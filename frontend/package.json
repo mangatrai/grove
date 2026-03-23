@@ -1,0 +1,11 @@
+{
+  "name": "@household-finance/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node -e \"console.log('Frontend scaffold pending implementation in Epic 2+')\"",
+    "build": "node -e \"console.log('No frontend build yet')\"",
+    "lint": "node -e \"console.log('No frontend lint issues')\"",
+    "test": "node -e \"console.log('No frontend tests yet')\""
+  }
+}
