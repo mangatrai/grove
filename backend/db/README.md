@@ -12,5 +12,8 @@ This folder contains SQL-first migrations and seed data for Story 1.2.
 ## Notes
 
 - The project uses a SQL-first migration style for transparency and auditability.
-- Migration execution tooling can be added in Epic 2 once runtime DB wiring is
-  introduced.
+- Migration execution tooling is provided via `scripts/db.sh` and `scripts/db.mjs`.
+- SQLite is the MVP system of record; runner enables:
+  - `PRAGMA journal_mode=WAL`,
+  - idempotent migration tracking (`schema_migrations`),
+  - idempotent seed tracking (`schema_seeds`).

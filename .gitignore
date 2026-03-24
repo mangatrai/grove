@@ -3,3 +3,8 @@ dist
 .env
 .DS_Store
 coverage
+# Runtime data: SQLite (+ WAL/SHM), staged uploads under imports/.
+# Canonical location is repo root: ./data/ (see backend/src/paths.ts → repoRoot).
+# ./backend/data/ can appear if something ran with cwd=backend or an old path bug — treat like ./data/; do not commit.
+/data/
+.runtime/

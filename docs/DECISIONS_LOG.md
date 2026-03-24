@@ -71,3 +71,9 @@
 - Context: Reduce MVP friction while preserving finance correctness and clear operator control.
 - Consequence: Faster implementation path with explicit defaults, while keeping extension hooks for stricter policy and richer taxonomy later.
 
+## D-012: Per-Institution Adapters + Single Canonical Ingest Path
+- Date: 2026-03-24
+- Decision: Split ingestion into (a) **per bank/format adapters** that produce normalized candidate rows, and (b) a **single canonical ingest service** that persists and dedupes. Do not attempt one parser for all institutions. CSV and PDF both use the adapter pattern; differences are isolated in adapter modules with fixture tests.
+- Context: Real-world exports (e.g. BoA summary sections, Citi Debit/Credit columns, Chase activity CSV) cannot be mapped reliably by one generic mapping UI alone without high error risk.
+- Consequence: Higher upfront adapter count for top institutions, but lower systemic risk and stable core logic. UX includes per-file **financial account** assignment and profile selection/confirmation before parse.
+

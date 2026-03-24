@@ -39,10 +39,13 @@
   - Create setup script to install dependencies and bootstrap local DB/runtime prerequisites. (S)
   - Create schema script to initialize tables and run pending migrations idempotently. (S)
   - Create service lifecycle script to start/stop frontend+backend background services via flags. (M)
+  - Create DB cleanup script to reset DB files safely for active mode only. (S)
+  - Add mode-based DB segregation (`MODE=TEST|PROD`) for same-machine dev/prod usage. (S)
 - Acceptance:
   - Fresh machine setup succeeds with one setup command path.
   - Schema bootstrap runs cleanly on first and repeated executions.
   - Services can be started and stopped using the same script and flags.
+  - DB cleanup requires explicit confirmation and only affects active mode DB files.
 
 ---
 
@@ -54,21 +57,57 @@
   - API endpoint for batch file upload. (M)
   - Import session lifecycle: created -> processing -> review -> finalized. (M)
   - File checksum and provenance persistence. (M)
+  - Dedicated service layer + state machine module (no ad-hoc transitions in routes). (M)
+  - API contract doc (`docs/API_IMPORT_SESSIONS.md`) and error codes. (S)
+  - DB constraint: unique `(session_id, checksum)`; duplicate upload rejected in-session. (S)
 - Acceptance:
   - Session tracks all uploaded files and statuses.
+  - Cross-household access returns 404; invalid transitions return 409 with `from`/`to`.
+  - Integration tests cover happy path, negative paths, and duplicate checksum behavior.
 
 ### Story 2.2 - Input adapters (CSV/Excel first)
 - Tasks:
   - Build adapter interface and parser profile registry. (M)
   - Implement CSV parser with configurable mapping. (M)
   - Implement Excel parser for common tabular patterns. (M)
+  - Refactor toward **normalized interchange** output consumed by a single canonical ingest service (not ad-hoc writes scattered in routes). (M)
 - Acceptance:
-  - CSV/Excel files parse into canonical raw records.
+  - CSV/Excel files parse into normalized rows suitable for `transaction_raw` / downstream canonical mapping.
+
+### Story 2.3 - Import Transactions: per-file account binding + profile selection
+- Tasks:
+  - Data model/API: attach `financial_account_id` (and optional `parser_profile_id`) per `import_file` before extraction. (M)
+  - UI: Import Transactions menu — upload → list files → **map each file to an account** → choose/confirm profile → run extraction. (L)
+  - Backend validation: file cannot be parsed until account is set (or explicit “unknown account” resolution path). (S)
+- Acceptance:
+  - User can assign each uploaded statement to the correct household account before rows are ingested.
+  - Clear extension point for new bank adapters without changing dedupe/canonical core.
+
+### Story 2.4 - Import staging cleanup (operator script)
+**Goal:** keep staged uploads under `data/imports/<sessionId>/` by default (they support re-parse, audit, and backup/restore with the DB), but give operators a **safe, explicit** way to reclaim disk space when they choose to drop raw bytes.
+
+**Why staged files are useful (default retention):**
+- **Re-parse** after fixing a bug or changing a parser profile (same checksum/bytes, better extraction).
+- **Audit / dispute** — show the exact CSV/PDF the numbers came from.
+- **Recovery** — restore DB + `data/imports` together from backup when both were captured.
+
+- Tasks:
+  - Add **`scripts/`** (or `npm run`) entry: purge import artifacts with **dry-run** default, **explicit confirmation** for destructive mode, and configurable scope (e.g. single `sessionId`, older than N days, or entire `data/imports` except reserved paths like `custom/` if present).
+  - On purge: delete session directories and/or files; **update `import_file.stored_path`** (e.g. `NULL`) for affected rows so the DB does not point at missing files; document that **re-parse** will no longer work for those files.
+  - Document usage in `README` or `docs/` (when to run, backup warning). (S)
+- Acceptance:
+  - Dry-run prints what would be deleted without deleting.
+  - Confirmed run removes targeted files and leaves DB metadata consistent (`stored_path` cleared or file row policy documented).
+  - No silent deletion: always requires explicit flag or typed confirmation.
 
 ---
 
 ## Epic 3: PDF Parsing Framework (P0)
 **Goal:** support institution-template PDF extraction with confidence scoring.
+
+**Note (account onboarding from PDFs — not a separate epic yet):** statements often include last-four, name, and product
+lines. A future story could use extracted text to suggest or pre-fill `financial_account` (masks, labels) during first
+import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 ### Story 3.1 - PDF parser abstraction and profile contract
 - Tasks:
@@ -101,10 +140,12 @@
 
 ### Story 4.1 - Canonical transaction mapping
 - Tasks:
+  - Implement **canonical ingest service** input contract: normalized rows from any adapter + target account context. (M)
   - Map parser output to canonical transaction model. (M)
   - Normalize descriptions and date/amount signs. (M)
 - Acceptance:
   - Canonical rows generated consistently across input formats.
+  - Adding a new bank adapter does not require changing dedupe/fingerprint rules beyond normalized field contract.
 
 ### Story 4.2 - Fingerprint dedupe engine
 - Tasks:

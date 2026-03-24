@@ -24,7 +24,8 @@
 - Operator scripts:
   - initial setup script (dependencies + local DB bootstrap),
   - schema initialization script,
-  - service lifecycle script (start/stop frontend+backend via flag).
+  - service lifecycle script (start/stop frontend+backend via flag),
+  - DB cleanup/reset script scoped by environment mode.
 
 ### Acceptance Criteria
 - Team/user agrees on data contract from parser -> canonical store -> base importer.
@@ -34,6 +35,7 @@
 - New machine setup can be completed via one setup command path.
 - Schema/table bootstrap can be run idempotently via one schema command path.
 - Frontend and backend can be started/stopped through one lifecycle script with flags.
+- DB cleanup/reset is available and mode-scoped (`TEST` vs `PROD`).
 
 ## Phase 1 (Week 3-6): Ingestion MVP (Statements + Basic Review)
 
@@ -42,10 +44,16 @@
 - Strict duplicate prevention.
 - Single-screen review with bulk operations.
 
+### Ingestion architecture (explicit)
+- **Adapters** (per institution × format × product type where needed): isolate CSV/PDF quirks; output a **normalized interchange** (rows with signed amounts, dates, description, provenance).
+- **Canonical ingest service**: single path from normalized rows → DB (`transaction_raw` / later canonical); dedupe and classification consume this path only.
+- **Import Transactions UX**: upload files → **map each file to a household financial account** → confirm or select parser profile → extract → review → finalize. Auto-suggest is allowed; silent full-auto for arbitrary files is not a goal for v1.
+
 ### Features
 - Multi-file upload intake.
-- Parser engine with institution profile abstraction.
-- Canonical transaction creation + provenance.
+- Parser engine with institution profile abstraction and **adapter registry** (CSV + PDF).
+- Per-file **account binding** (which `financial_account` the statement belongs to) before extraction.
+- Canonical transaction creation + provenance (one service boundary).
 - "Needs Resolution" queue for unknown category/duplicate/transfer ambiguity.
 - Bulk approve/categorize/assign user/edit.
 - Import session finalize and rollback before finalize.
@@ -125,10 +133,17 @@ Standardize local operations so setup, schema bootstrap, and service control are
    - Starts frontend + backend as background processes.
    - Stops running services using a `--stop` (or equivalent) flag.
    - Supports status check output for operator clarity.
+4. **DB cleanup/reset script**
+   - Deletes only DB artifacts for the active mode.
+   - Requires explicit confirmation flag to avoid accidental deletion.
+5. **Mode-based DB segregation**
+   - Support `MODE=TEST|PROD` in local env config.
+   - Resolve mode-specific DB files without code changes.
 
 ### Suggested Script Contract
 - `scripts/setup.(sh|ts)` -> setup/install/bootstrap.
 - `scripts/db.(sh|ts) --init` -> schema + migrations (+ optional seed).
+- `scripts/db-cleanup.(sh|ts) --yes` -> delete mode-specific DB artifacts.
 - `scripts/services.(sh|ts) --start|--stop|--status` -> frontend/backend process lifecycle.
 
 ## UAT Scenarios

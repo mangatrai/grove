@@ -67,6 +67,7 @@ Current pain: no reliable process, uncertainty around true financial position.
 - Base platform: Actual Budget.
 - Build custom ingestion/review pipeline for PDF/CSV/Excel normalization, strict dedupe, and bulk resolution UX.
 - MVP persistence/search baseline: SQLite (WAL) + SQLite FTS5 BM25 search.
+- Ingestion architecture: **per-institution/format adapters** → **normalized interchange** → **single canonical ingest path** (dedupe/classification); Import UX maps **each file to a financial account** before extraction.
 
 ## Current Artifacts
 - `docs/FINANCE_APP_PRD.md`

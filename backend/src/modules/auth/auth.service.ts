@@ -18,8 +18,8 @@ function ensureSeededUser(): void {
 
   const passwordHash = bcrypt.hashSync(env.SEED_OWNER_PASSWORD, 10);
   seededUsers.push({
-    userId: "seed-owner-1",
-    householdId: "seed-household-1",
+    userId: "20000000-0000-0000-0000-000000000001",
+    householdId: "10000000-0000-0000-0000-000000000001",
     role: "owner",
     email: env.SEED_OWNER_EMAIL,
     passwordHash

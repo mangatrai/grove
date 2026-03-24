@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { login } from "./auth.service.js";
+import type { AuthenticatedRequest } from "./auth.middleware.js";
 import { requireAuth } from "./auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 
@@ -31,7 +32,7 @@ authRouter.post("/login", (req, res) => {
   res.status(200).json({ token });
 });
 
-authRouter.get("/me", requireAuth, (req, res) => {
+authRouter.get("/me", requireAuth, (req: AuthenticatedRequest, res) => {
   res.status(200).json({ user: req.authUser });
 });
 

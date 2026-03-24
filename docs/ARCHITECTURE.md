@@ -8,9 +8,42 @@
 
 ## 2. System Overview
 
+### Ingestion layering (adapters vs canonical persistence)
+
+Bank and card exports are not uniform: CSVs differ in headers, debit/credit splits, summary sections, and encodings; PDFs differ by layout. A single “global” parser for all institutions does not scale and risks silent mis-mapping.
+
+**Layers:**
+
+1. **Intake (session + files)**  
+   Multi-file upload, checksums, staged storage, import session lifecycle (already in place).
+
+2. **Per-source adapters (institution × format × product type)**  
+   Examples: BoA checking CSV (skip summary block), Citi card CSV (Debit/Credit → signed amount), Chase card CSV, BoA/Citi/Chase PDF profiles.  
+   - **Input:** raw file bytes + metadata (filename, MIME, user-selected or auto-detected **profile**), and the **target `financial_account_id`** (which account this file belongs to).  
+   - **Output:** rows in a **stable normalized interchange** (e.g. posting date, amount signed, description, optional reference, provenance pointer to raw row/line).  
+   Adapters own quirks; they do **not** write business invariants (dedupe fingerprints, transfer rules) — they produce clean candidate rows.
+
+3. **Canonical ingest service (single write path)**  
+   One module receives **only** normalized rows + account/household context, writes `transaction_raw` (and later `transaction_canonical`), applies dedupe/classification policies.  
+   This keeps correctness logic in one place as new bank adapters are added.
+
+4. **UX: Import Transactions**  
+   Flow: user uploads CSV/PDF → **per file**, map to a **household financial account** (and optionally confirm/chosen profile) → run adapter → review grid → finalize.  
+   Auto-detect can suggest profile + mapping; user confirmation remains the safety gate for low confidence.
+
+**Shared building blocks:** date/amount parsing helpers, CSV “find header row” / section skipping utilities, reusable tests on **fixtures per institution** (redacted exports).
+
+### Staged uploads on disk (`data/imports/<sessionId>/`)
+Uploads are stored as files so the system can **re-read bytes** for parsing and future **re-parse**. Keeping them is valuable for:
+- **Re-parse** after parser/profile changes (same file, improved extraction).
+- **Audit / dispute** — tie posted numbers back to the exact source export.
+- **Recovery** — restore **SQLite + `data/imports`** from backup when both are included.
+
+Operators may still want to **reclaim disk space** after they trust extracted rows. That is **not** silent: planned **Story 2.4** (MVP backlog) adds an **operator cleanup script** (dry-run, confirmation, scope) that removes files and keeps DB pointers consistent.
+
 ### Core Subsystems
 1. **Web App**
-   - Import inbox, resolution queue, dashboards, manual edits, settings.
+   - Import Transactions (upload, per-file account mapping, profile selection), import inbox, resolution queue, dashboards, manual edits, settings.
 2. **Ingestion API**
    - Multi-file upload and import session management.
 3. **Parser Engine**
@@ -26,7 +59,7 @@
 8. **Data Store**
    - Canonical relational store for transaction lifecycle and provenance.
 9. **Retention Worker**
-   - Secure purge of raw files after extraction success + validation checkpoint.
+   - Secure purge of raw files after extraction success + validation checkpoint; **MVP plan:** explicit operator script for staged-import cleanup (see backlog Story 2.4), not only automatic purge.
 
 ## 3. Deployment Topology
 - Single-node deployment suitable for laptop/NAS/mini-PC.
@@ -38,14 +71,15 @@
 ## 4. Data Flow (Happy Path)
 1. User uploads statement/payslip files (batch).
 2. Import session created; files checksummed and staged.
-3. Parser profile selected per file (auto or user-chosen fallback).
-4. Extracted rows normalized into canonical schema.
-5. Dedupe fingerprint computed; duplicates blocked or routed to unresolved queue.
-6. Classification and transfer matching run with confidence thresholds.
-7. Inbox displays summary and unresolved counts.
-8. User bulk reviews/fixes and finalizes import.
-9. Posted canonical transactions update dashboards and ledger adapter output.
-10. Raw files purged per retention policy.
+3. User maps each file to a target **financial account** (and confirms or selects parser profile when needed).
+4. Per-file **adapter** runs; outputs rows in the normalized interchange format.
+5. **Canonical ingest service** persists raw rows and maps toward canonical schema (single path).
+6. Dedupe fingerprint computed; duplicates blocked or routed to unresolved queue.
+7. Classification and transfer matching run with confidence thresholds.
+8. Inbox displays summary and unresolved counts.
+9. User bulk reviews/fixes and finalizes import.
+10. Posted canonical transactions update dashboards and ledger adapter output.
+11. Raw files purged per retention policy.
 
 ## 5. Key Domain Model (Conceptual)
 - `Household`
