@@ -52,6 +52,9 @@ export function HomePage() {
         <button type="button" className="secondary" onClick={() => navigate("/transactions")}>
           View ledger
         </button>
+        <button type="button" className="secondary" onClick={() => navigate("/resolution")}>
+          Review queue
+        </button>
         <button type="button" className="secondary" onClick={logout}>
           Sign out
         </button>

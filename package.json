@@ -19,7 +19,8 @@
     "db:cleanup": "bash scripts/db-cleanup.sh --yes",
     "services:start": "bash scripts/services.sh --start",
     "services:stop": "bash scripts/services.sh --stop",
-    "services:status": "bash scripts/services.sh --status"
+    "services:status": "bash scripts/services.sh --status",
+    "import:purge": "node scripts/purge-import-staging.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1"

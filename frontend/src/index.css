@@ -120,3 +120,8 @@ th {
   font-weight: 600;
   color: #3a4a5a;
 }
+
+table.ledger-table thead th {
+  background: #f4f6f8;
+  border-bottom: 1px solid #dde2e8;
+}

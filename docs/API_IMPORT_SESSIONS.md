@@ -191,11 +191,14 @@ Maps all **`transaction_raw`** rows for this session into **`transaction_canonic
 
 **Body:** none (empty JSON `{}` is fine).
 
-**200:** `{ "inserted": number, "duplicates": number, "skipped": number }`  
+**200:** `{ "inserted": number, "duplicates": number, "skipped": number, "nearDuplicates": number }`  
 - **inserted** — new canonical rows (`status: posted`).  
 - **duplicates** — rows whose **fingerprint** already exists for this household (re-import / re-run canonicalize).  
-- **skipped** — malformed JSON or rows missing required fields / account not in household.
+- **skipped** — malformed JSON or rows missing required fields / account not in household.  
+- **nearDuplicates** — rows that match an existing ledger row on **same account, date, and amount** with a **similar but non-identical** normalized description; **not** posted; recorded in **`resolution_item`** (`type: duplicate_ambiguity`) for future review (Epic 4.2).
+
+After a successful response, staged import files for this session are **removed from disk** and `import_file.stored_path` is cleared.
 
 **404:** session not found / wrong household.
 
-Fingerprint = `SHA-256` over `(household_id, account_id, normalized date, rounded amount, normalized description)`.
+Fingerprint = `SHA-256` over `(household_id, account_id, normalized date, rounded amount to cents, normalized description)`.

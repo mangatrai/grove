@@ -1,13 +1,14 @@
 import crypto from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 
-import { db } from "../src/db/sqlite.js";
 import { buildApp } from "../src/app.js";
+import { db } from "../src/db/sqlite.js";
+import { resolveDataPath } from "../src/paths.js";
 
 const app = buildApp();
 
@@ -214,6 +215,37 @@ describe("import sessions and file intake", () => {
     expect(second.body.skipped[0].code).toBe("DUPLICATE_CHECKSUM_IN_SESSION");
   });
 
+  it("does not create data/imports/<sessionId> when every file is skipped as duplicate", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+    const payload = Buffer.from("bytes-for-all-skipped-dir-test");
+
+    const first = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", payload, "one.csv");
+    expect(first.status).toBe(201);
+
+    const stagingDir = resolveDataPath(path.join("data", "imports", sessionId));
+    expect(existsSync(stagingDir)).toBe(true);
+
+    rmSync(stagingDir, { recursive: true, force: true });
+    expect(existsSync(stagingDir)).toBe(false);
+
+    const second = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", payload, "two.csv");
+    expect(second.status).toBe(201);
+    expect(second.body.files).toHaveLength(0);
+    expect(second.body.skipped).toHaveLength(1);
+    expect(existsSync(stagingDir)).toBe(false);
+  });
+
   it("returns 409 when uploading after session is finalized", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
@@ -295,6 +327,7 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
     expect(canRes.body.duplicates).toBe(0);
+    expect(canRes.body.nearDuplicates).toBe(0);
 
     const canRes2 = await request(app)
       .post(`/imports/sessions/${sessionId}/canonicalize`)
@@ -303,6 +336,59 @@ describe("import sessions and file intake", () => {
     expect(canRes2.status).toBe(200);
     expect(canRes2.body.inserted).toBe(0);
     expect(canRes2.body.duplicates).toBe(2);
+    expect(canRes2.body.nearDuplicates).toBe(0);
+  });
+
+  it("routes near-duplicate rows to resolution_item and skips second ledger insert", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const csv = [
+      "Date,Description,Amount,Reference",
+      "2026-04-01,STARBUCKS COFFEE,-5.00,ref-n1",
+      "2026-04-01,STARBUCKS COFFEE STORE,-5.00,ref-n2"
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "near.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.nearDuplicates).toBe(1);
+    expect(canRes.body.duplicates).toBe(0);
+
+    const openResolution = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM resolution_item WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND type = 'duplicate_ambiguity' AND status = 'open'`
+      )
+      .get(sessionId) as { c: number };
+    expect(openResolution.c).toBeGreaterThanOrEqual(1);
   });
 
   it("returns 409 when canonicalize runs before parse (no transaction_raw)", async () => {
@@ -610,5 +696,40 @@ describe("import sessions and file intake", () => {
     expect(ledger.body.total).toBeGreaterThanOrEqual(2);
     expect(Array.isArray(ledger.body.transactions)).toBe(true);
     expect(ledger.body.transactions.some((t: { merchant?: string }) => t.merchant?.includes("Ledger test"))).toBe(true);
+
+    const scoped = await request(app)
+      .get(`/transactions?sessionId=${sessionId}&limit=50`)
+      .set("authorization", `Bearer ${token}`);
+    expect(scoped.status).toBe(200);
+    expect(scoped.body.sessionId).toBe(sessionId);
+    expect(scoped.body.total).toBe(2);
+    expect(scoped.body.transactions.length).toBe(2);
+  });
+
+  it("returns 404 when ledger sessionId filter is not found for household", async () => {
+    const token = await loginAndGetToken();
+    const res = await request(app)
+      .get("/transactions?sessionId=00000000-0000-0000-0000-000000000000")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("resolution queue", () => {
+  it("returns 401 without token", async () => {
+    const res = await request(app).get("/resolution");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns items array for authenticated household", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app).get("/resolution").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.items)).toBe(true);
   });
 });

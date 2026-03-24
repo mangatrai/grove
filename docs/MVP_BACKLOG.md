@@ -5,6 +5,8 @@
 - Priority: `P0` required for v1, `P1` next.
 - Order below reflects execution sequence and dependencies.
 
+**Checkpoint (repo vs this doc):** See **`docs/CHECKPOINT.md`** for what is implemented today, how to run, file map, and suggested next steps. Update that file when you ship meaningful chunks.
+
 ---
 
 ## Epic 1: Foundation and Project Skeleton (P0)
@@ -53,6 +55,8 @@
 **Goal:** ingest batches safely with traceability.
 
 ### Story 2.1 - Multi-file upload and session state machine
+**UI note (2025):** Sessions in **`review`** (after parse) **do not** accept new uploads per state machine. The Import UI explains this and offers **“Start another import session”** instead of a dead file picker. A future **in-session transaction review** screen is Epic 6; until then, **ledger** + **new session** is the intended flow.
+
 - Tasks:
   - API endpoint for batch file upload. (M)
   - Import session lifecycle: created -> processing -> review -> finalized. (M)
@@ -84,16 +88,16 @@
   - Clear extension point for new bank adapters without changing dedupe/canonical core.
 
 ### Story 2.4 - Import staging cleanup (operator script)
-**Goal:** keep staged uploads under `data/imports/<sessionId>/` by default (they support re-parse, audit, and backup/restore with the DB), but give operators a **safe, explicit** way to reclaim disk space when they choose to drop raw bytes.
+**Status:** baseline script + runbook — `scripts/purge-import-staging.mjs`, `npm run import:purge`, `docs/IMPORT_STAGING_PURGE.md`.
 
-**Why staged files are useful (default retention):**
-- **Re-parse** after fixing a bug or changing a parser profile (same checksum/bytes, better extraction).
-- **Audit / dispute** — show the exact CSV/PDF the numbers came from.
-- **Recovery** — restore DB + `data/imports` together from backup when both were captured.
+**Runtime behavior (product default):** After a successful **`POST /imports/sessions/:id/canonicalize`**, the backend **deletes** staged bytes under `data/imports/<sessionId>/` and clears **`import_file.stored_path`**. Staging is **temporary** during upload → parse → canonicalize; it is **not** retained for re-parse in normal operation.
+
+**Goal of this story (operators / edge cases):** Provide a **safe, explicit** script for disk + DB pointer cleanup when something **did not** complete the happy path (abandoned session, parse failed, canonicalize never ran, legacy folders, restore mismatch), and for **manual** reclaim without touching ledger rows.
 
 - Tasks:
   - Add **`scripts/`** (or `npm run`) entry: purge import artifacts with **dry-run** default, **explicit confirmation** for destructive mode, and configurable scope (e.g. single `sessionId`, older than N days, or entire `data/imports` except reserved paths like `custom/` if present).
-  - On purge: delete session directories and/or files; **update `import_file.stored_path`** (e.g. `NULL`) for affected rows so the DB does not point at missing files; document that **re-parse** will no longer work for those files.
+  - On purge: delete session directories and/or files; **update `import_file.stored_path`** (e.g. `NULL`) for affected rows so the DB does not point at missing files.
+  - **Test hygiene:** `scripts/prep-test-db.sh` + Vitest **`globalSetup`** teardown (`backend/tests/global-setup.ts`) run `scripts/clean-import-session-dirs.mjs` so **`data/imports/<uuid>/`** from integration tests does not accumulate between runs (`custom/` preserved).
   - Document usage in `README` or `docs/` (when to run, backup warning). (S)
 - Acceptance:
   - Dry-run prints what would be deleted without deleting.
@@ -104,6 +108,8 @@
 
 ## Epic 3: PDF Parsing Framework (P0)
 **Goal:** support institution-template PDF extraction with confidence scoring.
+
+**Planning note (prioritization):** Adding **more banks/institution adapters** (BoA vs Chase vs Citi, etc.) can be **deprioritized** until the **import + ledger UI** feels polished — new profiles are mostly incremental once the framework and UX are stable. **Richer extraction from statements you already support** (e.g. last-four / account hints, metadata for matching or onboarding) is a **different** slice of work than “more institutions” and may be scheduled alongside **Epic 6** (inbox / resolution) when review-before-post matters.
 
 **Note (account onboarding from PDFs — not a separate epic yet):** statements often include last-four, name, and product
 lines. A future story could use extracted text to suggest or pre-fill `financial_account` (masks, labels) during first
@@ -127,11 +133,21 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Target statements parse with acceptable field completeness.
 
 ### Story 3.3 - Payslip profile framework
+**Design reference:** `docs/PAYSLIP_V1.md` (bank ledger vs payslip separation, v1 summary-only scope, storage, phased UI).
+
+**Priority:** **Epic 4.2** baseline is **done**; start **3.3a** when you schedule payslip work (otherwise **Epic 6** resolution actions or **UI polish** first).
+
+**3.3a — v1 (summary strip only):**
 - Tasks:
-  - Implement paystub profile contract and table mappings. (L)
-  - Parse gross/net/tax/deduction detail into structured record. (L)
+  - **IBM-style** profile: extract **first summary block** from `pdf-parse` text (Current + YTD): hours/days, gross, post-tax deductions, employee taxes, pre-tax deductions, net pay; store **pay period** / pay date.
+  - **Dedicated payslip snapshot** storage (JSON or narrow columns), keyed by **household + period** (+ file reference); **do not** post into `transaction_canonical` by default (avoid double-count with bank net pay).
+  - Golden tests on agreed fixtures (e.g. commission + regular paycheck PDFs).
 - Acceptance:
-  - Payslip ingestion stores line-item totals and details.
+  - Parsed summary matches manual spot-check on fixtures; duplicate period policy documented.
+
+**3.3b+ — later:**
+- Line-item earnings/deductions/tax grids; additional employers; payslip-specific **screens and dashboards**; optional link to bank deposit for reconciliation.
+
 
 ---
 
@@ -148,12 +164,23 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Adding a new bank adapter does not require changing dedupe/fingerprint rules beyond normalized field contract.
 
 ### Story 4.2 - Fingerprint dedupe engine
-- Tasks:
-  - Implement deterministic fingerprinting and duplicate checks. (L)
-  - Add near-duplicate detection path to unresolved queue. (M)
-  - Add idempotency tests for re-imported files. (M)
+**Status:** **Baseline delivered** (engine + API + tests + minimal product surface). Further work = resolution **actions** (resolve/dismiss) and richer inbox UX → **Epic 6**.
+
+**Delivered:**
+- **`transaction-fingerprint.ts`** — deterministic `normalizeAmountForFingerprint`, date/description normalization, `computeTransactionFingerprint`.
+- **Canonical ingest** — exact duplicate via fingerprint + unique index; **near-duplicate** → insert **`resolution_item`** (`type: duplicate_ambiguity`), row not posted; response includes **`nearDuplicates`** (see `docs/API_IMPORT_SESSIONS.md`).
+- **Import UI** — shows **`nearDuplicates`** after canonicalize.
+- **Tests** — unit tests on fingerprint helpers; integration: idempotent second canonicalize; near-duplicate scenario (e.g. Starbucks lines).
+
+**Deferred / next:**
+- Bulk near-duplicate review, **PATCH** to resolve items, linking queue rows to ledger in UI (Epic 6.2–6.3 overlap).
+
+- Tasks (original backlog; baseline above covers most):
+  - Implement deterministic fingerprinting and duplicate checks. (L) ✅
+  - Add near-duplicate detection path to unresolved queue. (M) ✅ (`resolution_item` + `GET /resolution`)
+  - Add idempotency tests for re-imported files. (M) ✅
 - Acceptance:
-  - Re-uploading same file produces zero duplicate posted rows.
+  - Re-uploading same file produces zero duplicate posted rows. ✅
 
 ---
 
@@ -179,6 +206,8 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 ## Epic 6: Import Inbox and Resolution UX (P0)
 **Goal:** minimize manual effort with bulk review.
+
+**Baseline delivered (2025):** **`GET /resolution`** lists **`resolution_item`** for the household (`docs/API_RESOLUTION.md`). **Review queue** page at **`/resolution`** (read-only). Import workspace links to it; canonical near-duplicates create rows. **Not** delivered: bulk actions, resolve/dismiss API, session-level “inbox summary” beyond existing import session summary.
 
 ### Story 6.1 - Inbox summary view
 - Tasks:

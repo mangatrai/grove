@@ -4,6 +4,7 @@ import { authRouter } from "./modules/auth/auth.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { importsRouter } from "./modules/imports/imports.routes.js";
 import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
+import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
 
 /** Allow browser dev (Vite) and other local clients to call the API. */
 function corsMiddleware(): express.RequestHandler {
@@ -28,6 +29,7 @@ export function buildApp() {
   app.use("/auth", authRouter);
   app.use("/imports", importsRouter);
   app.use("/transactions", ledgerRouter);
+  app.use("/resolution", resolutionRouter);
 
   return app;
 }

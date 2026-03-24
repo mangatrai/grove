@@ -10,6 +10,11 @@ Household-scoped read access to `transaction_canonical` (Epic 7 slice — trust 
 
 - `limit` — default `50`, max `200`
 - `offset` — default `0`
+- `sessionId` — if set (UUID), only transactions whose **`source_ref`** chain maps to **`transaction_raw`** → **`import_file`** in that import session (household must own the session).
+
+**404:** `sessionId` does not exist for this household.
+
+When `sessionId` is used, the response includes **`sessionId`** so clients can show an import-scoped view.
 
 **200:**
 
@@ -18,6 +23,7 @@ Household-scoped read access to `transaction_canonical` (Epic 7 slice — trust 
   "total": 42,
   "limit": 50,
   "offset": 0,
+  "sessionId": "optional-uuid-when-filtering",
   "transactions": [
     {
       "id": "uuid",

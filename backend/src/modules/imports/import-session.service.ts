@@ -130,7 +130,9 @@ export interface SkippedImportFile {
 }
 
 /**
- * Persist uploaded files to disk and DB. Moves session to `processing` on first successful file.
+ * Persist uploaded files to disk and DB. Moves session to `processing` after handling the request.
+ * The session directory under `data/imports/<sessionId>/` is created only when at least one file
+ * is written (not skipped as a duplicate checksum in this session).
  * Duplicate SHA-256 checksums within the same session are **skipped** (not fatal) so other files in
  * the same request still upload.
  */
@@ -153,7 +155,8 @@ export function persistSessionFiles(
   }
 
   const targetDir = resolveDataPath(path.join("data", "imports", sessionId));
-  fs.mkdirSync(targetDir, { recursive: true });
+  /** Only create the session dir when at least one file is actually written (not skipped as duplicate). */
+  let ensuredTargetDir = false;
 
   const insertStmt = db.prepare(
     `INSERT INTO import_file (
@@ -183,6 +186,11 @@ export function persistSessionFiles(
     const fileId = crypto.randomUUID();
     const safeName = `${fileId}-${file.originalname}`;
     const storedPath = path.join(targetDir, safeName);
+
+    if (!ensuredTargetDir) {
+      fs.mkdirSync(targetDir, { recursive: true });
+      ensuredTargetDir = true;
+    }
 
     fs.writeFileSync(storedPath, file.buffer);
 
@@ -220,6 +228,39 @@ export function persistSessionFiles(
 
 export function listSessionDetail(sessionId: string, householdId: string): ImportSessionRow | null {
   return getSessionForHousehold(sessionId, householdId);
+}
+
+/**
+ * After canonical ingest, raw bytes are no longer needed; remove staged files and clear pointers.
+ * Idempotent: safe if paths are already missing.
+ */
+export function deleteStagingFilesForSession(sessionId: string): void {
+  const rows = db
+    .prepare(
+      `SELECT stored_path FROM import_file WHERE session_id = ? AND stored_path IS NOT NULL`
+    )
+    .all(sessionId) as Array<{ stored_path: string }>;
+
+  db.prepare(`UPDATE import_file SET stored_path = NULL WHERE session_id = ?`).run(sessionId);
+
+  for (const row of rows) {
+    try {
+      if (fs.existsSync(row.stored_path)) {
+        fs.unlinkSync(row.stored_path);
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  const sessionDir = resolveDataPath(path.join("data", "imports", sessionId));
+  try {
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+  } catch {
+    // best-effort
+  }
 }
 
 export function listFilesForSession(sessionId: string): Array<{

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
 import { formatAccountForSelect } from "../import/accountDisplay";
@@ -40,6 +40,15 @@ type LastImportSummary = {
   inserted: number;
   duplicates: number;
   skipped: number;
+  /** Same account/date/amount as an existing row but similar non-identical description — queued for review (Epic 4.2). */
+  nearDuplicates: number;
+};
+
+type CanonicalizeResult = {
+  inserted: number;
+  duplicates: number;
+  skipped: number;
+  nearDuplicates: number;
 };
 
 type ImportSessionSummary = {
@@ -56,6 +65,7 @@ type ImportSessionSummary = {
 
 export function ImportWorkspacePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const showAdvanced = searchParams.get("advanced") === "1";
   const token = getToken();
@@ -76,6 +86,7 @@ export function ImportWorkspacePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [startingSession, setStartingSession] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
   const [sessionSummary, setSessionSummary] = useState<ImportSessionSummary | null>(null);
@@ -222,6 +233,12 @@ export function ImportWorkspacePage() {
     if (!sessionId || !list?.length) {
       return;
     }
+    if (!canUploadMore) {
+      setError(
+        "This session no longer accepts new files. Use “Start another import session” below to import more statements."
+      );
+      return;
+    }
     setError(null);
     setMessage(null);
     setUploading(true);
@@ -276,6 +293,25 @@ export function ImportWorkspacePage() {
     }
   }
 
+  const canUploadMore = sessionStatus === "created" || sessionStatus === "processing";
+
+  async function startNewImportSession() {
+    setStartingSession(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const data = await apiJson<{ session: { id: string } }>("/imports/sessions", {
+        method: "POST",
+        body: JSON.stringify({ sourceType: "upload" })
+      });
+      navigate(`/imports/${data.session.id}`, { replace: false });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start a new import session.");
+    } finally {
+      setStartingSession(false);
+    }
+  }
+
   const showGenericMapping = files.some(
     (f) =>
       f.parser_profile_id === "generic_tabular" || drafts[f.id]?.profileId === "generic_tabular"
@@ -318,12 +354,14 @@ export function ImportWorkspacePage() {
     setError(null);
     setMessage(null);
     try {
-      const out = await apiJson<{ inserted: number; duplicates: number; skipped: number }>(
-        `/imports/sessions/${sessionId}/canonicalize`,
-        { method: "POST", body: "{}" }
-      );
+      const out = await apiJson<CanonicalizeResult>(`/imports/sessions/${sessionId}/canonicalize`, {
+        method: "POST",
+        body: "{}"
+      });
+      const nd = out.nearDuplicates ?? 0;
+      const near = nd > 0 ? ` Near-duplicate review: ${nd}.` : "";
       setMessage(
-        `Canonicalize: inserted ${out.inserted}, duplicates ${out.duplicates}, skipped ${out.skipped}.`
+        `Canonicalize: inserted ${out.inserted}, duplicates ${out.duplicates}, skipped ${out.skipped}.${near} Staged source files were removed from disk.`
       );
       await load();
     } catch (err) {
@@ -353,19 +391,25 @@ export function ImportWorkspacePage() {
         { method: "POST", body: JSON.stringify(body) }
       );
       await load();
-      const canonOut = await apiJson<{ inserted: number; duplicates: number; skipped: number }>(
-        `/imports/sessions/${sessionId}/canonicalize`,
-        { method: "POST", body: "{}" }
-      );
+      const canonOut = await apiJson<CanonicalizeResult>(`/imports/sessions/${sessionId}/canonicalize`, {
+        method: "POST",
+        body: "{}"
+      });
+      const nd = canonOut.nearDuplicates ?? 0;
       setLastImportSummary({
         parsedFiles: parseOut.parsedFiles,
         parsedRows: parseOut.parsedRows,
         inserted: canonOut.inserted,
         duplicates: canonOut.duplicates,
-        skipped: canonOut.skipped
+        skipped: canonOut.skipped,
+        nearDuplicates: nd
       });
+      const near =
+        nd > 0
+          ? ` ${nd} line(s) flagged as near-duplicates (not posted; review queue).`
+          : "";
       setMessage(
-        `Import finished: parsed ${parseOut.parsedFiles} file(s) (${parseOut.parsedRows} row(s)); loaded ${canonOut.inserted} new transaction(s) (${canonOut.duplicates} duplicates skipped).`
+        `Import finished: parsed ${parseOut.parsedFiles} file(s) (${parseOut.parsedRows} row(s)); loaded ${canonOut.inserted} new transaction(s) (${canonOut.duplicates} duplicates skipped).${near} Staged source files were removed from disk.`
       );
       await load();
     } catch (err) {
@@ -391,7 +435,9 @@ export function ImportWorkspacePage() {
       <p className="row" style={{ marginBottom: "0.5rem" }}>
         <Link to="/">← Home</Link>
         <span className="muted">·</span>
-        <Link to="/transactions">Ledger</Link>
+        <Link to={`/transactions?sessionId=${sessionId}`}>Ledger (this import)</Link>
+        <span className="muted">·</span>
+        <Link to="/resolution">Review queue</Link>
       </p>
       <div className="card">
         <h1>Import session</h1>
@@ -416,6 +462,12 @@ export function ImportWorkspacePage() {
               <strong>{lastImportSummary.duplicates}</strong> line(s) matched existing transactions (skipped as
               duplicates)
             </li>
+            {lastImportSummary.nearDuplicates > 0 ? (
+              <li>
+                <strong>{lastImportSummary.nearDuplicates}</strong> line(s) looked like an existing transaction (same
+                account, date, and amount; similar description) — not posted; recorded for review.
+              </li>
+            ) : null}
             {lastImportSummary.skipped > 0 ? (
               <li>
                 <strong>{lastImportSummary.skipped}</strong> line(s) skipped during load (e.g. invalid or
@@ -433,23 +485,52 @@ export function ImportWorkspacePage() {
 
       <div className="card">
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Upload files</h2>
-        <p className="muted">
-          CSV, XLSX, and PDF are supported. Files upload as soon as you pick them. If a file was already added to
-          this session, it&apos;s skipped and everything else still uploads.
-        </p>
-        <input
-          ref={fileInputRef}
-          name="files"
-          type="file"
-          multiple
-          disabled={uploading}
-          onClick={() => {
-            setError(null);
-            setMessage(null);
-          }}
-          onChange={(e) => void uploadFiles(e.target.files)}
-        />
-        {uploading ? <span className="muted"> Uploading…</span> : null}
+        {canUploadMore ? (
+          <>
+            <p className="muted">
+              CSV, XLSX, and PDF are supported. Files upload as soon as you pick them. If a file was already added to
+              this session, it&apos;s skipped and everything else still uploads.
+            </p>
+            <input
+              ref={fileInputRef}
+              name="files"
+              type="file"
+              multiple
+              disabled={uploading}
+              onClick={() => {
+                setError(null);
+                setMessage(null);
+              }}
+              onChange={(e) => void uploadFiles(e.target.files)}
+            />
+            {uploading ? <span className="muted"> Uploading…</span> : null}
+          </>
+        ) : sessionStatus == null ? (
+          <p className="muted">Could not determine session status. Refresh the page or return home.</p>
+        ) : (
+          <>
+            <p>
+              {sessionStatus === "review"
+                ? "This session is in review: parsed data is ready. You can’t add more files to this session yet (a dedicated transaction review screen is planned)."
+                : sessionStatus === "finalized"
+                  ? "This session is finalized. New files can’t be added here."
+                  : sessionStatus === "failed"
+                    ? "This session is in a failed state. Start fresh with a new session if you need to."
+                    : "This session no longer accepts new uploads."}
+            </p>
+            <p className="muted" style={{ marginTop: "0.5rem" }}>
+              To import more statements, start a <strong>new import session</strong>.
+            </p>
+            <div className="row" style={{ marginTop: "0.75rem" }}>
+              <button type="button" disabled={startingSession} onClick={() => void startNewImportSession()}>
+                {startingSession ? "Starting…" : "Start another import session"}
+              </button>
+              <Link to="/" className="muted" style={{ alignSelf: "center" }}>
+                Back to home
+              </Link>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="card">
@@ -543,7 +624,9 @@ export function ImportWorkspacePage() {
           <p className="muted">
             Per file: rows extracted into staging vs rows that made it into your ledger for this session. Lower ledger
             counts usually mean dedupe against data you imported earlier.{" "}
-            <Link to="/transactions">View ledger</Link>.
+            <Link to={`/transactions?sessionId=${sessionId}`}>Ledger for this import only</Link>
+            {" · "}
+            <Link to="/transactions">All household transactions</Link>.
           </p>
           <table>
             <thead>

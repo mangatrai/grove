@@ -2,11 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   computeTransactionFingerprint,
+  descriptionsCompatibleForNearDuplicate,
+  normalizeAmountForFingerprint,
   normalizeDescriptionForFingerprint,
   normalizeTxnDateForFingerprint
-} from "../src/modules/canonical/canonical-ingest.service.js";
+} from "../src/modules/canonical/transaction-fingerprint.js";
 
-describe("canonical fingerprint helpers", () => {
+describe("transaction fingerprint (Epic 4.2)", () => {
+  it("normalizes amounts to cents deterministically", () => {
+    expect(normalizeAmountForFingerprint(-4.5)).toBe(-4.5);
+    expect(normalizeAmountForFingerprint(-4.501)).toBe(-4.5);
+    expect(normalizeAmountForFingerprint(10.999)).toBe(11);
+    expect(normalizeAmountForFingerprint(0.1 + 0.2)).toBe(0.3);
+  });
+
   it("normalizes dates to YYYY-MM-DD", () => {
     expect(normalizeTxnDateForFingerprint("2026-03-01")).toBe("2026-03-01");
     expect(normalizeTxnDateForFingerprint("03/01/26")).toBe("2026-03-01");
@@ -34,5 +43,30 @@ describe("canonical fingerprint helpers", () => {
     });
     expect(a).toBe(b);
     expect(a.length).toBe(64);
+  });
+
+  it("treats float noise within the same cent as same fingerprint input", () => {
+    const desc = normalizeDescriptionForFingerprint("test");
+    const a = computeTransactionFingerprint({
+      householdId: "h",
+      accountId: "a",
+      txnDate: "2026-01-01",
+      amount: normalizeAmountForFingerprint(1.234),
+      normalizedDescription: desc
+    });
+    const b = computeTransactionFingerprint({
+      householdId: "h",
+      accountId: "a",
+      txnDate: "2026-01-01",
+      amount: normalizeAmountForFingerprint(1.234 + 1e-9),
+      normalizedDescription: desc
+    });
+    expect(a).toBe(b);
+  });
+
+  it("detects compatible descriptions for near-duplicate review", () => {
+    expect(descriptionsCompatibleForNearDuplicate("starbucks coffee", "starbucks coffee shop")).toBe(true);
+    expect(descriptionsCompatibleForNearDuplicate("x", "y")).toBe(false);
+    expect(descriptionsCompatibleForNearDuplicate("whole foods market", "whole foods")).toBe(true);
   });
 });

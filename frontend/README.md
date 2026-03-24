@@ -8,7 +8,9 @@ and canonicalize.
 
 Requires the API on **port 4000** (default backend). The Vite dev server proxies:
 
-- `/auth`, `/imports`, `/transactions`, `/health` → `http://127.0.0.1:4000`
+- `/auth`, `/imports`, `/transactions`, `/resolution`, `/health` → `http://127.0.0.1:4000`
+
+If you add a new API top-level path, add it here or the browser will get HTML instead of JSON.
 
 Override the proxy target:
 
@@ -37,9 +39,10 @@ Output: `frontend/dist/`.
 
 ## Routes
 
-- `/` — Home (start import, **View ledger**)
-- `/transactions` — Read-only ledger (canonical transactions)
+- `/` — Home (start import, ledger, review queue)
+- `/transactions` — Read-only ledger; add `?sessionId=<uuid>` to see rows from one import only
 - `/imports/:sessionId` — Import workspace + **Session processing summary** (raw vs ledger per file)
+- `/resolution` — **Review queue** (`GET /resolution`; read-only)
 
 ## Import UX
 
@@ -47,6 +50,7 @@ Output: `frontend/dist/`.
 - Parser profile is **inferred from account + file extension** (e.g. Bank of America checking/savings CSV share one format — the UI uses a single profile id; legacy `boa_savings_csv` is treated as equivalent).
 - **Parser override** is under a disclosure for edge cases (e.g. generic tabular).
 - **Run import** runs parse + canonicalize in one action; separate steps stay under “Separate steps”.
+- After the session moves to **review** (parsed), **new file uploads are not offered**; user is steered to **Start another import session** (same account/date/amount review inside one session is future work).
 - Duplicate uploads in the same session are **skipped** (not a hard error); other files in the batch still upload.
 - Manual parser/format selection: add **`?advanced=1`** to the import URL (intended for support & debugging).
 - Account labels use **`account_mask`** from the API; store **last four digits** there for `****1234`-style display.
