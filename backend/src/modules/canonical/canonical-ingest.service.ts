@@ -100,6 +100,10 @@ export function canonicalizeImportSession(
     `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
      VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
   );
+  const insertUnknownCategoryStmt = db.prepare(
+    `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
+  );
   const insertStmt = db.prepare(
     `INSERT INTO transaction_canonical (
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
@@ -201,9 +205,11 @@ export function canonicalizeImportSession(
 
     const { categoryId } = classifyDefaultCategory(normDesc, rounded);
 
+    const canonicalId = crypto.randomUUID();
+
     try {
       insertStmt.run(
-        crypto.randomUUID(),
+        canonicalId,
         householdId,
         accountId,
         categoryId,
@@ -216,6 +222,18 @@ export function canonicalizeImportSession(
         `raw:${row.raw_id}`
       );
       inserted += 1;
+      if (categoryId === null) {
+        insertUnknownCategoryStmt.run(
+          crypto.randomUUID(),
+          householdId,
+          canonicalId,
+          JSON.stringify({
+            kind: "unknown_category",
+            message:
+              "No default keyword rule matched this description; assign a category from the ledger or review queue."
+          })
+        );
+      }
     } catch (err: unknown) {
       const code =
         err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";

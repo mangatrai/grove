@@ -1,5 +1,10 @@
 import { DEFAULT_CATEGORY_IDS } from "./category-ids.js";
 
+/**
+ * Rules assign **leaf** `category_id` values from `DEFAULT_CATEGORY_IDS` / seed (Epic 5.3 hierarchy).
+ * Additional leaves (e.g. medical, dining out) use ids from `category-ids.ts` and migrations.
+ * Parents (e.g. Shopping, Home & utilities) are for roll-up only; rules do not target parent rows.
+ */
 export interface ClassificationResult {
   /** Matched default category id, or null if no conservative rule fired. */
   categoryId: string | null;
@@ -62,6 +67,26 @@ export function classifyDefaultCategory(
 
   if (
     includesAny(t, [
+      "restaurant",
+      "grubhub",
+      "doordash",
+      "uber eats",
+      "chipotle",
+      "taco bell",
+      "mcdonald",
+      "panera",
+      "panda express"
+    ])
+  ) {
+    return { categoryId: DEFAULT_CATEGORY_IDS.diningOut, ruleId: "dining_out_keywords" };
+  }
+
+  if (includesAny(t, ["starbucks", "dunkin", "dutch bro", "coffee"])) {
+    return { categoryId: DEFAULT_CATEGORY_IDS.coffeeSnacks, ruleId: "coffee_snacks_keywords" };
+  }
+
+  if (
+    includesAny(t, [
       "whole foods",
       "trader joe",
       "kroger",
@@ -69,7 +94,6 @@ export function classifyDefaultCategory(
       "aldi",
       "grocery",
       "groceries",
-      "starbucks",
       "walmart",
       "costco",
       "target",
@@ -108,6 +132,24 @@ export function classifyDefaultCategory(
     ])
   ) {
     return { categoryId: DEFAULT_CATEGORY_IDS.debtPayments, ruleId: "debt_keywords" };
+  }
+
+  if (
+    includesAny(t, [
+      "hospital",
+      "physician",
+      "doctor",
+      "urgent care",
+      "medical",
+      "lab corp",
+      "quest diag"
+    ])
+  ) {
+    return { categoryId: DEFAULT_CATEGORY_IDS.medical, ruleId: "medical_keywords" };
+  }
+
+  if (includesAny(t, ["cvs ", "cvs#", "walgreens", "pharmacy", "rite aid"])) {
+    return { categoryId: DEFAULT_CATEGORY_IDS.pharmacy, ruleId: "pharmacy_keywords" };
   }
 
   return { categoryId: null, ruleId: null };

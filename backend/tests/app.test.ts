@@ -285,7 +285,7 @@ describe("import sessions and file intake", () => {
 
     const csv = [
       "Date,Description,Amount,Reference",
-      "2026-03-01,Coffee,-4.50,ref-1",
+      "2026-03-01,Starbucks Coffee,-4.50,ref-1",
       "2026-03-02,Salary,3200.00,ref-2"
     ].join("\n");
 
@@ -1074,7 +1074,7 @@ describe("cash summary (reports)", () => {
 
     const res = await request(app)
       .get(
-        `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&categoryBreakdown=true&accountId=${testAccountId}`
+        `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&categoryBreakdown=true&categoryRollup=leaf&accountId=${testAccountId}`
       )
       .set("authorization", `Bearer ${token}`);
 

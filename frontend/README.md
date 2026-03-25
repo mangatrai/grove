@@ -42,7 +42,8 @@ Output: `frontend/dist/`.
 ## Routes
 
 - `/` — **Home:** cash dashboard when signed in (`GET /reports/cash-summary` + category UI); sign-in prompt when logged out. **`/dashboard`** redirects here.
-- `/transactions` — Read-only ledger; add `?sessionId=<uuid>` to see rows from one import only
+- `/categories` — Manage household categories (POST/PATCH/DELETE) and browse the global + household taxonomy.
+- `/transactions` — Ledger; query `sessionId`, `categoryId`, `uncategorizedOnly`, `dateFrom`, `dateTo` for filters (see `docs/API_LEDGER.md`).
 - `/imports/:sessionId` — Import workspace + **Session processing summary** (raw vs ledger per file); start via **New import** in the header (no Import nav item).
 - `/resolution` — **Review queue** (`GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk` for bulk status)
 

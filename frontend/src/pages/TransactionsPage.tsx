@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { apiJson, getToken } from "../api";
+import { apiJson, useAuthToken } from "../api";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
 type CategoryOption = {
   id: string;
   name: string;
+  parentId: string | null;
 };
 
 type TxRow = {
@@ -41,10 +42,65 @@ function formatMoney(amount: number, direction: string): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
+function CategorySelect({
+  categories,
+  value,
+  disabled,
+  onChange,
+  ariaLabel
+}: {
+  categories: CategoryOption[];
+  value: string | null;
+  disabled: boolean;
+  onChange: (v: string) => void;
+  ariaLabel: string;
+}) {
+  const topLevel = useMemo(() => {
+    return categories.filter((c) => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
+  }, [categories]);
+
+  return (
+    <select
+      className="ledger-category-select"
+      value={value ?? ""}
+      disabled={disabled}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={ariaLabel}
+    >
+      <option value="">Uncategorized</option>
+      {topLevel.map((p) => {
+        const children = categories
+          .filter((c) => c.parentId === p.id)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        if (children.length === 0) {
+          return (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          );
+        }
+        return (
+          <optgroup key={p.id} label={p.name}>
+            {children.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </select>
+  );
+}
+
 export function TransactionsPage() {
-  const token = getToken();
+  const token = useAuthToken();
   const [searchParams] = useSearchParams();
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
+  const categoryFilter = searchParams.get("categoryId")?.trim() || null;
+  const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
+  const dateFrom = searchParams.get("dateFrom")?.trim() || null;
+  const dateTo = searchParams.get("dateTo")?.trim() || null;
 
   const [data, setData] = useState<ListResponse | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -58,13 +114,25 @@ export function TransactionsPage() {
     if (sessionFilter) {
       qs.set("sessionId", sessionFilter);
     }
+    if (categoryFilter) {
+      qs.set("categoryId", categoryFilter);
+    }
+    if (uncategorizedOnly) {
+      qs.set("uncategorizedOnly", "true");
+    }
+    if (dateFrom) {
+      qs.set("dateFrom", dateFrom);
+    }
+    if (dateTo) {
+      qs.set("dateTo", dateTo);
+    }
     const [txRes, catRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
       apiJson<{ categories: CategoryOption[] }>("/categories")
     ]);
     setData(txRes);
     setCategories(catRes.categories);
-  }, [sessionFilter]);
+  }, [sessionFilter, categoryFilter, uncategorizedOnly, dateFrom, dateTo]);
 
   useEffect(() => {
     if (!token) {
@@ -100,10 +168,15 @@ export function TransactionsPage() {
     return <Navigate to="/login" replace />;
   }
 
+  const hasLedgerFilters = Boolean(categoryFilter || uncategorizedOnly || dateFrom || dateTo);
+
   return (
     <div>
       <div className="card">
         <h1>Ledger</h1>
+        <p className="muted">
+          <Link to="/categories">Manage categories</Link>
+        </p>
         {sessionFilter ? (
           <p className="muted">
             Showing only transactions from import session <code>{sessionFilter}</code>.{" "}
@@ -117,6 +190,31 @@ export function TransactionsPage() {
             set automatically (rules) or here.
           </p>
         )}
+        {hasLedgerFilters ? (
+          <p className="muted">
+            Filtered
+            {categoryFilter ? (
+              <>
+                {" "}
+                · category <code>{categoryFilter}</code>
+              </>
+            ) : null}
+            {uncategorizedOnly ? <> · uncategorized only</> : null}
+            {dateFrom ? (
+              <>
+                {" "}
+                · from <code>{dateFrom}</code>
+              </>
+            ) : null}
+            {dateTo ? (
+              <>
+                {" "}
+                · to <code>{dateTo}</code>
+              </>
+            ) : null}
+            . <Link to="/transactions">Clear filters</Link>
+          </p>
+        ) : null}
         {error ? <p className="error">{error}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && data ? (
@@ -129,7 +227,9 @@ export function TransactionsPage() {
               <p className="muted">
                 {sessionFilter
                   ? "No posted ledger rows for this session yet. Either parse/canonicalize has not finished, or all lines were flagged (duplicates / review queue)."
-                  : "No ledger rows yet. Complete an import session (New import in the header), then run import from the workspace."}
+                  : hasLedgerFilters
+                    ? "No rows match these filters."
+                    : "No ledger rows yet. Complete an import session (New import in the header), then run import from the workspace."}
               </p>
             ) : (
               <div style={{ overflowX: "auto" }}>
@@ -159,20 +259,13 @@ export function TransactionsPage() {
                           <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
                           <td>{desc}</td>
                           <td>
-                            <select
-                              className="ledger-category-select"
-                              value={t.categoryId ?? ""}
+                            <CategorySelect
+                              categories={categories}
+                              value={t.categoryId}
                               disabled={savingId === t.id}
-                              onChange={(e) => void updateCategory(t.id, e.target.value)}
-                              aria-label={`Category for ${desc}`}
-                            >
-                              <option value="">Uncategorized</option>
-                              {categories.map((c) => (
-                                <option key={c.id} value={c.id}>
-                                  {c.name}
-                                </option>
-                              ))}
-                            </select>
+                              onChange={(v) => void updateCategory(t.id, v)}
+                              ariaLabel={`Category for ${desc}`}
+                            />
                           </td>
                           <td>
                             <span className="muted">{t.status}</span>

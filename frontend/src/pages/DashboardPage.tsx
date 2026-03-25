@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -83,6 +84,18 @@ function currentMonthStr(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+function ledgerDrillHref(range: { start: string; end: string }, categoryId: string | null): string {
+  const qs = new URLSearchParams();
+  qs.set("dateFrom", range.start);
+  qs.set("dateTo", range.end);
+  if (categoryId === null) {
+    qs.set("uncategorizedOnly", "true");
+  } else {
+    qs.set("categoryId", categoryId);
+  }
+  return `/transactions?${qs.toString()}`;
+}
+
 export function DashboardPage() {
   const token = useAuthToken();
   const [preset, setPreset] = useState<CashPreset>("rolling_30");
@@ -110,6 +123,7 @@ export function DashboardPage() {
     qs.set("asOf", asOf);
     qs.set("breakdown", "true");
     qs.set("categoryBreakdown", "true");
+    qs.set("categoryRollup", "parent");
     if (preset === "month") {
       qs.set("month", monthStr);
     }
@@ -369,6 +383,9 @@ export function DashboardPage() {
             {data.byCategory && data.byCategory.length > 0 ? (
               <div style={{ marginTop: "1.25rem" }}>
                 <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>By category (period)</h2>
+                <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
+                  Amounts roll up to <strong>parent</strong> groups (e.g. Shopping combines Groceries and Clothing).
+                </p>
                 <div style={{ overflowX: "auto" }}>
                   <table className="ledger-table">
                     <thead>
@@ -378,6 +395,7 @@ export function DashboardPage() {
                         <th>Outflows</th>
                         <th>Net</th>
                         <th>Txns</th>
+                        <th>Ledger</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -388,6 +406,9 @@ export function DashboardPage() {
                           <td>${c.outflows.toFixed(2)}</td>
                           <td>{formatMoneySigned(c.net)}</td>
                           <td>{c.transactionCount}</td>
+                          <td>
+                            <Link to={ledgerDrillHref(data.range, c.categoryId)}>View</Link>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

@@ -190,16 +190,16 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** classify usable data while minimizing false positives.
 
 ### Story 5.1 - Category taxonomy and baseline rule engine
-**Partial (2025):** Seeded defaults are still **flat** top-level rows until **Story 5.3** lands (schema already supports `parent_id`). **`category-rules.ts`** applies conservative substring rules on fingerprint-normalized description + signed amount (inflow vs outflow). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Not** delivered: `unknown_category` resolution queue wiring, DB-driven rules UI, confidence scores.
+**Partial (2025):** Default taxonomy is **hierarchical** (global parent + leaf rows; migrations **`0006`** + **`0007`**; see seed). **`category-rules.ts`** applies conservative substring rules on fingerprint-normalized description + signed amount (inflow vs outflow), targeting **leaf** ids (`category-ids.ts`). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Still not** delivered: `unknown_category` resolution queue wiring, DB-driven rules UI, confidence scores. **Taxonomy gaps (explicit backlog):** no dedicated **transfer** or **tax** groups in seed; **Income** is a single leaf — no **salary / interest / dividends** children yet; align with **Story 5.2** (transfers) when modeling **account-to-account** flows.
 
 - Tasks:
-  - Seed compact household category taxonomy with modular extension path. (S) ✅ (flat; hierarchy seed in **5.3**)
+  - Seed compact household category taxonomy with modular extension path. (S) ✅ (hierarchical; ongoing expansion — see **5.3** + checkpoint)
   - Add conservative merchant-pattern rules with confidence. (M) ✅ (keyword baseline; confidence deferred)
 - Acceptance:
   - Known merchants auto-categorize; unknowns route to unresolved.
 
 ### Story 5.3 - Category hierarchy (parent / subcategory)
-**Status: ⬜ Not started.** **Depends on:** Story 5.1 baseline. **Schema:** `category.parent_id` already exists (`0001_init.sql`); seed and product behavior are not yet hierarchical.
+**Status: 🟡 Partial (2025-03-24).** **Depends on:** Story 5.1 baseline. **Schema:** `category.parent_id` (`0001_init` + **`0006_category_hierarchy`** + **`0007_expanded_default_taxonomy`**).
 
 **Goal:** Support a **tree** of categories so users think in groups (e.g. **Shopping** → Groceries, Clothing; **Loan** → Primary mortgage, Personal loan, Auto; **Investment** → Stocks, Rental income) while keeping posting and rules predictable.
 
@@ -210,12 +210,23 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 - **Rules:** `category-rules.ts` continues to map to **`category_id`** (usually leaf IDs). Optional stretch: rule targets a **parent** and assigns first matching child — defer unless needed.
 - **Reporting (coordination with Epic 7.2):** Define whether **`/reports/cash-summary`** `byCategory` rolls up **children into parent** totals (recommended for charts) while ledger stays leaf-accurate. Implement in a follow-on task once hierarchy seed + CRUD exist.
 
+**Delivered (2025-03-24):**
+- Hierarchical seed + **idempotent** migrations for existing DBs; expanded default groups (healthcare, food & dining, insurance, education, giving, etc.).
+- Backend: household **`POST`/`PATCH`/`DELETE /categories`** with `parentId` validation and depth checks (`MAX_DEPTH`).
+- Frontend: **`/categories`** — grouped table (parent column left, category right), explanatory copy, **Source** column, add **parent** vs **subcategory** form.
+- Ledger: **`<select>`** with **`optgroup`** by parent (native grouped list — not hover/flyout).
+
+**Remaining / product direction:**
+- **Richer taxonomy:** **Transfers** (coord with **Story 5.2**), **taxes**, **Income** sub-leaves (salary, interest, dividends, etc.) — still a substantial design + migration + rules pass.
+- **Ledger-first UX (preferred):** Replace or supplement the standalone page with **inline** category UI on transactions: show parent; **hover/flyout or nested menu** for children; **add category** in place. Goal: **no dedicated Categories screen** unless needed for power users — see **`docs/DECISIONS_LOG.md` D-014**.
+- **Reporting:** Hierarchical roll-up in **`byCategory`** and drill-down labels (coord. Epic 7.2).
+
 - Tasks:
-  - Hierarchical seed data + migration strategy for existing DBs (idempotent inserts or new migration). (M)
-  - Backend: create/update/delete household categories with `parentId` validation and cycle/depth checks. (M)
-  - Frontend: settings or modal flow — “Add category” / “Add subcategory under…”. (M)
-  - Ledger: hierarchical select; optional display “Parent › Child” in table. (S)
-  - Tests: API + at least one integration path for household subcategory. (S)
+  - Hierarchical seed data + migration strategy for existing DBs (idempotent inserts or new migration). (M) ✅ baseline + 0007; **ongoing** taxonomy expansion
+  - Backend: create/update/delete household categories with `parentId` validation and cycle/depth checks. (M) ✅
+  - Frontend: settings or modal flow — “Add category” / “Add subcategory under…”. (M) ✅ (`/categories`); **ledger-inline** still ⬜
+  - Ledger: hierarchical select; optional display “Parent › Child” in table. (S) 🟡 optgroup; **hover + inline add** still ⬜
+  - Tests: API + at least one integration path for household subcategory. (S) ✅
 - Acceptance:
   - Fresh seed shows an agreed parent/child taxonomy; users can add household-only categories and subcategories.
   - Ledger assignment picks a valid leaf (or documented parent policy); invalid `parent_id` rejected with a clear error.

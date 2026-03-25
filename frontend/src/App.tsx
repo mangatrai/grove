@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "./auth/RequireAuth";
 import { ShellLayout } from "./layout/ShellLayout";
+import { CategoriesPage } from "./pages/CategoriesPage";
 import { HomeRoute } from "./pages/HomeRoute";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -15,6 +16,7 @@ export function App() {
       <Route element={<ShellLayout />}>
         <Route path="/" element={<HomeRoute />} />
         <Route element={<RequireAuth />}>
+          <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/resolution" element={<ResolutionQueuePage />} />
           <Route path="/imports/:sessionId" element={<ImportWorkspacePage />} />

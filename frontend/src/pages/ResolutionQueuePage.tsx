@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { apiJson, getToken } from "../api";
+import { apiJson, useAuthToken } from "../api";
 
 type ResolutionItem = {
   id: string;
@@ -27,6 +27,8 @@ type ResolutionItem = {
 type ResolutionStatus = "open" | "in_review" | "resolved";
 type ResolutionFilter = ResolutionStatus | "all";
 
+type CategoryOption = { id: string; name: string; parentId: string | null };
+
 function formatType(t: string): string {
   switch (t) {
     case "duplicate_ambiguity":
@@ -43,8 +45,10 @@ function formatType(t: string): string {
 }
 
 export function ResolutionQueuePage() {
-  const token = getToken();
+  const token = useAuthToken();
   const [items, setItems] = useState<ResolutionItem[]>([]);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -59,6 +63,15 @@ export function ResolutionQueuePage() {
     );
     setItems(res.items);
   }, [statusFilter]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void apiJson<{ categories: CategoryOption[] }>("/categories")
+      .then((r) => setCategories(r.categories))
+      .catch(() => setCategories([]));
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -100,6 +113,41 @@ export function ResolutionQueuePage() {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(items.map((it) => it.id)));
+    }
+  }
+
+  async function bulkApplyCategory() {
+    if (!bulkCategoryId || selectedIds.size === 0) {
+      return;
+    }
+    const ids = [...selectedIds].filter((id) => {
+      const it = items.find((x) => x.id === id);
+      return it?.type === "unknown_category";
+    });
+    if (ids.length === 0) {
+      setError("Select one or more “Unknown category” rows to apply a category.");
+      return;
+    }
+    setError(null);
+    setSavingBulk(true);
+    try {
+      const res = await apiJson<{ updated: { id: string }[]; errors: { id: string; code: string }[] }>(
+        "/resolution/bulk-apply-category",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids, categoryId: bulkCategoryId })
+        }
+      );
+      if (res.errors.length > 0) {
+        setError(`Applied to ${res.updated.length}; ${res.errors.length} row(s) could not be updated.`);
+      }
+      setSelectedIds(new Set());
+      setBulkCategoryId("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Bulk category apply failed");
+    } finally {
+      setSavingBulk(false);
     }
   }
 
@@ -206,6 +254,50 @@ export function ResolutionQueuePage() {
                 onClick={() => void bulkUpdateStatus("open")}
               >
                 Reopen
+              </button>
+              <label style={{ marginBottom: 0, marginLeft: "0.5rem" }}>
+                <span className="muted" style={{ marginRight: "0.35rem" }}>
+                  Category (unknown items)
+                </span>
+                <select
+                  value={bulkCategoryId}
+                  onChange={(e) => setBulkCategoryId(e.target.value)}
+                  disabled={savingBulk}
+                  style={{ minWidth: "10rem" }}
+                >
+                  <option value="">—</option>
+                  {categories
+                    .filter((c) => !c.parentId)
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((p) => {
+                      const children = categories
+                        .filter((c) => c.parentId === p.id)
+                        .sort((a, b) => a.name.localeCompare(b.name));
+                      if (children.length === 0) {
+                        return (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        );
+                      }
+                      return (
+                        <optgroup key={p.id} label={p.name}>
+                          {children.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={savingBulk || !bulkCategoryId || selectedIds.size === 0}
+                onClick={() => void bulkApplyCategory()}
+              >
+                Apply category
               </button>
             </span>
           ) : null}

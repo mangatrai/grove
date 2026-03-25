@@ -17,6 +17,18 @@ describe("category rules (Epic 5.1)", () => {
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.groceries);
   });
 
+  it("classifies coffee shops before grocery merchants", () => {
+    const n = normalizeDescriptionForFingerprint("STARBUCKS STORE 1234");
+    const r = classifyDefaultCategory(n, -6.5);
+    expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.coffeeSnacks);
+  });
+
+  it("classifies dining delivery keywords", () => {
+    const n = normalizeDescriptionForFingerprint("DOORDASH SUBSCRIPTION");
+    const r = classifyDefaultCategory(n, -12);
+    expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.diningOut);
+  });
+
   it("returns null for unmatched debit", () => {
     const n = normalizeDescriptionForFingerprint("XYZ MYSTERY CO");
     const r = classifyDefaultCategory(n, -10);

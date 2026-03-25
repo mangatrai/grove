@@ -13,6 +13,11 @@ Household-scoped access to `transaction_canonical`: **GET** lists rows (Epic 7);
 - `limit` — default `50`, max `200`
 - `offset` — default `0`
 - `sessionId` — if set (UUID), only transactions whose **`source_ref`** chain maps to **`transaction_raw`** → **`import_file`** in that import session (household must own the session).
+- `categoryId` — optional UUID; filters to that category, or — if it is a **parent** — to that parent and all its **child** categories.
+- `uncategorizedOnly` — `true` / `false`; when `true`, only rows with **`category_id` IS NULL** (do not combine with `categoryId`).
+- `dateFrom`, `dateTo` — `YYYY-MM-DD` inclusive bounds on **`txn_date`**.
+
+**400:** `categoryId` and `uncategorizedOnly` both set.
 
 **404:** `sessionId` does not exist for this household.
 
@@ -81,3 +86,5 @@ or clear the category:
 **400:** invalid body, or category not available for this household.  
 **404:** transaction not found for this household.  
 **401:** missing or invalid token.
+
+When **`categoryId`** is set to a non-null value, any **`resolution_item`** with **`type = unknown_category`** and **`target_id`** equal to this transaction’s id is marked **`resolved`** (attention path).

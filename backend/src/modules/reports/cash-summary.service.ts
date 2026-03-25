@@ -12,6 +12,8 @@ export interface CashSummaryInput {
   breakdown: boolean;
   /** Include per-category breakdown (`LEFT JOIN category`; null category = "Uncategorized"). */
   categoryBreakdown: boolean;
+  /** When `categoryBreakdown`: `parent` rolls up leaf categories to top-level parent; `leaf` keeps per-leaf rows. Default `parent`. */
+  categoryRollup?: "leaf" | "parent";
   /** Optional filter; must belong to household. */
   accountId?: string;
 }
@@ -290,12 +292,12 @@ function aggregateByCategory(
   householdId: string,
   start: string,
   end: string,
-  accountId?: string
+  accountId: string | undefined,
+  rollup: "leaf" | "parent"
 ): CashSummaryCategoryRow[] {
   const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
-  const rows = db
-    .prepare(
-      `SELECT
+
+  const leafQuery = `SELECT
          tc.category_id AS categoryId,
          COALESCE(c.name, 'Uncategorized') AS categoryName,
          COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
@@ -309,8 +311,27 @@ function aggregateByCategory(
          AND tc.txn_date >= ? AND tc.txn_date <= ?
          ${acctSql}
        GROUP BY tc.category_id
-       ORDER BY outflows DESC, inflows DESC`
-    )
+       ORDER BY outflows DESC, inflows DESC`;
+
+  const parentQuery = `SELECT
+         CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END AS categoryId,
+         CASE WHEN tc.category_id IS NULL THEN 'Uncategorized' ELSE COALESCE(p.name, c.name) END AS categoryName,
+         COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
+         COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows,
+         COALESCE(SUM(tc.amount), 0) AS net,
+         COUNT(*) AS cnt
+       FROM transaction_canonical tc
+       LEFT JOIN category c ON c.id = tc.category_id
+       LEFT JOIN category p ON p.id = c.parent_id
+       WHERE tc.household_id = ?
+         AND tc.status = 'posted'
+         AND tc.txn_date >= ? AND tc.txn_date <= ?
+         ${acctSql}
+       GROUP BY CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END
+       ORDER BY outflows DESC, inflows DESC`;
+
+  const rows = db
+    .prepare(rollup === "parent" ? parentQuery : leafQuery)
     .all(householdId, start, end, ...acctParams) as Array<{
     categoryId: string | null;
     categoryName: string;
@@ -377,21 +398,14 @@ function monthlyTrend(
 function buildMonthlyOutflowsByCategory(
   householdId: string,
   rangeEnd: string,
-  accountId?: string
+  accountId: string | undefined,
+  rollup: "leaf" | "parent"
 ): CashSummaryMonthCategoryOutflows[] {
   const endYm = rangeEnd.slice(0, 7);
   const points: CashSummaryMonthCategoryOutflows[] = [];
   const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
 
-  for (let i = 5; i >= 0; i -= 1) {
-    const ym = monthsBack(endYm, i);
-    const monthStart = `${ym}-01`;
-    const monthEndFull = lastDayOfMonth(ym);
-    const capEnd = ym === endYm ? minDate(monthEndFull, rangeEnd) : monthEndFull;
-
-    const rows = db
-      .prepare(
-        `SELECT
+  const leafMonthly = `SELECT
            tc.category_id AS categoryId,
            COALESCE(c.name, 'Uncategorized') AS categoryName,
            COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows
@@ -403,8 +417,31 @@ function buildMonthlyOutflowsByCategory(
            ${acctSql}
          GROUP BY tc.category_id
          HAVING SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END) > 0
-         ORDER BY outflows DESC`
-      )
+         ORDER BY outflows DESC`;
+
+  const parentMonthly = `SELECT
+           CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END AS categoryId,
+           CASE WHEN tc.category_id IS NULL THEN 'Uncategorized' ELSE COALESCE(p.name, c.name) END AS categoryName,
+           COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows
+         FROM transaction_canonical tc
+         LEFT JOIN category c ON c.id = tc.category_id
+         LEFT JOIN category p ON p.id = c.parent_id
+         WHERE tc.household_id = ?
+           AND tc.status = 'posted'
+           AND tc.txn_date >= ? AND tc.txn_date <= ?
+           ${acctSql}
+         GROUP BY CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END
+         HAVING SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END) > 0
+         ORDER BY outflows DESC`;
+
+  for (let i = 5; i >= 0; i -= 1) {
+    const ym = monthsBack(endYm, i);
+    const monthStart = `${ym}-01`;
+    const monthEndFull = lastDayOfMonth(ym);
+    const capEnd = ym === endYm ? minDate(monthEndFull, rangeEnd) : monthEndFull;
+
+    const rows = db
+      .prepare(rollup === "parent" ? parentMonthly : leafMonthly)
       .all(householdId, monthStart, capEnd, ...acctParams) as Array<{
       categoryId: string | null;
       categoryName: string;
@@ -442,12 +479,13 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
   const byAccount = input.breakdown
     ? aggregateByAccount(householdId, range.start, range.end, input.accountId)
     : null;
+  const rollup = input.categoryRollup ?? "parent";
   const byCategory = input.categoryBreakdown
-    ? aggregateByCategory(householdId, range.start, range.end, input.accountId)
+    ? aggregateByCategory(householdId, range.start, range.end, input.accountId, rollup)
     : null;
   const trend = monthlyTrend(householdId, range.end, input.accountId);
   const monthlyOutflowsByCategory = input.categoryBreakdown
-    ? buildMonthlyOutflowsByCategory(householdId, range.end, input.accountId)
+    ? buildMonthlyOutflowsByCategory(householdId, range.end, input.accountId, rollup)
     : null;
 
   return {

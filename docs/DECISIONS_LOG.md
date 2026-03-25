@@ -83,3 +83,13 @@
 - Context: Users should land on decision metrics after login; import is secondary to ongoing cashflow review.
 - Consequence: Simpler IA; marketing/sign-in card remains for guests at `/` without the dashboard.
 
+## D-014: Category management surface + taxonomy depth (proposed direction)
+- Date: 2026-03-24
+- Status: **Proposed** — not implemented; captures product feedback after a first pass **`/categories`** page + hierarchical seed.
+- Direction:
+  - **Primary UX:** Manage categories **from the ledger** (and anywhere else transactions are categorized): show **parent** in the control; **hover or nested menu** for **child** leaves; **add category / subcategory** inline (no separate screen required for the common case).
+  - **Secondary:** Keep a **minimal** or **advanced** `/categories` route only if needed (bulk rename, cleanup), or remove it once inline parity exists.
+  - **Taxonomy:** Expand defaults beyond the current tree: **Transfers** (aligned with **Story 5.2** transfer matcher), **tax payments**, **Income** children (e.g. salary, interest, dividends, refunds), and any other household-standard buckets agreed in **`docs/MVP_BACKLOG.md`** / a future **`CATEGORY_TAXONOMY`** appendix.
+- Context: A full-page category list duplicates mental model vs picking a category on a row; the current seed still omits several real-world buckets.
+- Consequence: Next chunk of work is **UI-heavy** (accessible flyout + create flows) plus **data** (migrations, rules, reporting roll-up). Update **`docs/CHECKPOINT.md`** when this ships or is rejected.
+

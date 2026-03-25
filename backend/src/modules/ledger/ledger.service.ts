@@ -1,5 +1,5 @@
 import { db } from "../../db/sqlite.js";
-import { categoryUsableByHousehold } from "../category/categories.service.js";
+import { categoryHasChildren, categoryUsableByHousehold } from "../category/categories.service.js";
 
 export interface CanonicalTransactionRow {
   id: string;
@@ -26,6 +26,51 @@ export interface ListCanonicalResult {
   /** Present when the list is scoped to one import session. */
   sessionId?: string;
   transactions: CanonicalTransactionRow[];
+}
+
+/** Optional filters for ledger lists (category drill-down, date window, uncategorized). */
+export interface LedgerListFilters {
+  categoryId?: string;
+  uncategorizedOnly?: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+function ledgerFilterClause(householdId: string, filters: LedgerListFilters | undefined): {
+  sql: string;
+  params: unknown[];
+} {
+  if (!filters) {
+    return { sql: "", params: [] };
+  }
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  if (filters.uncategorizedOnly) {
+    parts.push("tc.category_id IS NULL");
+  } else if (filters.categoryId) {
+    const cid = filters.categoryId;
+    if (categoryHasChildren(cid)) {
+      parts.push(
+        "(tc.category_id = ? OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ? AND (household_id IS NULL OR household_id = ?)))"
+      );
+      params.push(cid, cid, householdId);
+    } else {
+      parts.push("tc.category_id = ?");
+      params.push(cid);
+    }
+  }
+  if (filters.dateFrom) {
+    parts.push("tc.txn_date >= ?");
+    params.push(filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    parts.push("tc.txn_date <= ?");
+    params.push(filters.dateTo);
+  }
+  if (parts.length === 0) {
+    return { sql: "", params: [] };
+  }
+  return { sql: ` AND ${parts.join(" AND ")}`, params };
 }
 
 function mapRow(r: {
@@ -84,11 +129,13 @@ const txSelect = `
 export function listCanonicalTransactions(
   householdId: string,
   limit: number,
-  offset: number
+  offset: number,
+  filters?: LedgerListFilters
 ): ListCanonicalResult {
+  const xf = ledgerFilterClause(householdId, filters);
   const totalRow = db
-    .prepare(`SELECT COUNT(*) AS cnt FROM transaction_canonical WHERE household_id = ?`)
-    .get(householdId) as { cnt: number };
+    .prepare(`SELECT COUNT(*) AS cnt FROM transaction_canonical tc WHERE tc.household_id = ?${xf.sql}`)
+    .get(householdId, ...xf.params) as { cnt: number };
   const total = Number(totalRow.cnt);
 
   const rows = db
@@ -97,11 +144,11 @@ export function listCanonicalTransactions(
        FROM transaction_canonical tc
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
        LEFT JOIN category c ON c.id = tc.category_id
-       WHERE tc.household_id = ?
+       WHERE tc.household_id = ?${xf.sql}
        ORDER BY tc.txn_date DESC, tc.created_at DESC
        LIMIT ? OFFSET ?`
     )
-    .all(householdId, limit, offset) as Array<{
+    .all(householdId, ...xf.params, limit, offset) as Array<{
     id: string;
     txn_date: string;
     amount: number;
@@ -131,7 +178,8 @@ export function listCanonicalTransactionsForImportSession(
   householdId: string,
   sessionId: string,
   limit: number,
-  offset: number
+  offset: number,
+  filters?: LedgerListFilters
 ): ListCanonicalResult | { ok: false; code: "SESSION_NOT_FOUND" } {
   const session = db
     .prepare(`SELECT 1 FROM import_session WHERE id = ? AND household_id = ?`)
@@ -140,15 +188,17 @@ export function listCanonicalTransactionsForImportSession(
     return { ok: false, code: "SESSION_NOT_FOUND" };
   }
 
+  const xf = ledgerFilterClause(householdId, filters);
+
   const totalRow = db
     .prepare(
       `SELECT COUNT(*) AS cnt
        FROM transaction_canonical tc
        INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
        INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE f.session_id = ? AND tc.household_id = ?`
+       WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}`
     )
-    .get(sessionId, householdId) as { cnt: number };
+    .get(sessionId, householdId, ...xf.params) as { cnt: number };
   const total = Number(totalRow.cnt);
 
   const rows = db
@@ -159,11 +209,11 @@ export function listCanonicalTransactionsForImportSession(
        LEFT JOIN category c ON c.id = tc.category_id
        INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
        INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE f.session_id = ? AND tc.household_id = ?
+       WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}
        ORDER BY tc.txn_date DESC, tc.created_at DESC
        LIMIT ? OFFSET ?`
     )
-    .all(sessionId, householdId, limit, offset) as Array<{
+    .all(sessionId, householdId, ...xf.params, limit, offset) as Array<{
     id: string;
     txn_date: string;
     amount: number;
@@ -209,6 +259,13 @@ export function updateCanonicalTransactionCategory(
     transactionId,
     householdId
   );
+
+  if (categoryId !== null) {
+    db.prepare(
+      `UPDATE resolution_item SET status = 'resolved'
+       WHERE household_id = ? AND type = 'unknown_category' AND target_id = ? AND status != 'resolved'`
+    ).run(householdId, transactionId);
+  }
 
   const row = db
     .prepare(

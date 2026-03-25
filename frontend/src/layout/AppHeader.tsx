@@ -65,6 +65,9 @@ export function AppHeader() {
             <NavLink to="/transactions" className={({ isActive }) => navClass(isActive)}>
               Ledger
             </NavLink>
+            <NavLink to="/categories" className={({ isActive }) => navClass(isActive)}>
+              Categories
+            </NavLink>
             <NavLink to="/resolution" className={({ isActive }) => navClass(isActive)}>
               Review queue
             </NavLink>

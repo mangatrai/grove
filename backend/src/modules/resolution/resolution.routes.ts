@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
+  bulkApplyCategoryToUnknownItems,
   bulkUpdateResolutionStatusForHousehold,
   listResolutionItemsForHousehold,
   updateResolutionStatusForHousehold
@@ -19,6 +20,27 @@ const listQuerySchema = z.object({
 const bulkBodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(200),
   status: z.enum(["open", "in_review", "resolved"])
+});
+
+const bulkApplyCategorySchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  categoryId: z.string().uuid()
+});
+
+resolutionRouter.post("/bulk-apply-category", (req: AuthenticatedRequest, res) => {
+  const parsed = bulkApplyCategorySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const uniqueIds = [...new Set(parsed.data.ids)];
+  const out = bulkApplyCategoryToUnknownItems(householdId, uniqueIds, parsed.data.categoryId);
+  if (!out.ok) {
+    res.status(400).json({ message: "Category is not available for this household", code: out.code });
+    return;
+  }
+  res.status(200).json({ updated: out.updated, errors: out.errors });
 });
 
 resolutionRouter.post("/bulk", (req: AuthenticatedRequest, res) => {

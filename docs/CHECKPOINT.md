@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2025-03-24 (session handoff — pick up from here anytime)
+**Last updated:** 2025-03-24 (evening stop — session handoff; categories UX + taxonomy follow-ups noted below)
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.
 
@@ -37,9 +37,9 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
 | **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable date/amount/description; exact fingerprint dedupe; **near-duplicate** path (same account/date/amount, compatible description) → **`resolution_item`** (`duplicate_ambiguity`), not posted; **`nearDuplicates`** in canonicalize response |
 | **Home / cash dashboard (Epic 7.1)** | 🟡 | **`GET /reports/cash-summary`** — period presets (month / YTD / rolling 30 & 90), KPIs, optional **account** filter, **by-account** breakdown, **by-category** + **monthly outflows by category** when `categoryBreakdown=true`, 6-month net trend + category charts (Recharts). **UI:** authenticated **`/`** (former `/dashboard` redirects here). **Not yet:** savings-rate / safe-to-spend, configurable targets (`docs/API_CASH_SUMMARY.md`) |
-| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** on canonicalize → **`category_id`**; **`GET /categories`** (includes **`parentId`**); ledger **`categoryId`/`categoryName`** + **`PATCH /transactions/:id`**. **Not yet:** `unknown_category` queue wiring, DB-driven rules UI, confidence scores (`docs/API_CATEGORIES.md`, `docs/API_LEDGER.md`) |
-| **Category hierarchy (Epic 5.3)** | ⬜ | **Story 5.3** — hierarchical seed, household create subcategory, API validation; see **`docs/MVP_BACKLOG.md`**. Schema **`parent_id`** exists; behavior not shipped yet. |
-| **UI shell & routing** | ✅ | **App shell** — sticky header when signed in (`ShellLayout`): nav **Home** (`/` = dashboard), **Ledger**, **Review queue**; **New import** (no separate Import nav item). Guests at **`/`** see sign-in card only (no header). **Vite proxy:** `/categories`, `/resolution`, `/reports` (see `frontend/vite.config.ts`) |
+| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** on canonicalize → **`category_id`** (includes extra leaf rules for dining, coffee, medical, pharmacy — see `category-ids.ts`); **`GET /categories`** (includes **`parentId`**); ledger **`categoryId`/`categoryName`** + **`PATCH /transactions/:id`**. **Not yet:** `unknown_category` queue wiring, DB-driven rules UI, confidence scores (`docs/API_CATEGORIES.md`, `docs/API_LEDGER.md`) |
+| **Category hierarchy (Epic 5.3)** | 🟡 | **Shipped:** hierarchical **seed** + migration **`0007_expanded_default_taxonomy.sql`** (parents/leaves for healthcare, food & dining, insurance, education, giving, etc.); **`POST`/`PATCH`/`DELETE /categories`** with depth/parent validation; **`/categories`** page — **parent column left, category right**, grouped rows (parent then children), **Source** column (built-in vs household), add form (**new parent group** vs **subcategory**). **Ledger:** picker uses **`optgroup`** by parent (not hover/flyout). **Gaps:** taxonomy still missing **transfers**, **tax payments**, **income subtypes** (salary, interest, …); no inline “add category” in ledger; standalone page may be redundant — see **`docs/MVP_BACKLOG.md`** (Epic 5) and **D-014** in **`docs/DECISIONS_LOG.md`**. |
+| **UI shell & routing** | ✅ | **App shell** — sticky header when signed in (`ShellLayout`): nav **Home** (`/` = dashboard), **Ledger**, **Categories**, **Review queue**; **New import** (no separate Import nav item). Guests at **`/`** see sign-in card only (no header). **Vite proxy:** `/categories`, `/resolution`, `/reports` (see `frontend/vite.config.ts`) |
 | **Import UX** | 🟡 | When session is **`review`** / **`finalized`** / **`failed`**, uploads **hidden**; **“Start another import session”**; file-level inbox drill-down still backlog (Epic 6) |
 | **Operator purge** | ✅ | `npm run import:purge` — see `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | `prep-test-db.sh` + `clean-import-session-dirs.mjs` + Vitest global teardown; integration tests include canonicalize idempotency, near-duplicate, cash-summary category breakdown |
@@ -62,11 +62,11 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 ---
 
-## Sensible next steps (not started)
+## Sensible next steps (prioritized themes)
 
-1. **Epic 5 Story 5.3 — category hierarchy:** hierarchical **seed**, **`POST`/`PATCH`** (or equivalent) for household categories/subcategories, ledger **grouped picker**, then **Epic 7.2** roll-up in `byCategory` — see `MVP_BACKLOG.md`.
-2. **Epic 5.1 continuation:** **`unknown_category`** queue, DB-driven rules UI, optional confidence — alongside or after 5.3.
-3. **Epic 7 continuation:** period comparisons, safe-to-spend / savings target, **drill-down** from category charts to ledger (7.1–7.2 stretch); hierarchy roll-up **after 5.3**.
+1. **Categories — product direction (large):** Move toward **ledger-first** category UX: hierarchical control on the transaction row (parent visible; **hover or submenu for children**; **add category / add subcategory** without leaving the ledger). **Demote or remove** the dedicated **`/categories`** route once parity exists. **Taxonomy:** add **Transfers** (and alignment with **Story 5.2** transfer matcher), **Taxes**, and **Income** children (salary, interest, dividends, refunds, etc.); review rules + cash-summary roll-up. See **`docs/MVP_BACKLOG.md`** (Epic 5) and **D-014** in **`docs/DECISIONS_LOG.md`**.
+2. **Epic 5.1 continuation:** **`unknown_category`** queue, DB-driven rules UI, optional confidence.
+3. **Epic 7 continuation:** period comparisons, safe-to-spend / savings target, **drill-down** from category charts to ledger (7.1–7.2 stretch); hierarchical **`byCategory`** roll-up semantics (partially unblocked; still needs product decisions).
 4. **Epic 6 continuation:** richer **inbox** (file-level drill-down), **undo before finalize** (6.3), bulk **category** / transfer actions when classification exists (Story 6.2 stretch goals).
 5. **Payslip v1 (3.3a):** IBM summary strip + storage — **after** you schedule it (`docs/PAYSLIP_V1.md`).
 6. **Epic 3.2:** More bank PDF adapters — deprioritized until polish; see backlog planning note.
@@ -84,5 +84,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 - `backend/src/modules/reports/` — `GET /reports/cash-summary`
 - `frontend/src/pages/HomeRoute.tsx` — `/` → dashboard if JWT, else sign-in card
 - `frontend/src/pages/DashboardPage.tsx` — Cash KPIs + category charts (authenticated home)
+- `frontend/src/pages/CategoriesPage.tsx` — `/categories` hierarchy table + add parent/subcategory (may be superseded by ledger-inline UX later)
 - `frontend/src/layout/ShellLayout.tsx` + `AppHeader.tsx` — app chrome; `src/auth/RequireAuth.tsx` — protected routes
 - `backend/src/modules/category/` — rules + `GET /categories`; canonical ingest sets `category_id`; ledger `PATCH` for category
+- `backend/db/migrations/0007_expanded_default_taxonomy.sql` — extra global parent/leaf categories

@@ -114,3 +114,34 @@ Apply one target status to many items (same transition rules as `PATCH /resoluti
 **401:** missing or invalid token.
 
 The Review queue UI uses this for **bulk In review / Resolve / Reopen** on selected rows.
+
+## `POST /resolution/bulk-apply-category`
+
+For **`unknown_category`** items only: sets **`category_id`** on the linked **`transaction_canonical`** row ( **`target_id`** ) and marks the resolution item **`resolved`**.
+
+**Body:**
+
+```json
+{
+  "ids": ["uuid", "uuid"],
+  "categoryId": "uuid"
+}
+```
+
+- `ids` — de-duplicated; max **200**.
+- `categoryId` — must be usable by the household (`GET /categories`).
+
+**200:**
+
+```json
+{
+  "updated": [{ "id": "resolution-item-uuid" }],
+  "errors": [{ "id": "uuid", "code": "WRONG_TYPE", "message": "…" }]
+}
+```
+
+**400:** invalid body or category not available (`INVALID_CATEGORY`).
+
+**401:** missing or invalid token.
+
+Canonical ingest creates **`unknown_category`** rows when no default keyword rule assigns a category; **`context`** is filled from the posted transaction (and import file when `source_ref` links to `transaction_raw`).

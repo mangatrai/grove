@@ -18,6 +18,7 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 | `asOf` | `YYYY-MM-DD` — end date for YTD / rolling windows, and month clip for trend; defaults to **today (UTC)** |
 | `breakdown` | `true` \| `false` — include **`byAccount`** table for the KPI range (default `false`) |
 | `categoryBreakdown` | `true` \| `false` — include **`byCategory`** for the KPI range and **`monthlyOutflowsByCategory`** for the six-month trend window (default `false`). Uses `LEFT JOIN category`; missing category shows as **Uncategorized**. |
+| `categoryRollup` | `leaf` \| `parent` — when `categoryBreakdown` is true, aggregate by **leaf** `category_id` or roll up to **parent** group name (default **`parent`**). |
 | `accountId` | Optional UUID — restrict KPIs, breakdown, category breakdown, and monthly trend to one **financial_account** (must belong to household; otherwise **404**) |
 
 ### Date ranges (KPI)

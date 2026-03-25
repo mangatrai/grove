@@ -20,6 +20,7 @@ const querySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  categoryRollup: z.enum(["leaf", "parent"]).optional(),
   accountId: z.string().uuid().optional()
 });
 
@@ -45,6 +46,7 @@ reportsRouter.get("/cash-summary", (req: AuthenticatedRequest, res) => {
       asOf: q.asOf,
       breakdown: q.breakdown ?? false,
       categoryBreakdown: q.categoryBreakdown ?? false,
+      categoryRollup: q.categoryRollup,
       accountId: q.accountId
     });
     res.status(200).json(data);

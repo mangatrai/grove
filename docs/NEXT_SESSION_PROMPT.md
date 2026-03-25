@@ -12,9 +12,9 @@ Read these files first and continue from there:
 - docs/MVP_BACKLOG.md
 
 Then do the following in order:
-1) Summarize the current state in 8-12 bullets.
+1) Summarize the current state in 8-12 bullets (include **Epic 5** categories: hierarchical seed + `/categories` + ledger optgroup; open work: **D-014** ledger-inline UX + richer taxonomy).
 2) List any open product/architecture questions that block implementation.
-3) Start implementation with Epic 1 from docs/MVP_BACKLOG.md.
+3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (not necessarily Epic 1 unless greenfield).
 4) Keep changes minimal, tested, and aligned with strict dedupe + transfer correctness.
 5) Do not introduce external SaaS dependencies; remain self-hosted and air-gapped capable.
 ```
