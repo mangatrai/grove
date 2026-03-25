@@ -74,9 +74,12 @@ Current pain: no reliable process, uncertainty around true financial position.
 - `docs/IMPLEMENTATION_PLAN_90_DAYS.md`
 - `docs/BASE_PLATFORM_DECISION.md`
 - `docs/REQUIREMENTS_TRACEABILITY.md`
+- `docs/CHANGE_HISTORY.md` — rolling CR / UX / fix log and PRD deviations
 
 ## Build status (rolling)
 Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. Treat those two files as the source of truth for “where we are” in the codebase.
+
+**Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
 1. Architecture and interfaces finalization.

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
 type CategoryOption = {
@@ -42,57 +43,6 @@ function formatMoney(amount: number, direction: string): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
-function CategorySelect({
-  categories,
-  value,
-  disabled,
-  onChange,
-  ariaLabel
-}: {
-  categories: CategoryOption[];
-  value: string | null;
-  disabled: boolean;
-  onChange: (v: string) => void;
-  ariaLabel: string;
-}) {
-  const topLevel = useMemo(() => {
-    return categories.filter((c) => !c.parentId).sort((a, b) => a.name.localeCompare(b.name));
-  }, [categories]);
-
-  return (
-    <select
-      className="ledger-category-select"
-      value={value ?? ""}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={ariaLabel}
-    >
-      <option value="">Uncategorized</option>
-      {topLevel.map((p) => {
-        const children = categories
-          .filter((c) => c.parentId === p.id)
-          .sort((a, b) => a.name.localeCompare(b.name));
-        if (children.length === 0) {
-          return (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          );
-        }
-        return (
-          <optgroup key={p.id} label={p.name}>
-            {children.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </optgroup>
-        );
-      })}
-    </select>
-  );
-}
-
 export function TransactionsPage() {
   const token = useAuthToken();
   const [searchParams] = useSearchParams();
@@ -101,6 +51,7 @@ export function TransactionsPage() {
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const dateFrom = searchParams.get("dateFrom")?.trim() || null;
   const dateTo = searchParams.get("dateTo")?.trim() || null;
+  const accountFilter = searchParams.get("accountId")?.trim() || null;
 
   const [data, setData] = useState<ListResponse | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
@@ -126,13 +77,16 @@ export function TransactionsPage() {
     if (dateTo) {
       qs.set("dateTo", dateTo);
     }
+    if (accountFilter) {
+      qs.set("accountId", accountFilter);
+    }
     const [txRes, catRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
       apiJson<{ categories: CategoryOption[] }>("/categories")
     ]);
     setData(txRes);
     setCategories(catRes.categories);
-  }, [sessionFilter, categoryFilter, uncategorizedOnly, dateFrom, dateTo]);
+  }, [sessionFilter, categoryFilter, uncategorizedOnly, dateFrom, dateTo, accountFilter]);
 
   useEffect(() => {
     if (!token) {
@@ -147,8 +101,7 @@ export function TransactionsPage() {
       .finally(() => setLoading(false));
   }, [token, load]);
 
-  async function updateCategory(txnId: string, raw: string) {
-    const categoryId = raw === "" ? null : raw;
+  async function updateCategory(txnId: string, categoryId: string | null) {
     setSavingId(txnId);
     setError(null);
     try {
@@ -168,7 +121,9 @@ export function TransactionsPage() {
     return <Navigate to="/login" replace />;
   }
 
-  const hasLedgerFilters = Boolean(categoryFilter || uncategorizedOnly || dateFrom || dateTo);
+  const hasLedgerFilters = Boolean(
+    categoryFilter || uncategorizedOnly || dateFrom || dateTo || accountFilter
+  );
 
   return (
     <div>
@@ -212,6 +167,12 @@ export function TransactionsPage() {
                 · to <code>{dateTo}</code>
               </>
             ) : null}
+            {accountFilter ? (
+              <>
+                {" "}
+                · account <code>{accountFilter}</code>
+              </>
+            ) : null}
             . <Link to="/transactions">Clear filters</Link>
           </p>
         ) : null}
@@ -241,7 +202,6 @@ export function TransactionsPage() {
                       <th>Amount</th>
                       <th>Description</th>
                       <th>Category</th>
-                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -259,16 +219,13 @@ export function TransactionsPage() {
                           <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
                           <td>{desc}</td>
                           <td>
-                            <CategorySelect
+                            <LedgerCategoryPicker
                               categories={categories}
                               value={t.categoryId}
                               disabled={savingId === t.id}
                               onChange={(v) => void updateCategory(t.id, v)}
                               ariaLabel={`Category for ${desc}`}
                             />
-                          </td>
-                          <td>
-                            <span className="muted">{t.status}</span>
                           </td>
                         </tr>
                       );

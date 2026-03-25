@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 
 type ResolutionItem = {
   id: string;
@@ -27,6 +28,13 @@ type ResolutionItem = {
 type ResolutionStatus = "open" | "in_review" | "resolved";
 type ResolutionFilter = ResolutionStatus | "all";
 
+type ResolutionTypeFilter =
+  | "all"
+  | "unknown_category"
+  | "duplicate_ambiguity"
+  | "transfer_ambiguity"
+  | "reconciliation_mismatch";
+
 type CategoryOption = { id: string; name: string; parentId: string | null };
 
 function formatType(t: string): string {
@@ -46,23 +54,30 @@ function formatType(t: string): string {
 
 export function ResolutionQueuePage() {
   const token = useAuthToken();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<ResolutionItem[]>([]);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [assigningTxnId, setAssigningTxnId] = useState<string | null>(null);
   const [savingBulk, setSavingBulk] = useState(false);
   const [statusFilter, setStatusFilter] = useState<ResolutionFilter>("open");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
+  const typeFilter = (searchParams.get("type") as ResolutionTypeFilter) || "all";
+
   const load = useCallback(async () => {
     setError(null);
+    const qs = new URLSearchParams();
+    qs.set("status", statusFilter);
+    qs.set("type", typeFilter);
     const res = await apiJson<{ items: ResolutionItem[]; status: ResolutionFilter }>(
-      `/resolution?status=${encodeURIComponent(statusFilter)}`
+      `/resolution?${qs.toString()}`
     );
     setItems(res.items);
-  }, [statusFilter]);
+  }, [statusFilter, typeFilter]);
 
   useEffect(() => {
     if (!token) {
@@ -88,7 +103,17 @@ export function ResolutionQueuePage() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [statusFilter]);
+  }, [statusFilter, typeFilter]);
+
+  function setTypeFilter(next: ResolutionTypeFilter) {
+    const p = new URLSearchParams(searchParams);
+    if (next === "all") {
+      p.delete("type");
+    } else {
+      p.set("type", next);
+    }
+    setSearchParams(p);
+  }
 
   const selectedCount = selectedIds.size;
   const allVisibleSelected = useMemo(
@@ -214,8 +239,8 @@ export function ResolutionQueuePage() {
       <div className="card">
         <h1>Review queue</h1>
         <p className="muted">
-          Items created when an import line could not be posted safely (e.g. near-duplicate of an existing ledger row).
-          Resolve them as you work through imports.
+          Items from imports: near-duplicates, <strong>unknown category</strong> (no rule matched — assign a category
+          below or on the ledger), and transfer pairings that need a second look.
         </p>
         <div className="row" style={{ marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.75rem" }}>
           <label style={{ marginBottom: 0 }}>
@@ -229,6 +254,20 @@ export function ResolutionQueuePage() {
               <option value="in_review">In review</option>
               <option value="resolved">Resolved</option>
               <option value="all">All</option>
+            </select>
+          </label>
+          <label style={{ marginBottom: 0 }}>
+            Type
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value as ResolutionTypeFilter)}
+              style={{ marginLeft: "0.5rem", width: "auto", minWidth: "12rem" }}
+            >
+              <option value="all">All types</option>
+              <option value="unknown_category">Unknown category</option>
+              <option value="duplicate_ambiguity">Near-duplicate</option>
+              <option value="transfer_ambiguity">Transfer ambiguity</option>
+              <option value="reconciliation_mismatch">Reconciliation</option>
             </select>
           </label>
           {selectedCount > 0 ? (
@@ -333,6 +372,7 @@ export function ResolutionQueuePage() {
                   <th>Raw preview</th>
                   <th>Target</th>
                   <th>Summary</th>
+                  <th>Category</th>
                   <th>Links</th>
                   <th>Actions</th>
                 </tr>
@@ -373,9 +413,41 @@ export function ResolutionQueuePage() {
                         <code style={{ fontSize: "0.85rem" }}>{it.targetId}</code>
                       </td>
                       <td>{summary}</td>
+                      <td style={{ minWidth: "9rem", maxWidth: "14rem" }}>
+                        {it.type === "unknown_category" ? (
+                          <LedgerCategoryPicker
+                            categories={categories}
+                            value={null}
+                            disabled={savingBulk || assigningTxnId === it.targetId}
+                            onChange={async (categoryId) => {
+                              if (!categoryId) {
+                                return;
+                              }
+                              setAssigningTxnId(it.targetId);
+                              setError(null);
+                              try {
+                                await apiJson(`/transactions/${it.targetId}`, {
+                                  method: "PATCH",
+                                  body: JSON.stringify({ categoryId })
+                                });
+                                await load();
+                              } catch (e: unknown) {
+                                setError(e instanceof Error ? e.message : "Failed to set category");
+                              } finally {
+                                setAssigningTxnId(null);
+                              }
+                            }}
+                            ariaLabel={`Set category for transaction ${it.targetId}`}
+                          />
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         {it.context.sessionId ? (
                           <Link to={`/transactions?sessionId=${it.context.sessionId}`}>Ledger rows</Link>
+                        ) : it.type === "unknown_category" ? (
+                          <Link to={`/transactions`}>Ledger</Link>
                         ) : (
                           <span className="muted">—</span>
                         )}

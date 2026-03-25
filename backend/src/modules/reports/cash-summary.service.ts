@@ -203,6 +203,20 @@ function accountFilterClause(accountId: string | undefined): { sql: string; para
   return { sql: " AND tc.account_id = ? ", params: [accountId] };
 }
 
+function transferReportingExclusionClause(tcAlias = "tc"): string {
+  // Exclude canonical rows that are known transfers (either matched by transfer_group_id,
+  // or queued as transfer ambiguities in the resolution queue).
+  return ` AND ${tcAlias}.transfer_group_id IS NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM resolution_item ri
+             WHERE ri.household_id = ${tcAlias}.household_id
+               AND ri.type = 'transfer_ambiguity'
+               AND ri.status IN ('open', 'in_review')
+               AND ri.target_id = ${tcAlias}.id
+           )`;
+}
+
 function aggregateForRange(
   householdId: string,
   start: string,
@@ -221,6 +235,7 @@ function aggregateForRange(
        WHERE tc.household_id = ?
          AND tc.status = 'posted'
          AND tc.txn_date >= ? AND tc.txn_date <= ?
+         ${transferReportingExclusionClause("tc")}
          ${acctSql}`
     )
     .get(householdId, start, end, ...acctParams) as {
@@ -261,6 +276,7 @@ function aggregateByAccount(
        WHERE tc.household_id = ?
          AND tc.status = 'posted'
          AND tc.txn_date >= ? AND tc.txn_date <= ?
+         ${transferReportingExclusionClause("tc")}
          ${acctSql}
        GROUP BY tc.account_id
        ORDER BY fa.institution, fa.account_mask`
@@ -309,6 +325,7 @@ function aggregateByCategory(
        WHERE tc.household_id = ?
          AND tc.status = 'posted'
          AND tc.txn_date >= ? AND tc.txn_date <= ?
+         ${transferReportingExclusionClause("tc")}
          ${acctSql}
        GROUP BY tc.category_id
        ORDER BY outflows DESC, inflows DESC`;
@@ -326,6 +343,7 @@ function aggregateByCategory(
        WHERE tc.household_id = ?
          AND tc.status = 'posted'
          AND tc.txn_date >= ? AND tc.txn_date <= ?
+         ${transferReportingExclusionClause("tc")}
          ${acctSql}
        GROUP BY CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END
        ORDER BY outflows DESC, inflows DESC`;
@@ -376,6 +394,7 @@ function monthlyTrend(
          WHERE tc.household_id = ?
            AND tc.status = 'posted'
            AND tc.txn_date >= ? AND tc.txn_date <= ?
+           ${transferReportingExclusionClause("tc")}
            ${acctSql}`
       )
       .get(householdId, monthStart, capEnd, ...acctParams) as {
@@ -414,6 +433,7 @@ function buildMonthlyOutflowsByCategory(
          WHERE tc.household_id = ?
            AND tc.status = 'posted'
            AND tc.txn_date >= ? AND tc.txn_date <= ?
+           ${transferReportingExclusionClause("tc")}
            ${acctSql}
          GROUP BY tc.category_id
          HAVING SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END) > 0
@@ -429,6 +449,7 @@ function buildMonthlyOutflowsByCategory(
          WHERE tc.household_id = ?
            AND tc.status = 'posted'
            AND tc.txn_date >= ? AND tc.txn_date <= ?
+           ${transferReportingExclusionClause("tc")}
            ${acctSql}
          GROUP BY CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END
          HAVING SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END) > 0

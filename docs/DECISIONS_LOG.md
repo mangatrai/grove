@@ -85,11 +85,25 @@
 
 ## D-014: Category management surface + taxonomy depth (proposed direction)
 - Date: 2026-03-24
-- Status: **Proposed** — not implemented; captures product feedback after a first pass **`/categories`** page + hierarchical seed.
+- Status: **Partial (2025-03-25)** — ledger-first picker + inline create shipped; taxonomy expanded (**`0008`**, Income leaves, Taxes/Transfers); **`/categories`** still present. See **`docs/CHANGE_HISTORY.md`** (CR-001, CR-002, UX-002, UX-003).
 - Direction:
   - **Primary UX:** Manage categories **from the ledger** (and anywhere else transactions are categorized): show **parent** in the control; **hover or nested menu** for **child** leaves; **add category / subcategory** inline (no separate screen required for the common case).
   - **Secondary:** Keep a **minimal** or **advanced** `/categories` route only if needed (bulk rename, cleanup), or remove it once inline parity exists.
   - **Taxonomy:** Expand defaults beyond the current tree: **Transfers** (aligned with **Story 5.2** transfer matcher), **tax payments**, **Income** children (e.g. salary, interest, dividends, refunds), and any other household-standard buckets agreed in **`docs/MVP_BACKLOG.md`** / a future **`CATEGORY_TAXONOMY`** appendix.
 - Context: A full-page category list duplicates mental model vs picking a category on a row; the current seed still omits several real-world buckets.
 - Consequence: Next chunk of work is **UI-heavy** (accessible flyout + create flows) plus **data** (migrations, rules, reporting roll-up). Update **`docs/CHECKPOINT.md`** when this ships or is rejected.
+
+## D-015: Ledger category trigger — single line vs “Parent › Child”
+- Date: 2025-03-25
+- Status: **Accepted**
+- Decision: On the **Ledger** table, the category control shows **only the name of the assigned category** (one line), whether the user picked a **parent group** or a **leaf**. **Visual differentiation** (muted + gray accent vs strong + blue accent) replaces a second line of text.
+- Context: User feedback — stacked parent/child made rows too tall; optional backlog wording had suggested “Parent › Child” display.
+- Consequence: Deviates from the optional display note in **Story 5.3**; documented as **PRD-001** in **`docs/CHANGE_HISTORY.md`**. Full path could return later via tooltip or drill-down only.
+
+## D-016: Ledger table — omit Status column
+- Date: 2025-03-25
+- Status: **Accepted**
+- Decision: **Transactions** ledger view does **not** show a **Status** column (posted/pending/etc. still available via API if needed elsewhere).
+- Context: User preference — not useful in this view; saves horizontal space.
+- Consequence: PRD/backlog screens that assumed a status column on the ledger are **out of date**; update wireframes if referenced.
 

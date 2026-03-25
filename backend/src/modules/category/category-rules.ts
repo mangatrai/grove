@@ -3,7 +3,7 @@ import { DEFAULT_CATEGORY_IDS } from "./category-ids.js";
 /**
  * Rules assign **leaf** `category_id` values from `DEFAULT_CATEGORY_IDS` / seed (Epic 5.3 hierarchy).
  * Additional leaves (e.g. medical, dining out) use ids from `category-ids.ts` and migrations.
- * Parents (e.g. Shopping, Home & utilities) are for roll-up only; rules do not target parent rows.
+ * Parents (e.g. Shopping, Home & utilities, Income) are for roll-up only; rules do not target parent rows.
  */
 export interface ClassificationResult {
   /** Matched default category id, or null if no conservative rule fired. */
@@ -29,11 +29,25 @@ export function classifyDefaultCategory(
   const outflow = signedAmountRounded < 0;
 
   if (inflow) {
-    if (includesAny(t, ["payroll", "direct dep", "salary", "pay check", "commission", "dividend"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.income, ruleId: "income_inflow_keywords" };
+    // Income leaves (conservative inflow keywords)
+    if (includesAny(t, ["refund"])) {
+      return { categoryId: DEFAULT_CATEGORY_IDS.incomeRefunds, ruleId: "income_refunds_keywords" };
     }
+
+    if (includesAny(t, ["rental income"])) {
+      return { categoryId: DEFAULT_CATEGORY_IDS.incomeRentalIncome, ruleId: "income_rental_income_keywords" };
+    }
+
     if (includesAny(t, ["interest", "int pymt", "int payment"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.income, ruleId: "income_interest" };
+      return { categoryId: DEFAULT_CATEGORY_IDS.incomeInterest, ruleId: "income_interest" };
+    }
+
+    if (includesAny(t, ["dividend"])) {
+      return { categoryId: DEFAULT_CATEGORY_IDS.incomeDividends, ruleId: "income_dividends" };
+    }
+
+    if (includesAny(t, ["payroll", "direct dep", "salary", "pay check", "paycheck", "commission"])) {
+      return { categoryId: DEFAULT_CATEGORY_IDS.incomeSalary, ruleId: "income_salary_inflow_keywords" };
     }
     return { categoryId: null, ruleId: null };
   }

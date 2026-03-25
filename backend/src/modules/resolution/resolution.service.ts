@@ -42,24 +42,59 @@ export type UpdateResolutionFailure =
 /**
  * Resolution items for the household, newest first (Epic 4.2 / Epic 6 precursor).
  */
+export type ResolutionItemTypeFilter =
+  | "unknown_category"
+  | "duplicate_ambiguity"
+  | "transfer_ambiguity"
+  | "reconciliation_mismatch"
+  | "all";
+
+/**
+ * Open resolution items per type (for dashboard / nav badges).
+ */
+export function countOpenResolutionItemsByType(householdId: string): Record<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT type, COUNT(*) AS cnt
+       FROM resolution_item
+       WHERE household_id = ? AND status = 'open'
+       GROUP BY type`
+    )
+    .all(householdId) as Array<{ type: string; cnt: number }>;
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    out[r.type] = Number(r.cnt);
+  }
+  return out;
+}
+
 export function listResolutionItemsForHousehold(
   householdId: string,
-  status: ResolutionStatus | "all" = "all"
+  status: ResolutionStatus | "all" = "all",
+  itemType: ResolutionItemTypeFilter = "all"
 ): ResolutionItemRow[] {
+  const typePart = itemType === "all" ? "" : " AND type = ?";
   const listSql =
     status === "all"
       ? `SELECT id, type, target_id AS targetId, reason, status, created_at AS createdAt
          FROM resolution_item
-         WHERE household_id = ?
+         WHERE household_id = ?${typePart}
          ORDER BY datetime(created_at) DESC`
       : `SELECT id, type, target_id AS targetId, reason, status, created_at AS createdAt
          FROM resolution_item
-         WHERE household_id = ? AND status = ?
+         WHERE household_id = ? AND status = ?${typePart}
          ORDER BY datetime(created_at) DESC`;
 
-  const rows = db
-    .prepare(listSql)
-    .all(...(status === "all" ? [householdId] : [householdId, status])) as Array<{
+  const params: unknown[] =
+    status === "all"
+      ? itemType === "all"
+        ? [householdId]
+        : [householdId, itemType]
+      : itemType === "all"
+        ? [householdId, status]
+        : [householdId, status, itemType];
+
+  const rows = db.prepare(listSql).all(...params) as Array<{
     id: string;
     type: string;
     targetId: string;

@@ -6,15 +6,26 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   bulkApplyCategoryToUnknownItems,
   bulkUpdateResolutionStatusForHousehold,
+  countOpenResolutionItemsByType,
   listResolutionItemsForHousehold,
-  updateResolutionStatusForHousehold
+  updateResolutionStatusForHousehold,
+  type ResolutionItemTypeFilter
 } from "./resolution.service.js";
 
 export const resolutionRouter = Router();
 resolutionRouter.use(requireAuth);
 
+const resolutionTypeEnum = z.enum([
+  "all",
+  "unknown_category",
+  "duplicate_ambiguity",
+  "transfer_ambiguity",
+  "reconciliation_mismatch"
+]);
+
 const listQuerySchema = z.object({
-  status: z.enum(["all", "open", "in_review", "resolved"]).optional().default("all")
+  status: z.enum(["all", "open", "in_review", "resolved"]).optional().default("all"),
+  type: resolutionTypeEnum.optional().default("all")
 });
 
 const bulkBodySchema = z.object({
@@ -55,6 +66,13 @@ resolutionRouter.post("/bulk", (req: AuthenticatedRequest, res) => {
   res.status(200).json(out);
 });
 
+resolutionRouter.get("/summary", (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const openByType = countOpenResolutionItemsByType(householdId);
+  const totalOpen = Object.values(openByType).reduce((a, b) => a + b, 0);
+  res.status(200).json({ openByType, totalOpen });
+});
+
 resolutionRouter.get("/", (req: AuthenticatedRequest, res) => {
   const q = listQuerySchema.safeParse(req.query ?? {});
   if (!q.success) {
@@ -62,8 +80,9 @@ resolutionRouter.get("/", (req: AuthenticatedRequest, res) => {
     return;
   }
   const householdId = req.authUser!.householdId;
-  const items = listResolutionItemsForHousehold(householdId, q.data.status);
-  res.status(200).json({ items, status: q.data.status });
+  const typeFilter = q.data.type as ResolutionItemTypeFilter;
+  const items = listResolutionItemsForHousehold(householdId, q.data.status, typeFilter);
+  res.status(200).json({ items, status: q.data.status, type: q.data.type });
 });
 
 const statusSchema = z.object({

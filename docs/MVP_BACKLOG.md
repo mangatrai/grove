@@ -5,7 +5,7 @@
 - Priority: `P0` required for v1, `P1` next.
 - Order below reflects execution sequence and dependencies.
 
-**Checkpoint (repo vs this doc):** See **`docs/CHECKPOINT.md`** for what is implemented today, how to run, file map, and suggested next steps. Update that file when you ship meaningful chunks.
+**Checkpoint (repo vs this doc):** See **`docs/CHECKPOINT.md`** for what is implemented today, how to run, file map, and suggested next steps. **User-driven tweaks and PRD deviations:** **`docs/CHANGE_HISTORY.md`**. Update those files when you ship meaningful chunks.
 
 **Progress legend:** ✅ Done · 🟡 Partial · ⬜ Not started (epic/story lines below use this where helpful).
 
@@ -190,7 +190,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** classify usable data while minimizing false positives.
 
 ### Story 5.1 - Category taxonomy and baseline rule engine
-**Partial (2025):** Default taxonomy is **hierarchical** (global parent + leaf rows; migrations **`0006`** + **`0007`**; see seed). **`category-rules.ts`** applies conservative substring rules on fingerprint-normalized description + signed amount (inflow vs outflow), targeting **leaf** ids (`category-ids.ts`). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Still not** delivered: `unknown_category` resolution queue wiring, DB-driven rules UI, confidence scores. **Taxonomy gaps (explicit backlog):** no dedicated **transfer** or **tax** groups in seed; **Income** is a single leaf — no **salary / interest / dividends** children yet; align with **Story 5.2** (transfers) when modeling **account-to-account** flows.
+**Partial (2026-03-25):** Default taxonomy is **hierarchical** (global parent + leaf rows; migrations **`0006`**, **`0007`**, **`0008`** — **`0008`** adds Income **leaves**, **Taxes** / **Transfers** groups + leaves, reparents Rental income; see **`docs/CHANGE_HISTORY.md`**). **`category-rules.ts`** maps to **leaf** ids including income subtypes where rules exist (`category-ids.ts`). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Now delivered:** `unknown_category` is actionable in **`/resolution`** via type filter + inline category assignment. **Still not:** DB-driven rules UI, confidence scores.
 
 - Tasks:
   - Seed compact household category taxonomy with modular extension path. (S) ✅ (hierarchical; ongoing expansion — see **5.3** + checkpoint)
@@ -199,7 +199,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Known merchants auto-categorize; unknowns route to unresolved.
 
 ### Story 5.3 - Category hierarchy (parent / subcategory)
-**Status: 🟡 Partial (2025-03-24).** **Depends on:** Story 5.1 baseline. **Schema:** `category.parent_id` (`0001_init` + **`0006_category_hierarchy`** + **`0007_expanded_default_taxonomy`**).
+**Status: 🟡 Partial (2025-03-25).** **Depends on:** Story 5.1 baseline. **Schema:** `category.parent_id` (`0001_init` + **`0006`** + **`0007`** + **`0008_income_taxes_transfers_taxonomy`**).
 
 **Goal:** Support a **tree** of categories so users think in groups (e.g. **Shopping** → Groceries, Clothing; **Loan** → Primary mortgage, Personal loan, Auto; **Investment** → Stocks, Rental income) while keeping posting and rules predictable.
 
@@ -210,22 +210,21 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 - **Rules:** `category-rules.ts` continues to map to **`category_id`** (usually leaf IDs). Optional stretch: rule targets a **parent** and assigns first matching child — defer unless needed.
 - **Reporting (coordination with Epic 7.2):** Define whether **`/reports/cash-summary`** `byCategory` rolls up **children into parent** totals (recommended for charts) while ledger stays leaf-accurate. Implement in a follow-on task once hierarchy seed + CRUD exist.
 
-**Delivered (2025-03-24):**
-- Hierarchical seed + **idempotent** migrations for existing DBs; expanded default groups (healthcare, food & dining, insurance, education, giving, etc.).
+**Delivered (2025-03-25):**
+- Hierarchical seed + **idempotent** migrations through **`0008`**; expanded groups (healthcare, food & dining, insurance, education, giving, **Income** leaves, **Taxes**, **Transfers**, etc.).
 - Backend: household **`POST`/`PATCH`/`DELETE /categories`** with `parentId` validation and depth checks (`MAX_DEPTH`).
-- Frontend: **`/categories`** — grouped table (parent column left, category right), explanatory copy, **Source** column, add **parent** vs **subcategory** form.
-- Ledger: **`<select>`** with **`optgroup`** by parent (native grouped list — not hover/flyout).
+- Frontend: **`/categories`** — grouped table, **Source** column, add **parent** vs **subcategory** form.
+- Ledger: **`LedgerCategoryPicker`** — portal **dialog** (backdrop, fixed position), **three columns** (groups / subcategories / new category), **`POST /categories`** inline; trigger shows **one line** (selected category name) with **parent vs leaf** styling — see **`docs/CHANGE_HISTORY.md` UX-003**, **`docs/DECISIONS_LOG.md` D-015**. **Status column removed** from ledger (**D-016**).
 
 **Remaining / product direction:**
-- **Richer taxonomy:** **Transfers** (coord with **Story 5.2**), **taxes**, **Income** sub-leaves (salary, interest, dividends, etc.) — still a substantial design + migration + rules pass.
-- **Ledger-first UX (preferred):** Replace or supplement the standalone page with **inline** category UI on transactions: show parent; **hover/flyout or nested menu** for children; **add category** in place. Goal: **no dedicated Categories screen** unless needed for power users — see **`docs/DECISIONS_LOG.md` D-014**.
+- **Ledger-first parity:** Decide whether **`/categories`** is still needed for power users or can be demoted — **`docs/DECISIONS_LOG.md` D-014** (partial).
 - **Reporting:** Hierarchical roll-up in **`byCategory`** and drill-down labels (coord. Epic 7.2).
 
 - Tasks:
-  - Hierarchical seed data + migration strategy for existing DBs (idempotent inserts or new migration). (M) ✅ baseline + 0007; **ongoing** taxonomy expansion
+  - Hierarchical seed data + migration strategy for existing DBs (idempotent inserts or new migration). (M) ✅ through **0008**
   - Backend: create/update/delete household categories with `parentId` validation and cycle/depth checks. (M) ✅
-  - Frontend: settings or modal flow — “Add category” / “Add subcategory under…”. (M) ✅ (`/categories`); **ledger-inline** still ⬜
-  - Ledger: hierarchical select; optional display “Parent › Child” in table. (S) 🟡 optgroup; **hover + inline add** still ⬜
+  - Frontend: settings or modal flow — “Add category” / “Add subcategory under…”. (M) ✅ (`/categories`) + **ledger inline** ✅
+  - Ledger: hierarchical picker + inline add; table display **single-line** category name (deviation from optional “Parent › Child” noted in **CHANGE_HISTORY** PRD-001). (S) 🟡
   - Tests: API + at least one integration path for household subcategory. (S) ✅
 - Acceptance:
   - Fresh seed shows an agreed parent/child taxonomy; users can add household-only categories and subcategories.
@@ -233,10 +232,12 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - No circular references; depth policy enforced.
 
 ### Story 5.2 - Transfer matcher
+**Partial (2026-03-25):** **Minimal** matcher in **`canonical-ingest.service.ts`** pairs likely transfer legs → **`transfer_group_id`**; ambiguous → **`resolution_item`** `transfer_ambiguity`. **Improved:** description/merchant+memo-based scoring reduces “ambiguous” results while keeping automation conservative; date tolerance widened slightly (still conservative). **`cash-summary`** excludes transfer-linked rows from income/expense/category aggregates (see **`docs/CHANGE_HISTORY.md` CR-006, CR-007**). **Not** full card/loan pattern coverage.
+
 - Tasks:
-  - Implement amount/date/account-graph matching logic. (L)
-  - Handle credit card payment and loan payment patterns. (L)
-  - Add scenario tests for no double expense counting. (M)
+  - Implement amount/date/account-graph matching logic. (L) 🟡 baseline
+  - Handle credit card payment and loan payment patterns. (L) ⬜
+  - Add scenario tests for no double expense counting. (M) 🟡 partial
 - Acceptance:
   - Credit-card purchase/payment cycle behaves correctly in reports.
 
@@ -282,7 +283,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** deliver core decision metrics from imported data.
 
 ### Story 7.1 - KPI cards
-**Status: 🟡 Partial (2025).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; optional **account** filter; **by-account** breakdown; **6-month monthly net** bar; **`categoryBreakdown`** → **by-category** table + inflow/outflow donuts + stacked monthly outflows by category (`docs/API_CASH_SUMMARY.md`). **Not** delivered: savings-rate / safe-to-spend, configurable targets.
+**Status: 🟡 Partial (2026-03-25).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; optional **account** filter; **by-account** breakdown; **6-month monthly net** bar; **`categoryBreakdown`** → **by-category** table + inflow/outflow donuts + stacked monthly outflows by category (`docs/API_CASH_SUMMARY.md`). **Transfer-linked rows** excluded from aggregates when identified (**see CHANGE_HISTORY CR-004**). **Now delivered:** dashboard surfacing for open `unknown_category` items + chart/table drill-down into `/transactions` with `dateFrom/dateTo` and `categoryId` (and optionally `accountId`). **Not** delivered: savings-rate / safe-to-spend, configurable targets.
 
 - Tasks:
   - Implement income, expenses, net cashflow, savings rate cards. (M) 🟡
@@ -291,7 +292,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Core KPIs visible by household with period selector.
 
 ### Story 7.2 - Category and trend reporting
-**Status: 🟡 Partial (2025).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Not** delivered: click-through drill-down to transactions, prior-period comparisons, extra custom date filters beyond cash-summary presets, hierarchical roll-up in `byCategory` (blocked until **5.3** seed + semantics are fixed).
+**Status: 🟡 Partial (2026-03-25).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Now delivered (partial):** click-through/drill-down links into the ledger from “By category (period)” and the dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Still not:** prior-period comparisons, extra custom date filters beyond cash-summary presets, and hierarchical roll-up semantics in `byCategory` beyond the current parent rollup option.
 
 - Tasks:
   - Build spend-by-category chart with drill-down. (M) 🟡

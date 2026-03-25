@@ -5,6 +5,7 @@ Use this exact starter prompt in a new chat after switching projects:
 ```text
 Read these files first and continue from there:
 - docs/CHECKPOINT.md (implementation status + progress legend)
+- docs/CHANGE_HISTORY.md (CR / UX / fixes + PRD deviations)
 - docs/PROJECT_CONTEXT.md
 - docs/DECISIONS_LOG.md
 - docs/FINANCE_APP_PRD.md
@@ -12,7 +13,7 @@ Read these files first and continue from there:
 - docs/MVP_BACKLOG.md
 
 Then do the following in order:
-1) Summarize the current state in 8-12 bullets (include **Epic 5** categories: hierarchical seed + `/categories` + ledger optgroup; open work: **D-014** ledger-inline UX + richer taxonomy).
+1) Summarize the current state in 8-12 bullets (include **Epic 5**: taxonomy **`0008`**, ledger **`LedgerCategoryPicker`**, partial **transfer matcher** + cash-summary exclusions; open work: **D-014** demote `/categories`?, **5.2** fuller matcher, **5.1** unknown_category queue).
 2) List any open product/architecture questions that block implementation.
 3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (not necessarily Epic 1 unless greenfield).
 4) Keep changes minimal, tested, and aligned with strict dedupe + transfer correctness.

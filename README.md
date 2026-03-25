@@ -14,6 +14,7 @@ ingestion pipeline.
 - `docs/API_RESOLUTION.md`: resolution queue — `GET` / `PATCH` / `POST /resolution/bulk` (`resolution_item`).
 - `docs/API_CASH_SUMMARY.md`: Epic 7.1 cash view — `GET /reports/cash-summary` (dashboard KPIs + trend).
 - `docs/CHECKPOINT.md`: **current implementation status** (✅ / 🟡 / ⬜ progress legend), run commands, file map, next steps (keep in sync when shipping).
+- `docs/CHANGE_HISTORY.md`: **CR / UX / fix history** and PRD deviations — why the app diverges from earlier backlog wording.
 - `backend/`: API, domain model, migrations, auth/RBAC baseline.
 - `frontend/`: Vite + React Import UI (Epic 2.3).
 
@@ -52,7 +53,8 @@ Progress markers: ✅ done · 🟡 partial · ⬜ not started (see **`docs/CHECK
 - 🟡 **Epic 6 (partial):** resolution queue with status filters, row context, ledger links, per-row and **bulk** status actions; **not** category bulk or full inbox drill-down yet.
 - 🟡 **Epic 7.1–7.2 (partial):** **Home** at **`/`** (cash KPIs + category-backed charts via `categoryBreakdown`); **`/dashboard`** redirects to **`/`**; **not** safe-to-spend / savings targets or full period comparisons yet (see backlog).
 - ✅ **Frontend shell (signed-in):** sticky **header** — **Home**, **Ledger**, **Review queue**, **New import**, **Sign out** (no separate Import nav link).
-- 🟡 **Epic 5.1 (partial):** default **category** taxonomy + **conservative keyword rules** on canonicalize; **`GET /categories`**; ledger **`categoryId` / `categoryName`** + **category dropdown** (`PATCH /transactions/:id`). **Not** transfer matcher (5.2), bulk category in resolution, or auto **unknown_category** queue yet.
+- 🟡 **Epic 5.1–5.3 (partial):** hierarchical taxonomy through migration **`0008`**, rules + **`GET /categories`**; ledger **`LedgerCategoryPicker`** (modal-style flyout, inline create) + **`PATCH /transactions/:id`**. **Epic 5.2 (partial):** minimal **transfer** pairing + **cash-summary** excludes transfers when identified.
+- **Not yet:** full transfer matcher coverage, **`unknown_category`** queue, bulk category in resolution.
 
-**Detail:** `docs/CHECKPOINT.md` · **Backlog:** `docs/MVP_BACKLOG.md`.
+**Detail:** `docs/CHECKPOINT.md` · **Backlog:** `docs/MVP_BACKLOG.md` · **History:** `docs/CHANGE_HISTORY.md`.
 

@@ -14,6 +14,7 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
   sessionId: z.string().uuid().optional(),
+  accountId: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
   uncategorizedOnly: z
     .enum(["true", "false"])
@@ -33,7 +34,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const { limit, offset, sessionId, categoryId, uncategorizedOnly, dateFrom, dateTo } = parsed.data;
+  const { limit, offset, sessionId, accountId, categoryId, uncategorizedOnly, dateFrom, dateTo } = parsed.data;
   const householdId = req.authUser!.householdId;
 
   if (categoryId && uncategorizedOnly) {
@@ -42,12 +43,13 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
   }
 
   const filters: LedgerListFilters | undefined =
-    categoryId || uncategorizedOnly || dateFrom || dateTo
+    categoryId || uncategorizedOnly || dateFrom || dateTo || accountId
       ? {
           categoryId: categoryId ?? undefined,
           uncategorizedOnly: uncategorizedOnly || undefined,
           dateFrom: dateFrom ?? undefined,
-          dateTo: dateTo ?? undefined
+          dateTo: dateTo ?? undefined,
+          accountId: accountId ?? undefined
         }
       : undefined;
 

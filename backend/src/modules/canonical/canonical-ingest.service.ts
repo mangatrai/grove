@@ -31,6 +31,52 @@ export {
   normalizeTxnDateForFingerprint
 } from "./transaction-fingerprint.js";
 
+/** Visible label for transfer pairing (merchant + memo). */
+function transferRowLabel(merchant: string | null, memo: string | null): string {
+  const s = `${merchant ?? ""} ${memo ?? ""}`.trim();
+  return s.length > 0 ? s : "";
+}
+
+/**
+ * Higher score = better same-transfer hypothesis (disambiguates multiple amount/date matches).
+ */
+function transferPairScore(
+  debitLabel: string,
+  creditLabel: string,
+  debitDate: string,
+  creditDate: string,
+  dateDiffDays: (a: string, b: string) => number
+): number {
+  const na = normalizeDescriptionForFingerprint(debitLabel);
+  const nb = normalizeDescriptionForFingerprint(creditLabel);
+  if (na === nb && na.length > 0) {
+    return 100;
+  }
+  const ud = debitLabel.toUpperCase();
+  const uc = creditLabel.toUpperCase();
+  const both = (re: RegExp) => re.test(ud) && re.test(uc);
+  if (both(/\b(ONLINE\s+)?TRANSFER\b|\bXFER\b|ACCT\s*(TO\s*)?TRANSFER|WEB\s+(PAY|PMT)\b|TEL\s+TRANSFER/i)) {
+    return 80;
+  }
+  if (both(/\bZELLE\b/)) {
+    return 75;
+  }
+  if (both(/\b(VENMO|PAYPAL|CASH\s*APP)\b/i)) {
+    return 70;
+  }
+  if (both(/\b(WIRE|W\/T)\b/i)) {
+    return 68;
+  }
+  const days = dateDiffDays(debitDate, creditDate);
+  if (days <= 1) {
+    const short = 10;
+    if (ud.length >= short && uc.length >= short && (ud.includes(uc.slice(0, short)) || uc.includes(ud.slice(0, short)))) {
+      return 45;
+    }
+  }
+  return 0;
+}
+
 type RawPayloadWithAccount = NormalizedRawPayload & { financial_account_id: string };
 
 function isRawPayload(value: unknown): value is RawPayloadWithAccount {
@@ -109,6 +155,56 @@ export function canonicalizeImportSession(
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
        merchant, memo, transfer_group_id, fingerprint, source_ref, status
      ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+  );
+
+  const insertedCanonicalRows: Array<{ id: string; txnDate: string }> = [];
+
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  function isoToUtcMidnightMs(isoDate: string): number {
+    const t = isoDate.trim().slice(0, 10);
+    const [y, m, d] = t.split("-").map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) {
+      return new Date(`${t}T00:00:00Z`).getTime();
+    }
+    return Date.UTC(y, m - 1, d);
+  }
+  function addDaysIso(isoDate: string, days: number): string {
+    const ms = isoToUtcMidnightMs(isoDate) + days * MS_PER_DAY;
+    return new Date(ms).toISOString().slice(0, 10);
+  }
+  function dateDiffDays(aIso: string, bIso: string): number {
+    return Math.abs(isoToUtcMidnightMs(aIso) - isoToUtcMidnightMs(bIso)) / MS_PER_DAY;
+  }
+
+  const selectTransferCandidatesStmt = db.prepare(
+    `SELECT id, account_id AS accountId, txn_date AS txnDate, amount AS amount,
+            merchant AS merchant, memo AS memo
+     FROM transaction_canonical
+     WHERE household_id = ?
+       AND status = 'posted'
+       AND transfer_group_id IS NULL
+       AND txn_date >= ? AND txn_date <= ?`
+  );
+
+  const updateTransferGroupStmt = db.prepare(
+    `UPDATE transaction_canonical
+     SET transfer_group_id = ?
+     WHERE id = ? AND transfer_group_id IS NULL`
+  );
+
+  const existsOpenAmbiguityForTargetStmt = db.prepare(
+    `SELECT 1
+     FROM resolution_item
+     WHERE household_id = ?
+       AND type = 'transfer_ambiguity'
+       AND status IN ('open', 'in_review')
+       AND target_id = ?
+     LIMIT 1`
+  );
+
+  const insertTransferAmbiguityStmt = db.prepare(
+    `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`
   );
 
   let inserted = 0;
@@ -222,6 +318,7 @@ export function canonicalizeImportSession(
         `raw:${row.raw_id}`
       );
       inserted += 1;
+      insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
       if (categoryId === null) {
         insertUnknownCategoryStmt.run(
           crypto.randomUUID(),
@@ -243,6 +340,169 @@ export function canonicalizeImportSession(
         throw err;
       }
     }
+  }
+
+  // Minimal transfer matcher:
+  // - unambiguously set transfer_group_id for one-to-one debit/credit pairs between different accounts
+  // - otherwise create resolution_item(type='transfer_ambiguity', status='open') for involved rows
+  if (insertedCanonicalRows.length > 0) {
+    const insertedDates = insertedCanonicalRows.map((r) => r.txnDate).sort();
+    const windowStart = addDaysIso(insertedDates[0]!, -1);
+    const windowEnd = addDaysIso(insertedDates[insertedDates.length - 1]!, 1);
+
+    const candidates = selectTransferCandidatesStmt.all(householdId, windowStart, windowEnd) as Array<{
+      id: string;
+      accountId: string;
+      txnDate: string;
+      amount: number;
+      merchant: string | null;
+      memo: string | null;
+    }>;
+
+    const debitRows: Array<{
+      id: string;
+      accountId: string;
+      txnDate: string;
+      centsAbs: number;
+      label: string;
+    }> = [];
+    const creditRows: Array<{
+      id: string;
+      accountId: string;
+      txnDate: string;
+      centsAbs: number;
+      label: string;
+    }> = [];
+
+    for (const r of candidates) {
+      const centsSigned = Math.round(Number(r.amount) * 100);
+      const centsAbs = Math.abs(centsSigned);
+      if (!Number.isFinite(centsAbs) || centsAbs === 0) {
+        continue;
+      }
+      const label = transferRowLabel(r.merchant, r.memo);
+      if (centsSigned < 0) {
+        debitRows.push({ id: r.id, accountId: r.accountId, txnDate: r.txnDate, centsAbs, label });
+      } else {
+        creditRows.push({ id: r.id, accountId: r.accountId, txnDate: r.txnDate, centsAbs, label });
+      }
+    }
+
+    // Stable order for deterministic matching/resolution.
+    debitRows.sort((a, b) => a.txnDate.localeCompare(b.txnDate) || a.id.localeCompare(b.id));
+    creditRows.sort((a, b) => a.txnDate.localeCompare(b.txnDate) || a.id.localeCompare(b.id));
+
+    const matched = new Set<string>();
+    const insertedAmbiguityTargets = new Set<string>();
+
+    const runInTransaction = db.transaction(() => {
+      for (const debit of debitRows) {
+        if (matched.has(debit.id)) continue;
+
+        let matchingCredits = creditRows.filter((c) => {
+          if (matched.has(c.id)) return false;
+          if (c.accountId === debit.accountId) return false;
+          if (c.centsAbs !== debit.centsAbs) return false;
+          return dateDiffDays(debit.txnDate, c.txnDate) <= 2;
+        });
+
+        if (matchingCredits.length > 1) {
+          const scored = matchingCredits
+            .map((c) => ({
+              c,
+              score: transferPairScore(debit.label, c.label, debit.txnDate, c.txnDate, dateDiffDays)
+            }))
+            .sort((a, b) => b.score - a.score);
+          const best = scored[0]!;
+          const second = scored[1];
+          if (best.score >= 70 && (!second || second.score < best.score - 20)) {
+            matchingCredits = [best.c];
+          } else if (best.score >= 45 && (!second || second.score < 25)) {
+            matchingCredits = [best.c];
+          }
+        }
+
+        if (matchingCredits.length === 0) continue;
+
+        if (matchingCredits.length !== 1) {
+          // Ambiguous: this debit matches multiple credit candidates.
+          const involvedTargetIds = new Set<string>([debit.id, ...matchingCredits.map((c) => c.id)]);
+          const reason = JSON.stringify({
+            kind: "transfer_ambiguity",
+            debitId: debit.id,
+            creditCandidateIds: matchingCredits.map((c) => c.id),
+            dateWindow: { start: windowStart, end: windowEnd },
+            closeDateToleranceDays: 2
+          });
+
+          for (const targetId of involvedTargetIds) {
+            if (insertedAmbiguityTargets.has(targetId)) continue;
+            const exists = existsOpenAmbiguityForTargetStmt.get(householdId, targetId);
+            if (exists) continue;
+            insertTransferAmbiguityStmt.run(crypto.randomUUID(), householdId, targetId, reason);
+            insertedAmbiguityTargets.add(targetId);
+          }
+          continue;
+        }
+
+        const credit = matchingCredits[0]!;
+        let matchingDebitsForCredit = debitRows.filter((d) => {
+          if (matched.has(d.id)) return false;
+          if (d.accountId === credit.accountId) return false;
+          if (d.centsAbs !== credit.centsAbs) return false;
+          return dateDiffDays(d.txnDate, credit.txnDate) <= 2;
+        });
+
+        if (matchingDebitsForCredit.length > 1) {
+          const scored = matchingDebitsForCredit
+            .map((d) => ({
+              d,
+              score: transferPairScore(d.label, credit.label, d.txnDate, credit.txnDate, dateDiffDays)
+            }))
+            .sort((a, b) => b.score - a.score);
+          const best = scored[0]!;
+          const second = scored[1];
+          if (best.score >= 70 && (!second || second.score < best.score - 20)) {
+            matchingDebitsForCredit = [best.d];
+          } else if (best.score >= 45 && (!second || second.score < 25)) {
+            matchingDebitsForCredit = [best.d];
+          }
+        }
+
+        if (matchingDebitsForCredit.length === 1) {
+          // Unambiguous mutual match: assign one transfer_group_id for both rows.
+          const groupId = crypto.randomUUID();
+          updateTransferGroupStmt.run(groupId, debit.id);
+          updateTransferGroupStmt.run(groupId, credit.id);
+          matched.add(debit.id);
+          matched.add(credit.id);
+          continue;
+        }
+
+        // Ambiguous: this credit matches multiple debits (mutual one-to-one requirement failed).
+        const involvedTargetIds = new Set<string>([
+          credit.id,
+          ...matchingDebitsForCredit.map((d) => d.id)
+        ]);
+        const reason = JSON.stringify({
+          kind: "transfer_ambiguity",
+          creditId: credit.id,
+          debitCandidateIds: matchingDebitsForCredit.map((d) => d.id),
+          dateWindow: { start: windowStart, end: windowEnd },
+          closeDateToleranceDays: 2
+        });
+
+        for (const targetId of involvedTargetIds) {
+          if (insertedAmbiguityTargets.has(targetId)) continue;
+          const exists = existsOpenAmbiguityForTargetStmt.get(householdId, targetId);
+          if (exists) continue;
+          insertTransferAmbiguityStmt.run(crypto.randomUUID(), householdId, targetId, reason);
+          insertedAmbiguityTargets.add(targetId);
+        }
+      }
+    });
+
+    runInTransaction();
   }
 
   deleteStagingFilesForSession(sessionId);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -84,19 +84,26 @@ function currentMonthStr(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
-function ledgerDrillHref(range: { start: string; end: string }, categoryId: string | null): string {
+function ledgerDrillHref(
+  range: { start: string; end: string },
+  opts?: { categoryId?: string | null; uncategorizedOnly?: boolean; accountId?: string | null }
+): string {
   const qs = new URLSearchParams();
   qs.set("dateFrom", range.start);
   qs.set("dateTo", range.end);
-  if (categoryId === null) {
+  if (opts?.accountId) {
+    qs.set("accountId", opts.accountId);
+  }
+  if (opts?.uncategorizedOnly) {
     qs.set("uncategorizedOnly", "true");
-  } else {
-    qs.set("categoryId", categoryId);
+  } else if (opts?.categoryId) {
+    qs.set("categoryId", opts.categoryId);
   }
   return `/transactions?${qs.toString()}`;
 }
 
 export function DashboardPage() {
+  const navigate = useNavigate();
   const token = useAuthToken();
   const [preset, setPreset] = useState<CashPreset>("rolling_30");
   const [monthStr, setMonthStr] = useState(currentMonthStr);
@@ -106,6 +113,10 @@ export function DashboardPage() {
   const [data, setData] = useState<CashSummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resolutionSummary, setResolutionSummary] = useState<{
+    openByType: Record<string, number>;
+    totalOpen: number;
+  } | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -132,6 +143,9 @@ export function DashboardPage() {
     }
     const res = await apiJson<CashSummaryResponse>(`/reports/cash-summary?${qs.toString()}`);
     setData(res);
+    void apiJson<{ openByType: Record<string, number>; totalOpen: number }>("/resolution/summary")
+      .then((r) => setResolutionSummary(r))
+      .catch(() => setResolutionSummary(null));
   }, [preset, monthStr, asOf, accountId]);
 
   useEffect(() => {
@@ -162,7 +176,11 @@ export function DashboardPage() {
     }
     return data.byCategory
       .filter((c) => c.outflows > 0)
-      .map((c) => ({ name: c.categoryName, value: c.outflows }));
+      .map((c) => ({
+        name: c.categoryName,
+        value: c.outflows,
+        categoryId: c.categoryId
+      }));
   }, [data?.byCategory]);
 
   const inflowPieData = useMemo(() => {
@@ -171,8 +189,17 @@ export function DashboardPage() {
     }
     return data.byCategory
       .filter((c) => c.inflows > 0)
-      .map((c) => ({ name: c.categoryName, value: c.inflows }));
+      .map((c) => ({
+        name: c.categoryName,
+        value: c.inflows,
+        categoryId: c.categoryId
+      }));
   }, [data?.byCategory]);
+
+  const drillOpts = useMemo(
+    () => ({ accountId: accountId || undefined }),
+    [accountId]
+  );
 
   const stackBarModel = useMemo(() => {
     const raw = data?.monthlyOutflowsByCategory;
@@ -227,6 +254,23 @@ export function DashboardPage() {
     <div>
       <div className="card">
         <h1>Home</h1>
+        {resolutionSummary && (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
+          <p
+            className="muted"
+            style={{
+              padding: "0.65rem 0.85rem",
+              borderRadius: "8px",
+              border: "1px solid #bae6fd",
+              background: "#f0f9ff",
+              marginBottom: "0.75rem"
+            }}
+          >
+            <strong>{resolutionSummary.openByType.unknown_category}</strong> posted transaction(s) have no category
+            yet.{" "}
+            <Link to="/resolution?status=open&type=unknown_category">Open review queue</Link> to assign categories in
+            bulk or per row.
+          </p>
+        ) : null}
         <p className="muted">
           Posted ledger totals by period — household cashflow plus category splits (rules + manual categories from the
           ledger).
@@ -316,7 +360,8 @@ export function DashboardPage() {
                 <div>
                   <h2 style={{ fontSize: "1.05rem", marginBottom: "0.35rem" }}>Outflows by category</h2>
                   <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                    Debit totals in this period (pie excludes categories with $0 outflows).
+                    Debit totals in this period (pie excludes categories with $0 outflows). Click a slice to open the
+                    ledger for that category.
                   </p>
                   <div className="chart-wrap chart-wrap--pie">
                     {outflowPieData.length > 0 ? (
@@ -331,6 +376,21 @@ export function DashboardPage() {
                             innerRadius={56}
                             outerRadius={88}
                             paddingAngle={1}
+                            cursor="pointer"
+                            onClick={(_, index) => {
+                              const slice = outflowPieData[index];
+                              if (!slice || !data) {
+                                return;
+                              }
+                              navigate(
+                                ledgerDrillHref(data.range, {
+                                  accountId: drillOpts.accountId,
+                                  ...(slice.categoryId === null
+                                    ? { uncategorizedOnly: true }
+                                    : { categoryId: slice.categoryId })
+                                })
+                              );
+                            }}
                           >
                             {outflowPieData.map((_, i) => (
                               <Cell key={String(i)} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
@@ -348,7 +408,7 @@ export function DashboardPage() {
                 <div>
                   <h2 style={{ fontSize: "1.05rem", marginBottom: "0.35rem" }}>Inflows by category</h2>
                   <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                    Credit totals in this period.
+                    Credit totals in this period. Click a slice to open the ledger for that category.
                   </p>
                   <div className="chart-wrap chart-wrap--pie">
                     {inflowPieData.length > 0 ? (
@@ -363,6 +423,21 @@ export function DashboardPage() {
                             innerRadius={56}
                             outerRadius={88}
                             paddingAngle={1}
+                            cursor="pointer"
+                            onClick={(_, index) => {
+                              const slice = inflowPieData[index];
+                              if (!slice || !data) {
+                                return;
+                              }
+                              navigate(
+                                ledgerDrillHref(data.range, {
+                                  accountId: drillOpts.accountId,
+                                  ...(slice.categoryId === null
+                                    ? { uncategorizedOnly: true }
+                                    : { categoryId: slice.categoryId })
+                                })
+                              );
+                            }}
                           >
                             {inflowPieData.map((_, i) => (
                               <Cell key={String(i)} fill={PIE_COLORS[(i + 2) % PIE_COLORS.length]!} />
@@ -407,7 +482,16 @@ export function DashboardPage() {
                           <td>{formatMoneySigned(c.net)}</td>
                           <td>{c.transactionCount}</td>
                           <td>
-                            <Link to={ledgerDrillHref(data.range, c.categoryId)}>View</Link>
+                            <Link
+                              to={ledgerDrillHref(data.range, {
+                                accountId: drillOpts.accountId,
+                                ...(c.categoryId === null
+                                  ? { uncategorizedOnly: true }
+                                  : { categoryId: c.categoryId })
+                              })}
+                            >
+                              View
+                            </Link>
                           </td>
                         </tr>
                       ))}
@@ -462,6 +546,7 @@ export function DashboardPage() {
                         <th>Outflows</th>
                         <th>Net</th>
                         <th>Txns</th>
+                        <th>Ledger</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -476,6 +561,9 @@ export function DashboardPage() {
                           <td>${a.outflows.toFixed(2)}</td>
                           <td>{formatMoneySigned(a.net)}</td>
                           <td>{a.transactionCount}</td>
+                          <td>
+                            <Link to={ledgerDrillHref(data.range, { accountId: a.accountId })}>View</Link>
+                          </td>
                         </tr>
                       ))}
                     </tbody>

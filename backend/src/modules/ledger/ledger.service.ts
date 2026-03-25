@@ -28,12 +28,13 @@ export interface ListCanonicalResult {
   transactions: CanonicalTransactionRow[];
 }
 
-/** Optional filters for ledger lists (category drill-down, date window, uncategorized). */
+/** Optional filters for ledger lists (category drill-down, date window, uncategorized, account). */
 export interface LedgerListFilters {
   categoryId?: string;
   uncategorizedOnly?: boolean;
   dateFrom?: string;
   dateTo?: string;
+  accountId?: string;
 }
 
 function ledgerFilterClause(householdId: string, filters: LedgerListFilters | undefined): {
@@ -66,6 +67,10 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
   if (filters.dateTo) {
     parts.push("tc.txn_date <= ?");
     params.push(filters.dateTo);
+  }
+  if (filters.accountId) {
+    parts.push("tc.account_id = ?");
+    params.push(filters.accountId);
   }
   if (parts.length === 0) {
     return { sql: "", params: [] };

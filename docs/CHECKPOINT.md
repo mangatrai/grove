@@ -1,8 +1,9 @@
 # Development checkpoint
 
-**Last updated:** 2025-03-24 (evening stop — session handoff; categories UX + taxonomy follow-ups noted below)
+**Last updated:** 2026-03-25
 
-This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.
+This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
+**Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
 
 ### Progress legend (used across `docs/`)
 
@@ -27,6 +28,8 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 `npm test` in `backend/` runs **`prep-test-db.sh`**, **`db.sh --init --seed`**, then Vitest — it can sit without output for tens of seconds while SQLite is recreated; that is normal. If another process locks the test DB, stop it and retry.
 
+**Migration order:** SQL migrations run **before** seeds. Any migration that inserts rows with `parent_id` to built-in parents must **`INSERT OR IGNORE`** those parents in the migration if they only existed in seed before (see **`0008`** + **FIX-002** in **`docs/CHANGE_HISTORY.md`**).
+
 ---
 
 ## Implemented (high level)
@@ -35,14 +38,15 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 |------|--------|-------------|
 | **Auth** | ✅ | Login, JWT, household-scoped routes |
 | **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
-| **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable date/amount/description; exact fingerprint dedupe; **near-duplicate** path (same account/date/amount, compatible description) → **`resolution_item`** (`duplicate_ambiguity`), not posted; **`nearDuplicates`** in canonicalize response |
-| **Home / cash dashboard (Epic 7.1)** | 🟡 | **`GET /reports/cash-summary`** — period presets (month / YTD / rolling 30 & 90), KPIs, optional **account** filter, **by-account** breakdown, **by-category** + **monthly outflows by category** when `categoryBreakdown=true`, 6-month net trend + category charts (Recharts). **UI:** authenticated **`/`** (former `/dashboard` redirects here). **Not yet:** savings-rate / safe-to-spend, configurable targets (`docs/API_CASH_SUMMARY.md`) |
-| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** on canonicalize → **`category_id`** (includes extra leaf rules for dining, coffee, medical, pharmacy — see `category-ids.ts`); **`GET /categories`** (includes **`parentId`**); ledger **`categoryId`/`categoryName`** + **`PATCH /transactions/:id`**. **Not yet:** `unknown_category` queue wiring, DB-driven rules UI, confidence scores (`docs/API_CATEGORIES.md`, `docs/API_LEDGER.md`) |
-| **Category hierarchy (Epic 5.3)** | 🟡 | **Shipped:** hierarchical **seed** + migration **`0007_expanded_default_taxonomy.sql`** (parents/leaves for healthcare, food & dining, insurance, education, giving, etc.); **`POST`/`PATCH`/`DELETE /categories`** with depth/parent validation; **`/categories`** page — **parent column left, category right**, grouped rows (parent then children), **Source** column (built-in vs household), add form (**new parent group** vs **subcategory**). **Ledger:** picker uses **`optgroup`** by parent (not hover/flyout). **Gaps:** taxonomy still missing **transfers**, **tax payments**, **income subtypes** (salary, interest, …); no inline “add category” in ledger; standalone page may be redundant — see **`docs/MVP_BACKLOG.md`** (Epic 5) and **D-014** in **`docs/DECISIONS_LOG.md`**. |
-| **UI shell & routing** | ✅ | **App shell** — sticky header when signed in (`ShellLayout`): nav **Home** (`/` = dashboard), **Ledger**, **Categories**, **Review queue**; **New import** (no separate Import nav item). Guests at **`/`** see sign-in card only (no header). **Vite proxy:** `/categories`, `/resolution`, `/reports` (see `frontend/vite.config.ts`) |
-| **Import UX** | 🟡 | When session is **`review`** / **`finalized`** / **`failed`**, uploads **hidden**; **“Start another import session”**; file-level inbox drill-down still backlog (Epic 6) |
-| **Operator purge** | ✅ | `npm run import:purge` — see `docs/IMPORT_STAGING_PURGE.md` |
-| **Tests** | 🟡 | `prep-test-db.sh` + `clean-import-session-dirs.mjs` + Vitest global teardown; integration tests include canonicalize idempotency, near-duplicate, cash-summary category breakdown |
+| **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable fingerprint; near-duplicate → **`resolution_item`** (`duplicate_ambiguity`); **`nearDuplicates`** in canonicalize response |
+| **Home / cash dashboard (Epic 7.1)** | 🟡 | **`GET /reports/cash-summary`** — presets, KPIs, account filter, by-account, **by-category** + charts when `categoryBreakdown=true`, trend. **Transfer rows excluded** from income/expense/category aggregates when `transfer_group_id` set or open **`transfer_ambiguity`** (see **CR-004** in **`docs/CHANGE_HISTORY.md`**). **New:** dashboard resolution surfacing for open `unknown_category` items and **chart->ledger drill-down** (pie slice click + “View” links) with the ledger pre-filtered by **category** and **optionally account**. **Not yet:** savings-rate / safe-to-spend, configurable targets (`docs/API_CASH_SUMMARY.md`) |
+| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** → **`category_id`** on canonicalize; **`GET /categories`**; ledger **`PATCH /transactions/:id`**. **Migration + rules:** Income **leaves** (Salary, Interest, Dividends, Refunds, Rental income), **Taxes** / **Transfers** parents + leaves (`0008`, `category-ids.ts`). **Now delivered:** `unknown_category` is actionable via **`/resolution`** type filter + **inline category assignment** on unknown items (uses the same ledger picker). **Still not:** DB-driven rules UI, confidence scores |
+| **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Seed + migrations** through **`0008_income_taxes_transfers_taxonomy.sql`** (Income leaves, Taxes/Transfers, Rental reparented). **`POST`/`PATCH`/`DELETE /categories`**. **`/categories`** page (grouped table + add parent/sub). **Ledger:** **`LedgerCategoryPicker`** — portal **modal-style** flyout (backdrop, 3 columns), inline **create group / subcategory** via **`POST /categories`**, **single-line** trigger (leaf vs parent vs uncategorized styling). **Ledger table:** **no Status column** (user preference). **Gaps:** optional demotion of **`/categories`** if ledger-only parity is enough; hierarchical **`byCategory` roll-up** in reports still product-dependent (Epic 7.2) |
+| **Transfer matcher (Epic 5.2)** | 🟡 | **Minimal** post-ingest matcher sets **`transfer_group_id`** for clear pairs; **`transfer_ambiguity`** resolution items when unclear. **Improved:** description/merchant+memo based scoring to disambiguate multiple candidates and a slightly wider date window (still conservative) — see **CR-006 / CR-007** in **`docs/CHANGE_HISTORY.md`**. **Not** full card/loan payment story coverage |
+| **UI shell & routing** | ✅ | **App shell** — Home (`/`), Ledger, Categories, Review queue, New import. **`/dashboard`** → **`/`** |
+| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session** |
+| **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
+| **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
 
 ---
 
@@ -51,8 +55,9 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | Topic | File |
 |----------|------|
 | Backlog & epics | `docs/MVP_BACKLOG.md` |
+| **Change / CR / UX history** | **`docs/CHANGE_HISTORY.md`** |
+| Decisions (ADR-lite) | `docs/DECISIONS_LOG.md` |
 | Import API | `docs/API_IMPORT_SESSIONS.md` |
-| Canonicalize | `docs/API_IMPORT_SESSIONS.md` (canonicalize section includes `nearDuplicates`) |
 | Ledger API | `docs/API_LEDGER.md` |
 | Categories API | `docs/API_CATEGORIES.md` |
 | Resolution queue API | `docs/API_RESOLUTION.md` |
@@ -64,27 +69,23 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 ## Sensible next steps (prioritized themes)
 
-1. **Categories — product direction (large):** Move toward **ledger-first** category UX: hierarchical control on the transaction row (parent visible; **hover or submenu for children**; **add category / add subcategory** without leaving the ledger). **Demote or remove** the dedicated **`/categories`** route once parity exists. **Taxonomy:** add **Transfers** (and alignment with **Story 5.2** transfer matcher), **Taxes**, and **Income** children (salary, interest, dividends, refunds, etc.); review rules + cash-summary roll-up. See **`docs/MVP_BACKLOG.md`** (Epic 5) and **D-014** in **`docs/DECISIONS_LOG.md`**.
-2. **Epic 5.1 continuation:** **`unknown_category`** queue, DB-driven rules UI, optional confidence.
-3. **Epic 7 continuation:** period comparisons, safe-to-spend / savings target, **drill-down** from category charts to ledger (7.1–7.2 stretch); hierarchical **`byCategory`** roll-up semantics (partially unblocked; still needs product decisions).
-4. **Epic 6 continuation:** richer **inbox** (file-level drill-down), **undo before finalize** (6.3), bulk **category** / transfer actions when classification exists (Story 6.2 stretch goals).
-5. **Payslip v1 (3.3a):** IBM summary strip + storage — **after** you schedule it (`docs/PAYSLIP_V1.md`).
-6. **Epic 3.2:** More bank PDF adapters — deprioritized until polish; see backlog planning note.
-7. **Backlog hygiene:** Keep Story **4.2** / **5** / **6** / **7** entries in `MVP_BACKLOG.md` in sync with this file when you ship more.
+1. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + strengthen ambiguity handling tests.
+2. **Epic 5.1 continuation:** DB-driven rules UI, optional confidence scores, and improve bulk assignment ergonomics for unknown items.
+3. **Epic 7 continuation:** deeper drill-down (e.g. ledger row paging / better drill semantics) and period comparisons + safe-to-spend.
+4. **Epic 6:** inbox drill-down, bulk category from resolution grid.  
+5. **Product cleanup:** decide whether **`/categories`** stays as “advanced” or is folded into ledger-only flows (**D-014** / **DECISIONS_LOG.md**).  
+6. **Docs hygiene:** keep **`CHANGE_HISTORY.md`** updated when user-facing behavior changes.
 
 ---
 
-## Quick file map (dedupe + resolution)
+## Quick file map (categories + ledger + reporting)
 
-- `backend/src/modules/canonical/transaction-fingerprint.ts` — fingerprint contract
-- `backend/src/modules/canonical/canonical-ingest.service.ts` — ingest + near-duplicate + `deleteStagingFilesForSession`
-- `backend/src/modules/resolution/resolution.service.ts` + `resolution.routes.ts` — `GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk`
-- `frontend/src/pages/ResolutionQueuePage.tsx` — queue UI + row/bulk status actions
-- `frontend/src/pages/ImportWorkspacePage.tsx` — import flow + closed-session upload UX
-- `backend/src/modules/reports/` — `GET /reports/cash-summary`
-- `frontend/src/pages/HomeRoute.tsx` — `/` → dashboard if JWT, else sign-in card
-- `frontend/src/pages/DashboardPage.tsx` — Cash KPIs + category charts (authenticated home)
-- `frontend/src/pages/CategoriesPage.tsx` — `/categories` hierarchy table + add parent/subcategory (may be superseded by ledger-inline UX later)
-- `frontend/src/layout/ShellLayout.tsx` + `AppHeader.tsx` — app chrome; `src/auth/RequireAuth.tsx` — protected routes
-- `backend/src/modules/category/` — rules + `GET /categories`; canonical ingest sets `category_id`; ledger `PATCH` for category
-- `backend/db/migrations/0007_expanded_default_taxonomy.sql` — extra global parent/leaf categories
+- `backend/src/modules/category/category-rules.ts` — default classification rules  
+- `backend/src/modules/category/category-ids.ts` — leaf/parent id constants  
+- `backend/db/migrations/0008_income_taxes_transfers_taxonomy.sql` — Income/Taxes/Transfers taxonomy  
+- `backend/src/modules/canonical/canonical-ingest.service.ts` — ingest, dedupe, **transfer matcher** hook  
+- `backend/src/modules/reports/cash-summary.service.ts` — KPIs; **transfer exclusion** clause  
+- `frontend/src/components/LedgerCategoryPicker.tsx` — ledger category flyout + inline create  
+- `frontend/src/pages/TransactionsPage.tsx` — ledger table (**no Status column**)  
+- `frontend/src/pages/CategoriesPage.tsx` — full category management  
+- `docs/CHANGE_HISTORY.md` — **CR / UX / FIX / PRD deviation log**

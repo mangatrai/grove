@@ -407,6 +407,96 @@ describe("import sessions and file intake", () => {
     expect(canRes.body.code).toBe("NO_RAW_ROWS");
   });
 
+  it("sets transfer_group_id for unambiguous transfer pairs", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const debitAccountId = crypto.randomUUID();
+    const creditAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Transfer Match Test A', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(debitAccountId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'savings', 'Transfer Match Test B', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(creditAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'transfer.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const txnDate = "1999-12-25";
+    const debitDesc = "Transfer to owned savings";
+    const creditDesc = "Transfer from owned checking";
+    const rawCreditId = crypto.randomUUID();
+    const rawDebitId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      0,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: creditDesc,
+        amount: 200,
+        financial_account_id: creditAccountId
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      1,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: debitDesc,
+        amount: -200,
+        financial_account_id: debitAccountId
+      })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const creditRow = db.prepare(
+      `SELECT id, transfer_group_id FROM transaction_canonical
+       WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ? AND merchant = ?`
+    ).get(householdId, creditAccountId, txnDate, 200, creditDesc) as { id: string; transfer_group_id: string | null };
+
+    const debitRow = db.prepare(
+      `SELECT id, transfer_group_id FROM transaction_canonical
+       WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ? AND merchant = ?`
+    ).get(householdId, debitAccountId, txnDate, -200, debitDesc) as { id: string; transfer_group_id: string | null };
+
+    expect(creditRow).toBeDefined();
+    expect(debitRow).toBeDefined();
+    expect(creditRow.transfer_group_id).not.toBeNull();
+    expect(debitRow.transfer_group_id).not.toBeNull();
+    expect(creditRow.transfer_group_id).toBe(debitRow.transfer_group_id);
+  });
+
   it("parses XLSX file into transaction_raw rows", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
@@ -1036,6 +1126,157 @@ describe("cash summary (reports)", () => {
     expect(Array.isArray(res.body.byAccount)).toBe(true);
     expect(res.body.byAccount).toHaveLength(1);
     expect(res.body.byAccount[0].accountId).toBe(testAccountId);
+  });
+
+  it("excludes transfer rows from KPI and category aggregation", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const ownerUserId = "20000000-0000-0000-0000-000000000001";
+
+    const incomeCat = "30000000-0000-0000-0000-000000000001";
+    const housingCat = "30000000-0000-0000-0000-000000000002";
+
+    const asOf = "1999-12-20";
+
+    // Normal (non-transfer) transactions.
+    const normalAccountId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Non-transfer Cash Summary Test', '0001', 'USD', CURRENT_TIMESTAMP)`
+    ).run(normalAccountId, householdId, ownerUserId);
+
+    // Transfer accounts (transfers are excluded from reporting).
+    const transferCreditAccountId = crypto.randomUUID();
+    const transferDebitAccountId = crypto.randomUUID();
+    const transferGroupId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'savings', 'Transfer Cash Summary Credit Test', '0002', 'USD', CURRENT_TIMESTAMP)`
+    ).run(transferCreditAccountId, householdId, ownerUserId);
+
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Transfer Cash Summary Debit Test', '0003', 'USD', CURRENT_TIMESTAMP)`
+    ).run(transferDebitAccountId, householdId, ownerUserId);
+
+    const salaryId = crypto.randomUUID();
+    const rentId = crypto.randomUUID();
+    const transferCreditId = crypto.randomUUID();
+    const transferDebitId = crypto.randomUUID();
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    const fp3 = crypto.randomBytes(32).toString("hex");
+    const fp4 = crypto.randomBytes(32).toString("hex");
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      salaryId,
+      householdId,
+      normalAccountId,
+      incomeCat,
+      asOf,
+      1000,
+      "credit",
+      "Salary payment",
+      fp1,
+      "test:salary"
+    );
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      rentId,
+      householdId,
+      normalAccountId,
+      housingCat,
+      asOf,
+      -250.5,
+      "debit",
+      "Rent payment",
+      fp2,
+      "test:rent"
+    );
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'posted')`
+    ).run(
+      transferCreditId,
+      householdId,
+      transferCreditAccountId,
+      incomeCat,
+      asOf,
+      999,
+      "credit",
+      "Transfer credit",
+      transferGroupId,
+      fp3,
+      "test:transfer-credit"
+    );
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'posted')`
+    ).run(
+      transferDebitId,
+      householdId,
+      transferDebitAccountId,
+      housingCat,
+      asOf,
+      -999,
+      "debit",
+      "Transfer debit",
+      transferGroupId,
+      fp4,
+      "test:transfer-debit"
+    );
+
+    const res = await request(app).get(
+      `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&categoryBreakdown=true&categoryRollup=leaf`
+    ).set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.household.inflows).toBe(1000);
+    expect(res.body.household.outflows).toBe(250.5);
+    expect(res.body.household.net).toBe(749.5);
+    expect(res.body.household.transactionCount).toBe(2);
+
+    expect(Array.isArray(res.body.byCategory)).toBe(true);
+    expect(res.body.byCategory).toHaveLength(2);
+    const housing = res.body.byCategory.find((r: { categoryName: string }) => r.categoryName === "Housing");
+    const income = res.body.byCategory.find((r: { categoryName: string }) => r.categoryName === "Income");
+    expect(housing).toBeDefined();
+    expect(income).toBeDefined();
+    expect(housing.outflows).toBe(250.5);
+    expect(housing.inflows).toBe(0);
+    expect(income.inflows).toBe(1000);
+    expect(income.outflows).toBe(0);
+    expect(res.body.byCategory.some((r: { categoryName: string }) => r.categoryName === "Uncategorized")).toBe(false);
+
+    expect(Array.isArray(res.body.monthlyOutflowsByCategory)).toBe(true);
+    const monthRow = res.body.monthlyOutflowsByCategory.find(
+      (m: { month: string }) => m.month === asOf.slice(0, 7)
+    );
+    expect(monthRow).toBeDefined();
+    const seg = monthRow.segments.find((s: { categoryName: string }) => s.categoryName === "Housing");
+    expect(seg.outflows).toBe(250.5);
   });
 
   it("returns byCategory and monthlyOutflowsByCategory when categoryBreakdown=true", async () => {
