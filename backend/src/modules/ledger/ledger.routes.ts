@@ -3,7 +3,11 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { listCanonicalTransactions, listCanonicalTransactionsForImportSession } from "./ledger.service.js";
+import {
+  listCanonicalTransactions,
+  listCanonicalTransactionsForImportSession,
+  updateCanonicalTransactionCategory
+} from "./ledger.service.js";
 
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
@@ -36,4 +40,32 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
 
   const result = listCanonicalTransactions(householdId, limit, offset);
   res.status(200).json(result);
+});
+
+const patchCategorySchema = z.object({
+  categoryId: z.union([z.string().uuid(), z.null()])
+});
+
+ledgerRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
+  const parsed = patchCategorySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+
+  const householdId = req.authUser!.householdId;
+  const out = updateCanonicalTransactionCategory(householdId, req.params.id, parsed.data.categoryId);
+  if (!out.ok) {
+    if (out.code === "INVALID_CATEGORY") {
+      res.status(400).json({
+        message: "Category is not available for this household",
+        code: out.code
+      });
+      return;
+    }
+    res.status(404).json({ message: "Transaction not found" });
+    return;
+  }
+
+  res.status(200).json(out.data);
 });

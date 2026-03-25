@@ -7,11 +7,13 @@ ingestion pipeline.
 
 - `docs/`: product and architecture documents.
 - `docs/API_IMPORT_SESSIONS.md`: Epic 2.1 import session + file intake API contract.
-- `docs/API_LEDGER.md`: read-only `GET /transactions` (canonical ledger; optional `sessionId` filter).
+- `docs/API_LEDGER.md`: `GET /transactions`, `PATCH /transactions/:id` (category); optional `sessionId` filter.
+- `docs/API_CATEGORIES.md`: Epic 5.1 — `GET /categories` (taxonomy for the household).
 - `docs/IMPORT_STAGING_PURGE.md`: Epic 2.4 — purge `data/imports/...` staging files + clear `stored_path`.
 - `docs/PAYSLIP_V1.md`: Epic 3 Story 3.3 — payslip module intent, v1 summary-only scope, storage vs ledger (see backlog).
-- `docs/API_RESOLUTION.md`: `GET /resolution` — import review queue (`resolution_item`).
-- `docs/CHECKPOINT.md`: **current implementation status**, run commands, file map, next steps (keep in sync when shipping).
+- `docs/API_RESOLUTION.md`: resolution queue — `GET` / `PATCH` / `POST /resolution/bulk` (`resolution_item`).
+- `docs/API_CASH_SUMMARY.md`: Epic 7.1 cash view — `GET /reports/cash-summary` (dashboard KPIs + trend).
+- `docs/CHECKPOINT.md`: **current implementation status** (✅ / 🟡 / ⬜ progress legend), run commands, file map, next steps (keep in sync when shipping).
 - `backend/`: API, domain model, migrations, auth/RBAC baseline.
 - `frontend/`: Vite + React Import UI (Epic 2.3).
 
@@ -23,7 +25,7 @@ ingestion pipeline.
    - `npm run setup`
 3. Start backend + frontend dev servers (background, logs under `.runtime/logs/`):
    - `npm run services:start`
-   - Open the UI (default **http://127.0.0.1:3000**), log in with seeded credentials from `.env.example`, then **New import session**.
+   - Open the UI (default **http://127.0.0.1:3000**), log in with seeded credentials from `.env.example` — land on the **home dashboard** (cash KPIs). Use **New import** in the header when you need a statement import.
    - Or run interactively: `npm run dev` (backend only) and `npm run dev:frontend` in a second terminal.
 4. Stop services when needed:
    - `npm run services:stop` — stops the recorded wrapper PIDs, then **clears whatever is still listening** on the dev ports
@@ -41,11 +43,16 @@ still omits **last-four** labels, your DB may predate a mask fix — run a fresh
 
 ## Current Implementation Scope
 
-- Epic 1: monorepo, migrations, seed, auth/RBAC baseline.
-- Epic 2.1+: import sessions API; **Epic 2.3**: browser Import UI (`frontend/`) for session → upload → bind → parse → canonicalize; **uploads only in `created`/`processing`** — after **review**, UI steers users to a **new import session** (see `docs/MVP_BACKLOG.md` Story 2.1 note).
-- Epic 2.4: staging purge script + auto-delete staging after successful canonicalize; test cleanup for `data/imports` session dirs.
-- **Epic 4.2 (baseline):** fingerprint dedupe, near duplicates → `resolution_item`, `GET /resolution`, Review queue page, `nearDuplicates` in API/UI.
-- **Epic 6 (partial):** read-only resolution queue; **not** bulk resolve / dismiss yet.
+Progress markers: ✅ done · 🟡 partial · ⬜ not started (see **`docs/CHECKPOINT.md`** for the live table).
+
+- ✅ Epic 1: monorepo, migrations, seed, auth/RBAC baseline.
+- 🟡 Epic 2.1+: import sessions API; **Epic 2.3**: browser Import UI (`frontend/`) for session → upload → bind → parse → canonicalize; **uploads only in `created`/`processing`** — after **review**, UI steers users to a **new import session** (see `docs/MVP_BACKLOG.md` Story 2.1 note).
+- ✅ Epic 2.4: staging purge script + auto-delete staging after successful canonicalize; test cleanup for `data/imports` session dirs.
+- ✅ **Epic 4.2 (baseline):** fingerprint dedupe, near duplicates → `resolution_item`, `GET /resolution`, Review queue page, `nearDuplicates` in API/UI.
+- 🟡 **Epic 6 (partial):** resolution queue with status filters, row context, ledger links, per-row and **bulk** status actions; **not** category bulk or full inbox drill-down yet.
+- 🟡 **Epic 7.1–7.2 (partial):** **Home** at **`/`** (cash KPIs + category-backed charts via `categoryBreakdown`); **`/dashboard`** redirects to **`/`**; **not** safe-to-spend / savings targets or full period comparisons yet (see backlog).
+- ✅ **Frontend shell (signed-in):** sticky **header** — **Home**, **Ledger**, **Review queue**, **New import**, **Sign out** (no separate Import nav link).
+- 🟡 **Epic 5.1 (partial):** default **category** taxonomy + **conservative keyword rules** on canonicalize; **`GET /categories`**; ledger **`categoryId` / `categoryName`** + **category dropdown** (`PATCH /transactions/:id`). **Not** transfer matcher (5.2), bulk category in resolution, or auto **unknown_category** queue yet.
 
 **Detail:** `docs/CHECKPOINT.md` · **Backlog:** `docs/MVP_BACKLOG.md`.
 

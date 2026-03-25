@@ -1,5 +1,7 @@
 # Implementation Plan (90 Days)
 
+**Repo status:** For what is actually built vs this plan, use **`docs/CHECKPOINT.md`** (✅ / 🟡 / ⬜) and **`docs/MVP_BACKLOG.md`**.
+
 ## Planning Assumptions
 - Primary strategy: `Actual Budget` as base + custom ingestion and review layer.
 - Deployment target: self-hosted, LAN-only, can run on-demand on laptop.

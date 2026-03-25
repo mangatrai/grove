@@ -7,6 +7,8 @@
 
 **Checkpoint (repo vs this doc):** See **`docs/CHECKPOINT.md`** for what is implemented today, how to run, file map, and suggested next steps. Update that file when you ship meaningful chunks.
 
+**Progress legend:** ✅ Done · 🟡 Partial · ⬜ Not started (epic/story lines below use this where helpful).
+
 ---
 
 ## Epic 1: Foundation and Project Skeleton (P0)
@@ -164,7 +166,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Adding a new bank adapter does not require changing dedupe/fingerprint rules beyond normalized field contract.
 
 ### Story 4.2 - Fingerprint dedupe engine
-**Status:** **Baseline delivered** (engine + API + tests + minimal product surface). Further work = resolution **actions** (resolve/dismiss) and richer inbox UX → **Epic 6**.
+**Status:** **Baseline delivered** (engine + API + tests + minimal product surface). Follow-on **Epic 6** work adds queue UX (status bulk, filters, context); classification bulk remains **Epic 5**-dependent.
 
 **Delivered:**
 - **`transaction-fingerprint.ts`** — deterministic `normalizeAmountForFingerprint`, date/description normalization, `computeTransactionFingerprint`.
@@ -173,7 +175,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 - **Tests** — unit tests on fingerprint helpers; integration: idempotent second canonicalize; near-duplicate scenario (e.g. Starbucks lines).
 
 **Deferred / next:**
-- Bulk near-duplicate review, **PATCH** to resolve items, linking queue rows to ledger in UI (Epic 6.2–6.3 overlap).
+- Bulk near-duplicate triage beyond **status** (e.g. category rules) when Epic 5 exists; session rollback / undo (Epic 6.3).
 
 - Tasks (original backlog; baseline above covers most):
   - Implement deterministic fingerprinting and duplicate checks. (L) ✅
@@ -188,9 +190,11 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** classify usable data while minimizing false positives.
 
 ### Story 5.1 - Category taxonomy and baseline rule engine
+**Partial (2025):** Seeded defaults unchanged (`0001_seed_defaults.sql`). **`category-rules.ts`** applies conservative substring rules on fingerprint-normalized description + signed amount (inflow vs outflow). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories. **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Not** delivered: `unknown_category` resolution queue wiring, DB-driven rules UI, confidence scores.
+
 - Tasks:
-  - Seed compact household category taxonomy with modular extension path. (S)
-  - Add conservative merchant-pattern rules with confidence. (M)
+  - Seed compact household category taxonomy with modular extension path. (S) ✅
+  - Add conservative merchant-pattern rules with confidence. (M) ✅ (keyword baseline; confidence deferred)
 - Acceptance:
   - Known merchants auto-categorize; unknowns route to unresolved.
 
@@ -207,9 +211,13 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 ## Epic 6: Import Inbox and Resolution UX (P0)
 **Goal:** minimize manual effort with bulk review.
 
-**Baseline delivered (2025):** **`GET /resolution`** lists **`resolution_item`** for the household (`docs/API_RESOLUTION.md`). **Review queue** page at **`/resolution`** (read-only). Import workspace links to it; canonical near-duplicates create rows. **Not** delivered: bulk actions, resolve/dismiss API, session-level “inbox summary” beyond existing import session summary.
+**Baseline delivered (2025):** **`GET /resolution`** (with **`?status=`** filter) lists **`resolution_item`** with **import context** (file, raw preview, ledger link). **`PATCH /resolution/:id`** and **`POST /resolution/bulk`** update status with the same transition rules (`docs/API_RESOLUTION.md`). **Review queue** at **`/resolution`** — per-row and **bulk** status actions. **Import workspace** — **Epic 6.1-style handoff:** posted vs exact duplicates vs near-duplicates, CTA to review queue when needed; ledger empty-state guidance when session filter shows no rows.
+
+**Not** delivered: file-level drill-down in inbox, category/transfer **bulk** edits (Story 6.2 stretch), session rollback (6.3), bulk “approve” semantics beyond status.
 
 ### Story 6.1 - Inbox summary view
+**Partial (2025):** Import workspace + last-import summary cover **posted vs flagged** counts and near-duplicate CTA; ledger/queue empty states clarified. **Remaining:** dedicated file-level drill-down and richer session inbox beyond the import card.
+
 - Tasks:
   - Build session summary UI (parsed/duplicate/unresolved counts). (M)
   - Add file-level status drill-down. (M)
@@ -217,6 +225,8 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - User sees processing outcome in a single place.
 
 ### Story 6.2 - Resolution grid with bulk actions
+**Partial (2025):** Resolution **grid** + **bulk status** (**In review / Resolve / Reopen**) via **`POST /resolution/bulk`**. **Remaining:** bulk category/user/transfer, approve-all-high-confidence — depends on Epic 5 classification.
+
 - Tasks:
   - Grid for unresolved and low-confidence transactions. (L)
   - Bulk edit category/user/transfer flags. (L)
@@ -238,17 +248,21 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** deliver core decision metrics from imported data.
 
 ### Story 7.1 - KPI cards
+**Status: 🟡 Partial (2025).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; optional **account** filter; **by-account** breakdown; **6-month monthly net** bar; **`categoryBreakdown`** → **by-category** table + inflow/outflow donuts + stacked monthly outflows by category (`docs/API_CASH_SUMMARY.md`). **Not** delivered: savings-rate / safe-to-spend, configurable targets.
+
 - Tasks:
-  - Implement income, expenses, net cashflow, savings rate cards. (M)
-  - Implement safe-to-spend with configurable monthly savings target. (M)
+  - Implement income, expenses, net cashflow, savings rate cards. (M) 🟡
+  - Implement safe-to-spend with configurable monthly savings target. (M) ⬜
 - Acceptance:
   - Core KPIs visible by household with period selector.
 
 ### Story 7.2 - Category and trend reporting
+**Status: 🟡 Partial (2025).** **Depends on Epic 5.1** (categories on ledger rows). **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Not** delivered: click-through drill-down to transactions, prior-period comparisons, extra custom date filters beyond cash-summary presets.
+
 - Tasks:
-  - Build spend-by-category chart with drill-down. (M)
-  - Add prior week/month/year comparisons. (M)
-  - Add weekly/monthly/YTD/yearly/custom filters. (M)
+  - Build spend-by-category chart with drill-down. (M) 🟡
+  - Add prior week/month/year comparisons. (M) ⬜
+  - Add weekly/monthly/YTD/yearly/custom filters. (M) ⬜ (partially covered by cash-summary presets)
 - Acceptance:
   - User can compare periods and inspect underlying transactions.
 

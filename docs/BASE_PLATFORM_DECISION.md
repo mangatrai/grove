@@ -1,5 +1,7 @@
 # Base Platform Decision: Actual Budget vs Firefly III
 
+**Note:** This document records the **strategic choice**. Current product build status lives in **`docs/CHECKPOINT.md`**.
+
 ## Recommendation
 Choose `Actual Budget` as the base platform, with a custom ingestion/review layer built around PDF/CSV normalization and strict dedupe.
 

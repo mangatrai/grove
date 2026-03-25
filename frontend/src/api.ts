@@ -1,7 +1,25 @@
+import { useSyncExternalStore } from "react";
+
 const TOKEN_KEY = "hf_jwt";
 
-export function getToken(): string | null {
+const tokenListeners = new Set<() => void>();
+
+function notifyTokenListeners(): void {
+  tokenListeners.forEach((fn) => fn());
+}
+
+/** Subscribe for `useSyncExternalStore` — call when auth changes so UI re-renders without a route change. */
+export function subscribeToken(onStoreChange: () => void): () => void {
+  tokenListeners.add(onStoreChange);
+  return () => tokenListeners.delete(onStoreChange);
+}
+
+export function getTokenSnapshot(): string | null {
   return localStorage.getItem(TOKEN_KEY);
+}
+
+export function getToken(): string | null {
+  return getTokenSnapshot();
 }
 
 export function setToken(token: string | null): void {
@@ -10,6 +28,12 @@ export function setToken(token: string | null): void {
   } else {
     localStorage.removeItem(TOKEN_KEY);
   }
+  notifyTokenListeners();
+}
+
+/** React hook: same as `getToken()` but re-renders when `setToken` runs (e.g. sign-out on same URL as `/`). */
+export function useAuthToken(): string | null {
+  return useSyncExternalStore(subscribeToken, getTokenSnapshot, () => null);
 }
 
 function authHeaders(): HeadersInit {

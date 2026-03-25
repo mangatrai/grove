@@ -1,5 +1,7 @@
 # Requirements Traceability and Scope
 
+**Implementation progress:** See **`docs/CHECKPOINT.md`** for what is ✅ shipped, 🟡 partial, or ⬜ not started in the repo. This file stays requirements-oriented; the checkpoint is the live status board.
+
 ## Priority Mapping
 
 ### P0 (Must Have for MVP)
@@ -34,14 +36,14 @@
 - Child/dependent functional workflows (data model only in MVP).
 
 ## Acceptance Checklist (MVP)
-- [ ] Statement batch can be uploaded in one operation.
+- [x] Statement batch can be uploaded in one operation. (import session + multi-file)
 - [ ] Parsed transactions enter inbox with confidence labels.
-- [ ] User can bulk approve and bulk edit.
-- [ ] Duplicate upload produces zero duplicate posted transactions.
-- [ ] Unknown category/transfer conflicts route to resolution queue.
-- [ ] Final dashboard shows spending vs income and safe-to-spend.
+- [ ] User can bulk approve and bulk edit. (partial: resolution **status** bulk; not category bulk)
+- [x] Duplicate upload produces zero duplicate posted transactions. (fingerprint + idempotency)
+- [ ] Unknown category/transfer conflicts route to resolution queue. (partial: duplicate ambiguity → queue; category unknown not wired)
+- [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home `/` shows cash KPIs + category-backed charts; no safe-to-spend yet)
 - [ ] Owner can view spouse + own data; spouse cannot view owner data.
-- [ ] Raw PDF files are deleted after successful extraction.
+- [x] Raw PDF files are deleted after successful extraction. (staging cleanup policy; see `IMPORT_STAGING_PURGE.md`)
 
 ## Open Product Questions (to finalize before implementation)
 1. Exact default category taxonomy for MVP.

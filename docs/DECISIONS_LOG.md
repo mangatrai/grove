@@ -75,5 +75,11 @@
 - Date: 2026-03-24
 - Decision: Split ingestion into (a) **per bank/format adapters** that produce normalized candidate rows, and (b) a **single canonical ingest service** that persists and dedupes. Do not attempt one parser for all institutions. CSV and PDF both use the adapter pattern; differences are isolated in adapter modules with fixture tests.
 - Context: Real-world exports (e.g. BoA summary sections, Citi Debit/Credit columns, Chase activity CSV) cannot be mapped reliably by one generic mapping UI alone without high error risk.
-- Consequence: Higher upfront adapter count for top institutions, but lower systemic risk and stable core logic. UX includes per-file **financial account** assignment and profile selection/confirmation before parse.
+  - Consequence: Higher upfront adapter count for top institutions, but lower systemic risk and stable core logic. UX includes per-file **financial account** assignment and profile selection/confirmation before parse.
+
+## D-013: Home = cash dashboard; Import not in primary nav
+- Date: 2026-03-24
+- Decision: Authenticated **home** route (`/`) is the **cash / KPI dashboard** (same content as former `/dashboard`). **Import** is started only from the header **New import** action — no **Import** item in the primary nav (reduces duplicate entry points). **`/dashboard`** redirects to **`/`** for bookmarks.
+- Context: Users should land on decision metrics after login; import is secondary to ongoing cashflow review.
+- Consequence: Simpler IA; marketing/sign-in card remains for guests at `/` without the dashboard.
 

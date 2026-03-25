@@ -1,5 +1,7 @@
 # API: Import sessions and file intake (Epic 2.1–2.3)
 
+> **Progress:** Import pipeline status vs backlog → **`docs/CHECKPOINT.md`** (✅ / 🟡 / ⬜).
+
 Base path: `/imports`  
 Auth: `Authorization: Bearer <JWT>` (all routes require authentication).
 

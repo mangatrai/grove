@@ -715,6 +715,73 @@ describe("import sessions and file intake", () => {
   });
 });
 
+describe("categories and ledger category field (Epic 5.1)", () => {
+  it("lists default categories", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app).get("/categories").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.categories)).toBe(true);
+    expect(res.body.categories.some((c: { name: string }) => c.name === "Groceries")).toBe(true);
+  });
+
+  it("returns categoryId and categoryName on ledger rows", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app).get("/transactions?limit=5").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    if (res.body.transactions.length > 0) {
+      const t = res.body.transactions[0];
+      expect(t).toHaveProperty("categoryId");
+      expect(t).toHaveProperty("categoryName");
+    }
+  });
+
+  it("updates transaction category via PATCH", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+
+    const id = crypto.randomUUID();
+    const fp = crypto.randomBytes(32).toString("hex");
+    const catId = "30000000-0000-0000-0000-000000000004";
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 't', NULL, NULL, ?, 'manual:patch', 'posted')`
+    ).run(id, householdId.household_id, SEED_BOA_CHECKING, new Date().toISOString().slice(0, 10), -1, fp);
+
+    const patch = await request(app)
+      .patch(`/transactions/${id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ categoryId: catId });
+
+    expect(patch.status).toBe(200);
+    expect(patch.body.categoryId).toBe(catId);
+    expect(patch.body.categoryName).toBe("Groceries");
+
+    const clear = await request(app)
+      .patch(`/transactions/${id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ categoryId: null });
+
+    expect(clear.status).toBe(200);
+    expect(clear.body.categoryId).toBeNull();
+  });
+});
+
 describe("resolution queue", () => {
   it("returns 401 without token", async () => {
     const res = await request(app).get("/resolution");
@@ -731,5 +798,317 @@ describe("resolution queue", () => {
     const res = await request(app).get("/resolution").set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.items)).toBe(true);
+    if (res.body.items.length > 0) {
+      expect(res.body.items[0]).toHaveProperty("context");
+    }
+  });
+
+  it("filters resolution list by status", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(crypto.randomUUID(), household.household_id, crypto.randomUUID(), "open item");
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'resolved')`
+    ).run(crypto.randomUUID(), household.household_id, crypto.randomUUID(), "resolved item");
+
+    const res = await request(app).get("/resolution?status=open").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("open");
+    expect(Array.isArray(res.body.items)).toBe(true);
+    expect(res.body.items.every((x: { status: string }) => x.status === "open")).toBe(true);
+  });
+
+  it("updates resolution status for household item", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+
+    const id = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(id, householdId.household_id, crypto.randomUUID(), "manual test");
+
+    const patch = await request(app)
+      .patch(`/resolution/${id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "in_review" });
+
+    expect(patch.status).toBe(200);
+    expect(patch.body.status).toBe("in_review");
+  });
+
+  it("returns 404 when updating another household's resolution item", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+
+    const otherHouseholdId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO household (id, name, created_at)
+       VALUES (?, 'Other household 2', CURRENT_TIMESTAMP)`
+    ).run(otherHouseholdId);
+    const id = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(id, otherHouseholdId, crypto.randomUUID(), "other household");
+
+    const patch = await request(app)
+      .patch(`/resolution/${id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "resolved" });
+    expect(patch.status).toBe(404);
+  });
+
+  it("returns 409 for invalid resolution transition", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+
+    const id = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'resolved')`
+    ).run(id, householdId.household_id, crypto.randomUUID(), "resolved item");
+
+    const patch = await request(app)
+      .patch(`/resolution/${id}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "in_review" });
+    expect(patch.status).toBe(409);
+    expect(patch.body.code).toBe("INVALID_TRANSITION");
+  });
+
+  it("bulk updates multiple resolution items", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+
+    const id1 = crypto.randomUUID();
+    const id2 = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(id1, householdId.household_id, crypto.randomUUID(), "a");
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(id2, householdId.household_id, crypto.randomUUID(), "b");
+
+    const bulk = await request(app)
+      .post("/resolution/bulk")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [id1, id2], status: "in_review" });
+
+    expect(bulk.status).toBe(200);
+    expect(bulk.body.updated).toHaveLength(2);
+    expect(bulk.body.errors).toHaveLength(0);
+    expect(bulk.body.updated.every((u: { status: string }) => u.status === "in_review")).toBe(true);
+  });
+
+  it("bulk returns per-item errors without failing the whole request", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+
+    const okId = crypto.randomUUID();
+    const badTransitionId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(okId, householdId.household_id, crypto.randomUUID(), "ok");
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'resolved')`
+    ).run(badTransitionId, householdId.household_id, crypto.randomUUID(), "bad");
+
+    const bulk = await request(app)
+      .post("/resolution/bulk")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [okId, badTransitionId], status: "in_review" });
+
+    expect(bulk.status).toBe(200);
+    expect(bulk.body.updated).toHaveLength(1);
+    expect(bulk.body.updated[0].id).toBe(okId);
+    expect(bulk.body.errors).toHaveLength(1);
+    expect(bulk.body.errors[0].id).toBe(badTransitionId);
+    expect(bulk.body.errors[0].code).toBe("INVALID_TRANSITION");
+  });
+});
+
+describe("cash summary (reports)", () => {
+  it("returns 401 without token", async () => {
+    const res = await request(app).get("/reports/cash-summary?preset=rolling_30");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when preset=month without month", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/cash-summary?preset=month")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("aggregates inflows, outflows, and net for the KPI range", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const testAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, '20000000-0000-0000-0000-000000000001', 'checking', 'Cash Summary Test', '9998', 'USD', CURRENT_TIMESTAMP)`
+    ).run(testAccountId, householdId);
+
+    const asOf = new Date().toISOString().slice(0, 10);
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    const id1 = crypto.randomUUID();
+    const id2 = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id1, householdId, testAccountId, asOf, 1000, "credit", "pay", null, fp1, "test:cash1");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id2, householdId, testAccountId, asOf, -250.5, "debit", "shop", null, fp2, "test:cash2");
+
+    const res = await request(app)
+      .get(
+        `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&breakdown=true&accountId=${testAccountId}`
+      )
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.household.inflows).toBe(1000);
+    expect(res.body.household.outflows).toBe(250.5);
+    expect(res.body.household.net).toBe(749.5);
+    expect(res.body.household.transactionCount).toBe(2);
+    expect(Array.isArray(res.body.monthlyTrend)).toBe(true);
+    expect(res.body.monthlyTrend.length).toBe(6);
+    expect(Array.isArray(res.body.byAccount)).toBe(true);
+    expect(res.body.byAccount).toHaveLength(1);
+    expect(res.body.byAccount[0].accountId).toBe(testAccountId);
+  });
+
+  it("returns byCategory and monthlyOutflowsByCategory when categoryBreakdown=true", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const testAccountId = crypto.randomUUID();
+    const incomeCat = "30000000-0000-0000-0000-000000000001";
+    const housingCat = "30000000-0000-0000-0000-000000000002";
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, '20000000-0000-0000-0000-000000000001', 'checking', 'Category Report Test', '9997', 'USD', CURRENT_TIMESTAMP)`
+    ).run(testAccountId, householdId);
+
+    const asOf = new Date().toISOString().slice(0, 10);
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    const id1 = crypto.randomUUID();
+    const id2 = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id1, householdId, testAccountId, incomeCat, asOf, 1000, "credit", "pay", null, fp1, "test:cat1");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id2, householdId, testAccountId, housingCat, asOf, -250.5, "debit", "rent", null, fp2, "test:cat2");
+
+    const res = await request(app)
+      .get(
+        `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&categoryBreakdown=true&accountId=${testAccountId}`
+      )
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.byCategory)).toBe(true);
+    expect(res.body.byCategory).toHaveLength(2);
+    const housing = res.body.byCategory.find((r: { categoryName: string }) => r.categoryName === "Housing");
+    const income = res.body.byCategory.find((r: { categoryName: string }) => r.categoryName === "Income");
+    expect(housing).toBeDefined();
+    expect(housing.outflows).toBe(250.5);
+    expect(income).toBeDefined();
+    expect(income.inflows).toBe(1000);
+    expect(Array.isArray(res.body.monthlyOutflowsByCategory)).toBe(true);
+    expect(res.body.monthlyOutflowsByCategory.length).toBe(6);
+    const asOfYm = asOf.slice(0, 7);
+    const monthRow = res.body.monthlyOutflowsByCategory.find(
+      (m: { month: string }) => m.month === asOfYm
+    );
+    expect(monthRow).toBeDefined();
+    expect(Array.isArray(monthRow.segments)).toBe(true);
+    const seg = monthRow.segments.find((s: { categoryName: string }) => s.categoryName === "Housing");
+    expect(seg.outflows).toBe(250.5);
+  });
+
+  it("returns 404 for account filter outside household", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get(`/reports/cash-summary?preset=rolling_30&accountId=${crypto.randomUUID()}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("ACCOUNT_NOT_FOUND");
   });
 });

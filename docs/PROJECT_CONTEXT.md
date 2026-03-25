@@ -75,6 +75,9 @@ Current pain: no reliable process, uncertainty around true financial position.
 - `docs/BASE_PLATFORM_DECISION.md`
 - `docs/REQUIREMENTS_TRACEABILITY.md`
 
+## Build status (rolling)
+Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. Treat those two files as the source of truth for “where we are” in the codebase.
+
 ## Immediate Next Build Focus
 1. Architecture and interfaces finalization.
 2. MVP backlog execution (epics/stories/tasks).

@@ -1,5 +1,7 @@
 # Household Finance Platform - Product Requirements Document (PRD)
 
+**Implementation status:** This PRD is the north star. For what the repo implements today (✅ / 🟡 / ⬜), use **`docs/CHECKPOINT.md`** and **`docs/MVP_BACKLOG.md`** — not every PRD section has a shipped counterpart yet.
+
 ## 1) Product Vision
 Build a private, self-hosted household finance platform that gives a trustworthy view of:
 - monthly net cashflow,

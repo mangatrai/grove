@@ -1,4 +1,5 @@
 import { db } from "../../db/sqlite.js";
+import { categoryUsableByHousehold } from "../category/categories.service.js";
 
 export interface CanonicalTransactionRow {
   id: string;
@@ -14,6 +15,8 @@ export interface CanonicalTransactionRow {
   accountMask: string | null;
   sourceRef: string | null;
   createdAt: string;
+  categoryId: string | null;
+  categoryName: string | null;
 }
 
 export interface ListCanonicalResult {
@@ -24,6 +27,59 @@ export interface ListCanonicalResult {
   sessionId?: string;
   transactions: CanonicalTransactionRow[];
 }
+
+function mapRow(r: {
+  id: string;
+  txn_date: string;
+  amount: number;
+  direction: string;
+  merchant: string | null;
+  memo: string | null;
+  status: string;
+  account_id: string;
+  institution: string;
+  account_type: string;
+  account_mask: string | null;
+  source_ref: string | null;
+  created_at: string;
+  category_id: string | null;
+  category_name: string | null;
+}): CanonicalTransactionRow {
+  return {
+    id: r.id,
+    txnDate: r.txn_date,
+    amount: r.amount,
+    direction: r.direction,
+    merchant: r.merchant,
+    memo: r.memo,
+    status: r.status,
+    accountId: r.account_id,
+    institution: r.institution,
+    accountType: r.account_type,
+    accountMask: r.account_mask,
+    sourceRef: r.source_ref,
+    createdAt: r.created_at,
+    categoryId: r.category_id,
+    categoryName: r.category_name
+  };
+}
+
+const txSelect = `
+       tc.id AS id,
+       tc.txn_date AS txn_date,
+       tc.amount AS amount,
+       tc.direction AS direction,
+       tc.merchant AS merchant,
+       tc.memo AS memo,
+       tc.status AS status,
+       tc.account_id AS account_id,
+       fa.institution AS institution,
+       fa.type AS account_type,
+       fa.account_mask AS account_mask,
+       tc.source_ref AS source_ref,
+       tc.created_at AS created_at,
+       tc.category_id AS category_id,
+       c.name AS category_name`;
 
 export function listCanonicalTransactions(
   householdId: string,
@@ -37,21 +93,10 @@ export function listCanonicalTransactions(
 
   const rows = db
     .prepare(
-      `SELECT tc.id AS id,
-              tc.txn_date AS txn_date,
-              tc.amount AS amount,
-              tc.direction AS direction,
-              tc.merchant AS merchant,
-              tc.memo AS memo,
-              tc.status AS status,
-              tc.account_id AS account_id,
-              fa.institution AS institution,
-              fa.type AS account_type,
-              fa.account_mask AS account_mask,
-              tc.source_ref AS source_ref,
-              tc.created_at AS created_at
+      `SELECT ${txSelect}
        FROM transaction_canonical tc
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
+       LEFT JOIN category c ON c.id = tc.category_id
        WHERE tc.household_id = ?
        ORDER BY tc.txn_date DESC, tc.created_at DESC
        LIMIT ? OFFSET ?`
@@ -70,23 +115,11 @@ export function listCanonicalTransactions(
     account_mask: string | null;
     source_ref: string | null;
     created_at: string;
+    category_id: string | null;
+    category_name: string | null;
   }>;
 
-  const transactions: CanonicalTransactionRow[] = rows.map((r) => ({
-    id: r.id,
-    txnDate: r.txn_date,
-    amount: r.amount,
-    direction: r.direction,
-    merchant: r.merchant,
-    memo: r.memo,
-    status: r.status,
-    accountId: r.account_id,
-    institution: r.institution,
-    accountType: r.account_type,
-    accountMask: r.account_mask,
-    sourceRef: r.source_ref,
-    createdAt: r.created_at
-  }));
+  const transactions: CanonicalTransactionRow[] = rows.map(mapRow);
 
   return { total, limit, offset, transactions };
 }
@@ -120,21 +153,10 @@ export function listCanonicalTransactionsForImportSession(
 
   const rows = db
     .prepare(
-      `SELECT tc.id AS id,
-              tc.txn_date AS txn_date,
-              tc.amount AS amount,
-              tc.direction AS direction,
-              tc.merchant AS merchant,
-              tc.memo AS memo,
-              tc.status AS status,
-              tc.account_id AS account_id,
-              fa.institution AS institution,
-              fa.type AS account_type,
-              fa.account_mask AS account_mask,
-              tc.source_ref AS source_ref,
-              tc.created_at AS created_at
+      `SELECT ${txSelect}
        FROM transaction_canonical tc
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
+       LEFT JOIN category c ON c.id = tc.category_id
        INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
        INNER JOIN import_file f ON f.id = tr.file_id
        WHERE f.session_id = ? AND tc.household_id = ?
@@ -155,23 +177,54 @@ export function listCanonicalTransactionsForImportSession(
     account_mask: string | null;
     source_ref: string | null;
     created_at: string;
+    category_id: string | null;
+    category_name: string | null;
   }>;
 
-  const transactions: CanonicalTransactionRow[] = rows.map((r) => ({
-    id: r.id,
-    txnDate: r.txn_date,
-    amount: r.amount,
-    direction: r.direction,
-    merchant: r.merchant,
-    memo: r.memo,
-    status: r.status,
-    accountId: r.account_id,
-    institution: r.institution,
-    accountType: r.account_type,
-    accountMask: r.account_mask,
-    sourceRef: r.source_ref,
-    createdAt: r.created_at
-  }));
+  const transactions: CanonicalTransactionRow[] = rows.map(mapRow);
 
   return { total, limit, offset, sessionId, transactions };
+}
+
+export function updateCanonicalTransactionCategory(
+  householdId: string,
+  transactionId: string,
+  categoryId: string | null
+):
+  | { ok: true; data: { id: string; categoryId: string | null; categoryName: string | null } }
+  | { ok: false; code: "NOT_FOUND" | "INVALID_CATEGORY" } {
+  if (categoryId !== null && !categoryUsableByHousehold(categoryId, householdId)) {
+    return { ok: false, code: "INVALID_CATEGORY" };
+  }
+
+  const exists = db
+    .prepare(`SELECT 1 FROM transaction_canonical WHERE id = ? AND household_id = ?`)
+    .get(transactionId, householdId);
+  if (!exists) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  db.prepare(`UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ?`).run(
+    categoryId,
+    transactionId,
+    householdId
+  );
+
+  const row = db
+    .prepare(
+      `SELECT tc.id AS id, tc.category_id AS category_id, c.name AS category_name
+       FROM transaction_canonical tc
+       LEFT JOIN category c ON c.id = tc.category_id
+       WHERE tc.id = ? AND tc.household_id = ?`
+    )
+    .get(transactionId, householdId) as { id: string; category_id: string | null; category_name: string | null };
+
+  return {
+    ok: true,
+    data: {
+      id: row.id,
+      categoryId: row.category_id,
+      categoryName: row.category_name
+    }
+  };
 }

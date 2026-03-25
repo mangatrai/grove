@@ -4,6 +4,11 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiJson, getToken } from "../api";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
+type CategoryOption = {
+  id: string;
+  name: string;
+};
+
 type TxRow = {
   id: string;
   txnDate: string;
@@ -18,6 +23,8 @@ type TxRow = {
   accountMask: string | null;
   sourceRef: string | null;
   createdAt: string;
+  categoryId: string | null;
+  categoryName: string | null;
 };
 
 type ListResponse = {
@@ -40,8 +47,10 @@ export function TransactionsPage() {
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
 
   const [data, setData] = useState<ListResponse | null>(null);
+  const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -49,8 +58,12 @@ export function TransactionsPage() {
     if (sessionFilter) {
       qs.set("sessionId", sessionFilter);
     }
-    const res = await apiJson<ListResponse>(`/transactions?${qs.toString()}`);
-    setData(res);
+    const [txRes, catRes] = await Promise.all([
+      apiJson<ListResponse>(`/transactions?${qs.toString()}`),
+      apiJson<{ categories: CategoryOption[] }>("/categories")
+    ]);
+    setData(txRes);
+    setCategories(catRes.categories);
   }, [sessionFilter]);
 
   useEffect(() => {
@@ -66,34 +79,42 @@ export function TransactionsPage() {
       .finally(() => setLoading(false));
   }, [token, load]);
 
+  async function updateCategory(txnId: string, raw: string) {
+    const categoryId = raw === "" ? null : raw;
+    setSavingId(txnId);
+    setError(null);
+    try {
+      await apiJson(`/transactions/${txnId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ categoryId })
+      });
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update category");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
   if (!token) {
     return <Navigate to="/login" replace />;
   }
 
   return (
     <div>
-      <p>
-        <Link to="/">← Home</Link>
-        {" · "}
-        <Link to="/resolution">Review queue</Link>
-        {sessionFilter ? (
-          <>
-            {" "}
-            ·{" "}
-            <Link to={`/imports/${sessionFilter}`}>This import session</Link>
-          </>
-        ) : null}
-      </p>
       <div className="card">
         <h1>Ledger</h1>
         {sessionFilter ? (
           <p className="muted">
-            Showing only transactions loaded from import session <code>{sessionFilter}</code>.{" "}
-            <Link to="/transactions">Show all household transactions</Link>.
+            Showing only transactions from import session <code>{sessionFilter}</code>.{" "}
+            <Link to={`/imports/${sessionFilter}`}>Import workspace</Link>
+            {" · "}
+            <Link to="/transactions">All household transactions</Link>.
           </p>
         ) : (
           <p className="muted">
-            Recent transactions from your household (read-only). Rows appear here after import → parse → canonicalize.
+            Recent transactions from your household. Rows appear after import → parse → canonicalize. Categories can be
+            set automatically (rules) or here.
           </p>
         )}
         {error ? <p className="error">{error}</p> : null}
@@ -107,8 +128,8 @@ export function TransactionsPage() {
             {data.transactions.length === 0 ? (
               <p className="muted">
                 {sessionFilter
-                  ? "No ledger rows linked to this session yet (parse and canonicalize first), or they were deduped against earlier imports."
-                  : "No ledger rows yet. Complete an import session and run import from the home page."}
+                  ? "No posted ledger rows for this session yet. Either parse/canonicalize has not finished, or all lines were flagged (duplicates / review queue)."
+                  : "No ledger rows yet. Complete an import session (New import in the header), then run import from the workspace."}
               </p>
             ) : (
               <div style={{ overflowX: "auto" }}>
@@ -119,6 +140,7 @@ export function TransactionsPage() {
                       <th>Account</th>
                       <th>Amount</th>
                       <th>Description</th>
+                      <th>Category</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -136,6 +158,22 @@ export function TransactionsPage() {
                           <td>{accountLabel}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
                           <td>{desc}</td>
+                          <td>
+                            <select
+                              className="ledger-category-select"
+                              value={t.categoryId ?? ""}
+                              disabled={savingId === t.id}
+                              onChange={(e) => void updateCategory(t.id, e.target.value)}
+                              aria-label={`Category for ${desc}`}
+                            >
+                              <option value="">Uncategorized</option>
+                              {categories.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                </option>
+                              ))}
+                            </select>
+                          </td>
                           <td>
                             <span className="muted">{t.status}</span>
                           </td>

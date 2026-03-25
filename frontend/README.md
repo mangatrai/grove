@@ -8,9 +8,11 @@ and canonicalize.
 
 Requires the API on **port 4000** (default backend). The Vite dev server proxies:
 
-- `/auth`, `/imports`, `/transactions`, `/resolution`, `/health` → `http://127.0.0.1:4000`
+- `/auth`, `/categories`, `/imports`, `/transactions`, `/resolution`, `/reports`, `/health` → `http://127.0.0.1:4000`
 
 If you add a new API top-level path, add it here or the browser will get HTML instead of JSON.
+
+**Layout:** Signed-in users get **`ShellLayout`** (`src/layout/ShellLayout.tsx`) with **`AppHeader`** — primary nav (**Home**, **Ledger**, **Review queue**), **New import**, **Sign out**, burger menu on narrow viewports. Guests at **`/`** see a sign-in card only (no header). **Login** is outside the shell (centered card). **`RequireAuth`** (`src/auth/RequireAuth.tsx`) wraps ledger, resolution, and import workspace (not the home dashboard — home uses JWT in `HomeRoute` to choose dashboard vs sign-in card).
 
 Override the proxy target:
 
@@ -39,10 +41,10 @@ Output: `frontend/dist/`.
 
 ## Routes
 
-- `/` — Home (start import, ledger, review queue)
+- `/` — **Home:** cash dashboard when signed in (`GET /reports/cash-summary` + category UI); sign-in prompt when logged out. **`/dashboard`** redirects here.
 - `/transactions` — Read-only ledger; add `?sessionId=<uuid>` to see rows from one import only
-- `/imports/:sessionId` — Import workspace + **Session processing summary** (raw vs ledger per file)
-- `/resolution` — **Review queue** (`GET /resolution`; read-only)
+- `/imports/:sessionId` — Import workspace + **Session processing summary** (raw vs ledger per file); start via **New import** in the header (no Import nav item).
+- `/resolution` — **Review queue** (`GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk` for bulk status)
 
 ## Import UX
 

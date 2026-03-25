@@ -1,5 +1,7 @@
 # Import staging purge (Epic 2.4)
 
+> **Progress:** Epic 2.4 operator tooling is ✅ in repo; see **`docs/CHECKPOINT.md`**.
+
 Uploaded bytes are written under **`data/imports/<sessionId>/`** while a session is being processed. **After a successful canonical ingest** (`POST /imports/sessions/:id/canonicalize`), the backend **deletes those staged files** and clears **`import_file.stored_path`** so the tree stays small. You typically do **not** need this script for day-to-day cleanup anymore.
 
 The purge script remains useful for **legacy folders**, **failed** or **abandoned** sessions (parse never ran or canonicalize never succeeded), or **manual** recovery.

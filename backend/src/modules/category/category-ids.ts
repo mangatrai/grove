@@ -1,0 +1,12 @@
+/**
+ * Default taxonomy from `backend/db/seeds/0001_seed_defaults.sql` (household_id NULL).
+ * Stable ids for rule engine and tests.
+ */
+export const DEFAULT_CATEGORY_IDS = {
+  income: "30000000-0000-0000-0000-000000000001",
+  housing: "30000000-0000-0000-0000-000000000002",
+  utilities: "30000000-0000-0000-0000-000000000003",
+  groceries: "30000000-0000-0000-0000-000000000004",
+  transport: "30000000-0000-0000-0000-000000000005",
+  debtPayments: "30000000-0000-0000-0000-000000000006"
+} as const;

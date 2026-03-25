@@ -4,6 +4,7 @@ Use this exact starter prompt in a new chat after switching projects:
 
 ```text
 Read these files first and continue from there:
+- docs/CHECKPOINT.md (implementation status + progress legend)
 - docs/PROJECT_CONTEXT.md
 - docs/DECISIONS_LOG.md
 - docs/FINANCE_APP_PRD.md

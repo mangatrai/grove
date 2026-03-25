@@ -16,9 +16,11 @@ export default defineConfig({
     port: Number(process.env.FRONTEND_PORT ?? 3000),
     proxy: {
       "/auth": api,
+      "/categories": api,
       "/imports": api,
       "/transactions": api,
       "/resolution": api,
+      "/reports": api,
       "/health": api
     }
   }

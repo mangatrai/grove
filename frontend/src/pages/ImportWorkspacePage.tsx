@@ -359,9 +359,10 @@ export function ImportWorkspacePage() {
         body: "{}"
       });
       const nd = out.nearDuplicates ?? 0;
-      const near = nd > 0 ? ` Near-duplicate review: ${nd}.` : "";
+      const flagged = out.duplicates + out.skipped + nd;
+      const near = nd > 0 ? ` Near-duplicate review items: ${nd}.` : "";
       setMessage(
-        `Canonicalize: inserted ${out.inserted}, duplicates ${out.duplicates}, skipped ${out.skipped}.${near} Staged source files were removed from disk.`
+        `Canonicalize complete: posted ${out.inserted}, flagged ${flagged} (exact duplicates ${out.duplicates}, near-duplicates ${nd}, skipped ${out.skipped}).${near} Staged source files were removed from disk.`
       );
       await load();
     } catch (err) {
@@ -409,7 +410,7 @@ export function ImportWorkspacePage() {
           ? ` ${nd} line(s) flagged as near-duplicates (not posted; review queue).`
           : "";
       setMessage(
-        `Import finished: parsed ${parseOut.parsedFiles} file(s) (${parseOut.parsedRows} row(s)); loaded ${canonOut.inserted} new transaction(s) (${canonOut.duplicates} duplicates skipped).${near} Staged source files were removed from disk.`
+        `Import finished: parsed ${parseOut.parsedFiles} file(s) (${parseOut.parsedRows} row(s)); posted ${canonOut.inserted} transaction(s), exact duplicates ${canonOut.duplicates}, skipped ${canonOut.skipped}.${near} Staged source files were removed from disk.`
       );
       await load();
     } catch (err) {
@@ -419,9 +420,6 @@ export function ImportWorkspacePage() {
     }
   }
 
-  if (!token) {
-    return <Navigate to="/login" replace />;
-  }
   if (!sessionId) {
     return <Navigate to="/" replace />;
   }
@@ -432,13 +430,6 @@ export function ImportWorkspacePage() {
 
   return (
     <div>
-      <p className="row" style={{ marginBottom: "0.5rem" }}>
-        <Link to="/">← Home</Link>
-        <span className="muted">·</span>
-        <Link to={`/transactions?sessionId=${sessionId}`}>Ledger (this import)</Link>
-        <span className="muted">·</span>
-        <Link to="/resolution">Review queue</Link>
-      </p>
       <div className="card">
         <h1>Import session</h1>
         <p className="muted">
@@ -456,11 +447,10 @@ export function ImportWorkspacePage() {
               <strong>{lastImportSummary.parsedRows}</strong> transaction line(s) extracted from your file(s)
             </li>
             <li>
-              <strong>{lastImportSummary.inserted}</strong> new row(s) written to the ledger (deduplicated)
+              <strong>{lastImportSummary.inserted}</strong> line(s) safely posted to your ledger
             </li>
             <li>
-              <strong>{lastImportSummary.duplicates}</strong> line(s) matched existing transactions (skipped as
-              duplicates)
+              <strong>{lastImportSummary.duplicates}</strong> line(s) flagged as exact duplicates (not posted)
             </li>
             {lastImportSummary.nearDuplicates > 0 ? (
               <li>
@@ -476,10 +466,14 @@ export function ImportWorkspacePage() {
             ) : null}
           </ul>
           <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0 }}>
-            In the file list below, each row&apos;s <strong>status</strong> should read <strong>parsed</strong> after
-            extraction. If numbers are zero, check the red error above or try &quot;Separate steps&quot; to see where it
-            failed.
+            Posted rows are in your ledger now. Flagged rows (duplicates, near-duplicates, skipped) were not posted.
+            Use the review queue when you have near-duplicates to investigate.
           </p>
+          {lastImportSummary.nearDuplicates > 0 ? (
+            <p style={{ marginTop: "0.65rem", marginBottom: 0 }}>
+              <Link to="/resolution">Go to review queue</Link> to triage near-duplicate lines before moving on.
+            </p>
+          ) : null}
         </div>
       ) : null}
 

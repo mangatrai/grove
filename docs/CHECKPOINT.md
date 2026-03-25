@@ -4,6 +4,14 @@
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.
 
+### Progress legend (used across `docs/`)
+
+| Symbol | Meaning |
+|--------|---------|
+| ✅ | **Done** — shipped in repo, exercised in tests or manual smoke where noted |
+| 🟡 | **Partial** — usable slice exists; backlog lists gaps |
+| ⬜ | **Not started** — design/backlog only |
+
 ---
 
 ## How to run
@@ -17,19 +25,23 @@ This file is the **single place** to see what the repo actually does today vs th
 
 Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · See root `.env` for `PORT` / `FRONTEND_PORT`.
 
+`npm test` in `backend/` runs **`prep-test-db.sh`**, **`db.sh --init --seed`**, then Vitest — it can sit without output for tens of seconds while SQLite is recreated; that is normal. If another process locks the test DB, stop it and retry.
+
 ---
 
 ## Implemented (high level)
 
-| Area | What exists |
-|------|-------------|
-| **Auth** | Login, JWT, household-scoped routes |
-| **Import** | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
-| **Dedupe (Epic 4.2)** | `transaction-fingerprint.ts` — stable date/amount/description; exact fingerprint dedupe; **near-duplicate** path (same account/date/amount, compatible description) → **`resolution_item`** (`duplicate_ambiguity`), not posted; **`nearDuplicates`** in canonicalize response |
-| **UI** | Import workspace, ledger (`/transactions`), **Review queue** (`/resolution`), home; **Vite proxy** includes `/resolution` (see `frontend/vite.config.ts`) |
-| **Import UX** | When session is **`review`** / **`finalized`** / **`failed`**, uploads **hidden**; **“Start another import session”** + copy (dedicated in-session transaction review is future / Epic 6) |
-| **Operator purge** | `npm run import:purge` — see `docs/IMPORT_STAGING_PURGE.md` |
-| **Tests** | `prep-test-db.sh` + `clean-import-session-dirs.mjs` + Vitest global teardown; integration tests include canonicalize idempotency + near-duplicate |
+| Area | Status | What exists |
+|------|--------|-------------|
+| **Auth** | ✅ | Login, JWT, household-scoped routes |
+| **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
+| **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable date/amount/description; exact fingerprint dedupe; **near-duplicate** path (same account/date/amount, compatible description) → **`resolution_item`** (`duplicate_ambiguity`), not posted; **`nearDuplicates`** in canonicalize response |
+| **Home / cash dashboard (Epic 7.1)** | 🟡 | **`GET /reports/cash-summary`** — period presets (month / YTD / rolling 30 & 90), KPIs, optional **account** filter, **by-account** breakdown, **by-category** + **monthly outflows by category** when `categoryBreakdown=true`, 6-month net trend + category charts (Recharts). **UI:** authenticated **`/`** (former `/dashboard` redirects here). **Not yet:** savings-rate / safe-to-spend, configurable targets (`docs/API_CASH_SUMMARY.md`) |
+| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** on canonicalize → **`category_id`**; **`GET /categories`**; ledger **`categoryId`/`categoryName`** + **`PATCH /transactions/:id`**. **Not yet:** `unknown_category` queue wiring, DB-driven rules UI, confidence scores (`docs/API_CATEGORIES.md`, `docs/API_LEDGER.md`) |
+| **UI shell & routing** | ✅ | **App shell** — sticky header when signed in (`ShellLayout`): nav **Home** (`/` = dashboard), **Ledger**, **Review queue**; **New import** (no separate Import nav item). Guests at **`/`** see sign-in card only (no header). **Vite proxy:** `/categories`, `/resolution`, `/reports` (see `frontend/vite.config.ts`) |
+| **Import UX** | 🟡 | When session is **`review`** / **`finalized`** / **`failed`**, uploads **hidden**; **“Start another import session”**; file-level inbox drill-down still backlog (Epic 6) |
+| **Operator purge** | ✅ | `npm run import:purge` — see `docs/IMPORT_STAGING_PURGE.md` |
+| **Tests** | 🟡 | `prep-test-db.sh` + `clean-import-session-dirs.mjs` + Vitest global teardown; integration tests include canonicalize idempotency, near-duplicate, cash-summary category breakdown |
 
 ---
 
@@ -41,7 +53,9 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | Import API | `docs/API_IMPORT_SESSIONS.md` |
 | Canonicalize | `docs/API_IMPORT_SESSIONS.md` (canonicalize section includes `nearDuplicates`) |
 | Ledger API | `docs/API_LEDGER.md` |
+| Categories API | `docs/API_CATEGORIES.md` |
 | Resolution queue API | `docs/API_RESOLUTION.md` |
+| Cash summary (home) | `docs/API_CASH_SUMMARY.md` |
 | Staging purge | `docs/IMPORT_STAGING_PURGE.md` |
 | Payslip (planned v1) | `docs/PAYSLIP_V1.md` |
 
@@ -49,10 +63,12 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 ## Sensible next steps (not started)
 
-1. **Epic 6 continuation:** `PATCH` resolution items (resolve/dismiss), link **Review queue** rows to ledger / raw context in UI.
-2. **Payslip v1 (3.3a):** IBM summary strip + storage — **after** you schedule it (`docs/PAYSLIP_V1.md`).
-3. **Epic 3.2:** More bank PDF adapters — deprioritized until polish; see backlog planning note.
-4. **Backlog hygiene:** Keep Story **4.2** / **6** entries in `MVP_BACKLOG.md` in sync with this file when you ship more.
+1. **Epic 7 continuation:** period comparisons, safe-to-spend / savings target, richer drill-down from category charts (7.1–7.2 stretch).
+2. **Epic 5.1 continuation:** DB-driven rules, **`unknown_category`** queue, optional confidence — see `MVP_BACKLOG.md` Story 5.1.
+3. **Epic 6 continuation:** richer **inbox** (file-level drill-down), **undo before finalize** (6.3), bulk **category** / transfer actions when classification exists (Story 6.2 stretch goals).
+4. **Payslip v1 (3.3a):** IBM summary strip + storage — **after** you schedule it (`docs/PAYSLIP_V1.md`).
+5. **Epic 3.2:** More bank PDF adapters — deprioritized until polish; see backlog planning note.
+6. **Backlog hygiene:** Keep Story **4.2** / **5** / **6** / **7** entries in `MVP_BACKLOG.md` in sync with this file when you ship more.
 
 ---
 
@@ -60,6 +76,11 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 - `backend/src/modules/canonical/transaction-fingerprint.ts` — fingerprint contract
 - `backend/src/modules/canonical/canonical-ingest.service.ts` — ingest + near-duplicate + `deleteStagingFilesForSession`
-- `backend/src/modules/resolution/resolution.service.ts` + `resolution.routes.ts` — `GET /resolution`
-- `frontend/src/pages/ResolutionQueuePage.tsx` — read-only queue UI
+- `backend/src/modules/resolution/resolution.service.ts` + `resolution.routes.ts` — `GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk`
+- `frontend/src/pages/ResolutionQueuePage.tsx` — queue UI + row/bulk status actions
 - `frontend/src/pages/ImportWorkspacePage.tsx` — import flow + closed-session upload UX
+- `backend/src/modules/reports/` — `GET /reports/cash-summary`
+- `frontend/src/pages/HomeRoute.tsx` — `/` → dashboard if JWT, else sign-in card
+- `frontend/src/pages/DashboardPage.tsx` — Cash KPIs + category charts (authenticated home)
+- `frontend/src/layout/ShellLayout.tsx` + `AppHeader.tsx` — app chrome; `src/auth/RequireAuth.tsx` — protected routes
+- `backend/src/modules/category/` — rules + `GET /categories`; canonical ingest sets `category_id`; ledger `PATCH` for category

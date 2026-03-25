@@ -29,7 +29,8 @@ export function LoginPage() {
   }
 
   return (
-    <div className="card" style={{ maxWidth: 420 }}>
+    <div className="login-page">
+      <div className="card login-card">
       <h1>Sign in</h1>
       <p className="muted">Use the seeded owner from your backend (see <code>.env.example</code>).</p>
       <form onSubmit={onSubmit}>
@@ -63,6 +64,7 @@ export function LoginPage() {
           <Link to="/">Back to home</Link>
         </p>
       </form>
+      </div>
     </div>
   );
 }

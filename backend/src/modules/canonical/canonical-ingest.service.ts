@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { db } from "../../db/sqlite.js";
 import { deleteStagingFilesForSession } from "../imports/import-session.service.js";
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
+import { classifyDefaultCategory } from "../category/category-rules.js";
 import {
   computeTransactionFingerprint,
   descriptionsCompatibleForNearDuplicate,
@@ -103,7 +104,7 @@ export function canonicalizeImportSession(
     `INSERT INTO transaction_canonical (
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
        merchant, memo, transfer_group_id, fingerprint, source_ref, status
-     ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
   );
 
   let inserted = 0;
@@ -198,11 +199,14 @@ export function canonicalizeImportSession(
     const merchant = desc.length > 120 ? desc.slice(0, 120) : desc;
     const memo = desc.length > 120 ? desc : null;
 
+    const { categoryId } = classifyDefaultCategory(normDesc, rounded);
+
     try {
       insertStmt.run(
         crypto.randomUUID(),
         householdId,
         accountId,
+        categoryId,
         normDate,
         rounded,
         direction,
