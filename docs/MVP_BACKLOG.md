@@ -190,13 +190,36 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** classify usable data while minimizing false positives.
 
 ### Story 5.1 - Category taxonomy and baseline rule engine
-**Partial (2025):** Seeded defaults unchanged (`0001_seed_defaults.sql`). **`category-rules.ts`** applies conservative substring rules on fingerprint-normalized description + signed amount (inflow vs outflow). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories. **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Not** delivered: `unknown_category` resolution queue wiring, DB-driven rules UI, confidence scores.
+**Partial (2025):** Seeded defaults are still **flat** top-level rows until **Story 5.3** lands (schema already supports `parent_id`). **`category-rules.ts`** applies conservative substring rules on fingerprint-normalized description + signed amount (inflow vs outflow). **Canonical ingest** sets **`category_id`** when a rule matches. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** returns **`categoryId` / `categoryName`**; **`PATCH /transactions/:id`** updates category (`docs/API_LEDGER.md`, `docs/API_CATEGORIES.md`). **Not** delivered: `unknown_category` resolution queue wiring, DB-driven rules UI, confidence scores.
 
 - Tasks:
-  - Seed compact household category taxonomy with modular extension path. (S) ✅
+  - Seed compact household category taxonomy with modular extension path. (S) ✅ (flat; hierarchy seed in **5.3**)
   - Add conservative merchant-pattern rules with confidence. (M) ✅ (keyword baseline; confidence deferred)
 - Acceptance:
   - Known merchants auto-categorize; unknowns route to unresolved.
+
+### Story 5.3 - Category hierarchy (parent / subcategory)
+**Status: ⬜ Not started.** **Depends on:** Story 5.1 baseline. **Schema:** `category.parent_id` already exists (`0001_init.sql`); seed and product behavior are not yet hierarchical.
+
+**Goal:** Support a **tree** of categories so users think in groups (e.g. **Shopping** → Groceries, Clothing; **Loan** → Primary mortgage, Personal loan, Auto; **Investment** → Stocks, Rental income) while keeping posting and rules predictable.
+
+**Scope:**
+- **Seed:** Replace/extend default seed so global defaults include **parent rows** and **child rows** (`parent_id` set). Document the canonical tree in `docs/API_CATEGORIES.md` or a short `docs/CATEGORY_TAXONOMY.md` appendix. Keep depth policy explicit (e.g. **two levels** for MVP: parent + leaf only; no arbitrary depth unless you expand later).
+- **Household CRUD:** Allow the household to **add** categories and subcategories (household-scoped rows with `household_id` set, `parent_id` pointing at a category usable by that household — global parent or household parent). **API:** `POST /categories` (and optionally `PATCH`/`DELETE` with guardrails: no delete if referenced by `transaction_canonical` or define reassign policy). Validate: no cycles, parent exists, depth within policy.
+- **Ledger UX:** Category picker shows **grouped hierarchy** (expand parent → pick leaf). Posted rows still store a single **`category_id`** (typically a **leaf**; if you allow assigning a parent, define whether reports treat it as “whole group” — default MVP: **assign leaf only**).
+- **Rules:** `category-rules.ts` continues to map to **`category_id`** (usually leaf IDs). Optional stretch: rule targets a **parent** and assigns first matching child — defer unless needed.
+- **Reporting (coordination with Epic 7.2):** Define whether **`/reports/cash-summary`** `byCategory` rolls up **children into parent** totals (recommended for charts) while ledger stays leaf-accurate. Implement in a follow-on task once hierarchy seed + CRUD exist.
+
+- Tasks:
+  - Hierarchical seed data + migration strategy for existing DBs (idempotent inserts or new migration). (M)
+  - Backend: create/update/delete household categories with `parentId` validation and cycle/depth checks. (M)
+  - Frontend: settings or modal flow — “Add category” / “Add subcategory under…”. (M)
+  - Ledger: hierarchical select; optional display “Parent › Child” in table. (S)
+  - Tests: API + at least one integration path for household subcategory. (S)
+- Acceptance:
+  - Fresh seed shows an agreed parent/child taxonomy; users can add household-only categories and subcategories.
+  - Ledger assignment picks a valid leaf (or documented parent policy); invalid `parent_id` rejected with a clear error.
+  - No circular references; depth policy enforced.
 
 ### Story 5.2 - Transfer matcher
 - Tasks:
@@ -257,7 +280,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Core KPIs visible by household with period selector.
 
 ### Story 7.2 - Category and trend reporting
-**Status: 🟡 Partial (2025).** **Depends on Epic 5.1** (categories on ledger rows). **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Not** delivered: click-through drill-down to transactions, prior-period comparisons, extra custom date filters beyond cash-summary presets.
+**Status: 🟡 Partial (2025).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Not** delivered: click-through drill-down to transactions, prior-period comparisons, extra custom date filters beyond cash-summary presets, hierarchical roll-up in `byCategory` (blocked until **5.3** seed + semantics are fixed).
 
 - Tasks:
   - Build spend-by-category chart with drill-down. (M) 🟡
@@ -327,9 +350,10 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 1. Epic 1 -> Epics 2/3/4
 2. Epics 2+3 feed Epic 4
 3. Epic 4 feeds Epics 5+6
-4. Epic 6 + posted data feed Epic 7
-5. Epic 8 can begin after Epic 2 baseline
-6. Epic 9 spans all prior epics
+4. **Story 5.3** (hierarchy seed + CRUD) enables hierarchical roll-up and labeling in **Epic 7.2**
+5. Epic 6 + posted data feed Epic 7
+6. Epic 8 can begin after Epic 2 baseline
+7. Epic 9 spans all prior epics
 
 ## Suggested First Sprint (2 weeks)
 - Epic 1 complete.

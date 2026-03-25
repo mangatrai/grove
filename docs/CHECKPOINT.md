@@ -37,7 +37,8 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
 | **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable date/amount/description; exact fingerprint dedupe; **near-duplicate** path (same account/date/amount, compatible description) → **`resolution_item`** (`duplicate_ambiguity`), not posted; **`nearDuplicates`** in canonicalize response |
 | **Home / cash dashboard (Epic 7.1)** | 🟡 | **`GET /reports/cash-summary`** — period presets (month / YTD / rolling 30 & 90), KPIs, optional **account** filter, **by-account** breakdown, **by-category** + **monthly outflows by category** when `categoryBreakdown=true`, 6-month net trend + category charts (Recharts). **UI:** authenticated **`/`** (former `/dashboard` redirects here). **Not yet:** savings-rate / safe-to-spend, configurable targets (`docs/API_CASH_SUMMARY.md`) |
-| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** on canonicalize → **`category_id`**; **`GET /categories`**; ledger **`categoryId`/`categoryName`** + **`PATCH /transactions/:id`**. **Not yet:** `unknown_category` queue wiring, DB-driven rules UI, confidence scores (`docs/API_CATEGORIES.md`, `docs/API_LEDGER.md`) |
+| **Classification (Epic 5.1)** | 🟡 | **`category-rules.ts`** on canonicalize → **`category_id`**; **`GET /categories`** (includes **`parentId`**); ledger **`categoryId`/`categoryName`** + **`PATCH /transactions/:id`**. **Not yet:** `unknown_category` queue wiring, DB-driven rules UI, confidence scores (`docs/API_CATEGORIES.md`, `docs/API_LEDGER.md`) |
+| **Category hierarchy (Epic 5.3)** | ⬜ | **Story 5.3** — hierarchical seed, household create subcategory, API validation; see **`docs/MVP_BACKLOG.md`**. Schema **`parent_id`** exists; behavior not shipped yet. |
 | **UI shell & routing** | ✅ | **App shell** — sticky header when signed in (`ShellLayout`): nav **Home** (`/` = dashboard), **Ledger**, **Review queue**; **New import** (no separate Import nav item). Guests at **`/`** see sign-in card only (no header). **Vite proxy:** `/categories`, `/resolution`, `/reports` (see `frontend/vite.config.ts`) |
 | **Import UX** | 🟡 | When session is **`review`** / **`finalized`** / **`failed`**, uploads **hidden**; **“Start another import session”**; file-level inbox drill-down still backlog (Epic 6) |
 | **Operator purge** | ✅ | `npm run import:purge` — see `docs/IMPORT_STAGING_PURGE.md` |
@@ -63,12 +64,13 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 ## Sensible next steps (not started)
 
-1. **Epic 7 continuation:** period comparisons, safe-to-spend / savings target, richer drill-down from category charts (7.1–7.2 stretch).
-2. **Epic 5.1 continuation:** DB-driven rules, **`unknown_category`** queue, optional confidence — see `MVP_BACKLOG.md` Story 5.1.
-3. **Epic 6 continuation:** richer **inbox** (file-level drill-down), **undo before finalize** (6.3), bulk **category** / transfer actions when classification exists (Story 6.2 stretch goals).
-4. **Payslip v1 (3.3a):** IBM summary strip + storage — **after** you schedule it (`docs/PAYSLIP_V1.md`).
-5. **Epic 3.2:** More bank PDF adapters — deprioritized until polish; see backlog planning note.
-6. **Backlog hygiene:** Keep Story **4.2** / **5** / **6** / **7** entries in `MVP_BACKLOG.md` in sync with this file when you ship more.
+1. **Epic 5 Story 5.3 — category hierarchy:** hierarchical **seed**, **`POST`/`PATCH`** (or equivalent) for household categories/subcategories, ledger **grouped picker**, then **Epic 7.2** roll-up in `byCategory` — see `MVP_BACKLOG.md`.
+2. **Epic 5.1 continuation:** **`unknown_category`** queue, DB-driven rules UI, optional confidence — alongside or after 5.3.
+3. **Epic 7 continuation:** period comparisons, safe-to-spend / savings target, **drill-down** from category charts to ledger (7.1–7.2 stretch); hierarchy roll-up **after 5.3**.
+4. **Epic 6 continuation:** richer **inbox** (file-level drill-down), **undo before finalize** (6.3), bulk **category** / transfer actions when classification exists (Story 6.2 stretch goals).
+5. **Payslip v1 (3.3a):** IBM summary strip + storage — **after** you schedule it (`docs/PAYSLIP_V1.md`).
+6. **Epic 3.2:** More bank PDF adapters — deprioritized until polish; see backlog planning note.
+7. **Backlog hygiene:** Keep Story **4.2** / **5** / **6** / **7** entries in `MVP_BACKLOG.md` in sync with this file when you ship more.
 
 ---
 

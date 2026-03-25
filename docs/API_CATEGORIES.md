@@ -1,6 +1,7 @@
 # API: Categories (Epic 5.1)
 
-> **Progress:** Taxonomy + rules + ledger wiring are 🟡 — **`docs/CHECKPOINT.md`**.
+> **Progress:** Taxonomy + rules + ledger wiring are 🟡 — **`docs/CHECKPOINT.md`**.  
+> **Planned:** Hierarchy seed + household **create** category/subcategory — **`docs/MVP_BACKLOG.md` Story 5.3** (today: **`GET /categories`** only).
 
 Base path: `/categories`  
 Auth: `Authorization: Bearer <JWT>`.
