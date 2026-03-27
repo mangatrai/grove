@@ -8,7 +8,7 @@ ingestion pipeline.
 - `docs/`: product and architecture documents.
 - `docs/API_IMPORT_SESSIONS.md`: Epic 2.1 import session + file intake API contract.
 - `docs/API_LEDGER.md`: `GET /transactions`, `PATCH /transactions/:id` (category); optional `sessionId` filter.
-- `docs/API_CATEGORIES.md`: Epic 5.1 — `GET /categories` (taxonomy for the household).
+- `docs/API_CATEGORIES.md`: Epic 5.1 / 5.3 — `GET /categories`, **`/categories/rules`** (household classification rules), taxonomy + CRUD.
 - `docs/IMPORT_STAGING_PURGE.md`: Epic 2.4 — purge `data/imports/...` staging files + clear `stored_path`.
 - `docs/PAYSLIP_V1.md`: Epic 3 Story 3.3 — payslip module intent, v1 summary-only scope, storage vs ledger (see backlog).
 - `docs/API_RESOLUTION.md`: resolution queue — `GET` / `PATCH` / `POST /resolution/bulk` (`resolution_item`).
@@ -51,10 +51,10 @@ Progress markers: ✅ done · 🟡 partial · ⬜ not started (see **`docs/CHECK
 - ✅ Epic 2.4: staging purge script + auto-delete staging after successful canonicalize; test cleanup for `data/imports` session dirs.
 - ✅ **Epic 4.2 (baseline):** fingerprint dedupe, near duplicates → `resolution_item`, `GET /resolution`, Review queue page, `nearDuplicates` in API/UI.
 - 🟡 **Epic 6 (partial):** resolution queue with status filters, row context, ledger links, per-row and **bulk** status actions; **not** category bulk or full inbox drill-down yet.
-- 🟡 **Epic 7.1–7.2 (partial):** **Home** at **`/`** (cash KPIs + category-backed charts via `categoryBreakdown`); **`/dashboard`** redirects to **`/`**; **not** safe-to-spend / savings targets or full period comparisons yet (see backlog).
-- ✅ **Frontend shell (signed-in):** sticky **header** — **Home**, **Ledger**, **Review queue**, **New import**, **Sign out** (no separate Import nav link).
-- 🟡 **Epic 5.1–5.3 (partial):** hierarchical taxonomy through migration **`0008`**, rules + **`GET /categories`**; ledger **`LedgerCategoryPicker`** (modal-style flyout, inline create) + **`PATCH /transactions/:id`**. **Epic 5.2 (partial):** minimal **transfer** pairing + **cash-summary** excludes transfers when identified.
-- **Not yet:** full transfer matcher coverage, **`unknown_category`** queue, bulk category in resolution.
+- 🟡 **Epic 7.1–7.2 (partial):** **Home** at **`/`** — cash KPIs, **`categoryBreakdown`**, **period comparison deltas** (prior window / YoY where applicable); **`/dashboard`** → **`/`**; drill-down to ledger. **Not** safe-to-spend / savings targets or arbitrary custom date range (see **`docs/API_CASH_SUMMARY.md`**).
+- ✅ **Frontend shell (signed-in):** sticky **header** — **Home**, **Ledger**, **Categories**, **Review queue**, **New import**, **Sign out**.
+- 🟡 **Epic 5.1–5.3 (partial):** taxonomy through **`0008`** + **`0009`** (DB **`category_rule`**); **`GET /categories`**, **`GET/POST/PATCH /categories/rules`**, **`/categories`** and **`/categories/rules`** UIs; ledger **`LedgerCategoryPicker`** + **`PATCH /transactions/:id`**; **`unknown_category`** on resolution queue with inline assign. **Epic 5.2 (partial):** transfer matcher + **env-tunable** thresholds (**`.env`** / **`backend/src/config/env.ts`**); **cash-summary** excludes transfers when identified.
+- **Not yet:** full transfer matcher coverage, **bulk** category from resolution, import undo before finalize.
 
 **Detail:** `docs/CHECKPOINT.md` · **Backlog:** `docs/MVP_BACKLOG.md` · **History:** `docs/CHANGE_HISTORY.md`.
 

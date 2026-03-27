@@ -37,11 +37,11 @@
 
 ## Acceptance Checklist (MVP)
 - [x] Statement batch can be uploaded in one operation. (import session + multi-file)
-- [ ] Parsed transactions enter inbox with confidence labels.
-- [ ] User can bulk approve and bulk edit. (partial: resolution **status** bulk; not category bulk)
+- [ ] Parsed transactions enter inbox with confidence labels. (partial: **`classification_meta`** + resolution summary for some paths)
+- [ ] User can bulk approve and bulk edit. (partial: resolution **status** bulk; **not** category bulk)
 - [x] Duplicate upload produces zero duplicate posted transactions. (fingerprint + idempotency)
-- [ ] Unknown category/transfer conflicts route to resolution queue. (partial: duplicate ambiguity → queue; category unknown not wired)
-- [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home `/` shows cash KPIs + category-backed charts; no safe-to-spend yet)
+- [x] Unknown category / transfer ambiguity routes to resolution queue. (`unknown_category`, `transfer_ambiguity`, `duplicate_ambiguity` — see **`docs/API_RESOLUTION.md`**)
+- [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home **`/`** — cash KPIs, category charts, **period comparison deltas**; **no** safe-to-spend yet — **`docs/CHECKPOINT.md`**)
 - [ ] Owner can view spouse + own data; spouse cannot view owner data.
 - [x] Raw PDF files are deleted after successful extraction. (staging cleanup policy; see `IMPORT_STAGING_PURGE.md`)
 

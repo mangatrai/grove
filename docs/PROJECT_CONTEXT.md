@@ -77,7 +77,9 @@ Current pain: no reliable process, uncertainty around true financial position.
 - `docs/CHANGE_HISTORY.md` — rolling CR / UX / fix log and PRD deviations
 
 ## Build status (rolling)
-Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. Treat those two files as the source of truth for “where we are” in the codebase.
+Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. **`docs/CHANGE_HISTORY.md`** records CR/UX/FIX/DOC entries with stable IDs. Treat **CHECKPOINT + CHANGE_HISTORY** as the source of truth for “where we are” and **why** recent choices were made.
+
+**Recent shipped slices (summary):** DB classification rules + **`/categories/rules`** UI (**CR-010**), transfer matcher **env** tuning (**CR-011**), cash-summary **KPI comparisons** + dashboard deltas, resolution **unknown_category** workflow, ledger drill-downs — details in **`CHANGE_HISTORY.md`** (2026-03-25–27 blocks).
 
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 

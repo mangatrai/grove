@@ -13,7 +13,7 @@ Read these files first and continue from there:
 - docs/MVP_BACKLOG.md
 
 Then do the following in order:
-1) Summarize the current state in 8-12 bullets (include **Epic 5**: taxonomy **`0008`**, ledger **`LedgerCategoryPicker`**, partial **transfer matcher** + cash-summary exclusions; open work: **D-014** demote `/categories`?, **5.2** fuller matcher, **5.1** unknown_category queue).
+1) Summarize the current state in 8-12 bullets. Include: migrations **`0008`** / **`0009`**; **`/categories`** + **`/categories/rules`** UI; DB **`category_rule`** + **`classification_meta`**; resolution **`unknown_category`** + inline assign; **transfer matcher** + **`TRANSFER_*`** env (**`backend/src/config/env.ts`**); **cash-summary** comparisons + dashboard drill-down; open work: **Epic 6** bulk category, **5.2** matcher coverage, **7** safe-to-spend, **D-014**.
 2) List any open product/architecture questions that block implementation.
 3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (not necessarily Epic 1 unless greenfield).
 4) Keep changes minimal, tested, and aligned with strict dedupe + transfer correctness.

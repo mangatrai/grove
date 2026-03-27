@@ -1,6 +1,6 @@
 # Household Finance Platform - Product Requirements Document (PRD)
 
-**Implementation status:** This PRD is the north star. For what the repo implements today (✅ / 🟡 / ⬜), use **`docs/CHECKPOINT.md`** and **`docs/MVP_BACKLOG.md`** — not every PRD section has a shipped counterpart yet.
+**Implementation status:** This PRD is the north star. For what the repo implements today (✅ / 🟡 / ⬜), use **`docs/CHECKPOINT.md`** and **`docs/MVP_BACKLOG.md`** — not every PRD section has a shipped counterpart yet. **Change audit / “why we diverged”:** **`docs/CHANGE_HISTORY.md`**. **Resume after a break:** start with **`CHECKPOINT`** + **`CHANGE_HISTORY`** (newest dated blocks).
 
 ## 1) Product Vision
 Build a private, self-hosted household finance platform that gives a trustworthy view of:

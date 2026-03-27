@@ -1,6 +1,6 @@
 # API: Categories (Epic 5.1 / 5.3)
 
-> **Progress:** Hierarchy seed (migrations **`0006`**, **`0007`**), household CRUD, ledger **optgroup** picker, and **`/categories`** management UI — see **`docs/CHECKPOINT.md`**. **Planned:** richer taxonomy (transfers, taxes, income subtypes) and **ledger-first** category UX (inline add + hierarchical flyout) may reduce reliance on this page — **`docs/MVP_BACKLOG.md`** Epic 5, **`docs/DECISIONS_LOG.md`** D-014.
+> **Progress:** Hierarchy seed (migrations **`0006`**, **`0007`**, **`0008`**), **`0009`** (**`category_rule`** + **`classification_meta`**), household CRUD, **`LedgerCategoryPicker`** (inline create + hierarchical flyout), **`/categories`** and **`/categories/rules`** UIs — see **`docs/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`**. Open product question: **D-014** — balance **`/categories`** vs ledger-only flows.
 
 Base path: `/categories` and `/categories/rules`  
 Auth: `Authorization: Bearer <JWT>`.
@@ -75,7 +75,7 @@ Delete a **household-owned** category with **no** child rows and **no** `transac
 
 **401:** missing or invalid token.
 
-UI: **`/categories`** (manage — full-screen table + add parent/subcategory), ledger category picker (grouped **`optgroup`** by parent; not a hover menu). Inline “add category” from the ledger is **not** implemented yet (backlog).
+UI: **`/categories`** (full-screen table + add parent/subcategory); **`/categories/rules`** (household pattern → category rules; link from Categories). **Ledger:** **`LedgerCategoryPicker`** — hierarchical columns + **inline `POST /categories`** for new parent/subcategory.
 
 ## Category Rules MVP (`/categories/rules`)
 
@@ -146,3 +146,5 @@ Update rule fields (including enable/disable).
 
 **404:** `NOT_FOUND`  
 **400:** same validation codes as create
+
+**UI:** authenticated **`/categories/rules`** (household rules table + add/edit; linked from **`/categories`**).
