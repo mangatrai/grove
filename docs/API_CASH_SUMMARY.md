@@ -19,7 +19,7 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 | `breakdown` | `true` \| `false` — include **`byAccount`** table for the KPI range (default `false`) |
 | `categoryBreakdown` | `true` \| `false` — include **`byCategory`** for the KPI range and **`monthlyOutflowsByCategory`** for the six-month trend window (default `false`). Uses `LEFT JOIN category`; missing category shows as **Uncategorized**. |
 | `categoryRollup` | `leaf` \| `parent` — when `categoryBreakdown` is true, aggregate by **leaf** `category_id` or roll up to **parent** group name (default **`parent`**). |
-| `accountId` | Optional UUID — restrict KPIs, breakdown, category breakdown, and monthly trend to one **financial_account** (must belong to household; otherwise **404**) |
+| `accountId` | Optional UUID — restrict KPIs, comparisons, breakdown, category breakdown, and monthly trend to one **financial_account** (must belong to household; otherwise **404**) |
 
 ### Date ranges (KPI)
 
@@ -27,6 +27,20 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 - **ytd** — `year(asOf)-01-01` through `asOf` inclusive.
 - **rolling_30** — `asOf` minus 29 days through `asOf` (30 days inclusive).
 - **rolling_90** — 90 days inclusive ending `asOf`.
+
+### Comparison blocks
+
+Every response includes `comparison.previousPeriod` and may include `comparison.yearOverYear`:
+
+- `month` preset: both **Previous month** and **Same month last year**.
+- `ytd` preset: **YTD last year** as `previousPeriod`.
+- `rolling_30` / `rolling_90`: immediately preceding same-length window as `previousPeriod`.
+
+Each comparison includes:
+
+- comparison range (`start`, `end`)
+- baseline household totals for that range
+- `delta` values (`inflows`, `outflows`, `net`) as **current KPI period minus comparison period**
 
 ### Monthly trend
 
@@ -53,6 +67,30 @@ Returns **6** calendar months ending in the month containing `range.end`, with t
     "outflows": 3200.5,
     "net": 1799.5,
     "transactionCount": 42
+  },
+  "comparison": {
+    "previousPeriod": {
+      "label": "Previous month",
+      "range": { "start": "2025-02-01", "end": "2025-02-28" },
+      "household": {
+        "inflows": 4800,
+        "outflows": 3000,
+        "net": 1800,
+        "transactionCount": 40
+      },
+      "delta": { "inflows": 200, "outflows": 200.5, "net": -0.5 }
+    },
+    "yearOverYear": {
+      "label": "Same month last year",
+      "range": { "start": "2024-03-01", "end": "2024-03-31" },
+      "household": {
+        "inflows": 4600,
+        "outflows": 2900,
+        "net": 1700,
+        "transactionCount": 39
+      },
+      "delta": { "inflows": 400, "outflows": 300.5, "net": 99.5 }
+    }
   },
   "byAccount": [
     {

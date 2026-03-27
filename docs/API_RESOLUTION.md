@@ -37,6 +37,12 @@ Optional query:
           "amount": -5,
           "description": "STARBUCKS COFFEE STORE",
           "referenceId": "optional-ref"
+        },
+        "classification": {
+          "source": "db|default|none",
+          "ruleId": "rule-id-or-null",
+          "confidence": 0.85,
+          "reason": "why category was assigned or unknown"
         }
       }
     }
@@ -48,6 +54,7 @@ Optional query:
 - **reason** — stored text (often JSON from canonical ingest).
 - **reasonDetail** — parsed JSON when `reason` is valid JSON; otherwise `null`.
 - **context** — best-effort triage context from `targetId`/`reasonDetail.rawId` -> `transaction_raw` -> `import_file`.
+- **context.classification** — explainability metadata from canonical classification when available.
 
 **401:** missing or invalid token.
 

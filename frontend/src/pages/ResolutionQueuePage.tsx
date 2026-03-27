@@ -22,6 +22,12 @@ type ResolutionItem = {
       description: string | null;
       referenceId: string | null;
     } | null;
+    classification: {
+      source?: "db" | "default" | "none";
+      ruleId?: string | null;
+      confidence?: number;
+      reason?: string;
+    } | null;
   };
 };
 
@@ -50,6 +56,13 @@ function formatType(t: string): string {
     default:
       return t;
   }
+}
+
+function prettyClassificationSource(source?: "db" | "default" | "none"): string | null {
+  if (!source) return null;
+  if (source === "db") return "Rule";
+  if (source === "default") return "Default rule";
+  return "Uncategorized";
 }
 
 export function ResolutionQueuePage() {
@@ -234,6 +247,13 @@ export function ResolutionQueuePage() {
     return `${sign}$${abs.toFixed(2)}`;
   }
 
+  function formatConfidence(confidence?: number): string | null {
+    if (typeof confidence !== "number" || !Number.isFinite(confidence)) {
+      return null;
+    }
+    return `${Math.round(confidence * 100)}%`;
+  }
+
   return (
     <div>
       <div className="card">
@@ -384,6 +404,10 @@ export function ResolutionQueuePage() {
                     (it.reasonDetail?.kind === "near_duplicate"
                       ? "Possible duplicate of an existing transaction."
                       : it.reason.slice(0, 120));
+                  const explainabilitySource = prettyClassificationSource(it.context.classification?.source);
+                  const explainabilityConfidence = formatConfidence(it.context.classification?.confidence);
+                  const explainabilityRuleId = it.context.classification?.ruleId ?? null;
+                  const explainabilityReason = it.context.classification?.reason ?? null;
                   return (
                     <tr key={it.id}>
                       <td>
@@ -412,7 +436,25 @@ export function ResolutionQueuePage() {
                       <td>
                         <code style={{ fontSize: "0.85rem" }}>{it.targetId}</code>
                       </td>
-                      <td>{summary}</td>
+                      <td style={{ minWidth: "18rem" }}>
+                        <div>{summary}</div>
+                        {explainabilitySource || explainabilityConfidence || explainabilityRuleId || explainabilityReason ? (
+                          <div className="resolution-explainability">
+                            {explainabilitySource ? (
+                              <span className="resolution-explainability__pill">{explainabilitySource}</span>
+                            ) : null}
+                            {explainabilityConfidence ? (
+                              <span className="resolution-explainability__pill">{explainabilityConfidence}</span>
+                            ) : null}
+                            {explainabilityRuleId ? (
+                              <span className="resolution-explainability__pill">ID {explainabilityRuleId.slice(0, 8)}</span>
+                            ) : null}
+                            {explainabilityReason ? (
+                              <span className="resolution-explainability__reason">{explainabilityReason}</span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </td>
                       <td style={{ minWidth: "9rem", maxWidth: "14rem" }}>
                         {it.type === "unknown_category" ? (
                           <LedgerCategoryPicker

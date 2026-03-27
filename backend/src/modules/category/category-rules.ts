@@ -10,6 +10,20 @@ export interface ClassificationResult {
   categoryId: string | null;
   /** Stable id for tests / debugging (not stored on row). */
   ruleId: string | null;
+  /** Rule source for explainability. */
+  source: "db" | "default" | "none";
+  /** Confidence score in range [0,1]. */
+  confidence: number;
+  /** Human-readable explanation used by review queue / ledger context. */
+  reason: string;
+}
+
+export interface DbCategoryRule {
+  id: string;
+  pattern: string;
+  matchType: "contains" | "prefix" | "regex";
+  categoryId: string;
+  confidence: number;
 }
 
 /**
@@ -22,7 +36,13 @@ export function classifyDefaultCategory(
 ): ClassificationResult {
   const t = normalizedDescription.trim();
   if (t.length === 0) {
-    return { categoryId: null, ruleId: null };
+    return {
+      categoryId: null,
+      ruleId: null,
+      source: "none",
+      confidence: 0,
+      reason: "Description is empty after normalization."
+    };
   }
 
   const inflow = signedAmountRounded > 0;
@@ -31,33 +51,41 @@ export function classifyDefaultCategory(
   if (inflow) {
     // Income leaves (conservative inflow keywords)
     if (includesAny(t, ["refund"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.incomeRefunds, ruleId: "income_refunds_keywords" };
+      return defaultMatch(DEFAULT_CATEGORY_IDS.incomeRefunds, "income_refunds_keywords", "Matched inflow refund keywords.");
     }
 
     if (includesAny(t, ["rental income"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.incomeRentalIncome, ruleId: "income_rental_income_keywords" };
+      return defaultMatch(
+        DEFAULT_CATEGORY_IDS.incomeRentalIncome,
+        "income_rental_income_keywords",
+        "Matched inflow rental income keywords."
+      );
     }
 
     if (includesAny(t, ["interest", "int pymt", "int payment"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.incomeInterest, ruleId: "income_interest" };
+      return defaultMatch(DEFAULT_CATEGORY_IDS.incomeInterest, "income_interest", "Matched inflow interest keywords.");
     }
 
     if (includesAny(t, ["dividend"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.incomeDividends, ruleId: "income_dividends" };
+      return defaultMatch(DEFAULT_CATEGORY_IDS.incomeDividends, "income_dividends", "Matched inflow dividend keywords.");
     }
 
     if (includesAny(t, ["payroll", "direct dep", "salary", "pay check", "paycheck", "commission"])) {
-      return { categoryId: DEFAULT_CATEGORY_IDS.incomeSalary, ruleId: "income_salary_inflow_keywords" };
+      return defaultMatch(
+        DEFAULT_CATEGORY_IDS.incomeSalary,
+        "income_salary_inflow_keywords",
+        "Matched inflow payroll/salary keywords."
+      );
     }
-    return { categoryId: null, ruleId: null };
+    return noMatch("No conservative default inflow rule matched.");
   }
 
   if (!outflow) {
-    return { categoryId: null, ruleId: null };
+    return noMatch("Amount is zero; default rules only classify inflow/outflow transactions.");
   }
 
   if (includesAny(t, ["mortgage", " mtg", "rent ", " rent", "hoa", "landlord", "lease"])) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.housing, ruleId: "housing_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.housing, "housing_keywords", "Matched housing payment keywords.");
   }
 
   if (
@@ -76,7 +104,7 @@ export function classifyDefaultCategory(
       "duke energy"
     ])
   ) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.utilities, ruleId: "utilities_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.utilities, "utilities_keywords", "Matched utilities bill keywords.");
   }
 
   if (
@@ -92,11 +120,11 @@ export function classifyDefaultCategory(
       "panda express"
     ])
   ) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.diningOut, ruleId: "dining_out_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.diningOut, "dining_out_keywords", "Matched dining/delivery merchant keywords.");
   }
 
   if (includesAny(t, ["starbucks", "dunkin", "dutch bro", "coffee"])) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.coffeeSnacks, ruleId: "coffee_snacks_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.coffeeSnacks, "coffee_snacks_keywords", "Matched coffee/snacks keywords.");
   }
 
   if (
@@ -114,7 +142,7 @@ export function classifyDefaultCategory(
       "publix"
     ])
   ) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.groceries, ruleId: "groceries_merchant" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.groceries, "groceries_merchant", "Matched grocery merchant keywords.");
   }
 
   if (
@@ -131,7 +159,7 @@ export function classifyDefaultCategory(
       "toll "
     ])
   ) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.transport, ruleId: "transport_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.transport, "transport_keywords", "Matched transportation/fuel keywords.");
   }
 
   if (
@@ -145,7 +173,7 @@ export function classifyDefaultCategory(
       "lending club"
     ])
   ) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.debtPayments, ruleId: "debt_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.debtPayments, "debt_keywords", "Matched debt payment keywords.");
   }
 
   if (
@@ -159,14 +187,36 @@ export function classifyDefaultCategory(
       "quest diag"
     ])
   ) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.medical, ruleId: "medical_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.medical, "medical_keywords", "Matched medical provider keywords.");
   }
 
   if (includesAny(t, ["cvs ", "cvs#", "walgreens", "pharmacy", "rite aid"])) {
-    return { categoryId: DEFAULT_CATEGORY_IDS.pharmacy, ruleId: "pharmacy_keywords" };
+    return defaultMatch(DEFAULT_CATEGORY_IDS.pharmacy, "pharmacy_keywords", "Matched pharmacy keywords.");
   }
 
-  return { categoryId: null, ruleId: null };
+  return noMatch("No conservative default outflow rule matched.");
+}
+
+export function classifyWithRules(
+  normalizedDescription: string,
+  signedAmountRounded: number,
+  dbRules: DbCategoryRule[]
+): ClassificationResult {
+  const t = normalizedDescription.trim();
+  if (t.length > 0) {
+    for (const rule of dbRules) {
+      if (matchesRule(t, rule)) {
+        return {
+          categoryId: rule.categoryId,
+          ruleId: rule.id,
+          source: "db",
+          confidence: clampConfidence(rule.confidence),
+          reason: `Matched ${rule.matchType} DB rule pattern "${rule.pattern}".`
+        };
+      }
+    }
+  }
+  return classifyDefaultCategory(normalizedDescription, signedAmountRounded);
 }
 
 function includesAny(haystack: string, needles: string[]): boolean {
@@ -176,4 +226,39 @@ function includesAny(haystack: string, needles: string[]): boolean {
     }
   }
   return false;
+}
+
+function matchesRule(normalizedDescription: string, rule: DbCategoryRule): boolean {
+  if (!rule.pattern) {
+    return false;
+  }
+  if (rule.matchType === "contains") {
+    return normalizedDescription.includes(rule.pattern);
+  }
+  if (rule.matchType === "prefix") {
+    return normalizedDescription.startsWith(rule.pattern);
+  }
+  try {
+    const re = new RegExp(rule.pattern, "i");
+    return re.test(normalizedDescription);
+  } catch {
+    return false;
+  }
+}
+
+function clampConfidence(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+function defaultMatch(categoryId: string, ruleId: string, reason: string): ClassificationResult {
+  return { categoryId, ruleId, source: "default", confidence: 0.7, reason };
+}
+
+function noMatch(reason: string): ClassificationResult {
+  return { categoryId: null, ruleId: null, source: "none", confidence: 0, reason };
 }

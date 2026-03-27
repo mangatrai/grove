@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
@@ -37,6 +37,13 @@ type ListResponse = {
   transactions: TxRow[];
 };
 
+type AccountRow = {
+  id: string;
+  institution: string;
+  type: string;
+  account_mask: string | null;
+};
+
 function formatMoney(amount: number, direction: string): string {
   const abs = Math.abs(amount);
   const sign = direction === "credit" ? "+" : "−";
@@ -45,23 +52,28 @@ function formatMoney(amount: number, direction: string): string {
 
 export function TransactionsPage() {
   const token = useAuthToken();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
   const categoryFilter = searchParams.get("categoryId")?.trim() || null;
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const dateFrom = searchParams.get("dateFrom")?.trim() || null;
   const dateTo = searchParams.get("dateTo")?.trim() || null;
   const accountFilter = searchParams.get("accountId")?.trim() || null;
+  const returnTo = searchParams.get("returnTo")?.trim() || null;
+  const fromDashboard = searchParams.get("fromDashboard") === "true";
+  const pageLimit = Math.min(Math.max(Number(searchParams.get("limit") || 100), 1), 200);
+  const pageOffset = Math.max(Number(searchParams.get("offset") || 0), 0);
 
   const [data, setData] = useState<ListResponse | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
-    const qs = new URLSearchParams({ limit: "100", offset: "0" });
+    const qs = new URLSearchParams({ limit: String(pageLimit), offset: String(pageOffset) });
     if (sessionFilter) {
       qs.set("sessionId", sessionFilter);
     }
@@ -80,13 +92,15 @@ export function TransactionsPage() {
     if (accountFilter) {
       qs.set("accountId", accountFilter);
     }
-    const [txRes, catRes] = await Promise.all([
+    const [txRes, catRes, acctRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
-      apiJson<{ categories: CategoryOption[] }>("/categories")
+      apiJson<{ categories: CategoryOption[] }>("/categories"),
+      apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
     ]);
     setData(txRes);
     setCategories(catRes.categories);
-  }, [sessionFilter, categoryFilter, uncategorizedOnly, dateFrom, dateTo, accountFilter]);
+    setAccounts(acctRes.accounts);
+  }, [sessionFilter, categoryFilter, uncategorizedOnly, dateFrom, dateTo, accountFilter, pageLimit, pageOffset]);
 
   useEffect(() => {
     if (!token) {
@@ -124,6 +138,26 @@ export function TransactionsPage() {
   const hasLedgerFilters = Boolean(
     categoryFilter || uncategorizedOnly || dateFrom || dateTo || accountFilter
   );
+  const categoryName = useMemo(
+    () => (categoryFilter ? categories.find((c) => c.id === categoryFilter)?.name ?? categoryFilter : null),
+    [categories, categoryFilter]
+  );
+  const accountName = useMemo(() => {
+    if (!accountFilter) {
+      return null;
+    }
+    const account = accounts.find((a) => a.id === accountFilter);
+    return account ? formatAccountForSelect(account) : accountFilter;
+  }, [accounts, accountFilter]);
+  const canPageBack = pageOffset > 0;
+  const canPageForward = data ? pageOffset + data.transactions.length < data.total : false;
+
+  function updatePaging(nextOffset: number) {
+    const next = new URLSearchParams(searchParams);
+    next.set("limit", String(pageLimit));
+    next.set("offset", String(Math.max(nextOffset, 0)));
+    setSearchParams(next);
+  }
 
   return (
     <div>
@@ -147,33 +181,34 @@ export function TransactionsPage() {
         )}
         {hasLedgerFilters ? (
           <p className="muted">
-            Filtered
-            {categoryFilter ? (
+            Filters:
+            {categoryName ? (
               <>
-                {" "}
-                · category <code>{categoryFilter}</code>
+                {" "}[category: <code>{categoryName}</code>]
               </>
             ) : null}
-            {uncategorizedOnly ? <> · uncategorized only</> : null}
+            {uncategorizedOnly ? <> [uncategorized only]</> : null}
             {dateFrom ? (
               <>
-                {" "}
-                · from <code>{dateFrom}</code>
+                {" "}[from <code>{dateFrom}</code>]
               </>
             ) : null}
             {dateTo ? (
               <>
-                {" "}
-                · to <code>{dateTo}</code>
+                {" "}[to <code>{dateTo}</code>]
               </>
             ) : null}
-            {accountFilter ? (
+            {accountName ? (
               <>
-                {" "}
-                · account <code>{accountFilter}</code>
+                {" "}[account: <code>{accountName}</code>]
               </>
             ) : null}
             . <Link to="/transactions">Clear filters</Link>
+          </p>
+        ) : null}
+        {fromDashboard && returnTo ? (
+          <p className="muted">
+            <Link to={returnTo}>Back to dashboard context</Link>
           </p>
         ) : null}
         {error ? <p className="error">{error}</p> : null}
@@ -183,6 +218,15 @@ export function TransactionsPage() {
             <p className="muted">
               Showing <strong>{data.transactions.length}</strong> of <strong>{data.total}</strong> transaction(s)
               {data.sessionId ? " for this import" : ""}.
+            </p>
+            <p className="muted">
+              Page offset <code>{pageOffset}</code>, limit <code>{pageLimit}</code>.{" "}
+              <button type="button" disabled={!canPageBack} onClick={() => updatePaging(pageOffset - pageLimit)}>
+                Previous
+              </button>{" "}
+              <button type="button" disabled={!canPageForward} onClick={() => updatePaging(pageOffset + pageLimit)}>
+                Next
+              </button>
             </p>
             {data.transactions.length === 0 ? (
               <p className="muted">

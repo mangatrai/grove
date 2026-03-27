@@ -497,6 +497,295 @@ describe("import sessions and file intake", () => {
     expect(creditRow.transfer_group_id).toBe(debitRow.transfer_group_id);
   });
 
+  it("matches credit-card payment memo variants with 2-day date skew", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const checkingAccountId = crypto.randomUUID();
+    const cardAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Payment Match Test Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingAccountId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'credit_card', 'Payment Match Test Card', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(cardAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'payment-variants.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const debitDate = "1999-12-20";
+    const creditDate = "1999-12-22";
+    const debitDesc = "AUTOPAY ACH PAYMENT TO CHASE CARD";
+    const creditDesc = "PAYMENT RECEIVED - THANK YOU";
+    const rawDebitId = crypto.randomUUID();
+    const rawCreditId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      0,
+      JSON.stringify({
+        txn_date: debitDate,
+        description: debitDesc,
+        amount: -315.44,
+        financial_account_id: checkingAccountId
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      1,
+      JSON.stringify({
+        txn_date: creditDate,
+        description: creditDesc,
+        amount: 315.44,
+        financial_account_id: cardAccountId
+      })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const rows = db.prepare(
+      `SELECT id, amount, transfer_group_id
+       FROM transaction_canonical
+       WHERE household_id = ? AND account_id IN (?, ?)
+       ORDER BY amount ASC`
+    ).all(householdId, checkingAccountId, cardAccountId) as Array<{
+      id: string;
+      amount: number;
+      transfer_group_id: string | null;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.transfer_group_id).not.toBeNull();
+    expect(rows[1]?.transfer_group_id).not.toBeNull();
+    expect(rows[0]?.transfer_group_id).toBe(rows[1]?.transfer_group_id);
+  });
+
+  it("keeps multi-candidate payment matches in transfer_ambiguity queue", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const checkingAccountId = crypto.randomUUID();
+    const cardAccountAId = crypto.randomUUID();
+    const cardAccountBId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Ambiguity Test Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingAccountId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'credit_card', 'Ambiguity Test Card A', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(cardAccountAId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'credit_card', 'Ambiguity Test Card B', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(cardAccountBId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'payment-ambiguity.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const rows = [
+      {
+        rowIndex: 0,
+        txnDate: "1999-12-24",
+        description: "ACH PAYMENT TO CREDIT CARD",
+        amount: -500,
+        accountId: checkingAccountId
+      },
+      {
+        rowIndex: 1,
+        txnDate: "1999-12-24",
+        description: "PAYMENT RECEIVED THANK YOU",
+        amount: 500,
+        accountId: cardAccountAId
+      },
+      {
+        rowIndex: 2,
+        txnDate: "1999-12-25",
+        description: "PAYMENT RECEIVED THANK YOU",
+        amount: 500,
+        accountId: cardAccountBId
+      }
+    ];
+
+    for (const r of rows) {
+      db.prepare(
+        `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+         VALUES (?, ?, ?, ?, 0.9)`
+      ).run(
+        crypto.randomUUID(),
+        fileId,
+        r.rowIndex,
+        JSON.stringify({
+          txn_date: r.txnDate,
+          description: r.description,
+          amount: r.amount,
+          financial_account_id: r.accountId
+        })
+      );
+    }
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(3);
+
+    const matchedCountRow = db
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM transaction_canonical
+         WHERE household_id = ?
+           AND account_id IN (?, ?, ?)
+           AND transfer_group_id IS NOT NULL`
+      )
+      .get(householdId, checkingAccountId, cardAccountAId, cardAccountBId) as { c: number };
+    expect(matchedCountRow.c).toBe(0);
+
+    const ambiguityRows = db
+      .prepare(
+        `SELECT target_id, reason
+         FROM resolution_item
+         WHERE household_id = ?
+           AND type = 'transfer_ambiguity'
+           AND status = 'open'
+           AND target_id IN (
+             SELECT id
+             FROM transaction_canonical
+             WHERE household_id = ?
+               AND account_id IN (?, ?, ?)
+           )`
+      )
+      .all(householdId, householdId, checkingAccountId, cardAccountAId, cardAccountBId) as Array<{
+      target_id: string;
+      reason: string;
+    }>;
+    expect(ambiguityRows.length).toBe(3);
+    const parsedReason = JSON.parse(ambiguityRows[0]!.reason) as {
+      matcherTelemetry?: { candidateScores?: Array<{ score: number }> };
+    };
+    expect(Array.isArray(parsedReason.matcherTelemetry?.candidateScores)).toBe(true);
+  });
+
+  it("does not auto-match generic payment wording without card/loan context", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const checkingAId = crypto.randomUUID();
+    const checkingBId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'No-FP Test A', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingAId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'No-FP Test B', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingBId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'generic-payment-words.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      crypto.randomUUID(),
+      fileId,
+      0,
+      JSON.stringify({
+        txn_date: "1999-12-24",
+        description: "AUTOMATIC PAYMENT",
+        amount: -120,
+        financial_account_id: checkingAId
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      crypto.randomUUID(),
+      fileId,
+      1,
+      JSON.stringify({
+        txn_date: "1999-12-25",
+        description: "PAYMENT POSTED",
+        amount: 120,
+        financial_account_id: checkingBId
+      })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const matchedCount = db
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM transaction_canonical
+         WHERE household_id = ?
+           AND account_id IN (?, ?)
+           AND transfer_group_id IS NOT NULL`
+      )
+      .get(householdId, checkingAId, checkingBId) as { c: number };
+    expect(matchedCount.c).toBe(0);
+  });
+
   it("parses XLSX file into transaction_raw rows", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
@@ -1279,6 +1568,57 @@ describe("cash summary (reports)", () => {
     expect(seg.outflows).toBe(250.5);
   });
 
+  it("excludes transfer_ambiguity rows from cash summary aggregation", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const ownerUserId = "20000000-0000-0000-0000-000000000001";
+
+    const asOf = "1999-12-21";
+    const accountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Transfer Ambiguity Cash Summary Test', '0999', 'USD', CURRENT_TIMESTAMP)`
+    ).run(accountId, householdId, ownerUserId);
+
+    const includeId = crypto.randomUUID();
+    const ambiguousId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Groceries', NULL, NULL, ?, ?, 'posted')`
+    ).run(includeId, householdId, accountId, asOf, -50, crypto.randomBytes(32).toString("hex"), "test:include");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Card payment candidate', NULL, NULL, ?, ?, 'posted')`
+    ).run(ambiguousId, householdId, accountId, asOf, -700, crypto.randomBytes(32).toString("hex"), "test:ambiguous");
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      ambiguousId,
+      JSON.stringify({ kind: "transfer_ambiguity", note: "cash summary exclusion regression guard" })
+    );
+
+    const res = await request(app)
+      .get(`/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&accountId=${accountId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.household.inflows).toBe(0);
+    expect(res.body.household.outflows).toBe(50);
+    expect(res.body.household.net).toBe(-50);
+    expect(res.body.household.transactionCount).toBe(1);
+  });
+
   it("returns byCategory and monthlyOutflowsByCategory when categoryBreakdown=true", async () => {
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",
@@ -1338,6 +1678,200 @@ describe("cash summary (reports)", () => {
     expect(Array.isArray(monthRow.segments)).toBe(true);
     const seg = monthRow.segments.find((s: { categoryName: string }) => s.categoryName === "Housing");
     expect(seg.outflows).toBe(250.5);
+  });
+
+  it("returns month-over-month and year-over-year comparison deltas for month preset", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const ownerUserId = "20000000-0000-0000-0000-000000000001";
+    const testAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Comparison Month Test', '7788', 'USD', CURRENT_TIMESTAMP)`
+    ).run(testAccountId, householdId, ownerUserId);
+
+    const currentYm = "2099-03";
+    const prevYm = "2099-02";
+    const yoyYm = "2098-03";
+    const currentDate = `${currentYm}-05`;
+    const prevDate = `${prevYm}-05`;
+    const yoyDate = `${yoyYm}-05`;
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      currentDate,
+      1000,
+      "credit",
+      "month-current-credit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:month-current-credit"
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      currentDate,
+      -400,
+      "debit",
+      "month-current-debit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:month-current-debit"
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      prevDate,
+      700,
+      "credit",
+      "month-prev-credit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:month-prev-credit"
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      prevDate,
+      -300,
+      "debit",
+      "month-prev-debit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:month-prev-debit"
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      yoyDate,
+      600,
+      "credit",
+      "month-yoy-credit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:month-yoy-credit"
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      yoyDate,
+      -100,
+      "debit",
+      "month-yoy-debit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:month-yoy-debit"
+    );
+
+    const res = await request(app)
+      .get(`/reports/cash-summary?preset=month&month=${currentYm}&accountId=${testAccountId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.comparison.previousPeriod.delta.inflows).toBe(300);
+    expect(res.body.comparison.previousPeriod.delta.outflows).toBe(100);
+    expect(res.body.comparison.previousPeriod.delta.net).toBe(200);
+    expect(res.body.comparison.yearOverYear.delta.inflows).toBe(400);
+    expect(res.body.comparison.yearOverYear.delta.outflows).toBe(300);
+    expect(res.body.comparison.yearOverYear.delta.net).toBe(100);
+  });
+
+  it("returns previous comparable window deltas for rolling preset", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const ownerUserId = "20000000-0000-0000-0000-000000000001";
+    const testAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Comparison Rolling Test', '8899', 'USD', CURRENT_TIMESTAMP)`
+    ).run(testAccountId, householdId, ownerUserId);
+
+    const asOf = "2099-03-30";
+    const currentWindowDate = "2099-03-25";
+    const previousWindowDate = "2099-02-25";
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      currentWindowDate,
+      1000,
+      "credit",
+      "rolling-current-credit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:rolling-current-credit"
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      testAccountId,
+      previousWindowDate,
+      700,
+      "credit",
+      "rolling-prev-credit",
+      crypto.randomBytes(32).toString("hex"),
+      "test:rolling-prev-credit"
+    );
+
+    const res = await request(app)
+      .get(`/reports/cash-summary?preset=rolling_30&asOf=${asOf}&accountId=${testAccountId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.comparison.previousPeriod.range.start).toBe("2099-01-30");
+    expect(res.body.comparison.previousPeriod.range.end).toBe("2099-02-28");
+    expect(res.body.comparison.previousPeriod.delta.inflows).toBe(300);
+    expect(res.body.comparison.previousPeriod.delta.net).toBe(300);
+    expect(res.body.comparison.yearOverYear).toBeUndefined();
   });
 
   it("returns 404 for account filter outside household", async () => {

@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
 
+import { env } from "../../config/env.js";
 import { db } from "../../db/sqlite.js";
 import { deleteStagingFilesForSession } from "../imports/import-session.service.js";
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
-import { classifyDefaultCategory } from "../category/category-rules.js";
+import { classifyWithRules } from "../category/category-rules.js";
+import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
 import {
   computeTransactionFingerprint,
   descriptionsCompatibleForNearDuplicate,
@@ -37,6 +39,66 @@ function transferRowLabel(merchant: string | null, memo: string | null): string 
   return s.length > 0 ? s : "";
 }
 
+function hasAnyPattern(labelUpper: string, patterns: RegExp[]): boolean {
+  return patterns.some((re) => re.test(labelUpper));
+}
+
+function transferPaymentPatternScore(debitLabel: string, creditLabel: string): number {
+  const debitUpper = debitLabel.toUpperCase();
+  const creditUpper = creditLabel.toUpperCase();
+
+  const paymentTokens = [
+    /\bPAYMENT\b/,
+    /\bPMT\b/,
+    /\bPYMT\b/,
+    /\bAUTOPAY\b/,
+    /\bAUTO\s*PAY\b/,
+    /\bACH\b/
+  ];
+  const loanTokens = [/\bLOAN\b/, /\bMORTGAGE\b/, /\bINSTALLMENT\b/, /\bAUTO\s+LOAN\b/, /\bSTUDENT\s+LOAN\b/];
+  const cardTokens = [/\bCREDIT\s*CARD\b/, /\bCARDMEMBER\b/, /\bCARD\b/, /\bVISA\b/, /\bMASTERCARD\b/, /\bAMEX\b/];
+  const outgoingPaymentTokens = [
+    /\bPAYMENT\s+TO\b/,
+    /\bPAY\s+TO\b/,
+    /\bACH\s+PAYMENT\b/,
+    /\bONLINE\s+PAYMENT\b/,
+    /\bWEB\s+(PAY|PMT)\b/,
+    /\bAUTOPAY\b/,
+    /\bAUTO\s*PAY\b/
+  ];
+  const incomingPaymentTokens = [
+    /\bPAYMENT\s+RECEIVED\b/,
+    /\bRECEIVED\s+PAYMENT\b/,
+    /\bTHANK\s+YOU\b/,
+    /\bACH\s+CREDIT\b/,
+    /\bCREDITED\b/
+  ];
+
+  const debitHasPayment = hasAnyPattern(debitUpper, paymentTokens);
+  const creditHasPayment = hasAnyPattern(creditUpper, paymentTokens);
+  if (!debitHasPayment || !creditHasPayment) {
+    return 0;
+  }
+
+  const debitOutgoing = hasAnyPattern(debitUpper, outgoingPaymentTokens);
+  const creditIncoming = hasAnyPattern(creditUpper, incomingPaymentTokens);
+  const loanContext = hasAnyPattern(debitUpper, loanTokens) || hasAnyPattern(creditUpper, loanTokens);
+  const cardContext = hasAnyPattern(debitUpper, cardTokens) || hasAnyPattern(creditUpper, cardTokens);
+
+  if (debitOutgoing && creditIncoming && (loanContext || cardContext)) {
+    return 92;
+  }
+  if (debitOutgoing && creditIncoming) {
+    return 82;
+  }
+  if (loanContext || cardContext) {
+    return 62;
+  }
+  // Guardrail: "payment" words alone are too broad and can false-match.
+  // Require directional complement or explicit loan/card context.
+  return 0;
+}
+
 /**
  * Higher score = better same-transfer hypothesis (disambiguates multiple amount/date matches).
  */
@@ -51,6 +113,10 @@ function transferPairScore(
   const nb = normalizeDescriptionForFingerprint(creditLabel);
   if (na === nb && na.length > 0) {
     return 100;
+  }
+  const paymentPatternScore = transferPaymentPatternScore(debitLabel, creditLabel);
+  if (paymentPatternScore > 0) {
+    return paymentPatternScore;
   }
   const ud = debitLabel.toUpperCase();
   const uc = creditLabel.toUpperCase();
@@ -71,7 +137,8 @@ function transferPairScore(
   if (days <= 1) {
     const short = 10;
     if (ud.length >= short && uc.length >= short && (ud.includes(uc.slice(0, short)) || uc.includes(ud.slice(0, short)))) {
-      return 45;
+      // Keep this weak: shared text alone should not force transfer matching.
+      return 20;
     }
   }
   return 0;
@@ -153,8 +220,8 @@ export function canonicalizeImportSession(
   const insertStmt = db.prepare(
     `INSERT INTO transaction_canonical (
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
-       merchant, memo, transfer_group_id, fingerprint, source_ref, status
-     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+       merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta
+     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?)`
   );
 
   const insertedCanonicalRows: Array<{ id: string; txnDate: string }> = [];
@@ -211,6 +278,7 @@ export function canonicalizeImportSession(
   let duplicates = 0;
   let skipped = 0;
   let nearDuplicates = 0;
+  const dbRules = listEnabledDbRulesForClassification(householdId);
 
   for (const row of rawRows) {
     let parsed: unknown;
@@ -299,7 +367,14 @@ export function canonicalizeImportSession(
     const merchant = desc.length > 120 ? desc.slice(0, 120) : desc;
     const memo = desc.length > 120 ? desc : null;
 
-    const { categoryId } = classifyDefaultCategory(normDesc, rounded);
+    const classification = classifyWithRules(normDesc, rounded, dbRules);
+    const categoryId = classification.categoryId;
+    const classificationMeta = JSON.stringify({
+      source: classification.source,
+      ruleId: classification.ruleId,
+      confidence: classification.confidence,
+      reason: classification.reason
+    });
 
     const canonicalId = crypto.randomUUID();
 
@@ -315,7 +390,8 @@ export function canonicalizeImportSession(
         merchant,
         memo,
         fingerprint,
-        `raw:${row.raw_id}`
+        `raw:${row.raw_id}`,
+        classificationMeta
       );
       inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
@@ -327,7 +403,13 @@ export function canonicalizeImportSession(
           JSON.stringify({
             kind: "unknown_category",
             message:
-              "No default keyword rule matched this description; assign a category from the ledger or review queue."
+              "No default keyword rule matched this description; assign a category from the ledger or review queue.",
+              classification: {
+                source: classification.source,
+                ruleId: classification.ruleId,
+                confidence: classification.confidence,
+                reason: classification.reason
+              }
           })
         );
       }
@@ -347,8 +429,8 @@ export function canonicalizeImportSession(
   // - otherwise create resolution_item(type='transfer_ambiguity', status='open') for involved rows
   if (insertedCanonicalRows.length > 0) {
     const insertedDates = insertedCanonicalRows.map((r) => r.txnDate).sort();
-    const windowStart = addDaysIso(insertedDates[0]!, -1);
-    const windowEnd = addDaysIso(insertedDates[insertedDates.length - 1]!, 1);
+    const windowStart = addDaysIso(insertedDates[0]!, -2);
+    const windowEnd = addDaysIso(insertedDates[insertedDates.length - 1]!, 2);
 
     const candidates = selectTransferCandidatesStmt.all(householdId, windowStart, windowEnd) as Array<{
       id: string;
@@ -415,9 +497,15 @@ export function canonicalizeImportSession(
             .sort((a, b) => b.score - a.score);
           const best = scored[0]!;
           const second = scored[1];
-          if (best.score >= 70 && (!second || second.score < best.score - 20)) {
+          if (
+            best.score >= env.TRANSFER_DISAMBIG_STRONG_MIN_SCORE &&
+            (!second || second.score < best.score - env.TRANSFER_DISAMBIG_STRONG_GAP)
+          ) {
             matchingCredits = [best.c];
-          } else if (best.score >= 45 && (!second || second.score < 25)) {
+          } else if (
+            best.score >= env.TRANSFER_DISAMBIG_WEAK_MIN_SCORE &&
+            (!second || second.score < env.TRANSFER_DISAMBIG_WEAK_MAX_SECOND_SCORE)
+          ) {
             matchingCredits = [best.c];
           }
         }
@@ -426,13 +514,24 @@ export function canonicalizeImportSession(
 
         if (matchingCredits.length !== 1) {
           // Ambiguous: this debit matches multiple credit candidates.
+          const candidateScores = matchingCredits
+            .map((c) => ({
+              creditId: c.id,
+              score: transferPairScore(debit.label, c.label, debit.txnDate, c.txnDate, dateDiffDays)
+            }))
+            .sort((a, b) => b.score - a.score);
           const involvedTargetIds = new Set<string>([debit.id, ...matchingCredits.map((c) => c.id)]);
           const reason = JSON.stringify({
             kind: "transfer_ambiguity",
             debitId: debit.id,
             creditCandidateIds: matchingCredits.map((c) => c.id),
             dateWindow: { start: windowStart, end: windowEnd },
-            closeDateToleranceDays: 2
+            closeDateToleranceDays: 2,
+            matcherTelemetry: {
+              phase: "debit_to_credits",
+              debitLabel: debit.label,
+              candidateScores
+            }
           });
 
           for (const targetId of involvedTargetIds) {
@@ -462,14 +561,54 @@ export function canonicalizeImportSession(
             .sort((a, b) => b.score - a.score);
           const best = scored[0]!;
           const second = scored[1];
-          if (best.score >= 70 && (!second || second.score < best.score - 20)) {
+          if (
+            best.score >= env.TRANSFER_DISAMBIG_STRONG_MIN_SCORE &&
+            (!second || second.score < best.score - env.TRANSFER_DISAMBIG_STRONG_GAP)
+          ) {
             matchingDebitsForCredit = [best.d];
-          } else if (best.score >= 45 && (!second || second.score < 25)) {
+          } else if (
+            best.score >= env.TRANSFER_DISAMBIG_WEAK_MIN_SCORE &&
+            (!second || second.score < env.TRANSFER_DISAMBIG_WEAK_MAX_SECOND_SCORE)
+          ) {
             matchingDebitsForCredit = [best.d];
           }
         }
 
         if (matchingDebitsForCredit.length === 1) {
+          const pairScore = transferPairScore(
+            debit.label,
+            credit.label,
+            debit.txnDate,
+            credit.txnDate,
+            dateDiffDays
+          );
+          if (pairScore < env.TRANSFER_MIN_AUTO_PAIR_SCORE) {
+            // Amount/date/account pairing alone is not enough — avoids false positives when memos are unrelated.
+            const reason = JSON.stringify({
+              kind: "transfer_ambiguity",
+              phase: "low_pair_score",
+              debitId: debit.id,
+              creditId: credit.id,
+              pairScore,
+              minAutoScore: env.TRANSFER_MIN_AUTO_PAIR_SCORE,
+              debitLabel: debit.label,
+              creditLabel: credit.label,
+              dateWindow: { start: windowStart, end: windowEnd },
+              closeDateToleranceDays: 2,
+              matcherTelemetry: {
+                message:
+                  "One-to-one amount/date match across accounts, but description pairing score is below the auto-match threshold."
+              }
+            });
+            for (const targetId of [debit.id, credit.id] as const) {
+              if (insertedAmbiguityTargets.has(targetId)) continue;
+              const exists = existsOpenAmbiguityForTargetStmt.get(householdId, targetId);
+              if (exists) continue;
+              insertTransferAmbiguityStmt.run(crypto.randomUUID(), householdId, targetId, reason);
+              insertedAmbiguityTargets.add(targetId);
+            }
+            continue;
+          }
           // Unambiguous mutual match: assign one transfer_group_id for both rows.
           const groupId = crypto.randomUUID();
           updateTransferGroupStmt.run(groupId, debit.id);
@@ -480,6 +619,12 @@ export function canonicalizeImportSession(
         }
 
         // Ambiguous: this credit matches multiple debits (mutual one-to-one requirement failed).
+        const candidateScores = matchingDebitsForCredit
+          .map((d) => ({
+            debitId: d.id,
+            score: transferPairScore(d.label, credit.label, d.txnDate, credit.txnDate, dateDiffDays)
+          }))
+          .sort((a, b) => b.score - a.score);
         const involvedTargetIds = new Set<string>([
           credit.id,
           ...matchingDebitsForCredit.map((d) => d.id)
@@ -489,7 +634,12 @@ export function canonicalizeImportSession(
           creditId: credit.id,
           debitCandidateIds: matchingDebitsForCredit.map((d) => d.id),
           dateWindow: { start: windowStart, end: windowEnd },
-          closeDateToleranceDays: 2
+          closeDateToleranceDays: 2,
+          matcherTelemetry: {
+            phase: "credit_to_debits",
+            creditLabel: credit.label,
+            candidateScores
+          }
         });
 
         for (const targetId of involvedTargetIds) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -36,6 +36,20 @@ type CashSummaryResponse = {
     outflows: number;
     net: number;
     transactionCount: number;
+  };
+  comparison?: {
+    previousPeriod: {
+      label: string;
+      range: { start: string; end: string };
+      household: { inflows: number; outflows: number; net: number; transactionCount: number };
+      delta: { inflows: number; outflows: number; net: number };
+    };
+    yearOverYear?: {
+      label: string;
+      range: { start: string; end: string };
+      household: { inflows: number; outflows: number; net: number; transactionCount: number };
+      delta: { inflows: number; outflows: number; net: number };
+    };
   };
   byAccount: Array<{
     accountId: string;
@@ -84,9 +98,31 @@ function currentMonthStr(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+function asPreset(v: string | null): CashPreset {
+  return v === "month" || v === "ytd" || v === "rolling_30" || v === "rolling_90" ? v : "rolling_30";
+}
+
+function formatDeltaMoney(n: number): string {
+  if (n === 0) {
+    return "$0.00";
+  }
+  return formatMoneySigned(n);
+}
+
+function deltaTone(n: number): "up" | "down" | "flat" {
+  if (n > 0) return "up";
+  if (n < 0) return "down";
+  return "flat";
+}
+
 function ledgerDrillHref(
   range: { start: string; end: string },
-  opts?: { categoryId?: string | null; uncategorizedOnly?: boolean; accountId?: string | null }
+  opts?: {
+    categoryId?: string | null;
+    uncategorizedOnly?: boolean;
+    accountId?: string | null;
+    dashboardContext?: URLSearchParams;
+  }
 ): string {
   const qs = new URLSearchParams();
   qs.set("dateFrom", range.start);
@@ -99,16 +135,34 @@ function ledgerDrillHref(
   } else if (opts?.categoryId) {
     qs.set("categoryId", opts.categoryId);
   }
+  if (opts?.dashboardContext) {
+    qs.set("returnTo", `/?${opts.dashboardContext.toString()}`);
+    qs.set("fromDashboard", "true");
+  }
   return `/transactions?${qs.toString()}`;
 }
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const token = useAuthToken();
-  const [preset, setPreset] = useState<CashPreset>("rolling_30");
-  const [monthStr, setMonthStr] = useState(currentMonthStr);
-  const [asOf, setAsOf] = useState(todayISODate);
-  const [accountId, setAccountId] = useState<string>("");
+  const [preset, setPreset] = useState<CashPreset>(() => asPreset(searchParams.get("preset")));
+  const [monthStr, setMonthStr] = useState(searchParams.get("month") || currentMonthStr());
+  const [asOf, setAsOf] = useState(searchParams.get("asOf") || todayISODate());
+  const [accountId, setAccountId] = useState<string>(() => searchParams.get("accountId") || "");
+  useEffect(() => {
+    const next = new URLSearchParams();
+    next.set("preset", preset);
+    next.set("asOf", asOf);
+    if (preset === "month") {
+      next.set("month", monthStr);
+    }
+    if (accountId) {
+      next.set("accountId", accountId);
+    }
+    setSearchParams(next, { replace: true });
+  }, [preset, monthStr, asOf, accountId, setSearchParams]);
+
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [data, setData] = useState<CashSummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -197,8 +251,8 @@ export function DashboardPage() {
   }, [data?.byCategory]);
 
   const drillOpts = useMemo(
-    () => ({ accountId: accountId || undefined }),
-    [accountId]
+    () => ({ accountId: accountId || undefined, dashboardContext: new URLSearchParams(searchParams) }),
+    [accountId, searchParams]
   );
 
   const stackBarModel = useMemo(() => {
@@ -344,14 +398,56 @@ export function DashboardPage() {
               <div className="kpi-card">
                 <div className="kpi-label">Inflows</div>
                 <div className="kpi-value kpi-in">{formatMoneySigned(data.household.inflows)}</div>
+                {data.comparison?.previousPeriod ? (
+                  <div className="kpi-delta-row">
+                    <span className={`kpi-delta-chip kpi-delta-chip--${deltaTone(data.comparison.previousPeriod.delta.inflows)}`}>
+                      vs {data.comparison.previousPeriod.label}: {formatDeltaMoney(data.comparison.previousPeriod.delta.inflows)}
+                    </span>
+                  </div>
+                ) : null}
+                {data.comparison?.yearOverYear ? (
+                  <div className="kpi-delta-row">
+                    <span className={`kpi-delta-chip kpi-delta-chip--${deltaTone(data.comparison.yearOverYear.delta.inflows)}`}>
+                      vs {data.comparison.yearOverYear.label}: {formatDeltaMoney(data.comparison.yearOverYear.delta.inflows)}
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="kpi-card">
                 <div className="kpi-label">Outflows</div>
                 <div className="kpi-value kpi-out">${data.household.outflows.toFixed(2)}</div>
+                {data.comparison?.previousPeriod ? (
+                  <div className="kpi-delta-row">
+                    <span className={`kpi-delta-chip kpi-delta-chip--${deltaTone(data.comparison.previousPeriod.delta.outflows)}`}>
+                      vs {data.comparison.previousPeriod.label}: {formatDeltaMoney(data.comparison.previousPeriod.delta.outflows)}
+                    </span>
+                  </div>
+                ) : null}
+                {data.comparison?.yearOverYear ? (
+                  <div className="kpi-delta-row">
+                    <span className={`kpi-delta-chip kpi-delta-chip--${deltaTone(data.comparison.yearOverYear.delta.outflows)}`}>
+                      vs {data.comparison.yearOverYear.label}: {formatDeltaMoney(data.comparison.yearOverYear.delta.outflows)}
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="kpi-card">
                 <div className="kpi-label">Net</div>
                 <div className="kpi-value">{formatMoneySigned(data.household.net)}</div>
+                {data.comparison?.previousPeriod ? (
+                  <div className="kpi-delta-row">
+                    <span className={`kpi-delta-chip kpi-delta-chip--${deltaTone(data.comparison.previousPeriod.delta.net)}`}>
+                      vs {data.comparison.previousPeriod.label}: {formatDeltaMoney(data.comparison.previousPeriod.delta.net)}
+                    </span>
+                  </div>
+                ) : null}
+                {data.comparison?.yearOverYear ? (
+                  <div className="kpi-delta-row">
+                    <span className={`kpi-delta-chip kpi-delta-chip--${deltaTone(data.comparison.yearOverYear.delta.net)}`}>
+                      vs {data.comparison.yearOverYear.label}: {formatDeltaMoney(data.comparison.yearOverYear.delta.net)}
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </div>
 

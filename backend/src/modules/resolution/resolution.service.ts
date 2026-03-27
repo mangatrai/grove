@@ -15,6 +15,13 @@ interface RawPreview {
   referenceId: string | null;
 }
 
+interface ClassificationExplainability {
+  source?: "db" | "default" | "none";
+  ruleId?: string | null;
+  confidence?: number;
+  reason?: string;
+}
+
 export interface ResolutionItemRow {
   id: string;
   type: string;
@@ -30,6 +37,7 @@ export interface ResolutionItemRow {
     fileId: string | null;
     fileName: string | null;
     raw: RawPreview | null;
+    classification: ClassificationExplainability | null;
   };
 }
 
@@ -111,7 +119,12 @@ export function listResolutionItemsForHousehold(
   );
 
   const unknownCanonStmt = db.prepare(
-    `SELECT f.session_id AS sessionId, f.id AS fileId, f.file_name AS fileName, tr.extracted_payload_json AS payloadJson
+    `SELECT
+       f.session_id AS sessionId,
+       f.id AS fileId,
+       f.file_name AS fileName,
+       tr.extracted_payload_json AS payloadJson,
+       tc.classification_meta AS classificationMeta
      FROM transaction_canonical tc
      INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
      INNER JOIN import_file f ON f.id = tr.file_id
@@ -119,7 +132,9 @@ export function listResolutionItemsForHousehold(
   );
 
   const canonTxnStmt = db.prepare(
-    `SELECT merchant, memo, amount, txn_date FROM transaction_canonical WHERE id = ? AND household_id = ?`
+    `SELECT merchant, memo, amount, txn_date, classification_meta AS classificationMeta
+     FROM transaction_canonical
+     WHERE id = ? AND household_id = ?`
   );
 
   return rows.map((r) => {
@@ -131,13 +146,20 @@ export function listResolutionItemsForHousehold(
     }
 
     let rawPreview: RawPreview | null = null;
+    let classification: ClassificationExplainability | null = null;
     let sessionId: string | null = null;
     let fileId: string | null = null;
     let fileName: string | null = null;
 
     if (r.type === "unknown_category") {
       const u = unknownCanonStmt.get(r.targetId, householdId) as
-        | { sessionId: string; fileId: string; fileName: string; payloadJson: string }
+        | {
+            sessionId: string;
+            fileId: string;
+            fileName: string;
+            payloadJson: string;
+            classificationMeta: string | null;
+          }
         | undefined;
       if (u) {
         sessionId = u.sessionId;
@@ -159,9 +181,22 @@ export function listResolutionItemsForHousehold(
         } catch {
           rawPreview = null;
         }
+        if (u.classificationMeta) {
+          try {
+            classification = JSON.parse(u.classificationMeta) as ClassificationExplainability;
+          } catch {
+            classification = null;
+          }
+        }
       } else {
         const co = canonTxnStmt.get(r.targetId, householdId) as
-          | { merchant: string | null; memo: string | null; amount: number; txn_date: string }
+          | {
+              merchant: string | null;
+              memo: string | null;
+              amount: number;
+              txn_date: string;
+              classificationMeta: string | null;
+            }
           | undefined;
         if (co) {
           const desc = (co.merchant || co.memo || "").trim() || null;
@@ -171,6 +206,13 @@ export function listResolutionItemsForHousehold(
             description: desc,
             referenceId: null
           };
+          if (co.classificationMeta) {
+            try {
+              classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
+            } catch {
+              classification = null;
+            }
+          }
         }
       }
     } else {
@@ -200,6 +242,22 @@ export function listResolutionItemsForHousehold(
           rawPreview = null;
         }
       }
+      const co = canonTxnStmt.get(r.targetId, householdId) as
+        | {
+            merchant: string | null;
+            memo: string | null;
+            amount: number;
+            txn_date: string;
+            classificationMeta: string | null;
+          }
+        | undefined;
+      if (co?.classificationMeta) {
+        try {
+          classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
+        } catch {
+          classification = null;
+        }
+      }
     }
 
     return {
@@ -214,7 +272,8 @@ export function listResolutionItemsForHousehold(
         sessionId,
         fileId,
         fileName,
-        raw: rawPreview
+        raw: rawPreview,
+        classification
       }
     };
   });

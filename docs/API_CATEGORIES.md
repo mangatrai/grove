@@ -2,7 +2,7 @@
 
 > **Progress:** Hierarchy seed (migrations **`0006`**, **`0007`**), household CRUD, ledger **optgroup** picker, and **`/categories`** management UI — see **`docs/CHECKPOINT.md`**. **Planned:** richer taxonomy (transfers, taxes, income subtypes) and **ledger-first** category UX (inline add + hierarchical flyout) may reduce reliance on this page — **`docs/MVP_BACKLOG.md`** Epic 5, **`docs/DECISIONS_LOG.md`** D-014.
 
-Base path: `/categories`  
+Base path: `/categories` and `/categories/rules`  
 Auth: `Authorization: Bearer <JWT>`.
 
 Global defaults (`household_id` IS NULL) use a **two-level** tree: top-level parents (e.g. Shopping, Home & utilities) and leaf rows (`parent_id` set). Households may add **top-level** categories (`parentId: null`) or **subcategories** under any **top-level** parent they can use (global or household). Nesting deeper than parent → leaf is rejected (`MAX_DEPTH`).
@@ -76,3 +76,73 @@ Delete a **household-owned** category with **no** child rows and **no** `transac
 **401:** missing or invalid token.
 
 UI: **`/categories`** (manage — full-screen table + add parent/subcategory), ledger category picker (grouped **`optgroup`** by parent; not a hover menu). Inline “add category” from the ledger is **not** implemented yet (backlog).
+
+## Category Rules MVP (`/categories/rules`)
+
+Household-managed classification rules are evaluated in deterministic order before built-in defaults:
+1) `priority` ascending  
+2) `createdAt` ascending  
+3) `id` ascending
+
+Each rule targets one assignable category (leaf) and supports:
+- `matchType`: `contains` | `prefix` | `regex`
+- `pattern`: normalized lower-case string (regex compiled/validated on write)
+- `confidence`: `0..1`
+- `enabled`: `true|false`
+
+### `GET /categories/rules`
+
+Returns household-owned rules.
+
+**200:**
+
+```json
+{
+  "rules": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "pattern": "whole foods",
+      "matchType": "contains",
+      "categoryId": "uuid",
+      "confidence": 0.9,
+      "priority": 10,
+      "enabled": true,
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  ]
+}
+```
+
+### `POST /categories/rules`
+
+Create a rule.
+
+**Body:**
+
+```json
+{
+  "pattern": "starbucks",
+  "matchType": "contains",
+  "categoryId": "uuid",
+  "confidence": 0.85,
+  "priority": 100,
+  "enabled": true
+}
+```
+
+**201:** `{ "rule": { ... } }`
+
+**400:** invalid payload or validation (`INVALID_PATTERN`, `INVALID_CATEGORY`, `INVALID_CONFIDENCE`, `INVALID_PRIORITY`).
+
+### `PATCH /categories/rules/:id`
+
+Update rule fields (including enable/disable).
+
+**Body:** any subset of create fields.
+
+**200:** `{ "rule": { ... } }`
+
+**404:** `NOT_FOUND`  
+**400:** same validation codes as create

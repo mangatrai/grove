@@ -68,6 +68,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 ---
 ## 2026-03-25
 
+### CR-009 — Transfer matcher: payment-pattern coverage + ambiguity guardrails
+- **Type:** CR + FIX
+- **What:** Extended transfer matching to score explicit **credit-card/loan payment** wording variants (`payment to`, `payment received`, `ach payment`, `autopay`, `loan`, etc.) while keeping conservative thresholds. Added tests for unambiguous payment pairing with date skew + memo variants, multi-candidate ambiguity queue behavior, and cash-summary exclusion for `transfer_ambiguity` rows.
+- **Why:** Reduce `transfer_ambiguity` noise for common payment flows without increasing false positives.
+- **Files:** `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/tests/app.test.ts`.
+
 ### CR-005 — Resolution queue: type filter + unknown_category surfaced
 - **Type:** CR + UX
 - **What:** Added **resolution item type filtering** to `GET /resolution` (unknown_category, duplicate_ambiguity, transfer_ambiguity, etc.) and a **dashboard banner** that counts open `unknown_category` items and links to the queue.
@@ -98,6 +104,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Type:** CR
 - **What:** Added `accountId` as an optional filter on `GET /transactions` so dashboard drill-down can pre-filter to a single account.
 - **Files:** `backend/src/modules/ledger/ledger.routes.ts`, `backend/src/modules/ledger/ledger.service.ts`, `frontend/src/pages/TransactionsPage.tsx`.
+
+### CR-009 — Transfer matcher hardening: anti-false-positive guardrails
+- **Type:** CR + FIX
+- **What:** Tightened transfer matching so generic “payment” words alone do not auto-match; matcher now requires directional complement or card/loan context for payment-style pairing. Added ambiguity telemetry (`candidateScores`) in `transfer_ambiguity.reason` JSON for easier triage/debugging.
+- **Why:** Reduce false positives while preserving useful auto-match for genuine card/loan settlement flows.
+- **Files:** `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/tests/app.test.ts`.
 
 ---
 

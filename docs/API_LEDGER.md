@@ -16,6 +16,8 @@ Household-scoped access to `transaction_canonical`: **GET** lists rows (Epic 7);
 - `categoryId` — optional UUID; filters to that category, or — if it is a **parent** — to that parent and all its **child** categories.
 - `uncategorizedOnly` — `true` / `false`; when `true`, only rows with **`category_id` IS NULL** (do not combine with `categoryId`).
 - `dateFrom`, `dateTo` — `YYYY-MM-DD` inclusive bounds on **`txn_date`**.
+- `returnTo` — optional relative app URL for context return affordance (frontend-only hint; ignored by backend filtering).
+- `fromDashboard` — optional `true`/`false` frontend context hint used for drill-down UX.
 
 **400:** `categoryId` and `uncategorizedOnly` both set.
 

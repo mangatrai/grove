@@ -32,6 +32,26 @@ export interface CashSummaryHousehold {
   transactionCount: number;
 }
 
+export interface CashSummaryComparisonMetrics {
+  inflows: number;
+  outflows: number;
+  net: number;
+  transactionCount: number;
+}
+
+export interface CashSummaryComparisonDelta {
+  inflows: number;
+  outflows: number;
+  net: number;
+}
+
+export interface CashSummaryComparisonBlock {
+  label: string;
+  range: { start: string; end: string };
+  household: CashSummaryComparisonMetrics;
+  delta: CashSummaryComparisonDelta;
+}
+
 export interface CashSummaryAccountRow {
   accountId: string;
   institution: string;
@@ -74,6 +94,11 @@ export interface CashSummaryResult {
   range: CashSummaryRange;
   asOf: string;
   household: CashSummaryHousehold;
+  /** Optional period comparisons. Added for Epic 7. */
+  comparison?: {
+    previousPeriod: CashSummaryComparisonBlock;
+    yearOverYear?: CashSummaryComparisonBlock;
+  };
   byAccount: CashSummaryAccountRow[] | null;
   byCategory: CashSummaryCategoryRow[] | null;
   monthlyTrend: CashSummaryTrendPoint[];
@@ -106,6 +131,21 @@ function monthsBack(ym: string, n: number): string {
   const [y, m] = ym.split("-").map(Number);
   const d = new Date(y!, m! - 1 - n, 1);
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+
+function nextDay(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const dt = new Date(y!, m! - 1, d!);
+  dt.setDate(dt.getDate() + 1);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+}
+
+function shiftDateByYear(isoDate: string, years: number): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const year = (y ?? 0) + years;
+  const maxDay = new Date(year, m!, 0).getDate();
+  const safeDay = Math.min(d!, maxDay);
+  return `${year}-${pad2(m!)}-${pad2(safeDay)}`;
 }
 
 function minDate(a: string, b: string): string {
@@ -250,6 +290,62 @@ function aggregateForRange(
     outflows: roundMoney(Number(row.outflows)),
     net: roundMoney(Number(row.net)),
     transactionCount: Number(row.cnt)
+  };
+}
+
+function resolveComparisonRanges(input: CashSummaryInput, range: CashSummaryRange): {
+  previous: { label: string; start: string; end: string };
+  yearOverYear?: { label: string; start: string; end: string };
+} {
+  if (input.preset === "month") {
+    const currentYm = range.start.slice(0, 7);
+    const prevYm = monthsBack(currentYm, 1);
+    const yoyYm = monthsBack(currentYm, 12);
+    return {
+      previous: {
+        label: "Previous month",
+        start: `${prevYm}-01`,
+        end: lastDayOfMonth(prevYm)
+      },
+      yearOverYear: {
+        label: "Same month last year",
+        start: `${yoyYm}-01`,
+        end: lastDayOfMonth(yoyYm)
+      }
+    };
+  }
+
+  if (input.preset === "ytd") {
+    return {
+      previous: {
+        label: "YTD last year",
+        start: shiftDateByYear(range.start, -1),
+        end: shiftDateByYear(range.end, -1)
+      }
+    };
+  }
+
+  // rolling windows compare against the immediately preceding window length.
+  const dayCountInclusive =
+    Math.round(
+      (new Date(nextDay(range.end)).getTime() - new Date(range.start).getTime()) / (24 * 60 * 60 * 1000)
+    ) || 0;
+  const previousEnd = daysBefore(range.start, 1);
+  const previousStart = daysBefore(previousEnd, Math.max(dayCountInclusive - 1, 0));
+  return {
+    previous: {
+      label: `Previous ${dayCountInclusive}-day window`,
+      start: previousStart,
+      end: previousEnd
+    }
+  };
+}
+
+function computeDelta(current: CashSummaryHousehold, baseline: CashSummaryHousehold): CashSummaryComparisonDelta {
+  return {
+    inflows: roundMoney(current.inflows - baseline.inflows),
+    outflows: roundMoney(current.outflows - baseline.outflows),
+    net: roundMoney(current.net - baseline.net)
   };
 }
 
@@ -497,6 +593,21 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
   }
 
   const household = aggregateForRange(householdId, range.start, range.end, input.accountId);
+  const comparisonRanges = resolveComparisonRanges(input, range);
+  const previousHousehold = aggregateForRange(
+    householdId,
+    comparisonRanges.previous.start,
+    comparisonRanges.previous.end,
+    input.accountId
+  );
+  const yearOverYearHousehold = comparisonRanges.yearOverYear
+    ? aggregateForRange(
+        householdId,
+        comparisonRanges.yearOverYear.start,
+        comparisonRanges.yearOverYear.end,
+        input.accountId
+      )
+    : null;
   const byAccount = input.breakdown
     ? aggregateByAccount(householdId, range.start, range.end, input.accountId)
     : null;
@@ -513,6 +624,30 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
     range,
     asOf,
     household,
+    comparison: {
+      previousPeriod: {
+        label: comparisonRanges.previous.label,
+        range: {
+          start: comparisonRanges.previous.start,
+          end: comparisonRanges.previous.end
+        },
+        household: previousHousehold,
+        delta: computeDelta(household, previousHousehold)
+      },
+      ...(comparisonRanges.yearOverYear && yearOverYearHousehold
+        ? {
+            yearOverYear: {
+              label: comparisonRanges.yearOverYear.label,
+              range: {
+                start: comparisonRanges.yearOverYear.start,
+                end: comparisonRanges.yearOverYear.end
+              },
+              household: yearOverYearHousehold,
+              delta: computeDelta(household, yearOverYearHousehold)
+            }
+          }
+        : {})
+    },
     byAccount,
     byCategory,
     monthlyTrend: trend,
