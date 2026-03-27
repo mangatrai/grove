@@ -142,6 +142,8 @@ export function CategoriesPage() {
         </p>
         <p className="muted">
           <Link to="/transactions">Back to ledger</Link>
+          {" · "}
+          <Link to="/categories/rules">Classification rules</Link>
         </p>
 
         {error ? <p className="error">{error}</p> : null}

@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-25
+**Last updated:** 2026-03-27
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -71,7 +71,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 1. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + strengthen ambiguity handling tests.
 2. **Epic 5.1 continuation:** DB-driven rules UI, optional confidence scores, and improve bulk assignment ergonomics for unknown items.
-3. **Epic 7 continuation:** deeper drill-down (e.g. ledger row paging / better drill semantics) and period comparisons + safe-to-spend.
+3. **Epic 7 continuation:** deeper drill-down (e.g. ledger row paging / better drill semantics), category-level trend comparisons if needed, **safe-to-spend** + savings targets.
 4. **Epic 6:** inbox drill-down, bulk category from resolution grid.  
 5. **Product cleanup:** decide whether **`/categories`** stays as “advanced” or is folded into ledger-only flows (**D-014** / **DECISIONS_LOG.md**).  
 6. **Docs hygiene:** keep **`CHANGE_HISTORY.md`** updated when user-facing behavior changes.

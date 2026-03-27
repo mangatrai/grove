@@ -292,12 +292,12 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Core KPIs visible by household with period selector.
 
 ### Story 7.2 - Category and trend reporting
-**Status: 🟡 Partial (2026-03-25).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Now delivered (partial):** click-through/drill-down links into the ledger from “By category (period)” and the dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Still not:** prior-period comparisons, extra custom date filters beyond cash-summary presets, and hierarchical roll-up semantics in `byCategory` beyond the current parent rollup option.
+**Status: 🟡 Partial (2026-03-27).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Delivered:** click-through/drill-down into the ledger from “By category (period)” and dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Delivered:** **period comparisons** — **`GET /reports/cash-summary`** returns **`comparison.previousPeriod`** and (when applicable) **`comparison.yearOverYear`** with household KPI deltas; the home dashboard surfaces these as compact delta chips (see **`docs/API_CASH_SUMMARY.md`**). Comparison semantics: **month** → previous calendar month + same month last year; **YTD** → prior-year YTD; **rolling_30 / rolling_90** → immediately preceding same-length window. **Still not:** arbitrary **custom date range** (only **presets** + `month` / `asOf`), category-level prior-period breakdown in the UI (household KPI deltas only), and richer **hierarchical** presentation/labels in `byCategory` beyond **`categoryRollup`** (`leaf` \| `parent`).
 
 - Tasks:
   - Build spend-by-category chart with drill-down. (M) 🟡
-  - Add prior week/month/year comparisons. (M) ⬜
-  - Add weekly/monthly/YTD/yearly/custom filters. (M) ⬜ (partially covered by cash-summary presets)
+  - Prior period / YoY / prior-window comparisons for household KPIs. (M) 🟡 (API + dashboard)
+  - Add weekly/monthly/YTD/yearly/custom filters. (M) 🟡 (presets cover week/month/YTD/rolling; **no** free-form from/to)
 - Acceptance:
   - User can compare periods and inspect underlying transactions.
 

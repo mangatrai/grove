@@ -858,3 +858,55 @@ select.ledger-category-select {
   padding-left: 0.75rem;
   border-left: 3px solid var(--color-border);
 }
+
+/* Category rules (household pattern → category) */
+.category-rules-page__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: flex-end;
+  margin-top: 0.5rem;
+}
+
+.category-rules-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.9rem;
+  min-width: min(100%, 12rem);
+}
+
+.category-rules-page__field--narrow {
+  min-width: 6rem;
+  max-width: 8rem;
+}
+
+.category-rules-page__field input,
+.category-rules-page__field select {
+  max-width: 100%;
+}
+
+.category-rules-page__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.category-rules-page__table code.category-rules-page__pattern {
+  font-size: 0.85rem;
+  background: #f1f5f9;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+}
+
+.category-rules-page__table .category-rules-page__num {
+  width: 4.5rem;
+}
+
+.category-rules-page__row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
