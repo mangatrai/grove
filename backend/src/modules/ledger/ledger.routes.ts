@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
+  createManualCanonicalTransaction,
   listCanonicalTransactions,
   listCanonicalTransactionsForImportSession,
   updateCanonicalTransactionCategory,
@@ -20,8 +21,24 @@ const querySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  needsReview: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v === "true"),
+  search: z.string().max(200).optional(),
+  amountMin: z.coerce.number().optional(),
+  amountMax: z.coerce.number().optional(),
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+const postManualSchema = z.object({
+  accountId: z.string().uuid(),
+  txnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  amount: z.number().finite().refine((n) => n !== 0, "Amount must not be zero"),
+  merchant: z.string().max(200).optional().default("Manual entry"),
+  memo: z.union([z.string().max(500), z.null()]).optional(),
+  categoryId: z.union([z.string().uuid(), z.null()]).optional()
 });
 
 export const ledgerRouter = Router();
@@ -34,7 +51,20 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const { limit, offset, sessionId, accountId, categoryId, uncategorizedOnly, dateFrom, dateTo } = parsed.data;
+  const {
+    limit,
+    offset,
+    sessionId,
+    accountId,
+    categoryId,
+    uncategorizedOnly,
+    needsReview,
+    search,
+    amountMin,
+    amountMax,
+    dateFrom,
+    dateTo
+  } = parsed.data;
   const householdId = req.authUser!.householdId;
 
   if (categoryId && uncategorizedOnly) {
@@ -42,11 +72,26 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
+  const amin = amountMin !== undefined && Number.isFinite(amountMin) ? amountMin : undefined;
+  const amax = amountMax !== undefined && Number.isFinite(amountMax) ? amountMax : undefined;
+
   const filters: LedgerListFilters | undefined =
-    categoryId || uncategorizedOnly || dateFrom || dateTo || accountId
+    categoryId ||
+    uncategorizedOnly ||
+    needsReview ||
+    (search !== undefined && search.trim() !== "") ||
+    amin !== undefined ||
+    amax !== undefined ||
+    dateFrom ||
+    dateTo ||
+    accountId
       ? {
           categoryId: categoryId ?? undefined,
           uncategorizedOnly: uncategorizedOnly || undefined,
+          needsReviewOnly: needsReview || undefined,
+          search: search?.trim() || undefined,
+          amountMin: amin,
+          amountMax: amax,
           dateFrom: dateFrom ?? undefined,
           dateTo: dateTo ?? undefined,
           accountId: accountId ?? undefined
@@ -65,6 +110,51 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
 
   const result = listCanonicalTransactions(householdId, limit, offset, filters);
   res.status(200).json(result);
+});
+
+ledgerRouter.post("/", (req: AuthenticatedRequest, res) => {
+  const parsed = postManualSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
+    return;
+  }
+
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+  const body = parsed.data;
+  const out = createManualCanonicalTransaction(householdId, userId, {
+    accountId: body.accountId,
+    txnDate: body.txnDate,
+    amount: body.amount,
+    merchant: body.merchant,
+    memo: body.memo === undefined ? null : body.memo,
+    categoryId: body.categoryId === undefined ? null : body.categoryId
+  });
+
+  if (!out.ok) {
+    if (out.code === "INVALID_ACCOUNT") {
+      res.status(400).json({ message: "Account not found for this household", code: out.code });
+      return;
+    }
+    if (out.code === "INVALID_CATEGORY") {
+      res.status(400).json({ message: "Category is not available for this household", code: out.code });
+      return;
+    }
+    if (out.code === "INVALID_AMOUNT") {
+      res.status(400).json({ message: "Amount must be a non-zero finite number", code: out.code });
+      return;
+    }
+    if (out.code === "DUPLICATE_FINGERPRINT") {
+      res.status(409).json({
+        message:
+          "A transaction with the same account, date, amount, and description fingerprint already exists (dedupe).",
+        code: out.code
+      });
+      return;
+    }
+  }
+
+  res.status(201).json({ id: out.id });
 });
 
 const patchCategorySchema = z.object({

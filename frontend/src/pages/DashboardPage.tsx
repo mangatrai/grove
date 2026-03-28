@@ -122,6 +122,42 @@ function deltaTone(n: number): "up" | "down" | "flat" {
   return "flat";
 }
 
+/** Matches `cash-summary.service.ts` for client-side preview while dragging the savings slider. */
+const AVG_DAYS_PER_MONTH = 30.437;
+
+function inclusiveCalendarDaysPreview(startIso: string, endIso: string): number {
+  const s = startIso.slice(0, 10);
+  const e = endIso.slice(0, 10);
+  const [sy, sm, sd] = s.split("-").map(Number);
+  const [ey, em, ed] = e.split("-").map(Number);
+  const t0 = Date.UTC(sy!, sm! - 1, sd!);
+  const t1 = Date.UTC(ey!, em! - 1, ed!);
+  return Math.round((t1 - t0) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function roundMoneyPreview(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function previewSpendingFromTarget(
+  net: number,
+  rangeStart: string,
+  rangeEnd: string,
+  monthlyTargetUsd: number
+): { savingsTargetApplied: number; safeToSpend: number } {
+  const days = inclusiveCalendarDaysPreview(rangeStart, rangeEnd);
+  const savingsTargetApplied = roundMoneyPreview(monthlyTargetUsd * (days / AVG_DAYS_PER_MONTH));
+  const safeToSpend = roundMoneyPreview(net - savingsTargetApplied);
+  return { savingsTargetApplied, safeToSpend };
+}
+
+function savingsTargetIsDirty(saved: number | null, draftUsd: number): boolean {
+  if (saved === null) {
+    return draftUsd > 0.009;
+  }
+  return Math.abs(saved - draftUsd) > 0.009;
+}
+
 function ledgerDrillHref(
   range: { start: string; end: string },
   opts?: {
@@ -191,7 +227,7 @@ export function DashboardPage() {
     openByType: Record<string, number>;
     totalOpen: number;
   } | null>(null);
-  const [savingsTargetDraft, setSavingsTargetDraft] = useState("");
+  const [targetPreviewUsd, setTargetPreviewUsd] = useState(0);
   const [savingTarget, setSavingTarget] = useState(false);
 
   useEffect(() => {
@@ -239,11 +275,43 @@ export function DashboardPage() {
 
   useEffect(() => {
     if (data?.spendingPower.monthlySavingsTargetUsd != null) {
-      setSavingsTargetDraft(String(data.spendingPower.monthlySavingsTargetUsd));
+      setTargetPreviewUsd(data.spendingPower.monthlySavingsTargetUsd);
     } else {
-      setSavingsTargetDraft("");
+      setTargetPreviewUsd(0);
     }
   }, [data?.spendingPower.monthlySavingsTargetUsd]);
+
+  const savingsSliderMax = useMemo(() => {
+    if (!data) {
+      return 10_000;
+    }
+    const inf = data.household.inflows;
+    const saved = data.spendingPower.monthlySavingsTargetUsd ?? 0;
+    const rough = Math.max(inf * 0.6, saved * 1.5, 2_500, targetPreviewUsd * 1.25);
+    const cap = Math.min(250_000, Math.max(1_000, Math.ceil(rough / 100) * 100));
+    return Math.max(cap, Math.ceil(targetPreviewUsd) + 500);
+  }, [data, targetPreviewUsd]);
+
+  const spendingPreview = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+    const saved = data.spendingPower.monthlySavingsTargetUsd;
+    if (saved === null && targetPreviewUsd <= 0) {
+      return { mode: "none" as const };
+    }
+    return {
+      mode: "preview" as const,
+      ...previewSpendingFromTarget(data.household.net, data.range.start, data.range.end, targetPreviewUsd)
+    };
+  }, [data, targetPreviewUsd]);
+
+  const savingsTargetDirty = useMemo(() => {
+    if (!data) {
+      return false;
+    }
+    return savingsTargetIsDirty(data.spendingPower.monthlySavingsTargetUsd, targetPreviewUsd);
+  }, [data, targetPreviewUsd]);
 
   const chartData = useMemo(
     () =>
@@ -364,6 +432,28 @@ export function DashboardPage() {
     <div>
       <div className="card">
         <h1>Home</h1>
+        <div className="dashboard-scope-bar">
+          <div className="dashboard-scope-bar__title">Scope</div>
+          <label className="dashboard-scope-bar__control">
+            <span className="dashboard-scope-bar__label">Account</span>
+            <select
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              className="dashboard-scope-bar__select"
+              aria-label="Cash summary account scope"
+            >
+              <option value="">All accounts (household)</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {formatAccountForSelect(a)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="dashboard-scope-bar__hint muted">
+            KPIs, trends, and charts below use this account filter together with the period you set.
+          </p>
+        </div>
         {resolutionSummary && (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
           <p
             className="muted"
@@ -382,8 +472,8 @@ export function DashboardPage() {
           </p>
         ) : null}
         <p className="muted">
-          Posted ledger totals by period — household cashflow plus category splits (rules + manual categories from the
-          ledger).
+          Posted transaction totals by period — household cashflow plus category splits (rules + categories you set on
+          each row).
         </p>
 
         <div className="dashboard-controls">
@@ -421,22 +511,6 @@ export function DashboardPage() {
               onChange={(e) => setAsOf(e.target.value)}
               style={{ marginLeft: "0.5rem", width: "auto" }}
             />
-          </label>
-
-          <label>
-            Account
-            <select
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              style={{ marginLeft: "0.5rem", width: "auto", minWidth: "14rem" }}
-            >
-              <option value="">All accounts</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {formatAccountForSelect(a)}
-                </option>
-              ))}
-            </select>
           </label>
         </div>
 
@@ -529,15 +603,20 @@ export function DashboardPage() {
                   </KpiInfo>
                 </div>
                 <div className="kpi-value">
-                  {data.spendingPower.safeToSpend !== null ? formatMoneySigned(data.spendingPower.safeToSpend) : "—"}
+                  {spendingPreview?.mode === "none"
+                    ? "—"
+                    : spendingPreview?.mode === "preview"
+                      ? formatMoneySigned(spendingPreview.safeToSpend)
+                      : "—"}
                 </div>
-                {data.spendingPower.savingsTargetApplied !== null && data.spendingPower.monthlySavingsTargetUsd !== null ? (
+                {spendingPreview?.mode === "preview" ? (
                   <p className="kpi-sub muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
-                    After ~${data.spendingPower.savingsTargetApplied.toFixed(2)} savings commitment this period
+                    After ~${spendingPreview.savingsTargetApplied.toFixed(2)} prorated savings commitment
+                    {savingsTargetDirty ? " · preview" : ""}
                   </p>
                 ) : (
                   <p className="kpi-sub muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
-                    Set a monthly target below
+                    Move the slider below to preview, then save
                   </p>
                 )}
               </div>
@@ -554,42 +633,59 @@ export function DashboardPage() {
             </div>
 
             <div className="dashboard-savings-target">
-              <label className="dashboard-savings-target__label">
-                Monthly savings target (USD)
+              <div className="dashboard-savings-target__slider-block">
+                <div className="dashboard-savings-target__slider-head">
+                  <span className="dashboard-savings-target__label-text">Monthly savings target (USD)</span>
+                  <span className="dashboard-savings-target__value">
+                    ${targetPreviewUsd.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    <span className="muted"> / mo</span>
+                  </span>
+                </div>
                 <input
-                  type="number"
+                  type="range"
+                  className="dashboard-savings-target__range"
                   min={0}
-                  step={0.01}
-                  placeholder="e.g. 500"
-                  value={savingsTargetDraft}
-                  onChange={(e) => setSavingsTargetDraft(e.target.value)}
+                  max={savingsSliderMax}
+                  step={10}
+                  value={Math.min(Math.max(0, targetPreviewUsd), savingsSliderMax)}
                   disabled={savingTarget}
+                  onChange={(e) => setTargetPreviewUsd(Number(e.target.value))}
+                  aria-label="Monthly savings target in US dollars"
                 />
-              </label>
-              <button
-                type="button"
-                disabled={savingTarget}
-                onClick={() => {
-                  const t = savingsTargetDraft.trim();
-                  if (t === "") {
-                    void saveSavingsTarget(null);
-                    return;
-                  }
-                  const n = Number(t);
-                  if (!Number.isFinite(n) || n < 0) {
-                    setError("Enter a non-negative number or leave blank to clear.");
-                    return;
-                  }
-                  void saveSavingsTarget(n);
-                }}
-              >
-                {savingTarget ? "Saving…" : "Save target"}
-              </button>
-              {data.spendingPower.monthlySavingsTargetUsd !== null ? (
-                <button type="button" className="secondary" disabled={savingTarget} onClick={() => void saveSavingsTarget(null)}>
-                  Clear
+                <div className="dashboard-savings-target__slider-ticks muted">
+                  <span>$0</span>
+                  <span>${savingsSliderMax.toLocaleString()}</span>
+                </div>
+                <p className="muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
+                  Slide to see safe-to-spend update. Values match the server formula (prorated by days in this period).
+                  {savingsTargetDirty ? " Save to keep your target." : ""}
+                </p>
+              </div>
+              <div className="dashboard-savings-target__actions">
+                <button
+                  type="button"
+                  disabled={savingTarget || !savingsTargetDirty}
+                  onClick={() => {
+                    const v = targetPreviewUsd <= 0 ? null : roundMoneyPreview(targetPreviewUsd);
+                    void saveSavingsTarget(v);
+                  }}
+                >
+                  {savingTarget ? "Saving…" : "Save target"}
                 </button>
-              ) : null}
+                {data.spendingPower.monthlySavingsTargetUsd !== null || targetPreviewUsd > 0 ? (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={savingTarget}
+                    onClick={() => {
+                      setTargetPreviewUsd(0);
+                      void saveSavingsTarget(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                ) : null}
+              </div>
             </div>
 
             {data.byCategory && data.byCategory.length > 0 ? (
@@ -598,7 +694,7 @@ export function DashboardPage() {
                   <h2 style={{ fontSize: "1.05rem", marginBottom: "0.35rem" }}>Outflows by category</h2>
                   <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
                     Debit totals in this period (pie excludes categories with $0 outflows). Click a slice to open the
-                    ledger for that category.
+                    transactions for that category.
                   </p>
                   <div className="chart-wrap chart-wrap--pie">
                     {outflowPieData.length > 0 ? (
@@ -645,7 +741,7 @@ export function DashboardPage() {
                 <div>
                   <h2 style={{ fontSize: "1.05rem", marginBottom: "0.35rem" }}>Inflows by category</h2>
                   <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                    Credit totals in this period. Click a slice to open the ledger for that category.
+                    Credit totals in this period. Click a slice to open transactions for that category.
                   </p>
                   <div className="chart-wrap chart-wrap--pie">
                     {inflowPieData.length > 0 ? (
@@ -707,7 +803,7 @@ export function DashboardPage() {
                         <th>Outflows</th>
                         <th>Net</th>
                         <th>Txns</th>
-                        <th>Ledger</th>
+                        <th>Transactions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -783,7 +879,7 @@ export function DashboardPage() {
                         <th>Outflows</th>
                         <th>Net</th>
                         <th>Txns</th>
-                        <th>Ledger</th>
+                        <th>Transactions</th>
                       </tr>
                     </thead>
                     <tbody>

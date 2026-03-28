@@ -1094,6 +1094,81 @@ describe("import sessions and file intake", () => {
   });
 });
 
+describe("transactions command center (Epic 11.2)", () => {
+  it("creates a manual transaction via POST", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        accountId: SEED_BOA_CHECKING,
+        txnDate: "2026-03-27",
+        amount: -12.34,
+        merchant: "API manual test",
+        memo: null,
+        categoryId: "30000000-0000-0000-0000-000000000004"
+      });
+    expect(res.status).toBe(201);
+    expect(typeof res.body.id).toBe("string");
+  });
+
+  it("lists needsReview rows with reviewReasons for uncategorized posted rows", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const id = crypto.randomUUID();
+    const fp = crypto.randomBytes(32).toString("hex");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'review-flag', NULL, NULL, ?, 'manual:test', 'posted')`
+    ).run(id, householdId.household_id, SEED_BOA_CHECKING, "2026-01-15", -2.5, fp);
+
+    const res = await request(app)
+      .get(`/transactions?needsReview=true&limit=50&search=${encodeURIComponent("review-flag")}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const hit = res.body.transactions.find((t: { id: string }) => t.id === id);
+    expect(hit).toBeDefined();
+    expect(Array.isArray(hit.reviewReasons)).toBe(true);
+    expect(hit.reviewReasons).toContain("Uncategorized");
+  });
+
+  it("returns 409 when manual POST duplicates fingerprint", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const body = {
+      accountId: SEED_BOA_CHECKING,
+      txnDate: "2026-04-01",
+      amount: -99.99,
+      merchant: `Dup test ${crypto.randomUUID()}`,
+      memo: null as string | null,
+      categoryId: null as string | null
+    };
+    const first = await request(app).post("/transactions").set("authorization", `Bearer ${token}`).send(body);
+    expect(first.status).toBe(201);
+    const second = await request(app).post("/transactions").set("authorization", `Bearer ${token}`).send(body);
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe("DUPLICATE_FINGERPRINT");
+  });
+});
+
 describe("categories and ledger category field (Epic 5.1)", () => {
   it("lists default categories", async () => {
     const login = await request(app).post("/auth/login").send({

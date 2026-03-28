@@ -260,7 +260,7 @@ export function ResolutionQueuePage() {
         <h1>Review queue</h1>
         <p className="muted">
           Items from imports: near-duplicates, <strong>unknown category</strong> (no rule matched — assign a category
-          below or on the ledger), and transfer pairings that need a second look.
+          below or on the Transactions page), and transfer pairings that need a second look.
         </p>
         <div className="row" style={{ marginBottom: "0.5rem", flexWrap: "wrap", gap: "0.75rem" }}>
           <label style={{ marginBottom: 0 }}>
@@ -487,9 +487,9 @@ export function ResolutionQueuePage() {
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         {it.context.sessionId ? (
-                          <Link to={`/transactions?sessionId=${it.context.sessionId}`}>Ledger rows</Link>
+                          <Link to={`/transactions?sessionId=${it.context.sessionId}`}>Session rows</Link>
                         ) : it.type === "unknown_category" ? (
-                          <Link to={`/transactions`}>Ledger</Link>
+                          <Link to={`/transactions`}>Transactions</Link>
                         ) : (
                           <span className="muted">—</span>
                         )}

@@ -13,7 +13,7 @@ Read these files first and continue from there:
 - docs/MVP_BACKLOG.md
 
 Then do the following in order:
-1) Summarize the current state in 8-12 bullets. Include: migrations **`0008`** / **`0009`**; **`/categories`** + **`/categories/rules`** UI; DB **`category_rule`** + **`classification_meta`**; resolution **`unknown_category`** + inline assign; **transfer matcher** + **`TRANSFER_*`** env (**`backend/src/config/env.ts`**); **cash-summary** comparisons + dashboard drill-down; open work: **Epic 6** inbox drill-down / remaining bulk gaps, **5.2** matcher coverage, **7** safe-to-spend, **D-014**.
+1) Summarize the current state in 8-12 bullets. Include: migrations **`0008`** / **`0009`**; **`/categories`** + **`/categories/rules`** UI; DB **`category_rule`** + **`classification_meta`**; resolution **`unknown_category`** + inline assign; **transfer matcher** + **`TRANSFER_*`** env (**`backend/src/config/env.ts`**); **cash-summary** comparisons + dashboard drill-down; **PRD §13** + **Epic 11** (target shell / transactions hub / settings — mostly docs until shipped); open work: **Epic 6** inbox drill-down / remaining bulk gaps, **5.2** matcher coverage, **7** / **11** implementation slices, **D-014**.
 2) List any open product/architecture questions that block implementation.
 3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (not necessarily Epic 1 unless greenfield).
 4) Keep changes minimal, tested, and aligned with strict dedupe + transfer correctness.

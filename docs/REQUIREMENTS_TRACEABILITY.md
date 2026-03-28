@@ -42,6 +42,7 @@
 - [x] Duplicate upload produces zero duplicate posted transactions. (fingerprint + idempotency)
 - [x] Unknown category / transfer ambiguity routes to resolution queue. (`unknown_category`, `transfer_ambiguity`, `duplicate_ambiguity` — see **`docs/API_RESOLUTION.md`**)
 - [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home **`/`** — cash KPIs, category charts, **period comparison deltas**, **cash-basis safe-to-spend** + savings rate when target set; KPI definitions in **(i)** tooltips — **`docs/CHECKPOINT.md`**, **`docs/API_CASH_SUMMARY.md`**, PRD §8 **MVP shipped formulas** + **`docs/CHANGE_HISTORY.md`** **PRD-002**, **UX-005**)
+- [ ] **Shell and IA** match **PRD §13** (collapsible nav, user menu → Settings/Logout, **Transactions** command center with **All \| Needs review**, sticky filters, **+ Add**, prominent dashboard scope, **`/settings`** tabs). ⬜ **Epic 11** — see **`docs/MVP_BACKLOG.md`**.
 - [ ] Owner can view spouse + own data; spouse cannot view owner data.
 - [x] Raw PDF files are deleted after successful extraction. (staging cleanup policy; see `IMPORT_STAGING_PURGE.md`)
 

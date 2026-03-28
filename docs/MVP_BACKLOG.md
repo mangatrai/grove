@@ -283,13 +283,16 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** deliver core decision metrics from imported data.
 
 ### Story 7.1 - KPI cards
-**Status: 🟡 Partial (2026-03-27).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; **`spendingPower`** — **savings rate**, **safe-to-spend** when **`monthly_savings_target_usd`** set (**`GET/PATCH /household/settings`**, migration **`0010`**); formulas vs PRD §8 shortcut documented as **`PRD-002`** + PRD **§8 MVP shipped formulas**; unmigrated DB: **`FIX-003`**. Optional **account** filter; **by-account** breakdown; **6-month** trend; **`categoryBreakdown`** + charts (**`docs/API_CASH_SUMMARY.md`**, **`docs/API_HOUSEHOLD.md`**). **Transfer-linked rows** excluded (**CR-004**). **Dashboard:** KPI **(i)** tooltips (**UX-005**), `unknown_category` banner, drill-down to ledger. **Not** delivered: forecast-based safe-to-spend, non-cash “committed expense” modeling.
+**Status: 🟡 Partial (2026-03-27).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; **`spendingPower`** — **savings rate**, **safe-to-spend** when **`monthly_savings_target_usd`** set (**`GET/PATCH /household/settings`**, migration **`0010`**); formulas vs PRD §8 shortcut documented as **`PRD-002`** + PRD **§8 MVP shipped formulas**; unmigrated DB: **`FIX-003`**. Optional **account** filter; **by-account** breakdown; **6-month** trend; **`categoryBreakdown`** + charts (**`docs/API_CASH_SUMMARY.md`**, **`docs/API_HOUSEHOLD.md`**). **Transfer-linked rows** excluded (**CR-004**). **Dashboard:** KPI **(i)** tooltips (**UX-005**), **monthly savings target** as a **slider** with live **safe-to-spend** preview (**UX-006**), `unknown_category` banner, drill-down to ledger. **Not** delivered: forecast-based safe-to-spend, non-cash “committed expense” modeling.
 
 - Tasks:
   - Implement income, expenses, net cashflow, savings rate cards. (M) 🟡
   - Implement safe-to-spend with configurable monthly savings target. (M) 🟡 (cash-basis; household PATCH)
 - Acceptance:
   - Core KPIs visible by household with period selector.
+
+### Planning note — Household profile & expectations
+**PRD §13 Phase D** and **Epic 11** Story **11.4** own the **Settings** route and **Household** tab plan. **Expected salary** and other “planning” fields are **not** API-backed yet; add stories when schema and endpoints exist. **Monthly savings target** ships today via **`PATCH /household/settings`** and may stay **duplicated** on **Home** (quick adjust) per §13.
 
 ### Story 7.2 - Category and trend reporting
 **Status: 🟡 Partial (2026-03-27).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Delivered:** click-through/drill-down into the ledger from “By category (period)” and dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Delivered:** **period comparisons** — **`GET /reports/cash-summary`** returns **`comparison.previousPeriod`** and (when applicable) **`comparison.yearOverYear`** with household KPI deltas; the home dashboard surfaces these as compact delta chips (see **`docs/API_CASH_SUMMARY.md`**). Comparison semantics: **month** → previous calendar month + same month last year; **YTD** → prior-year YTD; **rolling_30 / rolling_90** → immediately preceding same-length window. **Still not:** arbitrary **custom date range** (only **presets** + `month` / `asOf`), category-level prior-period breakdown in the UI (household KPI deltas only), and richer **hierarchical** presentation/labels in `byCategory` beyond **`categoryRollup`** (`leaf` \| `parent`).
@@ -370,7 +373,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 ### Story 10.3 - Screen-by-screen consistency pass
 - Tasks:
-  - Reconcile spacing, heading hierarchy, empty states, and mobile header across **ShellLayout** pages. (M)
+  - Reconcile spacing, heading hierarchy, empty states, and mobile header across **ShellLayout** pages; align with **Epic 11** when shell changes land. (M)
   - Optional: micro-interactions (focus rings, hover) where they improve clarity without noise. (S)
 - Acceptance:
   - No page feels like a different product family than **Home** / **Ledger** after pass.
@@ -383,8 +386,50 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 ---
 
+## Epic 11: Application shell, transactions hub, and settings (P0)
+**Goal:** Adopt a **persistent shell** and **Transactions-first** IA so users navigate less and work from dense, filterable surfaces — **PRD §13** (phases A–D). **Data density** is a **feature** for analysis, not a bug to minimize, provided hierarchy and filters stay clear.
+
+**Status:** 🟡 In progress (2026-03-27): **11.1**, **11.3**, **11.4** partial — **`docs/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`** **UX-007**.
+
+### Story 11.1 - Phase A: Shell and wayfinding
+**Status: 🟡 Partial (2026-03-27).** Collapsible sidebar + top bar + Account menu shipped (**UX-007**).  
+- Tasks:
+  - **Collapsible** left sidebar (collapse to icon rail). (M) 🟡 (abbr rail + `hf_sidebar_collapsed`)
+  - **User menu** (top-right): **Settings** link, **Log out**; placeholders for help/notifications if needed. (S) 🟡
+  - **IA copy:** Choose **Transactions** *or* **Ledger** as the single user-facing name; align **`App`** nav, page `<h1>`, and **`docs/`** references. (S) 🟡 (**Transactions** chosen)
+- Acceptance:
+  - Authenticated layout matches §13 Phase A; import remains reachable from **header** in one click.
+
+### Story 11.2 - Phase B: Transactions command center
+- Tasks:
+  - **Tabs:** **All** | **Needs review** on **`/transactions`** (same table component; tab drives query/filters). **Needs review** = §13 definition (uncategorized **or** open resolution tied to row **or** blocked/failed import path — implement with explicit filters + row-level **reason** chips or columns so the tab is not a junk drawer). (L)
+  - **Actions:** **+ Add** (manual **`POST`** transaction) alongside **Import** entry point on this screen or header. (M)
+  - **Filter bar:** Sticky row — search, account, date, category, amount; **More filters** as needed. (L) *Depends on existing/partial ledger APIs and **FR-9b** search when wired.*
+  - **Trash tab:** **Do not ship** until **soft-delete** epic exists; see **P1** note.
+- Acceptance:
+  - User can switch All / Needs review without leaving the shell; manual add is obvious; filters stay visible while scrolling the table (or clear sticky affordance).
+
+### Story 11.3 - Phase C: Dashboard scope prominence
+**Status: 🟡 Partial (2026-03-27).** **Scope** bar at top of Home card (**UX-007**).  
+- Tasks:
+  - Move **account scope** (all vs one account) to a **primary** control at the **top** of **Home** (layout + copy for financial accounts). (S) 🟡
+  - Ensure KPIs and charts respect scope consistently. (S) 🟡 (existing API filter; placement only)
+- Acceptance:
+  - Matches §13 Phase C; behavior unchanged aside from placement/clarity unless gaps found.
+
+### Story 11.4 - Phase D: Settings route and tabs
+**Status: 🟡 Partial (2026-03-27).** **`/settings`** + tabs + Household savings target form (**UX-007**).  
+- Tasks:
+  - **`/settings`** (or equivalent) from user menu; **sub-tabs:** **Profile**, **Household**, **Accounts**, **Notifications**, **Security** — render only tabs with backing API; others show honest empty/placeholder state. (M) 🟡
+  - **Household:** surface **`monthly_savings_target_usd`** (and future fields); allow **dual entry** with Home slider per §13. (M) 🟡
+- Acceptance:
+  - Settings is discoverable; no dead tabs without explanation.
+
+---
+
 ## P1 Backlog (After MVP)
 - **Epic 10** (design system / themes / branding — structured stories above).
+- **Transactions Trash tab + soft-delete:** restore semantics, retention, fingerprint/dedupe behavior — only after spec (**PRD §13** deferral).
 - INR + FX conversion reporting.
 - Exports (CSV/PDF/Excel).
 - Scheduled report notifications.
@@ -402,6 +447,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 6. Epic 8 can begin after Epic 2 baseline
 7. Epic 9 spans all prior epics
 8. **Epic 10** can start once a baseline shell exists (**Epic 1**); often scheduled **after** core flows feel functionally complete (P1)
+9. **Epic 11** can proceed in parallel with **Epic 7** / **Epic 6** once **Epic 1** shell exists; **11.2** coordinates with resolution + ledger APIs (**Epic 5** / **Epic 6**)
 
 ## Suggested First Sprint (2 weeks)
 - Epic 1 complete.

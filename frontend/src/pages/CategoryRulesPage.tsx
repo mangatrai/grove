@@ -203,7 +203,7 @@ export function CategoryRulesPage() {
         <p className="muted">
           <Link to="/categories">Back to categories</Link>
           {" · "}
-          <Link to="/transactions">Ledger</Link>
+          <Link to="/transactions">Transactions</Link>
         </p>
 
         {error ? <p className="error">{error}</p> : null}

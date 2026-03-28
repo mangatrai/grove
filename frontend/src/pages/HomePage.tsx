@@ -8,7 +8,7 @@ export function HomePage() {
     <div className="card">
       <h1>Household Finance</h1>
       <p className="muted">
-        Sign in for your cash-flow dashboard, ledger, and statement imports. Use <strong>New import</strong> in the
+        Sign in for your cash-flow dashboard, transactions list, and statement imports. Use <strong>New import</strong> in the
         header after you sign in.
       </p>
       <button type="button" onClick={() => navigate("/login")}>

@@ -1,6 +1,6 @@
 # Household Finance Platform - Product Requirements Document (PRD)
 
-**Implementation status:** This PRD is the north star. For what the repo implements today (✅ / 🟡 / ⬜), use **`docs/CHECKPOINT.md`** and **`docs/MVP_BACKLOG.md`** — not every PRD section has a shipped counterpart yet. **Change audit / “why we diverged”:** **`docs/CHANGE_HISTORY.md`**. **Resume after a break:** start with **`CHECKPOINT`** + **`CHANGE_HISTORY`** (newest dated blocks).
+**Implementation status:** This PRD is the north star. For what the repo implements today (✅ / 🟡 / ⬜), use **`docs/CHECKPOINT.md`** and **`docs/MVP_BACKLOG.md`** — not every PRD section has a shipped counterpart yet. **Target app shell and IA (phased):** **§13**. **Change audit / “why we diverged”:** **`docs/CHANGE_HISTORY.md`**. **Resume after a break:** start with **`CHECKPOINT`** + **`CHANGE_HISTORY`** (newest dated blocks).
 
 ## 1) Product Vision
 Build a private, self-hosted household finance platform that gives a trustworthy view of:
@@ -134,6 +134,7 @@ The system must support low-friction ingestion of monthly financial statements (
 - Category spend breakdown and drill-down to transactions.
 - Time windows: weekly, monthly, YTD, yearly, custom range.
 - Comparative views: current vs prior week/month/year.
+- **Presentation:** **All accounts vs one account** scope is **primary** on the dashboard surface (**§13** Phase C). **Data-dense** layouts are acceptable when filters and labels preserve scanability (**§13**).
 
 ### FR-9b: Search (MVP baseline)
 - Provide free-text search on merchant/memo/normalized description.
@@ -180,7 +181,7 @@ The Phase 1 **household-finance-app** dashboard uses **`GET /reports/cash-summar
 - **Savings rate (Home)** — When **inflows > 0**: **(inflows − outflows) ÷ inflows**, **rounded to two decimal places** as a ratio, then shown as a percentage. Algebra matches §8 *Savings Rate* when **Income** / **Expenses** are read as **cash-basis ledger totals** in the same window.
 - **Safe-to-spend** — Shown only when the household sets **`monthly_savings_target_usd`** (**`GET/PATCH /household/settings`**). **Net for the window** minus **monthly target × (inclusive calendar days in window ÷ ~30.437)**. This **generalizes** the “current month MTD” shortcut to all presets; without a target the KPI stays empty (—).
 
-**Home UX:** Definitions for each KPI appear in **(i)** tooltips (hover or keyboard focus), not as a long paragraph under the tiles (**`docs/CHANGE_HISTORY.md`** **UX-005**).
+**Home UX:** Definitions for each KPI appear in **(i)** tooltips (hover or keyboard focus), not as a long paragraph under the tiles (**`docs/CHANGE_HISTORY.md`** **UX-005**). The **monthly savings target** is adjusted with a **slider**; **safe-to-spend** updates live in the KPIs before save (**UX-006**).
 
 ### Net Worth Trend (Phase 1 basic)
 Net Worth = Assets - Liabilities
@@ -240,14 +241,46 @@ Rationale:
 3. Dashboard updates immediately after finalize.
 4. Optional rollback while session is unfinalized.
 
-## 13) NFRs
+## 13) Application shell, ledger hub, and settings (target IA)
+**Intent:** Reduce wayfinding cost and extra screens by using a **persistent app shell** (nav + header), a **Transactions-first hub** for day-to-day work, a dedicated **Home** dashboard, and a **Settings** area under the user menu — aligned with proven patterns (e.g. Stessa-style density) while staying household-finance-specific.
+
+**Density:** The product targets **data-heavy** screens for **analysis and decisions**; information hierarchy, filters, and scanability take priority over aggressive minimalism. Dense tables and filter rows are **acceptable by design** when labeled and keyboard-friendly.
+
+### Phase A — Shell and wayfinding
+- **Collapsible** left navigation (icons + labels; collapse to icons-only on narrow widths).
+- **Top-right user menu:** at minimum **Settings** and **Log out**; room for notifications/help later.
+- **Information architecture:** **Transactions** = primary **operational hub** (posted ledger + corrections). **Home** = **dashboard** (KPIs, trends, safe-to-spend). **Import** remains **one click** from the global header (no requirement to bury import inside Transactions only).
+- **Naming:** User-facing nav and page title use **Transactions** (not “Ledger”) for `/transactions`; **`docs/CHECKPOINT.md`** records status. Internal code may still say `ledger` in API paths (`/transactions`) and CSS class names.
+
+### Phase B — Transactions as command center
+- **Tabs** on the Transactions view, same underlying table patterns:
+  - **All** — default full posted ledger (current behavior baseline).
+  - **Needs review** — rows that need attention **before trusting reporting**; **definition (single sentence):** *Posted transactions that are **uncategorized** **or** have an **open resolution item** tied to them **or** are tied to **import/staging** outcomes that are blocked or failed pending user action.* Exact query/API mapping is an implementation detail; the tab must **not** become an undifferentiated junk drawer — if a row appears here, the UI states **why** (uncategorized vs resolution vs import).
+  - **Trash** — **not MVP** unless the product adopts **soft-delete** with restore semantics, retention, and audit rules (see **Deferrals** below).
+- **Primary actions** on or adjacent to this screen: **Import** (may duplicate header) and **+ Add** for **manual transaction entry** (**FR-7**).
+- **Filter bar:** A **sticky** (or always-visible) region above the table: **search** (free text per **FR-9b** when available), **account**, **date window**, **category**, **amount** band; optional **More filters** link for progressive disclosure.
+- **Category assignment:** Prefer **in-row** hierarchical assignment (search + parent/child, no page navigation) as the default path; **`/categories`** remains for taxonomy and rules administration.
+
+### Phase C — Dashboard (Home)
+- **Home** remains the **dashboard** route.
+- **Scope** (**all accounts** vs **one account**) is **visually primary** at the top of the page (dropdown or equivalent), with copy appropriate to **financial accounts** (checking, credit cards, etc.) — not “properties.” Card layout and per-metric **(i)** tooltips remain the pattern (**§8**).
+
+### Phase D — Settings
+- Dedicated **Settings** route (e.g. from user menu) with **sub-tabs** only where APIs exist; placeholder tabs acceptable with clear “not configured” states.
+- Suggested tab groups over time: **Profile** (user identity), **Household** (household name, **monthly savings target**, future expectations), **Connected accounts** / institutions, **Notifications**, **Security** (password/session).
+- **Monthly savings target** may appear both as **quick adjust on Home** and as **full edit under Household** in Settings (dual entry is acceptable).
+
+### Deferrals (explicit)
+- **Trash / deleted transactions tab:** **Out of scope** for MVP unless **soft-delete**, restore, retention, and dedupe/fingerprint interaction are specified and built. Until then, omit the tab or defer to a later **archive** concept.
+
+## 14) NFRs
 - Dashboard load target: <= 2-3 seconds for typical household dataset.
 - Import SLA target: 20-30 seconds per statement acceptable.
 - Reliability: idempotent imports, deterministic dedupe.
 - Security: encrypted backups, local-first deployment, no required external services.
 - Operability: can run on laptop on-demand, not 24x7 dependent.
 
-## 14) Risks and Mitigations
+## 15) Risks and Mitigations
 
 ### Risk: PDF parser drift per institution
 - Mitigation: parser profiles + template tests + fallback manual mapping UI.
@@ -264,14 +297,14 @@ Rationale:
 ### Risk: Over-complex feature creep
 - Mitigation: phase gates and explicit MVP freeze.
 
-## 15) MVP Exit Criteria
+## 16) MVP Exit Criteria
 - User can ingest monthly household files with <10 minutes review effort.
 - No duplicate transactions on repeated file upload.
 - Correct treatment of credit card purchase vs payment flow.
 - Dashboard clearly shows income, expenses, net cashflow, safe-to-spend.
 - User can batch-correct and finalize without per-row manual toil.
 
-## 16) Future Phases
+## 17) Future Phases
 - Phase 2: INR handling + FX conversion, tax summary/high-level projections, exports, notifications, audit trail.
 - Phase 3: advanced search, deeper investment analytics, custom categories/tags UX maturity, configurable user-level budgets.
 

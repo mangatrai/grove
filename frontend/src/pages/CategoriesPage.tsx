@@ -110,7 +110,7 @@ export function CategoriesPage() {
   }
 
   async function onDelete(id: string) {
-    if (!window.confirm("Delete this category? It must have no subcategories and no ledger rows.")) {
+    if (!window.confirm("Delete this category? It must have no subcategories and no transaction rows.")) {
       return;
     }
     setError(null);
@@ -141,7 +141,7 @@ export function CategoriesPage() {
           household. &ldquo;—&rdquo; under parent group means that row <em>is</em> the top-level group (not a subcategory).
         </p>
         <p className="muted">
-          <Link to="/transactions">Back to ledger</Link>
+          <Link to="/transactions">Back to Transactions</Link>
           {" · "}
           <Link to="/categories/rules">Classification rules</Link>
         </p>
