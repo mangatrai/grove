@@ -166,7 +166,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Adding a new bank adapter does not require changing dedupe/fingerprint rules beyond normalized field contract.
 
 ### Story 4.2 - Fingerprint dedupe engine
-**Status:** **Baseline delivered** (engine + API + tests + minimal product surface). Follow-on **Epic 6** work adds queue UX (status bulk, filters, context); classification bulk remains **Epic 5**-dependent.
+**Status:** **Baseline delivered** (engine + API + tests + minimal product surface). Follow-on **Epic 6** work adds queue UX (status bulk, filters, context, **`unknown_category` bulk category** via **`/resolution/bulk-apply-category`**).
 
 **Delivered:**
 - **`transaction-fingerprint.ts`** — deterministic `normalizeAmountForFingerprint`, date/description normalization, `computeTransactionFingerprint`.
@@ -190,7 +190,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** classify usable data while minimizing false positives.
 
 ### Story 5.1 - Category taxonomy and baseline rule engine
-**Partial (2026-03-27):** Default taxonomy is **hierarchical** (global parent + leaf rows; migrations **`0006`**, **`0007`**, **`0008`** — **`0008`** adds Income **leaves**, **Taxes** / **Transfers** groups + leaves; **`0009`** adds **`category_rule`** + **`classification_meta`** on **`transaction_canonical`**; see **`docs/CHANGE_HISTORY.md`**). **`category-rules.ts`** merges **DB rules** (priority order) then static defaults. **Canonical ingest** sets **`category_id`** and explainability metadata when rules match. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** **`PATCH /transactions/:id`**. **`GET/POST/PATCH /categories/rules`** — **`docs/API_CATEGORIES.md`**. **UI:** **`/categories/rules`** (manage rules; link from **`/categories`**). **`unknown_category`** on **`/resolution`** with type filter + inline category + classification summary. **Still not:** bulk category actions, full confidence product UX.
+**Partial (2026-03-27):** Default taxonomy is **hierarchical** (global parent + leaf rows; migrations **`0006`**, **`0007`**, **`0008`** — **`0008`** adds Income **leaves**, **Taxes** / **Transfers** groups + leaves; **`0009`** adds **`category_rule`** + **`classification_meta`** on **`transaction_canonical`**; see **`docs/CHANGE_HISTORY.md`**). **`category-rules.ts`** merges **DB rules** (priority order) then static defaults. **Canonical ingest** sets **`category_id`** and explainability metadata when rules match. **`GET /categories`** lists global + household categories (includes **`parentId`**). **Ledger** **`PATCH /transactions/:id`**. **`GET/POST/PATCH /categories/rules`** — **`docs/API_CATEGORIES.md`**. **UI:** **`/categories/rules`** (manage rules; link from **`/categories`**). **`unknown_category`** on **`/resolution`** with type filter + inline category + **`POST /resolution/bulk-apply-category`** (multi-select + apply category) + classification summary. **Still not:** full confidence product UX polish.
 
 - Tasks:
   - Seed compact household category taxonomy with modular extension path. (S) ✅ (hierarchical; ongoing expansion — see **5.3** + checkpoint)
@@ -248,7 +248,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 **Baseline delivered (2025):** **`GET /resolution`** (with **`?status=`** filter) lists **`resolution_item`** with **import context** (file, raw preview, ledger link). **`PATCH /resolution/:id`** and **`POST /resolution/bulk`** update status with the same transition rules (`docs/API_RESOLUTION.md`). **Review queue** at **`/resolution`** — per-row and **bulk** status actions. **Import workspace** — **Epic 6.1-style handoff:** posted vs exact duplicates vs near-duplicates, CTA to review queue when needed; ledger empty-state guidance when session filter shows no rows.
 
-**Not** delivered: file-level drill-down in inbox, category/transfer **bulk** edits (Story 6.2 stretch), session rollback (6.3), bulk “approve” semantics beyond status.
+**Not** delivered: file-level drill-down in inbox, **transfer** bulk edits (Story 6.2 stretch), session rollback (6.3), bulk “approve” semantics beyond status. **Delivered:** **`unknown_category` bulk category** — **`POST /resolution/bulk-apply-category`** + Review queue UI (select rows, apply category).
 
 ### Story 6.1 - Inbox summary view
 **Partial (2025):** Import workspace + last-import summary cover **posted vs flagged** counts and near-duplicate CTA; ledger/queue empty states clarified. **Remaining:** dedicated file-level drill-down and richer session inbox beyond the import card.
@@ -260,7 +260,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - User sees processing outcome in a single place.
 
 ### Story 6.2 - Resolution grid with bulk actions
-**Partial (2025):** Resolution **grid** + **bulk status** (**In review / Resolve / Reopen**) via **`POST /resolution/bulk`**. **Remaining:** bulk category/user/transfer, approve-all-high-confidence — depends on Epic 5 classification.
+**Partial (2026-03-27):** Resolution **grid** + **bulk status** (**In review / Resolve / Reopen**) via **`POST /resolution/bulk`**. **Delivered:** **bulk category** for **`unknown_category`** rows — **`POST /resolution/bulk-apply-category`** (`ids`, `categoryId`); Review queue: checkboxes, select all, category dropdown + **Apply category to selected** (`docs/API_RESOLUTION.md`). **Remaining:** bulk user/transfer assignment, approve-all-high-confidence.
 
 - Tasks:
   - Grid for unresolved and low-confidence transactions. (L)
@@ -349,7 +349,42 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 ---
 
+## Epic 10: Design system, branding, and UI polish (P1)
+**Goal:** cohesive visual identity and maintainable styling so new screens match the rest of the app without one-off CSS.
+
+**Context:** Incremental UX work already ships via **`docs/CHANGE_HISTORY.md`** (e.g. **UX-002**, **UX-003** — picker overlay, DM Sans, tokens in **`frontend/src/index.css`**). This epic **tracks** a deliberate pass: tokens, themes, and consistency—not ad hoc fixes only.
+
+### Story 10.1 - Design tokens and global styles
+- Tasks:
+  - Audit **`frontend/src/index.css`** `:root` variables (color, typography, radius, shadow, spacing); document naming in a short **`docs/`** appendix or **`frontend/README.md`** pointer.
+  - Align buttons, links, cards, tables, and form controls on shared tokens (reduce one-off hex where practical). (M)
+- Acceptance:
+  - New UI work can reuse documented tokens; no mandatory full-page redesign in one shot.
+
+### Story 10.2 - Color themes (e.g. light / dark)
+- Tasks:
+  - Define a second palette (or full dark theme) using **`data-theme`** or **`prefers-color-scheme`** + optional user toggle persisted (e.g. `localStorage`). (M)
+  - Ensure charts and third-party-looking components remain legible. (S)
+- Acceptance:
+  - User can switch theme (or OS-driven) without breaking contrast on primary flows (home, ledger, import, resolution).
+
+### Story 10.3 - Screen-by-screen consistency pass
+- Tasks:
+  - Reconcile spacing, heading hierarchy, empty states, and mobile header across **ShellLayout** pages. (M)
+  - Optional: micro-interactions (focus rings, hover) where they improve clarity without noise. (S)
+- Acceptance:
+  - No page feels like a different product family than **Home** / **Ledger** after pass.
+
+### Story 10.4 - Brand guidelines (lightweight)
+- Tasks:
+  - One-page **`docs/UI_BRAND.md`** (or section in **`frontend/README.md`**): font stack, primary/accent usage, when to use muted text, logo/header rules if applicable. (S)
+- Acceptance:
+  - Future contributors can match tone without re-deriving from **`index.css`** alone.
+
+---
+
 ## P1 Backlog (After MVP)
+- **Epic 10** (design system / themes / branding — structured stories above).
 - INR + FX conversion reporting.
 - Exports (CSV/PDF/Excel).
 - Scheduled report notifications.
@@ -366,6 +401,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 5. Epic 6 + posted data feed Epic 7
 6. Epic 8 can begin after Epic 2 baseline
 7. Epic 9 spans all prior epics
+8. **Epic 10** can start once a baseline shell exists (**Epic 1**); often scheduled **after** core flows feel functionally complete (P1)
 
 ## Suggested First Sprint (2 weeks)
 - Epic 1 complete.

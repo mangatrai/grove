@@ -45,7 +45,7 @@ Output: `frontend/dist/`.
 - `/categories` — Manage household categories (POST/PATCH/DELETE) and browse the global + household taxonomy. **`/categories/rules`** — household classification rules (`GET/POST/PATCH /categories/rules`); link from Categories.
 - `/transactions` — Ledger; query `sessionId`, `categoryId`, `uncategorizedOnly`, `dateFrom`, `dateTo` for filters (see `docs/API_LEDGER.md`).
 - `/imports/:sessionId` — Import workspace + **Session processing summary** (raw vs ledger per file); start via **New import** in the header (no Import nav item).
-- `/resolution` — **Review queue** (`GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk` for bulk status)
+- `/resolution` — **Review queue** (`GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk` for bulk status, **`POST /resolution/bulk-apply-category`** for bulk category on `unknown_category` rows)
 
 ## Import UX
 

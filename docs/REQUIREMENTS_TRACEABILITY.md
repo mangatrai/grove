@@ -38,7 +38,7 @@
 ## Acceptance Checklist (MVP)
 - [x] Statement batch can be uploaded in one operation. (import session + multi-file)
 - [ ] Parsed transactions enter inbox with confidence labels. (partial: **`classification_meta`** + resolution summary for some paths)
-- [ ] User can bulk approve and bulk edit. (partial: resolution **status** bulk; **not** category bulk)
+- [ ] User can bulk approve and bulk edit. (partial: resolution **status** bulk + **`unknown_category` bulk category** via **`/resolution/bulk-apply-category`**; not full “bulk edit all fields”)
 - [x] Duplicate upload produces zero duplicate posted transactions. (fingerprint + idempotency)
 - [x] Unknown category / transfer ambiguity routes to resolution queue. (`unknown_category`, `transfer_ambiguity`, `duplicate_ambiguity` — see **`docs/API_RESOLUTION.md`**)
 - [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home **`/`** — cash KPIs, category charts, **period comparison deltas**; **no** safe-to-spend yet — **`docs/CHECKPOINT.md`**)

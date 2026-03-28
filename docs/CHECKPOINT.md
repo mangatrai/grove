@@ -40,13 +40,14 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
 | **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable fingerprint; near-duplicate → **`resolution_item`** (`duplicate_ambiguity`); **`nearDuplicates`** in canonicalize response |
 | **Home / cash dashboard (Epic 7.1 / 7.2)** | 🟡 | **`GET /reports/cash-summary`** — presets, KPIs, **`comparison.previousPeriod`** + optional **`yearOverYear`** (household deltas), account filter, by-account, **by-category** + charts when `categoryBreakdown=true`, trend. **Transfer rows excluded** when `transfer_group_id` set or open **`transfer_ambiguity`** (**CR-004**). **UI:** `unknown_category` banner, **KPI delta chips**, chart/table **drill-down** to ledger (`categoryId`, `accountId`, dates). **Not yet:** safe-to-spend / savings targets, arbitrary custom date range (`docs/API_CASH_SUMMARY.md`) |
-| **Classification (Epic 5.1)** | 🟡 | **Static rules** in **`category-rules.ts`** + **DB rules** (migration **`0009`**, **`category_rule`** table) evaluated before defaults; **`classification_meta`** on canonical rows for explainability. **`GET/POST/PATCH /categories/rules`**; **UI:** **`/categories/rules`** (list, add, edit, enable/disable — linked from **`/categories`**). **`unknown_category`** on **`/resolution`** with type filter + inline category + summary chips. **Still not:** bulk category from queue, richer confidence UX |
+| **Classification (Epic 5.1)** | 🟡 | **Static rules** in **`category-rules.ts`** + **DB rules** (migration **`0009`**, **`category_rule`** table) evaluated before defaults; **`classification_meta`** on canonical rows for explainability. **`GET/POST/PATCH /categories/rules`**; **UI:** **`/categories/rules`**. **`unknown_category`** on **`/resolution`**: type filter, **inline** category, **bulk** assign (`POST /resolution/bulk-apply-category` — select rows + category, **`ResolutionQueuePage`**) + summary chips. **Still not:** richer confidence UX polish |
 | **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** page. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **Gaps:** D-014 (`/categories` vs ledger-only); hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
 | **Transfer matcher (Epic 5.2)** | 🟡 | Matcher in **`canonical-ingest.service.ts`**: scoring, **`transfer_ambiguity`**, **`low_pair_score`** when description confidence is below threshold. **Tunable via `.env`:** `TRANSFER_MIN_AUTO_PAIR_SCORE`, `TRANSFER_DISAMBIG_*` — see **`backend/src/config/env.ts`** and **`.env.example`**. **Not** exhaustive real-world card/loan coverage |
 | **UI shell & routing** | ✅ | **App shell** — Home (`/`), Ledger, Categories (**+** **`/categories/rules`**), Review queue, New import. **`/dashboard`** → **`/`** |
 | **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session** |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
+| **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
 
 ---
 
@@ -70,9 +71,9 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 ## Sensible next steps (prioritized themes)
 
 1. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
-2. **Epic 5.1 continuation:** bulk category assignment from resolution grid; polish confidence/explainability display.
+2. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category on resolution queue is **shipped** — **`/resolution/bulk-apply-category`**).
 3. **Epic 7 continuation:** ledger drill paging/context, category-level period comparisons (optional), **safe-to-spend** + savings targets.
-4. **Epic 6:** import inbox file-level drill-down; bulk category from resolution grid.  
+4. **Epic 6:** import inbox file-level drill-down; transfer/user bulk edits if still needed.  
 5. **Product cleanup:** **D-014** — whether **`/categories`** + **`/categories/rules`** stay as power-user surfaces or consolidate (**`docs/DECISIONS_LOG.md`**).  
 6. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work.
 
