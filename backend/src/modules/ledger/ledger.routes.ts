@@ -11,6 +11,13 @@ import {
   type LedgerListFilters
 } from "./ledger.service.js";
 
+const LEDGER_RESOLUTION_TYPES = [
+  "unknown_category",
+  "duplicate_ambiguity",
+  "transfer_ambiguity",
+  "reconciliation_mismatch"
+] as const;
+
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
@@ -25,6 +32,22 @@ const querySchema = z.object({
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true"),
+  resolutionType: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((v): string[] | undefined => {
+      if (v === undefined) {
+        return undefined;
+      }
+      const parts = (Array.isArray(v) ? v : [v]).flatMap((s) =>
+        String(s)
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean)
+      );
+      const uniq = [...new Set(parts)];
+      return uniq.length ? uniq : undefined;
+    }),
   search: z.string().max(200).optional(),
   amountMin: z.coerce.number().optional(),
   amountMax: z.coerce.number().optional(),
@@ -59,6 +82,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     categoryId,
     uncategorizedOnly,
     needsReview,
+    resolutionType,
     search,
     amountMin,
     amountMax,
@@ -72,6 +96,20 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
+  if (resolutionType?.length && !needsReview) {
+    res.status(400).json({ message: "resolutionType requires needsReview=true" });
+    return;
+  }
+
+  const allowedTypes = new Set<string>(LEDGER_RESOLUTION_TYPES);
+  if (resolutionType?.some((t) => !allowedTypes.has(t))) {
+    res.status(400).json({
+      message: "Invalid resolutionType",
+      allowed: [...LEDGER_RESOLUTION_TYPES]
+    });
+    return;
+  }
+
   const amin = amountMin !== undefined && Number.isFinite(amountMin) ? amountMin : undefined;
   const amax = amountMax !== undefined && Number.isFinite(amountMax) ? amountMax : undefined;
 
@@ -79,6 +117,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     categoryId ||
     uncategorizedOnly ||
     needsReview ||
+    (resolutionType?.length ?? 0) > 0 ||
     (search !== undefined && search.trim() !== "") ||
     amin !== undefined ||
     amax !== undefined ||
@@ -89,6 +128,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
           categoryId: categoryId ?? undefined,
           uncategorizedOnly: uncategorizedOnly || undefined,
           needsReviewOnly: needsReview || undefined,
+          resolutionTypes: resolutionType?.length ? resolutionType : undefined,
           search: search?.trim() || undefined,
           amountMin: amin,
           amountMax: amax,
@@ -131,30 +171,33 @@ ledgerRouter.post("/", (req: AuthenticatedRequest, res) => {
     categoryId: body.categoryId === undefined ? null : body.categoryId
   });
 
-  if (!out.ok) {
-    if (out.code === "INVALID_ACCOUNT") {
-      res.status(400).json({ message: "Account not found for this household", code: out.code });
-      return;
-    }
-    if (out.code === "INVALID_CATEGORY") {
-      res.status(400).json({ message: "Category is not available for this household", code: out.code });
-      return;
-    }
-    if (out.code === "INVALID_AMOUNT") {
-      res.status(400).json({ message: "Amount must be a non-zero finite number", code: out.code });
-      return;
-    }
-    if (out.code === "DUPLICATE_FINGERPRINT") {
-      res.status(409).json({
-        message:
-          "A transaction with the same account, date, amount, and description fingerprint already exists (dedupe).",
-        code: out.code
-      });
-      return;
-    }
+  if (out.ok) {
+    res.status(201).json({ id: out.id });
+    return;
   }
 
-  res.status(201).json({ id: out.id });
+  if (out.code === "INVALID_ACCOUNT") {
+    res.status(400).json({ message: "Account not found for this household", code: out.code });
+    return;
+  }
+  if (out.code === "INVALID_CATEGORY") {
+    res.status(400).json({ message: "Category is not available for this household", code: out.code });
+    return;
+  }
+  if (out.code === "INVALID_AMOUNT") {
+    res.status(400).json({ message: "Amount must be a non-zero finite number", code: out.code });
+    return;
+  }
+  if (out.code === "DUPLICATE_FINGERPRINT") {
+    res.status(409).json({
+      message:
+        "A transaction with the same account, date, amount, and description fingerprint already exists (dedupe).",
+      code: out.code
+    });
+    return;
+  }
+
+  res.status(500).json({ message: "Unexpected create transaction outcome" });
 });
 
 const patchCategorySchema = z.object({

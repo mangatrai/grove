@@ -27,6 +27,10 @@ export interface CanonicalTransactionRow {
   categoryName: string | null;
   /** Populated when listing with `needsReviewOnly` — why the row appears under Needs review. */
   reviewReasons?: string[];
+  /** Open resolution items for this row (same link rules as the review queue); for bulk `/resolution/*` calls. */
+  openReviewItems?: { id: string; type: string }[];
+  /** Import session when this row is tied to `raw:` source_ref. */
+  importSessionId?: string | null;
 }
 
 export interface ListCanonicalResult {
@@ -54,6 +58,11 @@ export interface LedgerListFilters {
    * or non-posted canonical status.
    */
   needsReviewOnly?: boolean;
+  /**
+   * When set with `needsReviewOnly`, keep rows that have at least one open/in_review resolution item
+   * whose `type` is in this list (same predicate family as `GET /resolution` type filter).
+   */
+  resolutionTypes?: string[];
 }
 
 /** Rows that belong in the “Needs review” tab (PRD §13). */
@@ -75,28 +84,52 @@ const NEEDS_REVIEW_PREDICATE = `(
   )
 )`;
 
-const OPEN_RESOLUTION_TYPES_SUBQUERY = `(
-    SELECT group_concat(d.type, '|')
-    FROM (
-      SELECT DISTINCT ri.type AS type
-      FROM resolution_item ri
-      WHERE ri.household_id = tc.household_id
-        AND ri.status IN ('open', 'in_review')
-        AND (
-          (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
-          OR (
-            ri.type = 'duplicate_ambiguity'
-            AND tc.source_ref IS NOT NULL
-            AND tc.source_ref = ('raw:' || ri.target_id)
-          )
+const OPEN_REVIEW_ITEMS_SUBQUERY = `(
+    SELECT group_concat(ri.id || ':' || ri.type, '|')
+    FROM resolution_item ri
+    WHERE ri.household_id = tc.household_id
+      AND ri.status IN ('open', 'in_review')
+      AND (
+        (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+        OR (
+          ri.type = 'duplicate_ambiguity'
+          AND tc.source_ref IS NOT NULL
+          AND tc.source_ref = ('raw:' || ri.target_id)
         )
-    ) AS d
+      )
   )`;
+
+const IMPORT_SESSION_SUBQUERY = `(
+    SELECT f2.session_id
+    FROM transaction_raw tr2
+    INNER JOIN import_file f2 ON f2.id = tr2.file_id
+    WHERE tc.source_ref = ('raw:' || tr2.id)
+    LIMIT 1
+  )`;
+
+function parseOpenReviewItems(blob: string | null | undefined): { id: string; type: string }[] {
+  if (!blob?.trim()) {
+    return [];
+  }
+  const out: { id: string; type: string }[] = [];
+  for (const part of blob.split("|")) {
+    const idx = part.indexOf(":");
+    if (idx <= 0) {
+      continue;
+    }
+    const id = part.slice(0, idx);
+    const type = part.slice(idx + 1);
+    if (id && type) {
+      out.push({ id, type });
+    }
+  }
+  return out;
+}
 
 function buildReviewReasons(
   categoryId: string | null,
   status: string,
-  openResolutionTypes: string | null | undefined
+  openItems: { id: string; type: string }[]
 ): string[] {
   const set = new Set<string>();
   if (categoryId === null) {
@@ -105,18 +138,16 @@ function buildReviewReasons(
   if (status !== "posted") {
     set.add(`Status: ${status}`);
   }
-  if (openResolutionTypes) {
-    for (const raw of openResolutionTypes.split("|")) {
-      const t = raw.trim();
-      if (t === "unknown_category") {
-        set.add("Open review: category");
-      } else if (t === "duplicate_ambiguity") {
-        set.add("Open review: duplicate / near-duplicate");
-      } else if (t === "transfer_ambiguity") {
-        set.add("Open review: transfer");
-      } else if (t === "reconciliation_mismatch") {
-        set.add("Open review: reconciliation");
-      }
+  const types = new Set(openItems.map((i) => i.type));
+  for (const t of types) {
+    if (t === "unknown_category") {
+      set.add("Open review: category");
+    } else if (t === "duplicate_ambiguity") {
+      set.add("Open review: duplicate / near-duplicate");
+    } else if (t === "transfer_ambiguity") {
+      set.add("Open review: transfer");
+    } else if (t === "reconciliation_mismatch") {
+      set.add("Open review: reconciliation");
     }
   }
   return [...set];
@@ -173,6 +204,24 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
     parts.push("CAST(tc.amount AS REAL) <= ?");
     params.push(filters.amountMax);
   }
+  if (filters.resolutionTypes && filters.resolutionTypes.length > 0) {
+    const ph = filters.resolutionTypes.map(() => "?").join(", ");
+    parts.push(`EXISTS (
+      SELECT 1 FROM resolution_item ri
+      WHERE ri.household_id = tc.household_id
+        AND ri.status IN ('open', 'in_review')
+        AND ri.type IN (${ph})
+        AND (
+          (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+          OR (
+            ri.type = 'duplicate_ambiguity'
+            AND tc.source_ref IS NOT NULL
+            AND tc.source_ref = ('raw:' || ri.target_id)
+          )
+        )
+    )`);
+    params.push(...filters.resolutionTypes);
+  }
   if (parts.length === 0) {
     return { sql: "", params: [] };
   }
@@ -196,7 +245,8 @@ function mapRow(
     created_at: string;
     category_id: string | null;
     category_name: string | null;
-    open_resolution_types?: string | null;
+    open_review_items_blob?: string | null;
+    import_session_id?: string | null;
   },
   opts?: { includeReviewReasons?: boolean }
 ): CanonicalTransactionRow {
@@ -218,7 +268,10 @@ function mapRow(
     categoryName: r.category_name
   };
   if (opts?.includeReviewReasons) {
-    row.reviewReasons = buildReviewReasons(r.category_id, r.status, r.open_resolution_types ?? null);
+    const openItems = parseOpenReviewItems(r.open_review_items_blob ?? null);
+    row.openReviewItems = openItems;
+    row.reviewReasons = buildReviewReasons(r.category_id, r.status, openItems);
+    row.importSessionId = r.import_session_id ?? null;
   }
   return row;
 }
@@ -243,7 +296,7 @@ function txSelectSql(includeReviewMeta: boolean): string {
   if (!includeReviewMeta) {
     return base;
   }
-  return `${base}, ${OPEN_RESOLUTION_TYPES_SUBQUERY} AS open_resolution_types`;
+  return `${base}, ${OPEN_REVIEW_ITEMS_SUBQUERY} AS open_review_items_blob, ${IMPORT_SESSION_SUBQUERY} AS import_session_id`;
 }
 
 export function listCanonicalTransactions(
@@ -286,7 +339,8 @@ export function listCanonicalTransactions(
     created_at: string;
     category_id: string | null;
     category_name: string | null;
-    open_resolution_types?: string | null;
+    open_review_items_blob?: string | null;
+    import_session_id?: string | null;
   }>;
 
   const transactions: CanonicalTransactionRow[] = rows.map((r) => mapRow(r, { includeReviewReasons: includeReview }));
@@ -354,7 +408,8 @@ export function listCanonicalTransactionsForImportSession(
     created_at: string;
     category_id: string | null;
     category_name: string | null;
-    open_resolution_types?: string | null;
+    open_review_items_blob?: string | null;
+    import_session_id?: string | null;
   }>;
 
   const transactions: CanonicalTransactionRow[] = rows.map((r) => mapRow(r, { includeReviewReasons: includeReview }));

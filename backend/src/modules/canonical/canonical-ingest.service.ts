@@ -53,10 +53,40 @@ function transferPaymentPatternScore(debitLabel: string, creditLabel: string): n
     /\bPYMT\b/,
     /\bAUTOPAY\b/,
     /\bAUTO\s*PAY\b/,
-    /\bACH\b/
+    /\bACH\b/,
+    /\bE-?PAYMENT\b/,
+    /\bEPAYMENT\b/,
+    /\bMOBILE\s+PAYMENT\b/,
+    /\bMOBILE\s+PMT\b/
   ];
-  const loanTokens = [/\bLOAN\b/, /\bMORTGAGE\b/, /\bINSTALLMENT\b/, /\bAUTO\s+LOAN\b/, /\bSTUDENT\s+LOAN\b/];
-  const cardTokens = [/\bCREDIT\s*CARD\b/, /\bCARDMEMBER\b/, /\bCARD\b/, /\bVISA\b/, /\bMASTERCARD\b/, /\bAMEX\b/];
+  const loanTokens = [
+    /\bLOAN\b/,
+    /\bMORTGAGE\b/,
+    /\bINSTALLMENT\b/,
+    /\bAUTO\s+LOAN\b/,
+    /\bSTUDENT\s+LOAN\b/,
+    /\bHELOC\b/,
+    /\bHOME\s+EQUITY\b/,
+    /\bPERSONAL\s+LOAN\b/,
+    /\bCAR\s+LOAN\b/,
+    /\bAUTO\s+FINANCE\b/,
+    /\bESCROW\b/,
+    /\bREFI(NANCE)?\b/
+  ];
+  const cardTokens = [
+    /\bCREDIT\s*CARD\b/,
+    /\bCARDMEMBER\b/,
+    /\bCARD\s+PAYMENT\b/,
+    /\bCC\s+PAYMENT\b/,
+    /\bPAY\s+CARD\b/,
+    /\bCARD\b/,
+    /\bVISA\b/,
+    /\bMASTERCARD\b/,
+    /\bAMEX\b/,
+    /\bAMERICAN\s+EXPRESS\b/,
+    /\bDISCOVER\b/,
+    /\bDISCVR\b/
+  ];
   const outgoingPaymentTokens = [
     /\bPAYMENT\s+TO\b/,
     /\bPAY\s+TO\b/,
@@ -64,26 +94,45 @@ function transferPaymentPatternScore(debitLabel: string, creditLabel: string): n
     /\bONLINE\s+PAYMENT\b/,
     /\bWEB\s+(PAY|PMT)\b/,
     /\bAUTOPAY\b/,
-    /\bAUTO\s*PAY\b/
+    /\bAUTO\s*PAY\b/,
+    /\bBILL\s+PAY\b/
   ];
   const incomingPaymentTokens = [
     /\bPAYMENT\s+RECEIVED\b/,
     /\bRECEIVED\s+PAYMENT\b/,
+    /\bPMT\s+RECEIVED\b/,
     /\bTHANK\s+YOU\b/,
     /\bACH\s+CREDIT\b/,
-    /\bCREDITED\b/
+    /\bCREDITED\b/,
+    /\bPAYMENT\s+APPLIED\b/,
+    /\bPRINCIPAL\s*(AND|&|,)?\s*INTEREST\b/
   ];
 
   const debitHasPayment = hasAnyPattern(debitUpper, paymentTokens);
   const creditHasPayment = hasAnyPattern(creditUpper, paymentTokens);
-  if (!debitHasPayment || !creditHasPayment) {
-    return 0;
-  }
-
   const debitOutgoing = hasAnyPattern(debitUpper, outgoingPaymentTokens);
   const creditIncoming = hasAnyPattern(creditUpper, incomingPaymentTokens);
   const loanContext = hasAnyPattern(debitUpper, loanTokens) || hasAnyPattern(creditUpper, loanTokens);
   const cardContext = hasAnyPattern(debitUpper, cardTokens) || hasAnyPattern(creditUpper, cardTokens);
+
+  /**
+   * Card/loan payoff from checking: bank memo includes PAYMENT + outbound semantics + card/loan cues,
+   * while the card/loan leg may only say THANK YOU / PMT RECEIVED (no literal "PAYMENT").
+   * Narrow on purpose — avoids treating unrelated ACH + THANK YOU as a transfer.
+   */
+  if (
+    debitHasPayment &&
+    debitOutgoing &&
+    (loanContext || cardContext) &&
+    !creditHasPayment &&
+    creditIncoming
+  ) {
+    return 88;
+  }
+
+  if (!debitHasPayment || !creditHasPayment) {
+    return 0;
+  }
 
   if (debitOutgoing && creditIncoming && (loanContext || cardContext)) {
     return 92;
@@ -101,8 +150,9 @@ function transferPaymentPatternScore(debitLabel: string, creditLabel: string): n
 
 /**
  * Higher score = better same-transfer hypothesis (disambiguates multiple amount/date matches).
+ * Exported for unit tests (Epic 5.2).
  */
-function transferPairScore(
+export function transferPairScore(
   debitLabel: string,
   creditLabel: string,
   debitDate: string,

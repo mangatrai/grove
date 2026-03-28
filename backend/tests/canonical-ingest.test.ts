@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { transferPairScore } from "../src/modules/canonical/canonical-ingest.service.js";
 import {
   computeTransactionFingerprint,
   descriptionsCompatibleForNearDuplicate,
@@ -7,6 +8,10 @@ import {
   normalizeDescriptionForFingerprint,
   normalizeTxnDateForFingerprint
 } from "../src/modules/canonical/transaction-fingerprint.js";
+
+function sameDayDiff(_a: string, _b: string): number {
+  return 0;
+}
 
 describe("transaction fingerprint (Epic 4.2)", () => {
   it("normalizes amounts to cents deterministically", () => {
@@ -68,5 +73,67 @@ describe("transaction fingerprint (Epic 4.2)", () => {
     expect(descriptionsCompatibleForNearDuplicate("starbucks coffee", "starbucks coffee shop")).toBe(true);
     expect(descriptionsCompatibleForNearDuplicate("x", "y")).toBe(false);
     expect(descriptionsCompatibleForNearDuplicate("whole foods market", "whole foods")).toBe(true);
+  });
+});
+
+describe("transfer pair score (Epic 5.2)", () => {
+  const d = "2026-03-01";
+
+  it("scores asymmetric card payoff when credit leg omits PAYMENT (THANK YOU only)", () => {
+    expect(
+      transferPairScore("ONLINE PAYMENT TO VISA", "THANK YOU", d, d, sameDayDiff)
+    ).toBe(88);
+    expect(
+      transferPairScore("ACH PAYMENT TO DISCOVER CARD", "CREDITED", d, d, sameDayDiff)
+    ).toBe(88);
+  });
+
+  it("does not treat ACH + THANK YOU as card payoff without card/loan cues on the debit", () => {
+    expect(transferPairScore("ACH PAYMENT", "THANK YOU", d, d, sameDayDiff)).toBe(0);
+  });
+
+  it("scores full-alignment card payment memos at 92", () => {
+    expect(
+      transferPairScore(
+        "AUTOPAY ACH PAYMENT TO CHASE CARD",
+        "PAYMENT RECEIVED - THANK YOU",
+        d,
+        d,
+        sameDayDiff
+      )
+    ).toBe(92);
+  });
+
+  it("scores loan-tagged payment legs with directional memos at 92", () => {
+    expect(
+      transferPairScore(
+        "ONLINE PAYMENT TO HELOC",
+        "PAYMENT RECEIVED - THANK YOU HELOC",
+        d,
+        d,
+        sameDayDiff
+      )
+    ).toBe(92);
+  });
+
+  it("scores mortgage and escrow payment memos with directional alignment", () => {
+    expect(
+      transferPairScore(
+        "ONLINE PAYMENT MORTGAGE",
+        "PAYMENT APPLIED ESCROW",
+        d,
+        d,
+        sameDayDiff
+      )
+    ).toBe(92);
+  });
+
+  it("keeps generic payment wording at 0 without transfer-like direction and context", () => {
+    expect(transferPairScore("AUTOMATIC PAYMENT", "PAYMENT POSTED", d, d, sameDayDiff)).toBe(0);
+  });
+
+  it("still prefers identical normalized descriptions at 100", () => {
+    const label = "INTERNAL XFER SAVINGS";
+    expect(transferPairScore(label, label, d, d, sameDayDiff)).toBe(100);
   });
 });

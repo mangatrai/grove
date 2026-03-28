@@ -744,6 +744,53 @@ table.ledger-table thead th {
   align-items: flex-end;
 }
 
+.transactions-toolbar__review-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: flex-start;
+  margin-top: 0.55rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #e8edf2;
+}
+
+.transactions-toolbar__resolution-types {
+  min-width: 14rem;
+  min-height: 6.5rem;
+  font: inherit;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.transactions-toolbar__review-hint {
+  flex: 1;
+  min-width: 12rem;
+  margin: 1.4rem 0 0;
+  font-size: 0.78rem;
+}
+
+.transactions-bulk-bar {
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin: 0.75rem 0 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+  background: #f0f9ff;
+  font-size: 0.85rem;
+}
+
+.review-queue-migrate-banner {
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  border: 1px solid #bae6fd;
+  background: #f0f9ff;
+}
+
 .transactions-page__why-cell {
   max-width: 14rem;
 }

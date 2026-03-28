@@ -13,9 +13,11 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 
 | Param | Description |
 |-------|-------------|
-| `preset` | `month` \| `ytd` \| `rolling_30` \| `rolling_90` (required) |
-| `month` | `YYYY-MM` — **required** when `preset=month` |
-| `asOf` | `YYYY-MM-DD` — end date for YTD / rolling windows, and month clip for trend; defaults to **today (UTC)** |
+| `preset` | `month` \| `ytd` \| `rolling_30` \| `rolling_90` — **required** unless both **`dateFrom`** and **`dateTo`** are set |
+| `month` | `YYYY-MM` — **required** when `preset=month` (not used for custom range) |
+| `asOf` | `YYYY-MM-DD` — end date for YTD / rolling windows, and month clip for trend; defaults to **today (UTC)** (ignored when using **`dateFrom`** / **`dateTo`**) |
+| `dateFrom` | `YYYY-MM-DD` — inclusive start of a **custom** KPI range; must appear together with **`dateTo`** |
+| `dateTo` | `YYYY-MM-DD` — inclusive end of a **custom** KPI range; must appear together with **`dateFrom`** |
 | `breakdown` | `true` \| `false` — include **`byAccount`** table for the KPI range (default `false`) |
 | `categoryBreakdown` | `true` \| `false` — include **`byCategory`** for the KPI range and **`monthlyOutflowsByCategory`** for the six-month trend window (default `false`). Uses `LEFT JOIN category`; missing category shows as **Uncategorized**. |
 | `categoryRollup` | `leaf` \| `parent` — when `categoryBreakdown` is true, aggregate by **leaf** `category_id` or roll up to **parent** group name (default **`parent`**). |
@@ -27,6 +29,9 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 - **ytd** — `year(asOf)-01-01` through `asOf` inclusive.
 - **rolling_30** — `asOf` minus 29 days through `asOf` (30 days inclusive).
 - **rolling_90** — 90 days inclusive ending `asOf`.
+- **Custom** — when **`dateFrom`** and **`dateTo`** are both valid calendar dates: that inclusive window. Maximum span **366** inclusive days; `dateFrom` must be ≤ `dateTo`. Response `range.preset` is **`custom`** and `asOf` equals **`dateTo`** (trend windows still anchor on `range.end`). If both dates are sent, they define the range even if `preset` is also present.
+
+**Future:** Per-category prior-period totals (parallel to household `comparison`) are not in the response yet; see TODO in `cash-summary.service.ts`.
 
 ### Comparison blocks
 
@@ -34,7 +39,7 @@ Every response includes `comparison.previousPeriod` and may include `comparison.
 
 - `month` preset: both **Previous month** and **Same month last year**.
 - `ytd` preset: **YTD last year** as `previousPeriod`.
-- `rolling_30` / `rolling_90`: immediately preceding same-length window as `previousPeriod`.
+- `rolling_30` / `rolling_90` / **`custom`**: immediately preceding same-length window as `previousPeriod` (no `yearOverYear`).
 
 Each comparison includes:
 
@@ -153,8 +158,12 @@ Returns **6** calendar months ending in the month containing `range.end`, with t
 
 ### Errors
 
-- **400** — invalid query (e.g. `preset=month` without `month`).
+- **400** — invalid query (e.g. `preset=month` without `month`, only one of `dateFrom`/`dateTo`, missing `preset` when no custom dates). Body `message` may be: `INVALID_DATE_FORMAT`, `INVALID_DATE_ORDER`, `CUSTOM_RANGE_TOO_LONG`, `dateFrom and dateTo must both be provided…`, etc.
 - **404** — `accountId` not found for household (`code: ACCOUNT_NOT_FOUND`).
 - **401** — missing or invalid token.
 
-UI: authenticated **`/`** (home / cash dashboard; legacy **`/dashboard`** redirects to **`/`**).
+UI: authenticated **`/`** (home / cash dashboard; legacy **`/dashboard`** redirects to **`/`**). Period control includes **Custom range** (from/to + Apply) using `dateFrom` / `dateTo`.
+
+### CHANGE_HISTORY
+
+- **CR-015:** `GET /reports/cash-summary` — optional inclusive **`dateFrom`** / **`dateTo`** (`YYYY-MM-DD`) for a custom window (max 366 days); **`preset`** optional when both are set; response `range.preset` may be **`custom`**; prior-period comparison matches rolling windows (same-length previous window).

@@ -389,7 +389,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 ## Epic 11: Application shell, transactions hub, and settings (P0)
 **Goal:** Adopt a **persistent shell** and **Transactions-first** IA so users navigate less and work from dense, filterable surfaces — **PRD §13** (phases A–D). **Data density** is a **feature** for analysis, not a bug to minimize, provided hierarchy and filters stay clear.
 
-**Status:** 🟡 In progress (2026-03-27): **11.1**, **11.3**, **11.4** partial; **11.2** command center shipped (**CR-013**). **11.5** = consolidate review UX (**DOC-005**).
+**Status:** 🟡 In progress (2026-03-28): **11.1**, **11.3**, **11.4** partial; **11.2** command center shipped (**CR-013**); **11.5** partial (**CR-014** — type filter, bulk, session link slice). **DOC-005** end state still pending.
 
 ### Story 11.1 - Phase A: Shell and wayfinding
 **Status: 🟡 Partial (2026-03-27).** Collapsible sidebar + top bar + Account menu shipped (**UX-007**).  
@@ -411,7 +411,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - User can switch All / Needs review without leaving the shell; manual add is obvious; filters stay visible while scrolling the table (or clear sticky affordance).
 
 ### Story 11.5 - Unify review: port Review queue into Transactions → Needs review
-**Status: ⬜ Not started (tracked 2026-03-27, **DOC-005**).** **Intent:** Long term, **only** **`/transactions`** (especially **Needs review**) should be where users clear import/review work; **`/resolution`** goes away or becomes a redirect. **Until then:** keep **Review queue** in the nav — it still has flows not yet replicated on the ledger hub.  
+**Status: 🟡 Partial (2026-03-28, **CR-014**).** **Shipped slice:** **`GET /transactions`** **`resolutionType`** + **`openReviewItems`** / **`importSessionId`** when **`needsReview=true`**; **Needs review** UI — type multi-select, checkboxes + select all, bulk status/category via resolution ids, **Import session** column; queue banner → Transactions. **Remaining vs full queue:** per-row **In review / Resolve / Reopen** and **PATCH /resolution/:id** on Transactions; **raw preview** / classification pills; **duplicate / transfer / reconciliation**-specific actions; **Home** drill-downs still targeting the resolution route; sidebar removal / redirect. **Intent (** **DOC-005** **):** long term **only** **`/transactions`** for review work.  
 - **Port / replace from `ResolutionQueuePage` + `GET/PATCH /resolution` + bulk APIs:** multi-select + **bulk status** (`POST /resolution/bulk`), **bulk category** (`POST /resolution/bulk-apply-category`), **type filters** and summary chips, per-row actions for **duplicate_ambiguity** / **transfer_ambiguity** / **reconciliation_mismatch**, **import context** (raw preview, session/file links), and **Home** banner links that today target **`/resolution`**.  
 - **Then:** remove sidebar **Review queue** (or keep as alias to **`/transactions?needsReview=true`**), update **Import workspace** CTAs, and trim duplicate API surface if safe.  
 - Acceptance:

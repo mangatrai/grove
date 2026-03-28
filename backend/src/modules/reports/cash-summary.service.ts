@@ -1,14 +1,22 @@
 import { db } from "../../db/sqlite.js";
 import { getHouseholdMonthlySavingsTarget } from "../household/household.service.js";
 
-export type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90";
+export type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90" | "custom";
+
+/** Inclusive span guard for `dateFrom`/`dateTo` custom ranges (API). */
+export const CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS = 366;
 
 export interface CashSummaryInput {
-  preset: CashPreset;
+  /** Required unless both `dateFrom` and `dateTo` are set (custom range). */
+  preset?: CashPreset;
   /** Required when preset is `month` (YYYY-MM). */
   month?: string;
   /** Inclusive end date for rolling/YTD and month boundaries (YYYY-MM-DD). Defaults to today (UTC). */
   asOf?: string;
+  /** Inclusive start (YYYY-MM-DD). When both `dateFrom` and `dateTo` are set, they define the KPI range instead of `preset`. */
+  dateFrom?: string;
+  /** Inclusive end (YYYY-MM-DD). */
+  dateTo?: string;
   /** Include per-account breakdown for the KPI range. */
   breakdown: boolean;
   /** Include per-category breakdown (`LEFT JOIN category`; null category = "Uncategorized"). */
@@ -125,6 +133,8 @@ export interface CashSummaryResult {
   monthlyOutflowsByCategory: CashSummaryMonthCategoryOutflows[] | null;
 }
 
+// TODO(Epic 7+): Optional API fields for per-category previous-window totals/deltas (second aggregateByCategory over prior range).
+
 function defaultAsOfUtc(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -221,8 +231,35 @@ function buildSpendingPower(
   };
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function assertValidIsoCalendarDate(iso: string): void {
+  if (!ISO_DATE_RE.test(iso)) {
+    throw new Error("INVALID_DATE_FORMAT");
+  }
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y!, m! - 1, d!);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m! - 1 || dt.getDate() !== d!) {
+    throw new Error("INVALID_DATE_FORMAT");
+  }
+}
+
+function assertCustomDateRange(dateFrom: string, dateTo: string): void {
+  assertValidIsoCalendarDate(dateFrom);
+  assertValidIsoCalendarDate(dateTo);
+  if (dateFrom > dateTo) {
+    throw new Error("INVALID_DATE_ORDER");
+  }
+  const days = inclusiveCalendarDays(dateFrom, dateTo);
+  if (days > CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS) {
+    throw new Error("CUSTOM_RANGE_TOO_LONG");
+  }
+}
+
 function buildRangeLabel(preset: CashPreset, start: string, end: string, month?: string): string {
   switch (preset) {
+    case "custom":
+      return `Custom range (${start} – ${end})`;
     case "month": {
       const label = month ?? start.slice(0, 7);
       const [y, mo] = label.split("-");
@@ -257,12 +294,33 @@ export function resolveCashRange(input: CashSummaryInput): {
   range: CashSummaryRange;
   asOf: string;
 } {
+  const fromQ = input.dateFrom?.trim();
+  const toQ = input.dateTo?.trim();
+  if (fromQ || toQ) {
+    if (!fromQ || !toQ) {
+      throw new Error("CUSTOM_RANGE_INCOMPLETE");
+    }
+    assertCustomDateRange(fromQ, toQ);
+    const range: CashSummaryRange = {
+      start: fromQ,
+      end: toQ,
+      preset: "custom",
+      label: buildRangeLabel("custom", fromQ, toQ)
+    };
+    return { range, asOf: toQ };
+  }
+
+  const preset = input.preset;
+  if (!preset) {
+    throw new Error("INVALID_PRESET");
+  }
+
   const asOf = input.asOf?.trim() || defaultAsOfUtc();
   let start: string;
   let end: string;
   let month: string | undefined;
 
-  switch (input.preset) {
+  switch (preset) {
     case "month": {
       const ym = input.month?.trim();
       if (!ym || !/^\d{4}-\d{2}$/.test(ym)) {
@@ -294,8 +352,8 @@ export function resolveCashRange(input: CashSummaryInput): {
   const range: CashSummaryRange = {
     start,
     end,
-    preset: input.preset,
-    label: buildRangeLabel(input.preset, start, end, month)
+    preset,
+    label: buildRangeLabel(preset, start, end, month)
   };
 
   return { range, asOf };
@@ -358,11 +416,11 @@ function aggregateForRange(
   };
 }
 
-function resolveComparisonRanges(input: CashSummaryInput, range: CashSummaryRange): {
+function resolveComparisonRanges(_input: CashSummaryInput, range: CashSummaryRange): {
   previous: { label: string; start: string; end: string };
   yearOverYear?: { label: string; start: string; end: string };
 } {
-  if (input.preset === "month") {
+  if (range.preset === "month") {
     const currentYm = range.start.slice(0, 7);
     const prevYm = monthsBack(currentYm, 1);
     const yoyYm = monthsBack(currentYm, 12);
@@ -380,7 +438,7 @@ function resolveComparisonRanges(input: CashSummaryInput, range: CashSummaryRang
     };
   }
 
-  if (input.preset === "ytd") {
+  if (range.preset === "ytd") {
     return {
       previous: {
         label: "YTD last year",

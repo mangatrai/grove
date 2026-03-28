@@ -257,6 +257,11 @@ export function ResolutionQueuePage() {
   return (
     <div>
       <div className="card">
+        <p className="muted review-queue-migrate-banner">
+          Prefer working in{" "}
+          <Link to="/transactions?needsReview=true">Transactions → Needs review</Link> for a single place to triage rows;
+          this queue remains for flows not yet moved there (<strong>Epic 11.5</strong>).
+        </p>
         <h1>Review queue</h1>
         <p className="muted">
           Items from imports: near-duplicates, <strong>unknown category</strong> (no rule matched — assign a category

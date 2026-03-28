@@ -11,6 +11,8 @@ type CategoryOption = {
   parentId: string | null;
 };
 
+type OpenReviewItem = { id: string; type: string };
+
 type TxRow = {
   id: string;
   txnDate: string;
@@ -28,6 +30,24 @@ type TxRow = {
   categoryId: string | null;
   categoryName: string | null;
   reviewReasons?: string[];
+  openReviewItems?: OpenReviewItem[];
+  importSessionId?: string | null;
+};
+
+const LEDGER_RESOLUTION_TYPES = [
+  "unknown_category",
+  "duplicate_ambiguity",
+  "transfer_ambiguity",
+  "reconciliation_mismatch"
+] as const;
+
+type LedgerResolutionType = (typeof LEDGER_RESOLUTION_TYPES)[number];
+
+const RESOLUTION_TYPE_LABELS: Record<LedgerResolutionType, string> = {
+  unknown_category: "Unknown category",
+  duplicate_ambiguity: "Near-duplicate",
+  transfer_ambiguity: "Transfer ambiguity",
+  reconciliation_mismatch: "Reconciliation"
 };
 
 type ListResponse = {
@@ -65,6 +85,16 @@ export function TransactionsPage() {
   const categoryFilter = searchParams.get("categoryId")?.trim() || null;
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
+  const resolutionTypes = useMemo((): LedgerResolutionType[] => {
+    const seen = new Set<LedgerResolutionType>();
+    for (const r of searchParams.getAll("resolutionType")) {
+      if (LEDGER_RESOLUTION_TYPES.includes(r as LedgerResolutionType)) {
+        seen.add(r as LedgerResolutionType);
+      }
+    }
+    return [...seen];
+  }, [searchParams]);
+  const resolutionTypesKey = useMemo(() => [...resolutionTypes].sort().join("|"), [resolutionTypes]);
   const searchFromUrl = searchParams.get("search")?.trim() ?? "";
   const amountMinUrl = searchParams.get("amountMin")?.trim() ?? "";
   const amountMaxUrl = searchParams.get("amountMax")?.trim() ?? "";
@@ -96,6 +126,9 @@ export function TransactionsPage() {
   const [addMemo, setAddMemo] = useState("");
   const [addCategoryId, setAddCategoryId] = useState<string | null>(null);
   const addFirstFieldRef = useRef<HTMLSelectElement | null>(null);
+  const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(() => new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
+  const [savingBulk, setSavingBulk] = useState(false);
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -142,6 +175,9 @@ export function TransactionsPage() {
     if (needsReviewTab) {
       qs.set("needsReview", "true");
     }
+    for (const rt of resolutionTypes) {
+      qs.append("resolutionType", rt);
+    }
     if (searchFromUrl) {
       qs.set("search", searchFromUrl);
     }
@@ -179,6 +215,7 @@ export function TransactionsPage() {
     categoryFilter,
     uncategorizedOnly,
     needsReviewTab,
+    resolutionTypesKey,
     searchFromUrl,
     dateFrom,
     dateTo,
@@ -203,6 +240,24 @@ export function TransactionsPage() {
   }, [token, load]);
 
   useEffect(() => {
+    setSelectedTxnIds(new Set());
+  }, [
+    needsReviewTab,
+    resolutionTypesKey,
+    sessionFilter,
+    categoryFilter,
+    uncategorizedOnly,
+    searchFromUrl,
+    dateFrom,
+    dateTo,
+    accountFilter,
+    amountMinUrl,
+    amountMaxUrl,
+    pageOffset,
+    pageLimit
+  ]);
+
+  useEffect(() => {
     if (!addOpen) {
       return;
     }
@@ -210,6 +265,134 @@ export function TransactionsPage() {
     const id = window.requestAnimationFrame(() => addFirstFieldRef.current?.focus());
     return () => window.cancelAnimationFrame(id);
   }, [addOpen]);
+
+  const selectedCount = selectedTxnIds.size;
+  const allVisibleSelected = useMemo(
+    () =>
+      Boolean(data?.transactions.length) &&
+      data!.transactions.every((t) => selectedTxnIds.has(t.id)),
+    [data, selectedTxnIds]
+  );
+
+  function toggleTxnSelected(txnId: string) {
+    setSelectedTxnIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(txnId)) {
+        next.delete(txnId);
+      } else {
+        next.add(txnId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    if (!data?.transactions.length) {
+      return;
+    }
+    if (allVisibleSelected) {
+      setSelectedTxnIds(new Set());
+    } else {
+      setSelectedTxnIds(new Set(data.transactions.map((t) => t.id)));
+    }
+  }
+
+  function collectOpenResolutionIdsFromSelection(): string[] {
+    if (!data) {
+      return [];
+    }
+    const out: string[] = [];
+    for (const t of data.transactions) {
+      if (!selectedTxnIds.has(t.id)) {
+        continue;
+      }
+      for (const item of t.openReviewItems ?? []) {
+        out.push(item.id);
+      }
+    }
+    return [...new Set(out)];
+  }
+
+  function collectUnknownCategoryResolutionIds(): string[] {
+    if (!data) {
+      return [];
+    }
+    const out: string[] = [];
+    for (const t of data.transactions) {
+      if (!selectedTxnIds.has(t.id)) {
+        continue;
+      }
+      for (const item of t.openReviewItems ?? []) {
+        if (item.type === "unknown_category") {
+          out.push(item.id);
+        }
+      }
+    }
+    return [...new Set(out)];
+  }
+
+  async function bulkApplyCategory() {
+    const ids = collectUnknownCategoryResolutionIds();
+    if (ids.length === 0) {
+      setError("Select rows with an open “Unknown category” review item.");
+      return;
+    }
+    if (!bulkCategoryId) {
+      setError("Choose a category.");
+      return;
+    }
+    setError(null);
+    setSavingBulk(true);
+    try {
+      const res = await apiJson<{ updated: { id: string }[]; errors: { id: string; code: string }[] }>(
+        "/resolution/bulk-apply-category",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids, categoryId: bulkCategoryId })
+        }
+      );
+      if (res.errors.length > 0) {
+        setError(`Applied to ${res.updated.length}; ${res.errors.length} row(s) could not be updated.`);
+      }
+      setSelectedTxnIds(new Set());
+      setBulkCategoryId("");
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk category apply failed");
+    } finally {
+      setSavingBulk(false);
+    }
+  }
+
+  async function bulkUpdateResolutionStatus(status: "open" | "in_review" | "resolved") {
+    const ids = collectOpenResolutionIdsFromSelection();
+    if (ids.length === 0) {
+      setError("Selected rows have no open review items to update.");
+      return;
+    }
+    setError(null);
+    setSavingBulk(true);
+    try {
+      const res = await apiJson<{ updated: { id: string; status: string }[]; errors: { id: string; code: string }[] }>(
+        "/resolution/bulk",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids, status })
+        }
+      );
+      if (res.errors.length > 0) {
+        setError(
+          `Updated ${res.updated.length} item(s); ${res.errors.length} could not be changed (${res.errors.map((e) => e.code).join(", ")})`
+        );
+      }
+      setSelectedTxnIds(new Set());
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk update failed");
+    } finally {
+      setSavingBulk(false);
+    }
+  }
 
   async function updateCategory(txnId: string, categoryId: string | null) {
     setSavingId(txnId);
@@ -250,6 +433,7 @@ export function TransactionsPage() {
       dateTo ||
       accountFilter ||
       needsReviewTab ||
+      resolutionTypes.length > 0 ||
       searchFromUrl ||
       amountMinUrl !== "" ||
       amountMaxUrl !== ""
@@ -262,6 +446,16 @@ export function TransactionsPage() {
     const next = new URLSearchParams(searchParams);
     mutate(next);
     setSearchParams(next);
+  }
+
+  function setResolutionTypesInUrl(nextTypes: LedgerResolutionType[]) {
+    mergeParams((n) => {
+      n.delete("resolutionType");
+      for (const t of nextTypes) {
+        n.append("resolutionType", t);
+      }
+      n.set("offset", "0");
+    });
   }
 
   function updatePaging(nextOffset: number) {
@@ -278,6 +472,7 @@ export function TransactionsPage() {
         n.set("needsReview", "true");
       } else {
         n.delete("needsReview");
+        n.delete("resolutionType");
       }
     });
   }
@@ -416,6 +611,34 @@ export function TransactionsPage() {
             Needs review
           </button>
         </div>
+        {needsReviewTab ? (
+          <div className="transactions-toolbar__review-row">
+            <label className="transactions-toolbar__field">
+              <span className="transactions-toolbar__label">Review types</span>
+              <select
+                multiple
+                size={4}
+                className="transactions-toolbar__resolution-types"
+                value={resolutionTypes}
+                aria-label="Filter by open review item types"
+                onChange={(e) => {
+                  const next = Array.from(e.target.selectedOptions).map((o) => o.value as LedgerResolutionType);
+                  setResolutionTypesInUrl(next);
+                }}
+              >
+                {LEDGER_RESOLUTION_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {RESOLUTION_TYPE_LABELS[t]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="muted transactions-toolbar__review-hint">
+              Cmd or Ctrl + click to select multiple types. With none selected, all needs-review rows are shown. Same
+              open-item types as the review queue.
+            </p>
+          </div>
+        ) : null}
         <div className="transactions-toolbar__row">
           <label className="transactions-toolbar__field">
             <span className="transactions-toolbar__label">Search</span>
@@ -567,6 +790,13 @@ export function TransactionsPage() {
           <p className="muted">
             Active filters:
             {needsReviewTab ? <> [needs review]</> : null}
+            {resolutionTypes.length > 0 ? (
+              <>
+                {" "}
+                [review types:{" "}
+                <code>{resolutionTypes.map((t) => RESOLUTION_TYPE_LABELS[t]).join(", ")}</code>]
+              </>
+            ) : null}
             {categoryName ? (
               <>
                 {" "}
@@ -613,6 +843,76 @@ export function TransactionsPage() {
             . <button type="button" className="link-button" onClick={() => clearFilters()}>Clear filters</button>
           </p>
         ) : null}
+        {needsReviewTab && selectedCount > 0 ? (
+          <div className="transactions-bulk-bar row" role="status" aria-live="polite">
+            <span className="muted">
+              {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
+            </span>
+            <button
+              type="button"
+              className="secondary"
+              disabled={savingBulk}
+              onClick={() => void bulkUpdateResolutionStatus("in_review")}
+            >
+              In review
+            </button>
+            <button type="button" disabled={savingBulk} onClick={() => void bulkUpdateResolutionStatus("resolved")}>
+              Resolve
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={savingBulk}
+              onClick={() => void bulkUpdateResolutionStatus("open")}
+            >
+              Reopen
+            </button>
+            <label style={{ marginBottom: 0, marginLeft: "0.25rem" }}>
+              <span className="muted" style={{ marginRight: "0.35rem" }}>
+                Category (unknown items)
+              </span>
+              <select
+                value={bulkCategoryId}
+                onChange={(e) => setBulkCategoryId(e.target.value)}
+                disabled={savingBulk}
+                style={{ minWidth: "10rem" }}
+              >
+                <option value="">—</option>
+                {categories
+                  .filter((c) => !c.parentId)
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((p) => {
+                    const children = categories
+                      .filter((c) => c.parentId === p.id)
+                      .sort((a, b) => a.name.localeCompare(b.name));
+                    if (children.length === 0) {
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      );
+                    }
+                    return (
+                      <optgroup key={p.id} label={p.name}>
+                        {children.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={savingBulk || !bulkCategoryId}
+              onClick={() => void bulkApplyCategory()}
+            >
+              Apply category
+            </button>
+          </div>
+        ) : null}
         {error ? <p className="error">{error}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && data ? (
@@ -645,11 +945,24 @@ export function TransactionsPage() {
                 <table className="ledger-table">
                   <thead>
                     <tr>
+                      {needsReviewTab ? (
+                        <th style={{ width: "2.5rem" }}>
+                          <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={() => toggleSelectAllVisible()}
+                            disabled={savingBulk}
+                            title="Select all rows on this page"
+                            aria-label="Select all rows on this page"
+                          />
+                        </th>
+                      ) : null}
                       <th>Date</th>
                       <th>Account</th>
                       <th>Amount</th>
                       <th>Description</th>
                       {needsReviewTab ? <th>Why</th> : null}
+                      {needsReviewTab ? <th>Session</th> : null}
                       <th>Category</th>
                     </tr>
                   </thead>
@@ -664,6 +977,17 @@ export function TransactionsPage() {
                       const reasons = t.reviewReasons?.length ? t.reviewReasons.join(" · ") : "—";
                       return (
                         <tr key={t.id}>
+                          {needsReviewTab ? (
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={selectedTxnIds.has(t.id)}
+                                onChange={() => toggleTxnSelected(t.id)}
+                                disabled={savingBulk}
+                                aria-label={`Select row ${desc}`}
+                              />
+                            </td>
+                          ) : null}
                           <td>{t.txnDate}</td>
                           <td>{accountLabel}</td>
                           <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
@@ -675,11 +999,25 @@ export function TransactionsPage() {
                               </span>
                             </td>
                           ) : null}
+                          {needsReviewTab ? (
+                            <td style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>
+                              {t.importSessionId ? (
+                                <Link
+                                  to={`/transactions?needsReview=true&sessionId=${t.importSessionId}`}
+                                  className="muted"
+                                >
+                                  Import session
+                                </Link>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
+                            </td>
+                          ) : null}
                           <td>
                             <LedgerCategoryPicker
                               categories={categories}
                               value={t.categoryId}
-                              disabled={savingId === t.id}
+                              disabled={savingId === t.id || savingBulk}
                               onChange={(v) => void updateCategory(t.id, v)}
                               ariaLabel={`Category for ${desc}`}
                             />

@@ -587,6 +587,180 @@ describe("import sessions and file intake", () => {
     expect(rows[0]?.transfer_group_id).toBe(rows[1]?.transfer_group_id);
   });
 
+  it("sets transfer_group when card payment credit leg has no PAYMENT token (THANK YOU only)", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const checkingAccountId = crypto.randomUUID();
+    const cardAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Asymmetric Card Pay Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingAccountId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'credit_card', 'Asymmetric Card Pay Card', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(cardAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'asymmetric-thanks.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const txnDate = "1999-11-11";
+    const rawDebitId = crypto.randomUUID();
+    const rawCreditId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      0,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: "ONLINE PAYMENT TO VISA",
+        amount: -88.5,
+        financial_account_id: checkingAccountId
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      1,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: "THANK YOU",
+        amount: 88.5,
+        financial_account_id: cardAccountId
+      })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const rows = db.prepare(
+      `SELECT amount, transfer_group_id
+       FROM transaction_canonical
+       WHERE household_id = ? AND account_id IN (?, ?)
+       ORDER BY amount ASC`
+    ).all(householdId, checkingAccountId, cardAccountId) as Array<{
+      amount: number;
+      transfer_group_id: string | null;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.transfer_group_id).not.toBeNull();
+    expect(rows[1]?.transfer_group_id).not.toBeNull();
+    expect(rows[0]?.transfer_group_id).toBe(rows[1]?.transfer_group_id);
+  });
+
+  it("sets transfer_group for HELOC-style loan payment across checking and loan accounts", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const checkingAccountId = crypto.randomUUID();
+    const loanAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'HELOC Pay Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingAccountId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'loan', 'HELOC Pay Loan', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(loanAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'heloc-pay.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const txnDate = "1999-10-10";
+    const debitDesc = "ONLINE PAYMENT TO HELOC";
+    const creditDesc = "PAYMENT RECEIVED - THANK YOU";
+    const rawDebitId = crypto.randomUUID();
+    const rawCreditId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      0,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: debitDesc,
+        amount: -450,
+        financial_account_id: checkingAccountId
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      1,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: creditDesc,
+        amount: 450,
+        financial_account_id: loanAccountId
+      })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const rows = db.prepare(
+      `SELECT amount, transfer_group_id
+       FROM transaction_canonical
+       WHERE household_id = ? AND account_id IN (?, ?)
+       ORDER BY amount ASC`
+    ).all(householdId, checkingAccountId, loanAccountId) as Array<{
+      amount: number;
+      transfer_group_id: string | null;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.transfer_group_id).not.toBeNull();
+    expect(rows[1]?.transfer_group_id).not.toBeNull();
+    expect(rows[0]?.transfer_group_id).toBe(rows[1]?.transfer_group_id);
+  });
+
   it("keeps multi-candidate payment matches in transfer_ambiguity queue", async () => {
     const token = await loginAndGetToken();
     const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
@@ -1144,6 +1318,78 @@ describe("transactions command center (Epic 11.2)", () => {
     expect(hit).toBeDefined();
     expect(Array.isArray(hit.reviewReasons)).toBe(true);
     expect(hit.reviewReasons).toContain("Uncategorized");
+  });
+
+  it("rejects resolutionType without needsReview=true", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/transactions?resolutionType=unknown_category")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(String(res.body.message)).toContain("needsReview");
+  });
+
+  it("filters needsReview by resolutionType and returns openReviewItems", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const txnId = crypto.randomUUID();
+    const resId = crypto.randomUUID();
+    const fp = crypto.randomBytes(32).toString("hex");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, 'debit', 'res-type-filter', NULL, NULL, ?, 'manual:rtf', 'posted')`
+    ).run(
+      txnId,
+      householdId.household_id,
+      SEED_BOA_CHECKING,
+      "30000000-0000-0000-0000-000000000004",
+      "2026-02-01",
+      -3,
+      fp
+    );
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
+    ).run(resId, householdId.household_id, txnId, JSON.stringify({ kind: "unknown_category" }));
+
+    const allReview = await request(app)
+      .get(`/transactions?needsReview=true&limit=100&search=${encodeURIComponent("res-type-filter")}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(allReview.status).toBe(200);
+    const allHit = allReview.body.transactions.find((t: { id: string }) => t.id === txnId);
+    expect(allHit).toBeDefined();
+    expect(Array.isArray(allHit.openReviewItems)).toBe(true);
+    expect(allHit.openReviewItems.some((x: { id: string }) => x.id === resId)).toBe(true);
+
+    const xferOnly = await request(app)
+      .get(
+        `/transactions?needsReview=true&resolutionType=transfer_ambiguity&limit=100&search=${encodeURIComponent("res-type-filter")}`
+      )
+      .set("authorization", `Bearer ${token}`);
+    expect(xferOnly.status).toBe(200);
+    expect(xferOnly.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(false);
+
+    const catOnly = await request(app)
+      .get(
+        `/transactions?needsReview=true&resolutionType=unknown_category&limit=100&search=${encodeURIComponent("res-type-filter")}`
+      )
+      .set("authorization", `Bearer ${token}`);
+    expect(catOnly.status).toBe(200);
+    expect(catOnly.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(true);
   });
 
   it("returns 409 when manual POST duplicates fingerprint", async () => {
@@ -1992,6 +2238,119 @@ describe("cash summary (reports)", () => {
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("ACCOUNT_NOT_FOUND");
+  });
+
+  it("returns 400 when only one of dateFrom/dateTo is provided", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/cash-summary?dateFrom=2025-01-01")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(String(res.body.message)).toContain("dateFrom");
+  });
+
+  it("returns 400 when preset is omitted and custom dates are not set", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/cash-summary?asOf=2025-06-01")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(String(res.body.message)).toMatch(/preset/i);
+  });
+
+  it("returns 400 for custom range with dateFrom after dateTo", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/cash-summary?dateFrom=2025-06-10&dateTo=2025-06-01")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("INVALID_DATE_ORDER");
+  });
+
+  it("returns 400 for custom range longer than 366 inclusive days", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/cash-summary?dateFrom=2024-01-01&dateTo=2025-01-01")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe("CUSTOM_RANGE_TOO_LONG");
+  });
+
+  it("aggregates KPIs for an inclusive custom dateFrom/dateTo range", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const testAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, '20000000-0000-0000-0000-000000000001', 'checking', 'Custom Range Cash Summary', '9996', 'USD', CURRENT_TIMESTAMP)`
+    ).run(testAccountId, householdId);
+
+    const inRange = "2010-05-15";
+    const outRange = "2010-01-01";
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    const fp3 = crypto.randomBytes(32).toString("hex");
+    const id1 = crypto.randomUUID();
+    const id2 = crypto.randomUUID();
+    const id3 = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id1, householdId, testAccountId, inRange, 100, "credit", "in", null, fp1, "test:custom-in");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id2, householdId, testAccountId, inRange, -40, "debit", "out", null, fp2, "test:custom-out");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
+    ).run(id3, householdId, testAccountId, outRange, 999, "credit", "outside", null, fp3, "test:custom-outside");
+
+    const res = await request(app)
+      .get(
+        `/reports/cash-summary?dateFrom=2010-05-01&dateTo=2010-05-31&breakdown=true&accountId=${testAccountId}`
+      )
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.range.preset).toBe("custom");
+    expect(res.body.range.start).toBe("2010-05-01");
+    expect(res.body.range.end).toBe("2010-05-31");
+    expect(res.body.asOf).toBe("2010-05-31");
+    expect(res.body.household.inflows).toBe(100);
+    expect(res.body.household.outflows).toBe(40);
+    expect(res.body.household.net).toBe(60);
+    expect(res.body.household.transactionCount).toBe(2);
+    // Same-length prior window as rolling presets (31 days May 1–31 → Mar 31 – Apr 30).
+    expect(res.body.comparison.previousPeriod.range.start).toBe("2010-03-31");
+    expect(res.body.comparison.previousPeriod.range.end).toBe("2010-04-30");
   });
 });
 

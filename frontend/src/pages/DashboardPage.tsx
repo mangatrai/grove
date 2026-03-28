@@ -17,7 +17,7 @@ import {
 import { apiJson, useAuthToken } from "../api";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
-type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90";
+type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90" | "custom";
 
 type CashSummaryCategoryRow = {
   categoryId: string | null;
@@ -105,8 +105,46 @@ function currentMonthStr(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function daysBeforeIso(endIso: string, days: number): string {
+  const [y, m, d] = endIso.split("-").map(Number);
+  const dt = new Date(y!, m! - 1, d!);
+  dt.setDate(dt.getDate() - days);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+}
+
 function asPreset(v: string | null): CashPreset {
-  return v === "month" || v === "ytd" || v === "rolling_30" || v === "rolling_90" ? v : "rolling_30";
+  return v === "month" || v === "ytd" || v === "rolling_30" || v === "rolling_90" || v === "custom"
+    ? v
+    : "rolling_30";
+}
+
+/** Read once at mount for stable initial dashboard scope from the URL. */
+function readDashboardScopeFromLocation(): {
+  preset: CashPreset;
+  monthStr: string;
+  asOf: string;
+  customFrom: string;
+  customTo: string;
+} {
+  const sp = new URLSearchParams(window.location.search);
+  const f = sp.get("dateFrom");
+  const t = sp.get("dateTo");
+  const asOf = sp.get("asOf") || todayISODate();
+  const month = sp.get("month") || currentMonthStr();
+  if (f && t) {
+    return { preset: "custom", monthStr: month, asOf, customFrom: f, customTo: t };
+  }
+  return {
+    preset: asPreset(sp.get("preset")),
+    monthStr: month,
+    asOf,
+    customFrom: daysBeforeIso(asOf, 29),
+    customTo: asOf
+  };
 }
 
 function formatDeltaMoney(n: number): string {
@@ -202,22 +240,38 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const token = useAuthToken();
-  const [preset, setPreset] = useState<CashPreset>(() => asPreset(searchParams.get("preset")));
-  const [monthStr, setMonthStr] = useState(searchParams.get("month") || currentMonthStr());
-  const [asOf, setAsOf] = useState(searchParams.get("asOf") || todayISODate());
+  const initialScope = useMemo(() => readDashboardScopeFromLocation(), []);
+  const [preset, setPreset] = useState<CashPreset>(() => initialScope.preset);
+  const [monthStr, setMonthStr] = useState(() => initialScope.monthStr);
+  const [asOf, setAsOf] = useState(() => initialScope.asOf);
+  const [customAppliedFrom, setCustomAppliedFrom] = useState(() => initialScope.customFrom);
+  const [customAppliedTo, setCustomAppliedTo] = useState(() => initialScope.customTo);
+  const [customDraftFrom, setCustomDraftFrom] = useState(() => initialScope.customFrom);
+  const [customDraftTo, setCustomDraftTo] = useState(() => initialScope.customTo);
   const [accountId, setAccountId] = useState<string>(() => searchParams.get("accountId") || "");
+
+  const customRangeDirty =
+    preset === "custom" &&
+    (customDraftFrom !== customAppliedFrom || customDraftTo !== customAppliedTo);
+
   useEffect(() => {
     const next = new URLSearchParams();
-    next.set("preset", preset);
-    next.set("asOf", asOf);
-    if (preset === "month") {
-      next.set("month", monthStr);
+    if (preset === "custom") {
+      next.set("preset", "custom");
+      next.set("dateFrom", customAppliedFrom);
+      next.set("dateTo", customAppliedTo);
+    } else {
+      next.set("preset", preset);
+      next.set("asOf", asOf);
+      if (preset === "month") {
+        next.set("month", monthStr);
+      }
     }
     if (accountId) {
       next.set("accountId", accountId);
     }
     setSearchParams(next, { replace: true });
-  }, [preset, monthStr, asOf, accountId, setSearchParams]);
+  }, [preset, monthStr, asOf, accountId, customAppliedFrom, customAppliedTo, setSearchParams]);
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [data, setData] = useState<CashSummaryResponse | null>(null);
@@ -242,13 +296,18 @@ export function DashboardPage() {
   const load = useCallback(async () => {
     setError(null);
     const qs = new URLSearchParams();
-    qs.set("preset", preset);
-    qs.set("asOf", asOf);
     qs.set("breakdown", "true");
     qs.set("categoryBreakdown", "true");
     qs.set("categoryRollup", "parent");
-    if (preset === "month") {
-      qs.set("month", monthStr);
+    if (preset === "custom") {
+      qs.set("dateFrom", customAppliedFrom);
+      qs.set("dateTo", customAppliedTo);
+    } else {
+      qs.set("preset", preset);
+      qs.set("asOf", asOf);
+      if (preset === "month") {
+        qs.set("month", monthStr);
+      }
     }
     if (accountId) {
       qs.set("accountId", accountId);
@@ -258,7 +317,7 @@ export function DashboardPage() {
     void apiJson<{ openByType: Record<string, number>; totalOpen: number }>("/resolution/summary")
       .then((r) => setResolutionSummary(r))
       .catch(() => setResolutionSummary(null));
-  }, [preset, monthStr, asOf, accountId]);
+  }, [preset, monthStr, asOf, accountId, customAppliedFrom, customAppliedTo]);
 
   useEffect(() => {
     if (!token) {
@@ -481,13 +540,25 @@ export function DashboardPage() {
             Period
             <select
               value={preset}
-              onChange={(e) => setPreset(e.target.value as CashPreset)}
+              onChange={(e) => {
+                const next = e.target.value as CashPreset;
+                if (next === "custom") {
+                  const end = asOf;
+                  const start = daysBeforeIso(end, 29);
+                  setCustomDraftFrom(start);
+                  setCustomDraftTo(end);
+                  setCustomAppliedFrom(start);
+                  setCustomAppliedTo(end);
+                }
+                setPreset(next);
+              }}
               style={{ marginLeft: "0.5rem", width: "auto", minWidth: "12rem" }}
             >
               <option value="month">Calendar month</option>
               <option value="ytd">Year to date</option>
               <option value="rolling_30">Last 30 days</option>
               <option value="rolling_90">Last 90 days</option>
+              <option value="custom">Custom range</option>
             </select>
           </label>
 
@@ -503,15 +574,48 @@ export function DashboardPage() {
             </label>
           ) : null}
 
-          <label>
-            As of (end date)
-            <input
-              type="date"
-              value={asOf}
-              onChange={(e) => setAsOf(e.target.value)}
-              style={{ marginLeft: "0.5rem", width: "auto" }}
-            />
-          </label>
+          {preset === "custom" ? (
+            <>
+              <label>
+                From
+                <input
+                  type="date"
+                  value={customDraftFrom}
+                  onChange={(e) => setCustomDraftFrom(e.target.value)}
+                  style={{ marginLeft: "0.5rem", width: "auto" }}
+                />
+              </label>
+              <label>
+                To
+                <input
+                  type="date"
+                  value={customDraftTo}
+                  onChange={(e) => setCustomDraftTo(e.target.value)}
+                  style={{ marginLeft: "0.5rem", width: "auto" }}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!customRangeDirty}
+                onClick={() => {
+                  setCustomAppliedFrom(customDraftFrom);
+                  setCustomAppliedTo(customDraftTo);
+                }}
+              >
+                Apply
+              </button>
+            </>
+          ) : (
+            <label>
+              As of (end date)
+              <input
+                type="date"
+                value={asOf}
+                onChange={(e) => setAsOf(e.target.value)}
+                style={{ marginLeft: "0.5rem", width: "auto" }}
+              />
+            </label>
+          )}
         </div>
 
         {error ? <p className="error">{error}</p> : null}
@@ -908,8 +1012,9 @@ export function DashboardPage() {
             <div className="chart-section">
               <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>Monthly net (last 6 months)</h2>
               <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                Each bar is net cashflow for that calendar month (through the &quot;as of&quot; date in the current
-                month).
+                {preset === "custom"
+                  ? "Each bar is net cashflow for that calendar month (the last month is clipped to your custom range end)."
+                  : "Each bar is net cashflow for that calendar month (through the \"as of\" date in the current month)."}
               </p>
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height={300}>

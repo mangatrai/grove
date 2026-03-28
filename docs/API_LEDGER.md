@@ -14,6 +14,7 @@ Household-scoped access to `transaction_canonical`: **GET** lists rows with opti
 - `categoryId` — optional UUID; filters to that category, or — if it is a **parent** — to that parent and all its **child** categories.
 - `uncategorizedOnly` — `true` / `false`; when `true`, only rows with **`category_id` IS NULL** (do not combine with `categoryId`).
 - `needsReview` — `true` / `false`; when `true`, only rows that need attention: **`category_id` IS NULL**, **`status` ≠ `posted`**, or an **open** / **in_review** **`resolution_item`** for this row (**`unknown_category`**, **`transfer_ambiguity`**, **`reconciliation_mismatch`** on canonical id, or **`duplicate_ambiguity`** when **`source_ref = 'raw:' || resolution target_id`**).
+- `resolutionType` — optional filter, **only when `needsReview=true`** (otherwise **400**). Repeat the query key or use comma-separated values. Allowed values: **`unknown_category`**, **`duplicate_ambiguity`**, **`transfer_ambiguity`**, **`reconciliation_mismatch`**. Narrows the list to rows that have at least one **open** / **in_review** resolution item of one of the given types, using the **same link rules** as the overall needs-review predicate (canonical `target_id` vs `raw:` + duplicate pattern).
 - `search` — optional string; case-insensitive substring match on **`merchant`** and **`memo`** concatenated (not ranked full-text search).
 - `amountMin`, `amountMax` — optional numbers; filter on signed **`amount`** (inclusive).
 - `dateFrom`, `dateTo` — `YYYY-MM-DD` inclusive bounds on **`txn_date`**.
@@ -21,7 +22,7 @@ Household-scoped access to `transaction_canonical`: **GET** lists rows with opti
 - `returnTo` — optional relative app URL for context return affordance (frontend-only hint; ignored by backend filtering).
 - `fromDashboard` — optional `true`/`false` frontend context hint used for drill-down UX.
 
-**400:** `categoryId` and `uncategorizedOnly` both set, or invalid query shape.
+**400:** `categoryId` and `uncategorizedOnly` both set; **`resolutionType` without `needsReview=true`**; unknown **`resolutionType`** value; or invalid query shape.
 
 **404:** `sessionId` does not exist for this household.
 
@@ -52,7 +53,9 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
       "categoryName": "Groceries",
       "sourceRef": "raw:…",
       "createdAt": "…",
-      "reviewReasons": ["Uncategorized", "Open review: category"]
+      "reviewReasons": ["Uncategorized", "Open review: category"],
+      "openReviewItems": [{ "id": "resolution-item-uuid", "type": "unknown_category" }],
+      "importSessionId": "import-session-uuid-or-null"
     }
   ]
 }
@@ -60,6 +63,8 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
 
 - **`categoryId` / `categoryName`** — from `LEFT JOIN category` on `transaction_canonical.category_id`. Both `null` when uncategorized.
 - **`reviewReasons`** — present only when **`needsReview=true`**; human-readable strings explaining why the row matches the needs-review predicate (e.g. **Uncategorized**, **Status: …**, **Open review: …**).
+- **`openReviewItems`** — present only when **`needsReview=true`**; open / in_review resolution rows tied to this transaction (**`id`** + **`type`**), for **`POST /resolution/bulk`** and **`POST /resolution/bulk-apply-category`** (same semantics as the review queue).
+- **`importSessionId`** — present only when **`needsReview=true`**; import session id when the row’s **`source_ref`** links to **`transaction_raw`** → **`import_file`**, otherwise **`null`** (manual rows, etc.).
 
 ## `POST /transactions`
 
