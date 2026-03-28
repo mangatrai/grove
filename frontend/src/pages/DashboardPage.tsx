@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bar,
@@ -147,6 +147,19 @@ function ledgerDrillHref(
     qs.set("fromDashboard", "true");
   }
   return `/transactions?${qs.toString()}`;
+}
+
+function KpiInfo({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="kpi-info">
+      <button type="button" className="kpi-info__btn" aria-label={`About ${label}`}>
+        i
+      </button>
+      <div className="kpi-info__tip" role="tooltip">
+        {children}
+      </div>
+    </div>
+  );
 }
 
 export function DashboardPage() {
@@ -439,7 +452,13 @@ export function DashboardPage() {
 
             <div className="kpi-grid">
               <div className="kpi-card">
-                <div className="kpi-label">Inflows</div>
+                <div className="kpi-label kpi-label--row">
+                  <span>Inflows</span>
+                  <KpiInfo label="Inflows">
+                    Sum of posted credit amounts for this period. If you pick an account above, only that account is
+                    included.
+                  </KpiInfo>
+                </div>
                 <div className="kpi-value kpi-in">{formatMoneySigned(data.household.inflows)}</div>
                 {data.comparison?.previousPeriod ? (
                   <div className="kpi-delta-row">
@@ -457,7 +476,12 @@ export function DashboardPage() {
                 ) : null}
               </div>
               <div className="kpi-card">
-                <div className="kpi-label">Outflows</div>
+                <div className="kpi-label kpi-label--row">
+                  <span>Outflows</span>
+                  <KpiInfo label="Outflows">
+                    Sum of posted debit amounts for this period. Respects the account filter when set.
+                  </KpiInfo>
+                </div>
                 <div className="kpi-value kpi-out">${data.household.outflows.toFixed(2)}</div>
                 {data.comparison?.previousPeriod ? (
                   <div className="kpi-delta-row">
@@ -475,7 +499,10 @@ export function DashboardPage() {
                 ) : null}
               </div>
               <div className="kpi-card">
-                <div className="kpi-label">Net</div>
+                <div className="kpi-label kpi-label--row">
+                  <span>Net</span>
+                  <KpiInfo label="Net">Inflows minus outflows for this period (household cashflow for the range).</KpiInfo>
+                </div>
                 <div className="kpi-value">{formatMoneySigned(data.household.net)}</div>
                 {data.comparison?.previousPeriod ? (
                   <div className="kpi-delta-row">
@@ -493,7 +520,14 @@ export function DashboardPage() {
                 ) : null}
               </div>
               <div className="kpi-card kpi-card--safe">
-                <div className="kpi-label">Safe to spend</div>
+                <div className="kpi-label kpi-label--row">
+                  <span>Safe to spend</span>
+                  <KpiInfo label="Safe to spend">
+                    When a monthly savings target is set below, this is net cashflow for this period minus that
+                    commitment, scaled by calendar days in the period vs about 30.44 days per month. Without a target,
+                    this stays empty.
+                  </KpiInfo>
+                </div>
                 <div className="kpi-value">
                   {data.spendingPower.safeToSpend !== null ? formatMoneySigned(data.spendingPower.safeToSpend) : "—"}
                 </div>
@@ -508,17 +542,16 @@ export function DashboardPage() {
                 )}
               </div>
               <div className="kpi-card">
-                <div className="kpi-label">Savings rate</div>
+                <div className="kpi-label kpi-label--row">
+                  <span>Savings rate</span>
+                  <KpiInfo label="Savings rate">
+                    When inflows are greater than zero: (inflows − outflows) ÷ inflows, rounded to two decimal places,
+                    then shown as a percent. If there are no inflows, this is empty.
+                  </KpiInfo>
+                </div>
                 <div className="kpi-value">{formatPct(data.spendingPower.savingsRate)}</div>
-                <p className="kpi-sub muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
-                  (Inflows − outflows) ÷ inflows
-                </p>
               </div>
             </div>
-
-            <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.5rem", maxWidth: "52rem" }}>
-              {data.spendingPower.explanation}
-            </p>
 
             <div className="dashboard-savings-target">
               <label className="dashboard-savings-target__label">

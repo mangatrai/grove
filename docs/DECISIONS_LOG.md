@@ -107,3 +107,10 @@
 - Context: User preference — not useful in this view; saves horizontal space.
 - Consequence: PRD/backlog screens that assumed a status column on the ledger are **out of date**; update wireframes if referenced.
 
+## D-017: Safe-to-spend and savings rate — windowed cash summary vs PRD §8 MTD shortcut
+- Date: 2026-03-27
+- Status: **Accepted**
+- Decision: Implement **safe-to-spend** and **savings rate** on **`GET /reports/cash-summary`** using **posted inflows/outflows** for the **selected preset window**, with **safe-to-spend** = **net − prorated monthly savings target** (calendar days ÷ ~30.437). **Savings rate** uses **(inflows − outflows) ÷ inflows** with **two-decimal** ratio rounding before display. **Household** stores **`monthly_savings_target_usd`** (migration **`0010`**).
+- Context: PRD §8 “first release” line describes **current-month MTD** only; the product ships **one API** for rolling 30/90, calendar month, and YTD.
+- Consequence: PRD §8 now includes **MVP shipped formulas**; deviation and rationale in **`docs/CHANGE_HISTORY.md`** **PRD-002**. If DB lacks **`0010`**, API degrades gracefully (**FIX-003**). Home KPI definitions use **(i)** tooltips (**UX-005**).
+

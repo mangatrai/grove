@@ -173,6 +173,15 @@ Safe-to-Spend = (Expected Income - Committed Expenses - Planned Savings Buffer) 
 For first release, simplify to:
 Safe-to-Spend (current month) = Income MTD - Expense MTD - Monthly Minimum Savings Target
 
+### MVP shipped formulas (custom web app — this repo)
+The Phase 1 **household-finance-app** dashboard uses **`GET /reports/cash-summary`** (posted ledger, optional account filter). Transfer-linked rows are **excluded** from inflow/outflow aggregates where configured (**`docs/CHANGE_HISTORY.md`** **CR-004**). This section records **intentional** differences from the shortcut formulas above; audit detail: **`docs/CHANGE_HISTORY.md`** **PRD-002**, API: **`docs/API_CASH_SUMMARY.md`**, **`docs/API_HOUSEHOLD.md`**.
+
+- **Inflows / outflows / net (Home KPIs)** — **Sum of posted credits**, **sum of posted debits**, and **inflows − outflows** for the **selected preset window** (calendar month, YTD, rolling 30/90), not a separate “expected income” or MTD-only model.
+- **Savings rate (Home)** — When **inflows > 0**: **(inflows − outflows) ÷ inflows**, **rounded to two decimal places** as a ratio, then shown as a percentage. Algebra matches §8 *Savings Rate* when **Income** / **Expenses** are read as **cash-basis ledger totals** in the same window.
+- **Safe-to-spend** — Shown only when the household sets **`monthly_savings_target_usd`** (**`GET/PATCH /household/settings`**). **Net for the window** minus **monthly target × (inclusive calendar days in window ÷ ~30.437)**. This **generalizes** the “current month MTD” shortcut to all presets; without a target the KPI stays empty (—).
+
+**Home UX:** Definitions for each KPI appear in **(i)** tooltips (hover or keyboard focus), not as a long paragraph under the tiles (**`docs/CHANGE_HISTORY.md`** **UX-005**).
+
 ### Net Worth Trend (Phase 1 basic)
 Net Worth = Assets - Liabilities
 Monthly trend from account balances and loan liabilities.
@@ -212,7 +221,7 @@ Rationale:
   - secure purge of raw files post-processing.
 
 ## 11) Suggested Data Model (MVP)
-- household(id, name, owner_user_id, created_at)
+- household(id, name, owner_user_id, created_at, monthly_savings_target_usd nullable) — *target used for prorated safe-to-spend on cash summary; see §8 MVP shipped formulas*
 - user(id, household_id, role, visibility_scope, ...)
 - financial_account(id, household_id, owner_user_id, type, institution, mask, currency)
 - import_session(id, household_id, source_type, started_at, status, finalized_at)
