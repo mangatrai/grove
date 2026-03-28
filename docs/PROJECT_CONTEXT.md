@@ -79,15 +79,13 @@ Current pain: no reliable process, uncertainty around true financial position.
 ## Build status (rolling)
 Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. **`docs/CHANGE_HISTORY.md`** records CR/UX/FIX/DOC entries with stable IDs. Treat **CHECKPOINT + CHANGE_HISTORY** as the source of truth for “where we are” and **why** recent choices were made.
 
-**Recent shipped slices (summary):** DB classification rules + **`/categories/rules`** UI (**CR-010**), transfer matcher **env** tuning (**CR-011**), cash-summary **KPI comparisons** + dashboard deltas, resolution **unknown_category** workflow, ledger drill-downs — details in **`CHANGE_HISTORY.md`** (2026-03-25–27 blocks). **Target UX (docs):** **PRD §13** + **Epic 11** (shell, transactions hub, settings) — **DOC-004**.
+**Recent shipped slices (summary):** **Epic 11.2** transactions hub (**CR-013**): **`/transactions`** tabs (**All \| Needs review**), sticky filter bar, **`POST /transactions`**, API **`needsReview`** + **`reviewReasons`**; shell + Settings (**UX-007**); cash-summary + savings target (**CR-012**, **PRD-002**); DB rules + **`/categories/rules`** (**CR-010**); resolution bulk category + queue UI. **IA direction:** single review surface at **Transactions → Needs review** — **Story 11.5** + **DOC-005** (keep **`/resolution`** until port). Details: **`CHANGE_HISTORY.md`** (2026-03-25–27).
 
-**Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
+**Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
-1. Architecture and interfaces finalization.
-2. MVP backlog execution (epics/stories/tasks).
-3. First parser profile set locked for implementation:
-   - Bank of America checking
-   - Citi credit cards
-   - Chase credit cards
+1. **`docs/CHECKPOINT.md`** “Sensible next steps” (especially **Epic 11 Story 11.5** vs **Epic 5.2** / **6** / **7**).
+2. **Story 11.5:** port **Review queue** workflows into **Transactions → Needs review**, then simplify nav (**DOC-005**).
+3. Continue **Epic 5.2** transfer matcher coverage + tests; **Epic 6** inbox drill-down as scheduled.
+4. Parser profile set (BoA checking, Citi/Chase cards) remains baseline for ingestion hardening.
 

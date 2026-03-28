@@ -97,7 +97,9 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 - `frontend/src/layout/ShellLayout.tsx`, `AppSidebar.tsx`, `AppTopBar.tsx` — collapsible nav + top bar (**Epic 11.1**)  
 - `frontend/src/pages/SettingsPage.tsx` — **`/settings`** tabs (**Epic 11.4**)  
 - `frontend/src/components/LedgerCategoryPicker.tsx` — category flyout + inline create  
-- `frontend/src/pages/TransactionsPage.tsx` — **Transactions** table (**no Status column**)  
+- `backend/src/modules/ledger/ledger.service.ts` — ledger list filters, **`needsReview`** predicate, **`reviewReasons`**, **`createManualCanonicalTransaction`**  
+- `backend/src/modules/ledger/ledger.routes.ts` — **`GET/POST/PATCH /transactions`**  
+- `frontend/src/pages/TransactionsPage.tsx` — **All \| Needs review** tabs, sticky filters, **Why** column, **+ Add** modal (**no Status column**; **Manage categories** link removed from intro)  
 - `frontend/src/pages/CategoriesPage.tsx` — category management; **link to rules**  
 - `frontend/src/pages/CategoryRulesPage.tsx` — **household classification rules UI**  
 - `docs/CHANGE_HISTORY.md` — **CR / UX / FIX / PRD deviation log**
