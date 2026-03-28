@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-27 (Epic **11.1 / 11.3 / 11.4** shell, scope bar, Settings — **UX-007**)
+**Last updated:** 2026-03-27 (Epic **11.2** command center **CR-013**; review unification tracked **DOC-005** / **11.5**)
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -48,7 +48,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
-| **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** §13 **Phase A** (collapsible sidebar, user menu, **Transactions** naming), **Phase C** (dashboard **Scope**), **Phase D** (**`/settings`** + Household). **Not yet:** **All \| Needs review** tabs, sticky filter bar, **+ Add**, **Trash**. See **`docs/FINANCE_APP_PRD.md` §13**. |
+| **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** §13 **Phase A**, **Phase B** core (**CR-013**): **`/transactions`** **All \| Needs review**, sticky filters, manual **POST**, **`reviewReasons`**. **Phase C** (dashboard **Scope**), **Phase D** (**`/settings`** + Household). **Tracked:** merge **`/resolution`** into **Needs review** — **`MVP_BACKLOG.md` Story 11.5**, **`DOC-005`** (keep both nav entries until port). **Not yet:** **Trash** tab. See **`docs/FINANCE_APP_PRD.md` §13**. |
 
 ---
 
@@ -76,7 +76,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 1. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
 2. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category on resolution queue is **shipped** — **`/resolution/bulk-apply-category`**).
 3. **Epic 7 continuation:** ledger drill paging/context, category-level period comparisons (optional), **safe-to-spend** + savings targets.
-4. **Epic 11 (new):** implement **PRD §13** in slices — **11.1** shell/user menu, **11.2** Transactions tabs + command center, **11.3** dashboard scope, **11.4** Settings (see **`MVP_BACKLOG.md`**).
+4. **Epic 11:** **11.5** — port **Review queue** capabilities into **Transactions → Needs review**, then retire dual nav (**`DOC-005`**). Remaining **11.1–11.4** gaps per **`MVP_BACKLOG.md`**.
 5. **Epic 6:** import inbox file-level drill-down; transfer/user bulk edits if still needed.  
 6. **Product cleanup:** **D-014** — whether **`/categories`** + **`/categories/rules`** stay as power-user surfaces or consolidate (**`docs/DECISIONS_LOG.md`**).  
 7. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work.

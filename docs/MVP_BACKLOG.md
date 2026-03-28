@@ -389,7 +389,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 ## Epic 11: Application shell, transactions hub, and settings (P0)
 **Goal:** Adopt a **persistent shell** and **Transactions-first** IA so users navigate less and work from dense, filterable surfaces — **PRD §13** (phases A–D). **Data density** is a **feature** for analysis, not a bug to minimize, provided hierarchy and filters stay clear.
 
-**Status:** 🟡 In progress (2026-03-27): **11.1**, **11.3**, **11.4** partial — **`docs/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`** **UX-007**.
+**Status:** 🟡 In progress (2026-03-27): **11.1**, **11.3**, **11.4** partial; **11.2** command center shipped (**CR-013**). **11.5** = consolidate review UX (**DOC-005**).
 
 ### Story 11.1 - Phase A: Shell and wayfinding
 **Status: 🟡 Partial (2026-03-27).** Collapsible sidebar + top bar + Account menu shipped (**UX-007**).  
@@ -401,13 +401,21 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Authenticated layout matches §13 Phase A; import remains reachable from **header** in one click.
 
 ### Story 11.2 - Phase B: Transactions command center
+**Status: 🟡 Partial / core shipped (2026-03-27).** **CR-013:** **All \| Needs review** tabs, sticky filters, substring search, amount bounds, **Why** / **`reviewReasons`**, **+ Add** (**`POST /transactions`**). **Not in this story:** absorbing full **`/resolution`** workflows — see **11.5**.  
 - Tasks:
-  - **Tabs:** **All** | **Needs review** on **`/transactions`** (same table component; tab drives query/filters). **Needs review** = §13 definition (uncategorized **or** open resolution tied to row **or** blocked/failed import path — implement with explicit filters + row-level **reason** chips or columns so the tab is not a junk drawer). (L)
-  - **Actions:** **+ Add** (manual **`POST`** transaction) alongside **Import** entry point on this screen or header. (M)
-  - **Filter bar:** Sticky row — search, account, date, category, amount; **More filters** as needed. (L) *Depends on existing/partial ledger APIs and **FR-9b** search when wired.*
+  - **Tabs:** **All** | **Needs review** on **`/transactions`** (same table component; tab drives query/filters). **Needs review** = §13 definition (uncategorized **or** open resolution tied to row **or** blocked/failed import path — implement with explicit filters + row-level **reason** chips or columns so the tab is not a junk drawer). (L) 🟡
+  - **Actions:** **+ Add** (manual **`POST`** transaction) alongside **Import** entry point on this screen or header. (M) 🟡
+  - **Filter bar:** Sticky row — search, account, date, category, amount; **More filters** as needed. (L) 🟡 *Ranked FTS still future.*
   - **Trash tab:** **Do not ship** until **soft-delete** epic exists; see **P1** note.
 - Acceptance:
   - User can switch All / Needs review without leaving the shell; manual add is obvious; filters stay visible while scrolling the table (or clear sticky affordance).
+
+### Story 11.5 - Unify review: port Review queue into Transactions → Needs review
+**Status: ⬜ Not started (tracked 2026-03-27, **DOC-005**).** **Intent:** Long term, **only** **`/transactions`** (especially **Needs review**) should be where users clear import/review work; **`/resolution`** goes away or becomes a redirect. **Until then:** keep **Review queue** in the nav — it still has flows not yet replicated on the ledger hub.  
+- **Port / replace from `ResolutionQueuePage` + `GET/PATCH /resolution` + bulk APIs:** multi-select + **bulk status** (`POST /resolution/bulk`), **bulk category** (`POST /resolution/bulk-apply-category`), **type filters** and summary chips, per-row actions for **duplicate_ambiguity** / **transfer_ambiguity** / **reconciliation_mismatch**, **import context** (raw preview, session/file links), and **Home** banner links that today target **`/resolution`**.  
+- **Then:** remove sidebar **Review queue** (or keep as alias to **`/transactions?needsReview=true`**), update **Import workspace** CTAs, and trim duplicate API surface if safe.  
+- Acceptance:
+  - Every workflow a user can complete on **`/resolution`** today is available from **Transactions → Needs review** (or an intentional, documented exception).
 
 ### Story 11.3 - Phase C: Dashboard scope prominence
 **Status: 🟡 Partial (2026-03-27).** **Scope** bar at top of Home card (**UX-007**).  
@@ -447,7 +455,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 6. Epic 8 can begin after Epic 2 baseline
 7. Epic 9 spans all prior epics
 8. **Epic 10** can start once a baseline shell exists (**Epic 1**); often scheduled **after** core flows feel functionally complete (P1)
-9. **Epic 11** can proceed in parallel with **Epic 7** / **Epic 6** once **Epic 1** shell exists; **11.2** coordinates with resolution + ledger APIs (**Epic 5** / **Epic 6**)
+9. **Epic 11** can proceed in parallel with **Epic 7** / **Epic 6** once **Epic 1** shell exists; **11.2** uses resolution + ledger APIs; **11.5** replaces dual **resolution** vs **Needs review** UX (**DOC-005**)
 
 ## Suggested First Sprint (2 weeks)
 - Epic 1 complete.

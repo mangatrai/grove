@@ -374,9 +374,6 @@ export function TransactionsPage() {
     <div className="transactions-page">
       <div className="card transactions-page__intro">
         <h1>Transactions</h1>
-        <p className="muted">
-          <Link to="/categories">Manage categories</Link>
-        </p>
         {sessionFilter ? (
           <p className="muted">
             Showing only transactions from import session <code>{sessionFilter}</code>.{" "}
