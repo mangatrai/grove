@@ -41,7 +41,7 @@
 - [ ] User can bulk approve and bulk edit. (partial: resolution **status** bulk + **`unknown_category` bulk category** via **`/resolution/bulk-apply-category`**; not full “bulk edit all fields”)
 - [x] Duplicate upload produces zero duplicate posted transactions. (fingerprint + idempotency)
 - [x] Unknown category / transfer ambiguity routes to resolution queue. (`unknown_category`, `transfer_ambiguity`, `duplicate_ambiguity` — see **`docs/API_RESOLUTION.md`**)
-- [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home **`/`** — cash KPIs, category charts, **period comparison deltas**; **no** safe-to-spend yet — **`docs/CHECKPOINT.md`**)
+- [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home **`/`** — cash KPIs, category charts, **period comparison deltas**, **cash-basis safe-to-spend** + savings rate when target set — **`docs/CHECKPOINT.md`**, **`docs/API_CASH_SUMMARY.md`**)
 - [ ] Owner can view spouse + own data; spouse cannot view owner data.
 - [x] Raw PDF files are deleted after successful extraction. (staging cleanup policy; see `IMPORT_STAGING_PURGE.md`)
 

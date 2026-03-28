@@ -1,6 +1,6 @@
 # API: Cash summary (Epic 7.1)
 
-> **Progress:** KPI + category breakdown + monthly category outflows are 🟡 vs full reporting vision — **`docs/CHECKPOINT.md`**.
+> **Progress:** KPI + category breakdown + **spending power** (safe-to-spend, savings rate) + monthly category outflows — **`docs/CHECKPOINT.md`**. Set **`household.monthly_savings_target_usd`** via **`GET/PATCH /household/settings`** (see **`docs/API_HOUSEHOLD.md`**).
 
 Base path: `/reports/cash-summary`  
 Auth: `Authorization: Bearer <JWT>` (requires authentication).
@@ -41,6 +41,18 @@ Each comparison includes:
 - comparison range (`start`, `end`)
 - baseline household totals for that range
 - `delta` values (`inflows`, `outflows`, `net`) as **current KPI period minus comparison period**
+
+### `spendingPower` (always present)
+
+Derived from the same **`household` KPI row** and optional **`monthly_savings_target_usd`** on the **`household`** row:
+
+| Field | Meaning |
+|-------|---------|
+| `monthlySavingsTargetUsd` | Household setting, or `null` if unset |
+| `savingsTargetApplied` | Target scaled to this report window: `monthly × (days in range ÷ 30.437)` |
+| `safeToSpend` | `household.net − savingsTargetApplied` when a monthly target is set; else `null` |
+| `savingsRate` | `(inflows − outflows) / inflows` when `inflows > 0`; else `null` |
+| `explanation` | Short copy for UI (formula summary) |
 
 ### Monthly trend
 
@@ -91,6 +103,13 @@ Returns **6** calendar months ending in the month containing `range.end`, with t
       },
       "delta": { "inflows": 400, "outflows": 300.5, "net": 99.5 }
     }
+  },
+  "spendingPower": {
+    "monthlySavingsTargetUsd": 500,
+    "savingsTargetApplied": 511.23,
+    "safeToSpend": 1288.27,
+    "savingsRate": 0.3599,
+    "explanation": "Safe-to-spend = net cashflow for this period minus your monthly savings commitment…"
   },
   "byAccount": [
     {

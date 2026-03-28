@@ -1,4 +1,5 @@
 import { db } from "../../db/sqlite.js";
+import { getHouseholdMonthlySavingsTarget } from "../household/household.service.js";
 
 export type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90";
 
@@ -90,6 +91,22 @@ export interface CashSummaryMonthCategoryOutflows {
   }>;
 }
 
+/** ~365.25/12 — used to prorate a monthly savings $ amount to arbitrary date ranges. */
+const AVG_DAYS_PER_MONTH = 30.437;
+
+export interface CashSummarySpendingPower {
+  /** Household setting; `null` if unset — then `safeToSpend` / `savingsTargetApplied` are `null`. */
+  monthlySavingsTargetUsd: number | null;
+  /** `monthlySavingsTargetUsd` scaled to this report window: `monthly × (days in range ÷ avg days/month)`. */
+  savingsTargetApplied: number | null;
+  /** Net cashflow for the period minus `savingsTargetApplied` when a monthly target is set. */
+  safeToSpend: number | null;
+  /** `(inflows − outflows) / inflows` when inflows > 0; else `null`. */
+  savingsRate: number | null;
+  /** Short formula note for UI / API consumers. */
+  explanation: string;
+}
+
 export interface CashSummaryResult {
   range: CashSummaryRange;
   asOf: string;
@@ -99,6 +116,8 @@ export interface CashSummaryResult {
     previousPeriod: CashSummaryComparisonBlock;
     yearOverYear?: CashSummaryComparisonBlock;
   };
+  /** Safe-to-spend + savings rate; uses `household.monthly_savings_target_usd` when set. */
+  spendingPower: CashSummarySpendingPower;
   byAccount: CashSummaryAccountRow[] | null;
   byCategory: CashSummaryCategoryRow[] | null;
   monthlyTrend: CashSummaryTrendPoint[];
@@ -154,6 +173,52 @@ function minDate(a: string, b: string): string {
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function inclusiveCalendarDays(startIso: string, endIso: string): number {
+  const s = startIso.slice(0, 10);
+  const e = endIso.slice(0, 10);
+  const [sy, sm, sd] = s.split("-").map(Number);
+  const [ey, em, ed] = e.split("-").map(Number);
+  const t0 = Date.UTC(sy!, sm! - 1, sd!);
+  const t1 = Date.UTC(ey!, em! - 1, ed!);
+  return Math.round((t1 - t0) / (24 * 60 * 60 * 1000)) + 1;
+}
+
+function buildSpendingPower(
+  household: CashSummaryHousehold,
+  rangeStart: string,
+  rangeEnd: string,
+  monthlyTarget: number | null
+): CashSummarySpendingPower {
+  const savingsRate =
+    household.inflows > 0
+      ? roundMoney((household.inflows - household.outflows) / household.inflows)
+      : null;
+
+  if (monthlyTarget === null) {
+    return {
+      monthlySavingsTargetUsd: null,
+      savingsTargetApplied: null,
+      safeToSpend: null,
+      savingsRate,
+      explanation:
+        "Savings rate = (inflows − outflows) ÷ inflows for this period when inflows > 0. Set a monthly savings target below to also show safe-to-spend (net for this period minus that commitment, scaled by period length vs ~30.44 days/month)."
+    };
+  }
+
+  const days = inclusiveCalendarDays(rangeStart, rangeEnd);
+  const savingsTargetApplied = roundMoney(monthlyTarget * (days / AVG_DAYS_PER_MONTH));
+  const safeToSpend = roundMoney(household.net - savingsTargetApplied);
+
+  return {
+    monthlySavingsTargetUsd: monthlyTarget,
+    savingsTargetApplied,
+    safeToSpend,
+    savingsRate,
+    explanation:
+      "Safe-to-spend = net cashflow for this period minus your monthly savings commitment, scaled by the number of days in this period (~30.44 days per month). Savings rate = (inflows − outflows) ÷ inflows when inflows > 0."
+  };
 }
 
 function buildRangeLabel(preset: CashPreset, start: string, end: string, month?: string): string {
@@ -620,10 +685,14 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
     ? buildMonthlyOutflowsByCategory(householdId, range.end, input.accountId, rollup)
     : null;
 
+  const monthlyTarget = getHouseholdMonthlySavingsTarget(householdId);
+  const spendingPower = buildSpendingPower(household, range.start, range.end, monthlyTarget);
+
   return {
     range,
     asOf,
     household,
+    spendingPower,
     comparison: {
       previousPeriod: {
         label: comparisonRanges.previous.label,

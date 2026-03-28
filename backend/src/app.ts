@@ -4,6 +4,7 @@ import { authRouter } from "./modules/auth/auth.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
+import { householdRouter } from "./modules/household/household.routes.js";
 import { importsRouter } from "./modules/imports/imports.routes.js";
 import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
@@ -30,6 +31,7 @@ export function buildApp() {
   app.use(express.json());
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
+  app.use("/household", householdRouter);
   app.use("/categories", categoriesRouter);
   app.use("/categories/rules", categoryRulesRouter);
   app.use("/imports", importsRouter);

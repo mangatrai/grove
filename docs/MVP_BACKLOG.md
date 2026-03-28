@@ -283,11 +283,11 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Goal:** deliver core decision metrics from imported data.
 
 ### Story 7.1 - KPI cards
-**Status: 🟡 Partial (2026-03-25).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; optional **account** filter; **by-account** breakdown; **6-month monthly net** bar; **`categoryBreakdown`** → **by-category** table + inflow/outflow donuts + stacked monthly outflows by category (`docs/API_CASH_SUMMARY.md`). **Transfer-linked rows** excluded from aggregates when identified (**see CHANGE_HISTORY CR-004**). **Now delivered:** dashboard surfacing for open `unknown_category` items + chart/table drill-down into `/transactions` with `dateFrom/dateTo` and `categoryId` (and optionally `accountId`). **Not** delivered: savings-rate / safe-to-spend, configurable targets.
+**Status: 🟡 Partial (2026-03-27).** **`GET /reports/cash-summary`** + UI on authenticated **`/`** (home; **`/dashboard`** redirects). Period presets: **calendar month**, **YTD**, **rolling 30 / 90**; KPIs **inflows / outflows / net**; **`spendingPower`** — **savings rate**, **safe-to-spend** when **`monthly_savings_target_usd`** set (**`GET/PATCH /household/settings`**, migration **`0010`**); optional **account** filter; **by-account** breakdown; **6-month** trend; **`categoryBreakdown`** + charts (**`docs/API_CASH_SUMMARY.md`**, **`docs/API_HOUSEHOLD.md`**). **Transfer-linked rows** excluded (**CR-004**). **Dashboard:** `unknown_category` banner, drill-down to ledger. **Not** delivered: forecast-based safe-to-spend, non-cash “committed expense” modeling.
 
 - Tasks:
   - Implement income, expenses, net cashflow, savings rate cards. (M) 🟡
-  - Implement safe-to-spend with configurable monthly savings target. (M) ⬜
+  - Implement safe-to-spend with configurable monthly savings target. (M) 🟡 (cash-basis; household PATCH)
 - Acceptance:
   - Core KPIs visible by household with period selector.
 

@@ -18,6 +18,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-03-27
 
+### CR-012 — Safe-to-spend + savings rate on cash summary (Epic 7.1)
+- **Type:** CR  
+- **What:** **`household.monthly_savings_target_usd`** (migration **`0010`**); **`GET/PATCH /household/settings`**; **`GET /reports/cash-summary`** includes **`spendingPower`**: prorated savings commitment for the report window (~30.437 days/month), **safe-to-spend** = net − commitment, **savings rate** = (inflows − outflows) / inflows. Home dashboard: KPI cards + target form.  
+- **Why:** PRD spending-power metric with an explicit, documented formula.  
+- **Files:** `backend/db/migrations/0010_household_savings_target.sql`, `backend/src/modules/household/*`, `backend/src/modules/reports/cash-summary.service.ts`, `frontend/src/pages/DashboardPage.tsx`, `docs/API_CASH_SUMMARY.md`, `docs/API_HOUSEHOLD.md`.
+
 ### DOC-003 — Docs corrected: resolution queue bulk category already shipped
 - **Type:** DOC  
 - **What:** **`frontend/src/pages/ResolutionQueuePage.tsx`** implements row checkboxes, **`POST /resolution/bulk-apply-category`**, and bulk status via **`POST /resolution/bulk`**. **`docs/CHECKPOINT.md`**, **`docs/MVP_BACKLOG.md`**, **`README.md`**, **`docs/REQUIREMENTS_TRACEABILITY.md`**, **`docs/NEXT_SESSION_PROMPT.md`**, **`frontend/README.md`** had incorrectly listed “bulk category” as missing.  

@@ -1415,6 +1415,38 @@ describe("cash summary (reports)", () => {
     expect(Array.isArray(res.body.byAccount)).toBe(true);
     expect(res.body.byAccount).toHaveLength(1);
     expect(res.body.byAccount[0].accountId).toBe(testAccountId);
+    expect(res.body.spendingPower).toBeDefined();
+    expect(res.body.spendingPower.monthlySavingsTargetUsd).toBeNull();
+    expect(res.body.spendingPower.safeToSpend).toBeNull();
+    expect(res.body.spendingPower.savingsRate).toBe(0.75);
+    expect(typeof res.body.spendingPower.explanation).toBe("string");
+  });
+
+  it("computes safe-to-spend when household monthly savings target is set", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdRow = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    db.prepare(`UPDATE household SET monthly_savings_target_usd = ? WHERE id = ?`).run(300, householdRow.household_id);
+
+    const res = await request(app)
+      .get("/reports/cash-summary?preset=rolling_30")
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.spendingPower.monthlySavingsTargetUsd).toBe(300);
+    expect(res.body.spendingPower.savingsTargetApplied).not.toBeNull();
+    expect(res.body.spendingPower.safeToSpend).not.toBeNull();
+    expect(res.body.spendingPower.safeToSpend).toBeCloseTo(
+      res.body.household.net - (res.body.spendingPower.savingsTargetApplied as number),
+      5
+    );
+
+    db.prepare(`UPDATE household SET monthly_savings_target_usd = NULL WHERE id = ?`).run(householdRow.household_id);
   });
 
   it("excludes transfer rows from KPI and category aggregation", async () => {
@@ -1885,5 +1917,33 @@ describe("cash summary (reports)", () => {
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("ACCOUNT_NOT_FOUND");
+  });
+});
+
+describe("household settings", () => {
+  it("GET and PATCH monthly savings target", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+
+    const g = await request(app).get("/household/settings").set("authorization", `Bearer ${token}`);
+    expect(g.status).toBe(200);
+    expect(g.body).toHaveProperty("monthlySavingsTargetUsd");
+
+    const p = await request(app)
+      .patch("/household/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({ monthlySavingsTargetUsd: 750 });
+    expect(p.status).toBe(200);
+    expect(p.body.monthlySavingsTargetUsd).toBe(750);
+
+    const p2 = await request(app)
+      .patch("/household/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({ monthlySavingsTargetUsd: null });
+    expect(p2.status).toBe(200);
+    expect(p2.body.monthlySavingsTargetUsd).toBeNull();
   });
 });

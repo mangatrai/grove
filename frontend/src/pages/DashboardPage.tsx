@@ -67,6 +67,13 @@ type CashSummaryResponse = {
     month: string;
     segments: Array<{ categoryId: string | null; categoryName: string; outflows: number }>;
   }> | null;
+  spendingPower: {
+    monthlySavingsTargetUsd: number | null;
+    savingsTargetApplied: number | null;
+    safeToSpend: number | null;
+    savingsRate: number | null;
+    explanation: string;
+  };
 };
 
 type AccountRow = {
@@ -171,6 +178,8 @@ export function DashboardPage() {
     openByType: Record<string, number>;
     totalOpen: number;
   } | null>(null);
+  const [savingsTargetDraft, setSavingsTargetDraft] = useState("");
+  const [savingTarget, setSavingTarget] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -215,6 +224,14 @@ export function DashboardPage() {
       .finally(() => setLoading(false));
   }, [token, load]);
 
+  useEffect(() => {
+    if (data?.spendingPower.monthlySavingsTargetUsd != null) {
+      setSavingsTargetDraft(String(data.spendingPower.monthlySavingsTargetUsd));
+    } else {
+      setSavingsTargetDraft("");
+    }
+  }, [data?.spendingPower.monthlySavingsTargetUsd]);
+
   const chartData = useMemo(
     () =>
       (data?.monthlyTrend ?? []).map((p) => ({
@@ -254,6 +271,32 @@ export function DashboardPage() {
     () => ({ accountId: accountId || undefined, dashboardContext: new URLSearchParams(searchParams) }),
     [accountId, searchParams]
   );
+
+  async function saveSavingsTarget(value: number | null) {
+    if (!token) {
+      return;
+    }
+    setSavingTarget(true);
+    setError(null);
+    try {
+      await apiJson<{ monthlySavingsTargetUsd: number | null }>("/household/settings", {
+        method: "PATCH",
+        body: JSON.stringify({ monthlySavingsTargetUsd: value })
+      });
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not save savings target");
+    } finally {
+      setSavingTarget(false);
+    }
+  }
+
+  function formatPct(n: number | null): string {
+    if (n === null || !Number.isFinite(n)) {
+      return "—";
+    }
+    return `${(n * 100).toFixed(1)}%`;
+  }
 
   const stackBarModel = useMemo(() => {
     const raw = data?.monthlyOutflowsByCategory;
@@ -449,6 +492,71 @@ export function DashboardPage() {
                   </div>
                 ) : null}
               </div>
+              <div className="kpi-card kpi-card--safe">
+                <div className="kpi-label">Safe to spend</div>
+                <div className="kpi-value">
+                  {data.spendingPower.safeToSpend !== null ? formatMoneySigned(data.spendingPower.safeToSpend) : "—"}
+                </div>
+                {data.spendingPower.savingsTargetApplied !== null && data.spendingPower.monthlySavingsTargetUsd !== null ? (
+                  <p className="kpi-sub muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
+                    After ~${data.spendingPower.savingsTargetApplied.toFixed(2)} savings commitment this period
+                  </p>
+                ) : (
+                  <p className="kpi-sub muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
+                    Set a monthly target below
+                  </p>
+                )}
+              </div>
+              <div className="kpi-card">
+                <div className="kpi-label">Savings rate</div>
+                <div className="kpi-value">{formatPct(data.spendingPower.savingsRate)}</div>
+                <p className="kpi-sub muted" style={{ margin: "0.35rem 0 0", fontSize: "0.8rem" }}>
+                  (Inflows − outflows) ÷ inflows
+                </p>
+              </div>
+            </div>
+
+            <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.5rem", maxWidth: "52rem" }}>
+              {data.spendingPower.explanation}
+            </p>
+
+            <div className="dashboard-savings-target">
+              <label className="dashboard-savings-target__label">
+                Monthly savings target (USD)
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  placeholder="e.g. 500"
+                  value={savingsTargetDraft}
+                  onChange={(e) => setSavingsTargetDraft(e.target.value)}
+                  disabled={savingTarget}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={savingTarget}
+                onClick={() => {
+                  const t = savingsTargetDraft.trim();
+                  if (t === "") {
+                    void saveSavingsTarget(null);
+                    return;
+                  }
+                  const n = Number(t);
+                  if (!Number.isFinite(n) || n < 0) {
+                    setError("Enter a non-negative number or leave blank to clear.");
+                    return;
+                  }
+                  void saveSavingsTarget(n);
+                }}
+              >
+                {savingTarget ? "Saving…" : "Save target"}
+              </button>
+              {data.spendingPower.monthlySavingsTargetUsd !== null ? (
+                <button type="button" className="secondary" disabled={savingTarget} onClick={() => void saveSavingsTarget(null)}>
+                  Clear
+                </button>
+              ) : null}
             </div>
 
             {data.byCategory && data.byCategory.length > 0 ? (
