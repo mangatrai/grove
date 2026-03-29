@@ -1,6 +1,6 @@
 # Household Finance — Web UI
 
-Vite + React + TypeScript app for **Epic 2.3 Import UI**: login, create import
+Vite + React + TypeScript app for **Epic 2.3 Import UI**: sign-in on **`/`** (guest landing), create import
 sessions, upload files, bind each file to an account + parser profile, parse,
 and canonicalize.
 
@@ -12,7 +12,7 @@ Requires the API on **port 4000** (default backend). The Vite dev server proxies
 
 If you add a new API top-level path, add it here or the browser will get HTML instead of JSON.
 
-**Layout:** Signed-in users get **`ShellLayout`** — **collapsible left sidebar** (`src/layout/AppSidebar.tsx`) with **Home**, **Transactions**, **Categories**, **Review queue**; **top bar** (`src/layout/AppTopBar.tsx`) with **New import** and **Account** menu (**Settings** → `/settings`, **Sign out**). Mobile: hamburger opens the sidebar drawer with backdrop. Guests at **`/`** see a sign-in card only (no chrome). **`RequireAuth`** wraps categories, transactions, resolution, import workspace, and **settings** (home dashboard uses JWT in `HomeRoute`).
+**Layout:** Signed-in users get **`ShellLayout`** — **collapsible left sidebar** (`src/layout/AppSidebar.tsx`) with **Home**, **Transactions**, **Categories**, **Review queue**; **top bar** (`src/layout/AppTopBar.tsx`) with **New import** and **Account** menu (**Settings** → `/settings`, **Sign out**). Mobile: hamburger opens the sidebar drawer with backdrop. Guests at **`/`** see a **landing + sign-in** hero (no chrome; same route as dashboard after JWT). **`/login`** redirects to **`/`**. **`RequireAuth`** wraps categories, transactions, resolution, import workspace, and **settings** (home dashboard uses JWT in `HomeRoute`).
 
 Override the proxy target:
 

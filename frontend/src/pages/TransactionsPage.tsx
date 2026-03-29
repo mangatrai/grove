@@ -560,7 +560,7 @@ export function TransactionsPage() {
   }
 
   if (!token) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const categorySelectValue = uncategorizedOnly ? "__uncat__" : categoryFilter ?? "";

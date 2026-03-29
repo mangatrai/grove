@@ -43,7 +43,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Classification (Epic 5.1)** | 🟡 | **Static rules** in **`category-rules.ts`** + **DB rules** (migration **`0009`**, **`category_rule`** table) evaluated before defaults; **`classification_meta`** on canonical rows for explainability. **`GET/POST/PATCH /categories/rules`**; **UI:** **`/categories/rules`**. **`unknown_category`** on **`/resolution`**: type filter, **inline** category, **bulk** assign (`POST /resolution/bulk-apply-category` — select rows + category, **`ResolutionQueuePage`**) + summary chips. **Still not:** richer confidence UX polish |
 | **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** page. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **Gaps:** D-014 (`/categories` vs ledger-only); hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
 | **Transfer matcher (Epic 5.2)** | 🟡 | Matcher in **`canonical-ingest.service.ts`**: scoring + **CR-016** payment/loan/card-network tokens + asymmetric card-payoff heuristic; **`transfer_ambiguity`**, **`low_pair_score`**. **Tunable via `.env`:** `TRANSFER_*`. **Still not:** exhaustive institution-specific coverage |
-| **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Home:** **Scope** bar (account filter) at top of dashboard card. **`/settings`** — tabs (Household wired to **`PATCH /household/settings`**; Profile / Accounts / Notifications / Security stub). Sidebar width persisted: **`localStorage`** `hf_sidebar_collapsed` |
+| **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Guests:** **`/`** = landing + **inline sign-in** (**CR-017**); **`/login`** → **`/`**. **Home (signed-in):** **Scope** bar (account filter). **`/settings`** — tabs (Household wired; other stubs). Sidebar width: **`localStorage`** `hf_sidebar_collapsed` |
 | **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session** |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
@@ -58,6 +58,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 |----------|------|
 | Backlog & epics | `docs/MVP_BACKLOG.md` |
 | Target shell & IA (phased) | **`docs/FINANCE_APP_PRD.md` §13** · **Epic 11** in **`MVP_BACKLOG.md`** |
+| External PFM patterns (non-competitive) | **`docs/PFM_COMPETITIVE_UX_REFERENCE.md`** · **D-018** |
 | **Change / CR / UX history** | **`docs/CHANGE_HISTORY.md`** |
 | Decisions (ADR-lite) | `docs/DECISIONS_LOG.md` |
 | Import API | `docs/API_IMPORT_SESSIONS.md` |

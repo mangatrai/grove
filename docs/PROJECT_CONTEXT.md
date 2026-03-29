@@ -75,6 +75,17 @@ Current pain: no reliable process, uncertainty around true financial position.
 - `docs/BASE_PLATFORM_DECISION.md`
 - `docs/REQUIREMENTS_TRACEABILITY.md`
 - `docs/CHANGE_HISTORY.md` — rolling CR / UX / fix log and PRD deviations
+- `docs/PFM_COMPETITIVE_UX_REFERENCE.md` — **non-competitive** analysis of **consumer PFM** positioning (Simplifi, Rocket Money, Mint) — **patterns** we may borrow vs **features** we reject; see **`docs/DECISIONS_LOG.md`** **D-018**
+
+## Competitive / UX reference (external)
+
+Commercial PFMs optimize for **cloud subscriptions, bank aggregation, and broad feature sets**. This project **does not** chase parity with those products; see **`docs/PFM_COMPETITIVE_UX_REFERENCE.md`** for:
+
+- What **Quicken Simplifi** emphasizes (forward-looking narrative, bundled “plan + reports + goals”) and how that maps to our **dashboard + cash summary + Epic 11** hub — without promising **bank linking** or **investment depth** we do not ship.
+- What **Rocket Money** emphasizes (subscriptions, spending automation, social proof) — **subscription management as hero** is **misaligned** with our **import-first** MVP; **supportive copy** and **spending clarity** are still relevant.
+- **Mint’s** transition to **Credit Karma** — reminder that **data portability** and **clear communication when IA changes** matter; reinforces our **SQLite / self-hosted** ownership story (**D-003**, **D-010**).
+
+**Decision:** We borrow **clarity, sectioning, and trust framing**; we **do not** copy business models, aggregate connectivity claims, or features that require external services. **D-018**.
 
 ## Build status (rolling)
 Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. **`docs/CHANGE_HISTORY.md`** records CR/UX/FIX/DOC entries with stable IDs. Treat **CHECKPOINT + CHANGE_HISTORY** as the source of truth for “where we are” and **why** recent choices were made.

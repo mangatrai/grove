@@ -27,7 +27,7 @@ ingestion pipeline.
    - `npm run setup`
 3. Start backend + frontend dev servers (background, logs under `.runtime/logs/`):
    - `npm run services:start`
-   - Open the UI (default **http://127.0.0.1:3000**), log in with seeded credentials from `.env.example` — land on the **home dashboard** (cash KPIs). Use **New import** in the header when you need a statement import.
+   - Open the UI (default **http://127.0.0.1:3000**), sign in on the **home** page with seeded credentials from `.env.example` — you land on the **dashboard** (cash KPIs). Use **New import** in the header when you need a statement import.
    - Or run interactively: `npm run dev` (backend only) and `npm run dev:frontend` in a second terminal.
 4. Stop services when needed:
    - `npm run services:stop` — stops the recorded wrapper PIDs, then **clears whatever is still listening** on the dev ports

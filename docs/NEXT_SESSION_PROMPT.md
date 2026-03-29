@@ -7,6 +7,7 @@ Read these files first and continue from there:
 - docs/CHECKPOINT.md (implementation status + progress legend)
 - docs/CHANGE_HISTORY.md (CR / UX / fixes + PRD deviations)
 - docs/PROJECT_CONTEXT.md
+- docs/PFM_COMPETITIVE_UX_REFERENCE.md (optional — external PFM patterns vs our scope, **D-018**)
 - docs/DECISIONS_LOG.md
 - docs/FINANCE_APP_PRD.md
 - docs/ARCHITECTURE.md

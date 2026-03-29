@@ -114,3 +114,10 @@
 - Context: PRD §8 “first release” line describes **current-month MTD** only; the product ships **one API** for rolling 30/90, calendar month, and YTD.
 - Consequence: PRD §8 now includes **MVP shipped formulas**; deviation and rationale in **`docs/CHANGE_HISTORY.md`** **PRD-002**. If DB lacks **`0010`**, API degrades gracefully (**FIX-003**). Home KPI definitions use **(i)** tooltips (**UX-005**).
 
+## D-018: External PFM inspiration — UX patterns vs feature parity
+- Date: 2026-03-28
+- Status: **Accepted**
+- Decision: Treat **consumer cloud PFM** products (e.g. Quicken Simplifi, Rocket Money, Mint/Credit Karma) as **reference for positioning, copy tone, and sectioning patterns** only — **not** as a feature backlog. We **do not** target bank-linking-first onboarding, subscription-cancellation heroes, social-proof metrics, or SaaS pricing models. We **do** align with **clear jobs-to-be-done** (cash visibility, categories, confidence), **trust messaging** adapted to **local/self-hosted** (D-003), and **honest** language: **safe-to-spend** and period KPIs are not “projected cash flow” parity until such models exist.
+- Context: Competitive sites are **marketing-heavy**; our constraints (import pipeline, dedupe, air-gap) differ by design.
+- Consequence: Ongoing UX/copy improvements **may** cite **`docs/PFM_COMPETITIVE_UX_REFERENCE.md`**; major IA changes continue to be logged in **`docs/CHANGE_HISTORY.md`**. No obligation to match commercial feature matrices.
+

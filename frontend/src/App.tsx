@@ -6,7 +6,6 @@ import { CategoriesPage } from "./pages/CategoriesPage";
 import { CategoryRulesPage } from "./pages/CategoryRulesPage";
 import { HomeRoute } from "./pages/HomeRoute";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
-import { LoginPage } from "./pages/LoginPage";
 import { ResolutionQueuePage } from "./pages/ResolutionQueuePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
@@ -14,7 +13,7 @@ import { TransactionsPage } from "./pages/TransactionsPage";
 export function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route element={<ShellLayout />}>
         <Route path="/" element={<HomeRoute />} />
         <Route element={<RequireAuth />}>
