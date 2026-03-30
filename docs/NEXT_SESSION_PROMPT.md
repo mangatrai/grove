@@ -4,9 +4,10 @@ Use this exact starter prompt in a new chat after switching projects:
 
 ```text
 Read these files first and continue from there:
-- docs/CHECKPOINT.md (implementation status + **“Next session pickup — Needs review / bulk category”** if present)
-- docs/CHANGE_HISTORY.md (CR / UX / fixes + PRD deviations)
+- docs/CHECKPOINT.md (implementation status + **“Sensible next steps”**)
+- docs/CHANGE_HISTORY.md (CR / UX / fixes — e.g. **CR-028**, **DOC-011**, **UX-009**, **FIX-006**–**FIX-008**)
 - docs/PROJECT_CONTEXT.md
+- docs/PAYSLIP_V1.md (if payslip / import work)
 - docs/PFM_COMPETITIVE_UX_REFERENCE.md (optional — external PFM patterns vs our scope, **D-018**)
 - docs/DECISIONS_LOG.md
 - docs/FINANCE_APP_PRD.md
@@ -14,9 +15,9 @@ Read these files first and continue from there:
 - docs/MVP_BACKLOG.md
 
 Then do the following in order:
-1) Summarize the current state in 8-12 bullets (include **CHECKPOINT** “Next session pickup” if any). Cover: migrations through **`0014`** where applicable; **`/transactions`** search (**FIX-005** hybrid substring + FTS); **Needs review** — **`POST /resolution/bulk-apply-category`** expects **`resolution_item`** ids with **`type === unknown_category`** only; **`needsReview`** predicate can include **categorized** rows with **transfer/duplicate/reconciliation** items; **import** / **payslip** / **D-014** as in **CHECKPOINT**.
+1) Summarize the current state in 8-12 bullets. Cover: migrations through **`0015`**; **`/transactions`** (**FIX-005**); **Needs review** + **CR-025**; **payslips** + **unified Import** (**CR-028**: **`ibm_pay_contributions_pdf`**, **`import_file_id`**, payslip-only canonicalize); **UX-009** import copy + filename heuristic; **import** / **D-014** per **CHECKPOINT**.
 2) List any open product/architecture questions that block implementation.
-3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (not necessarily Epic 1 unless greenfield).
+3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (prioritize **unified Import + payslip** if that matches product direction).
 4) Keep changes minimal, tested, and aligned with strict dedupe + transfer correctness.
 5) Do not introduce external SaaS dependencies; remain self-hosted and air-gapped capable.
 ```

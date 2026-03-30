@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-27 — **CR-025**–**CR-027** (Needs review UX, payslip list UI, bill-pay transfer score); **FIX-005** (ledger search); **CR-024**–**CR-023**, **CR-022**, **CR-021**, **DOC-008**
+**Last updated:** 2026-04-02 — **CR-029**, **CR-028**, **DOC-011**, **UX-009** (cash-summary per-category prior-window totals/deltas + unified Import payslip + **`0015`** + docs + workspace copy + filename heuristic); prior: **FIX-006**–**FIX-008**, **UX-008**; **CR-025**–**CR-027**; **FIX-005**; **DOC-010**
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -37,17 +37,17 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | Area | Status | What exists |
 |------|--------|-------------|
 | **Auth** | ✅ | Login, JWT, household-scoped routes |
-| **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
+| **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize**. **IBM payslip** profile (**`ibm_pay_contributions_pdf`**) → **`payslip_snapshot`** + **`import_file_id`** (**`0015`**); **0** raw rows; payslip-only canonicalize OK (**CR-028**) |
 | **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable fingerprint; near-duplicate → **`resolution_item`** (`duplicate_ambiguity`); **`nearDuplicates`** in canonicalize response |
-| **Home / cash dashboard (Epic 7.1 / 7.2)** | 🟡 | **`GET /reports/cash-summary`** — presets + **custom `dateFrom`/`dateTo`** (inclusive, max 366 days, **`CR-015`**), KPIs, **`spendingPower`**, **`comparison`** (same-length prior window for custom), account filter, by-account, **by-category** + charts, trend. **`GET/PATCH /household/settings`** — **`monthly_savings_target_usd`**. **Transfer exclusions** per **CR-004**; **FIX-003** unmigrated DB. **UI:** Home — **Custom** period + Apply, KPI tooltips (**UX-005**), savings slider (**UX-006**), drill-down. **PRD §8** via **PRD-002**. **Not yet:** per-category prior-window deltas (**TODO** in service); free-form range beyond 366-day cap |
+| **Home / cash dashboard (Epic 7.1 / 7.2)** | 🟡 | **`GET /reports/cash-summary`** — presets + **custom `dateFrom`/`dateTo`** (inclusive, max 366 days, **`CR-015`**), KPIs, **`spendingPower`**, **`comparison`** (same-length prior window for custom), account filter, by-account, **by-category** + charts, trend. **`GET/PATCH /household/settings`** — **`monthly_savings_target_usd`**. **Transfer exclusions** per **CR-004**; **FIX-003** unmigrated DB. **UI:** Home — **Custom** period + Apply, KPI tooltips (**UX-005**), savings slider (**UX-006**), drill-down. **PRD §8** via **PRD-002**. **Not yet:** free-form range beyond 366-day cap |
 | **Classification (Epic 5.1)** | 🟡 | **Static rules** in **`category-rules.ts`** + **DB rules** (migration **`0009`**, **`category_rule`** table) evaluated before defaults; **`classification_meta`** on canonical rows for explainability. **`GET/POST/PATCH /categories/rules`**; **UI:** **`/categories/rules`**. **`unknown_category`** triage: **Transactions → Needs review** (bulk + expand-row context + **`POST /resolution/bulk-apply-category`**). **Still not:** richer confidence UX polish |
 | **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** + **`/categories/rules`**. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **IA:** **D-014** — keep **Transactions** as primary categorization surface; **Categories** + **Rules** remain secondary (**DOC-008**). **Gaps:** hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
 | **Transfer matcher (Epic 5.2)** | 🟡 | Matcher in **`canonical-ingest.service.ts`**: scoring + **CR-016** payment/loan/card-network tokens + asymmetric card-payoff heuristic; **`transfer_ambiguity`**, **`low_pair_score`**. **Tunable via `.env`:** `TRANSFER_*`. **Still not:** exhaustive institution-specific coverage |
 | **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Guests:** **`/`** = landing + **inline sign-in** (**CR-017**); **`/login`** → **`/`**. **Home (signed-in):** **Scope** bar (account filter). **`/settings`** — tabs (Household wired; other stubs). Sidebar width: **`localStorage`** `hf_sidebar_collapsed` |
-| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**); **Finalize session** UI (**CR-022**) → **`PATCH .../status`** **`finalized`** |
-| **Payslip (Epic 3.3a / 3.3b starter)** | 🟡 | **`POST /payslips/upload`** — IBM-style summary parser (`ibm_pay_contributions_pdf`), **`payslip_snapshot`** table, dedupe by **`(household_id, file_checksum)`**. **`GET /payslips`** — list + paging. **UI:** **`/payslips`** — upload + table; sidebar **Payslips**. **Not** merged into **`transaction_canonical`**. **Still not:** line-item grids, dashboards — see **`docs/PAYSLIP_V1.md`** |
+| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**); **Finalize session** UI (**CR-022**) → **`PATCH .../status`** **`finalized`**. **Payslip copy + filename heuristic** for IBM profile (**UX-009**, **CR-028**) |
+| **Payslip (Epic 3.3a / 3.3b starter)** | 🟡 | **`POST /payslips/upload`** — IBM SuccessFactors / Pay and Contributions **multiline** text parse (**FIX-006**, **FIX-007**); **`422`** codes **`NO_PDF_TEXT`** / **`PARSE_FAILED`** / **`PDF_READ_ERROR`**. **`GET /payslips`** — list + paging (**`importFileId`** when from Import). **Import path:** **`ibm_pay_contributions_pdf`** + **`0015`** (**CR-028**). **UI:** **`/payslips`** (**UX-008**); Import workspace payslip guidance (**UX-009**). **Dev:** Vite **`/payslips`** (**FIX-008**). **Not** merged into **`transaction_canonical`**. **Still not:** line-item grids, dashboards; salary-only onboarding — see **`docs/PAYSLIP_V1.md`** |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
-| **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
+| **Tests** | 🟡 | Backend: Vitest + integration (**`cd backend && npm test`**). Frontend: **`cd frontend && npm test`** — **`inferParserProfile`** / payslip filename heuristic (**CR-028**) |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
 | **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** + **CR-018**: **`/transactions`** **Needs review** — type filter, **`openReviewItems`** (incl. **`status`**), **`importSessionId`**, bulk + **expand row** for **`GET /transactions/:id/open-review`** (raw preview, file/session, classification pills, per-item **In review / Resolve / Reopen** via **`PATCH /resolution/:id`**). **`GET /transactions`** — **`limit`/`offset`** paging; **`search`** → **FTS5** + **BM25** ranking (**`0011`**, **`0013`** triggers). **`/resolution`** → redirect to **`/transactions?needsReview=true`**; **Review queue** nav item removed. **Intentional gaps:** near-duplicate rows that never received a canonical **`source_ref`** may still be absent from Needs review (**DOC-005** follow-up); duplicate/transfer **specialist** flows vs queue parity. **Trash** deferred. See **`docs/FINANCE_APP_PRD.md` §13**. |
 
@@ -69,7 +69,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | Cash summary (home) | `docs/API_CASH_SUMMARY.md` |
 | Household settings (savings target) | `docs/API_HOUSEHOLD.md` |
 | Staging purge | `docs/IMPORT_STAGING_PURGE.md` |
-| Payslip (3.3a API + design) | **`docs/PAYSLIP_V1.md`** · **`POST /payslips/upload`** (**CR-023**) |
+| Payslip (3.3a/b + parser notes) | **`docs/PAYSLIP_V1.md`** · **`GET/POST /payslips`** (**CR-023**, **CR-026**, **FIX-006**–**FIX-007**) |
 
 ---
 
@@ -83,14 +83,14 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 ## Sensible next steps (prioritized themes)
 
-1. ~~**Needs review UX:**~~ **CR-025** shipped — bulk category guardrails + **Why** copy; further polish optional.
-2. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
-3. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category API is **`/resolution/bulk-apply-category`** — see pickup note for **UI** gaps).
-4. **Epic 7 continuation:** category-level period comparisons (optional), **safe-to-spend** + savings targets; ledger **FTS** + paging shipped (**CR-024**).
-5. **Epic 11:** **11.5** — **CR-018** closed the main **DOC-005** slice (single review surface + redirect). Remaining **11.1–11.4** gaps + duplicate/transfer depth per **`MVP_BACKLOG.md`**.
-6. **Epic 6:** file-level outcomes (**CR-019**); **6.3** undo (**CR-021**); **6.2** bulk edits if still needed.  
-7. **Product cleanup:** **D-014** decided — **DOC-008** / **`docs/DECISIONS_LOG.md`** (two-tier IA; no merge for MVP).  
-8. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work.
+1. **Payslip + Import:** **Shipped (baseline):** **`import_file`** on **`payslip_snapshot`** (**`0015`**), session parse + payslip-only canonicalize, workspace guidance, filename-based suggestion for **`ibm_pay_contributions_pdf`**. **Next:** **`GET /payslips/:id`** detail; salary/income account hints from onboarding; optional PDF text sniff (beyond filename). See **`docs/PAYSLIP_V1.md`**.
+2. **Epic 5.2 continuation:** transfer matcher (more memo patterns, tests) — reduces **Needs review** noise.
+3. **Epic 7 continuation:** **`byCategory`** prior-window / delta fields shipped; **safe-to-spend** polish and remaining KPI range UX (e.g. free-form ranges beyond the 366-day cap).
+4. **Epic 5.1:** classification explainability / confidence UI on Transactions and rules.
+5. **Epic 11:** duplicate/transfer specialist UX vs queue parity; **DOC-005** edge cases (near-duplicate **`source_ref`**).
+6. **Epic 6:** **6.2** bulk edits; import UX polish if not subsumed by (1).
+7. ~~**Needs review bulk UX:**~~ **CR-025** shipped — optional micro-copy only.
+8. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work (**DOC-010** meta).
 
 ---
 
@@ -113,4 +113,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 - `frontend/src/pages/TransactionsPage.tsx` — **All \| Needs review** tabs, sticky filters, **Why** column, **+ Add** modal (**no Status column**; **Manage categories** link removed from intro)  
 - `frontend/src/pages/CategoriesPage.tsx` — category management; **link to rules**  
 - `frontend/src/pages/CategoryRulesPage.tsx` — **household classification rules UI**  
+- `frontend/src/pages/PayslipsPage.tsx` — payslip upload + list (**UX-008**)  
+- `frontend/vite.config.ts` — dev proxy **`/payslips`** (**FIX-008**)  
+- `backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts` — IBM parser (**FIX-006**, **FIX-007**)  
 - `docs/CHANGE_HISTORY.md` — **CR / UX / FIX / PRD deviation log**

@@ -31,7 +31,9 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 - **rolling_90** — 90 days inclusive ending `asOf`.
 - **Custom** — when **`dateFrom`** and **`dateTo`** are both valid calendar dates: that inclusive window. Maximum span **366** inclusive days; `dateFrom` must be ≤ `dateTo`. Response `range.preset` is **`custom`** and `asOf` equals **`dateTo`** (trend windows still anchor on `range.end`). If both dates are sent, they define the range even if `preset` is also present.
 
-**Future:** Per-category prior-period totals (parallel to household `comparison`) are not in the response yet; see TODO in `cash-summary.service.ts`.
+When **`categoryBreakdown=true`**, **`byCategory[]`** also includes per-category prior-window totals/deltas using the same **`previousPeriod`** rules as `comparison.previousPeriod`:
+- `previousInflows`, `previousOutflows`, `previousNet`
+- `deltaInflows`, `deltaOutflows`, `deltaNet`
 
 ### Comparison blocks
 
@@ -65,7 +67,7 @@ Returns **6** calendar months ending in the month containing `range.end`, with t
 
 ### Category breakdown (`categoryBreakdown=true`)
 
-- **`byCategory`** — one row per distinct `category_id` in range: `categoryName`, `inflows`, `outflows` (debit magnitude), `net`, `transactionCount`.
+- **`byCategory`** — one row per distinct `category_id` in range: `categoryName`, `inflows`, `outflows` (debit magnitude), `net`, `transactionCount`, plus per-category comparison fields: `previousInflows`, `previousOutflows`, `previousNet`, `deltaInflows`, `deltaOutflows`, `deltaNet`.
 - **`monthlyOutflowsByCategory`** — for each of the same **6** months as `monthlyTrend`, `segments[]` of `{ categoryName, categoryId, outflows }` for categories with debit activity that month (omits categories with only credits).
 
 ### Response `200`
@@ -135,6 +137,12 @@ Returns **6** calendar months ending in the month containing `range.end`, with t
       "inflows": 0,
       "outflows": 400,
       "net": -400,
+      "previousInflows": 0,
+      "previousOutflows": 0,
+      "previousNet": 0,
+      "deltaInflows": 0,
+      "deltaOutflows": 400,
+      "deltaNet": -400,
       "transactionCount": 5
     }
   ],

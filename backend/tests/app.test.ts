@@ -283,10 +283,14 @@ describe("import sessions and file intake", () => {
       .send({ sourceType: "upload" });
     const sessionId = sessionResponse.body.session.id as string;
 
+    const tag = Date.now();
+    const dayBase = tag % 8000;
+    const txnDate1 = new Date(Date.UTC(2026, 0, 1 + (dayBase % 27))).toISOString().slice(0, 10);
+    const txnDate2 = new Date(Date.UTC(2026, 0, 2 + (dayBase % 27))).toISOString().slice(0, 10);
     const csv = [
       "Date,Description,Amount,Reference",
-      "2026-03-01,Starbucks Coffee,-4.50,ref-1",
-      "2026-03-02,Salary,3200.00,ref-2"
+      `${txnDate1},Starbucks Coffee ${tag},-4.50,ref-1-${tag}`,
+      `${txnDate2},Salary ${tag},3200.00,ref-2-${tag}`
     ].join("\n");
 
     const uploadRes = await request(app)
@@ -347,10 +351,11 @@ describe("import sessions and file intake", () => {
       .send({ sourceType: "upload" });
     const sessionId = sessionResponse.body.session.id as string;
 
+    const txnDate = new Date(Date.UTC(2025, 0, 1 + crypto.randomInt(0, 8000))).toISOString().slice(0, 10);
     const csv = [
       "Date,Description,Amount,Reference",
-      "2026-04-01,STARBUCKS COFFEE,-5.00,ref-n1",
-      "2026-04-01,STARBUCKS COFFEE STORE,-5.00,ref-n2"
+      `${txnDate},STARBUCKS COFFEE,-5.00,ref-n1`,
+      `${txnDate},STARBUCKS COFFEE STORE,-5.00,ref-n2`
     ].join("\n");
 
     const uploadRes = await request(app)
@@ -409,10 +414,11 @@ describe("import sessions and file intake", () => {
       .send({ sourceType: "upload" });
     const sessionId = sessionResponse.body.session.id as string;
 
+    const txnDate = new Date(Date.UTC(2025, 5, 1 + crypto.randomInt(0, 8000))).toISOString().slice(0, 10);
     const csv = [
       "Date,Description,Amount,Reference",
-      "2026-05-01,UNDOIMPTEST COFFEE,-5.00,ref-u1",
-      "2026-05-01,UNDOIMPTEST COFFEE STORE,-5.00,ref-u2"
+      `${txnDate},UNDOIMPTEST COFFEE,-5.00,ref-u1`,
+      `${txnDate},UNDOIMPTEST COFFEE STORE,-5.00,ref-u2`
     ].join("\n");
 
     const uploadRes = await request(app)
@@ -1395,10 +1401,14 @@ describe("import sessions and file intake", () => {
     expect(emptySummary.body.totals.openItemsNeedingReview).toBe(0);
     expect(emptySummary.body.totals.notPostedExactDuplicateOrSkipped).toBe(0);
 
+    const tag = Date.now();
+    const dayBase = tag % 8000;
+    const txnDate1 = new Date(Date.UTC(2026, 7, 1 + (dayBase % 27))).toISOString().slice(0, 10);
+    const txnDate2 = new Date(Date.UTC(2026, 7, 2 + (dayBase % 27))).toISOString().slice(0, 10);
     const csv = [
       "Date,Description,Amount,Reference",
-      "2026-08-01,Ledger test A,-3.33,ref-lt-a",
-      "2026-08-02,Ledger test B,4444.44,ref-lt-b"
+      `${txnDate1},Ledger test A ${tag},-3.33,ref-lt-a-${tag}`,
+      `${txnDate2},Ledger test B ${tag},4444.44,ref-lt-b-${tag}`
     ].join("\n");
 
     const uploadRes = await request(app)
@@ -1437,14 +1447,6 @@ describe("import sessions and file intake", () => {
     expect(sum.body.files[0].nearDuplicatesFlagged).toBe(0);
     expect(sum.body.files[0].notPostedExactDuplicateOrSkipped).toBe(0);
 
-    const ledger = await request(app)
-      .get("/transactions?limit=50")
-      .set("authorization", `Bearer ${token}`);
-    expect(ledger.status).toBe(200);
-    expect(ledger.body.total).toBeGreaterThanOrEqual(2);
-    expect(Array.isArray(ledger.body.transactions)).toBe(true);
-    expect(ledger.body.transactions.some((t: { merchant?: string }) => t.merchant?.includes("Ledger test"))).toBe(true);
-
     const scoped = await request(app)
       .get(`/transactions?sessionId=${sessionId}&limit=50`)
       .set("authorization", `Bearer ${token}`);
@@ -1452,6 +1454,9 @@ describe("import sessions and file intake", () => {
     expect(scoped.body.sessionId).toBe(sessionId);
     expect(scoped.body.total).toBe(2);
     expect(scoped.body.transactions.length).toBe(2);
+    expect(
+      scoped.body.transactions.some((t: { merchant?: string }) => t.merchant?.includes(`Ledger test A ${tag}`))
+    ).toBe(true);
   });
 
   it("returns 404 when ledger sessionId filter is not found for household", async () => {
@@ -1471,6 +1476,7 @@ describe("transactions command center (Epic 11.2)", () => {
     });
     expect(login.status).toBe(200);
     const token = login.body.token as string;
+    const tag = Date.now();
     const res = await request(app)
       .post("/transactions")
       .set("authorization", `Bearer ${token}`)
@@ -1478,7 +1484,7 @@ describe("transactions command center (Epic 11.2)", () => {
         accountId: SEED_BOA_CHECKING,
         txnDate: "2026-03-27",
         amount: -12.34,
-        merchant: "API manual test",
+        merchant: `API manual test ${tag}`,
         memo: null,
         categoryId: "30000000-0000-0000-0000-000000000004"
       });
@@ -2101,7 +2107,7 @@ describe("cash summary (reports)", () => {
     const incomeCat = "30000000-0000-0000-0000-000000000001";
     const housingCat = "30000000-0000-0000-0000-000000000002";
 
-    const asOf = "1999-12-20";
+    const asOf = new Date(Date.UTC(1990, 0, 1 + crypto.randomInt(0, 20000))).toISOString().slice(0, 10);
 
     // Normal (non-transfer) transactions.
     const normalAccountId = crypto.randomUUID();
@@ -2340,6 +2346,23 @@ describe("cash summary (reports)", () => {
     expect(housing.outflows).toBe(250.5);
     expect(income).toBeDefined();
     expect(income.inflows).toBe(1000);
+
+    // Epic 7: per-category prior-window totals/deltas are included with `categoryBreakdown=true`.
+    // In this test scenario, all seeded transactions are on `asOf`, so the previous rolling window contains 0 rows.
+    expect(housing.previousInflows).toBe(0);
+    expect(housing.previousOutflows).toBe(0);
+    expect(housing.previousNet).toBe(0);
+    expect(housing.deltaInflows).toBe(0);
+    expect(housing.deltaOutflows).toBe(250.5);
+    expect(housing.deltaNet).toBe(-250.5);
+
+    expect(income.previousInflows).toBe(0);
+    expect(income.previousOutflows).toBe(0);
+    expect(income.previousNet).toBe(0);
+    expect(income.deltaInflows).toBe(1000);
+    expect(income.deltaOutflows).toBe(0);
+    expect(income.deltaNet).toBe(1000);
+
     expect(Array.isArray(res.body.monthlyOutflowsByCategory)).toBe(true);
     expect(res.body.monthlyOutflowsByCategory.length).toBe(6);
     const asOfYm = asOf.slice(0, 7);

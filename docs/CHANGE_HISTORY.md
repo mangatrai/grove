@@ -16,6 +16,59 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-02
+
+### CR-029 — Cash summary: byCategory prior-window totals/deltas
+- **Type:** CR
+- **What:** `GET /reports/cash-summary` now includes per-category previous-window totals and deltas in `byCategory[]` when `categoryBreakdown=true`:
+  - `previousInflows`, `previousOutflows`, `previousNet`
+  - `deltaInflows`, `deltaOutflows`, `deltaNet`
+  using the same `comparison.previousPeriod` date rules as household KPIs.
+- **Why:** Make category drill-down comparisons consistent with the dashboard’s KPI deltas.
+- **Files:** `backend/src/modules/reports/cash-summary.service.ts`, `backend/tests/app.test.ts`, `frontend/src/pages/DashboardPage.tsx` (types), `docs/API_CASH_SUMMARY.md`.
+
+### DOC-011 — Docs sync: unified payslip import, migration **0015**, import API
+- **Type:** DOC  
+- **What:** **`docs/CHECKPOINT.md`** (payslip + import status, next steps), **`docs/API_IMPORT_SESSIONS.md`** (**`ibm_pay_contributions_pdf`**, parse/canonicalize behavior for payslip-only sessions), **`docs/PAYSLIP_V1.md`** (§1 progress — **`import_file`** link), **`docs/NEXT_SESSION_PROMPT.md`** (handoff bullets), **`docs/PROJECT_CONTEXT.md`** (immediate next focus). **`docs/API_CASH_SUMMARY.md`** — Epic **7** backlog pointer for per-category comparison fields (aligns with TODO in service).  
+- **Why:** Repo behavior for unified Import + payslip was ahead of written contracts.  
+- **Files:** those docs, **`docs/CHANGE_HISTORY.md`**.
+
+### CR-028 — Import: IBM payslip through session pipeline + filename heuristic
+- **Type:** CR  
+- **What:** Migration **`0015_payslip_import_file.sql`** — **`payslip_snapshot.import_file_id`** → **`import_file`**. Parse profile **`ibm_pay_contributions_pdf`**: writes **`payslip_snapshot`**, **`parsedRows` 0**, no **`transaction_raw`**. Canonicalize: payslip-only IBM session completes (**`inserted: 0`**, staging purge) instead of **`NO_RAW_ROWS`**. **`inferParserProfile`** (frontend) suggests **`ibm_pay_contributions_pdf`** for **`.pdf`** files whose names look like employer payslips (paystub, payslip, SuccessFactors, pay and contribution, etc.) before institution PDF rules.  
+- **Why:** Single Import intake for employer PDFs; less manual profile picking; **`GET /payslips`** shows **`importFileId`**.  
+- **Files:** backend migrations/services (already shipped); **`frontend/src/import/inferParserProfile.ts`**, **`frontend/src/pages/ImportWorkspacePage.tsx`**, **`frontend/src/import/inferParserProfile.test.ts`**, Vitest in **`frontend/`**.
+
+### UX-009 — Import workspace: payslip (IBM) guidance
+- **Type:** UX  
+- **What:** **Import session** — short callout under **Files & account**: choose **Employer payslip (IBM)** when the PDF is a pay stub; **parse** shows **0** ledger lines; **canonicalize** still finishes and clears staging; data appears under **Payslips**. **Last import** summary adds a line when **`parsedRows === 0`** and nothing posted, pointing to payslips.  
+- **Why:** Reduces confusion for payslip-only sessions.  
+- **Files:** **`frontend/src/pages/ImportWorkspacePage.tsx`**, **`docs/CHANGE_HISTORY.md`**.
+
+---
+
+## 2026-04-01
+
+### DOC-010 — Docs sync: payslip progress, checkpoint, next-session prompt
+- **Type:** DOC  
+- **What:** **`docs/CHECKPOINT.md`**, **`docs/PROJECT_CONTEXT.md`**, **`docs/PAYSLIP_V1.md`**, **`docs/NEXT_SESSION_PROMPT.md`** — reflect **FIX-006**–**FIX-008**, **UX-008**, IBM SuccessFactors parser behavior, dev **`/payslips`** proxy, and prioritized **next build** themes (unified import vs payslip-only UX).  
+- **Why:** Single handoff for humans and AI sessions after payslip hardening.  
+- **Files:** those docs, `docs/CHANGE_HISTORY.md`.
+
+### UX-008 — Payslips upload: success path after async (form reset)
+- **Type:** UX  
+- **What:** **`PayslipsPage`** — capture **`HTMLFormElement`** before **`await`**; call **`form.reset()`** after successful upload + reload instead of touching **`e.currentTarget.elements`** (React synthetic event **`currentTarget`** is **`null`** after await → *Cannot read properties of null (reading 'elements')*).  
+- **Why:** Upload succeeded server-side but UI threw; poor UX.  
+- **Files:** `frontend/src/pages/PayslipsPage.tsx`, `docs/CHANGE_HISTORY.md`.
+
+### FIX-008 — Vite dev proxy: `/payslips` → API
+- **Type:** FIX  
+- **What:** **`frontend/vite.config.ts`** — proxy **`/payslips`** to backend (same as **`/imports`**, **`/transactions`**). Without it, **`fetch('/payslips/...')`** in dev hit the Vite server and failed.  
+- **Why:** Payslip list/upload appeared broken in **`npm run dev:frontend`** until proxy added.  
+- **Files:** `frontend/vite.config.ts`, `docs/CHANGE_HISTORY.md`.
+
+---
+
 ## 2026-03-31
 
 ### FIX-007 — IBM payslip: multiline PDF text (real SuccessFactors layout)

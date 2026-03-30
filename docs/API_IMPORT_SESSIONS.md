@@ -138,7 +138,7 @@ Lists supported **parser profile IDs** (bank/format adapters). The client picks 
 
 **200:** `{ "profiles": [ { "id", "label" } ] }`
 
-Known IDs include: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf` (Bank of America eStatement PDF), `marcus_online_savings_pdf` (Marcus / Goldman Sachs online savings PDF).
+Known IDs include: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf` (Bank of America eStatement PDF), `marcus_online_savings_pdf` (Marcus / Goldman Sachs online savings PDF), **`ibm_pay_contributions_pdf`** (IBM / SuccessFactors-style **employer payslip** PDF — text-based; stores a **`payslip_snapshot`**, not ledger lines).
 
 ---
 
@@ -172,7 +172,9 @@ Parses supported files in a session into `transaction_raw` records.
 Supported adapters in MVP:
 - CSV (`.csv`)
 - Excel (`.xlsx`, `.xls`)
-- PDF (`.pdf`) — **text-based** statements only; use a named PDF profile (`boa_estatement_pdf`, `marcus_online_savings_pdf`). Scanned/image PDFs need OCR (not in MVP).
+- PDF (`.pdf`) — **text-based** only; use a named PDF profile (`boa_estatement_pdf`, `marcus_online_savings_pdf`, **`ibm_pay_contributions_pdf`**). Scanned/image PDFs need OCR (not in MVP).
+
+**Employer payslip (`ibm_pay_contributions_pdf`):** extraction runs the IBM payslip parser. On success, a row is written to **`payslip_snapshot`** with **`import_file_id`** set to this session file. **No** **`transaction_raw`** rows are created. **`200`** still returns **`parsedFiles`** ≥ 1 and typically **`parsedRows`: 0** (ledger line count). Duplicate payslip checksum for the household may mark the file **`failed`** / skip with a payslip-specific reason.
 
 **Profile `generic_tabular`:** user supplies column mapping (and optional `sheetName` for Excel).
 
@@ -193,7 +195,7 @@ Supported adapters in MVP:
 
 Required mapping keys: `date`, `description`, `amount`.
 
-**Named bank profiles** (`chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`): mapping is **not** used; send `{}` or omit `mapping` as allowed by the route.
+**Named bank profiles** (`chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, **`ibm_pay_contributions_pdf`**): mapping is **not** used; send `{}` or omit `mapping` as allowed by the route.
 
 **200:** `{ "parsedFiles", "parsedRows", "skippedFiles" }`  
 **400:** invalid payload/mapping (`code: "INVALID_MAPPING"` for generic_tabular when columns are wrong)  
@@ -206,7 +208,10 @@ Required mapping keys: `date`, `description`, `amount`.
 
 Maps all **`transaction_raw`** rows for this session into **`transaction_canonical`** (Epic 4.1 — single ingest path with strict dedupe).
 
-**Prerequisite:** run **`POST .../parse`** first so `transaction_raw` exists. Otherwise **409** with `code: "NO_RAW_ROWS"`.
+**Prerequisite:** run **`POST .../parse`** first.
+
+- If the session has **no** **`transaction_raw`** rows **and** is **not** a completed **IBM payslip-only** import, **409** with `code: "NO_RAW_ROWS"` (“run parse first”).
+- **Payslip-only session:** when parse created a **`payslip_snapshot`** linked to an **`import_file`** in this session with **`parser_profile_id = ibm_pay_contributions_pdf`**, canonicalize **succeeds** with **`inserted: 0`** (and zeros for duplicates / skipped / nearDuplicates), **deletes staging** for the session, and does **not** require ledger rows.
 
 **Body:** none (empty JSON `{}` is fine).
 

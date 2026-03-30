@@ -102,15 +102,20 @@ describe("category rules API and classification explainability", () => {
       household_id: string;
     };
     const ruleId = crypto.randomUUID();
+    const patternToken = `dbpri${Date.now()}`;
     db.prepare(
       `INSERT INTO category_rule
          (id, household_id, pattern, match_type, category_id, confidence, priority, enabled, created_at, updated_at)
        VALUES (?, ?, ?, 'contains', ?, 0.99, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(ruleId, household.household_id, "starbucks", UTILITIES_ID);
+    ).run(ruleId, household.household_id, patternToken, UTILITIES_ID);
 
+    const txnDate = new Date(Date.UTC(2026, 4, 1 + (Date.now() % 300))).toISOString().slice(0, 10);
     const sessionId = await createSessionWithCsv(
       token,
-      ["Date,Description,Amount,Reference", "2026-03-01,STARBUCKS STORE,-5.00,db-priority-1"].join("\n")
+      [
+        "Date,Description,Amount,Reference",
+        `${txnDate},${patternToken} store,-5.00,db-priority-${Date.now()}`
+      ].join("\n")
     );
 
     const canRes = await request(app)

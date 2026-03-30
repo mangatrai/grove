@@ -26,6 +26,12 @@ type CashSummaryCategoryRow = {
   outflows: number;
   net: number;
   transactionCount: number;
+  previousInflows?: number;
+  previousOutflows?: number;
+  previousNet?: number;
+  deltaInflows?: number;
+  deltaOutflows?: number;
+  deltaNet?: number;
 };
 
 type CashSummaryResponse = {
@@ -917,9 +923,30 @@ export function DashboardPage() {
                       {data.byCategory.map((c) => (
                         <tr key={c.categoryId ?? "uncat"}>
                           <td>{c.categoryName}</td>
-                          <td>{formatMoneySigned(c.inflows)}</td>
-                          <td>${c.outflows.toFixed(2)}</td>
-                          <td>{formatMoneySigned(c.net)}</td>
+                          <td>
+                            <div>{formatMoneySigned(c.inflows)}</div>
+                            {typeof c.deltaInflows === "number" && data.comparison?.previousPeriod ? (
+                              <div className="muted" style={{ fontSize: "0.8rem" }}>
+                                Δ {formatMoneySigned(c.deltaInflows)} vs {data.comparison.previousPeriod.label}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td>
+                            <div>${c.outflows.toFixed(2)}</div>
+                            {typeof c.deltaOutflows === "number" && data.comparison?.previousPeriod ? (
+                              <div className="muted" style={{ fontSize: "0.8rem" }}>
+                                Δ {formatMoneySigned(c.deltaOutflows)} vs {data.comparison.previousPeriod.label}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td>
+                            <div>{formatMoneySigned(c.net)}</div>
+                            {typeof c.deltaNet === "number" && data.comparison?.previousPeriod ? (
+                              <div className="muted" style={{ fontSize: "0.8rem" }}>
+                                Δ {formatMoneySigned(c.deltaNet)} vs {data.comparison.previousPeriod.label}
+                              </div>
+                            ) : null}
+                          </td>
                           <td>{c.transactionCount}</td>
                           <td>
                             <Link

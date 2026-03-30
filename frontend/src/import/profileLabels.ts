@@ -7,7 +7,8 @@ const FRIENDLY: Record<string, string> = {
   boa_savings_csv: "Bank of America deposit account (CSV)",
   boa_credit_card_csv: "Bank of America card (CSV)",
   boa_estatement_pdf: "Bank of America statement (PDF)",
-  marcus_online_savings_pdf: "Marcus savings (PDF)"
+  marcus_online_savings_pdf: "Marcus savings (PDF)",
+  ibm_pay_contributions_pdf: "Employer payslip — IBM Pay & Contributions (PDF)"
 };
 
 export function friendlyParserLabel(profileId: string): string {

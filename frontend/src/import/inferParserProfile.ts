@@ -8,12 +8,45 @@ export type FinancialAccountLike = {
   institution: string;
 };
 
+export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf";
+
 function extensionOf(fileName: string): string {
   const i = fileName.lastIndexOf(".");
   if (i < 0) {
     return "";
   }
   return fileName.slice(i).toLowerCase();
+}
+
+/**
+ * Heuristic: PDF file names that often indicate an employer payslip (IBM / SuccessFactors-style).
+ * Checked before institution PDF rules so a payslip on a checking account still suggests the payslip profile.
+ */
+export function filenameSuggestsIbmPayslipPdf(fileName: string | null | undefined): boolean {
+  if (!fileName?.trim()) {
+    return false;
+  }
+  const base = fileName.trim().split(/[/\\]/).pop() ?? "";
+  const lower = base.toLowerCase().replace(/\s+/g, " ");
+  if (!lower.endsWith(".pdf")) {
+    return false;
+  }
+  const stem = lower.slice(0, -4);
+  // `_` counts as a "word" char in JS `\b`; normalize so `jan_payslip` matches `\bpayslip\b`.
+  const stemForMatch = stem.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const patterns: RegExp[] = [
+    /\bpayslip\b/,
+    /\bpay[\s_-]?stub\b/,
+    /\bpaycheck\b/,
+    /\bpay[\s_-]?check\b/,
+    /successfactors/,
+    /\bpay[\s_-]and[\s_-]?contributions?\b/,
+    /\bregular[\s_-]?pay\b/,
+    /\bcommission[\s_-]?pay\b/,
+    /\bearnings[\s_-]?statement\b/,
+    /\bemployer[\s_-]?payslip\b/
+  ];
+  return patterns.some((re) => re.test(stemForMatch));
 }
 
 function normalizeInstitution(institution: string): "boa" | "chase" | "citi" | "marcus" | "other" {
@@ -46,6 +79,10 @@ export function inferParserProfile(
   const ext = extensionOf(fileName);
   const inst = normalizeInstitution(account.institution);
   const t = account.type.toLowerCase();
+
+  if (ext === ".pdf" && filenameSuggestsIbmPayslipPdf(fileName)) {
+    return IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+  }
 
   if (inst === "marcus" && t === "savings" && ext === ".pdf") {
     return "marcus_online_savings_pdf";

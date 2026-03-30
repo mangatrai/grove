@@ -557,9 +557,19 @@ export function ImportWorkspacePage() {
         <div className="card">
           <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Last import — data reached your ledger</h2>
           <ul style={{ margin: "0.5rem 0 0", paddingLeft: "1.25rem" }}>
-            <li>
-              <strong>{lastImportSummary.parsedRows}</strong> transaction line(s) extracted from your file(s)
-            </li>
+            {lastImportSummary.parsedRows === 0 &&
+            lastImportSummary.inserted === 0 &&
+            lastImportSummary.parsedFiles > 0 ? (
+              <li className="muted">
+                No transaction lines were extracted (often correct for an <strong>employer payslip</strong> import).
+                Check <Link to="/payslips">Payslips</Link> for the snapshot; the ledger stays unchanged for payslip-only
+                files.
+              </li>
+            ) : (
+              <li>
+                <strong>{lastImportSummary.parsedRows}</strong> transaction line(s) extracted from your file(s)
+              </li>
+            )}
             <li>
               <strong>{lastImportSummary.inserted}</strong> line(s) safely posted to your ledger
             </li>
@@ -655,7 +665,22 @@ export function ImportWorkspacePage() {
         <p className="muted">
           For each file, pick the account it belongs to. The menu shows the institution, account type, and last four
           digits when available so you can tell accounts apart. We detect the file format automatically — you
-          don&apos;t choose parsers.
+          don&apos;t choose parsers unless you use advanced mode.
+        </p>
+        <p
+          className="muted"
+          style={{
+            marginTop: "0.65rem",
+            padding: "0.65rem 0.75rem",
+            borderLeft: "3px solid var(--hf-border-strong, #94a3b8)",
+            background: "var(--hf-callout-bg, rgba(148, 163, 184, 0.12))"
+          }}
+        >
+          <strong>Employer payslip (IBM):</strong> For a pay-stub PDF (e.g. SuccessFactors / Pay and Contributions),
+          pick <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if we don&apos;t auto-detect it, or use a filename like
+          “payslip” or “paystub” for a suggestion. Parse may show <strong>0</strong> ledger lines — that&apos;s
+          expected. Run <strong>canonicalize</strong> anyway to finish the session and clear staging; summaries appear
+          under <Link to="/payslips">Payslips</Link>, not in the transaction ledger.
         </p>
         {files.length === 0 ? (
           <p className="muted">No files yet.</p>

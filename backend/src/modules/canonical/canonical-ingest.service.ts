@@ -279,6 +279,22 @@ export function canonicalizeImportSession(
     .all(sessionId) as Array<{ raw_id: string; payload_json: string }>;
 
   if (rawRows.length === 0) {
+    const payslipLinked = db
+      .prepare(
+        `SELECT 1 AS ok FROM payslip_snapshot ps
+         INNER JOIN import_file f ON f.id = ps.import_file_id
+         WHERE f.session_id = ?
+           AND f.parser_profile_id = 'ibm_pay_contributions_pdf'
+         LIMIT 1`
+      )
+      .get(sessionId) as { ok: number } | undefined;
+    if (payslipLinked) {
+      deleteStagingFilesForSession(sessionId);
+      return {
+        ok: true,
+        data: { inserted: 0, duplicates: 0, skipped: 0, nearDuplicates: 0 }
+      };
+    }
     return { ok: false, code: "NO_RAW_ROWS", message: "No transaction_raw rows for this session; run parse first" };
   }
 

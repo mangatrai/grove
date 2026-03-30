@@ -79,6 +79,16 @@ export interface CashSummaryCategoryRow {
   outflows: number;
   net: number;
   transactionCount: number;
+  /**
+   * Optional (Epic 7): previous-window totals + deltas for this category.
+   * Present when `categoryBreakdown=true` (same previous period used for `comparison.previousPeriod`).
+   */
+  previousInflows?: number;
+  previousOutflows?: number;
+  previousNet?: number;
+  deltaInflows?: number;
+  deltaOutflows?: number;
+  deltaNet?: number;
 }
 
 export interface CashSummaryTrendPoint {
@@ -133,7 +143,40 @@ export interface CashSummaryResult {
   monthlyOutflowsByCategory: CashSummaryMonthCategoryOutflows[] | null;
 }
 
-// TODO(Epic 7+): Optional API fields for per-category previous-window totals/deltas (second aggregateByCategory over prior range).
+function categoryKey(categoryId: string | null): string {
+  return categoryId ?? "__uncategorized__";
+}
+
+function mergeCategoryPreviousAndDeltas(
+  current: CashSummaryCategoryRow[],
+  previous: CashSummaryCategoryRow[]
+): CashSummaryCategoryRow[] {
+  const prev = new Map<string, CashSummaryCategoryRow>();
+  for (const r of previous) {
+    prev.set(categoryKey(r.categoryId), r);
+  }
+
+  return current.map((r) => {
+    const p = prev.get(categoryKey(r.categoryId));
+    const previousInflows = p?.inflows ?? 0;
+    const previousOutflows = p?.outflows ?? 0;
+    const previousNet = p?.net ?? 0;
+
+    const deltaInflows = roundMoney(r.inflows - previousInflows);
+    const deltaOutflows = roundMoney(r.outflows - previousOutflows);
+    const deltaNet = roundMoney(r.net - previousNet);
+
+    return {
+      ...r,
+      previousInflows,
+      previousOutflows,
+      previousNet,
+      deltaInflows,
+      deltaOutflows,
+      deltaNet
+    };
+  });
+}
 
 function defaultAsOfUtc(): string {
   return new Date().toISOString().slice(0, 10);
@@ -736,7 +779,17 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
     : null;
   const rollup = input.categoryRollup ?? "parent";
   const byCategory = input.categoryBreakdown
-    ? aggregateByCategory(householdId, range.start, range.end, input.accountId, rollup)
+    ? (() => {
+        const current = aggregateByCategory(householdId, range.start, range.end, input.accountId, rollup);
+        const previous = aggregateByCategory(
+          householdId,
+          comparisonRanges.previous.start,
+          comparisonRanges.previous.end,
+          input.accountId,
+          rollup
+        );
+        return mergeCategoryPreviousAndDeltas(current, previous);
+      })()
     : null;
   const trend = monthlyTrend(householdId, range.end, input.accountId);
   const monthlyOutflowsByCategory = input.categoryBreakdown

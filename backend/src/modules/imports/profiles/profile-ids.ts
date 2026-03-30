@@ -8,7 +8,9 @@ export const PARSER_PROFILE_IDS = [
   "boa_credit_card_csv",
   /** Epic 3 — text-based PDF eStatements */
   "boa_estatement_pdf",
-  "marcus_online_savings_pdf"
+  "marcus_online_savings_pdf",
+  /** Epic 3.3 — employer payslip (summary only; stored in payslip_snapshot, not ledger) */
+  "ibm_pay_contributions_pdf"
 ] as const;
 
 export type ParserProfileId = (typeof PARSER_PROFILE_IDS)[number];

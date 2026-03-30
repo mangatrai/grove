@@ -92,15 +92,15 @@ Commercial PFMs optimize for **cloud subscriptions, bank aggregation, and broad 
 ## Build status (rolling)
 Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. **`docs/CHANGE_HISTORY.md`** records CR/UX/FIX/DOC entries with stable IDs. Treat **CHECKPOINT + CHANGE_HISTORY** as the source of truth for “where we are” and **why** recent choices were made.
 
-**Recent shipped slices (summary):** **Epic 11.2** transactions hub (**CR-013**) + **11.5** (**CR-014**, **CR-018**): **`/transactions`** tabs (**All \| Needs review**), expand-row **`GET /transactions/:id/open-review`** (same **`context`** enrichment idea as **`GET /resolution`** for open items), bulk + per-item **`PATCH /resolution/:id`**. **Routing:** **`/resolution`** is not a separate screen — **`App`** **`Navigate`**s to **`/transactions?needsReview=true`** (**CR-018**). **Epic 6 (partial):** **`GET /imports/sessions/:id/summary`** exposes per-file **`nearDuplicatesFlagged`**, **`openItemsNeedingReview`**, **`notPostedExactDuplicateOrSkipped`**; **Import workspace** shows **Outcomes by file** with **View in ledger** / **Needs review** links (**CR-019**). Shell + Settings (**UX-007**); cash-summary + savings target (**CR-012**, **PRD-002**); DB rules + **`/categories/rules`** (**CR-010**). **IA:** primary review surface **Transactions → Needs review** (**DOC-005**, completed per **CR-018**). Details: **`CHANGE_HISTORY.md`**.
+**Recent shipped slices (summary):** **Payslips:** **`GET/POST /payslips`**, IBM **SuccessFactors**-style parser (**FIX-006**, **FIX-007**), **`/payslips`** UI (**CR-026**, **UX-008**, **FIX-008**). **Epic 11.2** transactions hub (**CR-013**) + **11.5** (**CR-014**, **CR-018**): **`/transactions`** tabs (**All \| Needs review**), expand-row **`GET /transactions/:id/open-review`**, bulk + per-item **`PATCH /resolution/:id`**. **`/resolution`** → **`/transactions?needsReview=true`** (**CR-018**). **Epic 6 (partial):** session summary + **Outcomes by file** (**CR-019**). **Needs review** bulk category UX (**CR-025**). Shell + Settings (**UX-007**); cash-summary + savings target (**CR-012**, **PRD-002**); DB rules + **`/categories/rules`** (**CR-010**). **IA:** **Transactions → Needs review** (**DOC-005** / **CR-018**). Details: **`CHANGE_HISTORY.md`**.
 
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
-1. **`docs/CHECKPOINT.md`** — **CR-025**–**CR-027** (Needs review UX, payslip list UI, bill-pay transfer score); **3.3b** follow-on: payslip detail drill-down, richer dashboards if desired.
-2. **`docs/CHECKPOINT.md`** “Sensible next steps” (Epic **5.2** continuation, **7**, **11** residual).
-3. **Story 11.5:** **core** port shipped (**CR-018**); near-duplicate edge cases, specialist duplicate/transfer UX.
-4. **Epic 5.2** / **6.2** / **7** per backlog.
-5. **D-014** closed (**DOC-008**): **Transactions** + **`/categories`** / **rules** split.
-6. Parser profiles (BoA, Citi, Chase) baseline for ingestion.
+1. **Unified Import + payslip:** **Baseline shipped** (**CR-028**, **`0015`**, **UX-009**): import session + **`ibm_pay_contributions_pdf`**, **`payslip_snapshot.import_file_id`**, payslip-only canonicalize, filename heuristic, workspace copy. **Next:** **`GET /payslips/:id`**, salary-account onboarding hints, optional PDF-text sniff. See **`docs/CHECKPOINT.md`** and **`docs/PAYSLIP_V1.md`**.
+2. **Epic 5.2** — transfer matcher continuation (fewer false **`transfer_ambiguity`** rows, more tests).
+3. **Epic 7** — cash summary gaps (category period deltas, safe-to-spend narrative).
+4. **Epic 11** — duplicate/transfer depth vs queue; **DOC-005** near-duplicate **`source_ref`** edge cases.
+5. **Epic 6.2** — bulk ledger edits if still in scope.
+6. **Ingestion:** parser profiles (BoA, Citi, Chase) baseline — parallel to (1) where separate files.
 

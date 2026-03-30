@@ -14,6 +14,9 @@ import { parseMarcusOnlineSavingsPdf } from "./profiles/marcus-online-savings-pd
 import type { NormalizedRawPayload } from "./profiles/types.js";
 import { parseAmount } from "./profiles/tabular-helpers.js";
 import type { ParserProfileId } from "./profiles/profile-ids.js";
+import { parseIbmPayslipPdf } from "../payslip/profiles/ibm-payslip-pdf.js";
+import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
+import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "../payslip/payslip.types.js";
 
 export interface ParseColumnMapping {
   date: string;
@@ -123,6 +126,8 @@ async function extractByProfile(
       return await parseBoaEStatementPdf(buffer);
     case "marcus_online_savings_pdf":
       return await parseMarcusOnlineSavingsPdf(buffer);
+    case "ibm_pay_contributions_pdf":
+      throw new Error("ibm_pay_contributions_pdf is handled in parseSessionImportFiles");
   }
 }
 
@@ -195,6 +200,55 @@ export async function parseSessionImportFiles(
     updateFileStatusStmt.run("processing", JSON.stringify({ stage: "parsing", profile: profileId }), file.id);
 
     try {
+      if (profileId === "ibm_pay_contributions_pdf") {
+        deleteRawRowsStmt.run(file.id);
+        const checksum = sha256Hex(buffer);
+        const parseResult = await parseIbmPayslipPdf(buffer);
+        if (!parseResult.ok) {
+          updateFileStatusStmt.run(
+            "failed",
+            JSON.stringify({ stage: "failed", reason: parseResult.reason, profile: profileId }),
+            file.id
+          );
+          outcome.skippedFiles.push({ fileId: file.id, reason: `payslip_${parseResult.reason}` });
+          continue;
+        }
+        const ins = insertPayslipSnapshot(
+          householdId,
+          file.file_name,
+          checksum,
+          IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID,
+          parseResult.summary,
+          file.id
+        );
+        if (!ins.ok) {
+          updateFileStatusStmt.run(
+            "failed",
+            JSON.stringify({
+              stage: "failed",
+              reason: "duplicate_payslip_checksum",
+              existingSnapshotId: ins.existing.id,
+              profile: profileId
+            }),
+            file.id
+          );
+          outcome.skippedFiles.push({ fileId: file.id, reason: "duplicate_payslip_checksum" });
+          continue;
+        }
+        outcome.parsedFiles += 1;
+        updateFileStatusStmt.run(
+          "parsed",
+          JSON.stringify({
+            stage: "parsed",
+            parsedRows: 0,
+            profile: profileId,
+            payslipSnapshotId: ins.snapshot.id
+          }),
+          file.id
+        );
+        continue;
+      }
+
       const extracted = await extractByProfile(profileId, buffer, file.file_name, request);
       if (!Array.isArray(extracted)) {
         updateFileStatusStmt.run(

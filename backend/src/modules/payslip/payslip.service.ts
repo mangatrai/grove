@@ -9,6 +9,7 @@ export type PayslipSnapshotRow = {
   fileName: string;
   fileChecksum: string;
   parserProfileId: string;
+  importFileId: string | null;
   payPeriodStart: string | null;
   payPeriodEnd: string | null;
   payDate: string | null;
@@ -34,6 +35,7 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
     fileName: String(r.file_name),
     fileChecksum: String(r.file_checksum),
     parserProfileId: String(r.parser_profile_id),
+    importFileId: r.import_file_id == null ? null : String(r.import_file_id),
     payPeriodStart: r.pay_period_start == null ? null : String(r.pay_period_start),
     payPeriodEnd: r.pay_period_end == null ? null : String(r.pay_period_end),
     payDate: r.pay_date == null ? null : String(r.pay_date),
@@ -76,7 +78,8 @@ export function insertPayslipSnapshot(
   fileName: string,
   fileChecksum: string,
   parserProfileId: string,
-  parsed: ParsedPayslipSummary
+  parsed: ParsedPayslipSummary,
+  importFileId?: string | null
 ):
   | { ok: true; snapshot: PayslipSnapshotRow }
   | { ok: false; code: "DUPLICATE_PAYSLIP"; existing: PayslipSnapshotRow } {
@@ -90,7 +93,7 @@ export function insertPayslipSnapshot(
 
   db.prepare(
     `INSERT INTO payslip_snapshot (
-      id, household_id, file_name, file_checksum, parser_profile_id,
+      id, household_id, file_name, file_checksum, parser_profile_id, import_file_id,
       pay_period_start, pay_period_end, pay_date,
       gross_pay_current, gross_pay_ytd,
       employee_taxes_current, employee_taxes_ytd,
@@ -99,7 +102,7 @@ export function insertPayslipSnapshot(
       net_pay_current, net_pay_ytd,
       hours_or_days_current, raw_extract_json
     ) VALUES (
-      ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?,
       ?, ?, ?,
       ?, ?,
       ?, ?,
@@ -114,6 +117,7 @@ export function insertPayslipSnapshot(
     fileName,
     fileChecksum,
     parserProfileId,
+    importFileId ?? null,
     parsed.payPeriodStart,
     parsed.payPeriodEnd,
     parsed.payDate,

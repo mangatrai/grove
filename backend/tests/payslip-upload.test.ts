@@ -35,7 +35,8 @@ describe("POST /payslips/upload", () => {
 
   it("stores payslip snapshot and rejects duplicate checksum", async () => {
     const token = await loginToken();
-    const buf = readFileSync(ibmFixture);
+    const base = readFileSync(ibmFixture);
+    const buf = Buffer.concat([base, Buffer.from(`\ndup-test-${Date.now()}`)]);
 
     const first = await request(app)
       .post("/payslips/upload")
@@ -79,5 +80,67 @@ describe("POST /payslips/upload", () => {
     const row = list.body.items.find((x: { id: string }) => x.id === id);
     expect(row).toBeDefined();
     expect(row.parserProfileId).toBe("ibm_pay_contributions_pdf");
+  });
+});
+
+describe("Import session with ibm_pay_contributions_pdf", () => {
+  async function loginToken(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  it("parse creates payslip_snapshot with import_file_id; canonicalize succeeds with 0 ledger rows", async () => {
+    const token = await loginToken();
+    const sessionRes = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    expect(sessionRes.status).toBe(201);
+    const sessionId = sessionRes.body.session.id as string;
+
+    const base = readFileSync(ibmFixture);
+    const buf = Buffer.concat([base, Buffer.from(`\nimport-payslip-${Date.now()}`)]);
+
+    const up = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", buf, "feb.pdf");
+    expect(up.status).toBe(201);
+    const fileId = up.body.files[0].id as string;
+
+    const boaChecking = "40000000-0000-0000-0000-000000000001";
+    const bind = await request(app)
+      .patch(`/imports/sessions/${sessionId}/files/${fileId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        financialAccountId: boaChecking,
+        parserProfileId: "ibm_pay_contributions_pdf"
+      });
+    expect(bind.status).toBe(200);
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(parseRes.status).toBe(200);
+    expect(parseRes.body.parsedFiles).toBe(1);
+    expect(parseRes.body.parsedRows).toBe(0);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(0);
+
+    const list = await request(app).get("/payslips").set("authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const row = list.body.items.find((x: { importFileId?: string }) => x.importFileId === fileId);
+    expect(row).toBeDefined();
+    expect(row.grossPayCurrent).toBe(5000);
   });
 });
