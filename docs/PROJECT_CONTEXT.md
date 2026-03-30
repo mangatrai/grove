@@ -1,5 +1,7 @@
 # Project Context (Single Source of Truth)
 
+*Product roadmap / “PRODUCT_CONTEXT” handoffs: this file — there is no separate `PRODUCT_CONTEXT.md`.*
+
 ## Project
 Household Finance App (private, self-hosted, air-gapped capable).
 
@@ -90,13 +92,14 @@ Commercial PFMs optimize for **cloud subscriptions, bank aggregation, and broad 
 ## Build status (rolling)
 Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **progress legend** (✅ / 🟡 / ⬜). Epics and stories in **`docs/MVP_BACKLOG.md`** use the same markers where updated. **`docs/CHANGE_HISTORY.md`** records CR/UX/FIX/DOC entries with stable IDs. Treat **CHECKPOINT + CHANGE_HISTORY** as the source of truth for “where we are” and **why** recent choices were made.
 
-**Recent shipped slices (summary):** **Epic 11.2** transactions hub (**CR-013**): **`/transactions`** tabs (**All \| Needs review**), sticky filter bar, **`POST /transactions`**, API **`needsReview`** + **`reviewReasons`**; shell + Settings (**UX-007**); cash-summary + savings target (**CR-012**, **PRD-002**); DB rules + **`/categories/rules`** (**CR-010**); resolution bulk category + queue UI. **IA direction:** single review surface at **Transactions → Needs review** — **Story 11.5** + **DOC-005** (keep **`/resolution`** until port). Details: **`CHANGE_HISTORY.md`** (2026-03-25–27).
+**Recent shipped slices (summary):** **Epic 11.2** transactions hub (**CR-013**) + **11.5** (**CR-014**, **CR-018**): **`/transactions`** tabs (**All \| Needs review**), expand-row **`GET /transactions/:id/open-review`** (same **`context`** enrichment idea as **`GET /resolution`** for open items), bulk + per-item **`PATCH /resolution/:id`**. **Routing:** **`/resolution`** is not a separate screen — **`App`** **`Navigate`**s to **`/transactions?needsReview=true`** (**CR-018**). **Epic 6 (partial):** **`GET /imports/sessions/:id/summary`** exposes per-file **`nearDuplicatesFlagged`**, **`openItemsNeedingReview`**, **`notPostedExactDuplicateOrSkipped`**; **Import workspace** shows **Outcomes by file** with **View in ledger** / **Needs review** links (**CR-019**). Shell + Settings (**UX-007**); cash-summary + savings target (**CR-012**, **PRD-002**); DB rules + **`/categories/rules`** (**CR-010**). **IA:** primary review surface **Transactions → Needs review** (**DOC-005**, completed per **CR-018**). Details: **`CHANGE_HISTORY.md`**.
 
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
-1. **`docs/CHECKPOINT.md`** “Sensible next steps” (especially **Epic 11 Story 11.5** vs **Epic 5.2** / **6** / **7**).
-2. **Story 11.5:** port **Review queue** workflows into **Transactions → Needs review**, then simplify nav (**DOC-005**).
-3. Continue **Epic 5.2** transfer matcher coverage + tests; **Epic 6** inbox drill-down as scheduled.
-4. Parser profile set (BoA checking, Citi/Chase cards) remains baseline for ingestion hardening.
+1. **`docs/CHECKPOINT.md`** “Sensible next steps” (especially **Epic 5.2** / **6.2–6.3** / **7** vs **11.5** residual).
+2. **Story 11.5:** **core** port shipped (**CR-018**); residual gaps per **`CHECKPOINT.md`** / **DOC-005** (near-duplicate edge cases, specialist duplicate/transfer UX).
+3. Continue **Epic 5.2** transfer matcher coverage + tests; **Epic 6** — file-level outcomes + summary API shipped (**CR-019**); remaining backlog items (e.g. **6.2** bulk transfer/edits, **6.3** undo-before-finalize).
+4. **D-014** closed (**DOC-008**): **Transactions** primary for categorization; **`/categories`** + **`/categories/rules`** secondary — no ledger merge for MVP.
+5. Parser profile set (BoA checking, Citi/Chase cards) remains baseline for ingestion hardening.
 

@@ -83,15 +83,16 @@
 - Context: Users should land on decision metrics after login; import is secondary to ongoing cashflow review.
 - Consequence: Simpler IA; marketing/sign-in card remains for guests at `/` without the dashboard.
 
-## D-014: Category management surface + taxonomy depth (proposed direction)
-- Date: 2026-03-24
-- Status: **Partial (2025-03-25)** — ledger-first picker + inline create shipped; taxonomy expanded (**`0008`**, Income leaves, Taxes/Transfers); **`/categories`** still present. See **`docs/CHANGE_HISTORY.md`** (CR-001, CR-002, UX-002, UX-003).
-- Direction:
-  - **Primary UX:** Manage categories **from the ledger** (and anywhere else transactions are categorized): show **parent** in the control; **hover or nested menu** for **child** leaves; **add category / subcategory** inline (no separate screen required for the common case).
-  - **Secondary:** Keep a **minimal** or **advanced** `/categories` route only if needed (bulk rename, cleanup), or remove it once inline parity exists.
-  - **Taxonomy:** Expand defaults beyond the current tree: **Transfers** (aligned with **Story 5.2** transfer matcher), **tax payments**, **Income** children (e.g. salary, interest, dividends, refunds), and any other household-standard buckets agreed in **`docs/MVP_BACKLOG.md`** / a future **`CATEGORY_TAXONOMY`** appendix.
-- Context: A full-page category list duplicates mental model vs picking a category on a row; the current seed still omits several real-world buckets.
-- Consequence: Next chunk of work is **UI-heavy** (accessible flyout + create flows) plus **data** (migrations, rules, reporting roll-up). Update **`docs/CHECKPOINT.md`** when this ships or is rejected.
+## D-014: Category management surface + taxonomy depth
+- Date: **Accepted 2026-03-27** (supersedes 2026-03-24 “proposed direction”); **DOC-008** in **`docs/CHANGE_HISTORY.md`**.
+- Status: **Accepted**
+- Decision: **Two-tier IA — no merge with the ledger hub for MVP.**
+  - **Primary (hub):** **Transactions** (`/transactions`). Day-to-day categorization, **`unknown_category`** resolution, and **inline create** use **`LedgerCategoryPicker`** on rows. This is the default mental model for “what bucket is this transaction?”
+  - **Secondary:** **`/categories`** stays in the nav. Full-tree browse, **add parent / subcategory**, and seeing **built-in vs household** labels are distinct from row-by-row assignment; users tuning taxonomy after real imports need this surface.
+  - **Secondary:** **`/categories/rules`** stays a **dedicated route** (linked from Categories). **Pattern rules** (priority, match type, confidence) are **automation authoring**, not the same job as picking a category on one row — keeping them separate avoids crowding the ledger and matches **load real data → add rules** workflows.
+  - **Not in scope now:** A single “mega” transactions page that also hosts full taxonomy + rules CRUD. **Optional later:** lighter consolidation (e.g. rules as a **tab** under Categories only, or a command palette) — revisit only after usage data, not as a blocker.
+- Context: Original tension was duplicate mental model between a full category tree page and the ledger picker. **Resolution:** The picker covers the **common case**; **Categories** + **Rules** cover **taxonomy and automation** — complementary roles, not duplicates.
+- Consequence: Sidebar keeps **Categories**; **`docs/CHECKPOINT.md`** / **Story 5.3** “ledger-first parity” line is **closed** for this decision (implementation polish may continue). **Taxonomy expansion** (migrations, defaults) remains independent of this IA choice.
 
 ## D-015: Ledger category trigger — single line vs “Parent › Child”
 - Date: 2025-03-25

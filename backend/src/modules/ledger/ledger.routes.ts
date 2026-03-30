@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
   createManualCanonicalTransaction,
   listCanonicalTransactions,
@@ -202,6 +203,25 @@ ledgerRouter.post("/", (req: AuthenticatedRequest, res) => {
 
 const patchCategorySchema = z.object({
   categoryId: z.union([z.string().uuid(), z.null()])
+});
+
+const txnIdParamSchema = z.object({
+  id: z.string().uuid()
+});
+
+ledgerRouter.get("/:id/open-review", (req: AuthenticatedRequest, res) => {
+  const parsed = txnIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid transaction id" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = listOpenResolutionItemsForCanonicalTransaction(householdId, parsed.data.id);
+  if (!out.ok) {
+    res.status(404).json({ message: "Transaction not found" });
+    return;
+  }
+  res.status(200).json({ items: out.items });
 });
 
 ledgerRouter.patch("/:id", (req: AuthenticatedRequest, res) => {

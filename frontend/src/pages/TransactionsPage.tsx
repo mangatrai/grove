@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
@@ -11,7 +11,34 @@ type CategoryOption = {
   parentId: string | null;
 };
 
-type OpenReviewItem = { id: string; type: string };
+type OpenReviewItem = { id: string; type: string; status: "open" | "in_review" };
+
+type ResolutionDetailItem = {
+  id: string;
+  type: string;
+  targetId: string;
+  reason: string;
+  reasonDetail: { kind?: string; message?: string; existingCanonicalId?: string; rawId?: string } | null;
+  status: "open" | "in_review" | "resolved";
+  createdAt: string;
+  context: {
+    sessionId: string | null;
+    fileId: string | null;
+    fileName: string | null;
+    raw: {
+      txnDate: string | null;
+      amount: number | null;
+      description: string | null;
+      referenceId: string | null;
+    } | null;
+    classification: {
+      source?: "db" | "default" | "none";
+      ruleId?: string | null;
+      confidence?: number;
+      reason?: string;
+    } | null;
+  };
+};
 
 type TxRow = {
   id: string;
@@ -78,6 +105,44 @@ function formatMoney(amount: number, direction: string): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
+function formatResolutionTypeLabel(t: string): string {
+  switch (t) {
+    case "duplicate_ambiguity":
+      return "Near-duplicate / ambiguous match";
+    case "unknown_category":
+      return "Unknown category";
+    case "transfer_ambiguity":
+      return "Transfer ambiguity";
+    case "reconciliation_mismatch":
+      return "Reconciliation mismatch";
+    default:
+      return t;
+  }
+}
+
+function prettyClassificationSource(source?: "db" | "default" | "none"): string | null {
+  if (!source) return null;
+  if (source === "db") return "Rule";
+  if (source === "default") return "Default rule";
+  return "Uncategorized";
+}
+
+function formatConfidencePct(confidence?: number): string | null {
+  if (typeof confidence !== "number" || !Number.isFinite(confidence)) {
+    return null;
+  }
+  return `${Math.round(confidence * 100)}%`;
+}
+
+function formatSignedMoneyRaw(amount: number | null): string {
+  if (amount == null) {
+    return "—";
+  }
+  const abs = Math.abs(amount);
+  const sign = amount >= 0 ? "+" : "−";
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
 export function TransactionsPage() {
   const token = useAuthToken();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -129,6 +194,12 @@ export function TransactionsPage() {
   const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(() => new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
   const [savingBulk, setSavingBulk] = useState(false);
+  const [expandedTxnIds, setExpandedTxnIds] = useState<Set<string>>(() => new Set());
+  const [reviewDetailByTxn, setReviewDetailByTxn] = useState<Record<string, ResolutionDetailItem[]>>({});
+  const [reviewDetailErr, setReviewDetailErr] = useState<Record<string, string>>({});
+  const [reviewDetailLoadingIds, setReviewDetailLoadingIds] = useState<Set<string>>(() => new Set());
+  const [savingResolutionItemId, setSavingResolutionItemId] = useState<string | null>(null);
+  const reviewDetailLoadedRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -258,6 +329,27 @@ export function TransactionsPage() {
   ]);
 
   useEffect(() => {
+    setExpandedTxnIds(new Set());
+    reviewDetailLoadedRef.current.clear();
+    setReviewDetailByTxn({});
+    setReviewDetailErr({});
+  }, [
+    needsReviewTab,
+    resolutionTypesKey,
+    sessionFilter,
+    categoryFilter,
+    uncategorizedOnly,
+    searchFromUrl,
+    dateFrom,
+    dateTo,
+    accountFilter,
+    amountMinUrl,
+    amountMaxUrl,
+    pageOffset,
+    pageLimit
+  ]);
+
+  useEffect(() => {
     if (!addOpen) {
       return;
     }
@@ -356,6 +448,9 @@ export function TransactionsPage() {
       }
       setSelectedTxnIds(new Set());
       setBulkCategoryId("");
+      reviewDetailLoadedRef.current.clear();
+      setReviewDetailByTxn({});
+      setReviewDetailErr({});
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Bulk category apply failed");
@@ -386,11 +481,93 @@ export function TransactionsPage() {
         );
       }
       setSelectedTxnIds(new Set());
+      reviewDetailLoadedRef.current.clear();
+      setReviewDetailByTxn({});
+      setReviewDetailErr({});
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Bulk update failed");
     } finally {
       setSavingBulk(false);
+    }
+  }
+
+  function forgetReviewDetail(txnId: string) {
+    reviewDetailLoadedRef.current.delete(txnId);
+    setReviewDetailByTxn((d) => {
+      if (!(txnId in d)) {
+        return d;
+      }
+      const next = { ...d };
+      delete next[txnId];
+      return next;
+    });
+    setReviewDetailErr((e) => {
+      if (!(txnId in e)) {
+        return e;
+      }
+      const next = { ...e };
+      delete next[txnId];
+      return next;
+    });
+  }
+
+  async function ensureReviewDetailLoaded(txnId: string) {
+    if (reviewDetailLoadedRef.current.has(txnId)) {
+      return;
+    }
+    setReviewDetailErr((e) => {
+      const next = { ...e };
+      delete next[txnId];
+      return next;
+    });
+    setReviewDetailLoadingIds((s) => new Set(s).add(txnId));
+    try {
+      const res = await apiJson<{ items: ResolutionDetailItem[] }>(`/transactions/${txnId}/open-review`);
+      setReviewDetailByTxn((d) => ({ ...d, [txnId]: res.items }));
+      reviewDetailLoadedRef.current.add(txnId);
+    } catch (e: unknown) {
+      setReviewDetailErr((d) => ({
+        ...d,
+        [txnId]: e instanceof Error ? e.message : "Failed to load review context"
+      }));
+    } finally {
+      setReviewDetailLoadingIds((s) => {
+        const next = new Set(s);
+        next.delete(txnId);
+        return next;
+      });
+    }
+  }
+
+  function toggleTxnExpand(txnId: string) {
+    setExpandedTxnIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(txnId)) {
+        next.delete(txnId);
+        return next;
+      }
+      next.add(txnId);
+      void ensureReviewDetailLoaded(txnId);
+      return next;
+    });
+  }
+
+  async function patchResolutionItemStatus(txnId: string, itemId: string, status: "open" | "in_review" | "resolved") {
+    setError(null);
+    setSavingResolutionItemId(itemId);
+    try {
+      await apiJson(`/resolution/${itemId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status })
+      });
+      forgetReviewDetail(txnId);
+      await ensureReviewDetailLoaded(txnId);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to update review item");
+    } finally {
+      setSavingResolutionItemId(null);
     }
   }
 
@@ -402,6 +579,7 @@ export function TransactionsPage() {
         method: "PATCH",
         body: JSON.stringify({ categoryId })
       });
+      forgetReviewDetail(txnId);
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to update category");
@@ -957,6 +1135,11 @@ export function TransactionsPage() {
                           />
                         </th>
                       ) : null}
+                      {needsReviewTab ? (
+                        <th className="transactions-page__expand-th" scope="col">
+                          Context
+                        </th>
+                      ) : null}
                       <th>Date</th>
                       <th>Account</th>
                       <th>Amount</th>
@@ -975,54 +1158,235 @@ export function TransactionsPage() {
                       });
                       const desc = t.merchant || t.memo || "—";
                       const reasons = t.reviewReasons?.length ? t.reviewReasons.join(" · ") : "—";
+                      const expanded = expandedTxnIds.has(t.id);
+                      const detailItems = reviewDetailByTxn[t.id];
+                      const detailLoading = reviewDetailLoadingIds.has(t.id);
+                      const detailError = reviewDetailErr[t.id];
+                      const colSpan = needsReviewTab ? 9 : 7;
                       return (
-                        <tr key={t.id}>
-                          {needsReviewTab ? (
+                        <Fragment key={t.id}>
+                          <tr>
+                            {needsReviewTab ? (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedTxnIds.has(t.id)}
+                                  onChange={() => toggleTxnSelected(t.id)}
+                                  disabled={savingBulk}
+                                  aria-label={`Select row ${desc}`}
+                                />
+                              </td>
+                            ) : null}
+                            {needsReviewTab ? (
+                              <td className="transactions-page__expand-cell">
+                                <button
+                                  type="button"
+                                  className="transactions-page__expand-btn"
+                                  aria-expanded={expanded}
+                                  onClick={() => toggleTxnExpand(t.id)}
+                                >
+                                  {expanded ? "Hide" : "Show"}
+                                </button>
+                              </td>
+                            ) : null}
+                            <td>{t.txnDate}</td>
+                            <td>{accountLabel}</td>
+                            <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
+                            <td>{desc}</td>
+                            {needsReviewTab ? (
+                              <td className="transactions-page__why-cell">
+                                <span className="transactions-page__why" title={reasons}>
+                                  {reasons}
+                                </span>
+                              </td>
+                            ) : null}
+                            {needsReviewTab ? (
+                              <td style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>
+                                {t.importSessionId ? (
+                                  <Link
+                                    to={`/transactions?needsReview=true&sessionId=${t.importSessionId}`}
+                                    className="muted"
+                                  >
+                                    Import session
+                                  </Link>
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                            ) : null}
                             <td>
-                              <input
-                                type="checkbox"
-                                checked={selectedTxnIds.has(t.id)}
-                                onChange={() => toggleTxnSelected(t.id)}
-                                disabled={savingBulk}
-                                aria-label={`Select row ${desc}`}
+                              <LedgerCategoryPicker
+                                categories={categories}
+                                value={t.categoryId}
+                                disabled={savingId === t.id || savingBulk}
+                                onChange={(v) => void updateCategory(t.id, v)}
+                                ariaLabel={`Category for ${desc}`}
                               />
                             </td>
+                          </tr>
+                          {needsReviewTab && expanded ? (
+                            <tr key={`${t.id}-ctx`} className="transactions-page__detail-row">
+                              <td colSpan={colSpan}>
+                                <div className="transactions-page__detail-panel">
+                                  {detailLoading ? <p className="muted">Loading review context…</p> : null}
+                                  {detailError ? <p className="error">{detailError}</p> : null}
+                                  {!detailLoading && !detailError && detailItems && detailItems.length === 0 ? (
+                                    <p className="muted">
+                                      No open resolution items on this row (still listed for other reasons, e.g.
+                                      uncategorized or non-posted status). Use filters and bulk actions above as
+                                      needed.
+                                    </p>
+                                  ) : null}
+                                  {!detailLoading && !detailError && detailItems && detailItems.length > 0
+                                    ? detailItems.map((it) => {
+                                        const summary =
+                                          it.reasonDetail?.message ??
+                                          (it.reasonDetail?.kind === "near_duplicate"
+                                            ? "Possible duplicate of an existing transaction."
+                                            : it.reason.slice(0, 200));
+                                        const explainSource = prettyClassificationSource(
+                                          it.context.classification?.source
+                                        );
+                                        const explainConf = formatConfidencePct(it.context.classification?.confidence);
+                                        const explainRule = it.context.classification?.ruleId ?? null;
+                                        const explainReason = it.context.classification?.reason ?? null;
+                                        const busy =
+                                          savingBulk ||
+                                          Boolean(savingResolutionItemId) ||
+                                          savingId === t.id;
+                                        return (
+                                          <div key={it.id} className="transactions-page__review-block">
+                                            <div className="transactions-page__review-block-head">
+                                              <strong>{formatResolutionTypeLabel(it.type)}</strong>
+                                              <span className="muted" style={{ marginLeft: "0.5rem" }}>
+                                                {it.status}
+                                              </span>
+                                              <span className="muted" style={{ marginLeft: "0.5rem" }}>
+                                                · {it.createdAt}
+                                              </span>
+                                            </div>
+                                            <p className="muted" style={{ margin: "0.35rem 0 0.25rem" }}>
+                                              <span className="muted">File:</span>{" "}
+                                              {it.context.fileName ?? "—"}{" "}
+                                              {it.context.sessionId ? (
+                                                <>
+                                                  ·{" "}
+                                                  <Link
+                                                    to={`/transactions?needsReview=true&sessionId=${it.context.sessionId}`}
+                                                  >
+                                                    Session rows
+                                                  </Link>
+                                                </>
+                                              ) : null}
+                                            </p>
+                                            <p className="muted" style={{ margin: "0 0 0.35rem" }}>
+                                              <span className="muted">Raw preview:</span>{" "}
+                                              {it.context.raw ? (
+                                                <>
+                                                  {it.context.raw.txnDate ?? "—"} ·{" "}
+                                                  {formatSignedMoneyRaw(it.context.raw.amount)} ·{" "}
+                                                  {it.context.raw.description ?? "—"}
+                                                </>
+                                              ) : (
+                                                "—"
+                                              )}
+                                            </p>
+                                            <p style={{ margin: "0 0 0.35rem", fontSize: "0.9rem" }}>{summary}</p>
+                                            {explainSource || explainConf || explainRule || explainReason ? (
+                                              <div className="resolution-explainability">
+                                                {explainSource ? (
+                                                  <span className="resolution-explainability__pill">{explainSource}</span>
+                                                ) : null}
+                                                {explainConf ? (
+                                                  <span className="resolution-explainability__pill">{explainConf}</span>
+                                                ) : null}
+                                                {explainRule ? (
+                                                  <span className="resolution-explainability__pill">
+                                                    ID {explainRule.slice(0, 8)}
+                                                  </span>
+                                                ) : null}
+                                                {explainReason ? (
+                                                  <span className="resolution-explainability__reason">{explainReason}</span>
+                                                ) : null}
+                                              </div>
+                                            ) : null}
+                                            <div className="transactions-page__review-block-actions row">
+                                              {it.type === "unknown_category" ? (
+                                                <div style={{ minWidth: "12rem", maxWidth: "16rem" }}>
+                                                  <span className="muted" style={{ fontSize: "0.78rem" }}>
+                                                    Set category
+                                                  </span>
+                                                  <LedgerCategoryPicker
+                                                    categories={categories}
+                                                    value={null}
+                                                    disabled={busy}
+                                                    onChange={async (categoryId) => {
+                                                      if (!categoryId) {
+                                                        return;
+                                                      }
+                                                      setSavingId(t.id);
+                                                      setError(null);
+                                                      try {
+                                                        await apiJson(`/transactions/${t.id}`, {
+                                                          method: "PATCH",
+                                                          body: JSON.stringify({ categoryId })
+                                                        });
+                                                        forgetReviewDetail(t.id);
+                                                        await load();
+                                                      } catch (e: unknown) {
+                                                        setError(e instanceof Error ? e.message : "Failed to set category");
+                                                      } finally {
+                                                        setSavingId(null);
+                                                      }
+                                                    }}
+                                                    ariaLabel={`Set category for transaction ${t.id}`}
+                                                  />
+                                                </div>
+                                              ) : null}
+                                              <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
+                                                {it.status !== "in_review" ? (
+                                                  <button
+                                                    type="button"
+                                                    className="secondary"
+                                                    disabled={busy || savingResolutionItemId === it.id}
+                                                    onClick={() =>
+                                                      void patchResolutionItemStatus(t.id, it.id, "in_review")
+                                                    }
+                                                  >
+                                                    In review
+                                                  </button>
+                                                ) : null}
+                                                {it.status !== "resolved" ? (
+                                                  <button
+                                                    type="button"
+                                                    disabled={busy || savingResolutionItemId === it.id}
+                                                    onClick={() =>
+                                                      void patchResolutionItemStatus(t.id, it.id, "resolved")
+                                                    }
+                                                  >
+                                                    Resolve
+                                                  </button>
+                                                ) : (
+                                                  <button
+                                                    type="button"
+                                                    className="secondary"
+                                                    disabled={busy || savingResolutionItemId === it.id}
+                                                    onClick={() => void patchResolutionItemStatus(t.id, it.id, "open")}
+                                                  >
+                                                    Reopen
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })
+                                    : null}
+                                </div>
+                              </td>
+                            </tr>
                           ) : null}
-                          <td>{t.txnDate}</td>
-                          <td>{accountLabel}</td>
-                          <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
-                          <td>{desc}</td>
-                          {needsReviewTab ? (
-                            <td className="transactions-page__why-cell">
-                              <span className="transactions-page__why" title={reasons}>
-                                {reasons}
-                              </span>
-                            </td>
-                          ) : null}
-                          {needsReviewTab ? (
-                            <td style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>
-                              {t.importSessionId ? (
-                                <Link
-                                  to={`/transactions?needsReview=true&sessionId=${t.importSessionId}`}
-                                  className="muted"
-                                >
-                                  Import session
-                                </Link>
-                              ) : (
-                                <span className="muted">—</span>
-                              )}
-                            </td>
-                          ) : null}
-                          <td>
-                            <LedgerCategoryPicker
-                              categories={categories}
-                              value={t.categoryId}
-                              disabled={savingId === t.id || savingBulk}
-                              onChange={(v) => void updateCategory(t.id, v)}
-                              ariaLabel={`Category for ${desc}`}
-                            />
-                          </td>
-                        </tr>
+                        </Fragment>
                       );
                     })}
                   </tbody>

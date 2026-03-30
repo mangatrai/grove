@@ -54,7 +54,7 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
       "sourceRef": "raw:…",
       "createdAt": "…",
       "reviewReasons": ["Uncategorized", "Open review: category"],
-      "openReviewItems": [{ "id": "resolution-item-uuid", "type": "unknown_category" }],
+      "openReviewItems": [{ "id": "resolution-item-uuid", "type": "unknown_category", "status": "open" }],
       "importSessionId": "import-session-uuid-or-null"
     }
   ]
@@ -63,7 +63,7 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
 
 - **`categoryId` / `categoryName`** — from `LEFT JOIN category` on `transaction_canonical.category_id`. Both `null` when uncategorized.
 - **`reviewReasons`** — present only when **`needsReview=true`**; human-readable strings explaining why the row matches the needs-review predicate (e.g. **Uncategorized**, **Status: …**, **Open review: …**).
-- **`openReviewItems`** — present only when **`needsReview=true`**; open / in_review resolution rows tied to this transaction (**`id`** + **`type`**), for **`POST /resolution/bulk`** and **`POST /resolution/bulk-apply-category`** (same semantics as the review queue).
+- **`openReviewItems`** — present only when **`needsReview=true`**; open / in_review resolution rows tied to this transaction (**`id`**, **`type`**, **`status`**: **`open`** or **`in_review`**), for **`POST /resolution/bulk`**, **`POST /resolution/bulk-apply-category`**, and **`PATCH /resolution/:id`** (same link rules as **`GET /resolution`**).
 - **`importSessionId`** — present only when **`needsReview=true`**; import session id when the row’s **`source_ref`** links to **`transaction_raw`** → **`import_file`**, otherwise **`null`** (manual rows, etc.).
 
 ## `POST /transactions`
@@ -128,3 +128,43 @@ or clear the category:
 **401:** missing or invalid token.
 
 When **`categoryId`** is set to a non-null value, any **`resolution_item`** with **`type = unknown_category`** and **`target_id`** equal to this transaction’s id is marked **`resolved`** (attention path).
+
+## `GET /transactions/:id/open-review`
+
+**Auth:** Bearer JWT.
+
+Returns **open** and **in_review** **`resolution_item`** rows linked to this canonical transaction, with the same **`context`** shape as **`GET /resolution`** (file name, session id, raw preview from staged payload when available, classification explainability when present). Used by **Transactions → Needs review** to show queue-style context without listing the full household queue.
+
+**200:**
+
+```json
+{
+  "items": [
+    {
+      "id": "resolution-item-uuid",
+      "type": "unknown_category",
+      "targetId": "canonical-txn-uuid",
+      "reason": "{…}",
+      "reasonDetail": { "kind": "unknown_category", "message": "…" },
+      "status": "open",
+      "createdAt": "…",
+      "context": {
+        "sessionId": "…",
+        "fileId": "…",
+        "fileName": "stmt.csv",
+        "raw": {
+          "txnDate": "2026-02-01",
+          "amount": -12.34,
+          "description": "…",
+          "referenceId": null
+        },
+        "classification": { "source": "db", "ruleId": null, "confidence": 0.9, "reason": "…" }
+      }
+    }
+  ]
+}
+```
+
+**400:** `:id` is not a valid UUID.  
+**404:** transaction not found for this household.  
+**401:** missing or invalid token.

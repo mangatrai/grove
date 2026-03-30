@@ -149,6 +149,23 @@ function transferPaymentPatternScore(debitLabel: string, creditLabel: string): n
 }
 
 /**
+ * Debit shows money leaving; credit shows money arriving — typical internal / linked-account memos.
+ * Only used when amount/date/account pairing already matches elsewhere; keeps unrelated ACH pairs at 0.
+ */
+function transferInternalDirectionalMemoScore(debitLabel: string, creditLabel: string): number {
+  const d = debitLabel.toUpperCase();
+  const c = creditLabel.toUpperCase();
+  const outgoing =
+    /\b(TRANSFER|XFER)\s+TO\b|\bTRANSFER\s+OUT\b|\bXFER\s+OUT\b|\bWITHDRAWAL\s+TRANSFER\b|\bTRANSFER\s+TO\s+(SAVINGS|CHK(?:ING)?|MMA|MONEY\s+MARKET)\b/i;
+  const incoming =
+    /\b(TRANSFER|XFER)\s+FROM\b|\bTRANSFER\s+IN\b|\bXFER\s+IN\b|\bDEPOSIT\s+TRANSFER\b|\bTRANSFER\s+FROM\s+(SAVINGS|CHK(?:ING)?|MMA|MONEY\s+MARKET)\b/i;
+  if (outgoing.test(d) && incoming.test(c)) {
+    return 74;
+  }
+  return 0;
+}
+
+/**
  * Higher score = better same-transfer hypothesis (disambiguates multiple amount/date matches).
  * Exported for unit tests (Epic 5.2).
  */
@@ -168,14 +185,30 @@ export function transferPairScore(
   if (paymentPatternScore > 0) {
     return paymentPatternScore;
   }
+  const internalDirectional = transferInternalDirectionalMemoScore(debitLabel, creditLabel);
+  if (internalDirectional > 0) {
+    return internalDirectional;
+  }
   const ud = debitLabel.toUpperCase();
   const uc = creditLabel.toUpperCase();
   const both = (re: RegExp) => re.test(ud) && re.test(uc);
+  if (both(/\b(MOBILE\s+TRANSFER|MOBILE\s+XFER|APP\s+TRANSFER)\b/i)) {
+    return 76;
+  }
+  if (both(/\b(BOOK\s+TRANSFER|E-?FT|EFT\s+(CREDIT|DEBIT|PMT|PAYMENT|TRANSFER))\b|\bEFT\s+DEP\b|\bEFT\s+WDL\b/i)) {
+    return 73;
+  }
   if (both(/\b(ONLINE\s+)?TRANSFER\b|\bXFER\b|ACCT\s*(TO\s*)?TRANSFER|WEB\s+(PAY|PMT)\b|TEL\s+TRANSFER/i)) {
     return 80;
   }
   if (both(/\bZELLE\b/)) {
     return 75;
+  }
+  if (both(/\b(RTP|REAL[\s-]*TIME\s+PAY)\b/i)) {
+    return 72;
+  }
+  if (both(/\b(APPLE\s+CASH|GOOGLE\s+PAY)\b/i)) {
+    return 71;
   }
   if (both(/\b(VENMO|PAYPAL|CASH\s*APP)\b/i)) {
     return 70;

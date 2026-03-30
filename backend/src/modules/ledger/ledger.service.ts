@@ -9,6 +9,9 @@ import {
   normalizeTxnDateForFingerprint
 } from "../canonical/transaction-fingerprint.js";
 
+/** Resolution rows included in ledger `openReviewItems` are only non-resolved statuses. */
+export type OpenReviewItemStatus = "open" | "in_review";
+
 export interface CanonicalTransactionRow {
   id: string;
   txnDate: string;
@@ -27,8 +30,8 @@ export interface CanonicalTransactionRow {
   categoryName: string | null;
   /** Populated when listing with `needsReviewOnly` — why the row appears under Needs review. */
   reviewReasons?: string[];
-  /** Open resolution items for this row (same link rules as the review queue); for bulk `/resolution/*` calls. */
-  openReviewItems?: { id: string; type: string }[];
+  /** Open resolution items for this row (same link rules as the review queue); for bulk `/resolution/*` and per-row PATCH. */
+  openReviewItems?: { id: string; type: string; status: OpenReviewItemStatus }[];
   /** Import session when this row is tied to `raw:` source_ref. */
   importSessionId?: string | null;
 }
@@ -85,7 +88,7 @@ const NEEDS_REVIEW_PREDICATE = `(
 )`;
 
 const OPEN_REVIEW_ITEMS_SUBQUERY = `(
-    SELECT group_concat(ri.id || ':' || ri.type, '|')
+    SELECT group_concat(ri.id || ':' || ri.type || ':' || ri.status, '|')
     FROM resolution_item ri
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
@@ -107,12 +110,23 @@ const IMPORT_SESSION_SUBQUERY = `(
     LIMIT 1
   )`;
 
-function parseOpenReviewItems(blob: string | null | undefined): { id: string; type: string }[] {
+const OPEN_REVIEW_ITEM_RE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([^:]+):(open|in_review)$/i;
+
+function parseOpenReviewItems(blob: string | null | undefined): { id: string; type: string; status: OpenReviewItemStatus }[] {
   if (!blob?.trim()) {
     return [];
   }
-  const out: { id: string; type: string }[] = [];
+  const out: { id: string; type: string; status: OpenReviewItemStatus }[] = [];
   for (const part of blob.split("|")) {
+    const m = part.match(OPEN_REVIEW_ITEM_RE);
+    if (m) {
+      const st = m[3].toLowerCase() as OpenReviewItemStatus;
+      if (st === "open" || st === "in_review") {
+        out.push({ id: m[1], type: m[2], status: st });
+      }
+      continue;
+    }
     const idx = part.indexOf(":");
     if (idx <= 0) {
       continue;
@@ -120,7 +134,7 @@ function parseOpenReviewItems(blob: string | null | undefined): { id: string; ty
     const id = part.slice(0, idx);
     const type = part.slice(idx + 1);
     if (id && type) {
-      out.push({ id, type });
+      out.push({ id, type, status: "open" });
     }
   }
   return out;
@@ -129,7 +143,7 @@ function parseOpenReviewItems(blob: string | null | undefined): { id: string; ty
 function buildReviewReasons(
   categoryId: string | null,
   status: string,
-  openItems: { id: string; type: string }[]
+  openItems: { id: string; type: string; status?: OpenReviewItemStatus }[]
 ): string[] {
   const set = new Set<string>();
   if (categoryId === null) {

@@ -42,7 +42,7 @@
 - [x] Duplicate upload produces zero duplicate posted transactions. (fingerprint + idempotency)
 - [x] Unknown category / transfer ambiguity routes to resolution queue. (`unknown_category`, `transfer_ambiguity`, `duplicate_ambiguity` — see **`docs/API_RESOLUTION.md`**)
 - [ ] Final dashboard shows spending vs income and safe-to-spend. (partial: home **`/`** — cash KPIs, category charts, **period comparison deltas**, **cash-basis safe-to-spend** + savings rate when target set; KPI definitions in **(i)** tooltips — **`docs/CHECKPOINT.md`**, **`docs/API_CASH_SUMMARY.md`**, PRD §8 **MVP shipped formulas** + **`docs/CHANGE_HISTORY.md`** **PRD-002**, **UX-005**)
-- [ ] **Shell and IA** match **PRD §13** (full parity). 🟡 **Epic 11** — **shipped:** collapsible nav, user menu → **Settings**/Logout, **`/transactions`** **All \| Needs review** + sticky filters + **+ Add**, dashboard **Scope**, **`/settings`** tabs (partial stubs). **Remaining:** **Trash** (deferred), **Story 11.5** merge **`/resolution`** into **Needs review** (**DOC-005**). See **`docs/MVP_BACKLOG.md`**.
+- [ ] **Shell and IA** match **PRD §13** (full parity). 🟡 **Epic 11** — **shipped:** collapsible nav, user menu → **Settings**/Logout, **`/transactions`** **All \| Needs review** + sticky filters + **+ Add** + expand review context + **`/resolution`** redirect (**CR-018**), dashboard **Scope**, **`/settings`** tabs (partial stubs). **Remaining:** **Trash** (deferred). See **`docs/MVP_BACKLOG.md`**.
 - [ ] Owner can view spouse + own data; spouse cannot view owner data.
 - [x] Raw PDF files are deleted after successful extraction. (staging cleanup policy; see `IMPORT_STAGING_PURGE.md`)
 

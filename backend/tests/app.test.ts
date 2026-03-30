@@ -389,6 +389,110 @@ describe("import sessions and file intake", () => {
       )
       .get(sessionId) as { c: number };
     expect(openResolution.c).toBeGreaterThanOrEqual(1);
+
+    const fileSum = await request(app)
+      .get(`/imports/sessions/${sessionId}/summary`)
+      .set("authorization", `Bearer ${token}`);
+    expect(fileSum.status).toBe(200);
+    expect(fileSum.body.files[0].rawRowCount).toBe(2);
+    expect(fileSum.body.files[0].canonicalRowCount).toBe(1);
+    expect(fileSum.body.files[0].nearDuplicatesFlagged).toBe(1);
+    expect(fileSum.body.files[0].notPostedExactDuplicateOrSkipped).toBe(0);
+    expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
+  });
+
+  it("undo-import removes session canonical rows before finalize and allows re-canonicalize", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const csv = [
+      "Date,Description,Amount,Reference",
+      "2026-05-01,UNDOIMPTEST COFFEE,-5.00,ref-u1",
+      "2026-05-01,UNDOIMPTEST COFFEE STORE,-5.00,ref-u2"
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "undo-near.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.nearDuplicates).toBe(1);
+
+    const undoRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/undo-import`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(undoRes.status).toBe(200);
+    expect(undoRes.body.deletedCanonicalRows).toBe(1);
+    expect(undoRes.body.deletedResolutionItems).toBeGreaterThanOrEqual(1);
+
+    const fileSum = await request(app)
+      .get(`/imports/sessions/${sessionId}/summary`)
+      .set("authorization", `Bearer ${token}`);
+    expect(fileSum.status).toBe(200);
+    expect(fileSum.body.files[0].canonicalRowCount).toBe(0);
+
+    const canRes2 = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes2.status).toBe(200);
+    expect(canRes2.body.inserted).toBe(1);
+  });
+
+  it("returns 409 for undo-import when session is finalized", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    await request(app)
+      .patch(`/imports/sessions/${sessionId}/status`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "processing" });
+    await request(app)
+      .patch(`/imports/sessions/${sessionId}/status`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "review" });
+    await request(app)
+      .patch(`/imports/sessions/${sessionId}/status`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "finalized" });
+
+    const undoRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/undo-import`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(undoRes.status).toBe(409);
+    expect(undoRes.body.code).toBe("SESSION_NOT_REVIEW");
   });
 
   it("returns 409 when canonicalize runs before parse (no transaction_raw)", async () => {
@@ -495,6 +599,92 @@ describe("import sessions and file intake", () => {
     expect(creditRow.transfer_group_id).not.toBeNull();
     expect(debitRow.transfer_group_id).not.toBeNull();
     expect(creditRow.transfer_group_id).toBe(debitRow.transfer_group_id);
+  });
+
+  it("sets transfer_group for directional internal transfer memos across accounts", async () => {
+    const token = await loginAndGetToken();
+    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const checkingAccountId = crypto.randomUUID();
+    const savingsAccountId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Internal Dir Transfer Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(checkingAccountId, householdId, ownerUserId);
+    db.prepare(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'savings', 'Internal Dir Transfer Savings', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(savingsAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'internal-dir.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const txnDate = "1999-08-08";
+    const rawDebitId = crypto.randomUUID();
+    const rawCreditId = crypto.randomUUID();
+
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      0,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: "TRANSFER TO SAVINGS",
+        amount: -250,
+        financial_account_id: checkingAccountId
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      1,
+      JSON.stringify({
+        txn_date: txnDate,
+        description: "TRANSFER FROM CHECKING",
+        amount: 250,
+        financial_account_id: savingsAccountId
+      })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const rows = db.prepare(
+      `SELECT amount, transfer_group_id
+       FROM transaction_canonical
+       WHERE household_id = ? AND account_id IN (?, ?)
+       ORDER BY amount ASC`
+    ).all(householdId, checkingAccountId, savingsAccountId) as Array<{
+      amount: number;
+      transfer_group_id: string | null;
+    }>;
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.transfer_group_id).not.toBeNull();
+    expect(rows[1]?.transfer_group_id).not.toBeNull();
+    expect(rows[0]?.transfer_group_id).toBe(rows[1]?.transfer_group_id);
   });
 
   it("matches credit-card payment memo variants with 2-day date skew", async () => {
@@ -1201,6 +1391,9 @@ describe("import sessions and file intake", () => {
     expect(emptySummary.status).toBe(200);
     expect(emptySummary.body.totals.rawRows).toBe(0);
     expect(emptySummary.body.totals.canonicalRows).toBe(0);
+    expect(emptySummary.body.totals.nearDuplicatesFlagged).toBe(0);
+    expect(emptySummary.body.totals.openItemsNeedingReview).toBe(0);
+    expect(emptySummary.body.totals.notPostedExactDuplicateOrSkipped).toBe(0);
 
     const csv = [
       "Date,Description,Amount,Reference",
@@ -1241,6 +1434,8 @@ describe("import sessions and file intake", () => {
     expect(sum.body.totals.canonicalRows).toBe(2);
     expect(sum.body.files[0].rawRowCount).toBe(2);
     expect(sum.body.files[0].canonicalRowCount).toBe(2);
+    expect(sum.body.files[0].nearDuplicatesFlagged).toBe(0);
+    expect(sum.body.files[0].notPostedExactDuplicateOrSkipped).toBe(0);
 
     const ledger = await request(app)
       .get("/transactions?limit=50")
@@ -1374,6 +1569,8 @@ describe("transactions command center (Epic 11.2)", () => {
     expect(allHit).toBeDefined();
     expect(Array.isArray(allHit.openReviewItems)).toBe(true);
     expect(allHit.openReviewItems.some((x: { id: string }) => x.id === resId)).toBe(true);
+    const hitItem = allHit.openReviewItems.find((x: { id: string }) => x.id === resId);
+    expect(hitItem).toMatchObject({ type: "unknown_category", status: "open" });
 
     const xferOnly = await request(app)
       .get(
@@ -1390,6 +1587,72 @@ describe("transactions command center (Epic 11.2)", () => {
       .set("authorization", `Bearer ${token}`);
     expect(catOnly.status).toBe(200);
     expect(catOnly.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(true);
+  });
+
+  it("lists open review items with file/raw context via GET /transactions/:id/open-review", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    const rawId = crypto.randomUUID();
+    const txnId = crypto.randomUUID();
+    const resId = crypto.randomUUID();
+    const fp = crypto.randomBytes(32).toString("hex");
+
+    db.prepare(
+      `INSERT INTO import_session (id, household_id, source_type, status)
+       VALUES (?, ?, 'upload', 'review')`
+    ).run(sessionId, householdId.household_id);
+    db.prepare(
+      `INSERT INTO import_file (id, session_id, file_name, status, checksum, stored_path)
+       VALUES (?, ?, 'stmt.csv', 'parsed', ?, NULL)`
+    ).run(fileId, sessionId, crypto.randomBytes(8).toString("hex"));
+    db.prepare(
+      `INSERT INTO transaction_raw (id, file_id, extracted_payload_json, row_index, confidence)
+       VALUES (?, ?, ?, 0, 0.95)`
+    ).run(
+      rawId,
+      fileId,
+      JSON.stringify({
+        txn_date: "2026-02-10",
+        amount: -44.44,
+        description: "Open review API raw line"
+      })
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Open review API', NULL, NULL, ?, ?, 'posted')`
+    ).run(txnId, householdId.household_id, SEED_BOA_CHECKING, "2026-02-10", -44.44, fp, `raw:${rawId}`);
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'unknown_category', ?, ?, 'in_review')`
+    ).run(resId, householdId.household_id, txnId, JSON.stringify({ kind: "unknown_category" }));
+
+    const res = await request(app)
+      .get(`/transactions/${txnId}/open-review`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.items)).toBe(true);
+    expect(res.body.items.length).toBe(1);
+    expect(res.body.items[0].id).toBe(resId);
+    expect(res.body.items[0].status).toBe("in_review");
+    expect(res.body.items[0].context?.fileName).toBe("stmt.csv");
+    expect(res.body.items[0].context?.sessionId).toBe(sessionId);
+    expect(res.body.items[0].context?.raw?.description).toContain("Open review API raw line");
+
+    const bad = await request(app)
+      .get(`/transactions/${crypto.randomUUID()}/open-review`)
+      .set("authorization", `Bearer ${token}`);
+    expect(bad.status).toBe(404);
   });
 
   it("returns 409 when manual POST duplicates fingerprint", async () => {

@@ -14,8 +14,7 @@ type AppSidebarProps = {
 const NAV = [
   { to: "/", end: true, label: "Home", abbr: "H" },
   { to: "/transactions", end: false, label: "Transactions", abbr: "T" },
-  { to: "/categories", end: false, label: "Categories", abbr: "C" },
-  { to: "/resolution", end: false, label: "Review queue", abbr: "R" }
+  { to: "/categories", end: false, label: "Categories", abbr: "C" }
 ] as const;
 
 export function AppSidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }: AppSidebarProps) {

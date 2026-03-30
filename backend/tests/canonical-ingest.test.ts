@@ -136,4 +136,40 @@ describe("transfer pair score (Epic 5.2)", () => {
     const label = "INTERNAL XFER SAVINGS";
     expect(transferPairScore(label, label, d, d, sameDayDiff)).toBe(100);
   });
+
+  it("scores directional internal transfer memos (debit out / credit in) at 74", () => {
+    expect(
+      transferPairScore("TRANSFER TO SAVINGS", "TRANSFER FROM CHECKING", d, d, sameDayDiff)
+    ).toBe(74);
+    expect(
+      transferPairScore("XFER OUT", "TRANSFER IN", d, d, sameDayDiff)
+    ).toBe(74);
+  });
+
+  it("does not score internal directional pattern when debit and credit cues are swapped (no transfer tokens)", () => {
+    expect(transferPairScore("ACH FROM SAVINGS", "ACH TO CHECKING", d, d, sameDayDiff)).toBe(0);
+  });
+
+  it("scores both-leg mobile/app transfer wording at 76", () => {
+    expect(
+      transferPairScore("MOBILE TRANSFER", "MOBILE TRANSFER CONFIRMED", d, d, sameDayDiff)
+    ).toBe(76);
+    expect(transferPairScore("APP TRANSFER SENT", "APP TRANSFER RCVD", d, d, sameDayDiff)).toBe(76);
+  });
+
+  it("scores both-leg book transfer or EFT bank phrasing at 73", () => {
+    expect(transferPairScore("BOOK TRANSFER #1001", "BOOK TRANSFER #9009", d, d, sameDayDiff)).toBe(73);
+    expect(transferPairScore("EFT DEBIT", "EFT CREDIT", d, d, sameDayDiff)).toBe(73);
+    expect(transferPairScore("E-FT OUT", "E-FT IN", d, d, sameDayDiff)).toBe(73);
+  });
+
+  it("scores both-leg RTP / real-time payment labels at 72", () => {
+    expect(transferPairScore("RTP SENT", "RTP RECEIVED", d, d, sameDayDiff)).toBe(72);
+    expect(transferPairScore("REAL TIME PAY", "REAL-TIME PAY", d, d, sameDayDiff)).toBe(72);
+  });
+
+  it("scores both-leg Apple Cash / Google Pay at 71", () => {
+    expect(transferPairScore("APPLE CASH SENT", "APPLE CASH", d, d, sameDayDiff)).toBe(71);
+    expect(transferPairScore("GOOGLE PAY TRANSFER", "GOOGLE PAY", d, d, sameDayDiff)).toBe(71);
+  });
 });

@@ -131,6 +131,13 @@ export function CategoriesPage() {
       <div className="card">
         <h1>Categories</h1>
         <p className="muted">
+          <strong>Primary categorization</strong> happens on{" "}
+          <Link to="/transactions">Transactions</Link> — pick a category on each row (and create new categories inline
+          there). This page is for browsing the full tree, adding parent groups or subcategories, and housekeeping.{" "}
+          <Link to="/categories/rules">Classification rules</Link> automate categorization from text patterns (when
+          imports and the matcher don&apos;t assign a category for you).
+        </p>
+        <p className="muted">
           <strong>Parent group</strong> (left) is the bucket you roll up into—housing, shopping, healthcare, and so on.{" "}
           <strong>Category</strong> (right) is the specific line item, often a subcategory under that group. Rows are
           grouped: each parent appears once, then its subcategories directly underneath so you never see a child before

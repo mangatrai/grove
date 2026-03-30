@@ -526,7 +526,10 @@ export function DashboardPage() {
           >
             <strong>{resolutionSummary.openByType.unknown_category}</strong> posted transaction(s) have no category
             yet.{" "}
-            <Link to="/resolution?status=open&type=unknown_category">Open review queue</Link> to assign categories in
+            <Link to="/transactions?needsReview=true&resolutionType=unknown_category">
+              Open Transactions → Needs review
+            </Link>{" "}
+            to assign categories in
             bulk or per row.
           </p>
         ) : null}

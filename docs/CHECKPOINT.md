@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-28 — **CR-014** (11.5 slice: resolution type filter + bulk on **Needs review**), **CR-015** (cash summary **custom** `dateFrom`/`dateTo`), **CR-016** (transfer matcher tokens), **FIX-004** (ledger **POST** `tsc`)
+**Last updated:** 2026-03-29 — **CR-021** (Epic **6.3** undo import + Categories **D-014** copy), **DOC-008** (**D-014**), **CR-018**–**CR-020**, **CR-014**–**CR-016**, **FIX-004**
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -40,15 +40,15 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Import** | ✅ | Session → upload → bind account/profile → parse → canonicalize; staging **deleted after successful canonicalize** |
 | **Dedupe (Epic 4.2)** | ✅ | `transaction-fingerprint.ts` — stable fingerprint; near-duplicate → **`resolution_item`** (`duplicate_ambiguity`); **`nearDuplicates`** in canonicalize response |
 | **Home / cash dashboard (Epic 7.1 / 7.2)** | 🟡 | **`GET /reports/cash-summary`** — presets + **custom `dateFrom`/`dateTo`** (inclusive, max 366 days, **`CR-015`**), KPIs, **`spendingPower`**, **`comparison`** (same-length prior window for custom), account filter, by-account, **by-category** + charts, trend. **`GET/PATCH /household/settings`** — **`monthly_savings_target_usd`**. **Transfer exclusions** per **CR-004**; **FIX-003** unmigrated DB. **UI:** Home — **Custom** period + Apply, KPI tooltips (**UX-005**), savings slider (**UX-006**), drill-down. **PRD §8** via **PRD-002**. **Not yet:** per-category prior-window deltas (**TODO** in service); free-form range beyond 366-day cap |
-| **Classification (Epic 5.1)** | 🟡 | **Static rules** in **`category-rules.ts`** + **DB rules** (migration **`0009`**, **`category_rule`** table) evaluated before defaults; **`classification_meta`** on canonical rows for explainability. **`GET/POST/PATCH /categories/rules`**; **UI:** **`/categories/rules`**. **`unknown_category`** on **`/resolution`**: type filter, **inline** category, **bulk** assign (`POST /resolution/bulk-apply-category` — select rows + category, **`ResolutionQueuePage`**) + summary chips. **Still not:** richer confidence UX polish |
-| **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** page. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **Gaps:** D-014 (`/categories` vs ledger-only); hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
+| **Classification (Epic 5.1)** | 🟡 | **Static rules** in **`category-rules.ts`** + **DB rules** (migration **`0009`**, **`category_rule`** table) evaluated before defaults; **`classification_meta`** on canonical rows for explainability. **`GET/POST/PATCH /categories/rules`**; **UI:** **`/categories/rules`**. **`unknown_category`** triage: **Transactions → Needs review** (bulk + expand-row context + **`POST /resolution/bulk-apply-category`**). **Still not:** richer confidence UX polish |
+| **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** + **`/categories/rules`**. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **IA:** **D-014** — keep **Transactions** as primary categorization surface; **Categories** + **Rules** remain secondary (**DOC-008**). **Gaps:** hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
 | **Transfer matcher (Epic 5.2)** | 🟡 | Matcher in **`canonical-ingest.service.ts`**: scoring + **CR-016** payment/loan/card-network tokens + asymmetric card-payoff heuristic; **`transfer_ambiguity`**, **`low_pair_score`**. **Tunable via `.env`:** `TRANSFER_*`. **Still not:** exhaustive institution-specific coverage |
 | **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Guests:** **`/`** = landing + **inline sign-in** (**CR-017**); **`/login`** → **`/`**. **Home (signed-in):** **Scope** bar (account filter). **`/settings`** — tabs (Household wired; other stubs). Sidebar width: **`localStorage`** `hf_sidebar_collapsed` |
-| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session** |
+| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**) |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
-| **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** slice: **`/transactions`** **Needs review** — **`resolutionType`** filter, **`openReviewItems`** / **`importSessionId`**, checkboxes, bulk status/category (resolution APIs), session column; queue banner → Transactions. **Still TODO for 11.5:** per-row queue actions, raw preview, duplicate/transfer-specific flows, Home links, remove **`/resolution`**. **Trash** deferred. See **`docs/FINANCE_APP_PRD.md` §13**. |
+| **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** + **CR-018**: **`/transactions`** **Needs review** — type filter, **`openReviewItems`** (incl. **`status`**), **`importSessionId`**, bulk + **expand row** for **`GET /transactions/:id/open-review`** (raw preview, file/session, classification pills, per-item **In review / Resolve / Reopen** via **`PATCH /resolution/:id`**). **`/resolution`** → redirect to **`/transactions?needsReview=true`**; **Review queue** nav item removed; Home + Import CTAs point at Needs review. **Intentional gaps:** near-duplicate rows that never received a canonical **`source_ref`** may still be absent from Needs review (**DOC-005** follow-up); duplicate/transfer **specialist** flows vs queue parity. **Trash** deferred. See **`docs/FINANCE_APP_PRD.md` §13**. |
 
 ---
 
@@ -75,11 +75,11 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 ## Sensible next steps (prioritized themes)
 
 1. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
-2. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category on resolution queue is **shipped** — **`/resolution/bulk-apply-category`**).
+2. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category on **Needs review** is **shipped** — **`/resolution/bulk-apply-category`**).
 3. **Epic 7 continuation:** ledger drill paging/context, category-level period comparisons (optional), **safe-to-spend** + savings targets.
-4. **Epic 11:** **11.5** — port **Review queue** capabilities into **Transactions → Needs review**, then retire dual nav (**`DOC-005`**). Remaining **11.1–11.4** gaps per **`MVP_BACKLOG.md`**.
-5. **Epic 6:** import inbox file-level drill-down; transfer/user bulk edits if still needed.  
-6. **Product cleanup:** **D-014** — whether **`/categories`** + **`/categories/rules`** stay as power-user surfaces or consolidate (**`docs/DECISIONS_LOG.md`**).  
+4. **Epic 11:** **11.5** — **CR-018** closed the main **DOC-005** slice (single review surface + redirect). Remaining **11.1–11.4** gaps + duplicate/transfer depth per **`MVP_BACKLOG.md`**.
+5. **Epic 6:** file-level outcomes (**CR-019**); **6.3** undo (**CR-021**); **6.2** bulk edits if still needed.  
+6. **Product cleanup:** **D-014** decided — **DOC-008** / **`docs/DECISIONS_LOG.md`** (two-tier IA; no merge for MVP).  
 7. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work.
 
 ---

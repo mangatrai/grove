@@ -694,6 +694,75 @@ a {
   box-shadow: var(--shadow-card);
 }
 
+/* Import workspace — per-file outcomes (Epic 6) */
+.import-file-outcomes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.import-file-outcome-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 0.85rem 1rem;
+  background: var(--color-page-bg);
+  min-width: 0;
+}
+
+.import-file-outcome-card__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  word-break: break-word;
+  margin: 0 0 0.25rem;
+  line-height: 1.35;
+}
+
+.import-file-outcome-card__meta {
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.import-file-outcome-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.65rem;
+  font-size: 0.82rem;
+  margin: 0.55rem 0 0.65rem;
+}
+
+.import-file-outcome-stats dt {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.import-file-outcome-stats dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.import-file-outcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  align-items: center;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.import-file-outcome-actions a {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .import-file-outcome-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 h1 {
   font-size: 1.35rem;
   margin: 0 0 0.75rem;
@@ -974,14 +1043,6 @@ table.ledger-table thead th {
   font-size: 0.85rem;
 }
 
-.review-queue-migrate-banner {
-  margin-bottom: 0.75rem;
-  padding: 0.5rem 0.65rem;
-  border-radius: 6px;
-  border: 1px solid #bae6fd;
-  background: #f0f9ff;
-}
-
 .transactions-page__why-cell {
   max-width: 14rem;
 }
@@ -994,6 +1055,63 @@ table.ledger-table thead th {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+}
+
+.transactions-page__expand-th {
+  width: 4.5rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transactions-page__expand-cell {
+  vertical-align: middle;
+}
+
+.transactions-page__expand-btn {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  color: var(--color-accent-bright);
+}
+
+.transactions-page__detail-row td {
+  padding-top: 0;
+  padding-bottom: 0.65rem;
+  background: #f8fafc;
+  border-top: none;
+}
+
+.transactions-page__detail-panel {
+  padding: 0.65rem 0.75rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  margin: 0 0 0.35rem;
+}
+
+.transactions-page__review-block {
+  padding: 0.5rem 0;
+  border-top: 1px solid #e2e8f0;
+}
+
+.transactions-page__review-block:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.transactions-page__review-block-head {
+  font-size: 0.88rem;
+}
+
+.transactions-page__review-block-actions {
+  margin-top: 0.45rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
 
 .transactions-modal-backdrop {

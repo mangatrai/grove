@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
@@ -51,16 +51,27 @@ type CanonicalizeResult = {
   nearDuplicates: number;
 };
 
+type ImportSessionFileSummaryRow = {
+  fileId: string;
+  fileName: string;
+  status: string;
+  rawRowCount: number;
+  canonicalRowCount: number;
+  nearDuplicatesFlagged: number;
+  openItemsNeedingReview: number;
+  notPostedExactDuplicateOrSkipped: number;
+};
+
 type ImportSessionSummary = {
   sessionId: string;
-  totals: { rawRows: number; canonicalRows: number };
-  files: Array<{
-    fileId: string;
-    fileName: string;
-    status: string;
-    rawRowCount: number;
-    canonicalRowCount: number;
-  }>;
+  totals: {
+    rawRows: number;
+    canonicalRows: number;
+    nearDuplicatesFlagged: number;
+    openItemsNeedingReview: number;
+    notPostedExactDuplicateOrSkipped: number;
+  };
+  files: ImportSessionFileSummaryRow[];
 };
 
 export function ImportWorkspacePage() {
@@ -88,6 +99,7 @@ export function ImportWorkspacePage() {
   const [uploading, setUploading] = useState(false);
   const [startingSession, setStartingSession] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [undoBusy, setUndoBusy] = useState(false);
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
   const [sessionSummary, setSessionSummary] = useState<ImportSessionSummary | null>(null);
 
@@ -121,6 +133,40 @@ export function ImportWorkspacePage() {
       setSessionSummary(null);
     }
   }, [sessionId]);
+
+  const undoLedgerPost = useCallback(async () => {
+    if (!sessionId) {
+      return;
+    }
+    const posted = sessionSummary?.totals.canonicalRows ?? 0;
+    if (posted === 0) {
+      return;
+    }
+    const ok = window.confirm(
+      "Remove all transactions this import posted to the ledger? Parsed file rows stay so you can run import again. After the session is finalized, this rollback is no longer available."
+    );
+    if (!ok) {
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setUndoBusy(true);
+    try {
+      const out = await apiJson<{ deletedCanonicalRows: number; deletedResolutionItems: number }>(
+        `/imports/sessions/${sessionId}/undo-import`,
+        { method: "POST", body: "{}" }
+      );
+      setLastImportSummary(null);
+      setMessage(
+        `Removed ${out.deletedCanonicalRows} ledger row(s) and ${out.deletedResolutionItems} review item(s) tied to this import. You can run import again.`
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Undo failed");
+    } finally {
+      setUndoBusy(false);
+    }
+  }, [sessionId, sessionSummary?.totals.canonicalRows, load]);
 
   useEffect(() => {
     if (!showAdvanced || !token) {
@@ -318,6 +364,16 @@ export function ImportWorkspacePage() {
   );
   const serverUsesGeneric = files.some((f) => f.parser_profile_id === "generic_tabular");
 
+  const summaryByFileId = useMemo(() => {
+    const m = new Map<string, ImportSessionFileSummaryRow>();
+    if (sessionSummary) {
+      for (const r of sessionSummary.files) {
+        m.set(r.fileId, r);
+      }
+    }
+    return m;
+  }, [sessionSummary]);
+
   const allFilesBound = files.length > 0 && files.every((f) => f.financial_account_id && f.parser_profile_id);
 
   async function runParse() {
@@ -471,7 +527,16 @@ export function ImportWorkspacePage() {
           </p>
           {lastImportSummary.nearDuplicates > 0 ? (
             <p style={{ marginTop: "0.65rem", marginBottom: 0 }}>
-              <Link to="/resolution">Go to review queue</Link> to triage near-duplicate lines before moving on.
+              <Link
+                to={
+                  sessionId
+                    ? `/transactions?needsReview=true&sessionId=${encodeURIComponent(sessionId)}`
+                    : "/transactions?needsReview=true"
+                }
+              >
+                Go to Transactions → Needs review
+              </Link>{" "}
+              to triage near-duplicate lines before moving on.
             </p>
           ) : null}
         </div>
@@ -612,49 +677,94 @@ export function ImportWorkspacePage() {
         )}
       </div>
 
-      {sessionSummary && sessionSummary.files.length > 0 ? (
+      {files.length > 0 ? (
         <div className="card">
-          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Session processing summary</h2>
-          <p className="muted">
-            Per file: rows extracted into staging vs rows that made it into your ledger for this session. Lower ledger
-            counts usually mean dedupe against data you imported earlier.{" "}
-            <Link to={`/transactions?sessionId=${sessionId}`}>Ledger for this import only</Link>
-            {" · "}
-            <Link to="/transactions">All household transactions</Link>.
-          </p>
-          <table>
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>Status</th>
-                <th>Raw rows</th>
-                <th>In ledger</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessionSummary.files.map((row) => (
-                <tr key={row.fileId}>
-                  <td>{row.fileName}</td>
-                  <td>{row.status}</td>
-                  <td>{row.rawRowCount}</td>
-                  <td>{row.canonicalRowCount}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <td colSpan={2}>
-                  <strong>Session totals</strong>
-                </td>
-                <td>
-                  <strong>{sessionSummary.totals.rawRows}</strong>
-                </td>
-                <td>
-                  <strong>{sessionSummary.totals.canonicalRows}</strong>
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Outcomes by file</h2>
+          {sessionSummary ? (
+            <>
+              <p className="muted" style={{ marginTop: 0 }}>
+                Parsed lines vs what reached your ledger for this session. Near-duplicates are flagged for review (not
+                posted). “Not posted (dup / skip)” covers exact duplicates and lines skipped during load.{" "}
+                <Link to={`/transactions?sessionId=${sessionId}`}>All lines from this import in the ledger</Link>
+                {" · "}
+                <Link to="/transactions">Full household ledger</Link>
+                {sessionSummary.totals.openItemsNeedingReview > 0 ? (
+                  <>
+                    {" · "}
+                    <Link to={`/transactions?sessionId=${sessionId}&needsReview=true`}>
+                      Needs review (this session)
+                    </Link>
+                  </>
+                ) : null}
+                .
+              </p>
+              <dl className="import-file-outcome-stats" style={{ marginTop: "0.5rem", marginBottom: 0 }}>
+                <dt>Session — parsed</dt>
+                <dd>{sessionSummary.totals.rawRows}</dd>
+                <dt>Session — posted</dt>
+                <dd>{sessionSummary.totals.canonicalRows}</dd>
+                <dt>Session — near-dup flagged</dt>
+                <dd>{sessionSummary.totals.nearDuplicatesFlagged}</dd>
+                <dt>Session — not posted (dup / skip)</dt>
+                <dd>{sessionSummary.totals.notPostedExactDuplicateOrSkipped}</dd>
+                {sessionSummary.totals.openItemsNeedingReview > 0 ? (
+                  <>
+                    <dt>Session — open review items</dt>
+                    <dd>{sessionSummary.totals.openItemsNeedingReview}</dd>
+                  </>
+                ) : null}
+              </dl>
+              <div className="import-file-outcomes">
+                {files.map((f) => {
+                  const row = summaryByFileId.get(f.id);
+                  if (!row) {
+                    return (
+                      <div key={f.id} className="import-file-outcome-card">
+                        <p className="import-file-outcome-card__title">{f.file_name}</p>
+                        <p className="muted import-file-outcome-card__meta">No summary row for this file yet.</p>
+                      </div>
+                    );
+                  }
+                  const ledgerHref = `/transactions?sessionId=${sessionId}`;
+                  const reviewHref = `/transactions?sessionId=${sessionId}&needsReview=true`;
+                  return (
+                    <div key={f.id} className="import-file-outcome-card">
+                      <p className="import-file-outcome-card__title">{row.fileName}</p>
+                      <p className="muted import-file-outcome-card__meta">
+                        File status: <strong>{row.status}</strong>
+                      </p>
+                      <dl className="import-file-outcome-stats">
+                        <dt>Parsed rows</dt>
+                        <dd>{row.rawRowCount}</dd>
+                        <dt>Posted to ledger</dt>
+                        <dd>{row.canonicalRowCount}</dd>
+                        <dt>Near-duplicates flagged</dt>
+                        <dd>{row.nearDuplicatesFlagged}</dd>
+                        <dt>Not posted (dup / skip)</dt>
+                        <dd>{row.notPostedExactDuplicateOrSkipped}</dd>
+                        {row.openItemsNeedingReview > 0 ? (
+                          <>
+                            <dt>Open review items</dt>
+                            <dd>{row.openItemsNeedingReview}</dd>
+                          </>
+                        ) : null}
+                      </dl>
+                      <div className="import-file-outcome-actions">
+                        <Link to={ledgerHref}>View in ledger</Link>
+                        {row.openItemsNeedingReview > 0 ? (
+                          <Link to={reviewHref}>Needs review</Link>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <p className="muted" style={{ marginTop: 0 }}>
+              Could not load import statistics. Refresh the page or try again later.
+            </p>
+          )}
         </div>
       ) : null}
 
@@ -718,6 +828,37 @@ export function ImportWorkspacePage() {
           </div>
         </details>
       </div>
+
+      {sessionStatus === "review" ? (
+        <div className="card">
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Undo ledger posting</h2>
+          <p className="muted">
+            While the session is in <strong>review</strong> (before <strong>finalized</strong>), you can remove posted
+            transactions from this import from the ledger and run <strong>Run import</strong> again. Parsed rows in the
+            database stay. After you finalize the session via the API, the session is immutable and this action is not
+            available.
+          </p>
+          <div className="row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={
+                undoBusy ||
+                pipelineBusy ||
+                (sessionSummary?.totals.canonicalRows ?? 0) === 0
+              }
+              title={
+                (sessionSummary?.totals.canonicalRows ?? 0) === 0
+                  ? "Nothing from this import is in the ledger yet"
+                  : undefined
+              }
+              onClick={() => void undoLedgerPost()}
+            >
+              {undoBusy ? "Working…" : "Remove posted transactions from this import"}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

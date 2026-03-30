@@ -84,7 +84,7 @@ Transition rules:
 **404:** item not found for this household.
 **409:** invalid transition (`code: "INVALID_TRANSITION"` with `from`/`to`).
 
-Current UI at `/resolution` uses this endpoint for per-row actions: **In review**, **Resolve**, **Reopen**.
+**Transactions → Needs review** (expand row context) uses this endpoint per open item for **In review**, **Resolve**, **Reopen**. The app route **`/resolution`** redirects to **`/transactions?needsReview=true`**; **`GET /resolution`** remains for API clients and tests.
 
 ## `POST /resolution/bulk`
 

@@ -1,6 +1,6 @@
 # API: Import sessions and file intake (Epic 2.1–2.3)
 
-> **Progress:** Import pipeline status vs backlog → **`docs/CHECKPOINT.md`** (✅ / 🟡 / ⬜).
+> **Progress:** Import pipeline status vs backlog → **`docs/CHECKPOINT.md`** (✅ / 🟡 / ⬜). **Undo before finalize:** **`POST .../undo-import`** (**Epic 6.3**, **CR-021**).
 
 Base path: `/imports`  
 Auth: `Authorization: Bearer <JWT>` (all routes require authentication).
@@ -82,22 +82,38 @@ Files include: `id`, `file_name`, `checksum`, `status`, `file_size`, `mime_type`
 
 ### `GET /imports/sessions/:sessionId/summary`
 
-Session processing summary (Epic 6.1-style): per uploaded file, counts of **`transaction_raw`** rows vs
-**`transaction_canonical`** rows linked to raw rows from that file (`source_ref = 'raw:' || transaction_raw.id`).
+Session processing summary (Epic 6): per uploaded file, parsed vs posted counts, near-duplicate flags, open review
+items, and a derived “not posted (exact duplicate or skipped)” bucket. All per-file numbers come from one response
+(no per-file follow-up calls).
+
+- **`rawRowCount`** — rows in **`transaction_raw`** for that file.
+- **`canonicalRowCount`** — posted ledger rows linked from that file’s raw rows (`source_ref = 'raw:' || transaction_raw.id`).
+- **`nearDuplicatesFlagged`** — count of **`resolution_item`** rows with `type: duplicate_ambiguity` whose **`target_id`** is a **`transaction_raw.id`** belonging to that file (near-duplicate ingest).
+- **`openItemsNeedingReview`** — open or in-review items for that file: the above near-duplicate items, plus **`unknown_category`**, **`transfer_ambiguity`**, or **`reconciliation_mismatch`** on **`transaction_canonical`** rows sourced from that file’s raw rows.
+- **`notPostedExactDuplicateOrSkipped`** — `max(0, rawRowCount - canonicalRowCount - nearDuplicatesFlagged)` — lines that did not post and were not recorded as a near-duplicate (typically exact fingerprint duplicates or skipped/invalid rows during canonicalize).
 
 **200:**
 
 ```json
 {
   "sessionId": "uuid",
-  "totals": { "rawRows": 10, "canonicalRows": 8 },
+  "totals": {
+    "rawRows": 10,
+    "canonicalRows": 8,
+    "nearDuplicatesFlagged": 1,
+    "openItemsNeedingReview": 2,
+    "notPostedExactDuplicateOrSkipped": 1
+  },
   "files": [
     {
       "fileId": "uuid",
       "fileName": "statement.csv",
       "status": "parsed",
       "rawRowCount": 10,
-      "canonicalRowCount": 8
+      "canonicalRowCount": 8,
+      "nearDuplicatesFlagged": 1,
+      "openItemsNeedingReview": 2,
+      "notPostedExactDuplicateOrSkipped": 1
     }
   ]
 }
@@ -204,3 +220,17 @@ After a successful response, staged import files for this session are **removed 
 **404:** session not found / wrong household.
 
 Fingerprint = `SHA-256` over `(household_id, account_id, normalized date, rounded amount to cents, normalized description)`.
+
+---
+
+### `POST /imports/sessions/:sessionId/undo-import`
+
+**Epic 6.3 — undo before finalize.** Removes **ledger impact** of this import while the session is still in **`review`**: deletes **`transaction_canonical`** rows whose **`source_ref`** points at **`transaction_raw`** rows in this session; deletes related **`resolution_item`** rows (including near-duplicate flags on raw ids, unknown category / transfer items on those canonical ids, and items on **partner** rows sharing a **`transfer_group_id`** with session-posted rows); clears **`transfer_group_id`** on any row in those groups before deleting session canonicals. **`transaction_raw`** rows are **not** deleted — you can run **`POST .../canonicalize`** again.
+
+**Allowed only** when session **`status`** is **`review`**. After **`finalized`**, returns **409** with `code: "SESSION_NOT_REVIEW"` and `currentStatus`.
+
+**Body:** none (`{}` is fine).
+
+**200:** `{ "deletedCanonicalRows": number, "deletedResolutionItems": number }`  
+**404:** session not found / wrong household.  
+**409:** `SESSION_NOT_REVIEW` — session is `finalized`, `failed`, or not yet in `review`.

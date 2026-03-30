@@ -76,6 +76,232 @@ export function countOpenResolutionItemsByType(householdId: string): Record<stri
   return out;
 }
 
+type ResolutionDbListRow = {
+  id: string;
+  type: string;
+  targetId: string;
+  reason: string;
+  status: ResolutionStatus;
+  createdAt: string;
+};
+
+type SqlGetStmt = { get: (...params: unknown[]) => unknown };
+
+type ResolutionContextStmts = {
+  rawContextStmt: SqlGetStmt;
+  unknownCanonStmt: SqlGetStmt;
+  canonTxnStmt: SqlGetStmt;
+};
+
+function createResolutionContextStmts(): ResolutionContextStmts {
+  return {
+    rawContextStmt: db.prepare(
+      `SELECT tr.file_id AS fileId, tr.extracted_payload_json AS payloadJson, f.file_name AS fileName, f.session_id AS sessionId
+       FROM transaction_raw tr
+       INNER JOIN import_file f ON f.id = tr.file_id
+       WHERE tr.id = ?`
+    ) as SqlGetStmt,
+    unknownCanonStmt: db.prepare(
+      `SELECT
+         f.session_id AS sessionId,
+         f.id AS fileId,
+         f.file_name AS fileName,
+         tr.extracted_payload_json AS payloadJson,
+         tc.classification_meta AS classificationMeta
+       FROM transaction_canonical tc
+       INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
+       INNER JOIN import_file f ON f.id = tr.file_id
+       WHERE tc.id = ? AND tc.household_id = ?`
+    ) as SqlGetStmt,
+    canonTxnStmt: db.prepare(
+      `SELECT merchant, memo, amount, txn_date, classification_meta AS classificationMeta
+       FROM transaction_canonical
+       WHERE id = ? AND household_id = ?`
+    ) as SqlGetStmt
+  };
+}
+
+function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stmts: ResolutionContextStmts): ResolutionItemRow {
+  let reasonDetail: ResolutionReasonDetail | null = null;
+  try {
+    reasonDetail = JSON.parse(r.reason) as ResolutionReasonDetail;
+  } catch {
+    reasonDetail = null;
+  }
+
+  let rawPreview: RawPreview | null = null;
+  let classification: ClassificationExplainability | null = null;
+  let sessionId: string | null = null;
+  let fileId: string | null = null;
+  let fileName: string | null = null;
+
+  if (r.type === "unknown_category") {
+    const u = stmts.unknownCanonStmt.get(r.targetId, householdId) as
+      | {
+          sessionId: string;
+          fileId: string;
+          fileName: string;
+          payloadJson: string;
+          classificationMeta: string | null;
+        }
+      | undefined;
+    if (u) {
+      sessionId = u.sessionId;
+      fileId = u.fileId;
+      fileName = u.fileName;
+      try {
+        const parsed = JSON.parse(u.payloadJson) as Partial<{
+          txn_date: string;
+          amount: number;
+          description: string;
+          reference_id: string;
+        }>;
+        rawPreview = {
+          txnDate: typeof parsed.txn_date === "string" ? parsed.txn_date : null,
+          amount: typeof parsed.amount === "number" ? parsed.amount : null,
+          description: typeof parsed.description === "string" ? parsed.description : null,
+          referenceId: typeof parsed.reference_id === "string" ? parsed.reference_id : null
+        };
+      } catch {
+        rawPreview = null;
+      }
+      if (u.classificationMeta) {
+        try {
+          classification = JSON.parse(u.classificationMeta) as ClassificationExplainability;
+        } catch {
+          classification = null;
+        }
+      }
+    } else {
+      const co = stmts.canonTxnStmt.get(r.targetId, householdId) as
+        | {
+            merchant: string | null;
+            memo: string | null;
+            amount: number;
+            txn_date: string;
+            classificationMeta: string | null;
+          }
+        | undefined;
+      if (co) {
+        const desc = (co.merchant || co.memo || "").trim() || null;
+        rawPreview = {
+          txnDate: co.txn_date,
+          amount: co.amount,
+          description: desc,
+          referenceId: null
+        };
+        if (co.classificationMeta) {
+          try {
+            classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
+          } catch {
+            classification = null;
+          }
+        }
+      }
+    }
+  } else {
+    const rawId = reasonDetail?.rawId || r.targetId;
+    const rawCtx = stmts.rawContextStmt.get(rawId) as
+      | { fileId: string; payloadJson: string; fileName: string; sessionId: string }
+      | undefined;
+
+    if (rawCtx) {
+      sessionId = rawCtx.sessionId;
+      fileId = rawCtx.fileId;
+      fileName = rawCtx.fileName;
+      try {
+        const parsed = JSON.parse(rawCtx.payloadJson) as Partial<{
+          txn_date: string;
+          amount: number;
+          description: string;
+          reference_id: string;
+        }>;
+        rawPreview = {
+          txnDate: typeof parsed.txn_date === "string" ? parsed.txn_date : null,
+          amount: typeof parsed.amount === "number" ? parsed.amount : null,
+          description: typeof parsed.description === "string" ? parsed.description : null,
+          referenceId: typeof parsed.reference_id === "string" ? parsed.reference_id : null
+        };
+      } catch {
+        rawPreview = null;
+      }
+    }
+    const co = stmts.canonTxnStmt.get(r.targetId, householdId) as
+      | {
+          merchant: string | null;
+          memo: string | null;
+          amount: number;
+          txn_date: string;
+          classificationMeta: string | null;
+        }
+      | undefined;
+    if (co?.classificationMeta) {
+      try {
+        classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
+      } catch {
+        classification = null;
+      }
+    }
+  }
+
+  return {
+    id: r.id,
+    type: r.type,
+    targetId: r.targetId,
+    reason: r.reason,
+    reasonDetail,
+    status: r.status,
+    createdAt: r.createdAt,
+    context: {
+      sessionId,
+      fileId,
+      fileName,
+      raw: rawPreview,
+      classification
+    }
+  };
+}
+
+/**
+ * Open / in_review resolution items tied to one canonical transaction (same link rules as ledger `openReviewItems`).
+ */
+export function listOpenResolutionItemsForCanonicalTransaction(
+  householdId: string,
+  canonicalTransactionId: string
+): { ok: true; items: ResolutionItemRow[] } | { ok: false; code: "NOT_FOUND" } {
+  const exists = db
+    .prepare(`SELECT 1 FROM transaction_canonical WHERE id = ? AND household_id = ?`)
+    .get(canonicalTransactionId, householdId);
+  if (!exists) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT ri.id AS id, ri.type AS type, ri.target_id AS targetId, ri.reason AS reason, ri.status AS status, ri.created_at AS createdAt
+       FROM resolution_item ri
+       WHERE ri.household_id = ?
+         AND ri.status IN ('open', 'in_review')
+         AND (
+           (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = ?)
+           OR (
+             ri.type = 'duplicate_ambiguity'
+             AND EXISTS (
+               SELECT 1 FROM transaction_canonical tc
+               WHERE tc.id = ? AND tc.household_id = ri.household_id
+                 AND tc.source_ref IS NOT NULL
+                 AND tc.source_ref = ('raw:' || ri.target_id)
+             )
+           )
+         )
+       ORDER BY datetime(ri.created_at) DESC`
+    )
+    .all(householdId, canonicalTransactionId, canonicalTransactionId) as ResolutionDbListRow[];
+
+  const stmts = createResolutionContextStmts();
+  return { ok: true, items: rows.map((r) => buildResolutionItemRow(r, householdId, stmts)) };
+}
+
 export function listResolutionItemsForHousehold(
   householdId: string,
   status: ResolutionStatus | "all" = "all",
@@ -102,181 +328,10 @@ export function listResolutionItemsForHousehold(
         ? [householdId, status]
         : [householdId, status, itemType];
 
-  const rows = db.prepare(listSql).all(...params) as Array<{
-    id: string;
-    type: string;
-    targetId: string;
-    reason: string;
-    status: ResolutionStatus;
-    createdAt: string;
-  }>;
+  const rows = db.prepare(listSql).all(...params) as ResolutionDbListRow[];
 
-  const rawContextStmt = db.prepare(
-    `SELECT tr.file_id AS fileId, tr.extracted_payload_json AS payloadJson, f.file_name AS fileName, f.session_id AS sessionId
-     FROM transaction_raw tr
-     INNER JOIN import_file f ON f.id = tr.file_id
-     WHERE tr.id = ?`
-  );
-
-  const unknownCanonStmt = db.prepare(
-    `SELECT
-       f.session_id AS sessionId,
-       f.id AS fileId,
-       f.file_name AS fileName,
-       tr.extracted_payload_json AS payloadJson,
-       tc.classification_meta AS classificationMeta
-     FROM transaction_canonical tc
-     INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
-     INNER JOIN import_file f ON f.id = tr.file_id
-     WHERE tc.id = ? AND tc.household_id = ?`
-  );
-
-  const canonTxnStmt = db.prepare(
-    `SELECT merchant, memo, amount, txn_date, classification_meta AS classificationMeta
-     FROM transaction_canonical
-     WHERE id = ? AND household_id = ?`
-  );
-
-  return rows.map((r) => {
-    let reasonDetail: ResolutionReasonDetail | null = null;
-    try {
-      reasonDetail = JSON.parse(r.reason) as ResolutionReasonDetail;
-    } catch {
-      reasonDetail = null;
-    }
-
-    let rawPreview: RawPreview | null = null;
-    let classification: ClassificationExplainability | null = null;
-    let sessionId: string | null = null;
-    let fileId: string | null = null;
-    let fileName: string | null = null;
-
-    if (r.type === "unknown_category") {
-      const u = unknownCanonStmt.get(r.targetId, householdId) as
-        | {
-            sessionId: string;
-            fileId: string;
-            fileName: string;
-            payloadJson: string;
-            classificationMeta: string | null;
-          }
-        | undefined;
-      if (u) {
-        sessionId = u.sessionId;
-        fileId = u.fileId;
-        fileName = u.fileName;
-        try {
-          const parsed = JSON.parse(u.payloadJson) as Partial<{
-            txn_date: string;
-            amount: number;
-            description: string;
-            reference_id: string;
-          }>;
-          rawPreview = {
-            txnDate: typeof parsed.txn_date === "string" ? parsed.txn_date : null,
-            amount: typeof parsed.amount === "number" ? parsed.amount : null,
-            description: typeof parsed.description === "string" ? parsed.description : null,
-            referenceId: typeof parsed.reference_id === "string" ? parsed.reference_id : null
-          };
-        } catch {
-          rawPreview = null;
-        }
-        if (u.classificationMeta) {
-          try {
-            classification = JSON.parse(u.classificationMeta) as ClassificationExplainability;
-          } catch {
-            classification = null;
-          }
-        }
-      } else {
-        const co = canonTxnStmt.get(r.targetId, householdId) as
-          | {
-              merchant: string | null;
-              memo: string | null;
-              amount: number;
-              txn_date: string;
-              classificationMeta: string | null;
-            }
-          | undefined;
-        if (co) {
-          const desc = (co.merchant || co.memo || "").trim() || null;
-          rawPreview = {
-            txnDate: co.txn_date,
-            amount: co.amount,
-            description: desc,
-            referenceId: null
-          };
-          if (co.classificationMeta) {
-            try {
-              classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
-            } catch {
-              classification = null;
-            }
-          }
-        }
-      }
-    } else {
-      const rawId = reasonDetail?.rawId || r.targetId;
-      const rawCtx = rawContextStmt.get(rawId) as
-        | { fileId: string; payloadJson: string; fileName: string; sessionId: string }
-        | undefined;
-
-      if (rawCtx) {
-        sessionId = rawCtx.sessionId;
-        fileId = rawCtx.fileId;
-        fileName = rawCtx.fileName;
-        try {
-          const parsed = JSON.parse(rawCtx.payloadJson) as Partial<{
-            txn_date: string;
-            amount: number;
-            description: string;
-            reference_id: string;
-          }>;
-          rawPreview = {
-            txnDate: typeof parsed.txn_date === "string" ? parsed.txn_date : null,
-            amount: typeof parsed.amount === "number" ? parsed.amount : null,
-            description: typeof parsed.description === "string" ? parsed.description : null,
-            referenceId: typeof parsed.reference_id === "string" ? parsed.reference_id : null
-          };
-        } catch {
-          rawPreview = null;
-        }
-      }
-      const co = canonTxnStmt.get(r.targetId, householdId) as
-        | {
-            merchant: string | null;
-            memo: string | null;
-            amount: number;
-            txn_date: string;
-            classificationMeta: string | null;
-          }
-        | undefined;
-      if (co?.classificationMeta) {
-        try {
-          classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
-        } catch {
-          classification = null;
-        }
-      }
-    }
-
-    return {
-      id: r.id,
-      type: r.type,
-      targetId: r.targetId,
-      reason: r.reason,
-      reasonDetail,
-      status: r.status,
-      createdAt: r.createdAt,
-      context: {
-        sessionId,
-        fileId,
-        fileName,
-        raw: rawPreview,
-        classification
-      }
-    };
-  });
+  const stmts = createResolutionContextStmts();
+  return rows.map((r) => buildResolutionItemRow(r, householdId, stmts));
 }
 
 function canTransition(from: ResolutionStatus, to: ResolutionStatus): boolean {

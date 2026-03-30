@@ -6,7 +6,6 @@ import { CategoriesPage } from "./pages/CategoriesPage";
 import { CategoryRulesPage } from "./pages/CategoryRulesPage";
 import { HomeRoute } from "./pages/HomeRoute";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
-import { ResolutionQueuePage } from "./pages/ResolutionQueuePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
@@ -21,7 +20,7 @@ export function App() {
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/resolution" element={<ResolutionQueuePage />} />
+          <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
           <Route path="/imports/:sessionId" element={<ImportWorkspacePage />} />
         </Route>
         <Route path="/dashboard" element={<Navigate to="/" replace />} />

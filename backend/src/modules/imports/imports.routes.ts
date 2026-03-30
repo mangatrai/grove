@@ -18,6 +18,10 @@ import {
   type BindingFailure
 } from "./import-file-binding.service.js";
 import { getImportSessionSummary } from "./session-summary.service.js";
+import {
+  rollbackImportSessionLedger,
+  type RollbackImportSessionFailure
+} from "./import-session-rollback.service.js";
 import { canonicalizeImportSession } from "../canonical/canonical-ingest.service.js";
 import { parseSessionImportFiles, type ParseFailure, type ParseColumnMapping } from "./import-parser.service.js";
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
@@ -57,6 +61,17 @@ function mapServiceFailureToStatus(failure: ServiceFailure): number {
       return 404;
     case "INVALID_TRANSITION":
     case "SESSION_CLOSED_FOR_UPLOAD":
+      return 409;
+    default:
+      return 500;
+  }
+}
+
+function mapRollbackFailureToStatus(failure: RollbackImportSessionFailure): number {
+  switch (failure.code) {
+    case "NOT_FOUND":
+      return 404;
+    case "SESSION_NOT_REVIEW":
       return 409;
     default:
       return 500;
@@ -274,6 +289,20 @@ importsRouter.post("/sessions/:sessionId/canonicalize", (req: AuthenticatedReque
       return;
     }
     res.status(500).json({ message: "Unexpected canonicalize error" });
+    return;
+  }
+
+  res.status(200).json(result.data);
+});
+
+importsRouter.post("/sessions/:sessionId/undo-import", (req: AuthenticatedRequest, res) => {
+  const result = rollbackImportSessionLedger(req.params.sessionId, req.authUser!.householdId);
+  if (!result.ok) {
+    res.status(mapRollbackFailureToStatus(result)).json({
+      message: result.message,
+      code: result.code,
+      ...(result.code === "SESSION_NOT_REVIEW" ? { currentStatus: result.currentStatus } : {})
+    });
     return;
   }
 

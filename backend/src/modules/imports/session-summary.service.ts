@@ -4,8 +4,25 @@ export interface ImportSessionFileSummary {
   fileId: string;
   fileName: string;
   status: string;
+  /** Rows in `transaction_raw` for this file (parsed lines). */
   rawRowCount: number;
+  /** Posted ledger rows linked from this file’s raw rows (`source_ref = 'raw:' || transaction_raw.id`). */
   canonicalRowCount: number;
+  /**
+   * `resolution_item` rows (`type = duplicate_ambiguity`) whose `target_id` is a `transaction_raw.id` from this file.
+   * Matches near-duplicate ingest behavior (one item per flagged raw row).
+   */
+  nearDuplicatesFlagged: number;
+  /**
+   * Open or in-review resolution items for this file: near-duplicate on raw, or category/transfer/reconciliation on
+   * canonical rows sourced from this file’s raw rows.
+   */
+  openItemsNeedingReview: number;
+  /**
+   * Parsed raw rows that did not become ledger rows and are not counted as near-duplicate flags — typically exact
+   * fingerprint duplicates or skipped/invalid lines during canonicalize.
+   */
+  notPostedExactDuplicateOrSkipped: number;
 }
 
 export interface ImportSessionSummary {
@@ -13,13 +30,24 @@ export interface ImportSessionSummary {
   totals: {
     rawRows: number;
     canonicalRows: number;
+    nearDuplicatesFlagged: number;
+    openItemsNeedingReview: number;
+    notPostedExactDuplicateOrSkipped: number;
   };
   files: ImportSessionFileSummary[];
 }
 
+function toCountMap(rows: Array<{ file_id: string; cnt: number }>): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const r of rows) {
+    m.set(r.file_id, Number(r.cnt));
+  }
+  return m;
+}
+
 /**
- * Per-file raw vs ledger row counts for an import session (Epic 6.1-style summary).
- * Canonical rows are linked via `transaction_canonical.source_ref = 'raw:' || transaction_raw.id`.
+ * Per-file import outcomes for a session (Epic 6): parsed vs posted, near-duplicate flags, open review load, and
+ * remaining unposted (exact duplicate or skipped). Uses grouped queries (no N+1 per file).
  */
 export function getImportSessionSummary(
   sessionId: string,
@@ -38,38 +66,135 @@ export function getImportSessionSummary(
     )
     .all(sessionId) as Array<{ id: string; file_name: string; status: string }>;
 
-  const rawCountStmt = db.prepare(
-    `SELECT COUNT(*) AS cnt FROM transaction_raw WHERE file_id = ?`
+  const fileIds = fileRows.map((f) => f.id);
+  if (fileIds.length === 0) {
+    return {
+      sessionId,
+      totals: {
+        rawRows: 0,
+        canonicalRows: 0,
+        nearDuplicatesFlagged: 0,
+        openItemsNeedingReview: 0,
+        notPostedExactDuplicateOrSkipped: 0
+      },
+      files: []
+    };
+  }
+
+  const placeholders = fileIds.map(() => "?").join(", ");
+
+  const rawByFile = toCountMap(
+    db
+      .prepare(
+        `SELECT file_id, COUNT(*) AS cnt
+         FROM transaction_raw
+         WHERE file_id IN (${placeholders})
+         GROUP BY file_id`
+      )
+      .all(...fileIds) as Array<{ file_id: string; cnt: number }>
   );
-  const canonicalForFileStmt = db.prepare(
-    `SELECT COUNT(*) AS cnt
-     FROM transaction_canonical tc
-     INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
-     WHERE tr.file_id = ? AND tc.household_id = ?`
+
+  const canonicalByFile = toCountMap(
+    db
+      .prepare(
+        `SELECT tr.file_id AS file_id, COUNT(*) AS cnt
+         FROM transaction_canonical tc
+         INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
+         WHERE tc.household_id = ? AND tr.file_id IN (${placeholders})
+         GROUP BY tr.file_id`
+      )
+      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+  );
+
+  const nearDupByFile = toCountMap(
+    db
+      .prepare(
+        `SELECT tr.file_id AS file_id, COUNT(*) AS cnt
+         FROM resolution_item ri
+         INNER JOIN transaction_raw tr ON ri.target_id = tr.id
+         WHERE ri.household_id = ?
+           AND ri.type = 'duplicate_ambiguity'
+           AND tr.file_id IN (${placeholders})
+         GROUP BY tr.file_id`
+      )
+      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+  );
+
+  const openNearByFile = toCountMap(
+    db
+      .prepare(
+        `SELECT tr.file_id AS file_id, COUNT(*) AS cnt
+         FROM resolution_item ri
+         INNER JOIN transaction_raw tr ON ri.target_id = tr.id
+         WHERE ri.household_id = ?
+           AND ri.type = 'duplicate_ambiguity'
+           AND ri.status IN ('open', 'in_review')
+           AND tr.file_id IN (${placeholders})
+         GROUP BY tr.file_id`
+      )
+      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+  );
+
+  const openCanonicalByFile = toCountMap(
+    db
+      .prepare(
+        `SELECT tr.file_id AS file_id, COUNT(DISTINCT ri.id) AS cnt
+         FROM resolution_item ri
+         INNER JOIN transaction_canonical tc ON ri.target_id = tc.id
+         INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
+         WHERE ri.household_id = ?
+           AND ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch')
+           AND ri.status IN ('open', 'in_review')
+           AND tr.file_id IN (${placeholders})
+         GROUP BY tr.file_id`
+      )
+      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
   );
 
   let totalRaw = 0;
   let totalCanon = 0;
+  let totalNear = 0;
+  let totalOpenReview = 0;
+  let totalExactOrSkip = 0;
 
   const files: ImportSessionFileSummary[] = fileRows.map((f) => {
-    const rawRow = rawCountStmt.get(f.id) as { cnt: number };
-    const rawRowCount = Number(rawRow.cnt);
-    const canonRow = canonicalForFileStmt.get(f.id, householdId) as { cnt: number };
-    const canonicalRowCount = Number(canonRow.cnt);
+    const rawRowCount = rawByFile.get(f.id) ?? 0;
+    const canonicalRowCount = canonicalByFile.get(f.id) ?? 0;
+    const nearDuplicatesFlagged = nearDupByFile.get(f.id) ?? 0;
+    const openItemsNeedingReview =
+      (openNearByFile.get(f.id) ?? 0) + (openCanonicalByFile.get(f.id) ?? 0);
+    const notPostedExactDuplicateOrSkipped = Math.max(
+      0,
+      rawRowCount - canonicalRowCount - nearDuplicatesFlagged
+    );
+
     totalRaw += rawRowCount;
     totalCanon += canonicalRowCount;
+    totalNear += nearDuplicatesFlagged;
+    totalOpenReview += openItemsNeedingReview;
+    totalExactOrSkip += notPostedExactDuplicateOrSkipped;
+
     return {
       fileId: f.id,
       fileName: f.file_name,
       status: f.status,
       rawRowCount,
-      canonicalRowCount
+      canonicalRowCount,
+      nearDuplicatesFlagged,
+      openItemsNeedingReview,
+      notPostedExactDuplicateOrSkipped
     };
   });
 
   return {
     sessionId,
-    totals: { rawRows: totalRaw, canonicalRows: totalCanon },
+    totals: {
+      rawRows: totalRaw,
+      canonicalRows: totalCanon,
+      nearDuplicatesFlagged: totalNear,
+      openItemsNeedingReview: totalOpenReview,
+      notPostedExactDuplicateOrSkipped: totalExactOrSkip
+    },
     files
   };
 }

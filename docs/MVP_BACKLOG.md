@@ -217,7 +217,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 - Ledger: **`LedgerCategoryPicker`** — portal **dialog** (backdrop, fixed position), **three columns** (groups / subcategories / new category), **`POST /categories`** inline; trigger shows **one line** (selected category name) with **parent vs leaf** styling — see **`docs/CHANGE_HISTORY.md` UX-003**, **`docs/DECISIONS_LOG.md` D-015**. **Status column removed** from ledger (**D-016**).
 
 **Remaining / product direction:**
-- **Ledger-first parity:** Decide whether **`/categories`** is still needed for power users or can be demoted — **`docs/DECISIONS_LOG.md` D-014** (partial).
+- **Ledger-first parity:** **D-014** **Accepted** — **Transactions** = primary categorization; **`/categories`** + **`/categories/rules`** stay as secondary taxonomy + automation surfaces (**`docs/DECISIONS_LOG.md`**, **DOC-008**).
 - **Reporting:** Hierarchical roll-up in **`byCategory`** and drill-down labels (coord. Epic 7.2).
 
 - Tasks:
@@ -248,10 +248,10 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 **Baseline delivered (2025):** **`GET /resolution`** (with **`?status=`** filter) lists **`resolution_item`** with **import context** (file, raw preview, ledger link). **`PATCH /resolution/:id`** and **`POST /resolution/bulk`** update status with the same transition rules (`docs/API_RESOLUTION.md`). **Review queue** at **`/resolution`** — per-row and **bulk** status actions. **Import workspace** — **Epic 6.1-style handoff:** posted vs exact duplicates vs near-duplicates, CTA to review queue when needed; ledger empty-state guidance when session filter shows no rows.
 
-**Not** delivered: file-level drill-down in inbox, **transfer** bulk edits (Story 6.2 stretch), session rollback (6.3), bulk “approve” semantics beyond status. **Delivered:** **`unknown_category` bulk category** — **`POST /resolution/bulk-apply-category`** + Review queue UI (select rows, apply category).
+**Not** delivered: **transfer** bulk edits (Story 6.2 stretch), bulk “approve” semantics beyond status. **Delivered (6.3):** **`POST .../undo-import`** before finalize (**`docs/API_IMPORT_SESSIONS.md`**). **Delivered:** **`unknown_category` bulk category** — **`POST /resolution/bulk-apply-category`**; primary review UI on **Transactions → Needs review** (**CR-014**, **CR-018**). **Delivered (2026-03-29, CR-019):** **file-level** outcomes on import workspace — **`GET /imports/sessions/:id/summary`** per-file **`nearDuplicatesFlagged`**, **`openItemsNeedingReview`**, **`notPostedExactDuplicateOrSkipped`**, CTAs to ledger / Needs review.
 
 ### Story 6.1 - Inbox summary view
-**Partial (2025):** Import workspace + last-import summary cover **posted vs flagged** counts and near-duplicate CTA; ledger/queue empty states clarified. **Remaining:** dedicated file-level drill-down and richer session inbox beyond the import card.
+**Status: 🟡 Partial (2026-03-29).** Session summary + **Outcomes by file** cards (**CR-019**). **Remaining:** richer session inbox (e.g. raw row preview per file without leaving workspace) if desired.
 
 - Tasks:
   - Build session summary UI (parsed/duplicate/unresolved counts). (M)
@@ -271,9 +271,11 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - User can resolve large batch without per-row modal workflow.
 
 ### Story 6.3 - Undo before finalize
+**Status: 🟡 Partial (2026-03-27).** **`POST /imports/sessions/:sessionId/undo-import`** + Import workspace **Remove posted transactions** while **`review`**; **`finalized`** rejected (**409**). Parsed **`transaction_raw`** kept for re-canonicalize. See **`docs/API_IMPORT_SESSIONS.md`**.
+
 - Tasks:
-  - Session rollback API and UI affordance. (M)
-  - Finalize lock semantics. (S)
+  - Session rollback API and UI affordance. (M) 🟡
+  - Finalize lock semantics. (S) 🟡 (immutable via state machine; undo only in `review`)
 - Acceptance:
   - User can undo before finalize; finalized session becomes immutable.
 
@@ -389,7 +391,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 ## Epic 11: Application shell, transactions hub, and settings (P0)
 **Goal:** Adopt a **persistent shell** and **Transactions-first** IA so users navigate less and work from dense, filterable surfaces — **PRD §13** (phases A–D). **Data density** is a **feature** for analysis, not a bug to minimize, provided hierarchy and filters stay clear.
 
-**Status:** 🟡 In progress (2026-03-28): **11.1**, **11.3**, **11.4** partial; **11.2** command center shipped (**CR-013**); **11.5** partial (**CR-014** — type filter, bulk, session link slice). **DOC-005** end state still pending.
+**Status:** 🟡 In progress (2026-03-29): **11.1**, **11.3**, **11.4** partial; **11.2** command center shipped (**CR-013**); **11.5** core **DOC-005** slice shipped (**CR-014** + **CR-018** — expand context, per-row status, redirect, CTAs). **Residual:** duplicate/transfer specialist UX, near-duplicate ledger visibility edge case.
 
 ### Story 11.1 - Phase A: Shell and wayfinding
 **Status: 🟡 Partial (2026-03-27).** Collapsible sidebar + top bar + Account menu shipped (**UX-007**).  
@@ -411,11 +413,9 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - User can switch All / Needs review without leaving the shell; manual add is obvious; filters stay visible while scrolling the table (or clear sticky affordance).
 
 ### Story 11.5 - Unify review: port Review queue into Transactions → Needs review
-**Status: 🟡 Partial (2026-03-28, **CR-014**).** **Shipped slice:** **`GET /transactions`** **`resolutionType`** + **`openReviewItems`** / **`importSessionId`** when **`needsReview=true`**; **Needs review** UI — type multi-select, checkboxes + select all, bulk status/category via resolution ids, **Import session** column; queue banner → Transactions. **Remaining vs full queue:** per-row **In review / Resolve / Reopen** and **PATCH /resolution/:id** on Transactions; **raw preview** / classification pills; **duplicate / transfer / reconciliation**-specific actions; **Home** drill-downs still targeting the resolution route; sidebar removal / redirect. **Intent (** **DOC-005** **):** long term **only** **`/transactions`** for review work.  
-- **Port / replace from `ResolutionQueuePage` + `GET/PATCH /resolution` + bulk APIs:** multi-select + **bulk status** (`POST /resolution/bulk`), **bulk category** (`POST /resolution/bulk-apply-category`), **type filters** and summary chips, per-row actions for **duplicate_ambiguity** / **transfer_ambiguity** / **reconciliation_mismatch**, **import context** (raw preview, session/file links), and **Home** banner links that today target **`/resolution`**.  
-- **Then:** remove sidebar **Review queue** (or keep as alias to **`/transactions?needsReview=true`**), update **Import workspace** CTAs, and trim duplicate API surface if safe.  
+**Status: ✅ Core shipped (2026-03-29, **CR-014** + **CR-018**).** **`GET /transactions`** when **`needsReview=true`**: **`resolutionType`**, **`openReviewItems`** (**`id`**, **`type`**, **`status`**), **`importSessionId`**. **`GET /transactions/:id/open-review`** returns the same **`context`** family as **`GET /resolution`** for open items on that row. **Needs review** UI: type multi-select, bulk status/category, **Show** expandable row — raw preview, file/session links, classification pills, per-item category (unknown), **In review / Resolve / Reopen** (**`PATCH /resolution/:id`**). **Nav:** **Review queue** removed; **`/resolution`** redirects to **`/transactions?needsReview=true`**. **Home** + **Import** CTAs → Needs review (with **`sessionId`** when relevant). **Removed:** standalone **`ResolutionQueuePage`**. **Intentional gaps (documented in **CHECKPOINT** / **CR-018**):** rows that only exist as **`resolution_item`** without a matching canonical **`source_ref`** link (e.g. some near-duplicate paths) may not appear on Needs review; richer duplicate/transfer workflows vs old queue. **Intent (** **DOC-005** **):** primary review work is **`/transactions`**.  
 - Acceptance:
-  - Every workflow a user can complete on **`/resolution`** today is available from **Transactions → Needs review** (or an intentional, documented exception).
+  - Main queue workflows (bulk + per-row status + import context + category) run from **Transactions → Needs review**; **`GET /resolution`** remains for API/tests.
 
 ### Story 11.3 - Phase C: Dashboard scope prominence
 **Status: 🟡 Partial (2026-03-27).** **Scope** bar at top of Home card (**UX-007**).  

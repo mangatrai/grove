@@ -12,7 +12,7 @@ Requires the API on **port 4000** (default backend). The Vite dev server proxies
 
 If you add a new API top-level path, add it here or the browser will get HTML instead of JSON.
 
-**Layout:** Signed-in users get **`ShellLayout`** — **collapsible left sidebar** (`src/layout/AppSidebar.tsx`) with **Home**, **Transactions**, **Categories**, **Review queue**; **top bar** (`src/layout/AppTopBar.tsx`) with **New import** and **Account** menu (**Settings** → `/settings`, **Sign out**). Mobile: hamburger opens the sidebar drawer with backdrop. Guests at **`/`** see a **landing + sign-in** hero (no chrome; same route as dashboard after JWT). **`/login`** redirects to **`/`**. **`RequireAuth`** wraps categories, transactions, resolution, import workspace, and **settings** (home dashboard uses JWT in `HomeRoute`).
+**Layout:** Signed-in users get **`ShellLayout`** — **collapsible left sidebar** (`src/layout/AppSidebar.tsx`) with **Home**, **Transactions**, **Categories**; **top bar** (`src/layout/AppTopBar.tsx`) with **New import** and **Account** menu (**Settings** → `/settings`, **Sign out**). Mobile: hamburger opens the sidebar drawer with backdrop. Guests at **`/`** see a **landing + sign-in** hero (no chrome; same route as dashboard after JWT). **`/login`** redirects to **`/`**. **`RequireAuth`** wraps categories, transactions, import workspace, and **settings** (home dashboard uses JWT in `HomeRoute`).
 
 Override the proxy target:
 
@@ -45,7 +45,7 @@ Output: `frontend/dist/`.
 - `/categories` — Manage household categories (POST/PATCH/DELETE) and browse the global + household taxonomy. **`/categories/rules`** — household classification rules (`GET/POST/PATCH /categories/rules`); link from Categories.
 - `/transactions` — Ledger hub; query `sessionId`, `needsReview`, `search`, `accountId`, `categoryId`, `uncategorizedOnly`, `dateFrom`, `dateTo`, `amountMin`, `amountMax` (see `docs/API_LEDGER.md`).
 - `/imports/:sessionId` — Import workspace + **Session processing summary** (raw vs ledger per file); start via **New import** in the header (no Import nav item).
-- `/resolution` — **Review queue** (`GET /resolution`, `PATCH /resolution/:id`, `POST /resolution/bulk` for bulk status, **`POST /resolution/bulk-apply-category`** for bulk category on `unknown_category` rows)
+- `/resolution` — **Redirects** to **`/transactions?needsReview=true`** (bookmark compatibility). **API** still exposes **`GET /resolution`**, **`PATCH /resolution/:id`**, **`POST /resolution/bulk`**, **`POST /resolution/bulk-apply-category`**; **Needs review** uses these plus **`GET /transactions/:id/open-review`** for row context.
 
 ## Import UX
 
