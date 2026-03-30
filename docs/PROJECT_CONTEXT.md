@@ -97,9 +97,10 @@ Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **pr
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
-1. **`docs/CHECKPOINT.md`** “Sensible next steps” (especially **Epic 5.2** / **6.2–6.3** / **7** vs **11.5** residual).
-2. **Story 11.5:** **core** port shipped (**CR-018**); residual gaps per **`CHECKPOINT.md`** / **DOC-005** (near-duplicate edge cases, specialist duplicate/transfer UX).
-3. Continue **Epic 5.2** transfer matcher coverage + tests; **Epic 6** — file-level outcomes + summary API shipped (**CR-019**); remaining backlog items (e.g. **6.2** bulk transfer/edits, **6.3** undo-before-finalize).
-4. **D-014** closed (**DOC-008**): **Transactions** primary for categorization; **`/categories`** + **`/categories/rules`** secondary — no ledger merge for MVP.
-5. Parser profile set (BoA checking, Citi/Chase cards) remains baseline for ingestion hardening.
+1. **`docs/CHECKPOINT.md`** — **“Next session pickup — Needs review / bulk category”** (March 2026): bulk **Apply category** only applies to **`unknown_category`** **`resolution_item`** ids; **Needs review** list can include **categorized** rows with other open items (transfer/duplicate/reconciliation). Start there for UX + copy + optional filters.
+2. **`docs/CHECKPOINT.md`** “Sensible next steps” (Epic **5.2**, **7**, **11** residual).
+3. **Story 11.5:** **core** port shipped (**CR-018**); near-duplicate edge cases, specialist duplicate/transfer UX.
+4. **Epic 5.2** / **6.2** / **7** per backlog.
+5. **D-014** closed (**DOC-008**): **Transactions** + **`/categories`** / **rules** split.
+6. Parser profiles (BoA, Citi, Chase) baseline for ingestion.
 

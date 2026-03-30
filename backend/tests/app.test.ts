@@ -1486,6 +1486,62 @@ describe("transactions command center (Epic 11.2)", () => {
     expect(typeof res.body.id).toBe("string");
   });
 
+  it("search matches substring or FTS and orders by txn_date desc", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const idNewerDate = crypto.randomUUID();
+    const idBetterFts = crypto.randomUUID();
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, 'debit', 'ledgerbm25', NULL, NULL, ?, 'manual:fts-order-a', 'posted')`
+    ).run(
+      idNewerDate,
+      householdId.household_id,
+      SEED_BOA_CHECKING,
+      "30000000-0000-0000-0000-000000000004",
+      "2026-12-15",
+      -1,
+      fp1
+    );
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, 'debit', 'ledgerbm25 ledgerbm25 ledgerbm25 ledgerbm25 ledgerbm25', NULL, NULL, ?, 'manual:fts-order-b', 'posted')`
+    ).run(
+      idBetterFts,
+      householdId.household_id,
+      SEED_BOA_CHECKING,
+      "30000000-0000-0000-0000-000000000004",
+      "2026-01-05",
+      -1,
+      fp2
+    );
+
+    const res = await request(app)
+      .get(`/transactions?search=${encodeURIComponent("ledgerbm25")}&limit=50`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const txs = res.body.transactions as { id: string }[];
+    const idxBetter = txs.findIndex((t) => t.id === idBetterFts);
+    const idxNewer = txs.findIndex((t) => t.id === idNewerDate);
+    expect(idxBetter).toBeGreaterThanOrEqual(0);
+    expect(idxNewer).toBeGreaterThanOrEqual(0);
+    // Hybrid search (substring OR FTS); list order is by date, newest first.
+    expect(idxNewer).toBeLessThan(idxBetter);
+  });
+
   it("lists needsReview rows with reviewReasons for uncategorized posted rows", async () => {
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",

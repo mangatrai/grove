@@ -931,7 +931,9 @@ export function TransactionsPage() {
             More filters {moreFiltersOpen ? "▴" : "▾"}
           </button>
           <p className="muted transactions-toolbar__fts-note">
-            Full-text ranked search is not enabled yet; this search matches substrings in merchant and memo.
+            Search matches a <strong>substring</strong> in merchant + memo, or the <strong>FTS5</strong> index when
+            present (multi-word queries use token <strong>AND</strong>). Results are sorted by <strong>date</strong>{" "}
+            (newest first). Pagination: <code>limit</code>/<code>offset</code>.
           </p>
         </div>
         {moreFiltersOpen ? (

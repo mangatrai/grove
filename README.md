@@ -36,6 +36,7 @@ ingestion pipeline.
    - If you use another app on those ports, stop it first or change ports in `.env`.
 5. Reset current mode DB only (safe by mode):
    - `npm run db:cleanup`
+   - **Full wipe + reseed** (drops the SQLite file for `MODE`, then migrations + seed): `npm run db:cleanup -- --yes && npm run db:seed`
 
 **Migrations:** new SQL files under `backend/db/migrations/` apply on `npm run setup` / `db:init`. If the account dropdown
 still omits **last-four** labels, your DB may predate a mask fix — run a fresh init for your mode or apply migrations so

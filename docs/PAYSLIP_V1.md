@@ -12,7 +12,7 @@
 | **Bank import** (`transaction_canonical`) | Cash reality: what hit which account (e.g. BoA net pay deposit). |
 | **Payslip module** | Employer-reported compensation: gross, taxes, deductions, period, YTD — **not** double-counting net pay unless we explicitly choose to link them. |
 
-> **Progress:** Design only (⬜) — implementation status: **`docs/CHECKPOINT.md`**.
+> **Progress:** **3.3a partial (🟡)** — IBM summary parse + **`payslip_snapshot`** storage + **`POST /payslips/upload`** + tests; **no** payslip list/dashboard UI (**3.3b**). Details: **`docs/CHECKPOINT.md`**.
 
 **User mental model:** Net pay appears in the bank feed; payslip **explains** salary vs commission vs withholdings for **dashboards and analytics** on a **different screen** than the generic ledger.
 

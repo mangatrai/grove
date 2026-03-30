@@ -7,6 +7,7 @@ import { healthRouter } from "./modules/health/health.routes.js";
 import { householdRouter } from "./modules/household/household.routes.js";
 import { importsRouter } from "./modules/imports/imports.routes.js";
 import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
+import { payslipRouter } from "./modules/payslip/payslip.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
 
@@ -38,6 +39,7 @@ export function buildApp() {
   app.use("/transactions", ledgerRouter);
   app.use("/resolution", resolutionRouter);
   app.use("/reports", reportsRouter);
+  app.use("/payslips", payslipRouter);
 
   return app;
 }

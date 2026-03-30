@@ -34,6 +34,36 @@ function accountById(accounts: FinancialAccount[], id: string): FinancialAccount
   return accounts.find((a) => a.id === id);
 }
 
+/** Parses JSON error bodies from `apiJson` failures (e.g. 409 INVALID_TRANSITION). */
+function messageFromApiError(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return "Request failed";
+  }
+  const text = err.message;
+  const jsonStart = text.indexOf("{");
+  if (jsonStart >= 0) {
+    try {
+      const j = JSON.parse(text.slice(jsonStart)) as {
+        code?: string;
+        message?: string;
+        from?: string;
+        to?: string;
+      };
+      if (j.code === "INVALID_TRANSITION") {
+        const detail =
+          j.from != null && j.to != null ? ` Current status “${j.from}” cannot move to “${j.to}”.` : "";
+        return `${j.message ?? "Invalid session status change"}${detail}`.trim();
+      }
+      if (typeof j.message === "string" && j.message.length > 0) {
+        return j.message;
+      }
+    } catch {
+      /* use raw message */
+    }
+  }
+  return text;
+}
+
 type LastImportSummary = {
   parsedFiles: number;
   parsedRows: number;
@@ -100,6 +130,7 @@ export function ImportWorkspacePage() {
   const [startingSession, setStartingSession] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [undoBusy, setUndoBusy] = useState(false);
+  const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
   const [sessionSummary, setSessionSummary] = useState<ImportSessionSummary | null>(null);
 
@@ -167,6 +198,33 @@ export function ImportWorkspacePage() {
       setUndoBusy(false);
     }
   }, [sessionId, sessionSummary?.totals.canonicalRows, load]);
+
+  const finalizeSession = useCallback(async () => {
+    if (!sessionId) {
+      return;
+    }
+    const ok = window.confirm(
+      "Finalize this import session? After finalizing, the session is locked: you cannot undo ledger posting for this import, and this cannot be reversed from the app."
+    );
+    if (!ok) {
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    setFinalizeBusy(true);
+    try {
+      await apiJson<{ sessionId: string; status: string }>(
+        `/imports/sessions/${sessionId}/status`,
+        { method: "PATCH", body: JSON.stringify({ status: "finalized" }) }
+      );
+      setMessage("Session finalized. This import session is now locked.");
+      await load();
+    } catch (err) {
+      setError(messageFromApiError(err));
+    } finally {
+      setFinalizeBusy(false);
+    }
+  }, [sessionId, load]);
 
   useEffect(() => {
     if (!showAdvanced || !token) {
@@ -830,34 +888,54 @@ export function ImportWorkspacePage() {
       </div>
 
       {sessionStatus === "review" ? (
-        <div className="card">
-          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Undo ledger posting</h2>
-          <p className="muted">
-            While the session is in <strong>review</strong> (before <strong>finalized</strong>), you can remove posted
-            transactions from this import from the ledger and run <strong>Run import</strong> again. Parsed rows in the
-            database stay. After you finalize the session via the API, the session is immutable and this action is not
-            available.
-          </p>
-          <div className="row">
-            <button
-              type="button"
-              className="secondary"
-              disabled={
-                undoBusy ||
-                pipelineBusy ||
-                (sessionSummary?.totals.canonicalRows ?? 0) === 0
-              }
-              title={
-                (sessionSummary?.totals.canonicalRows ?? 0) === 0
-                  ? "Nothing from this import is in the ledger yet"
-                  : undefined
-              }
-              onClick={() => void undoLedgerPost()}
-            >
-              {undoBusy ? "Working…" : "Remove posted transactions from this import"}
-            </button>
+        <>
+          <div className="card">
+            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Undo ledger posting</h2>
+            <p className="muted">
+              While the session is in <strong>review</strong> (before <strong>finalized</strong>), you can remove posted
+              transactions from this import from the ledger and run <strong>Run import</strong> again. Parsed rows in the
+              database stay. After you <strong>Finalize session</strong> below, the session is immutable and this action
+              is not available.
+            </p>
+            <div className="row">
+              <button
+                type="button"
+                className="secondary"
+                disabled={
+                  undoBusy ||
+                  finalizeBusy ||
+                  pipelineBusy ||
+                  (sessionSummary?.totals.canonicalRows ?? 0) === 0
+                }
+                title={
+                  (sessionSummary?.totals.canonicalRows ?? 0) === 0
+                    ? "Nothing from this import is in the ledger yet"
+                    : undefined
+                }
+                onClick={() => void undoLedgerPost()}
+              >
+                {undoBusy ? "Working…" : "Remove posted transactions from this import"}
+              </button>
+            </div>
           </div>
-        </div>
+
+          <div className="card import-finalize-session-card">
+            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Finalize session</h2>
+            <p className="muted">
+              When you&apos;re done reviewing, finalize to lock this session. Finalized sessions cannot be changed: you
+              cannot undo ledger posting for this import afterward.
+            </p>
+            <div className="row">
+              <button
+                type="button"
+                disabled={finalizeBusy || undoBusy || pipelineBusy}
+                onClick={() => void finalizeSession()}
+              >
+                {finalizeBusy ? "Working…" : "Finalize session"}
+              </button>
+            </div>
+          </div>
+        </>
       ) : null}
     </div>
   );

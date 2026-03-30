@@ -694,6 +694,11 @@ a {
   box-shadow: var(--shadow-card);
 }
 
+/* Import workspace — finalize session (CR-022) */
+.import-finalize-session-card {
+  border-left: 3px solid var(--color-accent-bright);
+}
+
 /* Import workspace — per-file outcomes (Epic 6) */
 .import-file-outcomes {
   display: grid;

@@ -4,7 +4,7 @@ Use this exact starter prompt in a new chat after switching projects:
 
 ```text
 Read these files first and continue from there:
-- docs/CHECKPOINT.md (implementation status + progress legend)
+- docs/CHECKPOINT.md (implementation status + **“Next session pickup — Needs review / bulk category”** if present)
 - docs/CHANGE_HISTORY.md (CR / UX / fixes + PRD deviations)
 - docs/PROJECT_CONTEXT.md
 - docs/PFM_COMPETITIVE_UX_REFERENCE.md (optional — external PFM patterns vs our scope, **D-018**)
@@ -14,7 +14,7 @@ Read these files first and continue from there:
 - docs/MVP_BACKLOG.md
 
 Then do the following in order:
-1) Summarize the current state in 8-12 bullets. Include: migrations **`0008`**–**`0010`**; **`/categories`** + **`/categories/rules`**; DB **`category_rule`** + **`classification_meta`**; **`/transactions`** command center: **All \| Needs review**, **`GET /transactions?needsReview=true`**, **`GET /transactions/:id/open-review`**, bulk + per-item **`/resolution/*`**; **`/resolution`** has **no dedicated page** — client **redirect** to **`/transactions?needsReview=true`** (**CR-018** / **DOC-005**); **import:** **`GET /imports/sessions/:id/summary`** per-file **`nearDuplicatesFlagged`**, **`openItemsNeedingReview`**, **`notPostedExactDuplicateOrSkipped`** + Import workspace **Outcomes by file** (ledger / Needs review CTAs) (**CR-019**); **transfer matcher** + **`TRANSFER_*`** env; **cash-summary** + **Home** scope + savings target; **`/settings`** (Household wired). Open work: **Epic 6.2–6.3** and richer inbox if desired, **5.2** matcher coverage, **7** polish, ranked **FTS** (ledger search is substring today); near-duplicate visibility on Needs review if still a gap. **D-014** closed — **DOC-008** (two-tier categories IA).
+1) Summarize the current state in 8-12 bullets (include **CHECKPOINT** “Next session pickup” if any). Cover: migrations through **`0014`** where applicable; **`/transactions`** search (**FIX-005** hybrid substring + FTS); **Needs review** — **`POST /resolution/bulk-apply-category`** expects **`resolution_item`** ids with **`type === unknown_category`** only; **`needsReview`** predicate can include **categorized** rows with **transfer/duplicate/reconciliation** items; **import** / **payslip** / **D-014** as in **CHECKPOINT**.
 2) List any open product/architecture questions that block implementation.
 3) Start implementation from **`docs/CHECKPOINT.md`** “Sensible next steps” (not necessarily Epic 1 unless greenfield).
 4) Keep changes minimal, tested, and aligned with strict dedupe + transfer correctness.

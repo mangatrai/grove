@@ -67,7 +67,8 @@ Multipart form field: `files` (one or more files).
 
 **200:** `{ "sessionId", "status" }`  
 **404:** Not found / wrong household.  
-**409:** `INVALID_TRANSITION` with `from` / `to` in body.
+**409:** `INVALID_TRANSITION` with `from` / `to` in body.  
+**UI:** Import workspace (**CR-022**) exposes **Finalize session** when the session is in **`review`**, sending **`{ "status": "finalized" }`**.
 
 ---
 

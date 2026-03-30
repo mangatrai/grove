@@ -52,7 +52,7 @@ export interface LedgerListFilters {
   dateFrom?: string;
   dateTo?: string;
   accountId?: string;
-  /** Substring match on merchant + memo (case-insensitive). Not full-text ranked. */
+  /** Full-text search on merchant + memo via FTS5 (`ledger_search_fts`), BM25-ranked when non-empty. */
   search?: string;
   amountMin?: number;
   amountMax?: number;
@@ -167,6 +167,23 @@ function buildReviewReasons(
   return [...set];
 }
 
+/** FTS5 MATCH: whitespace tokens, escape `"` as `""`, AND across tokens. */
+function buildFtsMatchQuery(raw: string): string {
+  const tokens = raw
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+  if (tokens.length === 0) {
+    return '""';
+  }
+  return tokens
+    .map((t) => {
+      const escaped = t.replace(/"/g, '""');
+      return `"${escaped}"`;
+    })
+    .join(" AND ");
+}
+
 function ledgerFilterClause(householdId: string, filters: LedgerListFilters | undefined): {
   sql: string;
   params: unknown[];
@@ -205,11 +222,6 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
     parts.push("tc.account_id = ?");
     params.push(filters.accountId);
   }
-  if (filters.search !== undefined && filters.search.trim() !== "") {
-    const needle = filters.search.trim().toLowerCase();
-    parts.push(`instr(lower(ifnull(tc.merchant, '') || ' ' || ifnull(tc.memo, '')), ?) > 0`);
-    params.push(needle);
-  }
   if (filters.amountMin !== undefined && Number.isFinite(filters.amountMin)) {
     parts.push("CAST(tc.amount AS REAL) >= ?");
     params.push(filters.amountMin);
@@ -235,6 +247,14 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
         )
     )`);
     params.push(...filters.resolutionTypes);
+  }
+  if (filters.search !== undefined && filters.search.trim() !== "") {
+    const needle = filters.search.trim().toLowerCase();
+    const ftsMatch = buildFtsMatchQuery(filters.search.trim());
+    parts.push(
+      `(instr(lower(coalesce(tc.merchant, '') || ' ' || coalesce(tc.memo, '')), ?) > 0 OR EXISTS (SELECT 1 FROM ledger_search_fts WHERE ledger_search_fts.rowid = tc.rowid AND ledger_search_fts MATCH ?))`
+    );
+    params.push(needle, ftsMatch);
   }
   if (parts.length === 0) {
     return { sql: "", params: [] };
@@ -322,9 +342,11 @@ export function listCanonicalTransactions(
   const xf = ledgerFilterClause(householdId, filters);
   const includeReview = Boolean(filters?.needsReviewOnly);
   const sel = txSelectSql(includeReview);
+  const orderBy = `ORDER BY tc.txn_date DESC, tc.created_at DESC`;
+  const countParams = [householdId, ...xf.params];
   const totalRow = db
     .prepare(`SELECT COUNT(*) AS cnt FROM transaction_canonical tc WHERE tc.household_id = ?${xf.sql}`)
-    .get(householdId, ...xf.params) as { cnt: number };
+    .get(...countParams) as { cnt: number };
   const total = Number(totalRow.cnt);
 
   const rows = db
@@ -334,10 +356,10 @@ export function listCanonicalTransactions(
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
        LEFT JOIN category c ON c.id = tc.category_id
        WHERE tc.household_id = ?${xf.sql}
-       ORDER BY tc.txn_date DESC, tc.created_at DESC
+       ${orderBy}
        LIMIT ? OFFSET ?`
     )
-    .all(householdId, ...xf.params, limit, offset) as Array<{
+    .all(...countParams, limit, offset) as Array<{
     id: string;
     txn_date: string;
     amount: number;
@@ -382,6 +404,8 @@ export function listCanonicalTransactionsForImportSession(
   const xf = ledgerFilterClause(householdId, filters);
   const includeReview = Boolean(filters?.needsReviewOnly);
   const sel = txSelectSql(includeReview);
+  const orderBy = `ORDER BY tc.txn_date DESC, tc.created_at DESC`;
+  const countParams = [sessionId, householdId, ...xf.params];
 
   const totalRow = db
     .prepare(
@@ -391,7 +415,7 @@ export function listCanonicalTransactionsForImportSession(
        INNER JOIN import_file f ON f.id = tr.file_id
        WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}`
     )
-    .get(sessionId, householdId, ...xf.params) as { cnt: number };
+    .get(...countParams) as { cnt: number };
   const total = Number(totalRow.cnt);
 
   const rows = db
@@ -403,10 +427,10 @@ export function listCanonicalTransactionsForImportSession(
        INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
        INNER JOIN import_file f ON f.id = tr.file_id
        WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}
-       ORDER BY tc.txn_date DESC, tc.created_at DESC
+       ${orderBy}
        LIMIT ? OFFSET ?`
     )
-    .all(sessionId, householdId, ...xf.params, limit, offset) as Array<{
+    .all(...countParams, limit, offset) as Array<{
     id: string;
     txn_date: string;
     amount: number;

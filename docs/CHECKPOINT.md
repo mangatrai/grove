@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-29 — **CR-021** (Epic **6.3** undo import + Categories **D-014** copy), **DOC-008** (**D-014**), **CR-018**–**CR-020**, **CR-014**–**CR-016**, **FIX-004**
+**Last updated:** 2026-03-30 — **Next session pickup** (Needs review bulk category + categorized rows); **FIX-005** (ledger search); **CR-024**–**CR-023**, **CR-022**, **CR-021**, **DOC-008**
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -44,11 +44,12 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** + **`/categories/rules`**. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **IA:** **D-014** — keep **Transactions** as primary categorization surface; **Categories** + **Rules** remain secondary (**DOC-008**). **Gaps:** hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
 | **Transfer matcher (Epic 5.2)** | 🟡 | Matcher in **`canonical-ingest.service.ts`**: scoring + **CR-016** payment/loan/card-network tokens + asymmetric card-payoff heuristic; **`transfer_ambiguity`**, **`low_pair_score`**. **Tunable via `.env`:** `TRANSFER_*`. **Still not:** exhaustive institution-specific coverage |
 | **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Guests:** **`/`** = landing + **inline sign-in** (**CR-017**); **`/login`** → **`/`**. **Home (signed-in):** **Scope** bar (account filter). **`/settings`** — tabs (Household wired; other stubs). Sidebar width: **`localStorage`** `hf_sidebar_collapsed` |
-| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**) |
+| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**); **Finalize session** UI (**CR-022**) → **`PATCH .../status`** **`finalized`** |
+| **Payslip (Epic 3.3a)** | 🟡 | **`POST /payslips/upload`** — IBM-style summary parser (`ibm_pay_contributions_pdf`), **`payslip_snapshot`** table, dedupe by **`(household_id, file_checksum)`**. **Not** merged into **`transaction_canonical`**. **No** payslip UI yet (**3.3b**) — see **`docs/PAYSLIP_V1.md`** |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
-| **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** + **CR-018**: **`/transactions`** **Needs review** — type filter, **`openReviewItems`** (incl. **`status`**), **`importSessionId`**, bulk + **expand row** for **`GET /transactions/:id/open-review`** (raw preview, file/session, classification pills, per-item **In review / Resolve / Reopen** via **`PATCH /resolution/:id`**). **`/resolution`** → redirect to **`/transactions?needsReview=true`**; **Review queue** nav item removed; Home + Import CTAs point at Needs review. **Intentional gaps:** near-duplicate rows that never received a canonical **`source_ref`** may still be absent from Needs review (**DOC-005** follow-up); duplicate/transfer **specialist** flows vs queue parity. **Trash** deferred. See **`docs/FINANCE_APP_PRD.md` §13**. |
+| **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** + **CR-018**: **`/transactions`** **Needs review** — type filter, **`openReviewItems`** (incl. **`status`**), **`importSessionId`**, bulk + **expand row** for **`GET /transactions/:id/open-review`** (raw preview, file/session, classification pills, per-item **In review / Resolve / Reopen** via **`PATCH /resolution/:id`**). **`GET /transactions`** — **`limit`/`offset`** paging; **`search`** → **FTS5** + **BM25** ranking (**`0011`**, **`0013`** triggers). **`/resolution`** → redirect to **`/transactions?needsReview=true`**; **Review queue** nav item removed. **Intentional gaps:** near-duplicate rows that never received a canonical **`source_ref`** may still be absent from Needs review (**DOC-005** follow-up); duplicate/transfer **specialist** flows vs queue parity. **Trash** deferred. See **`docs/FINANCE_APP_PRD.md` §13**. |
 
 ---
 
@@ -68,19 +69,36 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | Cash summary (home) | `docs/API_CASH_SUMMARY.md` |
 | Household settings (savings target) | `docs/API_HOUSEHOLD.md` |
 | Staging purge | `docs/IMPORT_STAGING_PURGE.md` |
-| Payslip (planned v1) | `docs/PAYSLIP_V1.md` |
+| Payslip (3.3a API + design) | **`docs/PAYSLIP_V1.md`** · **`POST /payslips/upload`** (**CR-023**) |
+
+---
+
+## Next session pickup — Needs review / bulk category (March 2026)
+
+**User-reported (stop point):**
+
+1. **Bulk “Apply category”** shows *Select rows with an open “Unknown category” review item.*  
+   - **Cause:** **`POST /resolution/bulk-apply-category`** takes **`resolution_item` ids** (not `transaction_canonical` ids). The UI only sends ids from **`openReviewItems`** where **`type ===`** **`unknown_category`** (`collectUnknownCategoryResolutionIds` in **`frontend/src/pages/TransactionsPage.tsx`**). If the selected rows have **no** open **`unknown_category`** item (e.g. only **transfer** / **duplicate** items, or nothing in **`openReviewItems`**), the list is empty → that message.  
+   - **Not necessarily a backend bug** — often **selection** + **type filter** mismatch (e.g. **Select all** on a page with no unknown-category rows).
+
+2. **Categorized transactions still on Needs review**  
+   - **By design (API):** **`needsReview=true`** includes rows with **any** open/in-review **`resolution_item`** (**`unknown_category`**, **`transfer_ambiguity`**, **`duplicate_ambiguity`**, **`reconciliation_mismatch`**), **or** uncategorized, **or** non-`posted` status — see **`NEEDS_REVIEW_PREDICATE`** in **`backend/src/modules/ledger/ledger.service.ts`** and **`docs/API_LEDGER.md`**. A row **can** have **`category_id`** set and still need review (e.g. **transfer** or **duplicate** ambiguity).  
+   - **Product follow-up:** clearer **Why** copy, optional **default filter** to **`unknown_category`** for the bulk-category workflow, or **disable** bulk category when selection has no unknown-category items.
+
+**Suggested implementation next:** UX guardrails + copy on **`TransactionsPage`**; optional **`resolutionType=unknown_category`** deep-link from bulk strip; verify **`openReviewItems`** payload when **`needsReview=true`** matches expectations.
 
 ---
 
 ## Sensible next steps (prioritized themes)
 
-1. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
-2. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category on **Needs review** is **shipped** — **`/resolution/bulk-apply-category`**).
-3. **Epic 7 continuation:** ledger drill paging/context, category-level period comparisons (optional), **safe-to-spend** + savings targets.
-4. **Epic 11:** **11.5** — **CR-018** closed the main **DOC-005** slice (single review surface + redirect). Remaining **11.1–11.4** gaps + duplicate/transfer depth per **`MVP_BACKLOG.md`**.
-5. **Epic 6:** file-level outcomes (**CR-019**); **6.3** undo (**CR-021**); **6.2** bulk edits if still needed.  
-6. **Product cleanup:** **D-014** decided — **DOC-008** / **`docs/DECISIONS_LOG.md`** (two-tier IA; no merge for MVP).  
-7. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work.
+1. **Needs review UX (above):** bulk category selection semantics, **Why** / filters clarity for **categorized** rows.
+2. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
+3. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category API is **`/resolution/bulk-apply-category`** — see pickup note for **UI** gaps).
+4. **Epic 7 continuation:** category-level period comparisons (optional), **safe-to-spend** + savings targets; ledger **FTS** + paging shipped (**CR-024**).
+5. **Epic 11:** **11.5** — **CR-018** closed the main **DOC-005** slice (single review surface + redirect). Remaining **11.1–11.4** gaps + duplicate/transfer depth per **`MVP_BACKLOG.md`**.
+6. **Epic 6:** file-level outcomes (**CR-019**); **6.3** undo (**CR-021**); **6.2** bulk edits if still needed.  
+7. **Product cleanup:** **D-014** decided — **DOC-008** / **`docs/DECISIONS_LOG.md`** (two-tier IA; no merge for MVP).  
+8. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work.
 
 ---
 
