@@ -137,3 +137,22 @@ export function insertPayslipSnapshot(
   >;
   return { ok: true, snapshot: rowToSnapshot(row) };
 }
+
+export function listPayslipSnapshots(
+  householdId: string,
+  opts: { limit: number; offset: number }
+): { total: number; items: PayslipSnapshotRow[] } {
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS c FROM payslip_snapshot WHERE household_id = ?`)
+    .get(householdId) as { c: number };
+  const total = Number(totalRow.c) || 0;
+  const rows = db
+    .prepare(
+      `SELECT * FROM payslip_snapshot
+       WHERE household_id = ?
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .all(householdId, opts.limit, opts.offset) as Record<string, unknown>[];
+  return { total, items: rows.map((r) => rowToSnapshot(r)) };
+}

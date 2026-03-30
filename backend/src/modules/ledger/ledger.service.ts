@@ -164,6 +164,9 @@ function buildReviewReasons(
       set.add("Open review: reconciliation");
     }
   }
+  if (categoryId !== null && [...types].some((t) => t !== "unknown_category")) {
+    set.add("Category already set — still here for other open review items");
+  }
   return [...set];
 }
 

@@ -18,6 +18,7 @@ export default defineConfig({
       "/auth": api,
       "/categories": api,
       "/imports": api,
+      "/payslips": api,
       "/transactions": api,
       "/resolution": api,
       "/reports": api,

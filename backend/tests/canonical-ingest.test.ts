@@ -172,4 +172,9 @@ describe("transfer pair score (Epic 5.2)", () => {
     expect(transferPairScore("APPLE CASH SENT", "APPLE CASH", d, d, sameDayDiff)).toBe(71);
     expect(transferPairScore("GOOGLE PAY TRANSFER", "GOOGLE PAY", d, d, sameDayDiff)).toBe(71);
   });
+
+  it("scores both-leg bill pay / billpay phrasing at 77", () => {
+    expect(transferPairScore("ONLINE BILL PAY TO UTIL", "BILLPAY FROM CHK", d, d, sameDayDiff)).toBe(77);
+    expect(transferPairScore("BILL PAYMENT SENT", "ONLINE BILL PAY RCVD", d, d, sameDayDiff)).toBe(77);
+  });
 });

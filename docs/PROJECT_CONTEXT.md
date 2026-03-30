@@ -97,8 +97,8 @@ Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **pr
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
-1. **`docs/CHECKPOINT.md`** — **“Next session pickup — Needs review / bulk category”** (March 2026): bulk **Apply category** only applies to **`unknown_category`** **`resolution_item`** ids; **Needs review** list can include **categorized** rows with other open items (transfer/duplicate/reconciliation). Start there for UX + copy + optional filters.
-2. **`docs/CHECKPOINT.md`** “Sensible next steps” (Epic **5.2**, **7**, **11** residual).
+1. **`docs/CHECKPOINT.md`** — **CR-025**–**CR-027** (Needs review UX, payslip list UI, bill-pay transfer score); **3.3b** follow-on: payslip detail drill-down, richer dashboards if desired.
+2. **`docs/CHECKPOINT.md`** “Sensible next steps” (Epic **5.2** continuation, **7**, **11** residual).
 3. **Story 11.5:** **core** port shipped (**CR-018**); near-duplicate edge cases, specialist duplicate/transfer UX.
 4. **Epic 5.2** / **6.2** / **7** per backlog.
 5. **D-014** closed (**DOC-008**): **Transactions** + **`/categories`** / **rules** split.

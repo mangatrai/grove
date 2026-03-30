@@ -359,6 +359,24 @@ export function TransactionsPage() {
   }, [addOpen]);
 
   const selectedCount = selectedTxnIds.size;
+
+  const unknownCategoryResolutionIdsInSelection = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+    const out: string[] = [];
+    for (const t of data.transactions) {
+      if (!selectedTxnIds.has(t.id)) {
+        continue;
+      }
+      for (const item of t.openReviewItems ?? []) {
+        if (item.type === "unknown_category") {
+          out.push(item.id);
+        }
+      }
+    }
+    return [...new Set(out)];
+  }, [data, selectedTxnIds]);
   const allVisibleSelected = useMemo(
     () =>
       Boolean(data?.transactions.length) &&
@@ -426,7 +444,9 @@ export function TransactionsPage() {
   async function bulkApplyCategory() {
     const ids = collectUnknownCategoryResolutionIds();
     if (ids.length === 0) {
-      setError("Select rows with an open “Unknown category” review item.");
+      setError(
+        "No open “Unknown category” items in your selection. Rows can stay on Needs review for transfer, duplicate, or other flags even when a category is set — filter Review types to “Unknown category” or pick different rows."
+      );
       return;
     }
     if (!bulkCategoryId) {
@@ -757,8 +777,8 @@ export function TransactionsPage() {
         ) : (
           <p className="muted">
             Posted rows from your household after import → parse → canonicalize. Categories can be set automatically
-            (rules) or here. Use <strong>Needs review</strong> for uncategorized rows, open resolution items, or
-            non-posted ledger status.
+            (rules) or here. <strong>Needs review</strong> includes uncategorized rows, non-posted status, and any
+            open review item — including when a category is already set but transfer or duplicate review is still open.
           </p>
         )}
         {fromDashboard && returnTo ? (
@@ -813,7 +833,15 @@ export function TransactionsPage() {
             </label>
             <p className="muted transactions-toolbar__review-hint">
               Cmd or Ctrl + click to select multiple types. With none selected, all needs-review rows are shown. Same
-              open-item types as the review queue.
+              open-item types as the review queue.{" "}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => setResolutionTypesInUrl(["unknown_category"])}
+              >
+                Show unknown category only
+              </button>{" "}
+              (helps bulk-assign categories).
             </p>
           </div>
         ) : null}
@@ -1027,6 +1055,18 @@ export function TransactionsPage() {
           <div className="transactions-bulk-bar row" role="status" aria-live="polite">
             <span className="muted">
               {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
+              {unknownCategoryResolutionIdsInSelection.length === 0 ? (
+                <>
+                  {" "}
+                  — none have an open “Unknown category” item (bulk category disabled).
+                </>
+              ) : (
+                <>
+                  {" "}
+                  — {unknownCategoryResolutionIdsInSelection.length} open “Unknown category” item
+                  {unknownCategoryResolutionIdsInSelection.length === 1 ? "" : "s"} for bulk apply.
+                </>
+              )}
             </span>
             <button
               type="button"
@@ -1047,9 +1087,15 @@ export function TransactionsPage() {
             >
               Reopen
             </button>
-            <label style={{ marginBottom: 0, marginLeft: "0.25rem" }}>
+            <label
+              style={{
+                marginBottom: 0,
+                marginLeft: "0.25rem",
+                opacity: unknownCategoryResolutionIdsInSelection.length === 0 ? 0.55 : 1
+              }}
+            >
               <span className="muted" style={{ marginRight: "0.35rem" }}>
-                Category (unknown items)
+                Category (unknown-category items)
               </span>
               <select
                 value={bulkCategoryId}
@@ -1086,8 +1132,13 @@ export function TransactionsPage() {
             </label>
             <button
               type="button"
-              disabled={savingBulk || !bulkCategoryId}
+              disabled={savingBulk || !bulkCategoryId || unknownCategoryResolutionIdsInSelection.length === 0}
               onClick={() => void bulkApplyCategory()}
+              title={
+                unknownCategoryResolutionIdsInSelection.length === 0
+                  ? "Select rows that still have an open Unknown category review item, or filter to Unknown category."
+                  : undefined
+              }
             >
               Apply category
             </button>

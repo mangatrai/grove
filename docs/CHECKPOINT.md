@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-30 — **Next session pickup** (Needs review bulk category + categorized rows); **FIX-005** (ledger search); **CR-024**–**CR-023**, **CR-022**, **CR-021**, **DOC-008**
+**Last updated:** 2026-03-27 — **CR-025**–**CR-027** (Needs review UX, payslip list UI, bill-pay transfer score); **FIX-005** (ledger search); **CR-024**–**CR-023**, **CR-022**, **CR-021**, **DOC-008**
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -45,7 +45,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Transfer matcher (Epic 5.2)** | 🟡 | Matcher in **`canonical-ingest.service.ts`**: scoring + **CR-016** payment/loan/card-network tokens + asymmetric card-payoff heuristic; **`transfer_ambiguity`**, **`low_pair_score`**. **Tunable via `.env`:** `TRANSFER_*`. **Still not:** exhaustive institution-specific coverage |
 | **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Guests:** **`/`** = landing + **inline sign-in** (**CR-017**); **`/login`** → **`/`**. **Home (signed-in):** **Scope** bar (account filter). **`/settings`** — tabs (Household wired; other stubs). Sidebar width: **`localStorage`** `hf_sidebar_collapsed` |
 | **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**); **Finalize session** UI (**CR-022**) → **`PATCH .../status`** **`finalized`** |
-| **Payslip (Epic 3.3a)** | 🟡 | **`POST /payslips/upload`** — IBM-style summary parser (`ibm_pay_contributions_pdf`), **`payslip_snapshot`** table, dedupe by **`(household_id, file_checksum)`**. **Not** merged into **`transaction_canonical`**. **No** payslip UI yet (**3.3b**) — see **`docs/PAYSLIP_V1.md`** |
+| **Payslip (Epic 3.3a / 3.3b starter)** | 🟡 | **`POST /payslips/upload`** — IBM-style summary parser (`ibm_pay_contributions_pdf`), **`payslip_snapshot`** table, dedupe by **`(household_id, file_checksum)`**. **`GET /payslips`** — list + paging. **UI:** **`/payslips`** — upload + table; sidebar **Payslips**. **Not** merged into **`transaction_canonical`**. **Still not:** line-item grids, dashboards — see **`docs/PAYSLIP_V1.md`** |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Vitest + integration paths (canonicalize, cash-summary, category rules, transfer exclusion) — **`cd backend && npm test`** should pass after **`0008`** Income parent fix |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
@@ -73,25 +73,17 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 ---
 
-## Next session pickup — Needs review / bulk category (March 2026)
+## Resolved / superseded — Needs review bulk category (March 2026)
 
-**User-reported (stop point):**
+**Original issue:** bulk **Apply category** looked broken when selection had no **`unknown_category`** items; categorized rows on Needs review were confusing.
 
-1. **Bulk “Apply category”** shows *Select rows with an open “Unknown category” review item.*  
-   - **Cause:** **`POST /resolution/bulk-apply-category`** takes **`resolution_item` ids** (not `transaction_canonical` ids). The UI only sends ids from **`openReviewItems`** where **`type ===`** **`unknown_category`** (`collectUnknownCategoryResolutionIds` in **`frontend/src/pages/TransactionsPage.tsx`**). If the selected rows have **no** open **`unknown_category`** item (e.g. only **transfer** / **duplicate** items, or nothing in **`openReviewItems`**), the list is empty → that message.  
-   - **Not necessarily a backend bug** — often **selection** + **type filter** mismatch (e.g. **Select all** on a page with no unknown-category rows).
-
-2. **Categorized transactions still on Needs review**  
-   - **By design (API):** **`needsReview=true`** includes rows with **any** open/in-review **`resolution_item`** (**`unknown_category`**, **`transfer_ambiguity`**, **`duplicate_ambiguity`**, **`reconciliation_mismatch`**), **or** uncategorized, **or** non-`posted` status — see **`NEEDS_REVIEW_PREDICATE`** in **`backend/src/modules/ledger/ledger.service.ts`** and **`docs/API_LEDGER.md`**. A row **can** have **`category_id`** set and still need review (e.g. **transfer** or **duplicate** ambiguity).  
-   - **Product follow-up:** clearer **Why** copy, optional **default filter** to **`unknown_category`** for the bulk-category workflow, or **disable** bulk category when selection has no unknown-category items.
-
-**Suggested implementation next:** UX guardrails + copy on **`TransactionsPage`**; optional **`resolutionType=unknown_category`** deep-link from bulk strip; verify **`openReviewItems`** payload when **`needsReview=true`** matches expectations.
+**Shipped (CR-025):** selection summary + disabled **Apply category** when no unknown-category items; clearer error copy; toolbar **Show unknown category only** sets **`resolutionType=unknown_category`**; intro + **`reviewReasons`** explain “category set but other flags open.”
 
 ---
 
 ## Sensible next steps (prioritized themes)
 
-1. **Needs review UX (above):** bulk category selection semantics, **Why** / filters clarity for **categorized** rows.
+1. ~~**Needs review UX:**~~ **CR-025** shipped — bulk category guardrails + **Why** copy; further polish optional.
 2. **Epic 5.2 continuation:** broaden transfer matcher coverage (card payments, loan patterns) + tests.
 3. **Epic 5.1 continuation:** polish confidence/explainability display (bulk category API is **`/resolution/bulk-apply-category`** — see pickup note for **UI** gaps).
 4. **Epic 7 continuation:** category-level period comparisons (optional), **safe-to-spend** + savings targets; ledger **FTS** + paging shipped (**CR-024**).

@@ -201,6 +201,9 @@ export function transferPairScore(
   if (both(/\b(ONLINE\s+)?TRANSFER\b|\bXFER\b|ACCT\s*(TO\s*)?TRANSFER|WEB\s+(PAY|PMT)\b|TEL\s+TRANSFER/i)) {
     return 80;
   }
+  if (both(/\b(BILL\s*PAY|BILLPAY|ONLINE\s+BILL\s+PAY|BILL\s+PAYMENT)\b/i)) {
+    return 77;
+  }
   if (both(/\bZELLE\b/)) {
     return 75;
   }
