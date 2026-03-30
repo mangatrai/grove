@@ -694,6 +694,26 @@ a {
   box-shadow: var(--shadow-card);
 }
 
+/* Payslip detail — definition lists */
+.payslip-detail-dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.payslip-detail-dl dt {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+.payslip-detail-dl dd {
+  margin: 0;
+  min-width: 0;
+}
+
 /* Import workspace — finalize session (CR-022) */
 .import-finalize-session-card {
   border-left: 3px solid var(--color-accent-bright);

@@ -6,13 +6,22 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
 import { parseIbmPayslipPdf } from "./profiles/ibm-payslip-pdf.js";
-import { insertPayslipSnapshot, listPayslipSnapshots, sha256Hex } from "./payslip.service.js";
+import {
+  getPayslipSnapshotForHousehold,
+  insertPayslipSnapshot,
+  listPayslipSnapshots,
+  sha256Hex
+} from "./payslip.service.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0)
+});
+
+const idParamSchema = z.object({
+  id: z.string().uuid()
 });
 
 export const payslipRouter = Router();
@@ -30,6 +39,21 @@ payslipRouter.get("/", (req: AuthenticatedRequest, res) => {
     offset: parsed.data.offset
   });
   res.json({ total, limit: parsed.data.limit, offset: parsed.data.offset, items });
+});
+
+payslipRouter.get("/:id", (req: AuthenticatedRequest, res) => {
+  const parsed = idParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payslip id", issues: parsed.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const snapshot = getPayslipSnapshotForHousehold(householdId, parsed.data.id);
+  if (!snapshot) {
+    res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.json(snapshot);
 });
 
 payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRequest, res) => {

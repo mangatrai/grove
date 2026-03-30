@@ -1,7 +1,7 @@
 # Payslip module — product intent and v1 scope
 
 **Epic alignment:** **Epic 3 — Story 3.3** (payslip / paystub), implemented in **phases**.  
-**Current priority (March–April 2026):** payslip **summary parse + list UI** shipped; **next** is **unified Import** (payslip as a document type + salary/income account binding) so **`/payslips`** stays primarily a **read** surface — see **`docs/CHECKPOINT.md`** “Sensible next steps.”
+**Current priority (March–April 2026):** payslip **summary parse + list + detail** (**`GET /payslips`**, **`GET /payslips/:id`**, **`/payslips/:payslipId`**) shipped (**CR-031**); **next** is **unified Import** depth (salary/income account hints, optional PDF sniff) so **`/payslips`** stays primarily a **read** surface — see **`docs/CHECKPOINT.md`** “Sensible next steps.”
 
 ---
 
@@ -12,7 +12,7 @@
 | **Bank import** (`transaction_canonical`) | Cash reality: what hit which account (e.g. BoA net pay deposit). |
 | **Payslip module** | Employer-reported compensation: gross, taxes, deductions, period, YTD — **not** double-counting net pay unless we explicitly choose to link them. |
 
-> **Progress:** **3.3a + 3.3b starter (🟡)** — IBM **SuccessFactors** multiline text (**FIX-007**), **`422`** reason codes (**FIX-006**), **`payslip_snapshot`** + **`POST /payslips/upload`** + **`GET /payslips`** + **`/payslips`** UI (upload success path **UX-008**, dev proxy **FIX-008**). **Unified Import (🟡):** **`ibm_pay_contributions_pdf`** in import sessions — **`payslip_snapshot.import_file_id`** (**migration `0015`**), parse → snapshot (no **`transaction_raw`**), canonicalize completes payslip-only sessions (**CR-028**, **DOC-011**). **Still not:** line-item grids, payslip dashboards, auto profile beyond filename heuristics. Details: **`docs/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`**.
+> **Progress:** **3.3a + 3.3b starter (🟡)** — IBM **SuccessFactors** multiline text (**FIX-007**), **`422`** reason codes (**FIX-006**), **`payslip_snapshot`** + **`POST /payslips/upload`** + **`GET /payslips`** + **`GET /payslips/:id`** + **`/payslips`** / **`/payslips/:payslipId`** (upload success path **UX-008**, detail **CR-031**, dev proxy **FIX-008**). **Unified Import (🟡):** **`ibm_pay_contributions_pdf`** in import sessions — **`payslip_snapshot.import_file_id`** (**migration `0015`**), parse → snapshot (no **`transaction_raw`**), canonicalize completes payslip-only sessions (**CR-028**, **DOC-011**). **Still not:** line-item grids, payslip dashboards, auto profile beyond filename heuristics. Details: **`docs/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`**.
 
 **User mental model:** Net pay appears in the bank feed; payslip **explains** salary vs commission vs withholdings for **dashboards and analytics** on a **different screen** than the generic ledger.
 

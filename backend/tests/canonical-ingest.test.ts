@@ -177,4 +177,21 @@ describe("transfer pair score (Epic 5.2)", () => {
     expect(transferPairScore("ONLINE BILL PAY TO UTIL", "BILLPAY FROM CHK", d, d, sameDayDiff)).toBe(77);
     expect(transferPairScore("BILL PAYMENT SENT", "ONLINE BILL PAY RCVD", d, d, sameDayDiff)).toBe(77);
   });
+
+  it("scores card payment memos at 88 when debit uses 'CARD PAYMENT' without PAYMENT TO", () => {
+    expect(transferPairScore("CARD PAYMENT VISA", "THANK YOU", d, d, sameDayDiff)).toBe(88);
+    expect(transferPairScore("CARD PAYMENT VISA", "CREDITED", d, d, sameDayDiff)).toBe(88);
+  });
+
+  it("scores loan payment memos at 92 when debit uses 'HELOC PAYMENT' (no PAYMENT TO)", () => {
+    expect(
+      transferPairScore(
+        "HELOC PAYMENT",
+        "PAYMENT APPLIED - THANK YOU HELOC",
+        d,
+        d,
+        sameDayDiff
+      )
+    ).toBe(92);
+  });
 });

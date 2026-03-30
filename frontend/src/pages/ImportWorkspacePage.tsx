@@ -665,7 +665,10 @@ export function ImportWorkspacePage() {
         <p className="muted">
           For each file, pick the account it belongs to. The menu shows the institution, account type, and last four
           digits when available so you can tell accounts apart. We detect the file format automatically — you
-          don&apos;t choose parsers unless you use advanced mode.
+          don&apos;t choose parsers unless you use advanced mode.{" "}
+          <strong>Employer payslip PDFs:</strong> prefer the <strong>Employer payslip (IBM) — placeholder</strong> account
+          when present — it binds imports to the payslip parser even for generic file names. Otherwise pick any account
+          where your salary deposits; payslip summaries are <strong>not</strong> posted as bank transactions.
         </p>
         <p
           className="muted"
@@ -679,8 +682,14 @@ export function ImportWorkspacePage() {
           <strong>Employer payslip (IBM):</strong> For a pay-stub PDF (e.g. SuccessFactors / Pay and Contributions),
           pick <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if we don&apos;t auto-detect it, or use a filename like
           “payslip” or “paystub” for a suggestion. Parse may show <strong>0</strong> ledger lines — that&apos;s
-          expected. Run <strong>canonicalize</strong> anyway to finish the session and clear staging; summaries appear
-          under <Link to="/payslips">Payslips</Link>, not in the transaction ledger.
+          expected. After every file has an account and format, go to the{" "}
+          <a href="#import-run-import">
+            <strong>Run import</strong>
+          </a>{" "}
+          section below and press <strong>Run import</strong> — that runs parse <em>and</em> finish (canonicalize) in one
+          step so staging clears. Summaries appear under <Link to="/payslips">Payslips</Link>, not in the transaction
+          ledger. (Advanced: separate <strong>Parse session</strong> / <strong>Canonicalize</strong> only lives under{" "}
+          <em>Separate steps</em> in that section.)
         </p>
         {files.length === 0 ? (
           <p className="muted">No files yet.</p>
@@ -876,11 +885,12 @@ export function ImportWorkspacePage() {
         </div>
       ) : null}
 
-      <div className="card">
+      <div className="card" id="import-run-import">
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Run import</h2>
         <p className="muted">
-          One step parses every file and then loads transactions into your ledger (dedupe included). Use separate
-          steps only if you need to debug.
+          One step parses every file and then loads transactions into your ledger (dedupe included). Employer payslip
+          PDFs follow the same button: you&apos;ll still see <strong>0</strong> new ledger lines, but this step finishes
+          the session and clears staging. Use separate steps only if you need to debug.
         </p>
         <div className="row">
           <button

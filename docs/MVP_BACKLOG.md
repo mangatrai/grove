@@ -232,11 +232,11 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - No circular references; depth policy enforced.
 
 ### Story 5.2 - Transfer matcher
-**Partial (2026-03-27):** **Matcher** in **`canonical-ingest.service.ts`** pairs transfer legs → **`transfer_group_id`** when score thresholds are met; else **`transfer_ambiguity`** (including **`low_pair_score`** when amount/date match but description is weak). Scoring uses merchant/memo patterns; **telemetry** in ambiguity `reason` JSON. **Operator tuning:** **`TRANSFER_*`** env vars in **`.env`** / **`backend/src/config/env.ts`** (defaults preserve conservative behavior). **`cash-summary`** excludes transfer-linked rows (**CR-004**, **CR-006**). **Not** full card/loan pattern coverage.
+**Priority: post-MVP (backlog).** A **conservative baseline** matcher ships today (**`canonical-ingest.service.ts`**, **`TRANSFER_*`**, **CR-016**, **CR-030**): pairs transfer legs → **`transfer_group_id`** when score thresholds are met; else **`transfer_ambiguity`** (including **`low_pair_score`**). Further **memo/institution coverage** and tuning are **deferred** until validation against **real bank exports** (avoid overfitting fixtures). **`cash-summary`** excludes transfer-linked rows (**CR-004**, **CR-006**).
 
 - Tasks:
   - Implement amount/date/account-graph matching logic. (L) 🟡 baseline
-  - Handle credit card payment and loan payment patterns. (L) ⬜
+  - Handle credit card payment and loan payment patterns. (L) ⬜ *deferred post-MVP*
   - Add scenario tests for no double expense counting. (M) 🟡 partial
 - Acceptance:
   - Credit-card purchase/payment cycle behaves correctly in reports.
@@ -297,12 +297,12 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **PRD §13 Phase D** and **Epic 11** Story **11.4** own the **Settings** route and **Household** tab plan. **Expected salary** and other “planning” fields are **not** API-backed yet; add stories when schema and endpoints exist. **Monthly savings target** ships today via **`PATCH /household/settings`** and may stay **duplicated** on **Home** (quick adjust) per §13.
 
 ### Story 7.2 - Category and trend reporting
-**Status: 🟡 Partial (2026-03-27).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Delivered:** click-through/drill-down into the ledger from “By category (period)” and dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Delivered:** **period comparisons** — **`GET /reports/cash-summary`** returns **`comparison.previousPeriod`** and (when applicable) **`comparison.yearOverYear`** with household KPI deltas; the home dashboard surfaces these as compact delta chips (see **`docs/API_CASH_SUMMARY.md`**). Comparison semantics: **month** → previous calendar month + same month last year; **YTD** → prior-year YTD; **rolling_30 / rolling_90** → immediately preceding same-length window. **Still not:** arbitrary **custom date range** (only **presets** + `month` / `asOf`), category-level prior-period breakdown in the UI (household KPI deltas only), and richer **hierarchical** presentation/labels in `byCategory` beyond **`categoryRollup`** (`leaf` \| `parent`).
+**Status: 🟡 Partial (2026-04-02).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Delivered:** click-through/drill-down into the ledger from “By category (period)” and dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Delivered:** **period comparisons** — **`GET /reports/cash-summary`** returns **`comparison.previousPeriod`** and (when applicable) **`comparison.yearOverYear`** with household KPI deltas; the home dashboard surfaces these as compact delta chips (see **`docs/API_CASH_SUMMARY.md`**). Comparison semantics: **month** → previous calendar month + same month last year; **YTD** → prior-year YTD; **rolling_30 / rolling_90** → immediately preceding same-length window; **custom** inclusive **`dateFrom` / `dateTo`** (**`CR-015`**, max **366** days) → same-length prior window. **Delivered:** **`byCategory[]`** prior-window totals and deltas (`previousInflows` / `previousOutflows` / `previousNet`, `delta*`) when **`categoryBreakdown=true`** (**`CR-029`**); dashboard “By category” table shows per-category deltas alongside household KPI chips. **Still not:** arbitrary ranges **beyond** the **366-day** cap (and other KPI / safe-to-spend polish noted in **`CHECKPOINT`**), and richer **hierarchical** presentation/labels in `byCategory` beyond **`categoryRollup`** (`leaf` \| `parent`) until **Story 5.3** lands.
 
 - Tasks:
   - Build spend-by-category chart with drill-down. (M) 🟡
-  - Prior period / YoY / prior-window comparisons for household KPIs. (M) 🟡 (API + dashboard)
-  - Add weekly/monthly/YTD/yearly/custom filters. (M) 🟡 (presets cover week/month/YTD/rolling; **no** free-form from/to)
+  - Prior period / YoY / prior-window comparisons for household KPIs. (M) 🟡 (API + dashboard; includes **`byCategory`** deltas — **`CR-029`**)
+  - Add weekly/monthly/YTD/yearly/custom filters. (M) 🟡 (presets + custom **`dateFrom`/`dateTo`** — **`CR-015`**; cap **366** days)
 - Acceptance:
   - User can compare periods and inspect underlying transactions.
 

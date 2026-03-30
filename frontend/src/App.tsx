@@ -7,6 +7,7 @@ import { CategoryRulesPage } from "./pages/CategoryRulesPage";
 import { HomeRoute } from "./pages/HomeRoute";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { PayslipDetailPage } from "./pages/PayslipDetailPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
@@ -20,6 +21,7 @@ export function App() {
           <Route path="/categories/rules" element={<CategoryRulesPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
+          <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />

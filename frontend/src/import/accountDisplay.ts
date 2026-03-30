@@ -18,6 +18,9 @@ export function lastFourFromMask(mask: string | null | undefined): string | null
 
 /** e.g. "Bank of America — savings ****2002" */
 export function formatAccountForSelect(a: AccountRow): string {
+  if (a.type === "payslip") {
+    return a.institution;
+  }
   const last4 = lastFourFromMask(a.account_mask);
   const suffix = last4 ? ` ****${last4}` : "";
   const typeLabel = a.type.replace(/_/g, " ");

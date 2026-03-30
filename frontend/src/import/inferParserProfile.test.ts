@@ -7,6 +7,7 @@ import {
 } from "./inferParserProfile";
 
 const boaChecking = { type: "checking", institution: "Bank of America" };
+const payslipPlaceholder = { type: "payslip", institution: "Employer payslip (IBM) — placeholder" };
 
 describe("filenameSuggestsIbmPayslipPdf", () => {
   it("matches common payslip filename tokens", () => {
@@ -35,5 +36,10 @@ describe("inferParserProfile", () => {
 
   it("still uses BOA eStatement for generic PDF names", () => {
     expect(inferParserProfile(boaChecking, "eStmt_2026-01.pdf")).toBe("boa_estatement_pdf");
+  });
+
+  it("uses IBM payslip for payslip account type even when filename is generic", () => {
+    expect(inferParserProfile(payslipPlaceholder, "eStmt_2026-01.pdf")).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
+    expect(inferParserProfile(payslipPlaceholder, "download.pdf")).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
   });
 });

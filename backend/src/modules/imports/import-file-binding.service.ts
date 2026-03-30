@@ -1,6 +1,31 @@
+import { randomUUID } from "node:crypto";
+
 import { db } from "../../db/sqlite.js";
 
 import { isParserProfileId } from "./profiles/profile-ids.js";
+
+const PAYSLIP_PLACEHOLDER_INSTITUTION = "Employer payslip (IBM) — placeholder";
+
+/**
+ * Ensures the signed-in user has a `payslip` bucket row for import binding (IBM v1).
+ * Idempotent — seed may already have inserted one; dev DBs created before migration **0016** get a row on first Import load.
+ */
+export function ensurePayslipImportPlaceholderAccount(householdId: string, ownerUserId: string): void {
+  const row = db
+    .prepare(
+      `SELECT 1 AS ok FROM financial_account
+       WHERE household_id = ? AND owner_user_id = ? AND type = 'payslip' LIMIT 1`
+    )
+    .get(householdId, ownerUserId) as { ok: number } | undefined;
+  if (row) {
+    return;
+  }
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+     VALUES (?, ?, ?, 'payslip', ?, NULL, 'USD', CURRENT_TIMESTAMP)`
+  ).run(id, householdId, ownerUserId, PAYSLIP_PLACEHOLDER_INSTITUTION);
+}
 
 export type BindingErrorCode =
   | "NOT_FOUND"
@@ -75,7 +100,7 @@ export function listHouseholdFinancialAccounts(householdId: string): Array<{
       `SELECT id, type, institution, account_mask, currency
        FROM financial_account
        WHERE household_id = ?
-       ORDER BY institution, type`
+       ORDER BY CASE WHEN type = 'payslip' THEN 0 ELSE 1 END, institution, type`
     )
     .all(householdId) as Array<{
     id: string;

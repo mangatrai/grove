@@ -97,9 +97,9 @@ Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **pr
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
 ## Immediate Next Build Focus
-1. **Unified Import + payslip:** **Baseline shipped** (**CR-028**, **`0015`**, **UX-009**): import session + **`ibm_pay_contributions_pdf`**, **`payslip_snapshot.import_file_id`**, payslip-only canonicalize, filename heuristic, workspace copy. **Next:** **`GET /payslips/:id`**, salary-account onboarding hints, optional PDF-text sniff. See **`docs/CHECKPOINT.md`** and **`docs/PAYSLIP_V1.md`**.
-2. **Epic 5.2** — transfer matcher continuation (fewer false **`transfer_ambiguity`** rows, more tests).
-3. **Epic 7** — cash summary gaps (category period deltas, safe-to-spend narrative).
+1. **Unified Import + payslip:** **Baseline shipped** (**CR-028**, **`0015`**, **UX-009**, **CR-031**): import session + **`ibm_pay_contributions_pdf`**, **`payslip_snapshot.import_file_id`**, **`GET /payslips/:id`**, **`/payslips/:payslipId`** UI, payslip-only canonicalize, filename heuristic, workspace copy. **Next:** salary-account onboarding hints, optional PDF-text sniff. See **`docs/CHECKPOINT.md`** and **`docs/PAYSLIP_V1.md`**.
+2. **Epic 5.2** — **post-MVP / backlog:** transfer matcher tuning waits on **real-world** bank data (**`MVP_BACKLOG`** Story **5.2**).
+3. **Epic 7** — cash summary gaps (safe-to-spend narrative; category deltas shipped **CR-029**).
 4. **Epic 11** — duplicate/transfer depth vs queue; **DOC-005** near-duplicate **`source_ref`** edge cases.
 5. **Epic 6.2** — bulk ledger edits if still in scope.
 6. **Ingestion:** parser profiles (BoA, Citi, Chase) baseline — parallel to (1) where separate files.

@@ -160,3 +160,13 @@ export function listPayslipSnapshots(
     .all(householdId, opts.limit, opts.offset) as Record<string, unknown>[];
   return { total, items: rows.map((r) => rowToSnapshot(r)) };
 }
+
+export function getPayslipSnapshotForHousehold(
+  householdId: string,
+  id: string
+): PayslipSnapshotRow | null {
+  const row = db
+    .prepare(`SELECT * FROM payslip_snapshot WHERE id = ? AND household_id = ?`)
+    .get(id, householdId) as Record<string, unknown> | undefined;
+  return row ? rowToSnapshot(row) : null;
+}

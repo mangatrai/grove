@@ -95,7 +95,14 @@ function transferPaymentPatternScore(debitLabel: string, creditLabel: string): n
     /\bWEB\s+(PAY|PMT)\b/,
     /\bAUTOPAY\b/,
     /\bAUTO\s*PAY\b/,
-    /\bBILL\s+PAY\b/
+    /\bBILL\s+PAY\b/,
+    // Card/loan payoff patterns that omit the directional "PAYMENT TO" phrasing.
+    // We keep this fairly specific (requires PAYMENT + card/loan context elsewhere).
+    /\bCARD\s*PAYMENT\b/,
+    /\bHELOC\s+PAYMENT\b/,
+    /\bLOAN\s+PAYMENT\b/,
+    /\bMORTGAGE\s+PAYMENT\b/,
+    /\bINSTALLMENT\s+PAYMENT\b/
   ];
   const incomingPaymentTokens = [
     /\bPAYMENT\s+RECEIVED\b/,

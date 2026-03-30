@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import request from "supertest";
@@ -80,6 +81,60 @@ describe("POST /payslips/upload", () => {
     const row = list.body.items.find((x: { id: string }) => x.id === id);
     expect(row).toBeDefined();
     expect(row.parserProfileId).toBe("ibm_pay_contributions_pdf");
+  });
+});
+
+describe("GET /payslips/:id", () => {
+  async function loginToken(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  it("returns 401 without auth", async () => {
+    const res = await request(app).get(`/payslips/${randomUUID()}`);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 for non-uuid id", async () => {
+    const token = await loginToken();
+    const res = await request(app).get("/payslips/not-a-uuid").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 for unknown id", async () => {
+    const token = await loginToken();
+    const res = await request(app)
+      .get(`/payslips/${randomUUID()}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("NOT_FOUND");
+  });
+
+  it("returns full snapshot after upload", async () => {
+    const token = await loginToken();
+    const base = readFileSync(ibmFixture);
+    const buf = Buffer.concat([base, Buffer.from(`\nget-one-${Date.now()}`)]);
+
+    const up = await request(app)
+      .post("/payslips/upload")
+      .set("authorization", `Bearer ${token}`)
+      .attach("file", buf, "detail-test.pdf");
+
+    expect(up.status).toBe(201);
+    const id = up.body.snapshot.id as string;
+
+    const one = await request(app).get(`/payslips/${id}`).set("authorization", `Bearer ${token}`);
+    expect(one.status).toBe(200);
+    expect(one.body.id).toBe(id);
+    expect(one.body.fileName).toBe("detail-test.pdf");
+    expect(one.body.grossPayCurrent).toBe(5000);
+    expect(one.body.netPayCurrent).toBeDefined();
+    expect(one.body.rawExtractJson).toBeDefined();
+    expect(typeof one.body.rawExtractJson).toBe("object");
   });
 });
 

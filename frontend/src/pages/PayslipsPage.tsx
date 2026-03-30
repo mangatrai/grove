@@ -159,19 +159,27 @@ export function PayslipsPage() {
                   <th>File</th>
                   <th>Uploaded</th>
                   <th>Parser</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
                 {data.items.map((r) => (
                   <tr key={r.id}>
-                    <td>{periodLabel(r)}</td>
+                    <td>
+                      <Link to={`/payslips/${r.id}`}>{periodLabel(r)}</Link>
+                    </td>
                     <td>{r.payDate ?? "—"}</td>
                     <td>{formatMoney(r.grossPayCurrent)}</td>
                     <td>{formatMoney(r.netPayCurrent)}</td>
-                    <td style={{ maxWidth: "14rem", wordBreak: "break-word" }}>{r.fileName}</td>
+                    <td style={{ maxWidth: "14rem", wordBreak: "break-word" }}>
+                      <Link to={`/payslips/${r.id}`}>{r.fileName}</Link>
+                    </td>
                     <td style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>{r.createdAt}</td>
                     <td>
                       <code style={{ fontSize: "0.8rem" }}>{r.parserProfileId}</code>
+                    </td>
+                    <td>
+                      <Link to={`/payslips/${r.id}`}>View</Link>
                     </td>
                   </tr>
                 ))}

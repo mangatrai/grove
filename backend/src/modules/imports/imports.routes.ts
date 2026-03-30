@@ -13,6 +13,7 @@ import {
   type ServiceFailure
 } from "./import-session.service.js";
 import {
+  ensurePayslipImportPlaceholderAccount,
   listHouseholdFinancialAccounts,
   updateImportFileBinding,
   type BindingFailure
@@ -179,7 +180,9 @@ importsRouter.patch("/sessions/:sessionId/status", (req: AuthenticatedRequest, r
 });
 
 importsRouter.get("/accounts", (req: AuthenticatedRequest, res) => {
-  const accounts = listHouseholdFinancialAccounts(req.authUser!.householdId);
+  const { householdId, userId } = req.authUser!;
+  ensurePayslipImportPlaceholderAccount(householdId, userId);
+  const accounts = listHouseholdFinancialAccounts(householdId);
   res.status(200).json({ accounts });
 });
 
