@@ -2,12 +2,17 @@ import { getHouseholdSettings } from "../household/household.service.js";
 import type { EmployerStub } from "../household/household.types.js";
 import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
 
-export function listHouseholdEmployers(householdId: string): EmployerStub[] {
-  return getHouseholdSettings(householdId)?.employers ?? [];
+/** Employers are stored on the signed-in user’s `person_profile` (Epic 12.5). */
+export function listHouseholdEmployers(householdId: string, userId: string): EmployerStub[] {
+  return getHouseholdSettings(householdId, userId)?.employers ?? [];
 }
 
-export function findEmployerById(householdId: string, employerId: string): EmployerStub | null {
-  return listHouseholdEmployers(householdId).find((e) => e.id === employerId) ?? null;
+export function findEmployerById(
+  householdId: string,
+  employerId: string,
+  userId: string
+): EmployerStub | null {
+  return listHouseholdEmployers(householdId, userId).find((e) => e.id === employerId) ?? null;
 }
 
 export function employerParserProfileId(e: EmployerStub): string {
@@ -22,11 +27,12 @@ export function employerParserProfileId(e: EmployerStub): string {
  */
 export function resolvePayslipUploadContext(
   householdId: string,
+  userId: string,
   employerIdRaw: string | undefined
 ):
   | { ok: true; parserProfileId: string; employerId: string | null }
   | { ok: false; code: "EMPLOYER_REQUIRED" | "INVALID_EMPLOYER"; message: string } {
-  const employers = listHouseholdEmployers(householdId);
+  const employers = listHouseholdEmployers(householdId, userId);
   const trimmed = employerIdRaw?.trim();
 
   if (employers.length === 0) {
@@ -45,7 +51,7 @@ export function resolvePayslipUploadContext(
     };
   }
 
-  const employer = findEmployerById(householdId, trimmed);
+  const employer = findEmployerById(householdId, trimmed, userId);
   if (!employer) {
     return { ok: false, code: "INVALID_EMPLOYER", message: "Employer not found in household settings" };
   }
@@ -54,6 +60,10 @@ export function resolvePayslipUploadContext(
 }
 
 /** Import parse when `import_file.employer_id` is null: require explicit employer if multiple configured. */
-export function requireEmployerForPayslipImport(householdId: string, employerId: string | null | undefined): boolean {
-  return listHouseholdEmployers(householdId).length <= 1 || Boolean(employerId?.trim());
+export function requireEmployerForPayslipImport(
+  householdId: string,
+  userId: string,
+  employerId: string | null | undefined
+): boolean {
+  return listHouseholdEmployers(householdId, userId).length <= 1 || Boolean(employerId?.trim());
 }

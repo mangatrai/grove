@@ -58,6 +58,7 @@ export function updateImportFileBinding(
   sessionId: string,
   fileId: string,
   householdId: string,
+  userId: string,
   input: { financialAccountId: string; parserProfileId: string; employerId?: string | null }
 ): BindingSuccess | BindingFailure {
   const session = db
@@ -86,7 +87,7 @@ export function updateImportFileBinding(
   const employerId = input.employerId === undefined ? null : input.employerId;
 
   if (employerId) {
-    const emp = findEmployerById(householdId, employerId);
+    const emp = findEmployerById(householdId, employerId, userId);
     if (!emp) {
       return { ok: false, code: "INVALID_EMPLOYER", message: "Employer not found in household settings" };
     }

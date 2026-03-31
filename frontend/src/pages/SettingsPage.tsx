@@ -31,6 +31,102 @@ type AccountRow = {
 
 type EmployerDraft = { id?: string; displayName: string; parserProfileId: string };
 
+type HouseholdProfileResponse = {
+  profile: {
+    id: string;
+    householdId: string;
+    linkedUserId: string | null;
+    fullName: string;
+    email: string | null;
+    phoneNumber: string | null;
+    avatarKey: string | null;
+    role: "head" | "member";
+    relationship: "self" | "spouse" | "child" | "dependent" | "other";
+  };
+};
+
+type HouseholdMemberResponse = {
+  id: string;
+  householdId: string;
+  linkedUserId: string | null;
+  firstName?: string;
+  lastName?: string;
+  fullName: string;
+  email: string | null;
+  phoneNumber: string | null;
+  avatarKey: string | null;
+  role: "head" | "member";
+  relationship: "self" | "spouse" | "child" | "dependent" | "other";
+};
+
+type HouseholdMembersPayload = {
+  members?: HouseholdMemberResponse[];
+};
+
+type ProfileDraft = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  avatarIconKey: string;
+  salaryAccountId: string;
+  employers: EmployerDraft[];
+};
+
+type HouseholdMemberDraft = {
+  id?: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  relationship: string;
+};
+
+type MeResponse = { user: { role: "owner" | "admin" | "member" } };
+
+const PROFILE_ICON_KEYS = ["person", "home", "wallet", "briefcase", "star"] as const;
+
+const AVATAR_KEY_EMOJI: Record<(typeof PROFILE_ICON_KEYS)[number], string> = {
+  person: "👤",
+  home: "🏠",
+  wallet: "💳",
+  briefcase: "💼",
+  star: "⭐"
+};
+
+function avatarEmojiPreview(key: string): string {
+  return AVATAR_KEY_EMOJI[key as keyof typeof AVATAR_KEY_EMOJI] ?? "👤";
+}
+
+function normalizeProfileDraft(payload: HouseholdProfileResponse): ProfileDraft {
+  const p = payload.profile;
+  const [firstName, ...lastNameParts] = (p.fullName ?? "").trim().split(/\s+/);
+  return {
+    firstName: firstName ?? "",
+    lastName: lastNameParts.join(" "),
+    email: p.email ?? "",
+    phone: (p.phoneNumber ?? "").trim(),
+    avatarIconKey: (p.avatarKey ?? PROFILE_ICON_KEYS[0]).trim() || PROFILE_ICON_KEYS[0],
+    salaryAccountId: "",
+    employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+  };
+}
+
+function normalizeMembersPayload(payload: HouseholdMembersPayload | HouseholdMemberResponse[]): HouseholdMemberDraft[] {
+  const rawMembers = Array.isArray(payload) ? payload : payload.members ?? [];
+  if (!Array.isArray(rawMembers)) {
+    return [];
+  }
+  return rawMembers.map((member) => ({
+    id: member.id,
+    firstName: member.firstName ?? member.fullName.trim().split(/\s+/)[0] ?? "",
+    lastName: member.lastName ?? member.fullName.trim().split(/\s+/).slice(1).join(" "),
+    email: member.email ?? "",
+    role: member.role,
+    relationship: member.relationship
+  }));
+}
+
 export function SettingsPage() {
   const token = useAuthToken();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -47,14 +143,90 @@ export function SettingsPage() {
   );
 
   const [targetDraft, setTargetDraft] = useState("");
-  const [salaryAccountId, setSalaryAccountId] = useState("");
-  const [employerDrafts, setEmployerDrafts] = useState<EmployerDraft[]>([
-    { displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }
-  ]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [loadingHousehold, setLoadingHousehold] = useState(true);
   const [savingHousehold, setSavingHousehold] = useState(false);
   const [householdError, setHouseholdError] = useState<string | null>(null);
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    avatarIconKey: PROFILE_ICON_KEYS[0],
+    salaryAccountId: "",
+    employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+  });
+  const [loadingProfile, setLoadingProfile] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
+  const [memberDrafts, setMemberDrafts] = useState<HouseholdMemberDraft[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
+  const [membersSuccess, setMembersSuccess] = useState<string | null>(null);
+  const [savingMemberIndex, setSavingMemberIndex] = useState<number | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: ""
+  });
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [securityError, setSecurityError] = useState<string | null>(null);
+  const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
+  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
+
+  const canManageHousehold = authRole === "owner" || authRole === "admin";
+
+  const loadProfile = useCallback(async () => {
+    setLoadingProfile(true);
+    setProfileError(null);
+    setProfileSuccess(null);
+    try {
+      const [response, settings, acct] = await Promise.all([
+        apiJson<HouseholdProfileResponse>("/household/profile"),
+        apiJson<HouseholdSettingsResponse>("/household/settings"),
+        apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+      ]);
+      setAccounts(acct.accounts);
+      const base = normalizeProfileDraft(response);
+      setProfileDraft({
+        ...base,
+        salaryAccountId: settings.salaryDepositFinancialAccountId ?? "",
+        employers:
+          settings.employers.length > 0
+            ? settings.employers.map((e) => ({
+                id: e.id,
+                displayName: e.displayName,
+                parserProfileId: e.parserProfileId ?? "ibm_pay_contributions_pdf"
+              }))
+            : [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+      });
+    } catch (e: unknown) {
+      setProfileError(e instanceof Error ? e.message : "Could not load profile");
+    } finally {
+      setLoadingProfile(false);
+    }
+  }, []);
+
+  const loadMembers = useCallback(async () => {
+    setLoadingMembers(true);
+    setMembersError(null);
+    setMembersSuccess(null);
+    try {
+      const response = await apiJson<HouseholdMembersPayload | HouseholdMemberResponse[]>("/household/members");
+      const normalized = normalizeMembersPayload(response);
+      setMemberDrafts(
+        normalized.length > 0
+          ? normalized
+          : [{ firstName: "", lastName: "", email: "", role: "member", relationship: "other" }]
+      );
+    } catch (e: unknown) {
+      setMembersError(e instanceof Error ? e.message : "Could not load household members");
+      setMemberDrafts([{ firstName: "", lastName: "", email: "", role: "member", relationship: "other" }]);
+    } finally {
+      setLoadingMembers(false);
+    }
+  }, []);
 
   const loadHousehold = useCallback(async () => {
     setLoadingHousehold(true);
@@ -66,34 +238,50 @@ export function SettingsPage() {
       ]);
       setAccounts(acct.accounts);
       setTargetDraft(r.monthlySavingsTargetUsd != null ? String(r.monthlySavingsTargetUsd) : "");
-      setSalaryAccountId(r.salaryDepositFinancialAccountId ?? "");
-      if (r.employers && r.employers.length > 0) {
-        setEmployerDrafts(
-          r.employers.map((e) => ({
-            id: e.id,
-            displayName: e.displayName,
-            parserProfileId: e.parserProfileId ?? "ibm_pay_contributions_pdf"
-          }))
-        );
-      } else {
-        setEmployerDrafts([{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]);
-      }
     } catch (e: unknown) {
       setHouseholdError(e instanceof Error ? e.message : "Could not load settings");
       setTargetDraft("");
-      setSalaryAccountId("");
-      setEmployerDrafts([{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]);
     } finally {
       setLoadingHousehold(false);
     }
   }, []);
 
   useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void apiJson<MeResponse>("/auth/me")
+      .then((r) => setAuthRole(r.user.role))
+      .catch(() => setAuthRole(null));
+  }, [token]);
+
+  useEffect(() => {
     if (!token || tab !== "household") {
       return;
     }
+    if (!canManageHousehold) {
+      setTab("profile");
+      return;
+    }
     void loadHousehold();
-  }, [token, tab, loadHousehold]);
+  }, [token, tab, canManageHousehold, loadHousehold, setTab]);
+
+  useEffect(() => {
+    if (!token || tab !== "profile") {
+      return;
+    }
+    void loadProfile();
+  }, [token, tab, loadProfile]);
+
+  useEffect(() => {
+    if (!token || tab !== "household") {
+      return;
+    }
+    if (!canManageHousehold) {
+      return;
+    }
+    void loadMembers();
+  }, [token, tab, canManageHousehold, loadMembers]);
 
   async function saveHouseholdTarget(value: number | null) {
     if (!token) {
@@ -114,57 +302,119 @@ export function SettingsPage() {
     }
   }
 
-  async function saveSalaryAccount() {
+  async function saveProfile() {
     if (!token) {
       return;
     }
-    setSavingHousehold(true);
-    setHouseholdError(null);
+    setSavingProfile(true);
+    setProfileError(null);
+    setProfileSuccess(null);
     try {
-      await apiJson<HouseholdSettingsResponse>("/household/settings", {
+      const iconKey = profileDraft.avatarIconKey.trim() || PROFILE_ICON_KEYS[0];
+      await apiJson<HouseholdProfileResponse>("/household/profile", {
         method: "PATCH",
         body: JSON.stringify({
-          salaryDepositFinancialAccountId: salaryAccountId === "" ? null : salaryAccountId
+          firstName: profileDraft.firstName.trim(),
+          lastName: profileDraft.lastName.trim(),
+          email: profileDraft.email.trim() || null,
+          phoneNumber: profileDraft.phone.trim() || null,
+          avatarKey: iconKey,
+          salaryDepositFinancialAccountId: profileDraft.salaryAccountId === "" ? null : profileDraft.salaryAccountId,
+          employers: profileDraft.employers
+            .map((e) => ({
+              id: e.id,
+              displayName: e.displayName.trim(),
+              parserProfileId: e.parserProfileId,
+              parserMapping: {} as Record<string, unknown>
+            }))
+            .filter((e) => e.displayName.length > 0)
         })
       });
-      await loadHousehold();
+      setProfileSuccess("Profile saved.");
+      await loadProfile();
     } catch (e: unknown) {
-      setHouseholdError(e instanceof Error ? e.message : "Could not save");
+      setProfileError(e instanceof Error ? e.message : "Could not save profile");
     } finally {
-      setSavingHousehold(false);
+      setSavingProfile(false);
     }
   }
 
-  async function saveEmployers() {
+  async function saveHouseholdMembers() {
     if (!token) {
       return;
     }
-    const employers = employerDrafts
-      .map((e) => ({
-        id: e.id,
-        displayName: e.displayName.trim(),
-        parserProfileId: e.parserProfileId,
-        parserMapping: {} as Record<string, unknown>
-      }))
-      .filter((e) => e.displayName.length > 0);
-    setSavingHousehold(true);
-    setHouseholdError(null);
+    const rows = memberDrafts.filter(
+      (r) => r.firstName.trim().length > 0 || r.lastName.trim().length > 0 || r.email.trim().length > 0
+    );
+    if (rows.length === 0) {
+      setMembersError("Add at least one household member row.");
+      return;
+    }
+    setSavingMemberIndex(-1);
+    setMembersError(null);
+    setMembersSuccess(null);
     try {
-      await apiJson<HouseholdSettingsResponse>("/household/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ employers })
-      });
-      await loadHousehold();
+      for (const row of rows) {
+        if (!row.firstName.trim()) {
+          throw new Error("Each member must include first name.");
+        }
+        const body = {
+          firstName: row.firstName.trim(),
+          lastName: row.lastName.trim(),
+          email: row.email.trim() || null,
+          role: row.role as "head" | "member",
+          relationship: row.relationship as "self" | "spouse" | "child" | "dependent" | "other"
+        };
+        const path = row.id ? `/household/members/${encodeURIComponent(row.id)}` : "/household/members";
+        await apiJson<HouseholdMemberResponse>(path, {
+          method: row.id ? "PATCH" : "POST",
+          body: JSON.stringify(body)
+        });
+      }
+      setMembersSuccess("Household updated.");
+      await loadMembers();
     } catch (e: unknown) {
-      setHouseholdError(e instanceof Error ? e.message : "Could not save");
+      setMembersError(e instanceof Error ? e.message : "Could not save household");
     } finally {
-      setSavingHousehold(false);
+      setSavingMemberIndex(null);
+    }
+  }
+
+  async function changePassword() {
+    if (!token) {
+      return;
+    }
+    setSecurityError(null);
+    setSecuritySuccess(null);
+    if (!passwordDraft.currentPassword || !passwordDraft.newPassword || !passwordDraft.confirmPassword) {
+      setSecurityError("All password fields are required.");
+      return;
+    }
+    if (passwordDraft.newPassword !== passwordDraft.confirmPassword) {
+      setSecurityError("New password and confirmation must match.");
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await apiJson<{ ok?: boolean; message?: string }>("/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({
+          currentPassword: passwordDraft.currentPassword,
+          newPassword: passwordDraft.newPassword
+        })
+      });
+      setSecuritySuccess("Password changed successfully.");
+      setPasswordDraft({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    } catch (e: unknown) {
+      setSecurityError(e instanceof Error ? e.message : "Could not change password");
+    } finally {
+      setChangingPassword(false);
     }
   }
 
   const tabLinks = useMemo(
     () =>
-      TABS.map((id) => (
+      TABS.filter((id) => id !== "household" || canManageHousehold).map((id) => (
         <button
           key={id}
           type="button"
@@ -182,14 +432,12 @@ export function SettingsPage() {
                   : "Security"}
         </button>
       )),
-    [tab, setTab]
+    [tab, setTab, canManageHousehold]
   );
 
   if (!token) {
     return <Navigate to="/" replace />;
   }
-
-  const bankAccounts = accounts.filter((a) => a.type !== "payslip");
 
   return (
     <div>
@@ -206,21 +454,308 @@ export function SettingsPage() {
         {tab === "profile" ? (
           <div className="settings-panel" role="tabpanel">
             <h2 className="settings-panel__title">Profile</h2>
-            <p className="muted">
-              Email, display name, and phone will live here when user-profile APIs are available. For now, sign in
-              controls identity.
+            <p className="muted" style={{ marginTop: 0 }}>
+              <strong>Avatar icon</strong> is stored as <code>avatarKey</code> on your profile. Below is a local preview;
+              the app shell and other screens are not wired to it yet — same saved value will be used when we add
+              avatars in the header and elsewhere.
             </p>
+            <div className="row" style={{ alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
+              <div
+                className="settings-avatar-preview"
+                style={{
+                  width: "3rem",
+                  height: "3rem",
+                  borderRadius: "50%",
+                  background: "var(--muted-bg, #e8eaed)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "1.5rem",
+                  flexShrink: 0
+                }}
+                title={`avatarKey: ${profileDraft.avatarIconKey}`}
+                aria-label={`Avatar preview: ${profileDraft.avatarIconKey}`}
+              >
+                {avatarEmojiPreview(profileDraft.avatarIconKey)}
+              </div>
+            </div>
+            {profileError ? <p className="error">{profileError}</p> : null}
+            {profileSuccess ? <p className="success">{profileSuccess}</p> : null}
+            {loadingProfile ? <p className="muted">Loading…</p> : null}
+            {!loadingProfile ? (
+              <div className="settings-household-form">
+                <div className="row" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+                  <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+                    First name
+                    <input
+                      type="text"
+                      value={profileDraft.firstName}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, firstName: e.target.value }))}
+                      disabled={savingProfile}
+                      placeholder="First name"
+                    />
+                  </label>
+                  <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+                    Last name
+                    <input
+                      type="text"
+                      value={profileDraft.lastName}
+                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, lastName: e.target.value }))}
+                      disabled={savingProfile}
+                      placeholder="Last name"
+                    />
+                  </label>
+                </div>
+                <label className="settings-field">
+                  Email
+                  <input
+                    type="email"
+                    value={profileDraft.email}
+                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, email: e.target.value }))}
+                    disabled={savingProfile}
+                    placeholder="you@example.com"
+                  />
+                </label>
+                <label className="settings-field">
+                  Phone
+                  <input
+                    type="tel"
+                    value={profileDraft.phone}
+                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, phone: e.target.value }))}
+                    disabled={savingProfile}
+                    placeholder="+1 555 000 0000"
+                  />
+                </label>
+                <label className="settings-field">
+                  Avatar icon
+                  <select
+                    value={profileDraft.avatarIconKey}
+                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, avatarIconKey: e.target.value }))}
+                    disabled={savingProfile}
+                  >
+                    {PROFILE_ICON_KEYS.map((iconKey) => (
+                      <option key={iconKey} value={iconKey}>
+                        {iconKey}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginBottom: 0 }}>
+                  Salary deposit account (optional)
+                </h3>
+                <label className="settings-field">
+                  Account
+                  <select
+                    value={profileDraft.salaryAccountId}
+                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, salaryAccountId: e.target.value }))}
+                    disabled={savingProfile}
+                  >
+                    <option value="">— Not set —</option>
+                    {accounts
+                      .filter((a) => a.type !== "payslip")
+                      .map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {formatAccountForSelect(a)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginBottom: 0 }}>
+                  Employers (payslip sources)
+                </h3>
+                {profileDraft.employers.map((row, idx) => (
+                  <div
+                    key={idx}
+                    className="row"
+                    style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}
+                  >
+                    <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+                      Employer name
+                      <input
+                        type="text"
+                        value={row.displayName}
+                        placeholder="e.g. Acme Corp"
+                        onChange={(e) => {
+                          const next = [...profileDraft.employers];
+                          next[idx] = { ...next[idx], displayName: e.target.value };
+                          setProfileDraft((prev) => ({ ...prev, employers: next }));
+                        }}
+                        disabled={savingProfile}
+                      />
+                    </label>
+                    <label className="settings-field" style={{ flex: "1 1 11rem" }}>
+                      Payslip format
+                      <select
+                        value={row.parserProfileId}
+                        onChange={(e) => {
+                          const next = [...profileDraft.employers];
+                          next[idx] = { ...next[idx], parserProfileId: e.target.value };
+                          setProfileDraft((prev) => ({ ...prev, employers: next }));
+                        }}
+                        disabled={savingProfile}
+                      >
+                        <option value="ibm_pay_contributions_pdf">IBM Pay &amp; Contributions (PDF)</option>
+                        <option value="adp_payslip_pdf">ADP (PDF — placeholder)</option>
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={savingProfile || profileDraft.employers.length <= 1}
+                      onClick={() =>
+                        setProfileDraft((prev) => ({
+                          ...prev,
+                          employers: prev.employers.filter((_, i) => i !== idx)
+                        }))
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+                <div className="settings-household-actions" style={{ marginTop: "0.25rem" }}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={savingProfile}
+                    onClick={() =>
+                      setProfileDraft((prev) => ({
+                        ...prev,
+                        employers: [...prev.employers, { displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+                      }))
+                    }
+                  >
+                    Add employer
+                  </button>
+                </div>
+                <div className="settings-household-actions">
+                  <button type="button" disabled={savingProfile} onClick={() => void saveProfile()}>
+                    {savingProfile ? "Saving…" : "Save profile"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
         {tab === "household" ? (
           <div className="settings-panel" role="tabpanel">
             <h2 className="settings-panel__title">Household</h2>
-            <p className="muted">
-              Monthly savings target feeds <strong>safe-to-spend</strong> on the cash summary. Income / payslip fields
-              below are optional — they document where salary lands and which employers you expect payslips from (v1:
-              IBM parser placeholder; more parsers and onboarding flows later — see <code>docs/PAYSLIP_V1.md</code>).
+            <p className="muted">Manage household members, roles, and relationships.</p>
+            <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: 0 }}>
+              Household members
+            </h3>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Track household members for role and relationship context.
             </p>
+            {membersError ? <p className="error">{membersError}</p> : null}
+            {membersSuccess ? <p className="success">{membersSuccess}</p> : null}
+            {loadingMembers ? <p className="muted">Loading members…</p> : null}
+            {!loadingMembers ? (
+              <>
+                {memberDrafts.map((member, idx) => (
+                  <div
+                    key={member.id ?? `draft-${idx}`}
+                    className="row"
+                    style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}
+                  >
+                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                      First name
+                      <input
+                        type="text"
+                        value={member.firstName}
+                        placeholder="Alex"
+                        onChange={(e) => {
+                          const next = [...memberDrafts];
+                          next[idx] = { ...next[idx], firstName: e.target.value };
+                          setMemberDrafts(next);
+                        }}
+                        disabled={savingMemberIndex !== null}
+                      />
+                    </label>
+                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                      Last name
+                      <input
+                        type="text"
+                        value={member.lastName}
+                        placeholder="Doe"
+                        onChange={(e) => {
+                          const next = [...memberDrafts];
+                          next[idx] = { ...next[idx], lastName: e.target.value };
+                          setMemberDrafts(next);
+                        }}
+                        disabled={savingMemberIndex !== null}
+                      />
+                    </label>
+                    <label className="settings-field" style={{ flex: "1 1 14rem" }}>
+                      Email
+                      <input
+                        type="email"
+                        value={member.email}
+                        placeholder="alex@example.com"
+                        onChange={(e) => {
+                          const next = [...memberDrafts];
+                          next[idx] = { ...next[idx], email: e.target.value };
+                          setMemberDrafts(next);
+                        }}
+                        disabled={savingMemberIndex !== null}
+                      />
+                    </label>
+                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                      Role
+                      <select
+                        value={member.role}
+                        onChange={(e) => {
+                          const next = [...memberDrafts];
+                          next[idx] = { ...next[idx], role: e.target.value };
+                          setMemberDrafts(next);
+                        }}
+                        disabled={savingMemberIndex !== null}
+                      >
+                        <option value="head">Head</option>
+                        <option value="member">Member</option>
+                      </select>
+                    </label>
+                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                      Relationship
+                      <select
+                        value={member.relationship}
+                        onChange={(e) => {
+                          const next = [...memberDrafts];
+                          next[idx] = { ...next[idx], relationship: e.target.value };
+                          setMemberDrafts(next);
+                        }}
+                        disabled={savingMemberIndex !== null}
+                      >
+                        <option value="self">Self</option>
+                        <option value="spouse">Spouse</option>
+                        <option value="child">Child</option>
+                        <option value="dependent">Dependent</option>
+                        <option value="other">Other</option>
+                      </select>
+                    </label>
+                  </div>
+                ))}
+                <div className="settings-household-actions" style={{ marginBottom: "1rem" }}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={savingMemberIndex !== null}
+                    onClick={() =>
+                      setMemberDrafts((prev) => [
+                        ...prev,
+                        { firstName: "", lastName: "", email: "", role: "member", relationship: "other" }
+                      ])
+                    }
+                  >
+                    Add another row
+                  </button>
+                  <button type="button" disabled={savingMemberIndex !== null} onClick={() => void saveHouseholdMembers()}>
+                    {savingMemberIndex !== null ? "Saving…" : "Save household"}
+                  </button>
+                </div>
+              </>
+            ) : null}
             {householdError ? <p className="error">{householdError}</p> : null}
             {loadingHousehold ? <p className="muted">Loading…</p> : null}
             {!loadingHousehold ? (
@@ -269,102 +804,6 @@ export function SettingsPage() {
                   </div>
                 </div>
 
-                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem" }}>
-                  Salary deposit account (optional)
-                </h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Where your paycheck typically deposits — used for future matching (not required for import). Pick a
-                  bank account; payslip “bucket” accounts are excluded here.
-                </p>
-                <div className="settings-household-form">
-                  <label className="settings-field">
-                    Account
-                    <select
-                      value={salaryAccountId}
-                      onChange={(e) => setSalaryAccountId(e.target.value)}
-                      disabled={savingHousehold}
-                    >
-                      <option value="">— Not set —</option>
-                      {bankAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {formatAccountForSelect(a)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="settings-household-actions">
-                    <button type="button" disabled={savingHousehold} onClick={() => void saveSalaryAccount()}>
-                      Save salary account
-                    </button>
-                  </div>
-                </div>
-
-                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>
-                  Employers (payslip sources)
-                </h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-              Add one row per employer and choose which <strong>payslip format</strong> applies. IBM is fully supported;
-              ADP is registered for onboarding but parsing is not implemented yet.
-                </p>
-                {employerDrafts.map((row, idx) => (
-                  <div key={idx} className="row" style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}>
-                    <label className="settings-field" style={{ flex: "1 1 12rem" }}>
-                      Employer name
-                      <input
-                        type="text"
-                        value={row.displayName}
-                        placeholder="e.g. Acme Corp"
-                        onChange={(e) => {
-                          const next = [...employerDrafts];
-                          next[idx] = { ...next[idx], displayName: e.target.value };
-                          setEmployerDrafts(next);
-                        }}
-                        disabled={savingHousehold}
-                      />
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 11rem" }}>
-                      Payslip format
-                      <select
-                        value={row.parserProfileId}
-                        onChange={(e) => {
-                          const next = [...employerDrafts];
-                          next[idx] = { ...next[idx], parserProfileId: e.target.value };
-                          setEmployerDrafts(next);
-                        }}
-                        disabled={savingHousehold}
-                      >
-                        <option value="ibm_pay_contributions_pdf">IBM Pay &amp; Contributions (PDF)</option>
-                        <option value="adp_payslip_pdf">ADP (PDF — placeholder)</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={savingHousehold || employerDrafts.length <= 1}
-                      onClick={() => setEmployerDrafts(employerDrafts.filter((_, i) => i !== idx))}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-                <div className="settings-household-actions" style={{ marginTop: "0.75rem" }}>
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={savingHousehold}
-                    onClick={() =>
-                      setEmployerDrafts([
-                        ...employerDrafts,
-                        { displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }
-                      ])
-                    }
-                  >
-                    Add employer
-                  </button>
-                  <button type="button" disabled={savingHousehold} onClick={() => void saveEmployers()}>
-                    Save employers
-                  </button>
-                </div>
               </>
             ) : null}
           </div>
@@ -390,7 +829,49 @@ export function SettingsPage() {
         {tab === "security" ? (
           <div className="settings-panel" role="tabpanel">
             <h2 className="settings-panel__title">Security</h2>
-            <p className="muted">Password change and session management APIs are not exposed in this MVP UI yet.</p>
+            {securityError ? <p className="error">{securityError}</p> : null}
+            {securitySuccess ? <p className="success">{securitySuccess}</p> : null}
+            <div className="settings-household-form">
+              <label className="settings-field">
+                Current password
+                <input
+                  type="password"
+                  value={passwordDraft.currentPassword}
+                  onChange={(e) =>
+                    setPasswordDraft((prev) => ({ ...prev, currentPassword: e.target.value }))
+                  }
+                  disabled={changingPassword}
+                  autoComplete="current-password"
+                />
+              </label>
+              <label className="settings-field">
+                New password
+                <input
+                  type="password"
+                  value={passwordDraft.newPassword}
+                  onChange={(e) => setPasswordDraft((prev) => ({ ...prev, newPassword: e.target.value }))}
+                  disabled={changingPassword}
+                  autoComplete="new-password"
+                />
+              </label>
+              <label className="settings-field">
+                Confirm new password
+                <input
+                  type="password"
+                  value={passwordDraft.confirmPassword}
+                  onChange={(e) =>
+                    setPasswordDraft((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                  }
+                  disabled={changingPassword}
+                  autoComplete="new-password"
+                />
+              </label>
+              <div className="settings-household-actions">
+                <button type="button" disabled={changingPassword} onClick={() => void changePassword()}>
+                  {changingPassword ? "Updating…" : "Change password"}
+                </button>
+              </div>
+            </div>
           </div>
         ) : null}
       </div>

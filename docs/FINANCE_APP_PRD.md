@@ -46,9 +46,11 @@ The system must support low-friction ingestion of monthly financial statements (
 - Owner/Admin:
   - view all household members/accounts/transactions.
   - upload/import/approve/edit/delete (within policy).
+  - manage household structure/settings (members, relationships, household-level settings).
 - Member:
   - view/edit own transactions/accounts only.
   - upload own statements.
+  - does **not** manage household structure/settings.
 - Read-only role deferred to Phase 2.
 
 ### Identity and Membership Model (decision)

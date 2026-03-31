@@ -8,7 +8,7 @@ VALUES
     '10000000-0000-0000-0000-000000000001',
     'owner@example.com',
     'owner',
-    '$2a$10$8fZGtw5FhyyMTOx2qNhA9umW6h6jb4NwwBqYXBrQ2XbS2J4Jr9NHG',
+    '$2a$10$Tg2KSaLf8qB4az.7LdyCvuQclHikol6qgE2ZWMJt5/chBWCfMO6eO',
     'all',
     CURRENT_TIMESTAMP
   );

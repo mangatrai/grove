@@ -139,6 +139,7 @@ async function extractByProfile(
 export async function parseSessionImportFiles(
   sessionId: string,
   householdId: string,
+  userId: string,
   request: ParseRequest
 ): Promise<ServiceResult<ParseOutcome> | ParseFailure> {
   const session = getSessionForHousehold(sessionId, householdId);
@@ -207,7 +208,7 @@ export async function parseSessionImportFiles(
 
     try {
       if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf") {
-        if (!requireEmployerForPayslipImport(householdId, file.employer_id)) {
+        if (!requireEmployerForPayslipImport(householdId, userId, file.employer_id)) {
           updateFileStatusStmt.run(
             "failed",
             JSON.stringify({
@@ -221,7 +222,7 @@ export async function parseSessionImportFiles(
           continue;
         }
         if (file.employer_id) {
-          const emp = findEmployerById(householdId, file.employer_id);
+          const emp = findEmployerById(householdId, file.employer_id, userId);
           if (!emp) {
             updateFileStatusStmt.run(
               "failed",

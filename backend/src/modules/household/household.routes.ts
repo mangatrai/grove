@@ -3,10 +3,16 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import { employerInputSchema } from "./household.types.js";
 import {
+  createHouseholdMember,
+  getCurrentUserProfile,
   getHouseholdSettings,
   getHouseholdMonthlySavingsTarget,
+  listHouseholdMembers,
+  patchCurrentUserProfile,
+  patchHouseholdMember,
   patchHouseholdSettings
 } from "./household.service.js";
 
@@ -15,7 +21,7 @@ householdRouter.use(requireAuth);
 
 householdRouter.get("/settings", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
-  const full = getHouseholdSettings(householdId);
+  const full = getHouseholdSettings(householdId, req.authUser!.userId);
   if (!full) {
     res.status(404).json({ message: "Household not found" });
     return;
@@ -29,13 +35,11 @@ householdRouter.get("/settings", (req: AuthenticatedRequest, res) => {
 
 const patchSchema = z
   .object({
-    monthlySavingsTargetUsd: z.union([z.number().min(0).max(1_000_000_000), z.null()]).optional(),
-    salaryDepositFinancialAccountId: z.union([z.string().uuid(), z.null()]).optional(),
-    employers: z.array(employerInputSchema).max(20).optional()
+    monthlySavingsTargetUsd: z.union([z.number().min(0).max(1_000_000_000), z.null()]).optional()
   })
   .refine((b) => Object.keys(b).length > 0, { message: "At least one field required" });
 
-householdRouter.patch("/settings", (req: AuthenticatedRequest, res) => {
+householdRouter.patch("/settings", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
   const parsed = patchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
@@ -47,23 +51,15 @@ householdRouter.patch("/settings", (req: AuthenticatedRequest, res) => {
     if (out.code === "MIGRATION_REQUIRED") {
       res.status(503).json({
         message:
-          "Database is missing migration 0010 (monthly_savings_target_usd) or 0017 (income onboarding). From repo root run: npm run db:init (or npm run db:seed). Use the same MODE / DB_PATH as your backend.",
+          "Database is missing migration 0010 (monthly_savings_target_usd). From repo root run: npm run db:init (or npm run db:seed). Use the same MODE / DB_PATH as your backend.",
         code: out.code
       });
-      return;
-    }
-    if (out.code === "INVALID_ACCOUNT") {
-      res.status(400).json({ message: "salaryDepositFinancialAccountId must be a household account", code: out.code });
-      return;
-    }
-    if (out.code === "INVALID_EMPLOYERS") {
-      res.status(400).json({ message: "Invalid employers payload", code: out.code });
       return;
     }
     res.status(400).json({ message: "Invalid amount", code: out.code });
     return;
   }
-  const full = getHouseholdSettings(householdId);
+  const full = getHouseholdSettings(householdId, req.authUser!.userId);
   if (!full) {
     res.status(404).json({ message: "Household not found" });
     return;
@@ -73,4 +69,132 @@ householdRouter.patch("/settings", (req: AuthenticatedRequest, res) => {
     salaryDepositFinancialAccountId: full.salaryDepositFinancialAccountId,
     employers: full.employers
   });
+});
+
+const roleSchema = z.enum(["head", "member"]);
+const relationshipSchema = z.enum(["self", "spouse", "child", "dependent", "other"]);
+
+const profilePatchSchema = z
+  .object({
+    firstName: z.string().min(1).max(120).optional(),
+    lastName: z.string().max(120).optional(),
+    fullName: z.string().min(1).max(200).optional(),
+    email: z.string().email().nullable().optional(),
+    phoneNumber: z.string().max(30).nullable().optional(),
+    avatarKey: z.string().max(500).nullable().optional(),
+    salaryDepositFinancialAccountId: z.union([z.string().uuid(), z.null()]).optional(),
+    employers: z.array(employerInputSchema).max(20).optional()
+  })
+  .refine((body) => Object.keys(body).length > 0, { message: "At least one field required" });
+
+householdRouter.get("/profile", (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+  const role = req.authUser!.role;
+  const profile = getCurrentUserProfile(householdId, userId, role);
+  if (!profile) {
+    res.status(404).json({ message: "Profile not found" });
+    return;
+  }
+  res.status(200).json({ profile });
+});
+
+householdRouter.patch("/profile", (req: AuthenticatedRequest, res) => {
+  const parsed = profilePatchSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({
+      message: "Invalid payload",
+      issues: parsed.error.flatten()
+    });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+  const role = req.authUser!.role;
+  const out = patchCurrentUserProfile(householdId, userId, role, parsed.data);
+  if (!out.ok) {
+    if (out.code === "EMAIL_CONFLICT") {
+      res.status(409).json({ message: "Email already in use", code: out.code });
+      return;
+    }
+    res.status(404).json({ message: "Profile not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ profile: out.profile });
+});
+
+householdRouter.get("/members", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const members = listHouseholdMembers(householdId);
+  res.status(200).json({ members });
+});
+
+const createMemberSchema = z.object({
+  firstName: z.string().min(1).max(120).optional(),
+  lastName: z.string().max(120).optional(),
+  fullName: z.string().min(1).max(200).optional(),
+  email: z.string().email().nullable().optional(),
+  phoneNumber: z.string().max(30).nullable().optional(),
+  avatarKey: z.string().max(500).nullable().optional(),
+  role: roleSchema,
+  relationship: relationshipSchema
+}).refine((b) => Boolean(b.fullName?.trim() || b.firstName?.trim()), { message: "First name or fullName is required" });
+
+householdRouter.post("/members", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const parsed = createMemberSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({
+      message: "Invalid payload",
+      issues: parsed.error.flatten()
+    });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = createHouseholdMember(householdId, parsed.data);
+  if (!out.ok) {
+    res.status(409).json({ message: "Email already in use", code: out.code });
+    return;
+  }
+  res.status(201).json({ member: out.member });
+});
+
+const patchMemberSchema = z
+  .object({
+    firstName: z.string().min(1).max(120).optional(),
+    lastName: z.string().max(120).optional(),
+    fullName: z.string().min(1).max(200).optional(),
+    email: z.string().email().nullable().optional(),
+    phoneNumber: z.string().max(30).nullable().optional(),
+    avatarKey: z.string().max(500).nullable().optional(),
+    role: roleSchema.optional(),
+    relationship: relationshipSchema.optional()
+  })
+  .refine((body) => Object.keys(body).length > 0, { message: "At least one field required" });
+
+householdRouter.patch("/members/:memberId", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid member id", issues: params.error.flatten() });
+    return;
+  }
+  const body = patchMemberSchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({
+      message: "Invalid payload",
+      issues: body.error.flatten()
+    });
+    return;
+  }
+
+  const householdId = req.authUser!.householdId;
+  const out = patchHouseholdMember(householdId, params.data.memberId, body.data);
+  if (!out.ok) {
+    if (out.code === "EMAIL_CONFLICT") {
+      res.status(409).json({ message: "Email already in use", code: out.code });
+      return;
+    }
+    res.status(404).json({ message: "Member not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ member: out.member });
 });

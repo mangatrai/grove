@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 
+import bcrypt from "bcryptjs";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
@@ -41,6 +42,203 @@ describe("auth and rbac baseline", () => {
     const response = await request(app).get("/auth/me");
 
     expect(response.status).toBe(401);
+  });
+
+  it("blocks member access to household management routes", async () => {
+    db.prepare(
+      `INSERT OR REPLACE INTO app_user
+       (id, household_id, email, role, password_hash, visibility_scope, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).run(
+      "20000000-0000-0000-0000-000000000099",
+      "10000000-0000-0000-0000-000000000001",
+      "member@example.com",
+      "member",
+      "$2a$10$Tg2KSaLf8qB4az.7LdyCvuQclHikol6qgE2ZWMJt5/chBWCfMO6eO",
+      "own"
+    );
+
+    const login = await request(app).post("/auth/login").send({
+      email: "member@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const membersRes = await request(app)
+      .get("/household/members")
+      .set("authorization", `Bearer ${token}`);
+    expect(membersRes.status).toBe(403);
+
+    const patchRes = await request(app)
+      .patch("/household/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({ monthlySavingsTargetUsd: 100 });
+    expect(patchRes.status).toBe(403);
+  });
+});
+
+describe("household profiles and members", () => {
+  async function loginAndGetToken(email = "owner@example.com", password = "ChangeMe123!"): Promise<string> {
+    const response = await request(app).post("/auth/login").send({
+      email,
+      password
+    });
+    expect(response.status).toBe(200);
+    return response.body.token as string;
+  }
+
+  it("reads and updates current profile fields", async () => {
+    const token = await loginAndGetToken();
+
+    const getProfile = await request(app).get("/household/profile").set("authorization", `Bearer ${token}`);
+    expect(getProfile.status).toBe(200);
+    expect(getProfile.body.profile).toMatchObject({
+      id: expect.any(String),
+      householdId: "10000000-0000-0000-0000-000000000001",
+      role: expect.any(String),
+      relationship: expect.any(String)
+    });
+
+    const patchProfile = await request(app)
+      .patch("/household/profile")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        fullName: "Owner Test Name",
+        phoneNumber: "+1-555-0100",
+        avatarKey: "avatars/owner-test.png"
+      });
+    expect(patchProfile.status).toBe(200);
+    expect(patchProfile.body.profile.fullName).toBe("Owner Test Name");
+    expect(patchProfile.body.profile.phoneNumber).toBe("+1-555-0100");
+    expect(patchProfile.body.profile.avatarKey).toBe("avatars/owner-test.png");
+  });
+
+  it("lists, creates and updates members and enforces household scope", async () => {
+    const token = await loginAndGetToken();
+
+    const listBefore = await request(app).get("/household/members").set("authorization", `Bearer ${token}`);
+    expect(listBefore.status).toBe(200);
+    expect(Array.isArray(listBefore.body.members)).toBe(true);
+    const initialCount = listBefore.body.members.length as number;
+
+    const createMember = await request(app)
+      .post("/household/members")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        fullName: "Kid One",
+        email: "kid.one@example.com",
+        phoneNumber: "555-0199",
+        avatarKey: "avatars/kid-1.png",
+        role: "member",
+        relationship: "child"
+      });
+    expect(createMember.status).toBe(201);
+    const createdMemberId = createMember.body.member.id as string;
+    expect(createMember.body.member.fullName).toBe("Kid One");
+    expect(createMember.body.member.relationship).toBe("child");
+
+    const listAfter = await request(app).get("/household/members").set("authorization", `Bearer ${token}`);
+    expect(listAfter.status).toBe(200);
+    expect(listAfter.body.members.length).toBe(initialCount + 1);
+
+    const patchMember = await request(app)
+      .patch(`/household/members/${createdMemberId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        fullName: "Kid One Updated",
+        role: "head",
+        relationship: "other"
+      });
+    expect(patchMember.status).toBe(200);
+    expect(patchMember.body.member.fullName).toBe("Kid One Updated");
+    expect(patchMember.body.member.role).toBe("head");
+    expect(patchMember.body.member.relationship).toBe("other");
+
+    const otherHouseholdId = crypto.randomUUID();
+    const otherProfileId = crypto.randomUUID();
+    const otherMembershipId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO household (id, name, created_at)
+       VALUES (?, 'Other household for profile scope', CURRENT_TIMESTAMP)`
+    ).run(otherHouseholdId);
+    db.prepare(
+      `INSERT INTO person_profile (id, household_id, full_name, email)
+       VALUES (?, ?, 'Other Member', 'other.member@example.com')`
+    ).run(otherProfileId, otherHouseholdId);
+    db.prepare(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+       VALUES (?, ?, ?, 'member', 'other')`
+    ).run(otherMembershipId, otherHouseholdId, otherProfileId);
+
+    const crossHouseholdPatch = await request(app)
+      .patch(`/household/members/${otherProfileId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ fullName: "Should Not Update" });
+    expect(crossHouseholdPatch.status).toBe(404);
+  });
+});
+
+describe("auth change password", () => {
+  it("changes password, rejects invalid current password, and supports login with new password", async () => {
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const userId = crypto.randomUUID();
+    const profileId = crypto.randomUUID();
+    const membershipId = crypto.randomUUID();
+    const email = `change-password-${crypto.randomUUID()}@example.com`;
+    const oldPassword = "TempOldPass123!";
+    const newPassword = "TempNewPass456!";
+
+    db.prepare(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope, created_at)
+       VALUES (?, ?, ?, 'member', ?, 'own', CURRENT_TIMESTAMP)`
+    ).run(userId, householdId, email, bcrypt.hashSync(oldPassword, 10));
+    db.prepare(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, email)
+       VALUES (?, ?, ?, 'Temp User', ?)`
+    ).run(profileId, householdId, userId, email);
+    db.prepare(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+       VALUES (?, ?, ?, 'member', 'other')`
+    ).run(membershipId, householdId, profileId);
+
+    const loginOld = await request(app).post("/auth/login").send({
+      email,
+      password: oldPassword
+    });
+    expect(loginOld.status).toBe(200);
+    const token = loginOld.body.token as string;
+
+    const badCurrent = await request(app)
+      .post("/auth/change-password")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        currentPassword: "WrongCurrent123!",
+        newPassword
+      });
+    expect(badCurrent.status).toBe(401);
+
+    const changeOk = await request(app)
+      .post("/auth/change-password")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        currentPassword: oldPassword,
+        newPassword
+      });
+    expect(changeOk.status).toBe(200);
+
+    const loginOldAfter = await request(app).post("/auth/login").send({
+      email,
+      password: oldPassword
+    });
+    expect(loginOldAfter.status).toBe(401);
+
+    const loginNewAfter = await request(app).post("/auth/login").send({
+      email,
+      password: newPassword
+    });
+    expect(loginNewAfter.status).toBe(200);
+    expect(typeof loginNewAfter.body.token).toBe("string");
   });
 });
 
@@ -2726,7 +2924,7 @@ describe("household settings", () => {
     expect(p2.body.monthlySavingsTargetUsd).toBeNull();
   });
 
-  it("PATCH salary deposit account and employers (income onboarding)", async () => {
+  it("PATCH profile: salary deposit account and employers (person_profile)", async () => {
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",
       password: "ChangeMe123!"
@@ -2735,25 +2933,31 @@ describe("household settings", () => {
     const checking = "40000000-0000-0000-0000-000000000001";
 
     const p = await request(app)
-      .patch("/household/settings")
+      .patch("/household/profile")
       .set("authorization", `Bearer ${token}`)
       .send({
         salaryDepositFinancialAccountId: checking,
         employers: [{ displayName: "Test Employer", parserProfileId: "ibm_pay_contributions_pdf", parserMapping: {} }]
       });
     expect(p.status).toBe(200);
-    expect(p.body.salaryDepositFinancialAccountId).toBe(checking);
-    expect(Array.isArray(p.body.employers)).toBe(true);
-    expect(p.body.employers[0].displayName).toBe("Test Employer");
-    expect(p.body.employers[0].parserProfileId).toBe("ibm_pay_contributions_pdf");
+
+    const settings = await request(app).get("/household/settings").set("authorization", `Bearer ${token}`);
+    expect(settings.status).toBe(200);
+    expect(settings.body.salaryDepositFinancialAccountId).toBe(checking);
+    expect(Array.isArray(settings.body.employers)).toBe(true);
+    expect(settings.body.employers[0].displayName).toBe("Test Employer");
+    expect(settings.body.employers[0].parserProfileId).toBe("ibm_pay_contributions_pdf");
 
     const clear = await request(app)
-      .patch("/household/settings")
+      .patch("/household/profile")
       .set("authorization", `Bearer ${token}`)
       .send({ salaryDepositFinancialAccountId: null, employers: [] });
     expect(clear.status).toBe(200);
-    expect(clear.body.salaryDepositFinancialAccountId).toBeNull();
-    expect(clear.body.employers).toEqual([]);
+
+    const after = await request(app).get("/household/settings").set("authorization", `Bearer ${token}`);
+    expect(after.status).toBe(200);
+    expect(after.body.salaryDepositFinancialAccountId).toBeNull();
+    expect(after.body.employers).toEqual([]);
   });
 });
 

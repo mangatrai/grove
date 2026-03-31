@@ -1,29 +1,53 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
+import { db } from "../../db/sqlite.js";
 import { env } from "../../config/env.js";
 import type { AuthUser, Role } from "./types.js";
 
-interface InMemoryUser extends AuthUser {
+interface DbLoginUser extends AuthUser {
   email: string;
   passwordHash: string;
 }
 
-const seededUsers: InMemoryUser[] = [];
+const getUserByEmailStmt = db.prepare<[string], {
+  id: string;
+  household_id: string;
+  role: Role;
+  email: string;
+  password_hash: string;
+}>(`
+  SELECT id, household_id, role, email, password_hash
+  FROM app_user
+  WHERE lower(email) = lower(?)
+  LIMIT 1
+`);
 
-function ensureSeededUser(): void {
-  if (seededUsers.length > 0) {
-    return;
+const getUserHashByIdStmt = db.prepare<[string], { password_hash: string }>(`
+  SELECT password_hash
+  FROM app_user
+  WHERE id = ?
+  LIMIT 1
+`);
+
+const updateUserPasswordStmt = db.prepare<[string, string]>(`
+  UPDATE app_user
+  SET password_hash = ?
+  WHERE id = ?
+`);
+
+function findUserByEmail(email: string): DbLoginUser | null {
+  const row = getUserByEmailStmt.get(email);
+  if (!row) {
+    return null;
   }
-
-  const passwordHash = bcrypt.hashSync(env.SEED_OWNER_PASSWORD, 10);
-  seededUsers.push({
-    userId: "20000000-0000-0000-0000-000000000001",
-    householdId: "10000000-0000-0000-0000-000000000001",
-    role: "owner",
-    email: env.SEED_OWNER_EMAIL,
-    passwordHash
-  });
+  return {
+    userId: row.id,
+    householdId: row.household_id,
+    role: row.role,
+    email: row.email,
+    passwordHash: row.password_hash
+  };
 }
 
 export interface LoginPayload {
@@ -32,9 +56,7 @@ export interface LoginPayload {
 }
 
 export function login(payload: LoginPayload): string | null {
-  ensureSeededUser();
-
-  const user = seededUsers.find((candidate) => candidate.email === payload.email);
+  const user = findUserByEmail(payload.email);
   if (!user) {
     return null;
   }
@@ -71,4 +93,22 @@ export function verifyToken(token: string): AuthUser | null {
   } catch {
     return null;
   }
+}
+
+export function changePassword(
+  userId: string,
+  currentPassword: string,
+  newPassword: string
+): { ok: true } | { ok: false; code: "INVALID_CURRENT_PASSWORD" | "NOT_FOUND" } {
+  const row = getUserHashByIdStmt.get(userId);
+  if (!row) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  const matches = bcrypt.compareSync(currentPassword, row.password_hash);
+  if (!matches) {
+    return { ok: false, code: "INVALID_CURRENT_PASSWORD" };
+  }
+  const nextHash = bcrypt.hashSync(newPassword, 10);
+  updateUserPasswordStmt.run(nextHash, userId);
+  return { ok: true };
 }

@@ -51,7 +51,7 @@ payslipRouter.post("/sniff", upload.single("file"), async (req: AuthenticatedReq
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = await sniffPayslipPdfBuffer(householdId, file.buffer);
+  const out = await sniffPayslipPdfBuffer(householdId, req.authUser!.userId, file.buffer);
   if (!out.ok) {
     res.status(422).json({
       message:
@@ -87,7 +87,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       ? (req.body as { employerId: string }).employerId
       : undefined;
 
-  const resolved = resolvePayslipUploadContext(householdId, employerIdRaw);
+  const resolved = resolvePayslipUploadContext(householdId, req.authUser!.userId, employerIdRaw);
   if (!resolved.ok) {
     res.status(400).json({
       message: resolved.message,

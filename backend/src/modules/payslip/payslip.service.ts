@@ -9,7 +9,7 @@ export type PayslipSnapshotRow = {
   fileName: string;
   fileChecksum: string;
   parserProfileId: string;
-  /** Household employer row (`employers_json`) when set. */
+  /** Employer id from user profile `employers_json` when set. */
   employerId: string | null;
   importFileId: string | null;
   payPeriodStart: string | null;

@@ -206,6 +206,7 @@ importsRouter.patch(
       req.params.sessionId,
       req.params.fileId,
       req.authUser!.householdId,
+      req.authUser!.userId,
       {
         financialAccountId: parsed.data.financialAccountId,
         parserProfileId: parsed.data.parserProfileId,
@@ -266,6 +267,7 @@ importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedReques
   const result = await parseSessionImportFiles(
     req.params.sessionId,
     req.authUser!.householdId,
+    req.authUser!.userId,
     {
       mapping: parsed.data.mapping as ParseColumnMapping | undefined,
       sheetName: parsed.data.sheetName

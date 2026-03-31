@@ -294,7 +294,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
   - Core KPIs visible by household with period selector.
 
 ### Planning note — Household profile & expectations
-**PRD §13 Phase D** and **Epic 11** Story **11.4** own the **Settings** route and **Household** tab plan. **Expected salary** and other “planning” fields are **not** API-backed yet; add stories when schema and endpoints exist. **Monthly savings target** ships today via **`PATCH /household/settings`** and may stay **duplicated** on **Home** (quick adjust) per §13.
+**PRD §13 Phase D** and **Epic 11** Story **11.4** own the **Settings** route and **Household** tab plan. **Salary / employers** are API-backed on **`GET/PATCH /household/profile`** (person-owned). **Monthly savings target** ships via **`PATCH /household/settings`** and may stay **duplicated** on **Home** (quick adjust) per §13.
 
 ### Story 7.2 - Category and trend reporting
 **Status: 🟡 Partial (2026-04-02).** **Depends on Epic 5.1** (categories on ledger rows); **Story 5.3** adds **roll-up / grouping** in reports (parent vs leaf) and clearer drill-down labels. **Delivered:** category-backed aggregates + charts on the home dashboard via **`categoryBreakdown`**. **Delivered:** click-through/drill-down into the ledger from “By category (period)” and dashboard charts/tables (pre-filtered by `categoryId` and the dashboard’s date window, optionally `accountId`). **Delivered:** **period comparisons** — **`GET /reports/cash-summary`** returns **`comparison.previousPeriod`** and (when applicable) **`comparison.yearOverYear`** with household KPI deltas; the home dashboard surfaces these as compact delta chips (see **`docs/API_CASH_SUMMARY.md`**). Comparison semantics: **month** → previous calendar month + same month last year; **YTD** → prior-year YTD; **rolling_30 / rolling_90** → immediately preceding same-length window; **custom** inclusive **`dateFrom` / `dateTo`** (**`CR-015`**, max **366** days) → same-length prior window. **Delivered:** **`byCategory[]`** prior-window totals and deltas (`previousInflows` / `previousOutflows` / `previousNet`, `delta*`) when **`categoryBreakdown=true`** (**`CR-029`**); dashboard “By category” table shows per-category deltas alongside household KPI chips. **Still not:** arbitrary ranges **beyond** the **366-day** cap (and other KPI / safe-to-spend polish noted in **`CHECKPOINT`**), and richer **hierarchical** presentation/labels in `byCategory` beyond **`categoryRollup`** (`leaf` \| `parent`) until **Story 5.3** lands.
@@ -429,6 +429,7 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 **Status: 🟡 Partial (2026-03-27).** **`/settings`** + tabs + Household savings target form (**UX-007**).  
 - Tasks:
   - **`/settings`** (or equivalent) from user menu; **sub-tabs:** **Profile**, **Household**, **Accounts**, **Notifications**, **Security** — render only tabs with backing API; others show honest empty/placeholder state. (M) 🟡
+  - Enforce RBAC for Household management: **owner/admin edit**, members hidden from Household tab; backend rejects member mutation/list endpoints with `403`. (S)
   - **Household:** surface **`monthly_savings_target_usd`** (and future fields); allow **dual entry** with Home slider per §13. (M) 🟡
   - **Revision (2026-04):** align Settings with separate identity model (`user_account` + `person_profile`) and move employer ownership from household-level shape toward person ownership in follow-on epics.
 - Acceptance:
@@ -469,8 +470,8 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 ### Story 12.5 - Employer ownership refactor
 - Tasks:
-  - Move employer semantics from household-level settings toward person-owned profile settings. (M)
-  - Keep temporary compatibility layer for existing household employer settings until migration is complete. (M)
+  - Move employer semantics from household-level settings toward person-owned profile settings. (M) ✅
+  - Remove household-level write path and legacy read fallback for salary/employers (**CR-040**). (S)
 - Acceptance:
   - Employer/parser selection is person-specific and no longer modeled as a generic household-wide list.
 

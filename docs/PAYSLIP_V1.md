@@ -1,7 +1,7 @@
 # Payslip module — product intent and v1 scope
 
 **Epic alignment:** **Epic 3 — Story 3.3** (payslip / paystub), implemented in **phases**.  
-**Current priority (March–April 2026):** payslip **summary parse + list + detail** (**`GET /payslips`**, **`GET /payslips/:id`**, **`/payslips/:payslipId`**) shipped (**CR-031**). **Household settings** (**`GET/PATCH /household/settings`**, migration **`0017`**) — optional **salary deposit account** + **employers** with per-employer **parser** (**IBM** vs **ADP** placeholder); **`0018`** stores **`employer_id`** on snapshot/import file (**CR-037**). **`POST /payslips/sniff`** suggests parser from PDF text; multi-employer flows require choosing employer on upload/import. **Next:** real ADP parse; bank-deposit link remains out of scope for v1.
+**Current priority (March–April 2026):** payslip **summary parse + list + detail** (**`GET /payslips`**, **`GET /payslips/:id`**, **`/payslips/:payslipId`**) shipped (**CR-031**). **Income onboarding** — **`GET /household/settings`** still returns salary + employers for the signed-in user (stored on **`person_profile`** after migration **`0020`**; edit via **`PATCH /household/profile`** — see **`docs/API_HOUSEHOLD_PROFILE.md`**). Legacy **`household.employers_json`** is no longer written. **`0018`** stores **`employer_id`** on snapshot/import file (**CR-037**). **`POST /payslips/sniff`** suggests parser from PDF text; multi-employer flows require choosing employer on upload/import. **Next:** real ADP parse; bank-deposit link remains out of scope for v1.
 
 ---
 
