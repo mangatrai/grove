@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
@@ -95,6 +96,92 @@ type AccountRow = {
 };
 
 type OwnerProfileOption = { id: string; label: string };
+type BelongsToFilterValue = "" | "household" | `person:${string}`;
+
+function parseBelongsToFilterValue(value: string): {
+  ownerScope?: "household" | "person";
+  ownerPersonProfileId?: string;
+} {
+  if (value === "household") {
+    return { ownerScope: "household" };
+  }
+  if (value.startsWith("person:")) {
+    const id = value.slice("person:".length);
+    if (id) {
+      return { ownerScope: "person", ownerPersonProfileId: id };
+    }
+  }
+  return {};
+}
+
+function formatBelongsToLabel(label: string): string {
+  return `Household > ${label}`;
+}
+
+function buildBelongsToGroups(ownerProfiles: OwnerProfileOption[]): HierarchicalPickerGroup[] {
+  return [
+    { group: "Household", items: [{ value: "household", label: "Household", searchText: "household" }] },
+    {
+      group: "Members",
+      items: ownerProfiles.map((p) => ({
+        value: `person:${p.id}`,
+        label: formatBelongsToLabel(p.label),
+        searchText: p.label
+      }))
+    }
+  ];
+}
+
+function buildAccountGroups(accounts: AccountRow[]): HierarchicalPickerGroup[] {
+  const byInstitution = new Map<string, AccountRow[]>();
+  for (const a of accounts) {
+    byInstitution.set(a.institution, [...(byInstitution.get(a.institution) ?? []), a]);
+  }
+  return [...byInstitution.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([institution, rows]) => ({
+      group: institution,
+      items: rows
+        .sort((a, b) => formatAccountForSelect(a).localeCompare(formatAccountForSelect(b)))
+        .map((a) => ({
+          value: a.id,
+          label: formatAccountForSelect(a),
+          searchText: `${a.institution} ${a.type} ${a.account_mask ?? ""}`
+        }))
+    }));
+}
+
+function buildCategoryGroups(categories: CategoryOption[]): HierarchicalPickerGroup[] {
+  const parents = categories.filter((c) => c.parentId === null).sort((a, b) => a.name.localeCompare(b.name));
+  const children = categories.filter((c) => c.parentId !== null).sort((a, b) => a.name.localeCompare(b.name));
+  const byParent = new Map<string, CategoryOption[]>();
+  for (const c of children) {
+    byParent.set(c.parentId!, [...(byParent.get(c.parentId!) ?? []), c]);
+  }
+  return [
+    {
+      group: "General",
+      items: [
+        { value: "__any__", label: "Any", searchText: "any" },
+        { value: "__uncat__", label: "Uncategorized only", searchText: "uncategorized" }
+      ]
+    },
+    {
+      group: "Top-level categories",
+      items: parents.map((p) => ({ value: p.id, label: p.name, searchText: p.name }))
+    },
+    {
+      group: "Subcategories",
+      items: parents.flatMap((p) =>
+        (byParent.get(p.id) ?? []).map((c) => ({
+          value: c.id,
+          label: `${p.name} > ${c.name}`,
+          searchText: `${p.name} ${c.name}`
+        }))
+      )
+    }
+  ];
+}
 
 function localDateStr(d = new Date()): string {
   const y = d.getFullYear();
@@ -172,6 +259,12 @@ export function TransactionsPage() {
   const accountFilter = searchParams.get("accountId")?.trim() || null;
   const ownerScopeFilter = (searchParams.get("ownerScope")?.trim() as "household" | "person" | null) || null;
   const ownerPersonProfileFilter = searchParams.get("ownerPersonProfileId")?.trim() || null;
+  const belongsToFilterValue: BelongsToFilterValue =
+    ownerScopeFilter === "person" && ownerPersonProfileFilter
+      ? (`person:${ownerPersonProfileFilter}` as BelongsToFilterValue)
+      : ownerScopeFilter === "household"
+        ? "household"
+        : "";
   const returnTo = searchParams.get("returnTo")?.trim() || null;
   const fromDashboard = searchParams.get("fromDashboard") === "true";
   const pageLimit = Math.min(Math.max(Number(searchParams.get("limit") || 100), 1), 200);
@@ -742,9 +835,9 @@ export function TransactionsPage() {
     return account ? formatAccountForSelect(account) : accountFilter;
   }, [accounts, accountFilter]);
 
-  const categorySelectOptions = useMemo(() => {
-    return [...categories].sort((a, b) => a.name.localeCompare(b.name));
-  }, [categories]);
+  const accountGroups = useMemo(() => buildAccountGroups(accounts), [accounts]);
+  const belongsToGroups = useMemo(() => buildBelongsToGroups(ownerProfiles), [ownerProfiles]);
+  const categoryGroups = useMemo(() => buildCategoryGroups(categories), [categories]);
 
   const hasLedgerFilters = Boolean(
     categoryFilter ||
@@ -998,27 +1091,20 @@ export function TransactionsPage() {
           </label>
           <label className="transactions-toolbar__field">
             <span className="transactions-toolbar__label">Account</span>
-            <select
-              value={accountFilter ?? ""}
-              onChange={(e) => {
+            <HierarchicalSearchPicker
+              value={accountFilter ?? null}
+              onChange={(v) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
-                  const v = e.target.value;
-                  if (!v) {
-                    n.delete("accountId");
-                  } else {
-                    n.set("accountId", v);
-                  }
-                });
-              }}
-            >
-              <option value="">All accounts</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {formatAccountForSelect(a)}
-                </option>
-              ))}
-            </select>
+                  if (!v) n.delete("accountId");
+                  else n.set("accountId", v);
+                })
+              }
+              groups={accountGroups}
+              placeholder="All accounts"
+              ariaLabel="Filter by account"
+              clearable
+            />
           </label>
           <label className="transactions-toolbar__field">
             <span className="transactions-toolbar__label">From</span>
@@ -1057,82 +1143,43 @@ export function TransactionsPage() {
             />
           </label>
           <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">Owner scope</span>
-            <select
-              value={ownerScopeFilter ?? ""}
-              onChange={(e) => {
+            <span className="transactions-toolbar__label">Belongs-to</span>
+            <HierarchicalSearchPicker
+              value={belongsToFilterValue || null}
+              onChange={(v) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
-                  const v = e.target.value;
-                  if (!v) {
-                    n.delete("ownerScope");
-                    n.delete("ownerPersonProfileId");
-                  } else {
-                    n.set("ownerScope", v);
-                    if (v === "household") {
-                      n.delete("ownerPersonProfileId");
-                    }
-                  }
-                });
-              }}
-            >
-              <option value="">All owners</option>
-              <option value="household">Household</option>
-              <option value="person">Person</option>
-            </select>
+                  const parsed = parseBelongsToFilterValue(v ?? "");
+                  n.delete("ownerScope");
+                  n.delete("ownerPersonProfileId");
+                  if (parsed.ownerScope) n.set("ownerScope", parsed.ownerScope);
+                  if (parsed.ownerPersonProfileId) n.set("ownerPersonProfileId", parsed.ownerPersonProfileId);
+                })
+              }
+              groups={belongsToGroups}
+              placeholder="All household activity"
+              ariaLabel="Filter by belongs-to"
+              clearable
+            />
           </label>
-          {ownerScopeFilter === "person" ? (
-            <label className="transactions-toolbar__field">
-              <span className="transactions-toolbar__label">Owner person</span>
-              <select
-                value={ownerPersonProfileFilter ?? ""}
-                onChange={(e) => {
-                  mergeParams((n) => {
-                    n.set("offset", "0");
-                    const v = e.target.value;
-                    if (!v) {
-                      n.delete("ownerPersonProfileId");
-                    } else {
-                      n.set("ownerPersonProfileId", v);
-                    }
-                  });
-                }}
-              >
-                <option value="">All people</option>
-                {ownerProfiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
           <label className="transactions-toolbar__field">
             <span className="transactions-toolbar__label">Category</span>
-            <select
-              value={categorySelectValue}
-              onChange={(e) => {
-                const v = e.target.value;
+            <HierarchicalSearchPicker
+              value={categorySelectValue || "__any__"}
+              onChange={(v) => {
+                const next = v ?? "__any__";
                 mergeParams((n) => {
                   n.set("offset", "0");
                   n.delete("categoryId");
                   n.delete("uncategorizedOnly");
-                  if (v === "__uncat__") {
-                    n.set("uncategorizedOnly", "true");
-                  } else if (v) {
-                    n.set("categoryId", v);
-                  }
+                  if (next === "__uncat__") n.set("uncategorizedOnly", "true");
+                  else if (next && next !== "__any__") n.set("categoryId", next);
                 });
               }}
-            >
-              <option value="">Any</option>
-              <option value="__uncat__">Uncategorized only</option>
-              {categorySelectOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+              groups={categoryGroups}
+              placeholder="Any"
+              ariaLabel="Filter by category"
+            />
           </label>
           <div className="transactions-toolbar__actions">
             <button type="button" className="button-primary" onClick={openAddModal}>
@@ -1230,14 +1277,14 @@ export function TransactionsPage() {
             {ownerScopeFilter ? (
               <>
                 {" "}
-                [owner scope: <code>{ownerScopeFilter}</code>]
+                [belongs-to: <code>{ownerScopeFilter}</code>]
               </>
             ) : null}
             {ownerPersonProfileFilter ? (
               <>
                 {" "}
-                [owner:{" "}
-                <code>{ownerProfiles.find((p) => p.id === ownerPersonProfileFilter)?.label ?? ownerPersonProfileFilter}</code>]
+                [belongs-to:{" "}
+                <code>{lookupLabel(belongsToGroups, `person:${ownerPersonProfileFilter}`) ?? ownerPersonProfileFilter}</code>]
               </>
             ) : null}
             {amountMinUrl !== "" ? (
@@ -1418,7 +1465,7 @@ export function TransactionsPage() {
                       <th>Description</th>
                       {needsReviewTab ? <th>Why</th> : null}
                       {needsReviewTab ? <th>Session</th> : null}
-                      <th>Owner</th>
+                      <th>Belongs-to</th>
                       <th>Category</th>
                     </tr>
                   </thead>
@@ -1488,25 +1535,21 @@ export function TransactionsPage() {
                               </td>
                             ) : null}
                             <td style={{ minWidth: "12rem" }}>
-                              <select
-                                value={t.ownerScope === "household" ? "household" : t.ownerPersonProfileId ?? ""}
-                                disabled={savingId === t.id || savingBulk}
-                                onChange={(e) => {
-                                  const v = e.target.value;
-                                  if (v === "household") {
+                              <HierarchicalSearchPicker
+                                value={t.ownerScope === "household" ? "household" : (`person:${t.ownerPersonProfileId ?? ""}` as const)}
+                                onChange={(v) => {
+                                  const parsed = parseBelongsToFilterValue(v ?? "household");
+                                  if (parsed.ownerScope === "household") {
                                     void updateCategory(t.id, t.categoryId, "household", null);
-                                  } else {
-                                    void updateCategory(t.id, t.categoryId, "person", v);
+                                  } else if (parsed.ownerPersonProfileId) {
+                                    void updateCategory(t.id, t.categoryId, "person", parsed.ownerPersonProfileId);
                                   }
                                 }}
-                              >
-                                <option value="household">Household</option>
-                                {ownerProfiles.map((p) => (
-                                  <option key={p.id} value={p.id}>
-                                    {p.label}
-                                  </option>
-                                ))}
-                              </select>
+                                groups={belongsToGroups}
+                                placeholder="Belongs-to"
+                                ariaLabel={`Belongs-to for ${desc}`}
+                                disabled={savingId === t.id || savingBulk}
+                              />
                             </td>
                             <td>
                               <LedgerCategoryPicker
