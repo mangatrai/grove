@@ -114,7 +114,7 @@ export function PayslipsPage() {
       return;
     }
     if (employers.length > 1 && !employerId) {
-      setUploadError("Choose which employer this payslip is from (Settings → Household).");
+      setUploadError("Choose which employer this payslip is from (Settings → Profile).");
       return;
     }
     setUploadError(null);
@@ -160,7 +160,7 @@ export function PayslipsPage() {
       <div className="card">
         <h1>Payslips</h1>
         <p className="muted">
-          Upload employer pay summaries — parser is chosen from <strong>Settings → Household → Employers</strong>{" "}
+          Upload employer pay summaries — parser is chosen from <strong>Settings → Profile → Employer Setup</strong>{" "}
           (IBM supported; ADP registered but not parsed yet). Optional <strong>sniff</strong> reads PDF text to suggest
           employer/parser. See <Link to="/transactions">Transactions</Link> for bank cash;{" "}
           <code>docs/PAYSLIP_V1.md</code>.

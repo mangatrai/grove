@@ -484,6 +484,20 @@ export function ImportWorkspacePage() {
   }, [sessionSummary]);
 
   const allFilesBound = files.length > 0 && files.every((f) => f.financial_account_id && f.parser_profile_id);
+  const filesMissingEmployerSelection =
+    householdEmployers.length > 1
+      ? files
+          .filter((f) => {
+            const profileForRow = drafts[f.id]?.profileId || f.parser_profile_id || "";
+            if (!PAYSLIP_PARSER_IDS.has(profileForRow)) {
+              return false;
+            }
+            const selectedEmployerId = drafts[f.id]?.employerId || f.employer_id || "";
+            return selectedEmployerId.trim().length === 0;
+          })
+          .map((f) => f.file_name)
+      : [];
+  const allFilesReady = allFilesBound && filesMissingEmployerSelection.length === 0;
 
   async function runParse() {
     if (!sessionId) {
@@ -717,7 +731,7 @@ export function ImportWorkspacePage() {
           For each file, pick the account it belongs to. The menu shows the institution, account type, and last four
           digits when available so you can tell accounts apart. We detect the file format automatically — you
           don&apos;t choose parsers unless you use advanced mode.{" "}
-          <strong>Employer payslip PDFs:</strong> use <strong>Settings → Household</strong> to set your{" "}
+          <strong>Employer payslip PDFs:</strong> use <strong>Settings → Profile</strong> to set your{" "}
           <strong>salary deposit</strong> account and at least one <strong>employer</strong> — then choosing that bank
           account for a PDF can suggest the employer payslip parser even when the file name is generic (e.g.{" "}
           <code>download.pdf</code>). Or use the <strong>Employer payslip (IBM) — placeholder</strong> account so any
@@ -973,9 +987,15 @@ export function ImportWorkspacePage() {
         <div className="row">
           <button
             type="button"
-            disabled={!allFilesBound || pipelineBusy}
+            disabled={!allFilesReady || pipelineBusy}
             onClick={() => void runImport()}
-            title={!allFilesBound ? "Each file needs an account and format saved" : undefined}
+            title={
+              !allFilesBound
+                ? "Each file needs an account and format saved"
+                : filesMissingEmployerSelection.length > 0
+                  ? "Choose employer for each payslip file"
+                  : undefined
+            }
           >
             {pipelineBusy ? "Working…" : "Run import"}
           </button>
@@ -985,12 +1005,17 @@ export function ImportWorkspacePage() {
             Choose an account for every file first. Formats save automatically when we can detect them.
           </p>
         ) : null}
+        {filesMissingEmployerSelection.length > 0 ? (
+          <p className="muted" style={{ marginTop: "0.5rem" }}>
+            Choose employer for payslip file(s) before running import: {filesMissingEmployerSelection.join(", ")}.
+          </p>
+        ) : null}
         <details style={{ marginTop: "1rem" }}>
           <summary className="muted" style={{ cursor: "pointer" }}>
             Separate steps (parse only / canonicalize only)
           </summary>
           <div className="row" style={{ marginTop: "0.75rem" }}>
-            <button type="button" className="secondary" disabled={!allFilesBound || pipelineBusy} onClick={() => void runParse()}>
+            <button type="button" className="secondary" disabled={!allFilesReady || pipelineBusy} onClick={() => void runParse()}>
               Parse session
             </button>
             <button type="button" className="secondary" disabled={pipelineBusy} onClick={() => void runCanonicalize()}>
