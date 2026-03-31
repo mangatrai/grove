@@ -270,6 +270,22 @@ export function DashboardPage() {
   const customRangeDirty =
     preset === "custom" &&
     (customDraftFrom !== customAppliedFrom || customDraftTo !== customAppliedTo);
+  const customRangeValidationError = useMemo(() => {
+    if (preset !== "custom") {
+      return null;
+    }
+    if (!customDraftFrom || !customDraftTo) {
+      return "Choose both custom range dates.";
+    }
+    if (customDraftFrom > customDraftTo) {
+      return "Custom range start must be on or before end date.";
+    }
+    const days = inclusiveCalendarDaysPreview(customDraftFrom, customDraftTo);
+    if (days > 366) {
+      return "Custom range cannot exceed 366 days.";
+    }
+    return null;
+  }, [preset, customDraftFrom, customDraftTo]);
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -617,8 +633,11 @@ export function DashboardPage() {
               </label>
               <button
                 type="button"
-                disabled={!customRangeDirty}
+                disabled={!customRangeDirty || customRangeValidationError !== null}
                 onClick={() => {
+                  if (customRangeValidationError) {
+                    return;
+                  }
                   setCustomAppliedFrom(customDraftFrom);
                   setCustomAppliedTo(customDraftTo);
                 }}
@@ -640,10 +659,17 @@ export function DashboardPage() {
         </div>
 
         {preset === "custom" ? (
-          <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.88rem" }}>
-            Custom range is limited to <strong>366 days</strong> (inclusive) per request — long analysis windows need
-            multiple exports or presets for now.
-          </p>
+          <>
+            <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.88rem" }}>
+              Custom range is limited to <strong>366 days</strong> (inclusive) per request — long analysis windows need
+              multiple exports or presets for now.
+            </p>
+            {customRangeValidationError ? (
+              <p className="error" style={{ marginTop: "0.35rem", fontSize: "0.86rem" }}>
+                {customRangeValidationError}
+              </p>
+            ) : null}
+          </>
         ) : null}
 
         {error ? <p className="error">{error}</p> : null}

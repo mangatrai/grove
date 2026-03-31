@@ -51,6 +51,8 @@ export interface LedgerListFilters {
   uncategorizedOnly?: boolean;
   dateFrom?: string;
   dateTo?: string;
+  /** Restrict to rows linked to one import file via `source_ref = raw:<id>` chain. */
+  fileId?: string;
   accountId?: string;
   /** Full-text search on merchant + memo via FTS5 (`ledger_search_fts`), BM25-ranked when non-empty. */
   search?: string;
@@ -220,6 +222,12 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
   if (filters.dateTo) {
     parts.push("tc.txn_date <= ?");
     params.push(filters.dateTo);
+  }
+  if (filters.fileId) {
+    parts.push(
+      "EXISTS (SELECT 1 FROM transaction_raw trf INNER JOIN import_file ff ON ff.id = trf.file_id WHERE tc.source_ref = ('raw:' || trf.id) AND ff.id = ?)"
+    );
+    params.push(filters.fileId);
   }
   if (filters.accountId) {
     parts.push("tc.account_id = ?");

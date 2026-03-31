@@ -23,6 +23,7 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
   offset: z.coerce.number().int().min(0).optional().default(0),
   sessionId: z.string().uuid().optional(),
+  fileId: z.string().uuid().optional(),
   accountId: z.string().uuid().optional(),
   categoryId: z.string().uuid().optional(),
   uncategorizedOnly: z
@@ -79,6 +80,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     limit,
     offset,
     sessionId,
+    fileId,
     accountId,
     categoryId,
     uncategorizedOnly,
@@ -124,6 +126,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     amax !== undefined ||
     dateFrom ||
     dateTo ||
+    fileId ||
     accountId
       ? {
           categoryId: categoryId ?? undefined,
@@ -135,6 +138,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
           amountMax: amax,
           dateFrom: dateFrom ?? undefined,
           dateTo: dateTo ?? undefined,
+          fileId: fileId ?? undefined,
           accountId: accountId ?? undefined
         }
       : undefined;
