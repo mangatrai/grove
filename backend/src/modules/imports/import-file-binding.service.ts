@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { db } from "../../db/sqlite.js";
 
+import { findEmployerById, employerParserProfileId } from "../payslip/payslip-employer-resolve.service.js";
 import { isParserProfileId } from "./profiles/profile-ids.js";
+
+const PAYSLIP_PARSER_PROFILES = new Set(["ibm_pay_contributions_pdf", "adp_payslip_pdf"]);
 
 const PAYSLIP_PLACEHOLDER_INSTITUTION = "Employer payslip (IBM) — placeholder";
 
@@ -30,7 +33,9 @@ export function ensurePayslipImportPlaceholderAccount(householdId: string, owner
 export type BindingErrorCode =
   | "NOT_FOUND"
   | "INVALID_ACCOUNT"
-  | "INVALID_PROFILE";
+  | "INVALID_PROFILE"
+  | "INVALID_EMPLOYER"
+  | "EMPLOYER_PARSER_MISMATCH";
 
 export interface BindingFailure {
   ok: false;
@@ -53,7 +58,7 @@ export function updateImportFileBinding(
   sessionId: string,
   fileId: string,
   householdId: string,
-  input: { financialAccountId: string; parserProfileId: string }
+  input: { financialAccountId: string; parserProfileId: string; employerId?: string | null }
 ): BindingSuccess | BindingFailure {
   const session = db
     .prepare(`SELECT id FROM import_session WHERE id = ? AND household_id = ?`)
@@ -78,12 +83,30 @@ export function updateImportFileBinding(
   }
 
   const profile = input.parserProfileId;
+  const employerId = input.employerId === undefined ? null : input.employerId;
+
+  if (employerId) {
+    const emp = findEmployerById(householdId, employerId);
+    if (!emp) {
+      return { ok: false, code: "INVALID_EMPLOYER", message: "Employer not found in household settings" };
+    }
+    if (PAYSLIP_PARSER_PROFILES.has(profile)) {
+      const want = employerParserProfileId(emp);
+      if (want !== profile) {
+        return {
+          ok: false,
+          code: "EMPLOYER_PARSER_MISMATCH",
+          message: `Employer is configured for ${want}; selected format is ${profile}`
+        };
+      }
+    }
+  }
 
   db.prepare(
     `UPDATE import_file
-     SET financial_account_id = ?, parser_profile_id = ?
+     SET financial_account_id = ?, parser_profile_id = ?, employer_id = ?
      WHERE id = ?`
-  ).run(input.financialAccountId, profile, fileId);
+  ).run(input.financialAccountId, profile, employerId ?? null, fileId);
 
   return { ok: true };
 }

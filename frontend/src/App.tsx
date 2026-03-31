@@ -9,6 +9,7 @@ import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PayslipDetailPage } from "./pages/PayslipDetailPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
+import { ResolutionQueuePage } from "./pages/ResolutionQueuePage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
 export function App() {
@@ -21,6 +22,7 @@ export function App() {
           <Route path="/categories/rules" element={<CategoryRulesPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
+          <Route path="/resolution-queue" element={<ResolutionQueuePage />} />
           <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

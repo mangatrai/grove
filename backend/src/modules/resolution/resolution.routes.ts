@@ -6,6 +6,7 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   bulkApplyCategoryToUnknownItems,
   bulkUpdateResolutionStatusForHousehold,
+  countOpenDuplicateAmbiguityNotOnLedger,
   countOpenResolutionItemsByType,
   listResolutionItemsForHousehold,
   updateResolutionStatusForHousehold,
@@ -70,7 +71,8 @@ resolutionRouter.get("/summary", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const openByType = countOpenResolutionItemsByType(householdId);
   const totalOpen = Object.values(openByType).reduce((a, b) => a + b, 0);
-  res.status(200).json({ openByType, totalOpen });
+  const openDuplicateAmbiguityNotOnLedger = countOpenDuplicateAmbiguityNotOnLedger(householdId);
+  res.status(200).json({ openByType, totalOpen, openDuplicateAmbiguityNotOnLedger });
 });
 
 resolutionRouter.get("/", (req: AuthenticatedRequest, res) => {

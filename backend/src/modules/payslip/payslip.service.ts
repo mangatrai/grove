@@ -9,6 +9,8 @@ export type PayslipSnapshotRow = {
   fileName: string;
   fileChecksum: string;
   parserProfileId: string;
+  /** Household employer row (`employers_json`) when set. */
+  employerId: string | null;
   importFileId: string | null;
   payPeriodStart: string | null;
   payPeriodEnd: string | null;
@@ -35,6 +37,7 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
     fileName: String(r.file_name),
     fileChecksum: String(r.file_checksum),
     parserProfileId: String(r.parser_profile_id),
+    employerId: r.employer_id == null ? null : String(r.employer_id),
     importFileId: r.import_file_id == null ? null : String(r.import_file_id),
     payPeriodStart: r.pay_period_start == null ? null : String(r.pay_period_start),
     payPeriodEnd: r.pay_period_end == null ? null : String(r.pay_period_end),
@@ -79,7 +82,8 @@ export function insertPayslipSnapshot(
   fileChecksum: string,
   parserProfileId: string,
   parsed: ParsedPayslipSummary,
-  importFileId?: string | null
+  importFileId?: string | null,
+  employerId?: string | null
 ):
   | { ok: true; snapshot: PayslipSnapshotRow }
   | { ok: false; code: "DUPLICATE_PAYSLIP"; existing: PayslipSnapshotRow } {
@@ -93,7 +97,7 @@ export function insertPayslipSnapshot(
 
   db.prepare(
     `INSERT INTO payslip_snapshot (
-      id, household_id, file_name, file_checksum, parser_profile_id, import_file_id,
+      id, household_id, file_name, file_checksum, parser_profile_id, import_file_id, employer_id,
       pay_period_start, pay_period_end, pay_date,
       gross_pay_current, gross_pay_ytd,
       employee_taxes_current, employee_taxes_ytd,
@@ -102,7 +106,7 @@ export function insertPayslipSnapshot(
       net_pay_current, net_pay_ytd,
       hours_or_days_current, raw_extract_json
     ) VALUES (
-      ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?,
       ?, ?,
       ?, ?,
@@ -118,6 +122,7 @@ export function insertPayslipSnapshot(
     fileChecksum,
     parserProfileId,
     importFileId ?? null,
+    employerId ?? null,
     parsed.payPeriodStart,
     parsed.payPeriodEnd,
     parsed.payDate,

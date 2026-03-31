@@ -2,32 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import type { PayslipSnapshotDetail } from "../payslip/types";
 
-/** Mirrors `PayslipSnapshotRow` from the API (full detail). */
-export type PayslipSnapshotDetail = {
-  id: string;
-  householdId: string;
-  fileName: string;
-  fileChecksum: string;
-  parserProfileId: string;
-  importFileId: string | null;
-  payPeriodStart: string | null;
-  payPeriodEnd: string | null;
-  payDate: string | null;
-  grossPayCurrent: number | null;
-  grossPayYtd: number | null;
-  employeeTaxesCurrent: number | null;
-  employeeTaxesYtd: number | null;
-  preTaxDeductionsCurrent: number | null;
-  preTaxDeductionsYtd: number | null;
-  postTaxDeductionsCurrent: number | null;
-  postTaxDeductionsYtd: number | null;
-  netPayCurrent: number | null;
-  netPayYtd: number | null;
-  hoursOrDaysCurrent: string | null;
-  rawExtractJson: Record<string, unknown>;
-  createdAt: string;
-};
+export type { PayslipSnapshotDetail };
+
+type EmployerRow = { id: string; displayName: string };
 
 function formatMoney(n: number | null): string {
   if (n == null || !Number.isFinite(n)) {
@@ -55,6 +34,7 @@ export function PayslipDetailPage() {
   const token = useAuthToken();
   const { payslipId } = useParams<{ payslipId: string }>();
   const [detail, setDetail] = useState<PayslipSnapshotDetail | null>(null);
+  const [employers, setEmployers] = useState<EmployerRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -65,6 +45,15 @@ export function PayslipDetailPage() {
     const res = await apiJson<PayslipSnapshotDetail>(`/payslips/${encodeURIComponent(payslipId)}`);
     setDetail(res);
   }, [payslipId]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void apiJson<{ employers: EmployerRow[] }>("/household/settings")
+      .then((r) => setEmployers(r.employers ?? []))
+      .catch(() => setEmployers([]));
+  }, [token]);
 
   useEffect(() => {
     if (!token || !payslipId) {
@@ -126,6 +115,15 @@ export function PayslipDetailPage() {
               <dd>
                 <code style={{ fontSize: "0.85rem" }}>{detail.parserProfileId}</code>
               </dd>
+              {detail.employerId ? (
+                <>
+                  <dt>Employer</dt>
+                  <dd>
+                    {employers.find((e) => e.id === detail.employerId)?.displayName ??
+                      `${detail.employerId.slice(0, 8)}…`}
+                  </dd>
+                </>
+              ) : null}
               {detail.importFileId ? (
                 <>
                   <dt>Import file</dt>

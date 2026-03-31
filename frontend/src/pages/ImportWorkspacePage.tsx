@@ -6,9 +6,12 @@ import { formatAccountForSelect } from "../import/accountDisplay";
 import {
   inferParserProfile,
   profilesEquivalent,
-  type FinancialAccountLike
+  type FinancialAccountLike,
+  type IncomeInferenceContext
 } from "../import/inferParserProfile";
 import { friendlyParserLabel } from "../import/profileLabels";
+
+const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "adp_payslip_pdf"]);
 
 type ImportFileRow = {
   id: string;
@@ -16,7 +19,10 @@ type ImportFileRow = {
   status: string;
   financial_account_id: string | null;
   parser_profile_id: string | null;
+  employer_id: string | null;
 };
+
+type HouseholdEmployer = { id: string; displayName: string; parserProfileId?: string };
 
 type FinancialAccount = {
   id: string;
@@ -117,7 +123,10 @@ export function ImportWorkspacePage() {
   const [accounts, setAccounts] = useState<FinancialAccount[]>([]);
   const [profiles, setProfiles] = useState<string[]>([]);
 
-  const [drafts, setDrafts] = useState<Record<string, { accountId: string; profileId: string }>>({});
+  const [drafts, setDrafts] = useState<
+    Record<string, { accountId: string; profileId: string; employerId: string }>
+  >({});
+  const [householdEmployers, setHouseholdEmployers] = useState<HouseholdEmployer[]>([]);
   const [mapDate, setMapDate] = useState("Date");
   const [mapAmount, setMapAmount] = useState("Amount");
   const [mapDesc, setMapDesc] = useState("Description");
@@ -133,6 +142,7 @@ export function ImportWorkspacePage() {
   const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
   const [sessionSummary, setSessionSummary] = useState<ImportSessionSummary | null>(null);
+  const [incomeInference, setIncomeInference] = useState<IncomeInferenceContext>({});
 
   const load = useCallback(async () => {
     if (!sessionId) {
@@ -145,17 +155,33 @@ export function ImportWorkspacePage() {
     }>(`/imports/sessions/${sessionId}`);
     setSessionStatus(detail.session.status);
     setFiles(detail.files);
-    const nextDrafts: Record<string, { accountId: string; profileId: string }> = {};
+    const nextDrafts: Record<string, { accountId: string; profileId: string; employerId: string }> = {};
     for (const f of detail.files) {
       nextDrafts[f.id] = {
         accountId: f.financial_account_id ?? "",
-        profileId: f.parser_profile_id ?? ""
+        profileId: f.parser_profile_id ?? "",
+        employerId: f.employer_id ?? ""
       };
     }
     setDrafts(nextDrafts);
 
     const accRes = await apiJson<{ accounts: FinancialAccount[] }>("/imports/accounts");
     setAccounts(accRes.accounts);
+
+    try {
+      const hs = await apiJson<{
+        salaryDepositFinancialAccountId: string | null;
+        employers: HouseholdEmployer[];
+      }>("/household/settings");
+      setHouseholdEmployers(hs.employers ?? []);
+      setIncomeInference({
+        salaryDepositAccountId: hs.salaryDepositFinancialAccountId,
+        employers: hs.employers ?? []
+      });
+    } catch {
+      setHouseholdEmployers([]);
+      setIncomeInference({});
+    }
 
     try {
       const sum = await apiJson<ImportSessionSummary>(`/imports/sessions/${sessionId}/summary`);
@@ -258,18 +284,20 @@ export function ImportWorkspacePage() {
   }, [sessionId]);
 
   const persistBinding = useCallback(
-    async (fileId: string, accountId: string, profileId: string) => {
+    async (fileId: string, accountId: string, profileId: string, employerId: string | null) => {
       if (!sessionId || !accountId || !profileId) {
         return;
       }
       setError(null);
       try {
+        const body: Record<string, unknown> = {
+          financialAccountId: accountId,
+          parserProfileId: profileId,
+          employerId: PAYSLIP_PARSER_IDS.has(profileId) ? (employerId ?? null) : null
+        };
         await apiJson(`/imports/sessions/${sessionId}/files/${fileId}`, {
           method: "PATCH",
-          body: JSON.stringify({
-            financialAccountId: accountId,
-            parserProfileId: profileId
-          })
+          body: JSON.stringify(body)
         });
         setError(null);
         setMessage("Binding saved.");
@@ -290,24 +318,28 @@ export function ImportWorkspacePage() {
       if (!accountId) {
         setDrafts((d) => ({
           ...d,
-          [fileId]: { accountId: "", profileId: "" }
+          [fileId]: { accountId: "", profileId: "", employerId: "" }
         }));
         return;
       }
 
-      const inferred = inferParserProfile(account as FinancialAccountLike, file?.file_name);
+      const inferred = inferParserProfile(account as FinancialAccountLike, file?.file_name, incomeInference);
       if (inferred) {
+        let employerId = "";
+        if (PAYSLIP_PARSER_IDS.has(inferred) && householdEmployers.length === 1) {
+          employerId = householdEmployers[0]!.id;
+        }
         setDrafts((d) => ({
           ...d,
-          [fileId]: { accountId, profileId: inferred }
+          [fileId]: { accountId, profileId: inferred, employerId }
         }));
-        await persistBinding(fileId, accountId, inferred);
+        await persistBinding(fileId, accountId, inferred, employerId || null);
         return;
       }
 
       setDrafts((d) => ({
         ...d,
-        [fileId]: { accountId, profileId: "" }
+        [fileId]: { accountId, profileId: "", employerId: "" }
       }));
       const hint = showAdvanced
         ? ""
@@ -316,18 +348,37 @@ export function ImportWorkspacePage() {
         `We couldn’t match this file to a supported import for that account.${hint}`
       );
     },
-    [accounts, files, persistBinding, showAdvanced]
+    [accounts, files, persistBinding, showAdvanced, incomeInference, householdEmployers]
   );
 
   const onOverrideProfileChange = useCallback(
     async (fileId: string, profileId: string) => {
       const accountId = drafts[fileId]?.accountId ?? "";
+      let employerId = drafts[fileId]?.employerId ?? "";
+      if (PAYSLIP_PARSER_IDS.has(profileId) && householdEmployers.length === 1) {
+        employerId = householdEmployers[0]!.id;
+      }
       setDrafts((d) => ({
         ...d,
-        [fileId]: { accountId, profileId }
+        [fileId]: { accountId, profileId, employerId }
       }));
       if (accountId && profileId) {
-        await persistBinding(fileId, accountId, profileId);
+        await persistBinding(fileId, accountId, profileId, employerId || null);
+      }
+    },
+    [drafts, persistBinding, householdEmployers]
+  );
+
+  const onEmployerChange = useCallback(
+    async (fileId: string, employerId: string) => {
+      const accountId = drafts[fileId]?.accountId ?? "";
+      const profileId = drafts[fileId]?.profileId ?? "";
+      setDrafts((d) => ({
+        ...d,
+        [fileId]: { ...d[fileId]!, employerId }
+      }));
+      if (accountId && profileId) {
+        await persistBinding(fileId, accountId, profileId, employerId || null);
       }
     },
     [drafts, persistBinding]
@@ -666,9 +717,11 @@ export function ImportWorkspacePage() {
           For each file, pick the account it belongs to. The menu shows the institution, account type, and last four
           digits when available so you can tell accounts apart. We detect the file format automatically — you
           don&apos;t choose parsers unless you use advanced mode.{" "}
-          <strong>Employer payslip PDFs:</strong> prefer the <strong>Employer payslip (IBM) — placeholder</strong> account
-          when present — it binds imports to the payslip parser even for generic file names. Otherwise pick any account
-          where your salary deposits; payslip summaries are <strong>not</strong> posted as bank transactions.
+          <strong>Employer payslip PDFs:</strong> use <strong>Settings → Household</strong> to set your{" "}
+          <strong>salary deposit</strong> account and at least one <strong>employer</strong> — then choosing that bank
+          account for a PDF can suggest the employer payslip parser even when the file name is generic (e.g.{" "}
+          <code>download.pdf</code>). Or use the <strong>Employer payslip (IBM) — placeholder</strong> account so any
+          PDF maps to the payslip parser. Payslip summaries are <strong>not</strong> posted as bank transactions.
         </p>
         <p
           className="muted"
@@ -699,14 +752,20 @@ export function ImportWorkspacePage() {
               <tr>
                 <th>File</th>
                 <th>Account</th>
+                {householdEmployers.length > 1 ? <th>Employer</th> : null}
                 <th>Format</th>
               </tr>
             </thead>
             <tbody>
               {files.map((f) => {
                 const acc = accountById(accounts, drafts[f.id]?.accountId ?? "");
-                const inferred = inferParserProfile(acc as FinancialAccountLike | undefined, f.file_name);
+                const inferred = inferParserProfile(
+                  acc as FinancialAccountLike | undefined,
+                  f.file_name,
+                  incomeInference
+                );
                 const savedProfile = f.parser_profile_id ?? drafts[f.id]?.profileId ?? "";
+                const profileForRow = drafts[f.id]?.profileId || f.parser_profile_id || "";
                 const autoLine =
                   inferred && savedProfile && profilesEquivalent(inferred, savedProfile) ? (
                     <span className="success">Ready: {friendlyParserLabel(inferred)}</span>
@@ -735,6 +794,25 @@ export function ImportWorkspacePage() {
                         ))}
                       </select>
                     </td>
+                    {householdEmployers.length > 1 ? (
+                      <td>
+                        {PAYSLIP_PARSER_IDS.has(profileForRow) ? (
+                          <select
+                            value={drafts[f.id]?.employerId ?? ""}
+                            onChange={(e) => void onEmployerChange(f.id, e.target.value)}
+                          >
+                            <option value="">— choose employer —</option>
+                            {householdEmployers.map((e) => (
+                              <option key={e.id} value={e.id}>
+                                {e.displayName}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="muted">—</span>
+                        )}
+                      </td>
+                    ) : null}
                     <td>
                       <div style={{ marginBottom: "0.35rem" }}>{autoLine}</div>
                       {showAdvanced ? (

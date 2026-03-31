@@ -2707,6 +2707,9 @@ describe("household settings", () => {
     const g = await request(app).get("/household/settings").set("authorization", `Bearer ${token}`);
     expect(g.status).toBe(200);
     expect(g.body).toHaveProperty("monthlySavingsTargetUsd");
+    expect(g.body).toHaveProperty("salaryDepositFinancialAccountId");
+    expect(g.body).toHaveProperty("employers");
+    expect(Array.isArray(g.body.employers)).toBe(true);
 
     const p = await request(app)
       .patch("/household/settings")
@@ -2721,5 +2724,50 @@ describe("household settings", () => {
       .send({ monthlySavingsTargetUsd: null });
     expect(p2.status).toBe(200);
     expect(p2.body.monthlySavingsTargetUsd).toBeNull();
+  });
+
+  it("PATCH salary deposit account and employers (income onboarding)", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const checking = "40000000-0000-0000-0000-000000000001";
+
+    const p = await request(app)
+      .patch("/household/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        salaryDepositFinancialAccountId: checking,
+        employers: [{ displayName: "Test Employer", parserProfileId: "ibm_pay_contributions_pdf", parserMapping: {} }]
+      });
+    expect(p.status).toBe(200);
+    expect(p.body.salaryDepositFinancialAccountId).toBe(checking);
+    expect(Array.isArray(p.body.employers)).toBe(true);
+    expect(p.body.employers[0].displayName).toBe("Test Employer");
+    expect(p.body.employers[0].parserProfileId).toBe("ibm_pay_contributions_pdf");
+
+    const clear = await request(app)
+      .patch("/household/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({ salaryDepositFinancialAccountId: null, employers: [] });
+    expect(clear.status).toBe(200);
+    expect(clear.body.salaryDepositFinancialAccountId).toBeNull();
+    expect(clear.body.employers).toEqual([]);
+  });
+});
+
+describe("resolution summary (DOC-005 orphan count)", () => {
+  it("GET /resolution/summary includes openDuplicateAmbiguityNotOnLedger", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app).get("/resolution/summary").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("openDuplicateAmbiguityNotOnLedger");
+    expect(typeof res.body.openDuplicateAmbiguityNotOnLedger).toBe("number");
   });
 });

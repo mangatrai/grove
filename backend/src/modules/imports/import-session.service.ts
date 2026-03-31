@@ -273,11 +273,12 @@ export function listFilesForSession(sessionId: string): Array<{
   uploaded_at: string;
   financial_account_id: string | null;
   parser_profile_id: string | null;
+  employer_id: string | null;
 }> {
   return db
     .prepare(
       `SELECT id, file_name, checksum, status, file_size, mime_type, uploaded_at,
-              financial_account_id, parser_profile_id
+              financial_account_id, parser_profile_id, employer_id
        FROM import_file
        WHERE session_id = ?
        ORDER BY uploaded_at ASC`
@@ -292,5 +293,6 @@ export function listFilesForSession(sessionId: string): Array<{
     uploaded_at: string;
     financial_account_id: string | null;
     parser_profile_id: string | null;
+    employer_id: string | null;
   }>;
 }

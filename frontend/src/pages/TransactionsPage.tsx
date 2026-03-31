@@ -200,10 +200,23 @@ export function TransactionsPage() {
   const [reviewDetailLoadingIds, setReviewDetailLoadingIds] = useState<Set<string>>(() => new Set());
   const [savingResolutionItemId, setSavingResolutionItemId] = useState<string | null>(null);
   const reviewDetailLoadedRef = useRef<Set<string>>(new Set());
+  const [resolutionQueueSummary, setResolutionQueueSummary] = useState<{
+    openDuplicateAmbiguityNotOnLedger?: number;
+  } | null>(null);
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
   }, [searchFromUrl]);
+
+  useEffect(() => {
+    if (!token || !needsReviewTab) {
+      setResolutionQueueSummary(null);
+      return;
+    }
+    void apiJson<{ openDuplicateAmbiguityNotOnLedger?: number }>("/resolution/summary")
+      .then((r) => setResolutionQueueSummary(r))
+      .catch(() => setResolutionQueueSummary(null));
+  }, [token, needsReviewTab]);
 
   useEffect(() => {
     setAmountMinDraft(amountMinUrl);
@@ -843,6 +856,22 @@ export function TransactionsPage() {
               </button>{" "}
               (helps bulk-assign categories).
             </p>
+          </div>
+        ) : null}
+        {needsReviewTab && (resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger ?? 0) > 0 ? (
+          <div
+            className="transactions-toolbar__orphan-banner"
+            style={{
+              padding: "0.65rem 0.85rem",
+              marginBottom: "0.75rem",
+              borderRadius: "8px",
+              border: "1px solid #fcd34d",
+              background: "#fffbeb"
+            }}
+          >
+            <strong>{resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger}</strong> open near-duplicate item(s)
+            are tied to import data only (no ledger row) — they do not appear in this table.{" "}
+            <Link to="/resolution-queue">Open full resolution queue</Link> to triage.
           </div>
         ) : null}
         <div className="transactions-toolbar__row">

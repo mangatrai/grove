@@ -76,6 +76,29 @@ export function countOpenResolutionItemsByType(householdId: string): Record<stri
   return out;
 }
 
+/**
+ * Open duplicate_ambiguity items with no ledger row linking `source_ref = 'raw:' || target_id`
+ * (near-duplicate skipped at ingest — invisible on Transactions → Needs review). See DOC-005.
+ */
+export function countOpenDuplicateAmbiguityNotOnLedger(householdId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS c
+       FROM resolution_item ri
+       WHERE ri.household_id = ?
+         AND ri.type = 'duplicate_ambiguity'
+         AND ri.status IN ('open', 'in_review')
+         AND NOT EXISTS (
+           SELECT 1 FROM transaction_canonical tc
+           WHERE tc.household_id = ri.household_id
+             AND tc.source_ref IS NOT NULL
+             AND tc.source_ref = ('raw:' || ri.target_id)
+         )`
+    )
+    .get(householdId) as { c: number } | undefined;
+  return row ? Number(row.c) || 0 : 0;
+}
+
 type ResolutionDbListRow = {
   id: string;
   type: string;

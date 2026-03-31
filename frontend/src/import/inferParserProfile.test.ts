@@ -7,6 +7,11 @@ import {
 } from "./inferParserProfile";
 
 const boaChecking = { type: "checking", institution: "Bank of America" };
+const boaSalaryChecking = {
+  id: "acc-salary",
+  type: "checking",
+  institution: "Bank of America"
+};
 const payslipPlaceholder = { type: "payslip", institution: "Employer payslip (IBM) — placeholder" };
 
 describe("filenameSuggestsIbmPayslipPdf", () => {
@@ -41,5 +46,19 @@ describe("inferParserProfile", () => {
   it("uses IBM payslip for payslip account type even when filename is generic", () => {
     expect(inferParserProfile(payslipPlaceholder, "eStmt_2026-01.pdf")).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
     expect(inferParserProfile(payslipPlaceholder, "download.pdf")).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
+  });
+
+  it("uses salary deposit + employers to infer payslip on generic PDF names (before BOA eStatement)", () => {
+    const income = {
+      salaryDepositAccountId: "acc-salary",
+      employers: [{ id: "emp-1", parserProfileId: IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID }]
+    };
+    expect(inferParserProfile(boaSalaryChecking, "download.pdf", income)).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
+    expect(inferParserProfile(boaSalaryChecking, "eStmt_2026-01.pdf", income)).toBe("boa_estatement_pdf");
+  });
+
+  it("does not use salary deposit inference without employers (falls through to institution PDF rules)", () => {
+    const income = { salaryDepositAccountId: "acc-salary", employers: [] };
+    expect(inferParserProfile(boaSalaryChecking, "download.pdf", income)).toBe("boa_estatement_pdf");
   });
 });

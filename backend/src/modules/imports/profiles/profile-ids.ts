@@ -10,7 +10,9 @@ export const PARSER_PROFILE_IDS = [
   "boa_estatement_pdf",
   "marcus_online_savings_pdf",
   /** Epic 3.3 — employer payslip (summary only; stored in payslip_snapshot, not ledger) */
-  "ibm_pay_contributions_pdf"
+  "ibm_pay_contributions_pdf",
+  /** Registered for onboarding; parse not implemented yet — use IBM or wait for ADP adapter */
+  "adp_payslip_pdf"
 ] as const;
 
 export type ParserProfileId = (typeof PARSER_PROFILE_IDS)[number];

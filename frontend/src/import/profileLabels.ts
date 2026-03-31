@@ -8,7 +8,8 @@ const FRIENDLY: Record<string, string> = {
   boa_credit_card_csv: "Bank of America card (CSV)",
   boa_estatement_pdf: "Bank of America statement (PDF)",
   marcus_online_savings_pdf: "Marcus savings (PDF)",
-  ibm_pay_contributions_pdf: "Employer payslip — IBM Pay & Contributions (PDF)"
+  ibm_pay_contributions_pdf: "Employer payslip — IBM Pay & Contributions (PDF)",
+  adp_payslip_pdf: "Employer payslip — ADP (PDF, not parsed yet)"
 };
 
 export function friendlyParserLabel(profileId: string): string {

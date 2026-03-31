@@ -14,9 +14,13 @@ import { parseMarcusOnlineSavingsPdf } from "./profiles/marcus-online-savings-pd
 import type { NormalizedRawPayload } from "./profiles/types.js";
 import { parseAmount } from "./profiles/tabular-helpers.js";
 import type { ParserProfileId } from "./profiles/profile-ids.js";
-import { parseIbmPayslipPdf } from "../payslip/profiles/ibm-payslip-pdf.js";
+import {
+  findEmployerById,
+  employerParserProfileId,
+  requireEmployerForPayslipImport
+} from "../payslip/payslip-employer-resolve.service.js";
+import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
-import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "../payslip/payslip.types.js";
 
 export interface ParseColumnMapping {
   date: string;
@@ -127,7 +131,8 @@ async function extractByProfile(
     case "marcus_online_savings_pdf":
       return await parseMarcusOnlineSavingsPdf(buffer);
     case "ibm_pay_contributions_pdf":
-      throw new Error("ibm_pay_contributions_pdf is handled in parseSessionImportFiles");
+    case "adp_payslip_pdf":
+      throw new Error("payslip PDF profiles are handled in parseSessionImportFiles");
   }
 }
 
@@ -143,7 +148,7 @@ export async function parseSessionImportFiles(
 
   const files = db
     .prepare(
-      `SELECT id, file_name, stored_path, status, financial_account_id, parser_profile_id
+      `SELECT id, file_name, stored_path, status, financial_account_id, parser_profile_id, employer_id
        FROM import_file
        WHERE session_id = ?
        ORDER BY uploaded_at ASC`
@@ -155,6 +160,7 @@ export async function parseSessionImportFiles(
     status: string;
     financial_account_id: string | null;
     parser_profile_id: string | null;
+    employer_id: string | null;
   }>;
 
   if (files.length === 0) {
@@ -200,11 +206,58 @@ export async function parseSessionImportFiles(
     updateFileStatusStmt.run("processing", JSON.stringify({ stage: "parsing", profile: profileId }), file.id);
 
     try {
-      if (profileId === "ibm_pay_contributions_pdf") {
+      if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf") {
+        if (!requireEmployerForPayslipImport(householdId, file.employer_id)) {
+          updateFileStatusStmt.run(
+            "failed",
+            JSON.stringify({
+              stage: "failed",
+              reason: "employer_required_for_payslip",
+              profile: profileId
+            }),
+            file.id
+          );
+          outcome.skippedFiles.push({ fileId: file.id, reason: "missing_employer_for_payslip" });
+          continue;
+        }
+        if (file.employer_id) {
+          const emp = findEmployerById(householdId, file.employer_id);
+          if (!emp) {
+            updateFileStatusStmt.run(
+              "failed",
+              JSON.stringify({ stage: "failed", reason: "invalid_employer", profile: profileId }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "invalid_employer" });
+            continue;
+          }
+          if (employerParserProfileId(emp) !== profileId) {
+            updateFileStatusStmt.run(
+              "failed",
+              JSON.stringify({ stage: "failed", reason: "employer_parser_mismatch", profile: profileId }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "employer_parser_mismatch" });
+            continue;
+          }
+        }
         deleteRawRowsStmt.run(file.id);
         const checksum = sha256Hex(buffer);
-        const parseResult = await parseIbmPayslipPdf(buffer);
+        const parseResult = await parsePayslipPdfByProfile(buffer, profileId);
         if (!parseResult.ok) {
+          if (parseResult.reason === "unsupported_parser") {
+            updateFileStatusStmt.run(
+              "failed",
+              JSON.stringify({
+                stage: "failed",
+                reason: parseResult.reason,
+                parserProfileId: parseResult.parserProfileId
+              }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_unsupported_parser" });
+            continue;
+          }
           updateFileStatusStmt.run(
             "failed",
             JSON.stringify({ stage: "failed", reason: parseResult.reason, profile: profileId }),
@@ -217,9 +270,10 @@ export async function parseSessionImportFiles(
           householdId,
           file.file_name,
           checksum,
-          IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID,
+          profileId,
           parseResult.summary,
-          file.id
+          file.id,
+          file.employer_id
         );
         if (!ins.ok) {
           updateFileStatusStmt.run(

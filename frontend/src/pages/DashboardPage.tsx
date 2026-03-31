@@ -91,6 +91,17 @@ type AccountRow = {
 
 const PIE_COLORS = ["#0b5fff", "#22c55e", "#f59e0b", "#e11d48", "#8b5cf6", "#0d9488", "#64748b", "#94a3b8"];
 
+function friendlyCashSummaryLoadError(err: unknown): string {
+  if (!(err instanceof Error)) {
+    return "Failed to load";
+  }
+  const m = err.message;
+  if (m.includes("CUSTOM_RANGE_TOO_LONG") || m.includes("CUSTOM_RANGE")) {
+    return "Custom date range cannot exceed 366 days (inclusive). Try a shorter span.";
+  }
+  return m;
+}
+
 function formatMonthShort(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -286,6 +297,7 @@ export function DashboardPage() {
   const [resolutionSummary, setResolutionSummary] = useState<{
     openByType: Record<string, number>;
     totalOpen: number;
+    openDuplicateAmbiguityNotOnLedger?: number;
   } | null>(null);
   const [targetPreviewUsd, setTargetPreviewUsd] = useState(0);
   const [savingTarget, setSavingTarget] = useState(false);
@@ -332,7 +344,7 @@ export function DashboardPage() {
     setLoading(true);
     void load()
       .catch((e: unknown) => {
-        setError(e instanceof Error ? e.message : "Failed to load");
+        setError(friendlyCashSummaryLoadError(e));
         setData(null);
       })
       .finally(() => setLoading(false));
@@ -627,6 +639,13 @@ export function DashboardPage() {
           )}
         </div>
 
+        {preset === "custom" ? (
+          <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.88rem" }}>
+            Custom range is limited to <strong>366 days</strong> (inclusive) per request — long analysis windows need
+            multiple exports or presets for now.
+          </p>
+        ) : null}
+
         {error ? <p className="error">{error}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
 
@@ -712,7 +731,8 @@ export function DashboardPage() {
                   <KpiInfo label="Safe to spend">
                     When a monthly savings target is set below, this is net cashflow for this period minus that
                     commitment, scaled by calendar days in the period vs about 30.44 days per month. Without a target,
-                    this stays empty.
+                    this stays empty. Based on posted activity in this period only — not a forecast of future bills or
+                    income.
                   </KpiInfo>
                 </div>
                 <div className="kpi-value">

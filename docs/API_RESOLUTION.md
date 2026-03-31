@@ -7,6 +7,22 @@ Auth: `Authorization: Bearer <JWT>` (all routes require authentication).
 
 Items are scoped to the caller’s **household** (`household_id` from the JWT).
 
+## `GET /resolution/summary`
+
+Lightweight counts for dashboards and the Transactions **Needs review** banner.
+
+**200:**
+
+```json
+{
+  "openByType": { "unknown_category": 2, "duplicate_ambiguity": 1 },
+  "totalOpen": 3,
+  "openDuplicateAmbiguityNotOnLedger": 1
+}
+```
+
+- **`openDuplicateAmbiguityNotOnLedger`** — open **`duplicate_ambiguity`** items whose **`target_id`** (raw row) has **no** matching **`transaction_canonical.source_ref = 'raw:' || target_id`** (near-duplicate skipped at ingest). These do **not** appear on **`GET /transactions?needsReview=true`**; use **`GET /resolution`** or **`/resolution-queue`** in the app (DOC-005).
+
 ## `GET /resolution`
 
 Lists all **`resolution_item`** rows for the household, **newest first**.

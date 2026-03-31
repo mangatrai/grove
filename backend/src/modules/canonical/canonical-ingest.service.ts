@@ -291,7 +291,6 @@ export function canonicalizeImportSession(
         `SELECT 1 AS ok FROM payslip_snapshot ps
          INNER JOIN import_file f ON f.id = ps.import_file_id
          WHERE f.session_id = ?
-           AND f.parser_profile_id = 'ibm_pay_contributions_pdf'
          LIMIT 1`
       )
       .get(sessionId) as { ok: number } | undefined;

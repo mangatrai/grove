@@ -53,7 +53,8 @@ const parseSchema = z.object({
 
 const fileBindingSchema = z.object({
   financialAccountId: z.string().min(1),
-  parserProfileId: z.string().min(1).refine(isParserProfileId, "Unknown parser profile id")
+  parserProfileId: z.string().min(1).refine(isParserProfileId, "Unknown parser profile id"),
+  employerId: z.union([z.string().uuid(), z.null()]).optional()
 });
 
 function mapServiceFailureToStatus(failure: ServiceFailure): number {
@@ -99,6 +100,8 @@ function mapBindingFailureToStatus(failure: BindingFailure): number {
       return 404;
     case "INVALID_ACCOUNT":
     case "INVALID_PROFILE":
+    case "INVALID_EMPLOYER":
+    case "EMPLOYER_PARSER_MISMATCH":
       return 400;
     default:
       return 500;
@@ -205,7 +208,8 @@ importsRouter.patch(
       req.authUser!.householdId,
       {
         financialAccountId: parsed.data.financialAccountId,
-        parserProfileId: parsed.data.parserProfileId
+        parserProfileId: parsed.data.parserProfileId,
+        employerId: parsed.data.employerId
       }
     );
 

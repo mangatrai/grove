@@ -4,8 +4,16 @@
  * `boa_checking_csv` for both (see backend `import-parser.service.ts`).
  */
 export type FinancialAccountLike = {
+  /** When set, enables salary-deposit + employer onboarding hints. */
+  id?: string;
   type: string;
   institution: string;
+};
+
+/** Optional household income settings from `GET /household/settings` to improve payslip PDF inference. */
+export type IncomeInferenceContext = {
+  salaryDepositAccountId?: string | null;
+  employers?: ReadonlyArray<{ id: string; parserProfileId?: string }>;
 };
 
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf";
@@ -22,6 +30,20 @@ function extensionOf(fileName: string): string {
  * Heuristic: PDF file names that often indicate an employer payslip (IBM / SuccessFactors-style).
  * Checked before institution PDF rules so a payslip on a checking account still suggests the payslip profile.
  */
+/** Avoid treating typical bank eStatement names as payslips when using salary-deposit + employer hints. */
+export function filenameLooksLikeBankStatementPdf(fileName: string | null | undefined): boolean {
+  if (!fileName?.trim()) {
+    return false;
+  }
+  const base = fileName.trim().split(/[/\\]/).pop() ?? "";
+  const lower = base.toLowerCase().replace(/\s+/g, " ");
+  if (!lower.endsWith(".pdf")) {
+    return false;
+  }
+  const stem = lower.slice(0, -4).replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return /\bestmt\b/.test(stem) || /\bstatement\b/.test(stem) || /\btransactions?\b/.test(stem);
+}
+
 export function filenameSuggestsIbmPayslipPdf(fileName: string | null | undefined): boolean {
   if (!fileName?.trim()) {
     return false;
@@ -71,7 +93,8 @@ function normalizeInstitution(institution: string): "boa" | "chase" | "citi" | "
  */
 export function inferParserProfile(
   account: FinancialAccountLike | undefined,
-  fileName: string | null | undefined
+  fileName: string | null | undefined,
+  income?: IncomeInferenceContext
 ): string | null {
   if (!account || !fileName?.trim()) {
     return null;
@@ -91,6 +114,21 @@ export function inferParserProfile(
 
   if (ext === ".pdf" && filenameSuggestsIbmPayslipPdf(fileName)) {
     return IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+  }
+
+  const sal = income?.salaryDepositAccountId;
+  const emps = income?.employers;
+  const accId = account.id;
+  if (
+    ext === ".pdf" &&
+    accId &&
+    sal &&
+    accId === sal &&
+    emps &&
+    emps.length > 0 &&
+    !filenameLooksLikeBankStatementPdf(fileName)
+  ) {
+    return emps[0]?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
   }
 
   if (inst === "marcus" && t === "savings" && ext === ".pdf") {
