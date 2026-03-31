@@ -227,6 +227,9 @@ describe("auth change password", () => {
       });
     expect(changeOk.status).toBe(200);
 
+    const staleTokenMe = await request(app).get("/auth/me").set("authorization", `Bearer ${token}`);
+    expect(staleTokenMe.status).toBe(401);
+
     const loginOldAfter = await request(app).post("/auth/login").send({
       email,
       password: oldPassword

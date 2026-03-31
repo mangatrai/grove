@@ -8,6 +8,7 @@ import type { AuthUser, Role } from "./types.js";
 interface DbLoginUser extends AuthUser {
   email: string;
   passwordHash: string;
+  tokenVersion: number;
 }
 
 const getUserByEmailStmt = db.prepare<[string], {
@@ -16,8 +17,9 @@ const getUserByEmailStmt = db.prepare<[string], {
   role: Role;
   email: string;
   password_hash: string;
+  token_version: number;
 }>(`
-  SELECT id, household_id, role, email, password_hash
+  SELECT id, household_id, role, email, password_hash, token_version
   FROM app_user
   WHERE lower(email) = lower(?)
   LIMIT 1
@@ -32,8 +34,15 @@ const getUserHashByIdStmt = db.prepare<[string], { password_hash: string }>(`
 
 const updateUserPasswordStmt = db.prepare<[string, string]>(`
   UPDATE app_user
-  SET password_hash = ?
+  SET password_hash = ?, token_version = token_version + 1
   WHERE id = ?
+`);
+
+const getUserTokenVersionByIdStmt = db.prepare<[string], { token_version: number }>(`
+  SELECT token_version
+  FROM app_user
+  WHERE id = ?
+  LIMIT 1
 `);
 
 function findUserByEmail(email: string): DbLoginUser | null {
@@ -46,7 +55,8 @@ function findUserByEmail(email: string): DbLoginUser | null {
     householdId: row.household_id,
     role: row.role,
     email: row.email,
-    passwordHash: row.password_hash
+    passwordHash: row.password_hash,
+    tokenVersion: row.token_version
   };
 }
 
@@ -70,7 +80,8 @@ export function login(payload: LoginPayload): string | null {
     {
       sub: user.userId,
       householdId: user.householdId,
-      role: user.role
+      role: user.role,
+      tokenVersion: user.tokenVersion
     },
     env.JWT_SECRET,
     { expiresIn: "8h" }
@@ -83,7 +94,15 @@ export function verifyToken(token: string): AuthUser | null {
       sub: string;
       householdId: string;
       role: Role;
+      tokenVersion?: number;
     };
+    const row = getUserTokenVersionByIdStmt.get(payload.sub);
+    if (!row) {
+      return null;
+    }
+    if ((payload.tokenVersion ?? -1) !== row.token_version) {
+      return null;
+    }
 
     return {
       userId: payload.sub,
