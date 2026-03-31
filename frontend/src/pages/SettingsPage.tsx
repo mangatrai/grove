@@ -27,6 +27,9 @@ type AccountRow = {
   institution: string;
   type: string;
   account_mask: string | null;
+  owner_scope?: "household" | "person";
+  owner_person_profile_id?: string | null;
+  default_parser_profile_id?: string | null;
 };
 
 type EmployerDraft = { id?: string; displayName: string; parserProfileId: string };
@@ -174,6 +177,19 @@ export function SettingsPage() {
   const [securityError, setSecurityError] = useState<string | null>(null);
   const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
   const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
+  const [accountOwners, setAccountOwners] = useState<Array<{ id: string; label: string }>>([]);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
+  const [accountDraft, setAccountDraft] = useState({
+    id: "",
+    type: "checking",
+    institution: "",
+    accountMask: "",
+    ownerScope: "household" as "household" | "person",
+    ownerPersonProfileId: "",
+    defaultParserProfileId: ""
+  });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
 
@@ -282,6 +298,85 @@ export function SettingsPage() {
     }
     void loadMembers();
   }, [token, tab, canManageHousehold, loadMembers]);
+
+  useEffect(() => {
+    if (!token || tab !== "accounts") {
+      return;
+    }
+    setAccountError(null);
+    setAccountSuccess(null);
+    void apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+      .then((r) => setAccounts(r.accounts))
+      .catch((e: unknown) => setAccountError(e instanceof Error ? e.message : "Could not load accounts"));
+    if (canManageHousehold) {
+      void apiJson<HouseholdMembersPayload>("/household/members")
+        .then((r) => {
+          const rows = (r.members ?? []).map((m) => ({
+            id: m.id,
+            label: `${m.fullName || m.email || m.id}${m.relationship ? ` (${m.relationship})` : ""}`
+          }));
+          setAccountOwners(rows);
+        })
+        .catch(() => setAccountOwners([]));
+    } else {
+      void apiJson<HouseholdProfileResponse>("/household/profile")
+        .then((r) =>
+          setAccountOwners([{ id: r.profile.id, label: r.profile.fullName || r.profile.email || "My profile" }])
+        )
+        .catch(() => setAccountOwners([]));
+    }
+  }, [token, tab, canManageHousehold]);
+
+  async function saveConnectedAccount() {
+    if (!token) {
+      return;
+    }
+    if (!accountDraft.institution.trim()) {
+      setAccountError("Institution is required.");
+      return;
+    }
+    if (accountDraft.ownerScope === "person" && !accountDraft.ownerPersonProfileId) {
+      setAccountError("Choose an owner profile.");
+      return;
+    }
+    setSavingAccount(true);
+    setAccountError(null);
+    setAccountSuccess(null);
+    try {
+      const body = {
+        type: accountDraft.type,
+        institution: accountDraft.institution.trim(),
+        accountMask: accountDraft.accountMask.trim() || null,
+        ownerScope: accountDraft.ownerScope,
+        ownerPersonProfileId: accountDraft.ownerScope === "person" ? accountDraft.ownerPersonProfileId : null,
+        defaultParserProfileId: accountDraft.defaultParserProfileId || null
+      };
+      if (accountDraft.id) {
+        await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify(body)
+        });
+      } else {
+        await apiJson("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
+      }
+      const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
+      setAccounts(r.accounts);
+      setAccountSuccess(accountDraft.id ? "Account updated." : "Account created.");
+      setAccountDraft({
+        id: "",
+        type: "checking",
+        institution: "",
+        accountMask: "",
+        ownerScope: "household",
+        ownerPersonProfileId: "",
+        defaultParserProfileId: ""
+      });
+    } catch (e: unknown) {
+      setAccountError(e instanceof Error ? e.message : "Could not save account");
+    } finally {
+      setSavingAccount(false);
+    }
+  }
 
   async function saveHouseholdTarget(value: number | null) {
     if (!token) {
@@ -828,10 +923,174 @@ export function SettingsPage() {
         {tab === "accounts" ? (
           <div className="settings-panel" role="tabpanel">
             <h2 className="settings-panel__title">Connected accounts</h2>
-            <p className="muted">
-              Financial accounts are added through import and the accounts list. A consolidated “connected accounts” view
-              and bank linking are not in this build.
-            </p>
+            <p className="muted">Manual onboarding for financial accounts, owner assignment, and parser defaults.</p>
+            {accountError ? <p className="error">{accountError}</p> : null}
+            {accountSuccess ? <p className="success">{accountSuccess}</p> : null}
+            <div className="settings-household-form">
+              <label className="settings-field">
+                Institution
+                <input
+                  type="text"
+                  value={accountDraft.institution}
+                  onChange={(e) => setAccountDraft((d) => ({ ...d, institution: e.target.value }))}
+                  disabled={savingAccount}
+                  placeholder="e.g. Bank of America"
+                />
+              </label>
+              <div className="row">
+                <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                  Account type
+                  <select
+                    value={accountDraft.type}
+                    onChange={(e) => setAccountDraft((d) => ({ ...d, type: e.target.value }))}
+                    disabled={savingAccount}
+                  >
+                    <option value="checking">Checking</option>
+                    <option value="savings">Savings</option>
+                    <option value="credit_card">Credit card</option>
+                    <option value="loan">Loan</option>
+                    <option value="mortgage">Mortgage</option>
+                    <option value="investment">Investment</option>
+                    <option value="payslip">Payslip</option>
+                  </select>
+                </label>
+                <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                  Account mask (optional)
+                  <input
+                    type="text"
+                    value={accountDraft.accountMask}
+                    onChange={(e) => setAccountDraft((d) => ({ ...d, accountMask: e.target.value }))}
+                    disabled={savingAccount}
+                    placeholder="1234"
+                  />
+                </label>
+                <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+                  Default parser (optional)
+                  <select
+                    value={accountDraft.defaultParserProfileId}
+                    onChange={(e) => setAccountDraft((d) => ({ ...d, defaultParserProfileId: e.target.value }))}
+                    disabled={savingAccount}
+                  >
+                    <option value="">— none —</option>
+                    <option value="boa_checking_csv">BoA checking CSV</option>
+                    <option value="boa_credit_card_csv">BoA credit card CSV</option>
+                    <option value="chase_card_csv">Chase card CSV</option>
+                    <option value="citi_card_csv">Citi card CSV</option>
+                    <option value="marcus_online_savings_pdf">Marcus savings PDF</option>
+                    <option value="ibm_pay_contributions_pdf">IBM payslip PDF</option>
+                    <option value="adp_payslip_pdf">ADP payslip PDF</option>
+                    <option value="generic_tabular">Generic tabular</option>
+                  </select>
+                </label>
+              </div>
+              <div className="row">
+                <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                  Owner scope
+                  <select
+                    value={accountDraft.ownerScope}
+                    onChange={(e) =>
+                      setAccountDraft((d) => ({
+                        ...d,
+                        ownerScope: e.target.value as "household" | "person",
+                        ownerPersonProfileId: e.target.value === "person" ? d.ownerPersonProfileId : ""
+                      }))
+                    }
+                    disabled={savingAccount}
+                  >
+                    <option value="household">Household</option>
+                    <option value="person">Person profile</option>
+                  </select>
+                </label>
+                <label className="settings-field" style={{ flex: "1 1 14rem" }}>
+                  Owner person
+                  <select
+                    value={accountDraft.ownerPersonProfileId}
+                    disabled={savingAccount || accountDraft.ownerScope !== "person"}
+                    onChange={(e) => setAccountDraft((d) => ({ ...d, ownerPersonProfileId: e.target.value }))}
+                  >
+                    <option value="">— select person —</option>
+                    {accountOwners.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="settings-household-actions">
+                <button type="button" disabled={savingAccount} onClick={() => void saveConnectedAccount()}>
+                  {savingAccount ? "Saving…" : accountDraft.id ? "Update account" : "Add account"}
+                </button>
+                {accountDraft.id ? (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={savingAccount}
+                    onClick={() =>
+                      setAccountDraft({
+                        id: "",
+                        type: "checking",
+                        institution: "",
+                        accountMask: "",
+                        ownerScope: "household",
+                        ownerPersonProfileId: "",
+                        defaultParserProfileId: ""
+                      })
+                    }
+                  >
+                    Cancel edit
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div style={{ marginTop: "1rem", overflowX: "auto" }}>
+              <table className="ledger-table">
+                <thead>
+                  <tr>
+                    <th>Institution</th>
+                    <th>Type</th>
+                    <th>Mask</th>
+                    <th>Owner</th>
+                    <th>Default parser</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {accounts.map((a) => (
+                    <tr key={a.id}>
+                      <td>{a.institution}</td>
+                      <td>{a.type}</td>
+                      <td>{a.account_mask ?? "—"}</td>
+                      <td>
+                        {a.owner_scope === "person"
+                          ? accountOwners.find((p) => p.id === a.owner_person_profile_id)?.label ?? "Person"
+                          : "Household"}
+                      </td>
+                      <td>{a.default_parser_profile_id ?? "—"}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() =>
+                            setAccountDraft({
+                              id: a.id,
+                              type: a.type,
+                              institution: a.institution,
+                              accountMask: a.account_mask ?? "",
+                              ownerScope: a.owner_scope ?? "household",
+                              ownerPersonProfileId: a.owner_person_profile_id ?? "",
+                              defaultParserProfileId: a.default_parser_profile_id ?? ""
+                            })
+                          }
+                        >
+                          Edit
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : null}
 

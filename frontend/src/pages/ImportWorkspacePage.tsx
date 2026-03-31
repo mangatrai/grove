@@ -20,6 +20,8 @@ type ImportFileRow = {
   financial_account_id: string | null;
   parser_profile_id: string | null;
   employer_id: string | null;
+  owner_scope: "household" | "person";
+  owner_person_profile_id: string | null;
 };
 
 type HouseholdEmployer = { id: string; displayName: string; parserProfileId?: string };
@@ -136,8 +138,18 @@ export function ImportWorkspacePage() {
   const [profiles, setProfiles] = useState<string[]>([]);
 
   const [drafts, setDrafts] = useState<
-    Record<string, { accountId: string; profileId: string; employerId: string }>
+    Record<
+      string,
+      {
+        accountId: string;
+        profileId: string;
+        employerId: string;
+        ownerScope: "household" | "person";
+        ownerPersonProfileId: string;
+      }
+    >
   >({});
+  const [ownerProfiles, setOwnerProfiles] = useState<Array<{ id: string; label: string }>>([]);
   const [householdEmployers, setHouseholdEmployers] = useState<HouseholdEmployer[]>([]);
   const [mapDate, setMapDate] = useState("Date");
   const [mapAmount, setMapAmount] = useState("Amount");
@@ -167,12 +179,17 @@ export function ImportWorkspacePage() {
     }>(`/imports/sessions/${sessionId}`);
     setSessionStatus(detail.session.status);
     setFiles(detail.files);
-    const nextDrafts: Record<string, { accountId: string; profileId: string; employerId: string }> = {};
+    const nextDrafts: Record<
+      string,
+      { accountId: string; profileId: string; employerId: string; ownerScope: "household" | "person"; ownerPersonProfileId: string }
+    > = {};
     for (const f of detail.files) {
       nextDrafts[f.id] = {
         accountId: f.financial_account_id ?? "",
         profileId: f.parser_profile_id ?? "",
-        employerId: f.employer_id ?? ""
+        employerId: f.employer_id ?? "",
+        ownerScope: f.owner_scope ?? "household",
+        ownerPersonProfileId: f.owner_person_profile_id ?? ""
       };
     }
     setDrafts(nextDrafts);
@@ -193,6 +210,24 @@ export function ImportWorkspacePage() {
     } catch {
       setHouseholdEmployers([]);
       setIncomeInference({});
+    }
+    try {
+      const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
+        "/household/members"
+      );
+      setOwnerProfiles(
+        (members.members ?? []).map((m) => ({
+          id: m.id,
+          label: `${m.fullName}${m.relationship ? ` (${m.relationship})` : ""}`
+        }))
+      );
+    } catch {
+      try {
+        const me = await apiJson<{ profile: { id: string; fullName: string } }>("/household/profile");
+        setOwnerProfiles([{ id: me.profile.id, label: me.profile.fullName || "My profile" }]);
+      } catch {
+        setOwnerProfiles([]);
+      }
     }
 
     try {
@@ -296,7 +331,14 @@ export function ImportWorkspacePage() {
   }, [sessionId]);
 
   const persistBinding = useCallback(
-    async (fileId: string, accountId: string, profileId: string, employerId: string | null) => {
+    async (
+      fileId: string,
+      accountId: string,
+      profileId: string,
+      employerId: string | null,
+      ownerScope: "household" | "person",
+      ownerPersonProfileId: string | null
+    ) => {
       if (!sessionId || !accountId || !profileId) {
         return;
       }
@@ -305,7 +347,9 @@ export function ImportWorkspacePage() {
         const body: Record<string, unknown> = {
           financialAccountId: accountId,
           parserProfileId: profileId,
-          employerId: PAYSLIP_PARSER_IDS.has(profileId) ? (employerId ?? null) : null
+          employerId: PAYSLIP_PARSER_IDS.has(profileId) ? (employerId ?? null) : null,
+          ownerScope,
+          ownerPersonProfileId: ownerScope === "person" ? ownerPersonProfileId : null
         };
         await apiJson(`/imports/sessions/${sessionId}/files/${fileId}`, {
           method: "PATCH",
@@ -330,28 +374,55 @@ export function ImportWorkspacePage() {
       if (!accountId) {
         setDrafts((d) => ({
           ...d,
-          [fileId]: { accountId: "", profileId: "", employerId: "" }
+          [fileId]: {
+            accountId: "",
+            profileId: "",
+            employerId: "",
+            ownerScope: "household",
+            ownerPersonProfileId: ""
+          }
         }));
         return;
       }
 
       const inferred = inferParserProfile(account as FinancialAccountLike, file?.file_name, incomeInference);
       if (inferred) {
+        const nextOwnerScope = drafts[fileId]?.ownerScope ?? "household";
+        const nextOwnerPersonProfileId = drafts[fileId]?.ownerPersonProfileId ?? "";
         let employerId = "";
         if (PAYSLIP_PARSER_IDS.has(inferred) && householdEmployers.length === 1) {
           employerId = householdEmployers[0]!.id;
         }
         setDrafts((d) => ({
           ...d,
-          [fileId]: { accountId, profileId: inferred, employerId }
+          [fileId]: {
+            accountId,
+            profileId: inferred,
+            employerId,
+            ownerScope: nextOwnerScope,
+            ownerPersonProfileId: nextOwnerPersonProfileId
+          }
         }));
-        await persistBinding(fileId, accountId, inferred, employerId || null);
+        await persistBinding(
+          fileId,
+          accountId,
+          inferred,
+          employerId || null,
+          nextOwnerScope,
+          nextOwnerScope === "person" ? nextOwnerPersonProfileId : null
+        );
         return;
       }
 
       setDrafts((d) => ({
         ...d,
-        [fileId]: { accountId, profileId: "", employerId: "" }
+        [fileId]: {
+          accountId,
+          profileId: "",
+          employerId: "",
+          ownerScope: drafts[fileId]?.ownerScope ?? "household",
+          ownerPersonProfileId: drafts[fileId]?.ownerPersonProfileId ?? ""
+        }
       }));
       const hint = showAdvanced
         ? ""
@@ -360,7 +431,7 @@ export function ImportWorkspacePage() {
         `We couldn’t match this file to a supported import for that account.${hint}`
       );
     },
-    [accounts, files, persistBinding, showAdvanced, incomeInference, householdEmployers]
+    [accounts, files, persistBinding, showAdvanced, incomeInference, householdEmployers, drafts]
   );
 
   const onOverrideProfileChange = useCallback(
@@ -372,10 +443,23 @@ export function ImportWorkspacePage() {
       }
       setDrafts((d) => ({
         ...d,
-        [fileId]: { accountId, profileId, employerId }
+        [fileId]: {
+          accountId,
+          profileId,
+          employerId,
+          ownerScope: d[fileId]?.ownerScope ?? "household",
+          ownerPersonProfileId: d[fileId]?.ownerPersonProfileId ?? ""
+        }
       }));
       if (accountId && profileId) {
-        await persistBinding(fileId, accountId, profileId, employerId || null);
+        await persistBinding(
+          fileId,
+          accountId,
+          profileId,
+          employerId || null,
+          drafts[fileId]?.ownerScope ?? "household",
+          drafts[fileId]?.ownerPersonProfileId || null
+        );
       }
     },
     [drafts, persistBinding, householdEmployers]
@@ -390,7 +474,41 @@ export function ImportWorkspacePage() {
         [fileId]: { ...d[fileId]!, employerId }
       }));
       if (accountId && profileId) {
-        await persistBinding(fileId, accountId, profileId, employerId || null);
+        await persistBinding(
+          fileId,
+          accountId,
+          profileId,
+          employerId || null,
+          drafts[fileId]?.ownerScope ?? "household",
+          drafts[fileId]?.ownerPersonProfileId || null
+        );
+      }
+    },
+    [drafts, persistBinding]
+  );
+
+  const onOwnerScopeChange = useCallback(
+    async (fileId: string, ownerScope: "household" | "person") => {
+      const accountId = drafts[fileId]?.accountId ?? "";
+      const profileId = drafts[fileId]?.profileId ?? "";
+      const employerId = drafts[fileId]?.employerId ?? "";
+      const personId = ownerScope === "person" ? drafts[fileId]?.ownerPersonProfileId ?? "" : "";
+      setDrafts((d) => ({ ...d, [fileId]: { ...d[fileId]!, ownerScope, ownerPersonProfileId: personId } }));
+      if (accountId && profileId) {
+        await persistBinding(fileId, accountId, profileId, employerId || null, ownerScope, personId || null);
+      }
+    },
+    [drafts, persistBinding]
+  );
+
+  const onOwnerPersonChange = useCallback(
+    async (fileId: string, ownerPersonProfileId: string) => {
+      const accountId = drafts[fileId]?.accountId ?? "";
+      const profileId = drafts[fileId]?.profileId ?? "";
+      const employerId = drafts[fileId]?.employerId ?? "";
+      setDrafts((d) => ({ ...d, [fileId]: { ...d[fileId]!, ownerPersonProfileId } }));
+      if (accountId && profileId) {
+        await persistBinding(fileId, accountId, profileId, employerId || null, "person", ownerPersonProfileId || null);
       }
     },
     [drafts, persistBinding]
@@ -780,6 +898,7 @@ export function ImportWorkspacePage() {
                 <th>Account</th>
                 {householdEmployers.length > 1 ? <th>Employer</th> : null}
                 <th>Format</th>
+                <th>Owner</th>
               </tr>
             </thead>
             <tbody>
@@ -864,6 +983,30 @@ export function ImportWorkspacePage() {
                           </div>
                         </details>
                       ) : null}
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }}>
+                        <select
+                          value={drafts[f.id]?.ownerScope ?? "household"}
+                          onChange={(e) => void onOwnerScopeChange(f.id, e.target.value as "household" | "person")}
+                        >
+                          <option value="household">Household</option>
+                          <option value="person">Person</option>
+                        </select>
+                        {(drafts[f.id]?.ownerScope ?? "household") === "person" ? (
+                          <select
+                            value={drafts[f.id]?.ownerPersonProfileId ?? ""}
+                            onChange={(e) => void onOwnerPersonChange(f.id, e.target.value)}
+                          >
+                            <option value="">— choose —</option>
+                            {ownerProfiles.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 );

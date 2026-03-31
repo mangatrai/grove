@@ -219,6 +219,8 @@ function ledgerDrillHref(
     categoryId?: string | null;
     uncategorizedOnly?: boolean;
     accountId?: string | null;
+    ownerScope?: "household" | "person" | "";
+    ownerPersonProfileId?: string | null;
     dashboardContext?: URLSearchParams;
   }
 ): string {
@@ -227,6 +229,12 @@ function ledgerDrillHref(
   qs.set("dateTo", range.end);
   if (opts?.accountId) {
     qs.set("accountId", opts.accountId);
+  }
+  if (opts?.ownerScope) {
+    qs.set("ownerScope", opts.ownerScope);
+  }
+  if (opts?.ownerScope === "person" && opts?.ownerPersonProfileId) {
+    qs.set("ownerPersonProfileId", opts.ownerPersonProfileId);
   }
   if (opts?.uncategorizedOnly) {
     qs.set("uncategorizedOnly", "true");
@@ -266,6 +274,11 @@ export function DashboardPage() {
   const [customDraftFrom, setCustomDraftFrom] = useState(() => initialScope.customFrom);
   const [customDraftTo, setCustomDraftTo] = useState(() => initialScope.customTo);
   const [accountId, setAccountId] = useState<string>(() => searchParams.get("accountId") || "");
+  const [ownerScope, setOwnerScope] = useState<"" | "household" | "person">(
+    () => (searchParams.get("ownerScope") as "" | "household" | "person" | null) ?? ""
+  );
+  const [ownerPersonProfileId, setOwnerPersonProfileId] = useState<string>(() => searchParams.get("ownerPersonProfileId") || "");
+  const [ownerProfiles, setOwnerProfiles] = useState<Array<{ id: string; label: string }>>([]);
 
   const customRangeDirty =
     preset === "custom" &&
@@ -303,8 +316,14 @@ export function DashboardPage() {
     if (accountId) {
       next.set("accountId", accountId);
     }
+    if (ownerScope) {
+      next.set("ownerScope", ownerScope);
+    }
+    if (ownerScope === "person" && ownerPersonProfileId) {
+      next.set("ownerPersonProfileId", ownerPersonProfileId);
+    }
     setSearchParams(next, { replace: true });
-  }, [preset, monthStr, asOf, accountId, customAppliedFrom, customAppliedTo, setSearchParams]);
+  }, [preset, monthStr, asOf, accountId, ownerScope, ownerPersonProfileId, customAppliedFrom, customAppliedTo, setSearchParams]);
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [data, setData] = useState<CashSummaryResponse | null>(null);
@@ -327,6 +346,26 @@ export function DashboardPage() {
       .catch(() => setAccounts([]));
   }, [token]);
 
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>("/household/members")
+      .then((r) =>
+        setOwnerProfiles(
+          (r.members ?? []).map((m) => ({ id: m.id, label: `${m.fullName}${m.relationship ? ` (${m.relationship})` : ""}` }))
+        )
+      )
+      .catch(async () => {
+        try {
+          const me = await apiJson<{ profile: { id: string; fullName: string } }>("/household/profile");
+          setOwnerProfiles([{ id: me.profile.id, label: me.profile.fullName || "My profile" }]);
+        } catch {
+          setOwnerProfiles([]);
+        }
+      });
+  }, [token]);
+
   const load = useCallback(async () => {
     setError(null);
     const qs = new URLSearchParams();
@@ -346,12 +385,18 @@ export function DashboardPage() {
     if (accountId) {
       qs.set("accountId", accountId);
     }
+    if (ownerScope) {
+      qs.set("ownerScope", ownerScope);
+      if (ownerScope === "person" && ownerPersonProfileId) {
+        qs.set("ownerPersonProfileId", ownerPersonProfileId);
+      }
+    }
     const res = await apiJson<CashSummaryResponse>(`/reports/cash-summary?${qs.toString()}`);
     setData(res);
     void apiJson<{ openByType: Record<string, number>; totalOpen: number }>("/resolution/summary")
       .then((r) => setResolutionSummary(r))
       .catch(() => setResolutionSummary(null));
-  }, [preset, monthStr, asOf, accountId, customAppliedFrom, customAppliedTo]);
+  }, [preset, monthStr, asOf, accountId, ownerScope, ownerPersonProfileId, customAppliedFrom, customAppliedTo]);
 
   useEffect(() => {
     if (!token) {
@@ -442,8 +487,13 @@ export function DashboardPage() {
   }, [data?.byCategory]);
 
   const drillOpts = useMemo(
-    () => ({ accountId: accountId || undefined, dashboardContext: new URLSearchParams(searchParams) }),
-    [accountId, searchParams]
+    () => ({
+      accountId: accountId || undefined,
+      ownerScope: ownerScope || undefined,
+      ownerPersonProfileId: ownerPersonProfileId || undefined,
+      dashboardContext: new URLSearchParams(searchParams)
+    }),
+    [accountId, ownerScope, ownerPersonProfileId, searchParams]
   );
 
   async function saveSavingsTarget(value: number | null) {
@@ -543,6 +593,43 @@ export function DashboardPage() {
               ))}
             </select>
           </label>
+          <label className="dashboard-scope-bar__control">
+            <span className="dashboard-scope-bar__label">Owner</span>
+            <select
+              value={ownerScope}
+              onChange={(e) => {
+                const v = e.target.value as "" | "household" | "person";
+                setOwnerScope(v);
+                if (v !== "person") {
+                  setOwnerPersonProfileId("");
+                }
+              }}
+              className="dashboard-scope-bar__select"
+              aria-label="Cash summary owner scope"
+            >
+              <option value="">All owners</option>
+              <option value="household">Household</option>
+              <option value="person">Person</option>
+            </select>
+          </label>
+          {ownerScope === "person" ? (
+            <label className="dashboard-scope-bar__control">
+              <span className="dashboard-scope-bar__label">Person</span>
+              <select
+                value={ownerPersonProfileId}
+                onChange={(e) => setOwnerPersonProfileId(e.target.value)}
+                className="dashboard-scope-bar__select"
+                aria-label="Cash summary owner person"
+              >
+                <option value="">All people</option>
+                {ownerProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <p className="dashboard-scope-bar__hint muted">
             KPIs, trends, and charts below use this account filter together with the period you set.
           </p>
@@ -566,7 +653,9 @@ export function DashboardPage() {
                 resolutionType: "unknown_category",
                 dateFrom: data.range.start,
                 dateTo: data.range.end,
-                ...(accountId ? { accountId } : {})
+                ...(accountId ? { accountId } : {}),
+                ...(ownerScope ? { ownerScope } : {}),
+                ...(ownerScope === "person" && ownerPersonProfileId ? { ownerPersonProfileId } : {})
               }).toString()}`}
             >
               Open Transactions → Needs review

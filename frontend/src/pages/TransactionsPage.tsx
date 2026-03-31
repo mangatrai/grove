@@ -56,6 +56,8 @@ type TxRow = {
   createdAt: string;
   categoryId: string | null;
   categoryName: string | null;
+  ownerScope: "household" | "person";
+  ownerPersonProfileId: string | null;
   reviewReasons?: string[];
   openReviewItems?: OpenReviewItem[];
   importSessionId?: string | null;
@@ -91,6 +93,8 @@ type AccountRow = {
   type: string;
   account_mask: string | null;
 };
+
+type OwnerProfileOption = { id: string; label: string };
 
 function localDateStr(d = new Date()): string {
   const y = d.getFullYear();
@@ -166,6 +170,8 @@ export function TransactionsPage() {
   const dateFrom = searchParams.get("dateFrom")?.trim() || null;
   const dateTo = searchParams.get("dateTo")?.trim() || null;
   const accountFilter = searchParams.get("accountId")?.trim() || null;
+  const ownerScopeFilter = (searchParams.get("ownerScope")?.trim() as "household" | "person" | null) || null;
+  const ownerPersonProfileFilter = searchParams.get("ownerPersonProfileId")?.trim() || null;
   const returnTo = searchParams.get("returnTo")?.trim() || null;
   const fromDashboard = searchParams.get("fromDashboard") === "true";
   const pageLimit = Math.min(Math.max(Number(searchParams.get("limit") || 100), 1), 200);
@@ -174,6 +180,7 @@ export function TransactionsPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -274,6 +281,12 @@ export function TransactionsPage() {
     if (accountFilter) {
       qs.set("accountId", accountFilter);
     }
+    if (ownerScopeFilter) {
+      qs.set("ownerScope", ownerScopeFilter);
+    }
+    if (ownerPersonProfileFilter) {
+      qs.set("ownerPersonProfileId", ownerPersonProfileFilter);
+    }
     if (amountMinUrl !== "") {
       const n = Number(amountMinUrl);
       if (Number.isFinite(n)) {
@@ -294,6 +307,26 @@ export function TransactionsPage() {
     setData(txRes);
     setCategories(catRes.categories);
     setAccounts(acctRes.accounts);
+    if (ownerProfiles.length === 0) {
+      try {
+        const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
+          "/household/members"
+        );
+        setOwnerProfiles(
+          (members.members ?? []).map((m) => ({
+            id: m.id,
+            label: `${m.fullName}${m.relationship ? ` (${m.relationship})` : ""}`
+          }))
+        );
+      } catch {
+        try {
+          const me = await apiJson<{ profile: { id: string; fullName: string } }>("/household/profile");
+          setOwnerProfiles([{ id: me.profile.id, label: me.profile.fullName || "My profile" }]);
+        } catch {
+          setOwnerProfiles([]);
+        }
+      }
+    }
   }, [
     sessionFilter,
     categoryFilter,
@@ -304,10 +337,13 @@ export function TransactionsPage() {
     dateFrom,
     dateTo,
     accountFilter,
+    ownerScopeFilter,
+    ownerPersonProfileFilter,
     amountMinUrl,
     amountMaxUrl,
     pageLimit,
-    pageOffset
+    pageOffset,
+    ownerProfiles.length
   ]);
 
   useEffect(() => {
@@ -668,13 +704,22 @@ export function TransactionsPage() {
     }
   }
 
-  async function updateCategory(txnId: string, categoryId: string | null) {
+  async function updateCategory(
+    txnId: string,
+    categoryId: string | null,
+    ownerScope?: "household" | "person",
+    ownerPersonProfileId?: string | null
+  ) {
     setSavingId(txnId);
     setError(null);
     try {
       await apiJson(`/transactions/${txnId}`, {
         method: "PATCH",
-        body: JSON.stringify({ categoryId })
+        body: JSON.stringify({
+          categoryId,
+          ownerScope,
+          ownerPersonProfileId: ownerScope === "person" ? ownerPersonProfileId : null
+        })
       });
       forgetReviewDetail(txnId);
       await load();
@@ -707,6 +752,8 @@ export function TransactionsPage() {
       dateFrom ||
       dateTo ||
       accountFilter ||
+      ownerScopeFilter ||
+      ownerPersonProfileFilter ||
       needsReviewTab ||
       resolutionTypes.length > 0 ||
       searchFromUrl ||
@@ -1010,6 +1057,57 @@ export function TransactionsPage() {
             />
           </label>
           <label className="transactions-toolbar__field">
+            <span className="transactions-toolbar__label">Owner scope</span>
+            <select
+              value={ownerScopeFilter ?? ""}
+              onChange={(e) => {
+                mergeParams((n) => {
+                  n.set("offset", "0");
+                  const v = e.target.value;
+                  if (!v) {
+                    n.delete("ownerScope");
+                    n.delete("ownerPersonProfileId");
+                  } else {
+                    n.set("ownerScope", v);
+                    if (v === "household") {
+                      n.delete("ownerPersonProfileId");
+                    }
+                  }
+                });
+              }}
+            >
+              <option value="">All owners</option>
+              <option value="household">Household</option>
+              <option value="person">Person</option>
+            </select>
+          </label>
+          {ownerScopeFilter === "person" ? (
+            <label className="transactions-toolbar__field">
+              <span className="transactions-toolbar__label">Owner person</span>
+              <select
+                value={ownerPersonProfileFilter ?? ""}
+                onChange={(e) => {
+                  mergeParams((n) => {
+                    n.set("offset", "0");
+                    const v = e.target.value;
+                    if (!v) {
+                      n.delete("ownerPersonProfileId");
+                    } else {
+                      n.set("ownerPersonProfileId", v);
+                    }
+                  });
+                }}
+              >
+                <option value="">All people</option>
+                {ownerProfiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <label className="transactions-toolbar__field">
             <span className="transactions-toolbar__label">Category</span>
             <select
               value={categorySelectValue}
@@ -1127,6 +1225,19 @@ export function TransactionsPage() {
               <>
                 {" "}
                 [account: <code>{accountName}</code>]
+              </>
+            ) : null}
+            {ownerScopeFilter ? (
+              <>
+                {" "}
+                [owner scope: <code>{ownerScopeFilter}</code>]
+              </>
+            ) : null}
+            {ownerPersonProfileFilter ? (
+              <>
+                {" "}
+                [owner:{" "}
+                <code>{ownerProfiles.find((p) => p.id === ownerPersonProfileFilter)?.label ?? ownerPersonProfileFilter}</code>]
               </>
             ) : null}
             {amountMinUrl !== "" ? (
@@ -1307,6 +1418,7 @@ export function TransactionsPage() {
                       <th>Description</th>
                       {needsReviewTab ? <th>Why</th> : null}
                       {needsReviewTab ? <th>Session</th> : null}
+                      <th>Owner</th>
                       <th>Category</th>
                     </tr>
                   </thead>
@@ -1323,7 +1435,7 @@ export function TransactionsPage() {
                       const detailItems = reviewDetailByTxn[t.id];
                       const detailLoading = reviewDetailLoadingIds.has(t.id);
                       const detailError = reviewDetailErr[t.id];
-                      const colSpan = needsReviewTab ? 9 : 7;
+                      const colSpan = needsReviewTab ? 10 : 8;
                       return (
                         <Fragment key={t.id}>
                           <tr>
@@ -1375,12 +1487,33 @@ export function TransactionsPage() {
                                 )}
                               </td>
                             ) : null}
+                            <td style={{ minWidth: "12rem" }}>
+                              <select
+                                value={t.ownerScope === "household" ? "household" : t.ownerPersonProfileId ?? ""}
+                                disabled={savingId === t.id || savingBulk}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (v === "household") {
+                                    void updateCategory(t.id, t.categoryId, "household", null);
+                                  } else {
+                                    void updateCategory(t.id, t.categoryId, "person", v);
+                                  }
+                                }}
+                              >
+                                <option value="household">Household</option>
+                                {ownerProfiles.map((p) => (
+                                  <option key={p.id} value={p.id}>
+                                    {p.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
                             <td>
                               <LedgerCategoryPicker
                                 categories={categories}
                                 value={t.categoryId}
                                 disabled={savingId === t.id || savingBulk}
-                                onChange={(v) => void updateCategory(t.id, v)}
+                                onChange={(v) => void updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId)}
                                 ariaLabel={`Category for ${desc}`}
                               />
                             </td>
