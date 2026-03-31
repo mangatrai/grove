@@ -5,7 +5,7 @@ Use this exact starter prompt in a new chat after switching projects:
 ```text
 Read these files first and continue from there:
 - docs/CHECKPOINT.md (implementation status + **“Handoff — next session”** + **“MVP done vs deferred freeze”**)
-- docs/CHANGE_HISTORY.md (CR / UX / fixes — e.g. **CR-044**, **CR-043**, **CR-042**, **CR-041**, **CR-040**, **CR-039**, **CR-028**)
+- docs/CHANGE_HISTORY.md (CR / UX / fixes — e.g. **UX-012**, **UX-011**, **CR-044**, **CR-043**, **CR-042**, **CR-041**)
 - docs/API_HOUSEHOLD_PROFILE.md (if settings / profile / salary / employers)
 - docs/PROJECT_CONTEXT.md
 - docs/PAYSLIP_V1.md (if payslip / import work)
