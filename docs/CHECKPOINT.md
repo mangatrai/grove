@@ -50,6 +50,8 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Tests** | 🟡 | Backend: Vitest + integration (**`cd backend && npm test`**). Frontend: **`cd frontend && npm test`** — **`inferParserProfile`** / payslip filename heuristic (**CR-028**) |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
 | **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** + **CR-018** + **CR-034**: **`/transactions`** **Needs review** + **`/resolution-queue`** (full **`GET /resolution`**) + banner when **`openDuplicateAmbiguityNotOnLedger`** > 0 (**DOC-005**). Type filter, **`openReviewItems`**, **`importSessionId`**, expand row **`GET /transactions/:id/open-review`**, **`PATCH /resolution/:id`**. **`GET /transactions`** paging + **FTS5** (**`0011`**, **`0013`**). **`/resolution`** → **`/transactions?needsReview=true`**. **Trash** deferred. **`docs/FINANCE_APP_PRD.md` §13**. |
+| **Identity + membership model (Epic 12, planned)** | ⬜ | **Decision locked:** separate **`user_account`** (auth/security) and **`person_profile`** (name/phone/avatar) with **`household_membership`** role + relationship. Supports profile-only members (e.g. children) and person-level attribution of accounts/files/transactions. |
+| **Credentials lifecycle (Epic 13, planned)** | ⬜ | Move from bootstrap **`.env`** login to DB-backed credentials + Security settings (change password/session invalidation), with air-gapped manual member onboarding. |
 
 ---
 
@@ -69,6 +71,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | Cash summary (home) | `docs/API_CASH_SUMMARY.md` |
 | Household settings (savings target) | `docs/API_HOUSEHOLD.md` |
 | Staging purge | `docs/IMPORT_STAGING_PURGE.md` |
+| Epic 12/13 phased execution | `docs/EPIC_12_13_EXECUTION_PLAN.md` |
 | Payslip (3.3a/b + parser notes) | **`docs/PAYSLIP_V1.md`** · **`GET/POST /payslips`** (**CR-023**, **CR-026**, **FIX-006**–**FIX-007**) |
 
 ---
@@ -88,9 +91,11 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 3. **Epic 7 continuation:** **`byCategory`** prior-window / delta fields shipped; **safe-to-spend** polish and remaining KPI range UX (e.g. free-form ranges beyond the 366-day cap).
 4. **Epic 5.1:** classification explainability / confidence UI on Transactions and rules.
 5. **Epic 11:** duplicate/transfer specialist UX vs queue parity; **DOC-005** edge cases (near-duplicate **`source_ref`**).
-6. **Epic 6:** **6.2** bulk edits; import UX polish if not subsumed by (1).
-7. ~~**Needs review bulk UX:**~~ **CR-025** shipped — optional micro-copy only.
-8. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work (**DOC-010** meta).
+6. **Epic 12 (new):** implement separate `user_account` + `person_profile`, household membership roles/relationships, and ownership attribution fields.
+7. **Epic 13 (new):** replace `.env` auth with DB credentials and ship Security tab (change password).
+8. **Epic 6:** **6.2** bulk edits; import UX polish if not subsumed by (1).
+9. ~~**Needs review bulk UX:**~~ **CR-025** shipped — optional micro-copy only.
+10. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work (**DOC-010** meta).
 
 ---
 

@@ -430,8 +430,77 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 - Tasks:
   - **`/settings`** (or equivalent) from user menu; **sub-tabs:** **Profile**, **Household**, **Accounts**, **Notifications**, **Security** — render only tabs with backing API; others show honest empty/placeholder state. (M) 🟡
   - **Household:** surface **`monthly_savings_target_usd`** (and future fields); allow **dual entry** with Home slider per §13. (M) 🟡
+  - **Revision (2026-04):** align Settings with separate identity model (`user_account` + `person_profile`) and move employer ownership from household-level shape toward person ownership in follow-on epics.
 - Acceptance:
   - Settings is discoverable; no dead tabs without explanation.
+
+---
+
+## Epic 12: Identity, Profile, Household Membership, and Ownership (P0)
+**Goal:** support multi-person households with clean ownership attribution while keeping auth concerns separate from person records.
+
+### Story 12.1 - User account vs person profile foundation
+- Tasks:
+  - Add explicit `user_account` (auth) and `person_profile` (name/phone/avatar) model boundaries. (M)
+  - Introduce deterministic link between account and primary person profile. (S)
+- Acceptance:
+  - Personal metadata can evolve without auth-table coupling; schema documents the boundary clearly.
+
+### Story 12.2 - Household membership with role and relationship
+- Tasks:
+  - Add `household_membership` with role (`head`, `member`) and relationship (`spouse`, `child`, `dependent`, `other`). (M)
+  - Allow profile-only members (no login credentials required). (S)
+- Acceptance:
+  - Household can include spouse/children as assignable members even without login.
+
+### Story 12.3 - Settings: Profile and Household management
+- Tasks:
+  - **Profile tab:** edit name, email/contact details, and avatar/icon selection. (M)
+  - **Household tab:** create/rename household, add members, set role/relationship. (M)
+- Acceptance:
+  - User can fully set up a primary household and member roster from Settings.
+
+### Story 12.4 - Ownership attribution across records
+- Tasks:
+  - Add person attribution fields for import files, payslip snapshots, accounts, and canonical transactions. (L)
+  - Expose assign/filter flows so statements and transactions can be tagged to household members. (L)
+- Acceptance:
+  - Files/transactions can be attributed to a person profile; owner/member visibility rules remain enforceable.
+
+### Story 12.5 - Employer ownership refactor
+- Tasks:
+  - Move employer semantics from household-level settings toward person-owned profile settings. (M)
+  - Keep temporary compatibility layer for existing household employer settings until migration is complete. (M)
+- Acceptance:
+  - Employer/parser selection is person-specific and no longer modeled as a generic household-wide list.
+
+---
+
+## Epic 13: Security and Credentials Lifecycle (P0)
+**Goal:** replace bootstrap `.env` credentials with durable local-account security suitable for air-gapped deployment.
+
+**Execution sequencing:** see **`docs/EPIC_12_13_EXECUTION_PLAN.md`** for phased delivery, dependency order, and first-two-sprint scope.
+
+### Story 13.1 - Local credential store and login flow
+- Tasks:
+  - Store password hashes in DB-backed auth model; remove dependency on static `.env` login for normal runtime. (M)
+  - Keep first-user bootstrap path documented for fresh installs. (S)
+- Acceptance:
+  - Regular login uses DB credentials; bootstrap path is explicit and auditable.
+
+### Story 13.2 - Security settings self-service
+- Tasks:
+  - Add **Security** tab backing API for change password. (M)
+  - Add session/token invalidation behavior for sensitive changes. (S)
+- Acceptance:
+  - User can rotate password without manual DB/env changes.
+
+### Story 13.3 - Household member onboarding (air-gapped manual-first)
+- Tasks:
+  - Add invite/add-member flow that works without external email dependencies in air-gapped mode. (M)
+  - Capture future-ready hooks for invite tokens/activation if online mode is later introduced. (S)
+- Acceptance:
+  - Household admin can onboard member accounts manually in offline environments.
 
 ---
 

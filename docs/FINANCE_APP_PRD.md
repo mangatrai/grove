@@ -51,6 +51,13 @@ The system must support low-friction ingestion of monthly financial statements (
   - upload own statements.
 - Read-only role deferred to Phase 2.
 
+### Identity and Membership Model (decision)
+- **Chosen approach:** keep **authentication identity** and **person profile** separate.
+- **`user_account`** holds login/security concerns (email, password hash, sessions).
+- **`person_profile`** holds human attributes (name, phone, avatar/icon) and ownership attribution.
+- **`household_membership`** links person to household with role and relationship (head, spouse, child, member).
+- A household person may exist without login credentials (e.g. child/dependent); login can be added later.
+
 ## 5) Scope and Data Domains
 
 ### In-scope Phase 1
@@ -149,6 +156,8 @@ The system must support low-friction ingestion of monthly financial statements (
 - Assign accounts/statements/transactions to a household member.
 - Owner sees all; members see own by default.
 - Family-level consolidated dashboards.
+- Support person-level attribution even when the person has no direct login account.
+- Household roles/relationships are modeled in membership, not embedded in auth records.
 
 ### FR-11: Privacy and Retention
 - Air-gapped capable operation (no external calls required for core ingestion).
