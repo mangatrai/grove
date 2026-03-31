@@ -26,7 +26,9 @@ const querySchema = z
       .optional()
       .transform((v) => v === "true"),
     categoryRollup: z.enum(["leaf", "parent"]).optional(),
-    accountId: z.string().uuid().optional()
+    accountId: z.string().uuid().optional(),
+    ownerScope: z.enum(["household", "person"]).optional(),
+    ownerPersonProfileId: z.string().uuid().optional()
   })
   .superRefine((q, ctx) => {
     const hasFrom = Boolean(q.dateFrom);
@@ -83,7 +85,9 @@ reportsRouter.get("/cash-summary", (req: AuthenticatedRequest, res) => {
       breakdown: q.breakdown ?? false,
       categoryBreakdown: q.categoryBreakdown ?? false,
       categoryRollup: q.categoryRollup,
-      accountId: q.accountId
+      accountId: q.accountId,
+      ownerScope: q.ownerScope,
+      ownerPersonProfileId: q.ownerPersonProfileId
     });
     res.status(200).json(data);
   } catch (e) {
@@ -94,7 +98,8 @@ reportsRouter.get("/cash-summary", (req: AuthenticatedRequest, res) => {
       msg === "CUSTOM_RANGE_INCOMPLETE" ||
       msg === "INVALID_DATE_FORMAT" ||
       msg === "INVALID_DATE_ORDER" ||
-      msg === "CUSTOM_RANGE_TOO_LONG"
+      msg === "CUSTOM_RANGE_TOO_LONG" ||
+      msg === "OWNER_PERSON_REQUIRED"
     ) {
       res.status(400).json({ message: msg });
       return;

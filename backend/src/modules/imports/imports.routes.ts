@@ -4,6 +4,8 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { db } from "../../db/sqlite.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   createImportSession,
   listFilesForSession,
@@ -13,8 +15,10 @@ import {
   type ServiceFailure
 } from "./import-session.service.js";
 import {
+  createHouseholdFinancialAccount,
   ensurePayslipImportPlaceholderAccount,
   listHouseholdFinancialAccounts,
+  updateHouseholdFinancialAccount,
   updateImportFileBinding,
   type BindingFailure
 } from "./import-file-binding.service.js";
@@ -54,7 +58,18 @@ const parseSchema = z.object({
 const fileBindingSchema = z.object({
   financialAccountId: z.string().min(1),
   parserProfileId: z.string().min(1).refine(isParserProfileId, "Unknown parser profile id"),
-  employerId: z.union([z.string().uuid(), z.null()]).optional()
+  employerId: z.union([z.string().uuid(), z.null()]).optional(),
+  ownerScope: z.enum(["household", "person"]).optional(),
+  ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional()
+});
+
+const accountUpsertSchema = z.object({
+  type: z.enum(["checking", "savings", "credit_card", "loan", "mortgage", "investment", "payslip"]),
+  institution: z.string().min(1).max(120),
+  accountMask: z.union([z.string().max(20), z.null()]).optional(),
+  ownerScope: z.enum(["household", "person"]).optional().default("household"),
+  ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
+  defaultParserProfileId: z.union([z.string().refine(isParserProfileId, "Unknown parser profile id"), z.null()]).optional()
 });
 
 function mapServiceFailureToStatus(failure: ServiceFailure): number {
@@ -189,6 +204,79 @@ importsRouter.get("/accounts", (req: AuthenticatedRequest, res) => {
   res.status(200).json({ accounts });
 });
 
+importsRouter.post("/accounts", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const parsed = accountUpsertSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  if (parsed.data.ownerScope === "person" && !parsed.data.ownerPersonProfileId) {
+    res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+    return;
+  }
+  if (parsed.data.ownerPersonProfileId) {
+    const ok = db
+      .prepare(`SELECT 1 FROM person_profile WHERE id = ? AND household_id = ?`)
+      .get(parsed.data.ownerPersonProfileId, req.authUser!.householdId);
+    if (!ok) {
+      res.status(400).json({ message: "Owner person profile not found for household" });
+      return;
+    }
+  }
+  const created = createHouseholdFinancialAccount({
+    householdId: req.authUser!.householdId,
+    ownerUserId: req.authUser!.userId,
+    type: parsed.data.type,
+    institution: parsed.data.institution,
+    accountMask: parsed.data.accountMask ?? null,
+    ownerScope: parsed.data.ownerScope,
+    ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null,
+    defaultParserProfileId: parsed.data.defaultParserProfileId ?? null
+  });
+  res.status(201).json({ id: created.id });
+});
+
+importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const params = z.object({ accountId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid account id", issues: params.error.issues });
+    return;
+  }
+  const parsed = accountUpsertSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  if (parsed.data.ownerScope === "person" && !parsed.data.ownerPersonProfileId) {
+    res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+    return;
+  }
+  if (parsed.data.ownerPersonProfileId) {
+    const ok = db
+      .prepare(`SELECT 1 FROM person_profile WHERE id = ? AND household_id = ?`)
+      .get(parsed.data.ownerPersonProfileId, req.authUser!.householdId);
+    if (!ok) {
+      res.status(400).json({ message: "Owner person profile not found for household" });
+      return;
+    }
+  }
+  const ok = updateHouseholdFinancialAccount({
+    accountId: params.data.accountId,
+    householdId: req.authUser!.householdId,
+    type: parsed.data.type,
+    institution: parsed.data.institution,
+    accountMask: parsed.data.accountMask ?? null,
+    ownerScope: parsed.data.ownerScope,
+    ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null,
+    defaultParserProfileId: parsed.data.defaultParserProfileId ?? null
+  });
+  if (!ok) {
+    res.status(404).json({ message: "Financial account not found" });
+    return;
+  }
+  res.status(200).json({ updated: true });
+});
+
 importsRouter.get("/parser-profiles", (_req, res) => {
   res.status(200).json({ profiles: PARSER_PROFILE_IDS });
 });
@@ -210,7 +298,9 @@ importsRouter.patch(
       {
         financialAccountId: parsed.data.financialAccountId,
         parserProfileId: parsed.data.parserProfileId,
-        employerId: parsed.data.employerId
+        employerId: parsed.data.employerId,
+        ownerScope: parsed.data.ownerScope,
+        ownerPersonProfileId: parsed.data.ownerPersonProfileId
       }
     );
 

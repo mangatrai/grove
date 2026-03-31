@@ -278,12 +278,18 @@ export function canonicalizeImportSession(
 
   const rawRows = db
     .prepare(
-      `SELECT tr.id AS raw_id, tr.extracted_payload_json AS payload_json
+      `SELECT tr.id AS raw_id, tr.extracted_payload_json AS payload_json,
+              f.owner_scope AS owner_scope, f.owner_person_profile_id AS owner_person_profile_id
        FROM transaction_raw tr
        INNER JOIN import_file f ON f.id = tr.file_id
        WHERE f.session_id = ?`
     )
-    .all(sessionId) as Array<{ raw_id: string; payload_json: string }>;
+    .all(sessionId) as Array<{
+    raw_id: string;
+    payload_json: string;
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
+  }>;
 
   if (rawRows.length === 0) {
     const payslipLinked = db
@@ -328,8 +334,9 @@ export function canonicalizeImportSession(
   const insertStmt = db.prepare(
     `INSERT INTO transaction_canonical (
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
-       merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta
-     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?)`
+       merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta,
+       owner_scope, owner_person_profile_id
+     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?, ?, ?)`
   );
 
   const insertedCanonicalRows: Array<{ id: string; txnDate: string }> = [];
@@ -499,7 +506,9 @@ export function canonicalizeImportSession(
         memo,
         fingerprint,
         `raw:${row.raw_id}`,
-        classificationMeta
+        classificationMeta,
+        row.owner_scope ?? "household",
+        row.owner_scope === "person" ? row.owner_person_profile_id : null
       );
       inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });

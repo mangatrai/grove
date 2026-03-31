@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
+import { db } from "../../db/sqlite.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
@@ -54,7 +55,9 @@ const querySchema = z.object({
   amountMin: z.coerce.number().optional(),
   amountMax: z.coerce.number().optional(),
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  ownerScope: z.enum(["household", "person"]).optional(),
+  ownerPersonProfileId: z.string().uuid().optional()
 });
 
 const postManualSchema = z.object({
@@ -90,7 +93,9 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     amountMin,
     amountMax,
     dateFrom,
-    dateTo
+    dateTo,
+    ownerScope,
+    ownerPersonProfileId
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
@@ -127,7 +132,9 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     dateFrom ||
     dateTo ||
     fileId ||
-    accountId
+    accountId ||
+    ownerScope ||
+    ownerPersonProfileId
       ? {
           categoryId: categoryId ?? undefined,
           uncategorizedOnly: uncategorizedOnly || undefined,
@@ -139,7 +146,9 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
           dateFrom: dateFrom ?? undefined,
           dateTo: dateTo ?? undefined,
           fileId: fileId ?? undefined,
-          accountId: accountId ?? undefined
+          accountId: accountId ?? undefined,
+          ownerScope: ownerScope ?? undefined,
+          ownerPersonProfileId: ownerPersonProfileId ?? undefined
         }
       : undefined;
 
@@ -206,7 +215,9 @@ ledgerRouter.post("/", (req: AuthenticatedRequest, res) => {
 });
 
 const patchCategorySchema = z.object({
-  categoryId: z.union([z.string().uuid(), z.null()])
+  categoryId: z.union([z.string().uuid(), z.null()]),
+  ownerScope: z.enum(["household", "person"]).optional(),
+  ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional()
 });
 
 const txnIdParamSchema = z.object({
@@ -236,7 +247,27 @@ ledgerRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
   }
 
   const householdId = req.authUser!.householdId;
-  const out = updateCanonicalTransactionCategory(householdId, req.params.id, parsed.data.categoryId);
+  if (parsed.data.ownerScope === "person") {
+    const ownerId = parsed.data.ownerPersonProfileId ?? null;
+    if (!ownerId) {
+      res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+      return;
+    }
+    const ownerOk = db
+      .prepare(`SELECT 1 FROM person_profile WHERE household_id = ? AND id = ?`)
+      .get(householdId, ownerId);
+    if (!ownerOk) {
+      res.status(400).json({ message: "Owner person profile not found for household" });
+      return;
+    }
+  }
+  const out = updateCanonicalTransactionCategory(
+    householdId,
+    req.params.id,
+    parsed.data.categoryId,
+    parsed.data.ownerScope,
+    parsed.data.ownerPersonProfileId
+  );
   if (!out.ok) {
     if (out.code === "INVALID_CATEGORY") {
       res.status(400).json({

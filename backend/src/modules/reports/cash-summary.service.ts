@@ -25,6 +25,8 @@ export interface CashSummaryInput {
   categoryRollup?: "leaf" | "parent";
   /** Optional filter; must belong to household. */
   accountId?: string;
+  ownerScope?: "household" | "person";
+  ownerPersonProfileId?: string;
 }
 
 export interface CashSummaryRange {
@@ -402,11 +404,26 @@ export function resolveCashRange(input: CashSummaryInput): {
   return { range, asOf };
 }
 
-function accountFilterClause(accountId: string | undefined): { sql: string; params: string[] } {
-  if (!accountId) {
-    return { sql: "", params: [] };
+function ownershipFilterClause(
+  accountId: string | undefined,
+  ownerScope: "household" | "person" | undefined,
+  ownerPersonProfileId: string | undefined
+): { sql: string; params: string[] } {
+  const parts: string[] = [];
+  const params: string[] = [];
+  if (accountId) {
+    parts.push("tc.account_id = ?");
+    params.push(accountId);
   }
-  return { sql: " AND tc.account_id = ? ", params: [accountId] };
+  if (ownerScope) {
+    parts.push("tc.owner_scope = ?");
+    params.push(ownerScope);
+  }
+  if (ownerPersonProfileId) {
+    parts.push("tc.owner_person_profile_id = ?");
+    params.push(ownerPersonProfileId);
+  }
+  return { sql: parts.length ? ` AND ${parts.join(" AND ")} ` : "", params };
 }
 
 function transferReportingExclusionClause(tcAlias = "tc"): string {
@@ -427,9 +444,11 @@ function aggregateForRange(
   householdId: string,
   start: string,
   end: string,
-  accountId?: string
+  accountId?: string,
+  ownerScope?: "household" | "person",
+  ownerPersonProfileId?: string
 ): CashSummaryHousehold {
-  const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
+  const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
   const row = db
     .prepare(
       `SELECT
@@ -519,9 +538,11 @@ function aggregateByAccount(
   householdId: string,
   start: string,
   end: string,
-  accountId?: string
+  accountId?: string,
+  ownerScope?: "household" | "person",
+  ownerPersonProfileId?: string
 ): CashSummaryAccountRow[] {
-  const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
+  const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
   const rows = db
     .prepare(
       `SELECT
@@ -571,9 +592,11 @@ function aggregateByCategory(
   start: string,
   end: string,
   accountId: string | undefined,
+  ownerScope: "household" | "person" | undefined,
+  ownerPersonProfileId: string | undefined,
   rollup: "leaf" | "parent"
 ): CashSummaryCategoryRow[] {
-  const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
+  const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
 
   const leafQuery = `SELECT
          tc.category_id AS categoryId,
@@ -634,11 +657,13 @@ function aggregateByCategory(
 function monthlyTrend(
   householdId: string,
   rangeEnd: string,
-  accountId?: string
+  accountId?: string,
+  ownerScope?: "household" | "person",
+  ownerPersonProfileId?: string
 ): CashSummaryTrendPoint[] {
   const endYm = rangeEnd.slice(0, 7);
   const points: CashSummaryTrendPoint[] = [];
-  const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
+  const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
 
   for (let i = 5; i >= 0; i -= 1) {
     const ym = monthsBack(endYm, i);
@@ -680,11 +705,13 @@ function buildMonthlyOutflowsByCategory(
   householdId: string,
   rangeEnd: string,
   accountId: string | undefined,
+  ownerScope: "household" | "person" | undefined,
+  ownerPersonProfileId: string | undefined,
   rollup: "leaf" | "parent"
 ): CashSummaryMonthCategoryOutflows[] {
   const endYm = rangeEnd.slice(0, 7);
   const points: CashSummaryMonthCategoryOutflows[] = [];
-  const { sql: acctSql, params: acctParams } = accountFilterClause(accountId);
+  const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
 
   const leafMonthly = `SELECT
            tc.category_id AS categoryId,
@@ -757,43 +784,81 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
   if (input.accountId && !assertAccountInHousehold(input.accountId, householdId)) {
     throw new Error("ACCOUNT_NOT_FOUND");
   }
+  if (input.ownerScope === "person" && !input.ownerPersonProfileId) {
+    throw new Error("OWNER_PERSON_REQUIRED");
+  }
 
-  const household = aggregateForRange(householdId, range.start, range.end, input.accountId);
+  const household = aggregateForRange(
+    householdId,
+    range.start,
+    range.end,
+    input.accountId,
+    input.ownerScope,
+    input.ownerPersonProfileId
+  );
   const comparisonRanges = resolveComparisonRanges(input, range);
   const previousHousehold = aggregateForRange(
     householdId,
     comparisonRanges.previous.start,
     comparisonRanges.previous.end,
-    input.accountId
+    input.accountId,
+    input.ownerScope,
+    input.ownerPersonProfileId
   );
   const yearOverYearHousehold = comparisonRanges.yearOverYear
     ? aggregateForRange(
         householdId,
         comparisonRanges.yearOverYear.start,
         comparisonRanges.yearOverYear.end,
-        input.accountId
+        input.accountId,
+        input.ownerScope,
+        input.ownerPersonProfileId
       )
     : null;
   const byAccount = input.breakdown
-    ? aggregateByAccount(householdId, range.start, range.end, input.accountId)
+    ? aggregateByAccount(
+        householdId,
+        range.start,
+        range.end,
+        input.accountId,
+        input.ownerScope,
+        input.ownerPersonProfileId
+      )
     : null;
   const rollup = input.categoryRollup ?? "parent";
   const byCategory = input.categoryBreakdown
     ? (() => {
-        const current = aggregateByCategory(householdId, range.start, range.end, input.accountId, rollup);
+        const current = aggregateByCategory(
+          householdId,
+          range.start,
+          range.end,
+          input.accountId,
+          input.ownerScope,
+          input.ownerPersonProfileId,
+          rollup
+        );
         const previous = aggregateByCategory(
           householdId,
           comparisonRanges.previous.start,
           comparisonRanges.previous.end,
           input.accountId,
+          input.ownerScope,
+          input.ownerPersonProfileId,
           rollup
         );
         return mergeCategoryPreviousAndDeltas(current, previous);
       })()
     : null;
-  const trend = monthlyTrend(householdId, range.end, input.accountId);
+  const trend = monthlyTrend(householdId, range.end, input.accountId, input.ownerScope, input.ownerPersonProfileId);
   const monthlyOutflowsByCategory = input.categoryBreakdown
-    ? buildMonthlyOutflowsByCategory(householdId, range.end, input.accountId, rollup)
+    ? buildMonthlyOutflowsByCategory(
+        householdId,
+        range.end,
+        input.accountId,
+        input.ownerScope,
+        input.ownerPersonProfileId,
+        rollup
+      )
     : null;
 
   const monthlyTarget = getHouseholdMonthlySavingsTarget(householdId);

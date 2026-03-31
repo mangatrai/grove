@@ -59,7 +59,13 @@ export function updateImportFileBinding(
   fileId: string,
   householdId: string,
   userId: string,
-  input: { financialAccountId: string; parserProfileId: string; employerId?: string | null }
+  input: {
+    financialAccountId: string;
+    parserProfileId: string;
+    employerId?: string | null;
+    ownerScope?: "household" | "person";
+    ownerPersonProfileId?: string | null;
+  }
 ): BindingSuccess | BindingFailure {
   const session = db
     .prepare(`SELECT id FROM import_session WHERE id = ? AND household_id = ?`)
@@ -85,6 +91,21 @@ export function updateImportFileBinding(
 
   const profile = input.parserProfileId;
   const employerId = input.employerId === undefined ? null : input.employerId;
+  const ownerScope = input.ownerScope ?? "household";
+  const ownerPersonProfileId = ownerScope === "person" ? (input.ownerPersonProfileId ?? null) : null;
+
+  if (ownerScope === "person") {
+    const ownerOk = db
+      .prepare(
+        `SELECT 1 FROM person_profile
+         WHERE id = ? AND household_id = ?
+         LIMIT 1`
+      )
+      .get(ownerPersonProfileId, householdId);
+    if (!ownerOk) {
+      return { ok: false, code: "NOT_FOUND", message: "Owner person profile not found for household" };
+    }
+  }
 
   if (employerId) {
     const emp = findEmployerById(householdId, employerId, userId);
@@ -105,9 +126,9 @@ export function updateImportFileBinding(
 
   db.prepare(
     `UPDATE import_file
-     SET financial_account_id = ?, parser_profile_id = ?, employer_id = ?
+     SET financial_account_id = ?, parser_profile_id = ?, employer_id = ?, owner_scope = ?, owner_person_profile_id = ?
      WHERE id = ?`
-  ).run(input.financialAccountId, profile, employerId ?? null, fileId);
+  ).run(input.financialAccountId, profile, employerId ?? null, ownerScope, ownerPersonProfileId, fileId);
 
   return { ok: true };
 }
@@ -118,10 +139,13 @@ export function listHouseholdFinancialAccounts(householdId: string): Array<{
   institution: string;
   account_mask: string | null;
   currency: string;
+  owner_scope: "household" | "person";
+  owner_person_profile_id: string | null;
+  default_parser_profile_id: string | null;
 }> {
   return db
     .prepare(
-      `SELECT id, type, institution, account_mask, currency
+      `SELECT id, type, institution, account_mask, currency, owner_scope, owner_person_profile_id, default_parser_profile_id
        FROM financial_account
        WHERE household_id = ?
        ORDER BY CASE WHEN type = 'payslip' THEN 0 ELSE 1 END, institution, type`
@@ -132,5 +156,73 @@ export function listHouseholdFinancialAccounts(householdId: string): Array<{
     institution: string;
     account_mask: string | null;
     currency: string;
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
+    default_parser_profile_id: string | null;
   }>;
+}
+
+export function createHouseholdFinancialAccount(input: {
+  householdId: string;
+  ownerUserId: string;
+  type: string;
+  institution: string;
+  accountMask?: string | null;
+  currency?: string;
+  ownerScope?: "household" | "person";
+  ownerPersonProfileId?: string | null;
+  defaultParserProfileId?: string | null;
+}): { id: string } {
+  const ownerScope = input.ownerScope ?? "household";
+  const ownerPersonProfileId = ownerScope === "person" ? (input.ownerPersonProfileId ?? null) : null;
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO financial_account (
+       id, household_id, owner_user_id, type, institution, account_mask, currency, created_at,
+       owner_scope, owner_person_profile_id, default_parser_profile_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`
+  ).run(
+    id,
+    input.householdId,
+    input.ownerUserId,
+    input.type,
+    input.institution.trim(),
+    input.accountMask ?? null,
+    input.currency ?? "USD",
+    ownerScope,
+    ownerPersonProfileId,
+    input.defaultParserProfileId ?? null
+  );
+  return { id };
+}
+
+export function updateHouseholdFinancialAccount(input: {
+  accountId: string;
+  householdId: string;
+  type: string;
+  institution: string;
+  accountMask?: string | null;
+  ownerScope?: "household" | "person";
+  ownerPersonProfileId?: string | null;
+  defaultParserProfileId?: string | null;
+}): boolean {
+  const ownerScope = input.ownerScope ?? "household";
+  const ownerPersonProfileId = ownerScope === "person" ? (input.ownerPersonProfileId ?? null) : null;
+  const out = db
+    .prepare(
+      `UPDATE financial_account
+       SET type = ?, institution = ?, account_mask = ?, owner_scope = ?, owner_person_profile_id = ?, default_parser_profile_id = ?
+       WHERE id = ? AND household_id = ?`
+    )
+    .run(
+      input.type,
+      input.institution.trim(),
+      input.accountMask ?? null,
+      ownerScope,
+      ownerPersonProfileId,
+      input.defaultParserProfileId ?? null,
+      input.accountId,
+      input.householdId
+    );
+  return out.changes > 0;
 }

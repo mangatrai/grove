@@ -28,6 +28,8 @@ export interface CanonicalTransactionRow {
   createdAt: string;
   categoryId: string | null;
   categoryName: string | null;
+  ownerScope: "household" | "person";
+  ownerPersonProfileId: string | null;
   /** Populated when listing with `needsReviewOnly` — why the row appears under Needs review. */
   reviewReasons?: string[];
   /** Open resolution items for this row (same link rules as the review queue); for bulk `/resolution/*` and per-row PATCH. */
@@ -68,6 +70,8 @@ export interface LedgerListFilters {
    * whose `type` is in this list (same predicate family as `GET /resolution` type filter).
    */
   resolutionTypes?: string[];
+  ownerScope?: "household" | "person";
+  ownerPersonProfileId?: string;
 }
 
 /** Rows that belong in the “Needs review” tab (PRD §13). */
@@ -233,6 +237,14 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
     parts.push("tc.account_id = ?");
     params.push(filters.accountId);
   }
+  if (filters.ownerScope) {
+    parts.push("tc.owner_scope = ?");
+    params.push(filters.ownerScope);
+  }
+  if (filters.ownerPersonProfileId) {
+    parts.push("tc.owner_person_profile_id = ?");
+    params.push(filters.ownerPersonProfileId);
+  }
   if (filters.amountMin !== undefined && Number.isFinite(filters.amountMin)) {
     parts.push("CAST(tc.amount AS REAL) >= ?");
     params.push(filters.amountMin);
@@ -290,6 +302,8 @@ function mapRow(
     created_at: string;
     category_id: string | null;
     category_name: string | null;
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
     open_review_items_blob?: string | null;
     import_session_id?: string | null;
   },
@@ -310,7 +324,9 @@ function mapRow(
     sourceRef: r.source_ref,
     createdAt: r.created_at,
     categoryId: r.category_id,
-    categoryName: r.category_name
+    categoryName: r.category_name,
+    ownerScope: r.owner_scope,
+    ownerPersonProfileId: r.owner_person_profile_id
   };
   if (opts?.includeReviewReasons) {
     const openItems = parseOpenReviewItems(r.open_review_items_blob ?? null);
@@ -337,7 +353,9 @@ function txSelectSql(includeReviewMeta: boolean): string {
        tc.source_ref AS source_ref,
        tc.created_at AS created_at,
        tc.category_id AS category_id,
-       c.name AS category_name`;
+       c.name AS category_name,
+       tc.owner_scope AS owner_scope,
+       tc.owner_person_profile_id AS owner_person_profile_id`;
   if (!includeReviewMeta) {
     return base;
   }
@@ -386,6 +404,8 @@ export function listCanonicalTransactions(
     created_at: string;
     category_id: string | null;
     category_name: string | null;
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
     open_review_items_blob?: string | null;
     import_session_id?: string | null;
   }>;
@@ -457,6 +477,8 @@ export function listCanonicalTransactionsForImportSession(
     created_at: string;
     category_id: string | null;
     category_name: string | null;
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
     open_review_items_blob?: string | null;
     import_session_id?: string | null;
   }>;
@@ -469,7 +491,9 @@ export function listCanonicalTransactionsForImportSession(
 export function updateCanonicalTransactionCategory(
   householdId: string,
   transactionId: string,
-  categoryId: string | null
+  categoryId: string | null,
+  ownerScope?: "household" | "person",
+  ownerPersonProfileId?: string | null
 ):
   | { ok: true; data: { id: string; categoryId: string | null; categoryName: string | null } }
   | { ok: false; code: "NOT_FOUND" | "INVALID_CATEGORY" } {
@@ -478,17 +502,26 @@ export function updateCanonicalTransactionCategory(
   }
 
   const exists = db
-    .prepare(`SELECT 1 FROM transaction_canonical WHERE id = ? AND household_id = ?`)
-    .get(transactionId, householdId);
+    .prepare(
+      `SELECT owner_scope AS owner_scope, owner_person_profile_id AS owner_person_profile_id
+       FROM transaction_canonical
+       WHERE id = ? AND household_id = ?`
+    )
+    .get(transactionId, householdId) as
+    | { owner_scope: "household" | "person"; owner_person_profile_id: string | null }
+    | undefined;
   if (!exists) {
     return { ok: false, code: "NOT_FOUND" };
   }
 
-  db.prepare(`UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ?`).run(
-    categoryId,
-    transactionId,
-    householdId
-  );
+  const nextOwnerScope = ownerScope ?? exists.owner_scope;
+  const nextOwnerPersonProfileId =
+    nextOwnerScope === "person" ? (ownerPersonProfileId ?? exists.owner_person_profile_id ?? null) : null;
+  db.prepare(
+    `UPDATE transaction_canonical
+     SET category_id = ?, owner_scope = ?, owner_person_profile_id = ?
+     WHERE id = ? AND household_id = ?`
+  ).run(categoryId, nextOwnerScope, nextOwnerPersonProfileId, transactionId, householdId);
 
   if (categoryId !== null) {
     db.prepare(

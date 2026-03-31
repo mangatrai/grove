@@ -3071,3 +3071,84 @@ describe("resolution summary (DOC-005 orphan count)", () => {
     expect(typeof res.body.openDuplicateAmbiguityNotOnLedger).toBe("number");
   });
 });
+
+describe("member ownership closure", () => {
+  it("persists owner scope/person on import file binding", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from("Date,Description,Amount\n2026-08-01,Owned,-1"), "owned.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    const ownerProfile = db.prepare(`SELECT id FROM person_profile WHERE linked_user_id = ?`).get(
+      "20000000-0000-0000-0000-000000000001"
+    ) as { id: string };
+    const bind = await request(app)
+      .patch(`/imports/sessions/${sessionId}/files/${fileId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        financialAccountId: SEED_BOA_CHECKING,
+        parserProfileId: "generic_tabular",
+        ownerScope: "person",
+        ownerPersonProfileId: ownerProfile.id
+      });
+    expect(bind.status).toBe(200);
+    const row = db
+      .prepare(`SELECT owner_scope, owner_person_profile_id FROM import_file WHERE id = ?`)
+      .get(fileId) as { owner_scope: string; owner_person_profile_id: string | null };
+    expect(row.owner_scope).toBe("person");
+    expect(row.owner_person_profile_id).toBe(ownerProfile.id);
+  });
+
+  it("filters transactions and cash summary by owner", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const ownerProfile = db
+      .prepare(`SELECT id FROM person_profile WHERE household_id = ? AND linked_user_id = ?`)
+      .get(householdId, "20000000-0000-0000-0000-000000000001") as { id: string };
+    const txnId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status, owner_scope, owner_person_profile_id
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, 'credit', 'owner-filter-target', NULL, NULL, ?, 'manual:owner-target', 'posted', 'person', ?)`
+    ).run(
+      txnId,
+      householdId,
+      SEED_BOA_CHECKING,
+      "30000000-0000-0000-0000-000000000001",
+      "2026-03-20",
+      321,
+      crypto.randomBytes(32).toString("hex"),
+      ownerProfile.id
+    );
+
+    const tx = await request(app)
+      .get(`/transactions?ownerScope=person&ownerPersonProfileId=${ownerProfile.id}&search=owner-filter-target`)
+      .set("authorization", `Bearer ${token}`);
+    expect(tx.status).toBe(200);
+    expect(tx.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(true);
+
+    const sum = await request(app)
+      .get(
+        `/reports/cash-summary?preset=rolling_30&asOf=2026-03-31&ownerScope=person&ownerPersonProfileId=${ownerProfile.id}`
+      )
+      .set("authorization", `Bearer ${token}`);
+    expect(sum.status).toBe(200);
+    expect(sum.body.household.inflows).toBeGreaterThan(0);
+  });
+});
