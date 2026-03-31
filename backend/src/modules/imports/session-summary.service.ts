@@ -23,6 +23,17 @@ export interface ImportSessionFileSummary {
    * fingerprint duplicates or skipped/invalid lines during canonicalize.
    */
   notPostedExactDuplicateOrSkipped: number;
+  /** Statement-balance check when parser rows include running balance (warn-only diagnostics). */
+  reconciliation: {
+    available: boolean;
+    status: "ok" | "mismatch" | "insufficient_data";
+    openingBalance: number | null;
+    closingBalance: number | null;
+    expectedClosingBalance: number | null;
+    netActivity: number | null;
+    variance: number | null;
+    note: string;
+  };
 }
 
 export interface ImportSessionSummary {
@@ -33,8 +44,121 @@ export interface ImportSessionSummary {
     nearDuplicatesFlagged: number;
     openItemsNeedingReview: number;
     notPostedExactDuplicateOrSkipped: number;
+    reconciliationAvailableFiles: number;
+    reconciliationMismatchedFiles: number;
   };
   files: ImportSessionFileSummary[];
+}
+
+type RawPayloadWithBalance = {
+  amount?: number;
+  source_row?: {
+    balance?: string;
+  };
+};
+
+function parseBalanceValue(raw: string | undefined): number | null {
+  if (!raw) {
+    return null;
+  }
+  const cleaned = raw.replace(/[$,\s]/g, "").trim();
+  if (!cleaned) {
+    return null;
+  }
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function reconciliationForFile(fileId: string): ImportSessionFileSummary["reconciliation"] {
+  const rows = db
+    .prepare(
+      `SELECT row_index, extracted_payload_json
+       FROM transaction_raw
+       WHERE file_id = ?
+       ORDER BY row_index ASC`
+    )
+    .all(fileId) as Array<{ row_index: number; extracted_payload_json: string }>;
+
+  if (rows.length === 0) {
+    return {
+      available: false,
+      status: "insufficient_data",
+      openingBalance: null,
+      closingBalance: null,
+      expectedClosingBalance: null,
+      netActivity: null,
+      variance: null,
+      note: "No parsed transaction rows for reconciliation."
+    };
+  }
+
+  let firstBalance: number | null = null;
+  let firstAmount: number | null = null;
+  let lastBalance: number | null = null;
+  let rawNet = 0;
+
+  for (const row of rows) {
+    let payload: RawPayloadWithBalance | null = null;
+    try {
+      payload = JSON.parse(row.extracted_payload_json) as RawPayloadWithBalance;
+    } catch {
+      payload = null;
+    }
+    if (!payload) {
+      continue;
+    }
+    const amount = typeof payload.amount === "number" && Number.isFinite(payload.amount) ? payload.amount : null;
+    if (amount !== null) {
+      rawNet += amount;
+    }
+    const bal = parseBalanceValue(payload.source_row?.balance);
+    if (bal === null) {
+      continue;
+    }
+    if (firstBalance === null) {
+      firstBalance = bal;
+      firstAmount = amount;
+    }
+    lastBalance = bal;
+  }
+
+  if (firstBalance === null || lastBalance === null || firstAmount === null) {
+    return {
+      available: false,
+      status: "insufficient_data",
+      openingBalance: null,
+      closingBalance: null,
+      expectedClosingBalance: null,
+      netActivity: roundMoney(rawNet),
+      variance: null,
+      note: "Running balance not available in parsed rows for this file profile."
+    };
+  }
+
+  const openingBalance = roundMoney(firstBalance - firstAmount);
+  const netActivity = roundMoney(rawNet);
+  const expectedClosingBalance = roundMoney(openingBalance + netActivity);
+  const closingBalance = roundMoney(lastBalance);
+  const variance = roundMoney(closingBalance - expectedClosingBalance);
+  const status = Math.abs(variance) <= 0.01 ? "ok" : "mismatch";
+
+  return {
+    available: true,
+    status,
+    openingBalance,
+    closingBalance,
+    expectedClosingBalance,
+    netActivity,
+    variance,
+    note:
+      status === "ok"
+        ? "Statement running balance check passed."
+        : "Statement running balance mismatch detected; review missing/extra lines or date window."
+  };
 }
 
 function toCountMap(rows: Array<{ file_id: string; cnt: number }>): Map<string, number> {
@@ -75,7 +199,9 @@ export function getImportSessionSummary(
         canonicalRows: 0,
         nearDuplicatesFlagged: 0,
         openItemsNeedingReview: 0,
-        notPostedExactDuplicateOrSkipped: 0
+        notPostedExactDuplicateOrSkipped: 0,
+        reconciliationAvailableFiles: 0,
+        reconciliationMismatchedFiles: 0
       },
       files: []
     };
@@ -156,6 +282,8 @@ export function getImportSessionSummary(
   let totalNear = 0;
   let totalOpenReview = 0;
   let totalExactOrSkip = 0;
+  let totalReconAvailable = 0;
+  let totalReconMismatch = 0;
 
   const files: ImportSessionFileSummary[] = fileRows.map((f) => {
     const rawRowCount = rawByFile.get(f.id) ?? 0;
@@ -167,12 +295,19 @@ export function getImportSessionSummary(
       0,
       rawRowCount - canonicalRowCount - nearDuplicatesFlagged
     );
+    const reconciliation = reconciliationForFile(f.id);
 
     totalRaw += rawRowCount;
     totalCanon += canonicalRowCount;
     totalNear += nearDuplicatesFlagged;
     totalOpenReview += openItemsNeedingReview;
     totalExactOrSkip += notPostedExactDuplicateOrSkipped;
+    if (reconciliation.available) {
+      totalReconAvailable += 1;
+      if (reconciliation.status === "mismatch") {
+        totalReconMismatch += 1;
+      }
+    }
 
     return {
       fileId: f.id,
@@ -182,7 +317,8 @@ export function getImportSessionSummary(
       canonicalRowCount,
       nearDuplicatesFlagged,
       openItemsNeedingReview,
-      notPostedExactDuplicateOrSkipped
+      notPostedExactDuplicateOrSkipped,
+      reconciliation
     };
   });
 
@@ -193,7 +329,9 @@ export function getImportSessionSummary(
       canonicalRows: totalCanon,
       nearDuplicatesFlagged: totalNear,
       openItemsNeedingReview: totalOpenReview,
-      notPostedExactDuplicateOrSkipped: totalExactOrSkip
+      notPostedExactDuplicateOrSkipped: totalExactOrSkip,
+      reconciliationAvailableFiles: totalReconAvailable,
+      reconciliationMismatchedFiles: totalReconMismatch
     },
     files
   };

@@ -96,6 +96,16 @@ type ImportSessionFileSummaryRow = {
   nearDuplicatesFlagged: number;
   openItemsNeedingReview: number;
   notPostedExactDuplicateOrSkipped: number;
+  reconciliation: {
+    available: boolean;
+    status: "ok" | "mismatch" | "insufficient_data";
+    openingBalance: number | null;
+    closingBalance: number | null;
+    expectedClosingBalance: number | null;
+    netActivity: number | null;
+    variance: number | null;
+    note: string;
+  };
 };
 
 type ImportSessionSummary = {
@@ -106,6 +116,8 @@ type ImportSessionSummary = {
     nearDuplicatesFlagged: number;
     openItemsNeedingReview: number;
     notPostedExactDuplicateOrSkipped: number;
+    reconciliationAvailableFiles: number;
+    reconciliationMismatchedFiles: number;
   };
   files: ImportSessionFileSummaryRow[];
 };
@@ -891,6 +903,10 @@ export function ImportWorkspacePage() {
                 <dd>{sessionSummary.totals.nearDuplicatesFlagged}</dd>
                 <dt>Session — not posted (dup / skip)</dt>
                 <dd>{sessionSummary.totals.notPostedExactDuplicateOrSkipped}</dd>
+                <dt>Session — recon checks</dt>
+                <dd>{sessionSummary.totals.reconciliationAvailableFiles}</dd>
+                <dt>Session — recon mismatches</dt>
+                <dd>{sessionSummary.totals.reconciliationMismatchedFiles}</dd>
                 {sessionSummary.totals.openItemsNeedingReview > 0 ? (
                   <>
                     <dt>Session — open review items</dt>
@@ -909,8 +925,8 @@ export function ImportWorkspacePage() {
                       </div>
                     );
                   }
-                  const ledgerHref = `/transactions?sessionId=${sessionId}`;
-                  const reviewHref = `/transactions?sessionId=${sessionId}&needsReview=true`;
+                  const ledgerHref = `/transactions?sessionId=${sessionId}&fileId=${encodeURIComponent(row.fileId)}`;
+                  const reviewHref = `/transactions?sessionId=${sessionId}&fileId=${encodeURIComponent(row.fileId)}&needsReview=true`;
                   return (
                     <div key={f.id} className="import-file-outcome-card">
                       <p className="import-file-outcome-card__title">{row.fileName}</p>
@@ -926,6 +942,14 @@ export function ImportWorkspacePage() {
                         <dd>{row.nearDuplicatesFlagged}</dd>
                         <dt>Not posted (dup / skip)</dt>
                         <dd>{row.notPostedExactDuplicateOrSkipped}</dd>
+                        <dt>Reconciliation</dt>
+                        <dd>
+                          {row.reconciliation.available
+                            ? row.reconciliation.status === "ok"
+                              ? "OK"
+                              : "Mismatch"
+                            : "N/A"}
+                        </dd>
                         {row.openItemsNeedingReview > 0 ? (
                           <>
                             <dt>Open review items</dt>
@@ -933,6 +957,19 @@ export function ImportWorkspacePage() {
                           </>
                         ) : null}
                       </dl>
+                      {row.reconciliation.available ? (
+                        <p className="muted import-file-outcome-card__meta" style={{ marginTop: 0 }}>
+                          Open: ${row.reconciliation.openingBalance?.toFixed(2) ?? "—"} · Net: $
+                          {row.reconciliation.netActivity?.toFixed(2) ?? "—"} · Expected close: $
+                          {row.reconciliation.expectedClosingBalance?.toFixed(2) ?? "—"} · Actual close: $
+                          {row.reconciliation.closingBalance?.toFixed(2) ?? "—"} · Variance: $
+                          {row.reconciliation.variance?.toFixed(2) ?? "—"}
+                        </p>
+                      ) : (
+                        <p className="muted import-file-outcome-card__meta" style={{ marginTop: 0 }}>
+                          {row.reconciliation.note}
+                        </p>
+                      )}
                       <div className="import-file-outcome-actions">
                         <Link to={ledgerHref}>View in ledger</Link>
                         {row.openItemsNeedingReview > 0 ? (
