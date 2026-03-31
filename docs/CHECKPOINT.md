@@ -1,6 +1,6 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-31 — **CR-041** (auth token-version invalidation + top bar profile identity + import/payslip employer UX guardrails), **CR-040** and prior — see **`docs/CHANGE_HISTORY.md`**.
+**Last updated:** 2026-03-31 — **CR-042** (import reconciliation diagnostics + file-scoped review links + dashboard range guardrails), **CR-041** and prior — see **`docs/CHANGE_HISTORY.md`**.
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
@@ -10,7 +10,9 @@ This file is the **single place** to see what the repo actually does today vs th
 - **Stable:** **`PATCH /household/settings`** — only **`monthlySavingsTargetUsd`**. Salary deposit + employers — **`GET /household/settings`** (read) + **`PATCH /household/profile`** (write); see **`docs/API_HOUSEHOLD.md`** and **`docs/API_HOUSEHOLD_PROFILE.md`**. Payslip/import employer lists use **`getHouseholdSettings(householdId, userId)`**. Backend **`cd backend && npm test`** — **123** tests green (migrations through **`0021_user_token_version`**); frontend **`cd frontend && npx tsc -p tsconfig.json --noEmit`** OK.
 - **`avatarKey`:** Persisted on profile and now surfaced in **`AppTopBar`** label (emoji + first name) for visible continuity with Settings.
 - **Security:** password change now increments **`app_user.token_version`**; existing JWTs are rejected after change (session invalidation behavior).
-- **Good next picks:** (1) Continue **Epic 12** per **`docs/EPIC_12_13_EXECUTION_PLAN.md`** (membership + ownership attribution still backlog-shaped). (2) Continue import/payslip polish beyond filename heuristics (sniff-led guidance in Import workspace). (3) Grep docs for stale “**Settings → Household**” copy where employer setup now lives under Profile.
+- **Import reconciliation:** Import session **Outcomes by file** now include warn-only reconciliation diagnostics for profiles that expose running balance; session totals include available/mismatch counts.
+- **Review navigation:** Import outcome links now support **file-scoped** drill-down via `GET /transactions?sessionId=...&fileId=...` (and `needsReview=true` variant).
+- **Good next picks:** (1) Continue **Epic 12** per **`docs/EPIC_12_13_EXECUTION_PLAN.md`** (membership + ownership attribution still backlog-shaped). (2) Expand reconciliation coverage to more parser profiles that include statement opening/closing signals. (3) Final MVP UAT checklist sign-off pass before release tag.
 - **Branch note:** Local **`main`** may be **ahead of `origin/main`**; confirm **`git status`** before push/merge.
 
 ### Progress legend (used across `docs/`)
@@ -52,7 +54,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Category hierarchy + ledger UX (Epic 5.3)** | 🟡 | **Migrations** through **`0008`** (+ **`0009`** for rules). **`/categories`** + **`/categories/rules`**. **Ledger:** **`LedgerCategoryPicker`** (portal flyout, inline **`POST /categories`**), **single-line** category cell, **no Status column** (**UX-003**, **PRD-001**). **IA:** **D-014** — keep **Transactions** as primary categorization surface; **Categories** + **Rules** remain secondary (**DOC-008**). **Gaps:** hierarchical **`byCategory`** semantics beyond **`categoryRollup`** |
 | **Transfer matcher (Epic 5.2)** | 🟡 | **Baseline shipped**; **continuation post-MVP** (**`MVP_BACKLOG`**) — real-statement validation before deeper patterns. Matcher in **`canonical-ingest.service.ts`**: **CR-016** + **CR-030** **`outgoingPaymentTokens`**; **`transfer_ambiguity`**, **`low_pair_score`**. **`TRANSFER_*`** env. |
 | **UI shell & routing** | 🟡 | **Epic 11.1 / 11.3 / 11.4 (partial):** collapsible **sidebar** + **top bar** + **Account** menu (**Settings** `/settings`, **Sign out**); nav label **Transactions** (`/transactions`). **`/dashboard`** → **`/`**. **Guests:** **`/`** = landing + **inline sign-in** (**CR-017**); **`/login`** → **`/`**. **Home (signed-in):** **Scope** bar (account filter). **`/settings`** tabs are partially wired; **Household** management is owner/admin only (member tab hidden; backend `403` on household member/settings management routes). **`avatarKey`** + first name now shown in top bar account trigger. Sidebar width: **`localStorage`** `hf_sidebar_collapsed` |
-| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**); **Finalize session** UI (**CR-022**) → **`PATCH .../status`** **`finalized`**. **Payslip copy + filename heuristic** for IBM profile (**UX-009**, **CR-028**); import run is now blocked with explicit message when multi-employer payslip files are missing employer selection (**CR-041**). |
+| **Import UX** | 🟡 | Closed sessions: uploads hidden; **Start another import session**. **Epic 6.3:** **`POST /imports/sessions/:id/undo-import`** + UI while **`review`** (**CR-021**); **Finalize session** UI (**CR-022**) → **`PATCH .../status`** **`finalized`**. **Payslip copy + filename heuristic** for IBM profile (**UX-009**, **CR-028**); import run is now blocked with explicit message when multi-employer payslip files are missing employer selection (**CR-041**). **CR-042:** outcomes include per-file reconciliation diagnostics and file-scoped drill-down links. |
 | **Payslip (Epic 3.3a / 3.3b)** | 🟡 | **`POST /payslips/upload`** — IBM SuccessFactors / Pay and Contributions **multiline** text parse (**FIX-006**, **FIX-007**); **`422`** codes **`NO_PDF_TEXT`** / **`PARSE_FAILED`** / **`PDF_READ_ERROR`**. **`GET /payslips`** — list + paging; **`GET /payslips/:id`** — full snapshot (**CR-031**). **`/payslips`** — **Recharts** gross/net/taxes + month rollups + latest-stub breakdown (**CR-036**). **`importFileId`** when from Import. **Import path:** **`ibm_pay_contributions_pdf`** + **`0015`** (**CR-028**). **Settings → Profile:** salary deposit + **employers** (person-owned storage, **CR-039**). **UI:** detail (**UX-008**); Import workspace (**UX-009**). **Dev:** Vite **`/payslips`** (**FIX-008**). **Not** merged into **`transaction_canonical`**. **Still not:** line-item grids; multi-parser execution beyond IBM — see **`docs/PAYSLIP_V1.md`** |
 | **Operator purge** | ✅ | `npm run import:purge` — `docs/IMPORT_STAGING_PURGE.md` |
 | **Tests** | 🟡 | Backend: Vitest + integration (**`cd backend && npm test`**). Frontend: **`cd frontend && npm test`** — **`inferParserProfile`** / payslip filename heuristic (**CR-028**) |
@@ -105,6 +107,22 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 8. **Epic 6:** **6.2** bulk edits; import UX polish if not subsumed by (1).
 9. ~~**Needs review bulk UX:**~~ **CR-025** shipped — optional micro-copy only.
 10. **Docs hygiene:** append **`CHANGE_HISTORY.md`** when shipping user-visible or behavior-changing work (**DOC-010** meta).
+
+---
+
+## MVP RC checklist (today)
+
+**Done**
+- Auth/security baseline: password change invalidates existing sessions via token versioning (**`0021`**, **CR-041**).
+- Profile continuity: top bar now reflects profile identity (`avatarKey` + first name) (**CR-041**).
+- Import/payslip guardrails: multi-employer employer selection is enforced before parse/import (**CR-041**).
+- Import trust diagnostics: per-file reconciliation details (when running balance is present) and file-scoped review drill-down links (**CR-042**).
+- Validation gates: backend test suite passing (**123/123**) and frontend typecheck green.
+
+**Deferred (explicit)**
+- Deep transfer matcher tuning with broader real-world pattern coverage (**post-MVP**, Epic 5.2 continuation).
+- Full ownership attribution rollout across all records and complete air-gapped member onboarding lifecycle (Epic 12.4 / 13.3).
+- Expanded statement-balance reconciliation support across all parser profiles (currently available where parsed rows expose running balance).
 
 ---
 
