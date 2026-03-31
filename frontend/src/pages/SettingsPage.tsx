@@ -483,9 +483,9 @@ export function SettingsPage() {
             {profileSuccess ? <p className="success">{profileSuccess}</p> : null}
             {loadingProfile ? <p className="muted">Loading…</p> : null}
             {!loadingProfile ? (
-              <div className="settings-household-form">
-                <div className="row" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
-                  <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+              <div className="settings-household-form" style={{ maxWidth: "none" }}>
+                <div className="row" style={{ gap: "0.75rem", flexWrap: "nowrap", justifyContent: "flex-start" }}>
+                  <label className="settings-field" style={{ flex: "0 0 14rem" }}>
                     First name
                     <input
                       type="text"
@@ -495,7 +495,7 @@ export function SettingsPage() {
                       placeholder="First name"
                     />
                   </label>
-                  <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+                  <label className="settings-field" style={{ flex: "0 0 14rem" }}>
                     Last name
                     <input
                       type="text"
@@ -540,37 +540,38 @@ export function SettingsPage() {
                     ))}
                   </select>
                 </label>
-                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginBottom: 0 }}>
-                  Salary deposit account (optional)
-                </h3>
-                <label className="settings-field">
-                  Account
-                  <select
-                    value={profileDraft.salaryAccountId}
-                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, salaryAccountId: e.target.value }))}
-                    disabled={savingProfile}
+                <h3
+                  className="settings-panel__title"
+                  style={{ fontSize: "1.05rem", marginBottom: 0, display: "flex", alignItems: "center", gap: "0.35rem" }}
+                >
+                  Employer Setup
+                  <span
+                    aria-label="Employer setup info"
+                    title="Use this section to set your employer name, salary deposit account, and payslip format mapping for import/upload."
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: "1rem",
+                      height: "1rem",
+                      borderRadius: "50%",
+                      border: "1px solid var(--color-border)",
+                      color: "var(--color-text-muted)",
+                      fontSize: "0.72rem",
+                      cursor: "help"
+                    }}
                   >
-                    <option value="">— Not set —</option>
-                    {accounts
-                      .filter((a) => a.type !== "payslip")
-                      .map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {formatAccountForSelect(a)}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginBottom: 0 }}>
-                  Employers (payslip sources)
+                    i
+                  </span>
                 </h3>
                 {profileDraft.employers.map((row, idx) => (
                   <div
                     key={idx}
                     className="row"
-                    style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}
+                    style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "nowrap", gap: "0.5rem" }}
                   >
                     <label className="settings-field" style={{ flex: "1 1 12rem" }}>
-                      Employer name
+                      Employers
                       <input
                         type="text"
                         value={row.displayName}
@@ -582,6 +583,23 @@ export function SettingsPage() {
                         }}
                         disabled={savingProfile}
                       />
+                    </label>
+                    <label className="settings-field" style={{ flex: "1 1 12rem" }}>
+                      Salary deposit account (optional)
+                      <select
+                        value={profileDraft.salaryAccountId}
+                        onChange={(e) => setProfileDraft((prev) => ({ ...prev, salaryAccountId: e.target.value }))}
+                        disabled={savingProfile}
+                      >
+                        <option value="">— Not set —</option>
+                        {accounts
+                          .filter((a) => a.type !== "payslip")
+                          .map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {formatAccountForSelect(a)}
+                            </option>
+                          ))}
+                      </select>
                     </label>
                     <label className="settings-field" style={{ flex: "1 1 11rem" }}>
                       Payslip format
@@ -627,8 +645,6 @@ export function SettingsPage() {
                   >
                     Add employer
                   </button>
-                </div>
-                <div className="settings-household-actions">
                   <button type="button" disabled={savingProfile} onClick={() => void saveProfile()}>
                     {savingProfile ? "Saving…" : "Save profile"}
                   </button>
