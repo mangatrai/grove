@@ -1,17 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { setToken } from "../api";
+import { apiJson, setToken, useAuthToken } from "../api";
 import { startImportSession } from "../import/startImportSession";
 
 type AppTopBarProps = {
   onOpenMobileNav: () => void;
 };
 
+const AVATAR_KEY_EMOJI: Record<string, string> = {
+  person: "👤",
+  home: "🏠",
+  wallet: "💳",
+  briefcase: "💼",
+  star: "⭐"
+};
+
+type ProfileResponse = {
+  profile: {
+    fullName: string;
+    avatarKey: string | null;
+  };
+};
+
 export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
+  const token = useAuthToken();
   const navigate = useNavigate();
   const [importBusy, setImportBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuLabel, setMenuLabel] = useState("Account");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,6 +43,31 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
     document.addEventListener("click", onDocClick);
     return () => document.removeEventListener("click", onDocClick);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!token) {
+      setMenuLabel("Account");
+      return;
+    }
+    let cancelled = false;
+    void apiJson<ProfileResponse>("/household/profile")
+      .then((r) => {
+        if (cancelled) {
+          return;
+        }
+        const firstName = r.profile.fullName.trim().split(/\s+/)[0] ?? "Account";
+        const emoji = AVATAR_KEY_EMOJI[r.profile.avatarKey ?? ""] ?? "👤";
+        setMenuLabel(`${emoji} ${firstName}`);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMenuLabel("Account");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   async function onNewImport() {
     setImportBusy(true);
@@ -74,7 +116,7 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
                 setMenuOpen((o) => !o);
               }}
             >
-              Account
+              {menuLabel}
             </button>
             {menuOpen ? (
               <div className="user-menu__dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
