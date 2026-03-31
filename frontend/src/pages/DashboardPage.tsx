@@ -547,7 +547,7 @@ export function DashboardPage() {
             KPIs, trends, and charts below use this account filter together with the period you set.
           </p>
         </div>
-        {resolutionSummary && (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
+        {data && resolutionSummary && (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
           <p
             className="muted"
             style={{
@@ -560,7 +560,15 @@ export function DashboardPage() {
           >
             <strong>{resolutionSummary.openByType.unknown_category}</strong> posted transaction(s) have no category
             yet.{" "}
-            <Link to="/transactions?needsReview=true&resolutionType=unknown_category">
+            <Link
+              to={`/transactions?${new URLSearchParams({
+                needsReview: "true",
+                resolutionType: "unknown_category",
+                dateFrom: data.range.start,
+                dateTo: data.range.end,
+                ...(accountId ? { accountId } : {})
+              }).toString()}`}
+            >
               Open Transactions → Needs review
             </Link>{" "}
             to assign categories in
@@ -1075,7 +1083,14 @@ export function DashboardPage() {
                           <td>{formatMoneySigned(a.net)}</td>
                           <td>{a.transactionCount}</td>
                           <td>
-                            <Link to={ledgerDrillHref(data.range, { accountId: a.accountId })}>View</Link>
+                            <Link
+                              to={ledgerDrillHref(data.range, {
+                                accountId: a.accountId,
+                                dashboardContext: new URLSearchParams(searchParams)
+                              })}
+                            >
+                              View
+                            </Link>
                           </td>
                         </tr>
                       ))}

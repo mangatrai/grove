@@ -390,6 +390,23 @@ export function TransactionsPage() {
     }
     return [...new Set(out)];
   }, [data, selectedTxnIds]);
+  const nonUnknownOpenResolutionCountInSelection = useMemo(() => {
+    if (!data) {
+      return 0;
+    }
+    let count = 0;
+    for (const t of data.transactions) {
+      if (!selectedTxnIds.has(t.id)) {
+        continue;
+      }
+      for (const item of t.openReviewItems ?? []) {
+        if (item.type !== "unknown_category") {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }, [data, selectedTxnIds]);
   const allVisibleSelected = useMemo(
     () =>
       Boolean(data?.transactions.length) &&
@@ -487,6 +504,53 @@ export function TransactionsPage() {
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Bulk category apply failed");
+    } finally {
+      setSavingBulk(false);
+    }
+  }
+
+  async function bulkApplyCategoryAndResolve() {
+    const ids = collectUnknownCategoryResolutionIds();
+    if (ids.length === 0) {
+      setError(
+        "No open “Unknown category” items in your selection. Filter Review types to “Unknown category” or pick different rows."
+      );
+      return;
+    }
+    if (!bulkCategoryId) {
+      setError("Choose a category.");
+      return;
+    }
+    setError(null);
+    setSavingBulk(true);
+    try {
+      const applyRes = await apiJson<{ updated: { id: string }[]; errors: { id: string; code: string }[] }>(
+        "/resolution/bulk-apply-category",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids, categoryId: bulkCategoryId })
+        }
+      );
+      const resolveRes = await apiJson<{ updated: { id: string; status: string }[]; errors: { id: string; code: string }[] }>(
+        "/resolution/bulk",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids, status: "resolved" })
+        }
+      );
+      if (applyRes.errors.length > 0 || resolveRes.errors.length > 0) {
+        setError(
+          `Category+resolve completed with partial errors: apply ${applyRes.errors.length}, resolve ${resolveRes.errors.length}.`
+        );
+      }
+      setSelectedTxnIds(new Set());
+      setBulkCategoryId("");
+      reviewDetailLoadedRef.current.clear();
+      setReviewDetailByTxn({});
+      setReviewDetailErr({});
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk category + resolve failed");
     } finally {
       setSavingBulk(false);
     }
@@ -1097,6 +1161,12 @@ export function TransactionsPage() {
                 </>
               )}
             </span>
+            {nonUnknownOpenResolutionCountInSelection > 0 ? (
+              <span className="muted" style={{ marginLeft: "0.25rem" }}>
+                {nonUnknownOpenResolutionCountInSelection} other review item
+                {nonUnknownOpenResolutionCountInSelection === 1 ? "" : "s"} also selected.
+              </span>
+            ) : null}
             <button
               type="button"
               className="secondary"
@@ -1170,6 +1240,15 @@ export function TransactionsPage() {
               }
             >
               Apply category
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={savingBulk || !bulkCategoryId || unknownCategoryResolutionIdsInSelection.length === 0}
+              onClick={() => void bulkApplyCategoryAndResolve()}
+              title="Applies category to unknown-category items in selection and marks those review items resolved."
+            >
+              Apply + resolve
             </button>
           </div>
         ) : null}
