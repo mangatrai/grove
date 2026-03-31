@@ -52,21 +52,38 @@ export interface ImportSessionSummary {
 
 type RawPayloadWithBalance = {
   amount?: number;
-  source_row?: {
-    balance?: string;
-  };
+  source_row?: Record<string, string | number | null | undefined>;
 };
 
 function parseBalanceValue(raw: string | undefined): number | null {
   if (!raw) {
     return null;
   }
-  const cleaned = raw.replace(/[$,\s]/g, "").trim();
+  const hasParens = /^\(.*\)$/.test(raw.trim());
+  const cleaned = raw.replace(/[()$,\s]/g, "").trim();
   if (!cleaned) {
     return null;
   }
-  const n = Number(cleaned);
+  const n = Number(hasParens ? `-${cleaned}` : cleaned);
   return Number.isFinite(n) ? n : null;
+}
+
+function extractBalanceFromSourceRow(
+  sourceRow: Record<string, string | number | null | undefined> | undefined
+): number | null {
+  if (!sourceRow) {
+    return null;
+  }
+  for (const [key, value] of Object.entries(sourceRow)) {
+    if (!/balance/i.test(key)) {
+      continue;
+    }
+    const parsed = parseBalanceValue(typeof value === "number" ? String(value) : value ?? undefined);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function roundMoney(n: number): number {
@@ -115,7 +132,7 @@ function reconciliationForFile(fileId: string): ImportSessionFileSummary["reconc
     if (amount !== null) {
       rawNet += amount;
     }
-    const bal = parseBalanceValue(payload.source_row?.balance);
+    const bal = extractBalanceFromSourceRow(payload.source_row);
     if (bal === null) {
       continue;
     }

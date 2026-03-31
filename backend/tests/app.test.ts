@@ -1660,6 +1660,50 @@ describe("import sessions and file intake", () => {
     ).toBe(true);
   });
 
+  it("computes reconciliation diagnostics when profile rows expose a balance column variant", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const csv = [
+      "Date,Description,Amount,Balance,Reference",
+      "2026-08-01,Coffee,-5.00,995.00,ref-r1",
+      "2026-08-02,Payroll,105.00,1100.00,ref-r2"
+    ].join("\n");
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "recon-balance.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const sum = await request(app)
+      .get(`/imports/sessions/${sessionId}/summary`)
+      .set("authorization", `Bearer ${token}`);
+    expect(sum.status).toBe(200);
+    expect(sum.body.files[0].reconciliation.available).toBe(true);
+    expect(sum.body.files[0].reconciliation.status).toBe("ok");
+    expect(sum.body.files[0].reconciliation.openingBalance).toBeCloseTo(1000, 2);
+    expect(sum.body.files[0].reconciliation.closingBalance).toBeCloseTo(1100, 2);
+  });
+
   it("returns 404 when ledger sessionId filter is not found for household", async () => {
     const token = await loginAndGetToken();
     const res = await request(app)
@@ -2193,6 +2237,55 @@ describe("resolution queue", () => {
     expect(bulk.body.errors).toHaveLength(1);
     expect(bulk.body.errors[0].id).toBe(badTransitionId);
     expect(bulk.body.errors[0].code).toBe("INVALID_TRANSITION");
+  });
+
+  it("bulk-apply-category updates unknown_category items and reports mixed-selection errors", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const txnId = crypto.randomUUID();
+    const fp = crypto.randomBytes(32).toString("hex");
+    db.prepare(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'bulk-cat-target', NULL, NULL, ?, 'manual:bulk-cat', 'posted')`
+    ).run(txnId, householdId.household_id, SEED_BOA_CHECKING, "2026-02-01", -23.45, fp);
+
+    const unknownId = crypto.randomUUID();
+    const wrongTypeId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
+    ).run(unknownId, householdId.household_id, txnId, JSON.stringify({ kind: "unknown_category" }));
+    db.prepare(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
+    ).run(wrongTypeId, householdId.household_id, crypto.randomUUID(), JSON.stringify({ kind: "near_duplicate" }));
+
+    const res = await request(app)
+      .post("/resolution/bulk-apply-category")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [unknownId, wrongTypeId], categoryId: "30000000-0000-0000-0000-000000000004" });
+    expect(res.status).toBe(200);
+    expect(res.body.updated.some((u: { id: string }) => u.id === unknownId)).toBe(true);
+    expect(res.body.errors.some((e: { id: string; code: string }) => e.id === wrongTypeId && e.code === "WRONG_TYPE")).toBe(
+      true
+    );
+
+    const txn = db
+      .prepare(`SELECT category_id FROM transaction_canonical WHERE id = ? AND household_id = ?`)
+      .get(txnId, householdId.household_id) as { category_id: string | null } | undefined;
+    expect(txn?.category_id).toBe("30000000-0000-0000-0000-000000000004");
+    const item = db
+      .prepare(`SELECT status FROM resolution_item WHERE id = ? AND household_id = ?`)
+      .get(unknownId, householdId.household_id) as { status: string } | undefined;
+    expect(item?.status).toBe("resolved");
   });
 });
 
