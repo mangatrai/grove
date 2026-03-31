@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
+import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import {
   inferParserProfile,
@@ -33,6 +34,56 @@ type FinancialAccount = {
   account_mask: string | null;
   currency: string;
 };
+
+type BelongsToChoice = "household" | `person:${string}`;
+
+function parseBelongsToChoice(choice: string): { ownerScope: "household" | "person"; ownerPersonProfileId: string | null } {
+  if (choice.startsWith("person:")) {
+    const id = choice.slice("person:".length);
+    if (id) {
+      return { ownerScope: "person", ownerPersonProfileId: id };
+    }
+  }
+  return { ownerScope: "household", ownerPersonProfileId: null };
+}
+
+function formatBelongsToLabel(label: string): string {
+  return `Household > ${label}`;
+}
+
+function buildBelongsToGroups(ownerProfiles: Array<{ id: string; label: string }>): HierarchicalPickerGroup[] {
+  return [
+    { group: "Household", items: [{ value: "household", label: "Household", searchText: "household" }] },
+    {
+      group: "Members",
+      items: ownerProfiles.map((p) => ({
+        value: `person:${p.id}`,
+        label: formatBelongsToLabel(p.label),
+        searchText: p.label
+      }))
+    }
+  ];
+}
+
+function buildAccountGroups(accounts: FinancialAccount[]): HierarchicalPickerGroup[] {
+  const byInstitution = new Map<string, FinancialAccount[]>();
+  for (const a of accounts) {
+    const key = a.institution;
+    byInstitution.set(key, [...(byInstitution.get(key) ?? []), a]);
+  }
+  return [...byInstitution.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([institution, rows]) => ({
+      group: institution,
+      items: rows
+        .sort((a, b) => formatAccountForSelect(a).localeCompare(formatAccountForSelect(b)))
+        .map((a) => ({
+          value: a.id,
+          label: formatAccountForSelect(a),
+          searchText: `${a.institution} ${a.type} ${a.account_mask ?? ""}`
+        }))
+    }));
+}
 
 function formatProfileLabel(id: string): string {
   return id.replace(/_/g, " ");
@@ -487,28 +538,29 @@ export function ImportWorkspacePage() {
     [drafts, persistBinding]
   );
 
-  const onOwnerScopeChange = useCallback(
-    async (fileId: string, ownerScope: "household" | "person") => {
+  const onBelongsToChange = useCallback(
+    async (fileId: string, belongsTo: BelongsToChoice) => {
       const accountId = drafts[fileId]?.accountId ?? "";
       const profileId = drafts[fileId]?.profileId ?? "";
       const employerId = drafts[fileId]?.employerId ?? "";
-      const personId = ownerScope === "person" ? drafts[fileId]?.ownerPersonProfileId ?? "" : "";
-      setDrafts((d) => ({ ...d, [fileId]: { ...d[fileId]!, ownerScope, ownerPersonProfileId: personId } }));
+      const parsed = parseBelongsToChoice(belongsTo);
+      setDrafts((d) => ({
+        ...d,
+        [fileId]: {
+          ...d[fileId]!,
+          ownerScope: parsed.ownerScope,
+          ownerPersonProfileId: parsed.ownerPersonProfileId ?? ""
+        }
+      }));
       if (accountId && profileId) {
-        await persistBinding(fileId, accountId, profileId, employerId || null, ownerScope, personId || null);
-      }
-    },
-    [drafts, persistBinding]
-  );
-
-  const onOwnerPersonChange = useCallback(
-    async (fileId: string, ownerPersonProfileId: string) => {
-      const accountId = drafts[fileId]?.accountId ?? "";
-      const profileId = drafts[fileId]?.profileId ?? "";
-      const employerId = drafts[fileId]?.employerId ?? "";
-      setDrafts((d) => ({ ...d, [fileId]: { ...d[fileId]!, ownerPersonProfileId } }));
-      if (accountId && profileId) {
-        await persistBinding(fileId, accountId, profileId, employerId || null, "person", ownerPersonProfileId || null);
+        await persistBinding(
+          fileId,
+          accountId,
+          profileId,
+          employerId || null,
+          parsed.ownerScope,
+          parsed.ownerPersonProfileId
+        );
       }
     },
     [drafts, persistBinding]
@@ -898,7 +950,7 @@ export function ImportWorkspacePage() {
                 <th>Account</th>
                 {householdEmployers.length > 1 ? <th>Employer</th> : null}
                 <th>Format</th>
-                <th>Owner</th>
+                <th>Belongs-to</th>
               </tr>
             </thead>
             <tbody>
@@ -927,17 +979,14 @@ export function ImportWorkspacePage() {
                       <span className="muted">status: {f.status}</span>
                     </td>
                     <td>
-                      <select
-                        value={drafts[f.id]?.accountId ?? ""}
-                        onChange={(e) => void onAccountChange(f.id, e.target.value)}
-                      >
-                        <option value="">— choose account —</option>
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {formatAccountForSelect(a)}
-                          </option>
-                        ))}
-                      </select>
+                      <HierarchicalSearchPicker
+                        value={drafts[f.id]?.accountId ?? null}
+                        onChange={(v) => void onAccountChange(f.id, v ?? "")}
+                        groups={buildAccountGroups(accounts)}
+                        placeholder="Choose account"
+                        ariaLabel={`Account for ${f.file_name}`}
+                        clearable
+                      />
                     </td>
                     {householdEmployers.length > 1 ? (
                       <td>
@@ -985,28 +1034,17 @@ export function ImportWorkspacePage() {
                       ) : null}
                     </td>
                     <td>
-                      <div className="row" style={{ gap: "0.35rem", flexWrap: "nowrap" }}>
-                        <select
-                          value={drafts[f.id]?.ownerScope ?? "household"}
-                          onChange={(e) => void onOwnerScopeChange(f.id, e.target.value as "household" | "person")}
-                        >
-                          <option value="household">Household</option>
-                          <option value="person">Person</option>
-                        </select>
-                        {(drafts[f.id]?.ownerScope ?? "household") === "person" ? (
-                          <select
-                            value={drafts[f.id]?.ownerPersonProfileId ?? ""}
-                            onChange={(e) => void onOwnerPersonChange(f.id, e.target.value)}
-                          >
-                            <option value="">— choose —</option>
-                            {ownerProfiles.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.label}
-                              </option>
-                            ))}
-                          </select>
-                        ) : null}
-                      </div>
+                      <HierarchicalSearchPicker
+                        value={
+                          drafts[f.id]?.ownerScope === "person" && drafts[f.id]?.ownerPersonProfileId
+                            ? (`person:${drafts[f.id]!.ownerPersonProfileId}` as BelongsToChoice)
+                            : "household"
+                        }
+                        onChange={(v) => void onBelongsToChange(f.id, (v ?? "household") as BelongsToChoice)}
+                        groups={buildBelongsToGroups(ownerProfiles)}
+                        placeholder="Belongs-to"
+                        ariaLabel={`Belongs-to for ${f.file_name}`}
+                      />
                     </td>
                   </tr>
                 );

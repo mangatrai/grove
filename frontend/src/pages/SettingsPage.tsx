@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
 const TABS = ["profile", "household", "accounts", "notifications", "security"] as const;
@@ -31,6 +32,36 @@ type AccountRow = {
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
 };
+
+type BelongsToChoice = "household" | `person:${string}`;
+
+function parseBelongsToChoice(choice: string): { ownerScope: "household" | "person"; ownerPersonProfileId: string | null } {
+  if (choice.startsWith("person:")) {
+    const id = choice.slice("person:".length);
+    if (id) {
+      return { ownerScope: "person", ownerPersonProfileId: id };
+    }
+  }
+  return { ownerScope: "household", ownerPersonProfileId: null };
+}
+
+function formatBelongsToLabel(label: string): string {
+  return `Household > ${label}`;
+}
+
+function buildBelongsToGroups(accountOwners: Array<{ id: string; label: string }>): HierarchicalPickerGroup[] {
+  return [
+    { group: "Household", items: [{ value: "household", label: "Household", searchText: "household" }] },
+    {
+      group: "Members",
+      items: accountOwners.map((p) => ({
+        value: `person:${p.id}`,
+        label: formatBelongsToLabel(p.label),
+        searchText: p.label
+      }))
+    }
+  ];
+}
 
 type EmployerDraft = { id?: string; displayName: string; parserProfileId: string };
 
@@ -186,8 +217,7 @@ export function SettingsPage() {
     type: "checking",
     institution: "",
     accountMask: "",
-    ownerScope: "household" as "household" | "person",
-    ownerPersonProfileId: "",
+    belongsTo: "household" as BelongsToChoice,
     defaultParserProfileId: ""
   });
 
@@ -335,8 +365,9 @@ export function SettingsPage() {
       setAccountError("Institution is required.");
       return;
     }
-    if (accountDraft.ownerScope === "person" && !accountDraft.ownerPersonProfileId) {
-      setAccountError("Choose an owner profile.");
+    const belongsTo = parseBelongsToChoice(accountDraft.belongsTo);
+    if (belongsTo.ownerScope === "person" && !belongsTo.ownerPersonProfileId) {
+      setAccountError("Choose a household member.");
       return;
     }
     setSavingAccount(true);
@@ -347,8 +378,8 @@ export function SettingsPage() {
         type: accountDraft.type,
         institution: accountDraft.institution.trim(),
         accountMask: accountDraft.accountMask.trim() || null,
-        ownerScope: accountDraft.ownerScope,
-        ownerPersonProfileId: accountDraft.ownerScope === "person" ? accountDraft.ownerPersonProfileId : null,
+        ownerScope: belongsTo.ownerScope,
+        ownerPersonProfileId: belongsTo.ownerPersonProfileId,
         defaultParserProfileId: accountDraft.defaultParserProfileId || null
       };
       if (accountDraft.id) {
@@ -367,8 +398,7 @@ export function SettingsPage() {
         type: "checking",
         institution: "",
         accountMask: "",
-        ownerScope: "household",
-        ownerPersonProfileId: "",
+        belongsTo: "household",
         defaultParserProfileId: ""
       });
     } catch (e: unknown) {
@@ -984,37 +1014,16 @@ export function SettingsPage() {
                 </label>
               </div>
               <div className="row">
-                <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                  Owner scope
-                  <select
-                    value={accountDraft.ownerScope}
-                    onChange={(e) =>
-                      setAccountDraft((d) => ({
-                        ...d,
-                        ownerScope: e.target.value as "household" | "person",
-                        ownerPersonProfileId: e.target.value === "person" ? d.ownerPersonProfileId : ""
-                      }))
-                    }
+                <label className="settings-field" style={{ flex: "1 1 18rem" }}>
+                  Belongs-to
+                  <HierarchicalSearchPicker
+                    value={accountDraft.belongsTo}
+                    onChange={(v) => setAccountDraft((d) => ({ ...d, belongsTo: (v ?? "household") as BelongsToChoice }))}
+                    groups={buildBelongsToGroups(accountOwners)}
+                    placeholder="Select who this account belongs to"
+                    ariaLabel="Connected account belongs-to"
                     disabled={savingAccount}
-                  >
-                    <option value="household">Household</option>
-                    <option value="person">Person profile</option>
-                  </select>
-                </label>
-                <label className="settings-field" style={{ flex: "1 1 14rem" }}>
-                  Owner person
-                  <select
-                    value={accountDraft.ownerPersonProfileId}
-                    disabled={savingAccount || accountDraft.ownerScope !== "person"}
-                    onChange={(e) => setAccountDraft((d) => ({ ...d, ownerPersonProfileId: e.target.value }))}
-                  >
-                    <option value="">— select person —</option>
-                    {accountOwners.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.label}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
               </div>
               <div className="settings-household-actions">
@@ -1032,8 +1041,7 @@ export function SettingsPage() {
                         type: "checking",
                         institution: "",
                         accountMask: "",
-                        ownerScope: "household",
-                        ownerPersonProfileId: "",
+                        belongsTo: "household",
                         defaultParserProfileId: ""
                       })
                     }
@@ -1050,7 +1058,7 @@ export function SettingsPage() {
                     <th>Institution</th>
                     <th>Type</th>
                     <th>Mask</th>
-                    <th>Owner</th>
+                    <th>Belongs-to</th>
                     <th>Default parser</th>
                     <th />
                   </tr>
@@ -1063,7 +1071,9 @@ export function SettingsPage() {
                       <td>{a.account_mask ?? "—"}</td>
                       <td>
                         {a.owner_scope === "person"
-                          ? accountOwners.find((p) => p.id === a.owner_person_profile_id)?.label ?? "Person"
+                          ? formatBelongsToLabel(
+                              accountOwners.find((p) => p.id === a.owner_person_profile_id)?.label ?? "Member"
+                            )
                           : "Household"}
                       </td>
                       <td>{a.default_parser_profile_id ?? "—"}</td>
@@ -1077,8 +1087,10 @@ export function SettingsPage() {
                               type: a.type,
                               institution: a.institution,
                               accountMask: a.account_mask ?? "",
-                              ownerScope: a.owner_scope ?? "household",
-                              ownerPersonProfileId: a.owner_person_profile_id ?? "",
+                              belongsTo:
+                                a.owner_scope === "person" && a.owner_person_profile_id
+                                  ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
+                                  : "household",
                               defaultParserProfileId: a.default_parser_profile_id ?? ""
                             })
                           }

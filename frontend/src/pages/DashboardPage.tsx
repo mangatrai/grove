@@ -15,6 +15,7 @@ import {
 } from "recharts";
 
 import { apiJson, useAuthToken } from "../api";
+import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
 type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90" | "custom";
@@ -81,6 +82,58 @@ type CashSummaryResponse = {
     explanation: string;
   };
 };
+
+type BelongsToChoice = "" | "household" | `person:${string}`;
+
+function parseBelongsToChoice(choice: string): { ownerScope: "" | "household" | "person"; ownerPersonProfileId: string } {
+  if (choice === "household") {
+    return { ownerScope: "household", ownerPersonProfileId: "" };
+  }
+  if (choice.startsWith("person:")) {
+    const id = choice.slice("person:".length);
+    if (id) {
+      return { ownerScope: "person", ownerPersonProfileId: id };
+    }
+  }
+  return { ownerScope: "", ownerPersonProfileId: "" };
+}
+
+function formatBelongsToLabel(label: string): string {
+  return `Household > ${label}`;
+}
+
+function buildBelongsToGroups(ownerProfiles: Array<{ id: string; label: string }>): HierarchicalPickerGroup[] {
+  return [
+    { group: "Household", items: [{ value: "household", label: "Household", searchText: "household" }] },
+    {
+      group: "Members",
+      items: ownerProfiles.map((p) => ({
+        value: `person:${p.id}`,
+        label: formatBelongsToLabel(p.label),
+        searchText: p.label
+      }))
+    }
+  ];
+}
+
+function buildAccountGroups(accounts: AccountRow[]): HierarchicalPickerGroup[] {
+  const byInstitution = new Map<string, AccountRow[]>();
+  for (const a of accounts) {
+    byInstitution.set(a.institution, [...(byInstitution.get(a.institution) ?? []), a]);
+  }
+  return [...byInstitution.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([institution, rows]) => ({
+      group: institution,
+      items: rows
+        .sort((a, b) => formatAccountForSelect(a).localeCompare(formatAccountForSelect(b)))
+        .map((a) => ({
+          value: a.id,
+          label: formatAccountForSelect(a),
+          searchText: `${a.institution} ${a.type} ${a.account_mask ?? ""}`
+        }))
+    }));
+}
 
 type AccountRow = {
   id: string;
@@ -279,6 +332,12 @@ export function DashboardPage() {
   );
   const [ownerPersonProfileId, setOwnerPersonProfileId] = useState<string>(() => searchParams.get("ownerPersonProfileId") || "");
   const [ownerProfiles, setOwnerProfiles] = useState<Array<{ id: string; label: string }>>([]);
+  const belongsToValue: BelongsToChoice =
+    ownerScope === "person" && ownerPersonProfileId
+      ? (`person:${ownerPersonProfileId}` as BelongsToChoice)
+      : ownerScope === "household"
+        ? "household"
+        : "";
 
   const customRangeDirty =
     preset === "custom" &&
@@ -326,6 +385,8 @@ export function DashboardPage() {
   }, [preset, monthStr, asOf, accountId, ownerScope, ownerPersonProfileId, customAppliedFrom, customAppliedTo, setSearchParams]);
 
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const accountGroups = useMemo(() => buildAccountGroups(accounts), [accounts]);
+  const belongsToGroups = useMemo(() => buildBelongsToGroups(ownerProfiles), [ownerProfiles]);
   const [data, setData] = useState<CashSummaryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -579,57 +640,30 @@ export function DashboardPage() {
           <div className="dashboard-scope-bar__title">Scope</div>
           <label className="dashboard-scope-bar__control">
             <span className="dashboard-scope-bar__label">Account</span>
-            <select
-              value={accountId}
-              onChange={(e) => setAccountId(e.target.value)}
-              className="dashboard-scope-bar__select"
-              aria-label="Cash summary account scope"
-            >
-              <option value="">All accounts (household)</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {formatAccountForSelect(a)}
-                </option>
-              ))}
-            </select>
+            <HierarchicalSearchPicker
+              value={accountId || null}
+              onChange={(v) => setAccountId(v ?? "")}
+              groups={accountGroups}
+              placeholder="All accounts (household)"
+              ariaLabel="Cash summary account scope"
+              clearable
+            />
           </label>
           <label className="dashboard-scope-bar__control">
-            <span className="dashboard-scope-bar__label">Owner</span>
-            <select
-              value={ownerScope}
-              onChange={(e) => {
-                const v = e.target.value as "" | "household" | "person";
-                setOwnerScope(v);
-                if (v !== "person") {
-                  setOwnerPersonProfileId("");
-                }
+            <span className="dashboard-scope-bar__label">Belongs-to</span>
+            <HierarchicalSearchPicker
+              value={belongsToValue || null}
+              onChange={(v) => {
+                const parsed = parseBelongsToChoice(v ?? "");
+                setOwnerScope(parsed.ownerScope);
+                setOwnerPersonProfileId(parsed.ownerPersonProfileId);
               }}
-              className="dashboard-scope-bar__select"
-              aria-label="Cash summary owner scope"
-            >
-              <option value="">All owners</option>
-              <option value="household">Household</option>
-              <option value="person">Person</option>
-            </select>
+              groups={belongsToGroups}
+              placeholder="All household activity"
+              ariaLabel="Cash summary belongs-to scope"
+              clearable
+            />
           </label>
-          {ownerScope === "person" ? (
-            <label className="dashboard-scope-bar__control">
-              <span className="dashboard-scope-bar__label">Person</span>
-              <select
-                value={ownerPersonProfileId}
-                onChange={(e) => setOwnerPersonProfileId(e.target.value)}
-                className="dashboard-scope-bar__select"
-                aria-label="Cash summary owner person"
-              >
-                <option value="">All people</option>
-                {ownerProfiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
           <p className="dashboard-scope-bar__hint muted">
             KPIs, trends, and charts below use this account filter together with the period you set.
           </p>
