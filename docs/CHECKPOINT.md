@@ -1,18 +1,19 @@
 # Development checkpoint
 
-**Last updated:** 2026-03-31 — **CR-043** (MVP final hardening: reconciliation balance-key coverage + bulk review throughput + dashboard drill-down parity), **CR-042** and prior — see **`docs/CHANGE_HISTORY.md`**.
+**Last updated:** 2026-04-02 — **CR-044** (MVP closure: connected accounts + member ownership attribution), **CR-043** and prior — see **`docs/CHANGE_HISTORY.md`**.
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
 **Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
 
-### Handoff — next session (2026-03-31)
+### Handoff — next session (2026-04-02)
 
-- **Stable:** **`PATCH /household/settings`** — only **`monthlySavingsTargetUsd`**. Salary deposit + employers — **`GET /household/settings`** (read) + **`PATCH /household/profile`** (write); see **`docs/API_HOUSEHOLD.md`** and **`docs/API_HOUSEHOLD_PROFILE.md`**. Payslip/import employer lists use **`getHouseholdSettings(householdId, userId)`**. Backend **`cd backend && npm test`** — **125** tests green (migrations through **`0021_user_token_version`**); frontend **`cd frontend && npm run lint && npm run build`** OK.
+- **Stable:** **`PATCH /household/settings`** — only **`monthlySavingsTargetUsd`**. Salary deposit + employers — **`GET /household/settings`** (read) + **`PATCH /household/profile`** (write); see **`docs/API_HOUSEHOLD.md`** and **`docs/API_HOUSEHOLD_PROFILE.md`**. Payslip/import employer lists use **`getHouseholdSettings(householdId, userId)`**. Backend **`cd backend && npm test`** — **127** tests green (migrations through **`0022_member_ownership_connected_accounts`**); frontend **`cd frontend && npm run lint`** OK.
 - **`avatarKey`:** Persisted on profile and now surfaced in **`AppTopBar`** label (emoji + first name) for visible continuity with Settings.
 - **Security:** password change now increments **`app_user.token_version`**; existing JWTs are rejected after change (session invalidation behavior).
 - **Import reconciliation:** Import session **Outcomes by file** now include warn-only reconciliation diagnostics for profiles that expose running balance; balance detection now covers generic `source_row` balance-like keys (not only literal `balance`) so more parser outputs are covered without blocking import.
 - **Review navigation:** Import outcome links now support **file-scoped** drill-down via `GET /transactions?sessionId=...&fileId=...` (and `needsReview=true` variant).
-- **MVP close status:** Final P0 checklist run completed (import parse/canonicalize/session outcomes, needs-review bulk flows, reconciliation diagnostics, dashboard drill-down parity). No new P0 blockers found in this pass.
+- **Connected accounts + ownership:** Settings now supports manual connected-account onboarding (institution presets/parsers/owner assignment), Import supports file-level owner tagging, Transactions supports owner tagging + owner filters, and Dashboard/Home cash summary supports owner filters with drill-down parity (**CR-044**).
+- **MVP close status:** Final P0 checklist run completed including ownership closure slice; no new P0 blockers found in this pass.
 - **Good next picks:** (1) Continue **Epic 12** per **`docs/EPIC_12_13_EXECUTION_PLAN.md`** (membership + ownership attribution still backlog-shaped). (2) Post-MVP transfer matcher tuning with real data (Epic 5.2 continuation). (3) Optional performance/code-split pass for frontend bundle warning.
 - **Branch note:** Local **`main`** may be **ahead of `origin/main`**; confirm **`git status`** before push/merge.
 
@@ -61,7 +62,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 | **Tests** | 🟡 | Backend: Vitest + integration (**`cd backend && npm test`**). Frontend: **`cd frontend && npm test`** — **`inferParserProfile`** / payslip filename heuristic (**CR-028**) |
 | **Design system & branding (Epic 10, P1)** | ⬜ | Ad hoc polish in **`CHANGE_HISTORY`** (e.g. **UX-002**); **no** full theme system yet — see **`docs/MVP_BACKLOG.md`** Epic **10** (tokens, optional dark/light, consistency pass, **`docs/UI_BRAND.md`**) |
 | **Shell, transactions hub, settings (Epic 11, P0)** | 🟡 | **Shipped:** **CR-013** + **CR-014** + **CR-018** + **CR-034**: **`/transactions`** **Needs review** + **`/resolution-queue`** (full **`GET /resolution`**) + banner when **`openDuplicateAmbiguityNotOnLedger`** > 0 (**DOC-005**). Type filter, **`openReviewItems`**, **`importSessionId`**, expand row **`GET /transactions/:id/open-review`**, **`PATCH /resolution/:id`**. **`GET /transactions`** paging + **FTS5** (**`0011`**, **`0013`**). **`/resolution`** → **`/transactions?needsReview=true`**. **Trash** deferred. **`docs/FINANCE_APP_PRD.md` §13**. |
-| **Identity + membership model (Epic 12)** | 🟡 | **Decision locked** (**DOC-012**). **Shipped in DB/API/UI (partial):** migrations **`0019_identity_profile_membership`**, **`0020_profile_income_settings`**; **`GET/PATCH /household/profile`**; salary/employers on **`person_profile`** (**CR-039**, **CR-040**). **Still backlog:** profile-only members, full ownership attribution on ledger/import objects, credentials off bootstrap (**Epic 13**). |
+| **Identity + membership model (Epic 12)** | 🟡 | **Decision locked** (**DOC-012**). **Shipped in DB/API/UI:** migrations **`0019`**, **`0020`**, **`0022`**; **`GET/PATCH /household/profile`**; salary/employers on **`person_profile`**; owner attribution across connected accounts/import files/ledger + owner filters in transactions/reports/dashboard (**CR-039**, **CR-040**, **CR-044**). **Still backlog:** profile-only members with no linked auth in onboarding UX; split allocation semantics (post-MVP). |
 | **Credentials lifecycle (Epic 13)** | 🟡 | DB-backed credentials + Security change-password are shipped, including JWT invalidation after password change (**`0021`** token version). **Still backlog:** full onboarding/invite lifecycle for air-gapped member account creation. |
 
 ---
@@ -124,7 +125,7 @@ Default **UI:** `http://127.0.0.1:3000` · **API:** `http://127.0.0.1:4000` · S
 
 **Deferred (explicit)**
 - Deep transfer matcher tuning with broader real-world pattern coverage (**post-MVP**, Epic 5.2 continuation).
-- Full ownership attribution rollout across all records and complete air-gapped member onboarding lifecycle (Epic 12.4 / 13.3).
+- Split allocation semantics (percent/amount) and richer onboarding lifecycle polish for profile-only members (post-MVP).
 - Expanded statement-balance reconciliation support across all parser profiles (currently available where parsed rows expose running balance).
 
 ---
