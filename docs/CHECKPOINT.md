@@ -3,11 +3,12 @@
 **Last updated:** 2026-04-02 — **CR-044** (MVP closure: connected accounts + member ownership attribution), **CR-043** and prior — see **`docs/CHANGE_HISTORY.md`**.
 
 This file is the **single place** to see what the repo actually does today vs the backlog, and what to do next.  
-**Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.
+**Audit trail** of user-driven tweaks, UX passes, and PRD deviations: **`docs/CHANGE_HISTORY.md`**.  
+**GitHub tracking:** UX/CR items may also live as issues on **`https://github.com/mangatrai/household-finance-app`** — see **`GitHub:`** / **`GitHub (closed):`** lines on **`docs/CHANGE_HISTORY.md`** entries (e.g. **UX-013** issues **#1–#4** closed with that ship). Close or comment on issues when fixes ship.
 
 ### Handoff — next session (2026-04-02)
 
-- **Stable:** **`PATCH /household/settings`** — only **`monthlySavingsTargetUsd`**. Salary deposit + employers — **`GET /household/settings`** (read) + **`PATCH /household/profile`** (write); see **`docs/API_HOUSEHOLD.md`** and **`docs/API_HOUSEHOLD_PROFILE.md`**. Payslip/import employer lists use **`getHouseholdSettings(householdId, userId)`**. Backend **`cd backend && npm test`** — **127** tests green (migrations through **`0022_member_ownership_connected_accounts`**); frontend **`cd frontend && npm run lint`** OK.
+- **Stable:** **`PATCH /household/settings`** — only **`monthlySavingsTargetUsd`**. Salary deposit + employers — **`GET /household/settings`** (read) + **`PATCH /household/profile`** (write); see **`docs/API_HOUSEHOLD.md`** and **`docs/API_HOUSEHOLD_PROFILE.md`**. Payslip/import employer lists use **`getHouseholdSettings(householdId, userId)`**. Backend **`cd backend && npm test`** — re-run after **`0023_household_custom_institution`**; frontend **`cd frontend && npm run lint`** OK. **API index:** **`openapi/openapi.yaml`**, **`docs/API_INDEX.md`**. **Import automation explainer:** **`docs/IMPORT_CLASSIFICATION.md`**. **Prod DB:** **`docs/PRODUCTION_SETUP.md`** (dev seeds under **`backend/db/seeds/dev/`**).
 - **`avatarKey`:** Persisted on profile and now surfaced in **`AppTopBar`** label (emoji + first name) for visible continuity with Settings.
 - **Security:** password change now increments **`app_user.token_version`**; existing JWTs are rejected after change (session invalidation behavior).
 - **Import reconciliation:** Import session **Outcomes by file** now include warn-only reconciliation diagnostics for profiles that expose running balance; balance detection now covers generic `source_row` balance-like keys (not only literal `balance`) so more parser outputs are covered without blocking import.
@@ -15,6 +16,7 @@ This file is the **single place** to see what the repo actually does today vs th
 - **Connected accounts + ownership:** Settings now supports manual connected-account onboarding (institution presets/parsers/owner assignment), Import supports file-level owner tagging, Transactions supports owner tagging + owner filters, and Dashboard/Home cash summary supports owner filters with drill-down parity (**CR-044**).
 - **Ownership UX wording:** Ownership controls now use **Belongs-to** language with one hierarchical selector (Household + `Household > Member`) across Settings, Import, Transactions/Needs Review, and Dashboard for consistent attribution UX (**UX-011**).
 - **Picker UX modernization:** Transactions/Dashboard/Import/Settings now use searchable hierarchy-aware pickers for category/account/belongs-to selection; Transactions row category assignment moved to inline searchable picker (legacy portlet chooser removed) while keeping quick add actions (**UX-012**).
+- **Cascade refinement + Add Transaction fixes:** Pickers now support menu/submenu cascade interaction with search, category creation moved to in-picker footer actions, Home scope controls are side-by-side, and Add Transaction now uses money direction + positive amount + required belongs-to with fixed dropdown layering (**UX-013**).
 - **MVP close status:** Final P0 checklist run completed including ownership closure slice; no new P0 blockers found in this pass.
 - **Good next picks:** (1) Continue **Epic 12** per **`docs/EPIC_12_13_EXECUTION_PLAN.md`** (membership + ownership attribution still backlog-shaped). (2) Post-MVP transfer matcher tuning with real data (Epic 5.2 continuation). (3) Optional performance/code-split pass for frontend bundle warning.
 - **Branch note:** Local **`main`** may be **ahead of `origin/main`**; confirm **`git status`** before push/merge.

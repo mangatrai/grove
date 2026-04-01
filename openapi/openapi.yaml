@@ -1,0 +1,275 @@
+openapi: 3.1.0
+info:
+  title: Household Finance API
+  version: 0.1.0
+  description: |
+    HTTP API for the self-hosted household finance app. All authenticated routes expect
+    `Authorization: Bearer <JWT>` unless noted. See `docs/API_INDEX.md` for prose topic guides.
+servers:
+  - url: /
+    description: Relative to configured API base URL
+tags:
+  - name: health
+  - name: auth
+  - name: household
+  - name: categories
+  - name: imports
+  - name: transactions
+  - name: resolution
+  - name: reports
+  - name: payslips
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness / readiness
+      responses:
+        "200":
+          description: OK
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Obtain JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        "200":
+          description: Token issued
+        "401":
+          description: Invalid credentials
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Current user and role
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: User payload
+        "401":
+          description: Unauthorized
+  /auth/change-password:
+    post:
+      tags: [auth]
+      summary: Change password for signed-in user
+      security: [{ bearerAuth: [] }]
+  /household/settings:
+    get:
+      tags: [household]
+      summary: Household-level settings (targets, salary deposit, employers)
+      security: [{ bearerAuth: [] }]
+    patch:
+      tags: [household]
+      summary: Update household settings (restricted fields)
+      security: [{ bearerAuth: [] }]
+  /household/profile:
+    get:
+      tags: [household]
+      summary: Signed-in person profile
+      security: [{ bearerAuth: [] }]
+    patch:
+      tags: [household]
+      summary: Update profile
+      security: [{ bearerAuth: [] }]
+  /household/members:
+    get:
+      tags: [household]
+      summary: List household members
+      security: [{ bearerAuth: [] }]
+    post:
+      tags: [household]
+      summary: Create member (admin)
+      security: [{ bearerAuth: [] }]
+  /household/members/{memberId}:
+    patch:
+      tags: [household]
+      summary: Update member
+      security: [{ bearerAuth: [] }]
+  /categories:
+    get:
+      tags: [categories]
+      summary: List categories for household
+      security: [{ bearerAuth: [] }]
+    post:
+      tags: [categories]
+      summary: Create household-owned category
+      security: [{ bearerAuth: [] }]
+  /categories/{categoryId}:
+    patch:
+      tags: [categories]
+      summary: Update household-owned category
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [categories]
+      summary: Delete household-owned category
+      security: [{ bearerAuth: [] }]
+  /categories/rules:
+    get:
+      tags: [categories]
+      summary: List category rules
+      security: [{ bearerAuth: [] }]
+    post:
+      tags: [categories]
+      summary: Create category rule
+      security: [{ bearerAuth: [] }]
+  /categories/rules/{ruleId}:
+    patch:
+      tags: [categories]
+      summary: Update rule
+      security: [{ bearerAuth: [] }]
+  /imports/accounts:
+    get:
+      tags: [imports]
+      summary: List financial accounts
+      security: [{ bearerAuth: [] }]
+    post:
+      tags: [imports]
+      summary: Create connected account
+      security: [{ bearerAuth: [] }]
+  /imports/accounts/{accountId}:
+    patch:
+      tags: [imports]
+      summary: Update connected account
+      security: [{ bearerAuth: [] }]
+  /imports/parser-profiles:
+    get:
+      tags: [imports]
+      summary: List known parser profile ids
+      security: [{ bearerAuth: [] }]
+  /imports/institutions:
+    get:
+      tags: [imports]
+      summary: Curated institution labels and household custom institutions
+      security: [{ bearerAuth: [] }]
+  /imports/institutions/custom:
+    post:
+      tags: [imports]
+      summary: Add household custom institution name
+      security: [{ bearerAuth: [] }]
+  /imports/sessions:
+    post:
+      tags: [imports]
+      summary: Create import session
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}:
+    get:
+      tags: [imports]
+      summary: Session detail
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/status:
+    patch:
+      tags: [imports]
+      summary: Transition session status
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/summary:
+    get:
+      tags: [imports]
+      summary: Per-file import summary
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/files:
+    post:
+      tags: [imports]
+      summary: Upload files to session (multipart field `files`)
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/files/{fileId}:
+    patch:
+      tags: [imports]
+      summary: Bind file to account and parser
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/parse:
+    post:
+      tags: [imports]
+      summary: Parse staged files
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/canonicalize:
+    post:
+      tags: [imports]
+      summary: Canonicalize into ledger
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/undo-import:
+    post:
+      tags: [imports]
+      summary: Roll back session ledger effects
+      security: [{ bearerAuth: [] }]
+  /transactions:
+    get:
+      tags: [transactions]
+      summary: List ledger transactions (filters via query params)
+      security: [{ bearerAuth: [] }]
+    post:
+      tags: [transactions]
+      summary: Manual transaction entry
+      security: [{ bearerAuth: [] }]
+  /transactions/{transactionId}:
+    patch:
+      tags: [transactions]
+      summary: Update category / owner on transaction
+      security: [{ bearerAuth: [] }]
+  /transactions/{transactionId}/open-review:
+    get:
+      tags: [transactions]
+      summary: Open resolution items for a transaction
+      security: [{ bearerAuth: [] }]
+  /resolution:
+    get:
+      tags: [resolution]
+      summary: List resolution items (query status, type)
+      security: [{ bearerAuth: [] }]
+  /resolution/bulk:
+    post:
+      tags: [resolution]
+      summary: Bulk update resolution item status
+      security: [{ bearerAuth: [] }]
+  /resolution/{id}:
+    patch:
+      tags: [resolution]
+      summary: Update resolution item status
+      security: [{ bearerAuth: [] }]
+  /resolution/bulk-apply-category:
+    post:
+      tags: [resolution]
+      summary: Bulk apply category to unknown-category items
+      security: [{ bearerAuth: [] }]
+  /resolution/summary:
+    get:
+      tags: [resolution]
+      summary: Resolution queue summary counts
+      security: [{ bearerAuth: [] }]
+  /reports/cash-summary:
+    get:
+      tags: [reports]
+      summary: Cash summary / KPIs
+      security: [{ bearerAuth: [] }]
+  /payslips:
+    get:
+      tags: [payslips]
+      summary: List payslips
+      security: [{ bearerAuth: [] }]
+  /payslips/upload:
+    post:
+      tags: [payslips]
+      summary: Upload payslip PDF
+      security: [{ bearerAuth: [] }]
+  /payslips/sniff:
+    post:
+      tags: [payslips]
+      summary: Sniff PDF for parser hints
+      security: [{ bearerAuth: [] }]
+  /payslips/{id}:
+    get:
+      tags: [payslips]
+      summary: Payslip detail
+      security: [{ bearerAuth: [] }]
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

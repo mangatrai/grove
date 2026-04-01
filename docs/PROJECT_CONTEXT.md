@@ -96,6 +96,12 @@ Shipped vs planned work is tracked in **`docs/CHECKPOINT.md`** with a clear **pr
 
 **Change history:** User-driven tweaks, UX passes, engineering fixes, and **PRD/backlog deviations** are logged in **`docs/CHANGE_HISTORY.md`** (CR- / UX- / FIX- / DOC- / PRD- prefixes). **`docs/DECISIONS_LOG.md`** holds ADR-lite decisions (e.g. D-015, D-016) that point to that file when needed.
 
+## Documentation map (reduce duplicate hunting)
+- **API route index:** `openapi/openapi.yaml` and **`docs/API_INDEX.md`** (topic guides: `API_*.md`).
+- **Import rules & automation:** **`docs/IMPORT_CLASSIFICATION.md`** (DB rules vs defaults vs dedupe vs transfers).
+- **Production DB:** **`docs/PRODUCTION_SETUP.md`** (migrations; `seeds/` vs `seeds/dev/`).
+- **Session handoff:** **`docs/CHECKPOINT.md`**, **`docs/NEXT_SESSION_PROMPT.md`**.
+
 ## Immediate Next Build Focus
 1. **Unified Import + payslip:** **Baseline shipped** (**CR-028**, **`0015`**, **UX-009**, **CR-031**): import session + **`ibm_pay_contributions_pdf`**, **`payslip_snapshot.import_file_id`**, **`GET /payslips/:id`**, **`/payslips/:payslipId`** UI, payslip-only canonicalize, filename heuristic, workspace copy. **Income data** lives on **`person_profile`** — read **`GET /household/settings`**, write **`PATCH /household/profile`** (**CR-040**; **`docs/API_HOUSEHOLD_PROFILE.md`**). **Next:** stronger salary-account hints from profile, optional PDF-text sniff, **optional UI:** show **`avatarKey`** in **`AppTopBar`**. See **`docs/CHECKPOINT.md`** (also **Handoff — next session**) and **`docs/PAYSLIP_V1.md`**.
 2. **Epic 5.2** — **post-MVP / backlog:** transfer matcher tuning waits on **real-world** bank data (**`MVP_BACKLOG`** Story **5.2**).

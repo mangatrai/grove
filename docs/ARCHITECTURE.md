@@ -128,6 +128,8 @@ Operators may still want to **reclaim disk space** after they trust extracted ro
 - Unknown categories go to unresolved queue.
 - Bulk apply category corrections from inbox grid.
 
+**Implementation detail:** DB rules, default keyword rules, dedupe, and transfer detection are summarized in **`docs/IMPORT_CLASSIFICATION.md`** (the `/categories/rules` UI is only custom DB rules).
+
 ## 9. Reconciliation Strategy (MVP)
 - Validate statement opening/closing balance where available.
 - Compute delta from imported canonical postings.
