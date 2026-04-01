@@ -1,14 +1,10 @@
 import { useMemo, useState } from "react";
-import { Group, ActionIcon, Tooltip } from "@mantine/core";
 
 import { apiJson } from "../api";
+import { buildCategoryAssignmentGroups, type CategoryOption } from "./categoryPickerGroups";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "./HierarchicalSearchPicker";
 
-type CategoryOption = {
-  id: string;
-  name: string;
-  parentId: string | null;
-};
+export type { CategoryOption };
 
 export function LedgerCategoryPicker({
   categories,
@@ -26,44 +22,10 @@ export function LedgerCategoryPicker({
   const [savingCreate, setSavingCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
-  const topLevelParents = useMemo(
-    () => categories.filter((c) => c.parentId === null).sort((a, b) => a.name.localeCompare(b.name)),
-    [categories]
+  const groups: HierarchicalPickerGroup[] = useMemo(
+    () => buildCategoryAssignmentGroups(categories, value),
+    [categories, value]
   );
-  const childrenByParentId = useMemo(() => {
-    const map = new Map<string, CategoryOption[]>();
-    for (const c of categories) {
-      if (!c.parentId) continue;
-      const arr = map.get(c.parentId) ?? [];
-      arr.push(c);
-      map.set(c.parentId, arr);
-    }
-    for (const [pid, arr] of map.entries()) {
-      map.set(
-        pid,
-        arr.sort((a, b) => a.name.localeCompare(b.name))
-      );
-    }
-    return map;
-  }, [categories]);
-  const groups: HierarchicalPickerGroup[] = useMemo(() => {
-    const parentItems = topLevelParents.map((p) => ({
-      value: p.id,
-      label: p.name,
-      searchText: p.name
-    }));
-    const childItems = topLevelParents.flatMap((p) =>
-      (childrenByParentId.get(p.id) ?? []).map((c) => ({
-        value: c.id,
-        label: `${p.name} > ${c.name}`,
-        searchText: `${p.name} ${c.name}`
-      }))
-    );
-    return [
-      { group: "Top-level groups", items: parentItems },
-      { group: "Subcategories", items: childItems }
-    ];
-  }, [topLevelParents, childrenByParentId]);
   const selectedParentId = useMemo(() => {
     if (!value) return null;
     const selected = byId.get(value);
@@ -111,39 +73,31 @@ export function LedgerCategoryPicker({
 
   return (
     <div>
-      <Group gap={6} wrap="nowrap" align="center">
-        <HierarchicalSearchPicker
-          value={value}
-          onChange={(next) => void onChange(next)}
-          groups={groups}
-          placeholder="Uncategorized"
-          ariaLabel={ariaLabel}
-          clearable
-          disabled={disabled || savingCreate}
-        />
-        <Tooltip label="Add top-level group">
-          <ActionIcon
-            variant="light"
-            size="sm"
-            onClick={() => void createParentGroup()}
-            disabled={disabled || savingCreate}
-            aria-label="Add top-level category group"
-          >
-            <span aria-hidden>+</span>
-          </ActionIcon>
-        </Tooltip>
-        <Tooltip label={selectedParentId ? "Add subcategory under selected group" : "Select a group first"}>
-          <ActionIcon
-            variant="light"
-            size="sm"
-            onClick={() => void createSubcategory()}
-            disabled={disabled || savingCreate || !selectedParentId}
-            aria-label="Add subcategory under selected group"
-          >
-            <span aria-hidden>+</span>
-          </ActionIcon>
-        </Tooltip>
-      </Group>
+      <HierarchicalSearchPicker
+        value={value}
+        onChange={(next) => void onChange(next)}
+        groups={groups}
+        placeholder="Uncategorized"
+        ariaLabel={ariaLabel}
+        clearable
+        disabled={disabled || savingCreate}
+        footer={
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+            <button type="button" className="secondary" onClick={() => void createParentGroup()} disabled={disabled || savingCreate}>
+              Add group
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void createSubcategory()}
+              disabled={disabled || savingCreate || !selectedParentId}
+              title={selectedParentId ? "Add subcategory under selected group" : "Select a group first"}
+            >
+              Add subcategory
+            </button>
+          </div>
+        }
+      />
       {error ? <p className="error" style={{ marginTop: "0.25rem" }}>{error}</p> : null}
     </div>
   );
