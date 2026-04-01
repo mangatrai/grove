@@ -2,32 +2,42 @@ import { randomUUID } from "node:crypto";
 
 import { db } from "../../db/sqlite.js";
 
-import { findEmployerById, employerParserProfileId } from "../payslip/payslip-employer-resolve.service.js";
+import {
+  findEmployerById,
+  employerParserProfileId,
+  listHouseholdEmployers,
+  payslipBucketInstitutionFromEmployers
+} from "../payslip/payslip-employer-resolve.service.js";
 import { isParserProfileId } from "./profiles/profile-ids.js";
 
 const PAYSLIP_PARSER_PROFILES = new Set(["ibm_pay_contributions_pdf", "adp_payslip_pdf"]);
 
-const PAYSLIP_PLACEHOLDER_INSTITUTION = "Employer payslip (IBM) — placeholder";
-
 /**
- * Ensures the signed-in user has a `payslip` bucket row for import binding (IBM v1).
- * Idempotent — seed may already have inserted one; dev DBs created before migration **0016** get a row on first Import load.
+ * Ensures one `payslip` bucket row for import binding; `institution` follows Profile → Employer Setup.
+ * Updates the label when employers change (e.g. after PATCH /household/profile or GET /imports/accounts).
  */
-export function ensurePayslipImportPlaceholderAccount(householdId: string, ownerUserId: string): void {
-  const row = db
+/** Creates or updates the single `payslip`-type account used to bind payslip PDF imports (not a bank account). */
+export function ensurePayslipImportBucketAccount(householdId: string, ownerUserId: string): void {
+  const institution = payslipBucketInstitutionFromEmployers(listHouseholdEmployers(householdId, ownerUserId));
+  const existing = db
     .prepare(
-      `SELECT 1 AS ok FROM financial_account
+      `SELECT id FROM financial_account
        WHERE household_id = ? AND owner_user_id = ? AND type = 'payslip' LIMIT 1`
     )
-    .get(householdId, ownerUserId) as { ok: number } | undefined;
-  if (row) {
+    .get(householdId, ownerUserId) as { id: string } | undefined;
+  if (existing) {
+    db.prepare(`UPDATE financial_account SET institution = ? WHERE id = ? AND household_id = ?`).run(
+      institution,
+      existing.id,
+      householdId
+    );
     return;
   }
   const id = randomUUID();
   db.prepare(
     `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
      VALUES (?, ?, ?, 'payslip', ?, NULL, 'USD', CURRENT_TIMESTAMP)`
-  ).run(id, householdId, ownerUserId, PAYSLIP_PLACEHOLDER_INSTITUTION);
+  ).run(id, householdId, ownerUserId, institution);
 }
 
 export type BindingErrorCode =

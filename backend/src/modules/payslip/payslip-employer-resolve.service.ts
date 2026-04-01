@@ -19,6 +19,18 @@ export function employerParserProfileId(e: EmployerStub): string {
   return e.parserProfileId?.trim() || IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
 }
 
+/** Label for the household `payslip` import bucket row — driven by Profile → Employer Setup, not a fixed IBM string. */
+export function payslipBucketInstitutionFromEmployers(employers: EmployerStub[]): string {
+  const names = employers.map((e) => e.displayName.trim()).filter(Boolean);
+  if (names.length === 0) {
+    return "Employer payslips — add employer name(s) above";
+  }
+  if (names.length === 1) {
+    return `Payslip — ${names[0]}`;
+  }
+  return `Payslip — ${names[0]!} (+${names.length - 1} more)`;
+}
+
 /**
  * Direct payslip upload: which parser + employer row to attach.
  * - 0 employers → IBM, no employer_id

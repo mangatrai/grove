@@ -19,7 +19,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional().default(50),
-  offset: z.coerce.number().int().min(0).optional().default(0)
+  offset: z.coerce.number().int().min(0).optional().default(0),
+  ownerScope: z.enum(["household", "person"]).optional(),
+  ownerPersonProfileId: z.string().uuid().optional()
 });
 
 const idParamSchema = z.object({
@@ -38,7 +40,9 @@ payslipRouter.get("/", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const { total, items } = listPayslipSnapshots(householdId, {
     limit: parsed.data.limit,
-    offset: parsed.data.offset
+    offset: parsed.data.offset,
+    ownerScope: parsed.data.ownerScope,
+    ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null
   });
   res.json({ total, limit: parsed.data.limit, offset: parsed.data.offset, items });
 });

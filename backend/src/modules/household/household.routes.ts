@@ -5,6 +5,7 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { employerInputSchema } from "./household.types.js";
+import { ensurePayslipImportBucketAccount } from "../imports/import-file-binding.service.js";
 import {
   createHouseholdMember,
   getCurrentUserProfile,
@@ -119,6 +120,9 @@ householdRouter.patch("/profile", (req: AuthenticatedRequest, res) => {
     }
     res.status(404).json({ message: "Profile not found", code: out.code });
     return;
+  }
+  if (parsed.data.employers !== undefined) {
+    ensurePayslipImportBucketAccount(householdId, userId);
   }
   res.status(200).json({ profile: out.profile });
 });
