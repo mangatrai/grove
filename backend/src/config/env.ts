@@ -29,15 +29,6 @@ const envSchema = z.object({
   DB_PATH: z.string().optional(),
   DB_PATH_TEST: z.string().default("./data/household-finance-test.sqlite"),
   DB_PATH_PROD: z.string().default("./data/household-finance-prod.sqlite"),
-  /** Reserved for future seed generation; SQL seeds use fixed credentials today. Empty string in `.env` falls back to defaults. */
-  SEED_OWNER_EMAIL: z.preprocess(
-    (v) => (v === "" || v === undefined ? undefined : v),
-    z.string().email().default("owner@example.com")
-  ),
-  SEED_OWNER_PASSWORD: z.preprocess(
-    (v) => (v === "" || v === undefined ? undefined : v),
-    z.string().min(8).default("ChangeMe123!")
-  ),
   /** Minimum `transferPairScore` to auto-assign `transfer_group_id` on a mutual 1:1 amount/date match. */
   TRANSFER_MIN_AUTO_PAIR_SCORE: optionalIntEnv(45, 0, 100),
   /** Multi-candidate: narrow if best score ≥ this and runner-up is below best by at least the gap. */

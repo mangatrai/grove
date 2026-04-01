@@ -19,7 +19,6 @@ Single-page index for operators. The backend loads the **repository root** `.env
 |----------|--------|
 | `PORT` | API listen port (default `4000`). |
 | `JWT_SECRET` | JWT signing; min 16 chars in schema (default exists for local dev only). |
-| `SEED_OWNER_EMAIL` / `SEED_OWNER_PASSWORD` | Reserved; empty string falls back to defaults. SQL seeds define the user today. |
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
 
 ## Frontend (Vite)

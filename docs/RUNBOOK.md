@@ -42,7 +42,7 @@ Edit `.env`:
 | `VITE_PROXY_API` | (Optional) Base URL for API proxy in dev; default `http://127.0.0.1:4000`. |
 | `VITE_DEV_SIGNIN_EMAIL` / `VITE_DEV_SIGNIN_PASSWORD` | (Optional) Prefill sign-in on the home page in dev only; leave empty for no prefill. |
 
-**Seeded database user vs UI:** The first user row comes from [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) (fixed email + bcrypt hash). `SEED_OWNER_*` in `.env` is documented in `.env.example` and does **not** rewrite that SQL. Sign-in field defaults are controlled only by `VITE_DEV_SIGNIN_*` (see above).
+**Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 
 ## 5. Database (schema + seeds)
 
