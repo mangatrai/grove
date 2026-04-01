@@ -25,8 +25,9 @@ ingestion pipeline.
 
 1. Copy `.env.example` to `.env` and set a strong `JWT_SECRET`.
    - Set `MODE=TEST` for development and `MODE=PROD` for production runs on the same machine.
-2. Run initial setup (dependencies + SQLite schema + seed):
+2. Run initial setup (dependencies + SQLite schema + seeds including **sample bank accounts** for dev):
    - `npm run setup`
+   - For **categories + owner user only** (no sample accounts): `npm run db:seed` after a clean DB (see [`docs/RUNBOOK.md`](docs/RUNBOOK.md)).
 3. Start backend + frontend dev servers (background, logs under `.runtime/logs/`):
    - `npm run services:start`
    - Open the UI (default **http://127.0.0.1:3000**), sign in on the **home** page with seeded credentials from `.env.example` — you land on the **dashboard** (cash KPIs). Use **New import** in the header when you need a statement import.

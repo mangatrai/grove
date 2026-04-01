@@ -15,11 +15,18 @@ Single-page index for operators. The backend loads the **repository root** `.env
 
 ## Backend (runtime)
 
+**Logging:** The API writes only to **stdout/stderr** (listen URL, SQLite path, migration counts). There are no rotating log files; capture process output in your shell, systemd journal, or platform logs (e.g. Koyeb).
+
 | Variable | Notes |
 |----------|--------|
 | `PORT` | API listen port (default `4000`). |
 | `JWT_SECRET` | JWT signing; min 16 chars in schema (default exists for local dev only). |
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
+| `AI_CATEGORY_ENABLED` | Enable OpenAI categorization pass during canonicalize (default `false`). |
+| `AI_CATEGORY_AUTO_APPLY_MIN` | Confidence threshold for automatic category assignment (default `0.9`). |
+| `AI_CATEGORY_REVIEW_MIN` | Minimum confidence to attach AI suggestion in review payload (default `0.6`). |
+| `OPENAI_API_KEY` | API key for OpenAI calls. |
+| `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). |
 
 ## Frontend (Vite)
 
@@ -35,3 +42,11 @@ Single-page index for operators. The backend loads the **repository root** `.env
 - **Tests:** `backend` `npm test` runs `MODE=TEST` with `DB_PATH` unset so the test DB path is deterministic (see [`scripts/prep-test-db.sh`](../scripts/prep-test-db.sh)).
 
 See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset.
+
+## Postgres / Koyeb (planned)
+
+Current runtime is SQLite-only. Postgres/Koyeb production deployment is tracked as planned work:
+- add a Postgres-backed migration runner path (or dialect-safe migration strategy),
+- define `DATABASE_URL` / SSL / pooling env contract,
+- add startup migration policy for container deploys,
+- validate health checks + rollback strategy for Koyeb.

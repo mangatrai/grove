@@ -41,6 +41,9 @@ Edit `.env`:
 | `PORT` / `FRONTEND_PORT` | API and Vite dev server ports. |
 | `VITE_PROXY_API` | (Optional) Base URL for API proxy in dev; default `http://127.0.0.1:4000`. |
 | `VITE_DEV_SIGNIN_EMAIL` / `VITE_DEV_SIGNIN_PASSWORD` | (Optional) Prefill sign-in on the home page in dev only; leave empty for no prefill. |
+| `AI_CATEGORY_*` + `OPENAI_*` | (Optional) OpenAI categorization controls. Keep `AI_CATEGORY_ENABLED=false` until you are ready. |
+
+**API logs:** The backend prints to **stdout/stderr** only (no rotating log files). See [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
 **Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 
@@ -52,13 +55,13 @@ Edit `.env`:
 node scripts/print-db-path.mjs
 ```
 
-**Development (full seed including dev fixtures under `backend/db/seeds/dev/`):**
+**First-time dev setup (includes sample bank accounts under `seeds/dev/`):**
 
 ```bash
 npm run setup
 ```
 
-This runs `scripts/setup.sh`: `npm install`, creates `data/` and `.runtime/logs/`, then `scripts/db.sh --init --seed` (migrations + top-level seeds + `seeds/dev/*.sql`).
+This runs `scripts/setup.sh`: `npm install`, creates `data/` and `.runtime/logs/`, then `scripts/db.sh --init --seed --dev-seeds`.
 
 **Migrations only (no seeds):**
 
@@ -66,10 +69,16 @@ This runs `scripts/setup.sh`: `npm install`, creates `data/` and `.runtime/logs/
 npm run db:init
 ```
 
-**Migrations + seeds (after cleanup or fresh clone):**
+**Migrations + minimal seeds** — default household, owner user, **global categories only** (no `financial_account` rows):
 
 ```bash
 npm run db:seed
+```
+
+**Migrations + minimal seeds + dev sample accounts** (BoA/Citi/Chase/Marcus — for local smoke / tests; payslip bucket comes from profile, not SQL):
+
+```bash
+npm run db:seed:dev
 ```
 
 ## 6. Run the application
@@ -117,11 +126,13 @@ npm test
 
 ## 9. Stop and reset
 
-**Stop background dev servers first** before deleting the database file. If the API still has SQLite open, removing the file may not change what the running process serves until restart (WAL / open file handles).
+**Stop the API before cleanup.** If SQLite is still open, `rm` can remove the directory entry while Node keeps the **old** database in memory — the UI will still show transactions until you stop the process. On macOS/Linux, `db:cleanup` uses `lsof` and **refuses** to delete while something holds the file (unless you set `DB_CLEANUP_ALLOW_OPEN=1` and then restart the API yourself).
 
 ```bash
 npm run services:stop
 ```
+
+Compare paths: the backend logs `SQLite: /absolute/path/...` on startup; `node scripts/print-db-path.mjs` must print the same path.
 
 **Reset the database file the API uses (destructive):**
 
@@ -132,6 +143,8 @@ npm run services:stop
 ```bash
 npm run db:cleanup
 npm run db:seed
+# or, if you want the sample bank accounts again:
+# npm run db:seed:dev
 ```
 
 Then start the API again (`npm run services:start` or `npm run dev:backend`). Clear site storage or sign out if you had an old JWT.
@@ -148,7 +161,7 @@ node scripts/print-db-path.mjs
 
 | Symptom | Check |
 |---------|--------|
-| `db:cleanup` ran but the UI still shows old rows | API was still running, or a **different** `MODE` / `DB_PATH` than you think — compare `node scripts/print-db-path.mjs` to the file you expect; **restart** the backend after cleanup. |
+| `db:cleanup` ran but the UI still shows old rows | **API was still holding the DB open** (most common): stop with `npm run services:stop`, run `db:cleanup` again, then `db:seed` and restart. Or wrong file: compare backend log line `SQLite: …` with `node scripts/print-db-path.mjs`. |
 | Port in use | Change `PORT` / `FRONTEND_PORT` in `.env` or stop the other process. |
 | 401 / invalid token | Clear browser storage for the site; sign in again. |
 | Missing tables / old schema | Run `npm run setup` or `npm run db:seed` after `db:cleanup`. |
@@ -161,3 +174,13 @@ node scripts/print-db-path.mjs
 - [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) — production DB and seeds  
 - [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) — product scope  
 - [`CHECKPOINT.md`](CHECKPOINT.md) — implementation status  
+
+## 11. Production roadmap notes (SQLite -> Postgres / Koyeb)
+
+The current setup and scripts are SQLite-centric. For Koyeb + hosted Postgres migration, treat this as a tracked
+phase after parser/categorization stabilization:
+
+- add Postgres runtime support and migration compatibility,
+- define `DATABASE_URL` + SSL/pooling env contract,
+- decide startup migration strategy for container deploys,
+- validate backups/rollback and health-check behavior in Koyeb.
