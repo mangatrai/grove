@@ -29,6 +29,8 @@ import {
 } from "./import-session-rollback.service.js";
 import { canonicalizeImportSession } from "../canonical/canonical-ingest.service.js";
 import { parseSessionImportFiles, type ParseFailure, type ParseColumnMapping } from "./import-parser.service.js";
+import { createHouseholdCustomInstitution, listHouseholdCustomInstitutions } from "./household-institutions.service.js";
+import { listUsInstitutionLabels } from "./institution-catalog.js";
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -279,6 +281,34 @@ importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), (re
 
 importsRouter.get("/parser-profiles", (_req, res) => {
   res.status(200).json({ profiles: PARSER_PROFILE_IDS });
+});
+
+importsRouter.get("/institutions", (req: AuthenticatedRequest, res) => {
+  const catalog = listUsInstitutionLabels();
+  const custom = listHouseholdCustomInstitutions(req.authUser!.householdId);
+  res.status(200).json({ catalog, custom });
+});
+
+const customInstitutionBodySchema = z.object({
+  displayName: z.string().min(2).max(120)
+});
+
+importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const parsed = customInstitutionBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const result = createHouseholdCustomInstitution(req.authUser!.householdId, parsed.data.displayName);
+  if (!result.ok) {
+    if (result.code === "DUPLICATE") {
+      res.status(409).json({ message: "That institution name is already saved for your household." });
+      return;
+    }
+    res.status(400).json({ message: "Invalid institution name" });
+    return;
+  }
+  res.status(201).json({ id: result.id });
 });
 
 importsRouter.patch(
