@@ -101,6 +101,11 @@ function main() {
     if (seed) {
       const seedsApplied = applySqlFiles(db, seedsDir, "schema_seeds");
       console.log(`Seeds applied this run: ${seedsApplied}`);
+      const devSeedsDir = path.join(seedsDir, "dev");
+      if (fs.existsSync(devSeedsDir)) {
+        const devApplied = applySqlFiles(db, devSeedsDir, "schema_seeds");
+        console.log(`Dev seeds applied this run: ${devApplied}`);
+      }
     }
   } finally {
     db.close();

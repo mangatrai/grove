@@ -7,7 +7,7 @@ import * as XLSX from "xlsx";
 import { db } from "../src/db/sqlite.js";
 import { buildApp } from "../src/app.js";
 const app = buildApp();
-/** Seeded in `0002_seed_financial_accounts.sql` */
+/** Seeded in `seeds/dev/dev_0002_seed_financial_accounts.sql` */
 const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
 const SEED_CHASE_CC = "40000000-0000-0000-0000-000000000005";
 describe("app health", () => {

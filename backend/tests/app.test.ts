@@ -13,7 +13,7 @@ import { resolveDataPath } from "../src/paths.js";
 
 const app = buildApp();
 
-/** Seeded in `0002_seed_financial_accounts.sql` */
+/** Seeded in `seeds/dev/dev_0002_seed_financial_accounts.sql` */
 const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
 const SEED_CHASE_CC = "40000000-0000-0000-0000-000000000005";
 const SEED_MARCUS_SAVINGS = "40000000-0000-0000-0000-000000000006";

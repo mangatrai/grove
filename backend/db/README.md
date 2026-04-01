@@ -8,6 +8,8 @@ This folder contains SQL-first migrations and seed data for Story 1.2.
   canonical transactions, and resolution queues.
 - `seeds/0001_seed_defaults.sql`: default household, owner user, and starter
   categories.
+- `seeds/dev/*.sql`: optional dev-only fixtures (sample accounts, etc.). Applied
+  after top-level seeds when using `scripts/db.mjs --seed`. See `docs/PRODUCTION_SETUP.md`.
 
 ## Notes
 
