@@ -38,3 +38,4 @@ Statement-level reconciliation (when implemented in your file flow) can surface 
 
 - `docs/ARCHITECTURE.md` — high-level strategy sections
 - `docs/API_CATEGORIES.md` — `/categories` and `/categories/rules` APIs
+- `docs/CATEGORIZATION_ROADMAP.md` — limits of keyword rules, “needs review” vs classification, air-gap–friendly improvement tiers (memory → fuzzy → optional local ML)
