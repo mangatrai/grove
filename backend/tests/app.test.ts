@@ -1577,6 +1577,11 @@ describe("import sessions and file intake", () => {
 
     expect(parseRes.status).toBe(200);
     expect(parseRes.body.parsedRows).toBeGreaterThan(10);
+    const summaryRes = await request(app)
+      .get(`/imports/sessions/${sessionId}/summary`)
+      .set("authorization", `Bearer ${token}`);
+    expect(summaryRes.status).toBe(200);
+    expect(summaryRes.body.files[0].diagnostics.parser.boaCsv.dataLineCount).toBeGreaterThan(10);
   });
 
   it("returns 401 for ledger list without token", async () => {
@@ -1647,6 +1652,9 @@ describe("import sessions and file intake", () => {
     expect(sum.body.files[0].canonicalRowCount).toBe(2);
     expect(sum.body.files[0].nearDuplicatesFlagged).toBe(0);
     expect(sum.body.files[0].notPostedExactDuplicateOrSkipped).toBe(0);
+    expect(sum.body.files[0].diagnostics.canonicalize.inserted).toBe(2);
+    expect(sum.body.files[0].diagnostics.canonicalize.duplicateFingerprint).toBe(0);
+    expect(sum.body.files[0].diagnostics.canonicalize.nearDuplicate).toBe(0);
 
     const scoped = await request(app)
       .get(`/transactions?sessionId=${sessionId}&limit=50`)
