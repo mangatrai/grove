@@ -1546,11 +1546,19 @@ export function TransactionsPage() {
                                   {detailLoading ? <p className="muted">Loading review context…</p> : null}
                                   {detailError ? <p className="error">{detailError}</p> : null}
                                   {!detailLoading && !detailError && detailItems && detailItems.length === 0 ? (
-                                    <p className="muted">
-                                      No open resolution items on this row (still listed for other reasons, e.g.
-                                      uncategorized or non-posted status). Use filters and bulk actions above as
-                                      needed.
-                                    </p>
+                                    <div className="muted" style={{ fontSize: "0.9rem", lineHeight: 1.45 }}>
+                                      <p style={{ margin: "0 0 0.5rem" }}>
+                                        No <strong>open</strong> review ticket for this row. The Needs review tab also
+                                        lists uncategorized transactions and non-posted rows, so you can still see this
+                                        line here even when there is nothing to expand.
+                                      </p>
+                                      <p style={{ margin: 0 }}>
+                                        Assign a category in the row above, or re-open a resolved item from the
+                                        resolution queue if you cleared it without categorizing. AI suggestions only
+                                        attach when canonicalize runs with <code>AI_CATEGORY_ENABLED</code> and a valid{" "}
+                                        <code>OPENAI_API_KEY</code> in the API&apos;s environment.
+                                      </p>
+                                    </div>
                                   ) : null}
                                   {!detailLoading && !detailError && detailItems && detailItems.length > 0
                                     ? detailItems.map((it) => {

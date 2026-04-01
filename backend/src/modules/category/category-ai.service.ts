@@ -42,7 +42,11 @@ function normalizeAiSuggestion(raw: unknown): Omit<AiSuggestion, "model"> | null
 }
 
 export async function suggestCategoryWithAi(input: AiInput): Promise<AiSuggestion | null> {
-  if (!env.AI_CATEGORY_ENABLED || !env.OPENAI_API_KEY) {
+  if (!env.AI_CATEGORY_ENABLED) {
+    return null;
+  }
+  if (!env.OPENAI_API_KEY?.trim()) {
+    console.warn("[category-ai] AI_CATEGORY_ENABLED is on but OPENAI_API_KEY is missing; skipping.");
     return null;
   }
 
@@ -93,6 +97,10 @@ export async function suggestCategoryWithAi(input: AiInput): Promise<AiSuggestio
       body: JSON.stringify(body)
     });
     if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.warn(
+        `[category-ai] OpenAI HTTP ${res.status}${errText ? `: ${errText.slice(0, 300)}` : ""}`
+      );
       return null;
     }
     const payload = (await res.json()) as {
@@ -119,7 +127,8 @@ export async function suggestCategoryWithAi(input: AiInput): Promise<AiSuggestio
       }
     }
     return { ...parsed, model: env.OPENAI_MODEL };
-  } catch {
+  } catch (err) {
+    console.warn("[category-ai] request failed:", err instanceof Error ? err.message : err);
     return null;
   }
 }

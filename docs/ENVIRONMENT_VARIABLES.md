@@ -15,7 +15,7 @@ Single-page index for operators. The backend loads the **repository root** `.env
 
 ## Backend (runtime)
 
-**Logging:** The API writes only to **stdout/stderr** (listen URL, SQLite path, migration counts). There are no rotating log files; capture process output in your shell, systemd journal, or platform logs (e.g. Koyeb).
+**Logging:** The API writes only to **stdout/stderr** (listen URL, SQLite path, migration counts, `[category-ai]` warnings on OpenAI errors). There are no rotating log files. For a **background** API process, redirect output when starting, e.g. `nohup npm run dev -w backend >> .runtime/api.log 2>&1 &` (create `.runtime/` first), then `tail -f .runtime/api.log`. On macOS with launchd or Linux with systemd, logs go to the configured log path or `journalctl`.
 
 | Variable | Notes |
 |----------|--------|
