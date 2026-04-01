@@ -1,13 +1,13 @@
 # End-to-end runbook (brand new environment)
 
-Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml).
+Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Migration order: [`backend/db/README.md`](../backend/db/README.md).
 
 ## 1. Prerequisites
 
 - **Node.js** — Current LTS (v20+ recommended).
 - **npm** — Comes with Node (workspace monorepo at repo root).
 - **Ports** — Defaults: UI **3000**, API **4000** (see `.env.example`: `FRONTEND_PORT`, `PORT`). Ensure nothing else binds to those ports, or change them in `.env`.
-- **Optional:** `sqlite3` CLI for ad-hoc DB inspection (not required for normal operation).
+- **Optional:** `sqlite3` CLI for ad-hoc inspection (not required for normal operation).
 
 ## 2. Get the code
 
@@ -34,14 +34,23 @@ Edit `.env`:
 
 | Variable | Purpose |
 |----------|---------|
-| `JWT_SECRET` | **Required.** Long random string for signing JWTs. |
-| `MODE` | `TEST` (default dev DB path) or `PROD` for separate SQLite file. |
-| `DB_PATH` | Optional override; else `DB_PATH_TEST` / `DB_PATH_PROD` from `.env.example`. |
+| `JWT_SECRET` | **Required** for anything beyond local throwaway use. Long random string for signing JWTs. |
+| `MODE` | `TEST` (default dev DB file) or `PROD` for a separate SQLite file. |
+| `DB_PATH` | Optional absolute or repo-relative path; when set, **overrides** `MODE` file selection. |
+| `DB_PATH_TEST` / `DB_PATH_PROD` | Used when `DB_PATH` is unset (see backend [`env.ts`](../backend/src/config/env.ts)). |
 | `PORT` / `FRONTEND_PORT` | API and Vite dev server ports. |
+| `VITE_PROXY_API` | (Optional) Base URL for API proxy in dev; default `http://127.0.0.1:4000`. |
+| `VITE_DEV_SIGNIN_EMAIL` / `VITE_DEV_SIGNIN_PASSWORD` | (Optional) Prefill sign-in on the home page in dev only; leave empty for no prefill. |
 
-Seeded login defaults are documented in `.env.example` and match `backend/db/seeds/0001_seed_defaults.sql` unless you change seeds.
+**Seeded database user vs UI:** The first user row comes from [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) (fixed email + bcrypt hash). `SEED_OWNER_*` in `.env` is documented in `.env.example` and does **not** rewrite that SQL. Sign-in field defaults are controlled only by `VITE_DEV_SIGNIN_*` (see above).
 
 ## 5. Database (schema + seeds)
+
+**Which file is used:** The API and all `npm run db:*` scripts resolve the same path via [`scripts/print-db-path.mjs`](../scripts/print-db-path.mjs) (same rules as the backend). To print it:
+
+```bash
+node scripts/print-db-path.mjs
+```
 
 **Development (full seed including dev fixtures under `backend/db/seeds/dev/`):**
 
@@ -57,7 +66,7 @@ This runs `scripts/setup.sh`: `npm install`, creates `data/` and `.runtime/logs/
 npm run db:init
 ```
 
-**Reseed after cleanup:**
+**Migrations + seeds (after cleanup or fresh clone):**
 
 ```bash
 npm run db:seed
@@ -81,6 +90,8 @@ npm run dev:backend
 npm run dev:frontend
 ```
 
+Vite reads env from the **repository root** (`envDir` in [`frontend/vite.config.ts`](../frontend/vite.config.ts)) so `FRONTEND_PORT`, `VITE_*`, etc. in the root `.env` apply when you use `npm run dev:frontend`.
+
 - **UI:** `http://127.0.0.1:3000` (or `FRONTEND_PORT`).
 - **API:** `http://127.0.0.1:4000` (or `PORT`).
 - **Health:** `GET http://127.0.0.1:4000/health`
@@ -88,7 +99,7 @@ npm run dev:frontend
 ## 7. First sign-in
 
 1. Open the home page (`/`).
-2. Sign in with the **seeded** email/password from `.env.example` (typically `owner@example.com` / `ChangeMe123!` unless you changed the seed).
+2. Sign in with the **seeded** user from `0001_seed_defaults.sql` (default **owner@example.com** / **ChangeMe123!**) unless you changed the seed file.
 3. You should land on the cash snapshot / dashboard after auth.
 
 **Production:** change the default password immediately; consider not shipping dev seeds (see `PRODUCTION_SETUP.md`).
@@ -106,28 +117,38 @@ npm test
 
 ## 9. Stop and reset
 
-**Stop background dev servers:**
+**Stop background dev servers first** before deleting the database file. If the API still has SQLite open, removing the file may not change what the running process serves until restart (WAL / open file handles).
 
 ```bash
 npm run services:stop
 ```
 
-**Reset DB for current `MODE` (destructive):**
+**Reset the database file the API uses (destructive):**
 
-```bash
-npm run db:cleanup
-```
+`npm run db:cleanup` runs `scripts/db-cleanup.sh` with `--yes` and removes the resolved SQLite path (and `-wal` / `-shm`).
 
 **Full wipe + reseed:**
 
 ```bash
-npm run db:cleanup -- --yes && npm run db:seed
+npm run db:cleanup
+npm run db:seed
 ```
 
-## 10. Troubleshooting
+Then start the API again (`npm run services:start` or `npm run dev:backend`). Clear site storage or sign out if you had an old JWT.
+
+## 10. Validation and troubleshooting
+
+**Confirm you are looking at the same DB as the backend:**
+
+```bash
+node scripts/print-db-path.mjs
+# Optional, if sqlite3 is installed:
+# sqlite3 "$(node scripts/print-db-path.mjs | tr -d '\r\n')" "SELECT COUNT(*) FROM transaction_canonical;"
+```
 
 | Symptom | Check |
 |---------|--------|
+| `db:cleanup` ran but the UI still shows old rows | API was still running, or a **different** `MODE` / `DB_PATH` than you think — compare `node scripts/print-db-path.mjs` to the file you expect; **restart** the backend after cleanup. |
 | Port in use | Change `PORT` / `FRONTEND_PORT` in `.env` or stop the other process. |
 | 401 / invalid token | Clear browser storage for the site; sign in again. |
 | Missing tables / old schema | Run `npm run setup` or `npm run db:seed` after `db:cleanup`. |
@@ -136,6 +157,7 @@ npm run db:cleanup -- --yes && npm run db:seed
 ## Related docs
 
 - [`README.md`](../README.md) — quick start summary  
+- [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) — `.env` reference (DB path, Vite, transfer thresholds)  
 - [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) — production DB and seeds  
 - [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) — product scope  
 - [`CHECKPOINT.md`](CHECKPOINT.md) — implementation status  

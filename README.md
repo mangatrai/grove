@@ -36,9 +36,8 @@ ingestion pipeline.
      (**`FRONTEND_PORT` / `PORT`**, default **3000** / **4000** from `.env`). That catches **orphan** `node`
      (Vite) processes that are no longer a child of the wrapper PID (common on macOS).
    - If you use another app on those ports, stop it first or change ports in `.env`.
-5. Reset current mode DB only (safe by mode):
-   - `npm run db:cleanup`
-   - **Full wipe + reseed** (drops the SQLite file for `MODE`, then migrations + seed): `npm run db:cleanup -- --yes && npm run db:seed`
+5. Reset the DB file the API uses (same path as `node scripts/print-db-path.mjs` — see [`docs/RUNBOOK.md`](docs/RUNBOOK.md)):
+   - Stop dev servers first (`npm run services:stop`), then `npm run db:cleanup` and `npm run db:seed`.
 
 **Migrations:** new SQL files under `backend/db/migrations/` apply on `npm run setup` / `db:init`. If the account dropdown
 still omits **last-four** labels, your DB may predate a mask fix — run a fresh init for your mode or apply migrations so

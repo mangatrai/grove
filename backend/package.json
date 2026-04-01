@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
-    "test": "bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed && vitest run"
+    "test": "bash -c 'export MODE=TEST; unset DB_PATH; bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed && vitest run'"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

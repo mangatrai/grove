@@ -2,22 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MODE="${MODE:-TEST}"
-DB_PATH_TEST="${DB_PATH_TEST:-$ROOT_DIR/data/household-finance-test.sqlite}"
-DB_PATH_PROD="${DB_PATH_PROD:-$ROOT_DIR/data/household-finance-prod.sqlite}"
 MIGRATIONS_DIR="$ROOT_DIR/backend/db/migrations"
 SEEDS_DIR="$ROOT_DIR/backend/db/seeds"
 
-if [[ -n "${DB_PATH:-}" ]]; then
-  DB_PATH="${DB_PATH}"
-elif [[ "$MODE" == "TEST" ]]; then
-  DB_PATH="$DB_PATH_TEST"
-elif [[ "$MODE" == "PROD" ]]; then
-  DB_PATH="$DB_PATH_PROD"
-else
-  echo "Invalid MODE: $MODE (expected TEST or PROD)"
-  exit 1
-fi
+DB_PATH="$(node "$ROOT_DIR/scripts/print-db-path.mjs" | tr -d '\r\n')"
 
 usage() {
   echo "Usage: scripts/db.sh --init [--seed]"
@@ -47,12 +35,14 @@ if [[ "$INIT" != "true" ]]; then
   usage
 fi
 
-mkdir -p "$ROOT_DIR/data"
+mkdir -p "$(dirname "$DB_PATH")"
 
 SEED_FLAG=""
 if [[ "$SEED" == "true" ]]; then
   SEED_FLAG="--seed"
 fi
+
+echo "Using DB path (matches backend): $DB_PATH"
 
 node "$ROOT_DIR/scripts/db.mjs" \
   --db-path "$DB_PATH" \

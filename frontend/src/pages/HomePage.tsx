@@ -7,8 +7,8 @@ import { apiJson, setToken } from "../api";
  * Inspired by common fintech patterns: split hero, value props, elevated credential card.
  */
 export function HomePage() {
-  const [email, setEmail] = useState("owner@example.com");
-  const [password, setPassword] = useState("ChangeMe123!");
+  const [email, setEmail] = useState(() => import.meta.env.VITE_DEV_SIGNIN_EMAIL ?? "");
+  const [password, setPassword] = useState(() => import.meta.env.VITE_DEV_SIGNIN_PASSWORD ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -79,7 +79,6 @@ export function HomePage() {
           <div className="home-landing__aside">
             <div className="home-landing__card card">
               <h2 className="home-landing__card-title">Sign in</h2>
-              <p className="muted home-landing__card-sub">Defaults match the seed user in <code>.env.example</code>.</p>
               <form className="home-landing__form" onSubmit={onSubmit}>
                 <div className="home-landing__field">
                   <label htmlFor="home-email">Email</label>
