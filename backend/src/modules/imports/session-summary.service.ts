@@ -23,6 +23,11 @@ export interface ImportSessionFileSummary {
    * fingerprint duplicates or skipped/invalid lines during canonicalize.
    */
   notPostedExactDuplicateOrSkipped: number;
+  /** Parse/canonical diagnostics copied from `import_file.confidence_summary` when available. */
+  diagnostics?: {
+    parser?: Record<string, unknown>;
+    canonicalize?: Record<string, unknown>;
+  };
   /** Statement-balance check when parser rows include running balance (warn-only diagnostics). */
   reconciliation: {
     available: boolean;
@@ -203,9 +208,9 @@ export function getImportSessionSummary(
 
   const fileRows = db
     .prepare(
-      `SELECT id, file_name, status FROM import_file WHERE session_id = ? ORDER BY uploaded_at ASC`
+      `SELECT id, file_name, status, confidence_summary FROM import_file WHERE session_id = ? ORDER BY uploaded_at ASC`
     )
-    .all(sessionId) as Array<{ id: string; file_name: string; status: string }>;
+    .all(sessionId) as Array<{ id: string; file_name: string; status: string; confidence_summary: string | null }>;
 
   const fileIds = fileRows.map((f) => f.id);
   if (fileIds.length === 0) {
@@ -303,6 +308,22 @@ export function getImportSessionSummary(
   let totalReconMismatch = 0;
 
   const files: ImportSessionFileSummary[] = fileRows.map((f) => {
+    let diagnostics: ImportSessionFileSummary["diagnostics"] | undefined;
+    if (f.confidence_summary) {
+      try {
+        const parsed = JSON.parse(f.confidence_summary) as Record<string, unknown>;
+        const parser = parsed && typeof parsed === "object" ? (parsed["parserDiagnostics"] as Record<string, unknown> | undefined) : undefined;
+        const canonicalize =
+          parsed && typeof parsed === "object"
+            ? (parsed["canonicalize"] as Record<string, unknown> | undefined)
+            : undefined;
+        if (parser || canonicalize) {
+          diagnostics = { parser, canonicalize };
+        }
+      } catch {
+        diagnostics = undefined;
+      }
+    }
     const rawRowCount = rawByFile.get(f.id) ?? 0;
     const canonicalRowCount = canonicalByFile.get(f.id) ?? 0;
     const nearDuplicatesFlagged = nearDupByFile.get(f.id) ?? 0;
@@ -335,7 +356,8 @@ export function getImportSessionSummary(
       nearDuplicatesFlagged,
       openItemsNeedingReview,
       notPostedExactDuplicateOrSkipped,
-      reconciliation
+      reconciliation,
+      diagnostics
     };
   });
 

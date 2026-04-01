@@ -29,6 +29,16 @@ export function parseCsvWithHeader(csvText: string): Record<string, string>[] {
   });
 }
 
+export function countCsvDataLines(csvText: string): number {
+  const lines = csvText.split(/\r?\n/).map((line) => line.trim());
+  const nonEmpty = lines.filter((line) => line.length > 0);
+  if (nonEmpty.length <= 1) {
+    return 0;
+  }
+  // Header line + N data rows
+  return nonEmpty.length - 1;
+}
+
 /**
  * BoA checking/savings web export: summary lines first; transaction header is
  * `Date,Description,Amount,Running Bal.` (or similar).

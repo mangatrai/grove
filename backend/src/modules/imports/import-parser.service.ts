@@ -5,7 +5,11 @@ import { db } from "../../db/sqlite.js";
 
 import { getSessionForHousehold, type ServiceResult } from "./import-session.service.js";
 import { resolveParserAdapter } from "./parsers/parser-registry.js";
-import { parseBoaCheckingOrSavingsCsv } from "./profiles/boa-checking-savings-csv.js";
+import {
+  parseBoaCheckingOrSavingsCsv,
+  parseBoaCheckingOrSavingsCsvDetailed,
+  type BoaCsvDiagnostics
+} from "./profiles/boa-checking-savings-csv.js";
 import { parseBoaCreditCardCsv } from "./profiles/boa-credit-card-csv.js";
 import { parseBoaEStatementPdf } from "./profiles/boa-estatement-pdf.js";
 import { parseChaseCardCsv } from "./profiles/chase-card-csv.js";
@@ -41,6 +45,10 @@ export interface ParseOutcome {
   parsedRows: number;
   skippedFiles: Array<{ fileId: string; reason: string }>;
 }
+
+type ParserDiagnostics = {
+  boaCsv?: BoaCsvDiagnostics;
+};
 
 type ParseFailureCode =
   | "NOT_FOUND"
@@ -136,6 +144,23 @@ async function extractByProfile(
   }
 }
 
+async function extractByProfileWithDiagnostics(
+  profileId: ParserProfileId,
+  buffer: Buffer,
+  fileName: string,
+  request: ParseRequest
+): Promise<{ rows: NormalizedRawPayload[]; diagnostics?: ParserDiagnostics } | ParseFailure> {
+  if (profileId === "boa_checking_csv" || profileId === "boa_savings_csv") {
+    const parsed = parseBoaCheckingOrSavingsCsvDetailed(buffer);
+    return { rows: parsed.rows, diagnostics: { boaCsv: parsed.diagnostics } };
+  }
+  const extracted = await extractByProfile(profileId, buffer, fileName, request);
+  if (!Array.isArray(extracted)) {
+    return extracted;
+  }
+  return { rows: extracted };
+}
+
 export async function parseSessionImportFiles(
   sessionId: string,
   householdId: string,
@@ -149,7 +174,8 @@ export async function parseSessionImportFiles(
 
   const files = db
     .prepare(
-      `SELECT id, file_name, stored_path, status, financial_account_id, parser_profile_id, employer_id
+      `SELECT id, file_name, stored_path, status, financial_account_id, parser_profile_id, employer_id,
+              owner_scope, owner_person_profile_id
        FROM import_file
        WHERE session_id = ?
        ORDER BY uploaded_at ASC`
@@ -162,6 +188,8 @@ export async function parseSessionImportFiles(
     financial_account_id: string | null;
     parser_profile_id: string | null;
     employer_id: string | null;
+    owner_scope: "household" | "person" | null;
+    owner_person_profile_id: string | null;
   }>;
 
   if (files.length === 0) {
@@ -274,7 +302,9 @@ export async function parseSessionImportFiles(
           profileId,
           parseResult.summary,
           file.id,
-          file.employer_id
+          file.employer_id,
+          file.owner_scope === "person" ? "person" : "household",
+          file.owner_scope === "person" ? file.owner_person_profile_id : null
         );
         if (!ins.ok) {
           updateFileStatusStmt.run(
@@ -304,8 +334,8 @@ export async function parseSessionImportFiles(
         continue;
       }
 
-      const extracted = await extractByProfile(profileId, buffer, file.file_name, request);
-      if (!Array.isArray(extracted)) {
+      const extracted = await extractByProfileWithDiagnostics(profileId, buffer, file.file_name, request);
+      if ("code" in extracted) {
         updateFileStatusStmt.run(
           "failed",
           JSON.stringify({ stage: "failed", reason: extracted.code }),
@@ -318,7 +348,7 @@ export async function parseSessionImportFiles(
         continue;
       }
 
-      const payloads = extracted;
+      const payloads = extracted.rows;
       deleteRawRowsStmt.run(file.id);
 
       let parsedRowsForFile = 0;
@@ -341,7 +371,12 @@ export async function parseSessionImportFiles(
       outcome.parsedRows += parsedRowsForFile;
       updateFileStatusStmt.run(
         "parsed",
-        JSON.stringify({ stage: "parsed", parsedRows: parsedRowsForFile, profile: profileId }),
+        JSON.stringify({
+          stage: "parsed",
+          parsedRows: parsedRowsForFile,
+          profile: profileId,
+          parserDiagnostics: extracted.diagnostics ?? null
+        }),
         file.id
       );
     } catch {
