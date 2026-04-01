@@ -16,7 +16,7 @@ import {
 } from "./import-session.service.js";
 import {
   createHouseholdFinancialAccount,
-  ensurePayslipImportPlaceholderAccount,
+  ensurePayslipImportBucketAccount,
   listHouseholdFinancialAccounts,
   updateHouseholdFinancialAccount,
   updateImportFileBinding,
@@ -201,7 +201,7 @@ importsRouter.patch("/sessions/:sessionId/status", (req: AuthenticatedRequest, r
 
 importsRouter.get("/accounts", (req: AuthenticatedRequest, res) => {
   const { householdId, userId } = req.authUser!;
-  ensurePayslipImportPlaceholderAccount(householdId, userId);
+  ensurePayslipImportBucketAccount(householdId, userId);
   const accounts = listHouseholdFinancialAccounts(householdId);
   res.status(200).json({ accounts });
 });
@@ -406,8 +406,8 @@ importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedReques
   res.status(200).json(result.data);
 });
 
-importsRouter.post("/sessions/:sessionId/canonicalize", (req: AuthenticatedRequest, res) => {
-  const result = canonicalizeImportSession(req.params.sessionId, req.authUser!.householdId);
+importsRouter.post("/sessions/:sessionId/canonicalize", async (req: AuthenticatedRequest, res) => {
+  const result = await canonicalizeImportSession(req.params.sessionId, req.authUser!.householdId);
   if (!result.ok) {
     if (result.code === "NOT_FOUND") {
       res.status(404).json({ message: result.message, code: result.code });

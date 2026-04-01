@@ -6,6 +6,7 @@ import { deleteStagingFilesForSession } from "../imports/import-session.service.
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
 import { classifyWithRules } from "../category/category-rules.js";
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
+import { suggestCategoryWithAi } from "../category/category-ai.service.js";
 import {
   computeTransactionFingerprint,
   descriptionsCompatibleForNearDuplicate,
@@ -239,6 +240,16 @@ export function transferPairScore(
 
 type RawPayloadWithAccount = NormalizedRawPayload & { financial_account_id: string };
 
+type CanonicalFileDiagnostics = {
+  inserted: number;
+  duplicateFingerprint: number;
+  nearDuplicate: number;
+  invalidJson: number;
+  invalidPayloadShape: number;
+  invalidAccount: number;
+  invalidAmount: number;
+};
+
 function isRawPayload(value: unknown): value is RawPayloadWithAccount {
   if (!value || typeof value !== "object") {
     return false;
@@ -265,20 +276,20 @@ function existingDescriptionFingerprint(merchant: string | null, memo: string | 
  * Near-duplicate rows (same account/date/amount, compatible description text, different fingerprint) are
  * skipped and recorded in `resolution_item` (type `duplicate_ambiguity`).
  */
-export function canonicalizeImportSession(
+export async function canonicalizeImportSession(
   sessionId: string,
   householdId: string
-): { ok: true; data: CanonicalizeOutcome } | CanonicalizeFailure {
+): Promise<{ ok: true; data: CanonicalizeOutcome } | CanonicalizeFailure> {
   const session = db
     .prepare(`SELECT id FROM import_session WHERE id = ? AND household_id = ?`)
     .get(sessionId, householdId) as { id: string } | undefined;
   if (!session) {
-    return { ok: false, code: "NOT_FOUND", message: "Import session not found" };
+    return Promise.resolve({ ok: false, code: "NOT_FOUND", message: "Import session not found" });
   }
 
   const rawRows = db
     .prepare(
-      `SELECT tr.id AS raw_id, tr.extracted_payload_json AS payload_json,
+      `SELECT tr.id AS raw_id, tr.file_id AS file_id, tr.extracted_payload_json AS payload_json,
               f.owner_scope AS owner_scope, f.owner_person_profile_id AS owner_person_profile_id
        FROM transaction_raw tr
        INNER JOIN import_file f ON f.id = tr.file_id
@@ -286,6 +297,7 @@ export function canonicalizeImportSession(
     )
     .all(sessionId) as Array<{
     raw_id: string;
+    file_id: string;
     payload_json: string;
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
@@ -302,12 +314,16 @@ export function canonicalizeImportSession(
       .get(sessionId) as { ok: number } | undefined;
     if (payslipLinked) {
       deleteStagingFilesForSession(sessionId);
-      return {
+      return Promise.resolve({
         ok: true,
         data: { inserted: 0, duplicates: 0, skipped: 0, nearDuplicates: 0 }
-      };
+      });
     }
-    return { ok: false, code: "NO_RAW_ROWS", message: "No transaction_raw rows for this session; run parse first" };
+    return Promise.resolve({
+      ok: false,
+      code: "NO_RAW_ROWS",
+      message: "No transaction_raw rows for this session; run parse first"
+    });
   }
 
   const accountOkStmt = db.prepare(
@@ -394,24 +410,46 @@ export function canonicalizeImportSession(
   let skipped = 0;
   let nearDuplicates = 0;
   const dbRules = listEnabledDbRulesForClassification(householdId);
+  const fileDiagnostics = new Map<string, CanonicalFileDiagnostics>();
+  const ensureFileDiag = (fileId: string): CanonicalFileDiagnostics => {
+    const existing = fileDiagnostics.get(fileId);
+    if (existing) {
+      return existing;
+    }
+    const next: CanonicalFileDiagnostics = {
+      inserted: 0,
+      duplicateFingerprint: 0,
+      nearDuplicate: 0,
+      invalidJson: 0,
+      invalidPayloadShape: 0,
+      invalidAccount: 0,
+      invalidAmount: 0
+    };
+    fileDiagnostics.set(fileId, next);
+    return next;
+  };
 
   for (const row of rawRows) {
+    const diag = ensureFileDiag(row.file_id);
     let parsed: unknown;
     try {
       parsed = JSON.parse(row.payload_json) as unknown;
     } catch {
       skipped += 1;
+      diag.invalidJson += 1;
       continue;
     }
 
     if (!isRawPayload(parsed)) {
       skipped += 1;
+      diag.invalidPayloadShape += 1;
       continue;
     }
 
     const accountId = parsed.financial_account_id;
     if (!accountOkStmt.get(accountId, householdId)) {
       skipped += 1;
+      diag.invalidAccount += 1;
       continue;
     }
 
@@ -421,6 +459,7 @@ export function canonicalizeImportSession(
     const rounded = normalizeAmountForFingerprint(amount);
     if (!Number.isFinite(rounded)) {
       skipped += 1;
+      diag.invalidAmount += 1;
       continue;
     }
 
@@ -434,6 +473,7 @@ export function canonicalizeImportSession(
 
     if (existsStmt.get(householdId, fingerprint)) {
       duplicates += 1;
+      diag.duplicateFingerprint += 1;
       continue;
     }
 
@@ -474,6 +514,7 @@ export function canonicalizeImportSession(
 
     if (isNear) {
       nearDuplicates += 1;
+      diag.nearDuplicate += 1;
       continue;
     }
 
@@ -483,12 +524,48 @@ export function canonicalizeImportSession(
     const memo = desc.length > 120 ? desc : null;
 
     const classification = classifyWithRules(normDesc, rounded, dbRules);
-    const categoryId = classification.categoryId;
+    let categoryId = classification.categoryId;
+    let aiSuggestion:
+      | {
+          suggestedCategoryId: string | null;
+          confidence: number;
+          suggestedNewCategoryName: string | null;
+          reason: string;
+          model: string;
+        }
+      | null = null;
+    if (categoryId === null) {
+      aiSuggestion = await suggestCategoryWithAi({
+        householdId,
+        transactionId: row.raw_id,
+        normalizedDescription: normDesc,
+        signedAmount: rounded
+      });
+      if (
+        aiSuggestion?.suggestedCategoryId &&
+        aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
+      ) {
+        categoryId = aiSuggestion.suggestedCategoryId;
+      }
+    }
     const classificationMeta = JSON.stringify({
       source: classification.source,
       ruleId: classification.ruleId,
       confidence: classification.confidence,
-      reason: classification.reason
+      reason: classification.reason,
+      ai: aiSuggestion
+        ? {
+            suggestedCategoryId: aiSuggestion.suggestedCategoryId,
+            confidence: aiSuggestion.confidence,
+            suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
+            reason: aiSuggestion.reason,
+            model: aiSuggestion.model,
+            autoApplied:
+              categoryId !== null &&
+              aiSuggestion.suggestedCategoryId === categoryId &&
+              aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
+          }
+        : null
     });
 
     const canonicalId = crypto.randomUUID();
@@ -511,6 +588,7 @@ export function canonicalizeImportSession(
         row.owner_scope === "person" ? row.owner_person_profile_id : null
       );
       inserted += 1;
+      diag.inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
       if (categoryId === null) {
         insertUnknownCategoryStmt.run(
@@ -526,7 +604,17 @@ export function canonicalizeImportSession(
                 ruleId: classification.ruleId,
                 confidence: classification.confidence,
                 reason: classification.reason
-              }
+              },
+              ai:
+                aiSuggestion && aiSuggestion.confidence >= env.AI_CATEGORY_REVIEW_MIN
+                  ? {
+                      suggestedCategoryId: aiSuggestion.suggestedCategoryId,
+                      confidence: aiSuggestion.confidence,
+                      suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
+                      reason: aiSuggestion.reason,
+                      model: aiSuggestion.model
+                    }
+                  : null
           })
         );
       }
@@ -535,9 +623,49 @@ export function canonicalizeImportSession(
         err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
       if (code === "SQLITE_CONSTRAINT_UNIQUE" || code.includes("SQLITE_CONSTRAINT")) {
         duplicates += 1;
+        diag.duplicateFingerprint += 1;
       } else {
         throw err;
       }
+    }
+  }
+
+  if (fileDiagnostics.size > 0) {
+    const fileRows = db
+      .prepare(`SELECT id, confidence_summary FROM import_file WHERE session_id = ?`)
+      .all(sessionId) as Array<{ id: string; confidence_summary: string | null }>;
+    const updateConfidenceSummaryStmt = db.prepare(
+      `UPDATE import_file SET confidence_summary = ? WHERE id = ?`
+    );
+    for (const f of fileRows) {
+      const canonical = fileDiagnostics.get(f.id);
+      if (!canonical) {
+        continue;
+      }
+      let base: Record<string, unknown> = {};
+      if (f.confidence_summary) {
+        try {
+          const parsed = JSON.parse(f.confidence_summary) as unknown;
+          if (parsed && typeof parsed === "object") {
+            base = parsed as Record<string, unknown>;
+          }
+        } catch {
+          base = {};
+        }
+      }
+      const next = {
+        ...base,
+        canonicalize: {
+          inserted: canonical.inserted,
+          duplicateFingerprint: canonical.duplicateFingerprint,
+          nearDuplicate: canonical.nearDuplicate,
+          invalidJson: canonical.invalidJson,
+          invalidPayloadShape: canonical.invalidPayloadShape,
+          invalidAccount: canonical.invalidAccount,
+          invalidAmount: canonical.invalidAmount
+        }
+      };
+      updateConfidenceSummaryStmt.run(JSON.stringify(next), f.id);
     }
   }
 
@@ -774,5 +902,5 @@ export function canonicalizeImportSession(
 
   deleteStagingFilesForSession(sessionId);
 
-  return { ok: true, data: { inserted, duplicates, skipped, nearDuplicates } };
+  return Promise.resolve({ ok: true, data: { inserted, duplicates, skipped, nearDuplicates } });
 }

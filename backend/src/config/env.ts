@@ -18,6 +18,27 @@ function optionalIntEnv(defaultVal: number, min: number, max: number) {
   );
 }
 
+function optionalFloatEnv(defaultVal: number, min: number, max: number) {
+  return z.preprocess(
+    (val: unknown) => {
+      if (val === undefined || val === "") return defaultVal;
+      const n = Number(val);
+      return Number.isFinite(n) ? n : defaultVal;
+    },
+    z.number().min(min).max(max)
+  );
+}
+
+function optionalBoolEnv(defaultVal: boolean) {
+  return z.preprocess((val: unknown) => {
+    if (val === undefined || val === "") return defaultVal;
+    const s = String(val).trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(s)) return true;
+    if (["0", "false", "no", "off"].includes(s)) return false;
+    return defaultVal;
+  }, z.boolean());
+}
+
 const envSchema = z.object({
   PORT: z.string().default("4000"),
   MODE: z
@@ -36,7 +57,12 @@ const envSchema = z.object({
   TRANSFER_DISAMBIG_STRONG_GAP: optionalIntEnv(20, 0, 100),
   /** Multi-candidate: weaker narrow if best ≥ this and runner-up score is below this ceiling. */
   TRANSFER_DISAMBIG_WEAK_MIN_SCORE: optionalIntEnv(45, 0, 100),
-  TRANSFER_DISAMBIG_WEAK_MAX_SECOND_SCORE: optionalIntEnv(25, 0, 100)
+  TRANSFER_DISAMBIG_WEAK_MAX_SECOND_SCORE: optionalIntEnv(25, 0, 100),
+  AI_CATEGORY_ENABLED: optionalBoolEnv(false),
+  AI_CATEGORY_AUTO_APPLY_MIN: optionalFloatEnv(0.9, 0, 1),
+  AI_CATEGORY_REVIEW_MIN: optionalFloatEnv(0.6, 0, 1),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default("gpt-4o-mini")
 });
 
 export const env = envSchema.parse(process.env);
