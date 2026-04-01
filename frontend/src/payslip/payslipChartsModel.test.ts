@@ -10,6 +10,8 @@ const base = (): PayslipSnapshotDetail => ({
   fileChecksum: "c",
   parserProfileId: "ibm_pay_contributions_pdf",
   employerId: null,
+  ownerScope: "household",
+  ownerPersonProfileId: null,
   importFileId: null,
   payPeriodStart: null,
   payPeriodEnd: null,

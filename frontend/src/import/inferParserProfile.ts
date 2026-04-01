@@ -89,9 +89,8 @@ export function inferParserProfile(
   const t = account.type.toLowerCase();
 
   /**
-   * Payslip “bucket” accounts (v1: single IBM placeholder per seed owner).
-   * Any PDF uses the IBM payslip parser — avoids mis-inferring BoA eStatement on generic filenames.
-   * Future: per-employer accounts + onboarding parser mapping (ADP, etc.).
+   * `financial_account.type === payslip` — synthetic import target (not a bank account).
+   * Any PDF on this account uses the IBM payslip parser; avoids mis-inferring bank e-statements on generic filenames.
    */
   if (t === "payslip" && ext === ".pdf") {
     return IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;

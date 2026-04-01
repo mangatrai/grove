@@ -12,7 +12,7 @@ const boaSalaryChecking = {
   type: "checking",
   institution: "Bank of America"
 };
-const payslipPlaceholder = { type: "payslip", institution: "Employer payslip (IBM) — placeholder" };
+const payslipPlaceholder = { type: "payslip", institution: "Payslip — Acme Corp" };
 
 describe("filenameSuggestsIbmPayslipPdf", () => {
   it("matches common payslip filename tokens", () => {

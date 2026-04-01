@@ -6,6 +6,8 @@ export type PayslipSnapshotDetail = {
   fileChecksum: string;
   parserProfileId: string;
   employerId: string | null;
+  ownerScope: "household" | "person";
+  ownerPersonProfileId: string | null;
   importFileId: string | null;
   payPeriodStart: string | null;
   payPeriodEnd: string | null;

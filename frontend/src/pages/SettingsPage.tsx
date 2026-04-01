@@ -517,6 +517,12 @@ export function SettingsPage() {
       });
       setProfileSuccess("Profile saved.");
       await loadProfile();
+      try {
+        const acct = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
+        setAccounts(acct.accounts);
+      } catch {
+        /* accounts tab may not be loaded yet */
+      }
     } catch (e: unknown) {
       setProfileError(e instanceof Error ? e.message : "Could not save profile");
     } finally {
@@ -795,7 +801,7 @@ export function SettingsPage() {
                         disabled={savingProfile}
                       >
                         <option value="ibm_pay_contributions_pdf">IBM Pay &amp; Contributions (PDF)</option>
-                        <option value="adp_payslip_pdf">ADP (PDF — placeholder)</option>
+                        <option value="adp_payslip_pdf">ADP (PDF — not implemented)</option>
                       </select>
                     </label>
                     <button

@@ -917,8 +917,9 @@ export function ImportWorkspacePage() {
           <strong>Employer payslip PDFs:</strong> use <strong>Settings → Profile</strong> to set your{" "}
           <strong>salary deposit</strong> account and at least one <strong>employer</strong> — then choosing that bank
           account for a PDF can suggest the employer payslip parser even when the file name is generic (e.g.{" "}
-          <code>download.pdf</code>). Or use the <strong>Employer payslip (IBM) — placeholder</strong> account so any
-          PDF maps to the payslip parser. Payslip summaries are <strong>not</strong> posted as bank transactions.
+          <code>download.pdf</code>). Or bind to your <strong>payslip</strong> account (the label comes from{" "}
+          <strong>Profile → Employer Setup</strong>) so generic PDF names map to the payslip parser. Payslip summaries
+          are <strong>not</strong> posted as bank transactions.
         </p>
         <p
           className="muted"
@@ -929,7 +930,7 @@ export function ImportWorkspacePage() {
             background: "var(--hf-callout-bg, rgba(148, 163, 184, 0.12))"
           }}
         >
-          <strong>Employer payslip (IBM):</strong> For a pay-stub PDF (e.g. SuccessFactors / Pay and Contributions),
+          <strong>IBM Pay &amp; Contributions PDF:</strong> For a pay-stub PDF (e.g. SuccessFactors / Pay and Contributions),
           pick <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if we don&apos;t auto-detect it, or use a filename like
           “payslip” or “paystub” for a suggestion. Parse may show <strong>0</strong> ledger lines — that&apos;s
           expected. After every file has an account and format, go to the{" "}

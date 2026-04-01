@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
 import type { PayslipSnapshotDetail } from "../payslip/types";
 
@@ -13,6 +14,17 @@ type ListResponse = {
 };
 
 type EmployerRow = { id: string; displayName: string };
+type OwnerProfileOption = { id: string; label: string };
+type HouseholdMemberResponse = { id: string; fullName?: string; firstName?: string; lastName?: string };
+type HouseholdMembersPayload = { members: HouseholdMemberResponse[] };
+type HouseholdProfileResponse = {
+  profile: {
+    id: string;
+    fullName?: string;
+    firstName?: string;
+    lastName?: string;
+  };
+};
 
 function formatMoney(n: number | null): string {
   if (n == null || !Number.isFinite(n)) {
@@ -40,17 +52,78 @@ export function PayslipsPage() {
   const token = useAuthToken();
   const [data, setData] = useState<ListResponse | null>(null);
   const [employers, setEmployers] = useState<EmployerRow[]>([]);
+  const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
+  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    const params = new URLSearchParams({ limit: "200", offset: "0" });
+    if (ownerFilter === "household") {
+      params.set("ownerScope", "household");
+    } else if (ownerFilter?.startsWith("person:")) {
+      const id = ownerFilter.slice("person:".length);
+      if (id) {
+        params.set("ownerScope", "person");
+        params.set("ownerPersonProfileId", id);
+      }
+    }
     const [res, hs] = await Promise.all([
-      apiJson<ListResponse>("/payslips?limit=200&offset=0"),
+      apiJson<ListResponse>(`/payslips?${params.toString()}`),
       apiJson<{ employers: EmployerRow[] }>("/household/settings").catch(() => ({ employers: [] as EmployerRow[] }))
     ]);
     setData(res);
     setEmployers(hs.employers ?? []);
-  }, []);
+  }, [ownerFilter]);
+
+  const loadOwners = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    const [membersRes, profileRes] = await Promise.all([
+      apiJson<HouseholdMembersPayload>("/household/members").catch(
+        () => ({ members: [] as HouseholdMemberResponse[] }) as HouseholdMembersPayload
+      ),
+      apiJson<HouseholdProfileResponse>("/household/profile").catch(
+        () => ({ profile: { id: "", fullName: "Household" } }) as HouseholdProfileResponse
+      )
+    ]);
+    const members = membersRes.members ?? [];
+    const profile = profileRes.profile;
+    const mapped = members.map((m) => ({
+      id: m.id,
+      label: [m.fullName, [m.firstName, m.lastName].filter(Boolean).join(" ").trim()].find((x) => x && x.trim()) || m.id
+    }));
+    if (profile?.id && !mapped.some((m) => m.id === profile.id)) {
+      mapped.unshift({
+        id: profile.id,
+        label:
+          [profile.fullName, [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim()].find(
+            (x) => x && x.trim()
+          ) || "Me"
+      });
+    }
+    setOwnerProfiles(mapped);
+  }, [token]);
+
+  const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
+    () => [
+      {
+        group: "Household",
+        items: [{ value: "household", label: "Household", displayLabel: "Household", searchText: "household" }]
+      },
+      {
+        group: "Members",
+        items: ownerProfiles.map((p) => ({
+          value: `person:${p.id}`,
+          label: `Household > ${p.label}`,
+          displayLabel: p.label,
+          searchText: p.label
+        }))
+      }
+    ],
+    [ownerProfiles]
+  );
 
   useEffect(() => {
     if (!token) {
@@ -58,13 +131,13 @@ export function PayslipsPage() {
     }
     setLoading(true);
     setLoadError(null);
-    void load()
+    void Promise.all([load(), loadOwners()])
       .catch((e: unknown) => {
         setLoadError(e instanceof Error ? e.message : "Failed to load payslips");
         setData(null);
       })
       .finally(() => setLoading(false));
-  }, [token, load]);
+  }, [token, load, loadOwners]);
 
   if (!token) {
     return <Navigate to="/" replace />;
@@ -74,21 +147,24 @@ export function PayslipsPage() {
     <div className="payslips-page">
       <div className="card">
         <h1>Payslips</h1>
-        <p className="muted">
-          Employer pay summaries are added through <strong>New import</strong> (same intake as other files). Parser and
-          employer binding come from <Link to="/settings/profile">Settings → Profile → Employer Setup</Link> (IBM
-          supported; ADP registered but not parsed yet). See <Link to="/transactions">Transactions</Link> for bank cash;{" "}
-          <code>docs/PAYSLIP_V1.md</code>.
+        <p className="muted" style={{ marginBottom: 0 }}>
+          Add payslip PDFs via <Link to="/imports">New import</Link>. Manage employers in{" "}
+          <Link to="/settings/profile">Settings → Profile</Link>.
         </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Add payslip PDFs</h2>
-        <p className="muted" style={{ margin: 0 }}>
-          Start an import from <Link to="/imports">Imports</Link>, attach your payslip PDF, and route it to the payslip
-          placeholder account for your employer’s parser. Configure employers under{" "}
-          <Link to="/settings/profile">Settings → Profile</Link> before importing if you have more than one employer.
-        </p>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>View scope</h2>
+          <HierarchicalSearchPicker
+            value={ownerFilter}
+            onChange={(v) => setOwnerFilter(v)}
+            groups={belongsToGroups}
+            placeholder="Whole household"
+            ariaLabel="Filter payslips by belongs-to"
+            clearable
+          />
+        </div>
       </div>
 
       {!loading && data && data.items.length > 0 ? (
