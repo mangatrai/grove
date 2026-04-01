@@ -638,32 +638,34 @@ export function DashboardPage() {
         <h1>Home</h1>
         <div className="dashboard-scope-bar">
           <div className="dashboard-scope-bar__title">Scope</div>
-          <label className="dashboard-scope-bar__control">
-            <span className="dashboard-scope-bar__label">Account</span>
-            <HierarchicalSearchPicker
-              value={accountId || null}
-              onChange={(v) => setAccountId(v ?? "")}
-              groups={accountGroups}
-              placeholder="All accounts (household)"
-              ariaLabel="Cash summary account scope"
-              clearable
-            />
-          </label>
-          <label className="dashboard-scope-bar__control">
-            <span className="dashboard-scope-bar__label">Belongs-to</span>
-            <HierarchicalSearchPicker
-              value={belongsToValue || null}
-              onChange={(v) => {
-                const parsed = parseBelongsToChoice(v ?? "");
-                setOwnerScope(parsed.ownerScope);
-                setOwnerPersonProfileId(parsed.ownerPersonProfileId);
-              }}
-              groups={belongsToGroups}
-              placeholder="All household activity"
-              ariaLabel="Cash summary belongs-to scope"
-              clearable
-            />
-          </label>
+          <div className="dashboard-scope-bar__controls-row">
+            <label className="dashboard-scope-bar__control">
+              <span className="dashboard-scope-bar__label">Account</span>
+              <HierarchicalSearchPicker
+                value={accountId || null}
+                onChange={(v) => setAccountId(v ?? "")}
+                groups={accountGroups}
+                placeholder="All accounts (household)"
+                ariaLabel="Cash summary account scope"
+                clearable
+              />
+            </label>
+            <label className="dashboard-scope-bar__control">
+              <span className="dashboard-scope-bar__label">Belongs-to</span>
+              <HierarchicalSearchPicker
+                value={belongsToValue || null}
+                onChange={(v) => {
+                  const parsed = parseBelongsToChoice(v ?? "");
+                  setOwnerScope(parsed.ownerScope);
+                  setOwnerPersonProfileId(parsed.ownerPersonProfileId);
+                }}
+                groups={belongsToGroups}
+                placeholder="All household activity"
+                ariaLabel="Cash summary belongs-to scope"
+                clearable
+              />
+            </label>
+          </div>
           <p className="dashboard-scope-bar__hint muted">
             KPIs, trends, and charts below use this account filter together with the period you set.
           </p>

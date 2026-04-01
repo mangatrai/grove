@@ -1,16 +1,12 @@
+import { MultiSelect } from "@mantine/core";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
-
-type CategoryOption = {
-  id: string;
-  name: string;
-  parentId: string | null;
-};
 
 type OpenReviewItem = { id: string; type: string; status: "open" | "in_review" };
 
@@ -151,38 +147,6 @@ function buildAccountGroups(accounts: AccountRow[]): HierarchicalPickerGroup[] {
     }));
 }
 
-function buildCategoryGroups(categories: CategoryOption[]): HierarchicalPickerGroup[] {
-  const parents = categories.filter((c) => c.parentId === null).sort((a, b) => a.name.localeCompare(b.name));
-  const children = categories.filter((c) => c.parentId !== null).sort((a, b) => a.name.localeCompare(b.name));
-  const byParent = new Map<string, CategoryOption[]>();
-  for (const c of children) {
-    byParent.set(c.parentId!, [...(byParent.get(c.parentId!) ?? []), c]);
-  }
-  return [
-    {
-      group: "General",
-      items: [
-        { value: "__any__", label: "Any", searchText: "any" },
-        { value: "__uncat__", label: "Uncategorized only", searchText: "uncategorized" }
-      ]
-    },
-    {
-      group: "Top-level categories",
-      items: parents.map((p) => ({ value: p.id, label: p.name, searchText: p.name }))
-    },
-    {
-      group: "Subcategories",
-      items: parents.flatMap((p) =>
-        (byParent.get(p.id) ?? []).map((c) => ({
-          value: c.id,
-          label: `${p.name} > ${c.name}`,
-          searchText: `${p.name} ${c.name}`
-        }))
-      )
-    }
-  ];
-}
-
 function localDateStr(d = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -286,10 +250,11 @@ export function TransactionsPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [addAccountId, setAddAccountId] = useState("");
   const [addTxnDate, setAddTxnDate] = useState(localDateStr);
+  const [addDirection, setAddDirection] = useState<"credit" | "debit">("debit");
   const [addAmount, setAddAmount] = useState("");
   const [addMerchant, setAddMerchant] = useState("Manual entry");
-  const [addMemo, setAddMemo] = useState("");
   const [addCategoryId, setAddCategoryId] = useState<string | null>(null);
+  const [addBelongsTo, setAddBelongsTo] = useState<BelongsToFilterValue>("");
   const addFirstFieldRef = useRef<HTMLSelectElement | null>(null);
   const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(() => new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
@@ -837,7 +802,15 @@ export function TransactionsPage() {
 
   const accountGroups = useMemo(() => buildAccountGroups(accounts), [accounts]);
   const belongsToGroups = useMemo(() => buildBelongsToGroups(ownerProfiles), [ownerProfiles]);
-  const categoryGroups = useMemo(() => buildCategoryGroups(categories), [categories]);
+  const categoryGroups = useMemo(() => buildCategoryFilterGroups(categories), [categories]);
+  const resolutionTypeMultiData = useMemo(
+    () =>
+      LEDGER_RESOLUTION_TYPES.map((t) => ({
+        value: t,
+        label: RESOLUTION_TYPE_LABELS[t]
+      })),
+    []
+  );
 
   const hasLedgerFilters = Boolean(
     categoryFilter ||
@@ -935,10 +908,11 @@ export function TransactionsPage() {
   function openAddModal() {
     setAddAccountId(accountFilter ?? accounts[0]?.id ?? "");
     setAddTxnDate(localDateStr());
+    setAddDirection("debit");
     setAddAmount("");
     setAddMerchant("Manual entry");
-    setAddMemo("");
     setAddCategoryId(null);
+    setAddBelongsTo("");
     setAddError(null);
     setAddOpen(true);
   }
@@ -947,21 +921,35 @@ export function TransactionsPage() {
     setAddSaving(true);
     setAddError(null);
     const amt = Number(addAmount);
-    if (!addAccountId || !Number.isFinite(amt) || amt === 0) {
-      setAddError("Choose an account and enter a non-zero amount.");
+    if (!addAccountId || !Number.isFinite(amt) || amt <= 0) {
+      setAddError("Choose an account and enter a positive amount.");
+      setAddSaving(false);
+      return;
+    }
+    const belongsTo = parseBelongsToFilterValue(addBelongsTo);
+    if (!belongsTo.ownerScope) {
+      setAddError("Choose Belongs-to.");
       setAddSaving(false);
       return;
     }
     try {
-      await apiJson<{ id: string }>("/transactions", {
+      const created = await apiJson<{ id: string }>("/transactions", {
         method: "POST",
         body: JSON.stringify({
           accountId: addAccountId,
           txnDate: addTxnDate,
-          amount: amt,
+          amount: addDirection === "credit" ? amt : -amt,
           merchant: addMerchant.trim() || "Manual entry",
-          memo: addMemo.trim() ? addMemo.trim() : null,
+          memo: null,
           categoryId: addCategoryId
+        })
+      });
+      await apiJson(`/transactions/${created.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          categoryId: addCategoryId,
+          ownerScope: belongsTo.ownerScope,
+          ownerPersonProfileId: belongsTo.ownerScope === "person" ? belongsTo.ownerPersonProfileId : null
         })
       });
       setAddOpen(false);
@@ -1028,37 +1016,25 @@ export function TransactionsPage() {
         </div>
         {needsReviewTab ? (
           <div className="transactions-toolbar__review-row">
-            <label className="transactions-toolbar__field">
+            <label className="transactions-toolbar__field transactions-toolbar__field--grow">
               <span className="transactions-toolbar__label">Review types</span>
-              <select
-                multiple
-                size={4}
-                className="transactions-toolbar__resolution-types"
-                value={resolutionTypes}
+              <MultiSelect
+                placeholder="All types"
                 aria-label="Filter by open review item types"
-                onChange={(e) => {
-                  const next = Array.from(e.target.selectedOptions).map((o) => o.value as LedgerResolutionType);
-                  setResolutionTypesInUrl(next);
-                }}
-              >
-                {LEDGER_RESOLUTION_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {RESOLUTION_TYPE_LABELS[t]}
-                  </option>
-                ))}
-              </select>
+                data={resolutionTypeMultiData}
+                value={resolutionTypes}
+                onChange={(v) => setResolutionTypesInUrl(v as LedgerResolutionType[])}
+                clearable
+                searchable={false}
+                size="sm"
+                className="transactions-toolbar__resolution-multiselect"
+              />
             </label>
             <p className="muted transactions-toolbar__review-hint">
-              Cmd or Ctrl + click to select multiple types. With none selected, all needs-review rows are shown. Same
-              open-item types as the review queue.{" "}
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => setResolutionTypesInUrl(["unknown_category"])}
-              >
-                Show unknown category only
-              </button>{" "}
-              (helps bulk-assign categories).
+              Empty = all needs-review rows.{" "}
+              <button type="button" className="link-button" onClick={() => setResolutionTypesInUrl(["unknown_category"])}>
+                Unknown category only
+              </button>
             </p>
           </div>
         ) : null}
@@ -1747,7 +1723,7 @@ export function TransactionsPage() {
           <div className="transactions-modal card" role="dialog" aria-modal="true" aria-labelledby="add-txn-title">
             <h2 id="add-txn-title">Add transaction</h2>
             <p className="muted">
-              Amount uses the same sign as imports: negative for outflows (debit), positive for inflows (credit).
+              Choose money direction first, then enter a positive amount.
             </p>
             {addError ? <p className="error">{addError}</p> : null}
             <div className="transactions-modal__grid">
@@ -1772,24 +1748,56 @@ export function TransactionsPage() {
                 Date
                 <input type="date" value={addTxnDate} onChange={(e) => setAddTxnDate(e.target.value)} />
               </label>
+              <fieldset className="transactions-modal__money-flow">
+                <legend>Money flow</legend>
+                <label className="transactions-modal__radio">
+                  <input
+                    type="radio"
+                    name="add-direction"
+                    checked={addDirection === "credit"}
+                    onChange={() => setAddDirection("credit")}
+                  />
+                  Money In
+                </label>
+                <label className="transactions-modal__radio">
+                  <input
+                    type="radio"
+                    name="add-direction"
+                    checked={addDirection === "debit"}
+                    onChange={() => setAddDirection("debit")}
+                  />
+                  Money Out
+                </label>
+              </fieldset>
               <label>
                 Amount
                 <input
                   type="number"
                   step="any"
+                  min="0"
                   value={addAmount}
                   onChange={(e) => setAddAmount(e.target.value)}
-                  placeholder="-42.50"
+                  placeholder="42.50"
                 />
               </label>
-              <label>
-                Payee / description
-                <input value={addMerchant} onChange={(e) => setAddMerchant(e.target.value)} />
-              </label>
               <label className="transactions-modal__full">
-                Memo (optional)
-                <input value={addMemo} onChange={(e) => setAddMemo(e.target.value)} />
+                Description
+                <input
+                  value={addMerchant}
+                  onChange={(e) => setAddMerchant(e.target.value)}
+                  placeholder="Merchant or payee"
+                />
               </label>
+              <div className="transactions-modal__full">
+                <span className="transactions-modal__picker-label">Belongs-to</span>
+                <HierarchicalSearchPicker
+                  value={addBelongsTo || null}
+                  onChange={(v) => setAddBelongsTo((v ?? "") as BelongsToFilterValue)}
+                  groups={belongsToGroups}
+                  placeholder="Choose belongs-to..."
+                  ariaLabel="Belongs-to for new transaction"
+                />
+              </div>
               <div className="transactions-modal__full">
                 <span className="transactions-modal__picker-label">Category</span>
                 <LedgerCategoryPicker

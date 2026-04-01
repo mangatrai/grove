@@ -326,15 +326,24 @@ a {
 
 .dashboard-scope-bar__control {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: row;
   align-items: center;
-  gap: 0.5rem 0.75rem;
+  gap: 0.5rem;
   margin: 0;
+  flex: 1 1 16rem;
+  min-width: 14rem;
 }
 
 .dashboard-scope-bar__label {
   font-weight: 600;
   font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.dashboard-scope-bar__controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
 }
 
 .dashboard-scope-bar__select {
@@ -819,6 +828,133 @@ textarea {
   border-radius: 6px;
 }
 
+.hs-picker {
+  position: relative;
+  min-width: 11rem;
+}
+
+.hs-picker__trigger {
+  width: 100%;
+  max-width: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: #fff;
+  color: var(--color-text);
+  box-shadow: none;
+}
+
+.hs-picker__trigger--disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hs-picker__value,
+.hs-picker__placeholder {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hs-picker__placeholder {
+  color: #94a3b8;
+}
+
+.hs-picker__chev {
+  color: #64748b;
+}
+
+.hs-picker__menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 1300;
+  min-width: 24rem;
+  max-width: min(42rem, 90vw);
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+}
+
+.hs-picker__search-wrap {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.hs-picker__search {
+  flex: 1;
+  min-width: 10rem;
+  max-width: none;
+}
+
+.hs-picker__clear {
+  white-space: nowrap;
+}
+
+.hs-picker__panes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 11rem;
+}
+
+.hs-picker__parents,
+.hs-picker__children {
+  max-height: 18rem;
+  overflow: auto;
+  padding: 0.25rem;
+}
+
+.hs-picker__parents {
+  border-right: 1px solid #e2e8f0;
+}
+
+.hs-picker__parent,
+.hs-picker__child {
+  width: 100%;
+  border: 1px solid transparent;
+  background: #fff;
+  color: var(--color-text);
+  box-shadow: none;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.45rem;
+  border-radius: 6px;
+}
+
+.hs-picker__parent--active,
+.hs-picker__child--active {
+  background: #e0f2fe;
+  border-color: rgba(2, 132, 199, 0.45);
+  color: #0c4a6e;
+}
+
+.hs-picker__arrow {
+  color: #64748b;
+}
+
+.hs-picker__empty {
+  padding: 0.5rem;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+
+.hs-picker__footer {
+  border-top: 1px solid #e2e8f0;
+  padding: 0.45rem 0.5rem;
+  background: #f8fafc;
+}
+
 button {
   padding: 0.45rem 0.9rem;
   border-radius: 6px;
@@ -1039,14 +1175,14 @@ table.ledger-table thead th {
   border-top: 1px solid #e8edf2;
 }
 
-.transactions-toolbar__resolution-types {
-  min-width: 14rem;
-  min-height: 6.5rem;
-  font: inherit;
-  padding: 0.35rem 0.45rem;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
+.transactions-toolbar__field--grow {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+}
+
+.transactions-toolbar__resolution-multiselect {
+  width: 100%;
+  max-width: 22rem;
 }
 
 .transactions-toolbar__review-hint {
@@ -1155,6 +1291,7 @@ table.ledger-table thead th {
   width: min(32rem, 100%);
   margin-top: 2vh;
   padding: 1.1rem 1.25rem 1rem;
+  overflow: visible;
 }
 
 .transactions-modal__grid {
@@ -1198,6 +1335,34 @@ table.ledger-table thead th {
   margin-top: 1rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--color-border);
+}
+
+.transactions-modal__money-flow {
+  grid-column: 1 / -1;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.5rem 0.65rem;
+  margin: 0;
+}
+
+.transactions-modal__money-flow legend {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.transactions-modal__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-right: 1rem;
+  font-weight: 500;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.transactions-modal__radio input {
+  margin: 0;
 }
 
 .dashboard-controls {
