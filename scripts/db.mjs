@@ -9,7 +9,9 @@ function parseArgs(argv) {
     dbPath: "",
     migrationsDir: "",
     seedsDir: "",
-    seed: false
+    seed: false,
+    /** Sample `financial_account` rows under seeds/dev (local dev + tests only). */
+    devSeeds: false
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -31,6 +33,10 @@ function parseArgs(argv) {
     }
     if (current === "--seed") {
       args.seed = true;
+      continue;
+    }
+    if (current === "--dev-seeds") {
+      args.devSeeds = true;
     }
   }
 
@@ -86,7 +92,7 @@ function applySqlFiles(db, folder, tableName) {
 }
 
 function main() {
-  const { dbPath, migrationsDir, seedsDir, seed } = parseArgs(process.argv.slice(2));
+  const { dbPath, migrationsDir, seedsDir, seed, devSeeds } = parseArgs(process.argv.slice(2));
 
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
@@ -102,9 +108,13 @@ function main() {
       const seedsApplied = applySqlFiles(db, seedsDir, "schema_seeds");
       console.log(`Seeds applied this run: ${seedsApplied}`);
       const devSeedsDir = path.join(seedsDir, "dev");
-      if (fs.existsSync(devSeedsDir)) {
-        const devApplied = applySqlFiles(db, devSeedsDir, "schema_seeds");
-        console.log(`Dev seeds applied this run: ${devApplied}`);
+      if (devSeeds) {
+        if (fs.existsSync(devSeedsDir)) {
+          const devApplied = applySqlFiles(db, devSeedsDir, "schema_seeds");
+          console.log(`Dev seeds applied this run: ${devApplied}`);
+        }
+      } else if (fs.existsSync(devSeedsDir)) {
+        console.log("Skipping seeds/dev (sample bank accounts). Use --dev-seeds for local fixtures or npm run db:seed:dev.");
       }
     }
   } finally {

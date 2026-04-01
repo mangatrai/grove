@@ -10,6 +10,6 @@ echo "Preparing local directories..."
 mkdir -p "$ROOT_DIR/data" "$ROOT_DIR/.runtime/logs" "$ROOT_DIR/.runtime/pids"
 
 echo "Initializing database schema and seed data..."
-"$ROOT_DIR/scripts/db.sh" --init --seed
+"$ROOT_DIR/scripts/db.sh" --init --seed --dev-seeds
 
 echo "Setup complete."
