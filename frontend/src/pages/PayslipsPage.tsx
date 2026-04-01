@@ -1,7 +1,7 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
-import { apiFetch, apiJson, useAuthToken } from "../api";
+import { apiJson, useAuthToken } from "../api";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
 import type { PayslipSnapshotDetail } from "../payslip/types";
 
@@ -40,12 +40,8 @@ export function PayslipsPage() {
   const token = useAuthToken();
   const [data, setData] = useState<ListResponse | null>(null);
   const [employers, setEmployers] = useState<EmployerRow[]>([]);
-  const [employerId, setEmployerId] = useState("");
-  const [sniffNote, setSniffNote] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     const [res, hs] = await Promise.all([
@@ -54,9 +50,6 @@ export function PayslipsPage() {
     ]);
     setData(res);
     setEmployers(hs.employers ?? []);
-    if ((hs.employers?.length ?? 0) === 1 && hs.employers[0]) {
-      setEmployerId(hs.employers[0].id);
-    }
   }, []);
 
   useEffect(() => {
@@ -73,84 +66,6 @@ export function PayslipsPage() {
       .finally(() => setLoading(false));
   }, [token, load]);
 
-  async function onFilePicked(ev: React.ChangeEvent<HTMLInputElement>) {
-    const file = ev.target.files?.[0];
-    setSniffNote(null);
-    if (!file) {
-      return;
-    }
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await apiFetch("/payslips/sniff", { method: "POST", body: fd });
-      const text = await res.text();
-      if (!res.ok) {
-        return;
-      }
-      const j = JSON.parse(text) as {
-        suggestedEmployerId?: string | null;
-        note?: string | null;
-        confidence?: string;
-      };
-      if (j.suggestedEmployerId) {
-        setEmployerId(j.suggestedEmployerId);
-      }
-      if (j.note) {
-        setSniffNote(j.note);
-      }
-    } catch {
-      /* sniff is optional */
-    }
-  }
-
-  async function onUpload(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const fileInput = form.elements.namedItem("payslip");
-    const input =
-      fileInput instanceof HTMLInputElement ? fileInput.files?.[0] : undefined;
-    if (!input) {
-      setUploadError("Choose a PDF file.");
-      return;
-    }
-    if (employers.length > 1 && !employerId) {
-      setUploadError("Choose which employer this payslip is from (Settings → Profile).");
-      return;
-    }
-    setUploadError(null);
-    setUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", input);
-      if (employers.length > 1 && employerId) {
-        fd.append("employerId", employerId);
-      }
-      const res = await apiFetch("/payslips/upload", { method: "POST", body: fd });
-      if (!res.ok) {
-        const text = await res.text();
-        let detail = text;
-        try {
-          const j = JSON.parse(text) as { message?: string; code?: string };
-          if (typeof j.message === "string") {
-            detail = j.code ? `${j.message} (${j.code})` : j.message;
-          }
-        } catch {
-          /* keep raw */
-        }
-        throw new Error(`${res.status}: ${detail}`);
-      }
-      await load();
-      if (form.isConnected) {
-        form.reset();
-      }
-      setSniffNote(null);
-    } catch (err: unknown) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-    }
-  }
-
   if (!token) {
     return <Navigate to="/" replace />;
   }
@@ -160,55 +75,20 @@ export function PayslipsPage() {
       <div className="card">
         <h1>Payslips</h1>
         <p className="muted">
-          Upload employer pay summaries — parser is chosen from <strong>Settings → Profile → Employer Setup</strong>{" "}
-          (IBM supported; ADP registered but not parsed yet). Optional <strong>sniff</strong> reads PDF text to suggest
-          employer/parser. See <Link to="/transactions">Transactions</Link> for bank cash;{" "}
+          Employer pay summaries are added through <strong>New import</strong> (same intake as other files). Parser and
+          employer binding come from <Link to="/settings/profile">Settings → Profile → Employer Setup</Link> (IBM
+          supported; ADP registered but not parsed yet). See <Link to="/transactions">Transactions</Link> for bank cash;{" "}
           <code>docs/PAYSLIP_V1.md</code>.
         </p>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Upload</h2>
-        <form className="row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }} onSubmit={(ev) => void onUpload(ev)}>
-          <label>
-            <span className="muted">PDF</span>{" "}
-            <input
-              name="payslip"
-              type="file"
-              accept="application/pdf,.pdf"
-              disabled={uploading}
-              onChange={(ev) => void onFilePicked(ev)}
-            />
-          </label>
-          {employers.length > 1 ? (
-            <label>
-              <span className="muted">Employer</span>{" "}
-              <select
-                value={employerId}
-                onChange={(e) => {
-                  setEmployerId(e.target.value);
-                }}
-                disabled={uploading}
-              >
-                <option value="">— choose —</option>
-                {employers.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.displayName}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <button type="submit" disabled={uploading}>
-            {uploading ? "Uploading…" : "Upload"}
-          </button>
-        </form>
-        {sniffNote ? (
-          <p className="muted" style={{ marginTop: "0.65rem", fontSize: "0.9rem" }}>
-            {sniffNote}
-          </p>
-        ) : null}
-        {uploadError ? <p className="error">{uploadError}</p> : null}
+        <h2 style={{ marginTop: 0 }}>Add payslip PDFs</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          Start an import from <Link to="/imports">Imports</Link>, attach your payslip PDF, and route it to the payslip
+          placeholder account for your employer’s parser. Configure employers under{" "}
+          <Link to="/settings/profile">Settings → Profile</Link> before importing if you have more than one employer.
+        </p>
       </div>
 
       {!loading && data && data.items.length > 0 ? (
