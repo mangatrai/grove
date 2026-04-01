@@ -110,6 +110,7 @@ function buildBelongsToGroups(ownerProfiles: Array<{ id: string; label: string }
       items: ownerProfiles.map((p) => ({
         value: `person:${p.id}`,
         label: formatBelongsToLabel(p.label),
+        displayLabel: p.label,
         searchText: p.label
       }))
     }

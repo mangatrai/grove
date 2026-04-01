@@ -29,6 +29,7 @@ export function buildCategoryFilterGroups(categories: CategoryOption[]): Hierarc
         (byParent.get(p.id) ?? []).map((c) => ({
           value: c.id,
           label: `${p.name} > ${c.name}`,
+          displayLabel: c.name,
           searchText: `${p.name} ${c.name}`
         }))
       )
@@ -60,14 +61,14 @@ export function buildCategoryAssignmentGroups(
   let items = assignable
     .map((c) => {
       const label = rowLabel(c);
-      return { value: c.id, label, searchText: label };
+      return { value: c.id, label, displayLabel: c.name, searchText: label };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
   if (selectedId && !assignableIds.has(selectedId)) {
     const row = byId.get(selectedId);
     if (row) {
       const label = rowLabel(row);
-      items = [{ value: row.id, label, searchText: label }, ...items];
+      items = [{ value: row.id, label, displayLabel: row.name, searchText: label }, ...items];
     }
   }
   return [{ group: "Categories", items }];

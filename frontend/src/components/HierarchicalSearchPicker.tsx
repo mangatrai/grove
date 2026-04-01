@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-type FlatItem = { value: string; label: string; searchText?: string };
+/** `label` is used for search and menu; `displayLabel` (optional) is shown on the closed trigger only. */
+export type HierarchicalPickerItem = {
+  value: string;
+  label: string;
+  searchText?: string;
+  displayLabel?: string;
+};
 
 export type HierarchicalPickerGroup = {
   group: string;
-  items: FlatItem[];
+  items: HierarchicalPickerItem[];
 };
+
+type FlatItem = HierarchicalPickerItem;
 
 type PickerParent = {
   id: string;
@@ -18,6 +26,24 @@ type PickerParent = {
 function flatten(groups: HierarchicalPickerGroup[]): FlatItem[] {
   return groups.flatMap((g) => g.items);
 }
+
+/** Text for the closed picker button and filter chips (prefers `displayLabel` when set). */
+export function lookupTriggerLabel(
+  groups: HierarchicalPickerGroup[],
+  value: string | null | undefined
+): string | null {
+  if (!value) {
+    return null;
+  }
+  const item = flatten(groups).find((x) => x.value === value);
+  if (!item) {
+    return null;
+  }
+  return item.displayLabel ?? item.label;
+}
+
+/** Alias for `lookupTriggerLabel` (short display for trigger / chips). */
+export const lookupLabel = lookupTriggerLabel;
 
 function normalizeGroups(groups: HierarchicalPickerGroup[]): PickerParent[] {
   const byLabel = new Map<string, PickerParent>();
@@ -105,7 +131,7 @@ export function HierarchicalSearchPicker({
       }))
       .filter((p) => p.children.length > 0 || `${p.label} ${p.searchText}`.toLowerCase().includes(needle));
   }, [parents, search]);
-  const selectedLabel = useMemo(() => lookupLabel(groups, value), [groups, value]);
+  const selectedLabel = useMemo(() => lookupTriggerLabel(groups, value), [groups, value]);
   const activeParent = filtered.find((p) => p.id === activeParentId) ?? filtered[0] ?? null;
 
   useEffect(() => {
@@ -216,11 +242,4 @@ export function HierarchicalSearchPicker({
       ) : null}
     </div>
   );
-}
-
-export function lookupLabel(groups: HierarchicalPickerGroup[], value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-  return flatten(groups).find((x) => x.value === value)?.label ?? null;
 }

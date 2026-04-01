@@ -122,6 +122,7 @@ function buildBelongsToGroups(ownerProfiles: OwnerProfileOption[]): Hierarchical
       items: ownerProfiles.map((p) => ({
         value: `person:${p.id}`,
         label: formatBelongsToLabel(p.label),
+        displayLabel: p.label,
         searchText: p.label
       }))
     }
@@ -1253,7 +1254,8 @@ export function TransactionsPage() {
             {ownerScopeFilter ? (
               <>
                 {" "}
-                [belongs-to: <code>{ownerScopeFilter}</code>]
+                [belongs-to:{" "}
+                <code>{lookupLabel(belongsToGroups, ownerScopeFilter) ?? ownerScopeFilter}</code>]
               </>
             ) : null}
             {ownerPersonProfileFilter ? (
