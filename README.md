@@ -3,6 +3,8 @@
 Private, self-hosted household finance platform with a strict correctness-first
 ingestion pipeline.
 
+**Full step-by-step setup (new machine / CI):** [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
+
 ## Monorepo Layout
 
 - `docs/`: product and architecture documents.
