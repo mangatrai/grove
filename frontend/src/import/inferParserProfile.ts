@@ -3,6 +3,8 @@
  * BOA checking vs savings CSV share the same parser implementation; we always use
  * `boa_checking_csv` for both (see backend `import-parser.service.ts`).
  */
+import { normalizeInstitution } from "./institutionCatalog";
+
 export type FinancialAccountLike = {
   /** When set, enables salary-deposit + employer onboarding hints. */
   id?: string;
@@ -69,23 +71,6 @@ export function filenameSuggestsIbmPayslipPdf(fileName: string | null | undefine
     /\bemployer[\s_-]?payslip\b/
   ];
   return patterns.some((re) => re.test(stemForMatch));
-}
-
-function normalizeInstitution(institution: string): "boa" | "chase" | "citi" | "marcus" | "other" {
-  const s = institution.toLowerCase();
-  if (s.includes("bank of america") || s === "boa") {
-    return "boa";
-  }
-  if (s.includes("marcus") || s.includes("goldman")) {
-    return "marcus";
-  }
-  if (s.includes("chase")) {
-    return "chase";
-  }
-  if (s.includes("citi")) {
-    return "citi";
-  }
-  return "other";
 }
 
 /**
