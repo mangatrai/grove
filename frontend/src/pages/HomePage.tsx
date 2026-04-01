@@ -79,7 +79,7 @@ export function HomePage() {
           <div className="home-landing__aside">
             <div className="home-landing__card card">
               <h2 className="home-landing__card-title">Sign in</h2>
-              <p className="muted home-landing__card-sub">Use the seeded account from your backend (see <code>.env.example</code>).</p>
+              <p className="muted home-landing__card-sub">Defaults match the seed user in <code>.env.example</code>.</p>
               <form className="home-landing__form" onSubmit={onSubmit}>
                 <div className="home-landing__field">
                   <label htmlFor="home-email">Email</label>
@@ -110,7 +110,7 @@ export function HomePage() {
               </form>
             </div>
             <p className="muted home-landing__footnote">
-              After sign-in, use <strong>New import</strong> in the header to add statements.
+              Use <strong>New import</strong> in the header to upload statements.
             </p>
           </div>
         </div>

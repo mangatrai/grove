@@ -4,6 +4,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiJson, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
+import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 
 const TABS = ["profile", "household", "accounts", "notifications", "security"] as const;
 type SettingsTab = (typeof TABS)[number];
@@ -118,6 +119,11 @@ type HouseholdMemberDraft = {
 
 type MeResponse = { user: { role: "owner" | "admin" | "member" } };
 
+type InstitutionsResponse = {
+  catalog: string[];
+  custom: Array<{ id: string; displayName: string }>;
+};
+
 const PROFILE_ICON_KEYS = ["person", "home", "wallet", "briefcase", "star"] as const;
 
 const AVATAR_KEY_EMOJI: Record<(typeof PROFILE_ICON_KEYS)[number], string> = {
@@ -212,16 +218,48 @@ export function SettingsPage() {
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
+  const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
+  const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
     institution: "",
     accountMask: "",
-    belongsTo: "household" as BelongsToChoice,
-    defaultParserProfileId: ""
+    belongsTo: "household" as BelongsToChoice
   });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
+
+  const loadInstitutions = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    try {
+      const r = await apiJson<InstitutionsResponse>("/imports/institutions");
+      setInstitutionCatalogList(r.catalog);
+      setInstitutionCustom(r.custom);
+    } catch {
+      setInstitutionCatalogList([...US_INSTITUTION_LABELS]);
+      setInstitutionCustom([]);
+    }
+  }, [token]);
+
+  const institutionPickerGroups = useMemo((): HierarchicalPickerGroup[] => {
+    const catalogItems = institutionCatalogList.map((label) => ({
+      value: label,
+      label,
+      searchText: label
+    }));
+    const customItems = institutionCustom.map((c) => ({
+      value: c.displayName,
+      label: c.displayName,
+      searchText: c.displayName
+    }));
+    return [
+      { group: "Suggested", items: catalogItems },
+      ...(customItems.length > 0 ? [{ group: "Your household", items: customItems }] : [])
+    ];
+  }, [institutionCatalogList, institutionCustom]);
 
   const loadProfile = useCallback(async () => {
     setLoadingProfile(true);
@@ -355,7 +393,29 @@ export function SettingsPage() {
         )
         .catch(() => setAccountOwners([]));
     }
-  }, [token, tab, canManageHousehold]);
+    void loadInstitutions();
+  }, [token, tab, canManageHousehold, loadInstitutions]);
+
+  async function addCustomInstitutionName() {
+    if (!token) {
+      return;
+    }
+    const name = window.prompt("Institution name (saved for everyone in your household):");
+    if (!name?.trim()) {
+      return;
+    }
+    setAccountError(null);
+    try {
+      await apiJson("/imports/institutions/custom", {
+        method: "POST",
+        body: JSON.stringify({ displayName: name.trim() })
+      });
+      await loadInstitutions();
+      setAccountDraft((d) => ({ ...d, institution: name.trim() }));
+    } catch (e: unknown) {
+      setAccountError(e instanceof Error ? e.message : "Could not add institution");
+    }
+  }
 
   async function saveConnectedAccount() {
     if (!token) {
@@ -380,7 +440,7 @@ export function SettingsPage() {
         accountMask: accountDraft.accountMask.trim() || null,
         ownerScope: belongsTo.ownerScope,
         ownerPersonProfileId: belongsTo.ownerPersonProfileId,
-        defaultParserProfileId: accountDraft.defaultParserProfileId || null
+        defaultParserProfileId: null as string | null
       };
       if (accountDraft.id) {
         await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
@@ -398,8 +458,7 @@ export function SettingsPage() {
         type: "checking",
         institution: "",
         accountMask: "",
-        belongsTo: "household",
-        defaultParserProfileId: ""
+        belongsTo: "household"
       });
     } catch (e: unknown) {
       setAccountError(e instanceof Error ? e.message : "Could not save account");
@@ -569,8 +628,7 @@ export function SettingsPage() {
       <div className="card">
         <h1>Settings</h1>
         <p className="muted">
-          Manage your account and household preferences. Quick edits for cash-flow targets also stay on{" "}
-          <Link to="/">Home</Link>.
+          Profile, household, and connected accounts. Savings target edits also appear on <Link to="/">Home</Link>.
         </p>
         <div className="settings-tabs" role="tablist" aria-label="Settings sections">
           {tabLinks}
@@ -580,9 +638,7 @@ export function SettingsPage() {
           <div className="settings-panel" role="tabpanel">
             <h2 className="settings-panel__title">Profile</h2>
             <p className="muted" style={{ marginTop: 0 }}>
-              <strong>Avatar icon</strong> is stored as <code>avatarKey</code> on your profile. Below is a local preview;
-              the app shell and other screens are not wired to it yet — same saved value will be used when we add
-              avatars in the header and elsewhere.
+              Avatar is saved as <code>avatarKey</code> on your profile (preview below; header wiring may follow later).
             </p>
             <div className="row" style={{ alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
               <div
@@ -953,18 +1009,32 @@ export function SettingsPage() {
         {tab === "accounts" ? (
           <div className="settings-panel" role="tabpanel">
             <h2 className="settings-panel__title">Connected accounts</h2>
-            <p className="muted">Manual onboarding for financial accounts, owner assignment, and parser defaults.</p>
+            <p className="muted">Link accounts for import. Parser is chosen from institution, account type, and file when you import.</p>
             {accountError ? <p className="error">{accountError}</p> : null}
             {accountSuccess ? <p className="success">{accountSuccess}</p> : null}
             <div className="settings-household-form">
               <label className="settings-field">
                 Institution
-                <input
-                  type="text"
-                  value={accountDraft.institution}
-                  onChange={(e) => setAccountDraft((d) => ({ ...d, institution: e.target.value }))}
+                <HierarchicalSearchPicker
+                  value={accountDraft.institution || null}
+                  onChange={(v) => setAccountDraft((d) => ({ ...d, institution: v ?? "" }))}
+                  groups={institutionPickerGroups}
+                  placeholder="Select institution"
+                  ariaLabel="Financial institution"
                   disabled={savingAccount}
-                  placeholder="e.g. Bank of America"
+                  clearable
+                  footer={
+                    <div className="row" style={{ justifyContent: "flex-start" }}>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={savingAccount}
+                        onClick={() => void addCustomInstitutionName()}
+                      >
+                        Add institution name…
+                      </button>
+                    </div>
+                  }
                 />
               </label>
               <div className="row">
@@ -993,24 +1063,6 @@ export function SettingsPage() {
                     disabled={savingAccount}
                     placeholder="1234"
                   />
-                </label>
-                <label className="settings-field" style={{ flex: "1 1 12rem" }}>
-                  Default parser (optional)
-                  <select
-                    value={accountDraft.defaultParserProfileId}
-                    onChange={(e) => setAccountDraft((d) => ({ ...d, defaultParserProfileId: e.target.value }))}
-                    disabled={savingAccount}
-                  >
-                    <option value="">— none —</option>
-                    <option value="boa_checking_csv">BoA checking CSV</option>
-                    <option value="boa_credit_card_csv">BoA credit card CSV</option>
-                    <option value="chase_card_csv">Chase card CSV</option>
-                    <option value="citi_card_csv">Citi card CSV</option>
-                    <option value="marcus_online_savings_pdf">Marcus savings PDF</option>
-                    <option value="ibm_pay_contributions_pdf">IBM payslip PDF</option>
-                    <option value="adp_payslip_pdf">ADP payslip PDF</option>
-                    <option value="generic_tabular">Generic tabular</option>
-                  </select>
                 </label>
               </div>
               <div className="row">
@@ -1041,8 +1093,7 @@ export function SettingsPage() {
                         type: "checking",
                         institution: "",
                         accountMask: "",
-                        belongsTo: "household",
-                        defaultParserProfileId: ""
+                        belongsTo: "household"
                       })
                     }
                   >
@@ -1059,7 +1110,6 @@ export function SettingsPage() {
                     <th>Type</th>
                     <th>Mask</th>
                     <th>Belongs-to</th>
-                    <th>Default parser</th>
                     <th />
                   </tr>
                 </thead>
@@ -1076,7 +1126,6 @@ export function SettingsPage() {
                             )
                           : "Household"}
                       </td>
-                      <td>{a.default_parser_profile_id ?? "—"}</td>
                       <td>
                         <button
                           type="button"
@@ -1090,8 +1139,7 @@ export function SettingsPage() {
                               belongsTo:
                                 a.owner_scope === "person" && a.owner_person_profile_id
                                   ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
-                                  : "household",
-                              defaultParserProfileId: a.default_parser_profile_id ?? ""
+                                  : "household"
                             })
                           }
                         >
