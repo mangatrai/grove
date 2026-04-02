@@ -61,6 +61,8 @@ const envSchema = z.object({
   AI_CATEGORY_ENABLED: optionalBoolEnv(false),
   /** Max transactions per OpenAI chat request when batching categorization (1–128). */
   AI_CATEGORY_BATCH_SIZE: optionalIntEnv(28, 1, 128),
+  /** Concurrent OpenAI requests for different chunks of the same AI run (1–8). Use 1 to avoid rate limits. */
+  AI_CATEGORY_MAX_PARALLEL: optionalIntEnv(1, 1, 8),
   AI_CATEGORY_AUTO_APPLY_MIN: optionalFloatEnv(0.9, 0, 1),
   AI_CATEGORY_REVIEW_MIN: optionalFloatEnv(0.6, 0, 1),
   OPENAI_API_KEY: z.string().optional(),
@@ -81,7 +83,9 @@ const envSchema = z.object({
     if (val === undefined || val === "") return undefined;
     const s = String(val).trim();
     return s === "" ? undefined : s;
-  }, z.string().optional())
+  }, z.string().optional()),
+  /** Max characters logged per debug line for OpenAI request/response bodies (`LOG_LEVEL=debug`). */
+  LOG_AI_DEBUG_BODY_MAX_CHARS: optionalIntEnv(4000, 200, 50_000)
 });
 
 export const env = envSchema.parse(process.env);

@@ -30,6 +30,14 @@ function clamp01(n: number): number {
   return n;
 }
 
+function truncateForDebug(s: string): string {
+  const max = env.LOG_AI_DEBUG_BODY_MAX_CHARS;
+  if (s.length <= max) {
+    return s;
+  }
+  return `${s.slice(0, max)}\n… [truncated ${s.length - max} chars]`;
+}
+
 function normalizeAiSuggestion(raw: unknown): Omit<AiSuggestion, "model"> | null {
   if (!raw || typeof raw !== "object") {
     return null;
@@ -67,12 +75,22 @@ function finalizeSuggestion(householdId: string, parsed: Omit<AiSuggestion, "mod
   return { ...parsed, model: env.OPENAI_MODEL };
 }
 
+/** Leaf categories: id + name only (smaller prompt than including parentId). */
 function leafCategoriesPayload(householdId: string) {
   const all = listCategoriesForHousehold(householdId);
-  return all
-    .filter((c) => !categoryHasChildren(c.id))
-    .map((c) => ({ id: c.id, name: c.name, parentId: c.parentId }));
+  return all.filter((c) => !categoryHasChildren(c.id)).map((c) => ({ id: c.id, name: c.name }));
 }
+
+const CLASSIFICATION_GUIDELINES = [
+  "Use high confidence (e.g. 0.9+) when merchant, ACH descriptors, amount sign, and direction clearly match one leaf.",
+  "Use lower confidence when several leaves are plausible.",
+  "Employer or payroll: credits with DES:PAYMENTS, CCD, PMT, or similar from a known employer name → prefer salary/wages (or the household leaf for earned income), not generic corporate or misc income.",
+  "Telecom: T-MOBILE, TMOBILE, VERIZON, AT&T, etc. on debit → Utilities or Subscriptions, never Groceries.",
+  "Mortgage/home loan: LOAN PAYMT, MORTGAGE, UWM, escrow, home equity → prefer a housing/mortgage leaf over generic Debt Payments when such a leaf exists.",
+  "Zelle/Venmo/P2P: read memo text; reimbursement vs transfer vs shared expense.",
+  "If no leaf fits well: set suggestedCategoryId to null, set suggestedNewCategoryName to a short specific label (e.g. Mortgage — LenderName), and explain in reason.",
+  "If a broad leaf is correct but a subtype is obvious, pick the best leaf and name the subtype in reason; you may suggest suggestedNewCategoryName for a future subcategory."
+].join(" ");
 
 /** Rough char budget for the JSON user payload (categories + transactions); split batch if exceeded. */
 const MAX_ESTIMATED_USER_JSON_CHARS = 100_000;
@@ -104,12 +122,11 @@ function buildUserContentObject(
   });
   return {
     task: "Assign categories for multiple transactions.",
+    guidelines: CLASSIFICATION_GUIDELINES,
     transactions,
     categories,
-    expectedJsonSchema: {
-      results:
-        "array of { transactionId: string, suggestedCategoryId: string|null, confidence: number(0..1), suggestedNewCategoryName: string|null, reason: string }"
-    }
+    resultsShape:
+      "Top-level JSON must include results: array of { transactionId, suggestedCategoryId, confidence 0..1, suggestedNewCategoryName, reason } — one entry per input transactionId."
   };
 }
 
@@ -156,6 +173,9 @@ export async function suggestCategoriesWithAiBatch(
   if (est > MAX_ESTIMATED_USER_JSON_CHARS) {
     if (items.length > 1) {
       const mid = Math.ceil(items.length / 2);
+      log.debug(
+        `[category-ai] payload ~${est} chars > limit; splitting batch ${items.length} -> ${mid} + ${items.length - mid}`
+      );
       const leftMap = await suggestCategoriesWithAiBatch(householdId, items.slice(0, mid));
       const rightMap = await suggestCategoriesWithAiBatch(householdId, items.slice(mid));
       for (const [k, v] of rightMap) {
@@ -173,6 +193,14 @@ export async function suggestCategoriesWithAiBatch(
       ? SINGLE_ITEM_DESC_TRUNCATE_CHARS
       : undefined;
 
+  const userObject = buildUserContentObject(householdId, items, descMax);
+  const userJson = JSON.stringify(userObject);
+
+  const systemContent =
+    "You classify bank transactions into the household's existing leaf categories (use category id when it fits). " +
+    "Follow the guidelines in the user JSON. You MUST return strict JSON with a top-level results array: one object per input transactionId (same ids). " +
+    "Include suggestedNewCategoryName when no leaf is adequate or to name a clearer subtype. Return JSON only.";
+
   const body = {
     model: env.OPENAI_MODEL,
     temperature: 0,
@@ -180,15 +208,18 @@ export async function suggestCategoriesWithAiBatch(
     messages: [
       {
         role: "system",
-        content:
-          "You classify bank transaction descriptions into existing categories. Prefer an existing category id whenever reasonable. You MUST return one result object per input transactionId. Return strict JSON only."
+        content: systemContent
       },
       {
         role: "user",
-        content: JSON.stringify(buildUserContentObject(householdId, items, descMax))
+        content: userJson
       }
     ]
   };
+
+  log.debug(
+    `[category-ai] OpenAI request: ${items.length} txn(s), user JSON ${userJson.length} chars\n${truncateForDebug(userJson)}`
+  );
 
   const t0 = Date.now();
   try {
@@ -214,6 +245,7 @@ export async function suggestCategoriesWithAiBatch(
     if (!content) {
       return out;
     }
+    log.debug(`[category-ai] OpenAI raw content (${content.length} chars)\n${truncateForDebug(content)}`);
     let root: unknown;
     try {
       root = JSON.parse(content) as unknown;
@@ -227,6 +259,18 @@ export async function suggestCategoriesWithAiBatch(
     if (!Array.isArray(results)) {
       return out;
     }
+    const preview = results.map((row) => {
+      if (!row || typeof row !== "object") {
+        return {};
+      }
+      const o = row as Record<string, unknown>;
+      return {
+        transactionId: o.transactionId,
+        suggestedCategoryId: o.suggestedCategoryId,
+        confidence: o.confidence
+      };
+    });
+    log.debug(`[category-ai] parsed results (${results.length}): ${truncateForDebug(JSON.stringify(preview))}`);
     for (const row of results) {
       const parsed = normalizeAiSuggestion(row);
       const tid =
