@@ -1,6 +1,6 @@
 # Async / background canonicalize (design)
 
-**Status:** Design only — not implemented in the API yet. Tracking: GitHub [#14](https://github.com/mangatrai/household-finance-app/issues/14).
+**Status:** Design only — not implemented in the API yet. Tracking: GitHub [#12](https://github.com/mangatrai/household-finance-app/issues/12).
 
 ## Problem
 

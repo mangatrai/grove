@@ -27,7 +27,7 @@ See [`docs/ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) for all related 
 - **`AI_CATEGORY_MAX_PARALLEL`** — Concurrent OpenAI requests for **different** chunks of the same contiguous AI run (default **1**). Increase cautiously to avoid **429** rate limits.
 - **`OPENAI_MODEL`** — Faster/cheaper models may trade quality; validate on your statements.
 
-Total model time is dominated by **API latency**; see [`docs/CANONICALIZE_ASYNC.md`](CANONICALIZE_ASYNC.md) for a **background job** pattern that improves **perceived** UX without reducing total tokens (issue [#14](https://github.com/mangatrai/household-finance-app/issues/14)).
+Total model time is dominated by **API latency**; see [`docs/CANONICALIZE_ASYNC.md`](CANONICALIZE_ASYNC.md) for a **background job** pattern that improves **perceived** UX without reducing total tokens (issue [#12](https://github.com/mangatrai/household-finance-app/issues/12)).
 
 **Future:** Pass **account type** (checking vs credit card) into the batch payload — [#13](https://github.com/mangatrai/household-finance-app/issues/13).
 
