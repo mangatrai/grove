@@ -6,7 +6,9 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   createHouseholdCategory,
   deleteHouseholdCategory,
+  getCategoryHouseholdId,
   listCategoriesForHousehold,
+  updateDefaultCategory,
   updateHouseholdCategory
 } from "./categories.service.js";
 
@@ -59,14 +61,54 @@ categoriesRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = updateHouseholdCategory(householdId, req.params.id, parsed.data);
+  const role = req.authUser!.role;
+  const scope = getCategoryHouseholdId(req.params.id);
+  if (scope === undefined) {
+    res.status(404).json({ message: "Category not found", code: "NOT_FOUND" });
+    return;
+  }
+
+  const out =
+    scope === null
+      ? role === "owner" || role === "admin"
+        ? updateDefaultCategory(householdId, req.params.id, parsed.data)
+        : { ok: false as const, code: "FORBIDDEN" as const }
+      : scope === householdId
+        ? updateHouseholdCategory(householdId, req.params.id, parsed.data)
+        : { ok: false as const, code: "NOT_FOUND" as const };
+
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {
       res.status(404).json({ message: "Category not found", code: out.code });
       return;
     }
     if (out.code === "FORBIDDEN") {
-      res.status(403).json({ message: "Not allowed to edit this category", code: out.code });
+      res.status(403).json({
+        message:
+          scope === null
+            ? "Only owners and admins can edit built-in categories for this installation"
+            : "Not allowed to edit this category",
+        code: out.code
+      });
+      return;
+    }
+    if (out.code === "INVALID_REPARENT") {
+      res.status(400).json({
+        message: "Remove or reassign subcategories before moving this group under another parent",
+        code: out.code
+      });
+      return;
+    }
+    if (out.code === "INVALID_NAME") {
+      res.status(400).json({ message: "Name is required", code: out.code });
+      return;
+    }
+    if (out.code === "INVALID_PARENT" || out.code === "MAX_DEPTH") {
+      res.status(400).json({ message: "Invalid parent for subcategory", code: out.code });
+      return;
+    }
+    if (out.code === "CYCLE") {
+      res.status(400).json({ message: "Invalid parent", code: out.code });
       return;
     }
     res.status(400).json({ message: "Cannot update category", code: out.code });
@@ -77,6 +119,23 @@ categoriesRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
 
 categoriesRouter.delete("/:id", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
+  const scope = getCategoryHouseholdId(req.params.id);
+  if (scope === undefined) {
+    res.status(404).json({ message: "Category not found", code: "NOT_FOUND" });
+    return;
+  }
+  if (scope === null) {
+    res.status(403).json({
+      message: "Built-in categories cannot be deleted; rename them or hide via classification rules",
+      code: "BUILTIN_READONLY"
+    });
+    return;
+  }
+  if (scope !== householdId) {
+    res.status(404).json({ message: "Category not found", code: "NOT_FOUND" });
+    return;
+  }
+
   const out = deleteHouseholdCategory(householdId, req.params.id);
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {

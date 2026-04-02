@@ -3,21 +3,26 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
-import { listBuiltinRulesCatalog } from "./builtin-rules-catalog.js";
 import { recategorizeHouseholdTransactions } from "./category-recategorize.service.js";
 import { classifyWithRules } from "./category-rules.js";
 import { listRuleLearningPreviewForSession } from "./category-rule-learning.service.js";
 import {
   createCategoryRuleForHousehold,
   createCategoryRulesFromPatterns,
+  createGlobalCategoryRule,
   createRuleFromLedgerTransaction,
+  deleteGlobalCategoryRule,
   listCategoryRulesForHousehold,
   listEnabledDbRulesForClassification,
-  updateCategoryRuleForHousehold
+  listGlobalCategoryRules,
+  updateCategoryRuleForHousehold,
+  updateGlobalCategoryRule
 } from "./category-rules.service.js";
 
 const matchTypeSchema = z.enum(["contains", "prefix", "regex"]);
+const amountScopeSchema = z.enum(["any", "credit_only", "debit_only"]);
 
 export const categoryRulesRouter = Router();
 categoryRulesRouter.use(requireAuth);
@@ -25,13 +30,19 @@ categoryRulesRouter.use(requireAuth);
 categoryRulesRouter.get("/", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const rules = listCategoryRulesForHousehold(householdId);
-  const builtinRules = listBuiltinRulesCatalog().map((b) => ({
+  const builtinRules = listGlobalCategoryRules().map((b) => ({
     origin: "builtin" as const,
-    ruleId: b.ruleId,
-    flow: b.flow,
+    id: b.id,
+    ruleKey: b.ruleKey,
+    pattern: b.pattern,
+    matchType: b.matchType,
     categoryId: b.categoryId,
-    keywords: b.keywords,
-    summary: b.summary
+    amountScope: b.amountScope,
+    confidence: b.confidence,
+    priority: b.priority,
+    enabled: b.enabled,
+    createdAt: b.createdAt,
+    updatedAt: b.updatedAt
   }));
   res.status(200).json({ builtinRules, rules });
 });
@@ -94,6 +105,53 @@ categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
+  res.status(201).json({ rule: out.data });
+});
+
+const createBuiltinBodySchema = z.object({
+  ruleKey: z.string().min(2).max(120).optional(),
+  pattern: z.string().min(2).max(120),
+  matchType: matchTypeSchema,
+  categoryId: z.string().uuid(),
+  amountScope: amountScopeSchema,
+  confidence: z.number().min(0).max(1).optional().default(0.7),
+  priority: z.number().int().min(0).max(10000).optional().default(100),
+  enabled: z.boolean().optional().default(true)
+});
+
+categoryRulesRouter.post("/builtin", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const parsed = createBuiltinBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const b = parsed.data;
+  const ruleKey =
+    b.ruleKey?.trim() ||
+    `custom_${b.pattern
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, "_")
+      .replace(/[^a-z0-9_]/g, "")
+      .slice(0, 80)}`;
+  const out = createGlobalCategoryRule({
+    ruleKey,
+    pattern: b.pattern,
+    matchType: b.matchType,
+    categoryId: b.categoryId,
+    amountScope: b.amountScope,
+    confidence: b.confidence,
+    priority: b.priority,
+    enabled: b.enabled
+  });
+  if (!out.ok) {
+    const message =
+      out.code === "BUILTIN_REQUIRES_GLOBAL_LEAF"
+        ? "Built-in rules may only target installation default category leaves. Use a household classification rule for categories you created."
+        : "Cannot create built-in rule";
+    res.status(400).json({ message, code: out.code });
+    return;
+  }
   res.status(201).json({ rule: out.data });
 });
 
@@ -218,4 +276,48 @@ categoryRulesRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
   }
 
   res.status(200).json({ rule: out.data });
+});
+
+const patchBuiltinSchema = z
+  .object({
+    ruleKey: z.string().min(2).max(120).optional(),
+    pattern: z.string().min(2).max(120).optional(),
+    matchType: matchTypeSchema.optional(),
+    categoryId: z.string().uuid().optional(),
+    amountScope: amountScopeSchema.optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    priority: z.number().int().min(0).max(10000).optional(),
+    enabled: z.boolean().optional()
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
+categoryRulesRouter.patch("/builtin/:id", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const parsed = patchBuiltinSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const out = updateGlobalCategoryRule(req.params.id, parsed.data);
+  if (!out.ok) {
+    if (out.code === "NOT_FOUND") {
+      res.status(404).json({ message: "Rule not found", code: out.code });
+      return;
+    }
+    const message =
+      out.code === "BUILTIN_REQUIRES_GLOBAL_LEAF"
+        ? "Built-in rules may only target installation default category leaves. Use a household classification rule for categories you created."
+        : "Cannot update built-in rule";
+    res.status(400).json({ message, code: out.code });
+    return;
+  }
+  res.status(200).json({ rule: out.data });
+});
+
+categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const out = deleteGlobalCategoryRule(req.params.id);
+  if (!out.ok) {
+    res.status(404).json({ message: "Rule not found", code: out.code });
+    return;
+  }
+  res.status(204).send();
 });

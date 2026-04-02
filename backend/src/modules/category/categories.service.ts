@@ -73,6 +73,17 @@ export function categoryUsableByHousehold(categoryId: string, householdId: strin
   return Boolean(row);
 }
 
+/** Default taxonomy leaf (`household_id` NULL) usable as a global built-in rule target. */
+export function categoryAssignableForGlobalBuiltin(categoryId: string): boolean {
+  const row = db
+    .prepare(`SELECT household_id AS householdId FROM category WHERE id = ?`)
+    .get(categoryId) as { householdId: string | null } | undefined;
+  if (!row || row.householdId !== null) {
+    return false;
+  }
+  return !categoryHasChildren(categoryId);
+}
+
 function getCategoryInternal(id: string): CategoryDbRow | undefined {
   return db
     .prepare(
@@ -129,7 +140,73 @@ export function createHouseholdCategory(
 }
 
 export type UpdateCategoryFailure =
-  | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "INVALID_NAME" | "INVALID_PARENT" | "MAX_DEPTH" | "CYCLE" };
+  | {
+      ok: false;
+      code:
+        | "NOT_FOUND"
+        | "FORBIDDEN"
+        | "INVALID_NAME"
+        | "INVALID_PARENT"
+        | "MAX_DEPTH"
+        | "CYCLE"
+        | "INVALID_REPARENT";
+    };
+
+/** Built-in row (`household_id` NULL). Used by routes for auth branching. */
+export function getCategoryHouseholdId(categoryId: string): string | null | undefined {
+  const row = getCategoryInternal(categoryId);
+  if (!row) {
+    return undefined;
+  }
+  return row.householdId;
+}
+
+/**
+ * Update a global default category (`household_id` IS NULL). Installation-wide for this DB.
+ * Same depth rules as household updates; cannot move a top-level group under another if it still has subcategories.
+ */
+export function updateDefaultCategory(
+  householdId: string,
+  categoryId: string,
+  updates: { name?: string; parentId?: string | null }
+): { ok: true; data: CategoryRow } | UpdateCategoryFailure {
+  const row = getCategoryInternal(categoryId);
+  if (!row || row.householdId !== null) {
+    return { ok: false, code: row ? "FORBIDDEN" : "NOT_FOUND" };
+  }
+
+  const nextName = updates.name !== undefined ? updates.name.trim() : row.name;
+  if (!nextName) {
+    return { ok: false, code: "INVALID_NAME" };
+  }
+
+  let nextParentId = updates.parentId !== undefined ? updates.parentId : row.parentId;
+  if (updates.parentId !== undefined) {
+    if (nextParentId === categoryId) {
+      return { ok: false, code: "CYCLE" };
+    }
+    if (categoryHasChildren(categoryId) && nextParentId !== null) {
+      return { ok: false, code: "INVALID_REPARENT" };
+    }
+    if (nextParentId !== null) {
+      if (!categoryUsableByHousehold(nextParentId, householdId)) {
+        return { ok: false, code: "INVALID_PARENT" };
+      }
+      if (!parentAcceptsChild(nextParentId)) {
+        return { ok: false, code: "MAX_DEPTH" };
+      }
+    }
+  }
+
+  db.prepare(`UPDATE category SET name = ?, parent_id = ? WHERE id = ? AND household_id IS NULL`).run(
+    nextName,
+    nextParentId,
+    categoryId
+  );
+
+  const out = getCategoryInternal(categoryId)!;
+  return { ok: true, data: mapRowFromDb(out) };
+}
 
 export function updateHouseholdCategory(
   householdId: string,
@@ -150,6 +227,9 @@ export function updateHouseholdCategory(
   if (updates.parentId !== undefined) {
     if (nextParentId === categoryId) {
       return { ok: false, code: "CYCLE" };
+    }
+    if (categoryHasChildren(categoryId) && nextParentId !== null) {
+      return { ok: false, code: "INVALID_REPARENT" };
     }
     if (nextParentId !== null) {
       if (!categoryUsableByHousehold(nextParentId, householdId)) {

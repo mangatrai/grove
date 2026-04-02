@@ -2,8 +2,12 @@ import crypto from "node:crypto";
 
 import { db } from "../../db/sqlite.js";
 import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
-import { categoryHasChildren, categoryUsableByHousehold } from "./categories.service.js";
-import type { DbCategoryRule } from "./category-rules.js";
+import {
+  categoryAssignableForGlobalBuiltin,
+  categoryHasChildren,
+  categoryUsableByHousehold
+} from "./categories.service.js";
+import type { DbCategoryRule, RuleAmountScope } from "./category-rules.js";
 
 export interface CategoryRuleRow extends DbCategoryRule {
   householdId: string;
@@ -36,6 +40,8 @@ function mapRule(row: CategoryRuleDbRow): CategoryRuleRow {
     matchType: row.matchType,
     categoryId: row.categoryId,
     confidence: row.confidence,
+    amountScope: "any",
+    ruleOrigin: "household",
     priority: row.priority,
     enabled: row.enabled === 1,
     createdAt: row.createdAt,
@@ -113,20 +119,312 @@ export function listEnabledDbRulesForClassification(householdId: string): DbCate
   const rows = db
     .prepare(
       `SELECT
-         id,
-         pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
-         confidence
-       FROM category_rule
-       WHERE household_id = ? AND enabled = 1
-       ORDER BY priority ASC, datetime(created_at) ASC, id ASC`
+         m.id AS id,
+         m.pattern AS pattern,
+         m.match_type AS matchType,
+         m.category_id AS categoryId,
+         m.confidence AS confidence,
+         m.amount_scope AS amountScope,
+         m.rule_origin AS ruleOrigin
+       FROM (
+         SELECT
+           id,
+           pattern,
+           match_type,
+           category_id,
+           confidence,
+           'any' AS amount_scope,
+           'household' AS rule_origin,
+           0 AS seg,
+           priority,
+           created_at,
+           id AS sid
+         FROM category_rule
+         WHERE household_id = ? AND enabled = 1
+         UNION ALL
+         SELECT
+           id,
+           pattern,
+           match_type,
+           category_id,
+           confidence,
+           amount_scope,
+           'global' AS rule_origin,
+           1 AS seg,
+           priority,
+           created_at,
+           id AS sid
+         FROM category_rule_global
+         WHERE enabled = 1
+       ) AS m
+       ORDER BY m.seg ASC, m.priority ASC, datetime(m.created_at) ASC, m.sid ASC`
     )
     .all(householdId) as DbCategoryRule[];
   return rows;
 }
 
-type RuleValidationFailureCode = "INVALID_PATTERN" | "INVALID_CATEGORY" | "INVALID_CONFIDENCE" | "INVALID_PRIORITY";
+export interface GlobalCategoryRuleRow {
+  id: string;
+  ruleKey: string;
+  pattern: string;
+  matchType: MatchType;
+  categoryId: string;
+  amountScope: RuleAmountScope;
+  confidence: number;
+  priority: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface GlobalRuleDbRow {
+  id: string;
+  ruleKey: string;
+  pattern: string;
+  matchType: MatchType;
+  categoryId: string;
+  amountScope: RuleAmountScope;
+  confidence: number;
+  priority: number;
+  enabled: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapGlobalRule(row: GlobalRuleDbRow): GlobalCategoryRuleRow {
+  return {
+    id: row.id,
+    ruleKey: row.ruleKey,
+    pattern: row.pattern,
+    matchType: row.matchType,
+    categoryId: row.categoryId,
+    amountScope: row.amountScope,
+    confidence: row.confidence,
+    priority: row.priority,
+    enabled: row.enabled === 1,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  };
+}
+
+export function listGlobalCategoryRules(): GlobalCategoryRuleRow[] {
+  const rows = db
+    .prepare(
+      `SELECT
+         id,
+         rule_key AS ruleKey,
+         pattern,
+         match_type AS matchType,
+         category_id AS categoryId,
+         amount_scope AS amountScope,
+         confidence,
+         priority,
+         enabled,
+         created_at AS createdAt,
+         updated_at AS updatedAt
+       FROM category_rule_global
+       ORDER BY enabled DESC, priority ASC, datetime(created_at) ASC, id ASC`
+    )
+    .all() as GlobalRuleDbRow[];
+
+  return rows.map(mapGlobalRule);
+}
+
+export function createGlobalCategoryRule(input: {
+  ruleKey: string;
+  pattern: string;
+  matchType: MatchType;
+  categoryId: string;
+  amountScope: RuleAmountScope;
+  confidence: number;
+  priority: number;
+  enabled: boolean;
+}): { ok: true; data: GlobalCategoryRuleRow } | CreateRuleFailure {
+  const pattern = normalizePattern(input.pattern);
+  if (!isPatternValid(pattern, input.matchType)) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
+    return { ok: false, code: "INVALID_CONFIDENCE" };
+  }
+  if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 10000) {
+    return { ok: false, code: "INVALID_PRIORITY" };
+  }
+  const rk = input.ruleKey.trim().toLowerCase().replace(/\s+/g, "_");
+  if (rk.length < 2 || rk.length > 120) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  if (!categoryAssignableForGlobalBuiltin(input.categoryId)) {
+    return { ok: false, code: "BUILTIN_REQUIRES_GLOBAL_LEAF" };
+  }
+
+  const id = crypto.randomUUID();
+  try {
+    db.prepare(
+      `INSERT INTO category_rule_global (
+         id, rule_key, pattern, match_type, category_id, amount_scope, confidence, priority, enabled, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    ).run(
+      id,
+      rk,
+      pattern,
+      input.matchType,
+      input.categoryId,
+      input.amountScope,
+      input.confidence,
+      input.priority,
+      input.enabled ? 1 : 0
+    );
+  } catch (e: unknown) {
+    const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
+    if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+      return { ok: false, code: "INVALID_PATTERN" };
+    }
+    throw e;
+  }
+
+  const row = db
+    .prepare(
+      `SELECT
+         id,
+         rule_key AS ruleKey,
+         pattern,
+         match_type AS matchType,
+         category_id AS categoryId,
+         amount_scope AS amountScope,
+         confidence,
+         priority,
+         enabled,
+         created_at AS createdAt,
+         updated_at AS updatedAt
+       FROM category_rule_global
+       WHERE id = ?`
+    )
+    .get(id) as GlobalRuleDbRow;
+  return { ok: true, data: mapGlobalRule(row) };
+}
+
+export function updateGlobalCategoryRule(
+  ruleId: string,
+  updates: {
+    ruleKey?: string;
+    pattern?: string;
+    matchType?: MatchType;
+    categoryId?: string;
+    amountScope?: RuleAmountScope;
+    confidence?: number;
+    priority?: number;
+    enabled?: boolean;
+  }
+): { ok: true; data: GlobalCategoryRuleRow } | UpdateRuleFailure {
+  const existing = db
+    .prepare(
+      `SELECT
+         id,
+         rule_key AS ruleKey,
+         pattern,
+         match_type AS matchType,
+         category_id AS categoryId,
+         amount_scope AS amountScope,
+         confidence,
+         priority,
+         enabled,
+         created_at AS createdAt,
+         updated_at AS updatedAt
+       FROM category_rule_global
+       WHERE id = ?`
+    )
+    .get(ruleId) as GlobalRuleDbRow | undefined;
+  if (!existing) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  const nextKeyRaw = updates.ruleKey !== undefined ? updates.ruleKey.trim().toLowerCase().replace(/\s+/g, "_") : existing.ruleKey;
+  const nextPattern = normalizePattern(updates.pattern ?? existing.pattern);
+  const nextMatchType = updates.matchType ?? existing.matchType;
+  const nextCategoryId = updates.categoryId ?? existing.categoryId;
+  const nextAmountScope = updates.amountScope ?? existing.amountScope;
+  const nextConfidence = updates.confidence ?? existing.confidence;
+  const nextPriority = updates.priority ?? existing.priority;
+  const nextEnabled = updates.enabled ?? (existing.enabled === 1);
+
+  if (nextKeyRaw.length < 2 || nextKeyRaw.length > 120) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  if (!isPatternValid(nextPattern, nextMatchType)) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  if (!Number.isFinite(nextConfidence) || nextConfidence < 0 || nextConfidence > 1) {
+    return { ok: false, code: "INVALID_CONFIDENCE" };
+  }
+  if (!Number.isInteger(nextPriority) || nextPriority < 0 || nextPriority > 10000) {
+    return { ok: false, code: "INVALID_PRIORITY" };
+  }
+  if (!categoryAssignableForGlobalBuiltin(nextCategoryId)) {
+    return { ok: false, code: "BUILTIN_REQUIRES_GLOBAL_LEAF" };
+  }
+
+  try {
+    db.prepare(
+      `UPDATE category_rule_global
+       SET rule_key = ?, pattern = ?, match_type = ?, category_id = ?, amount_scope = ?,
+           confidence = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?`
+    ).run(
+      nextKeyRaw,
+      nextPattern,
+      nextMatchType,
+      nextCategoryId,
+      nextAmountScope,
+      nextConfidence,
+      nextPriority,
+      nextEnabled ? 1 : 0,
+      ruleId
+    );
+  } catch (e: unknown) {
+    const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
+    if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+      return { ok: false, code: "INVALID_PATTERN" };
+    }
+    throw e;
+  }
+
+  const row = db
+    .prepare(
+      `SELECT
+         id,
+         rule_key AS ruleKey,
+         pattern,
+         match_type AS matchType,
+         category_id AS categoryId,
+         amount_scope AS amountScope,
+         confidence,
+         priority,
+         enabled,
+         created_at AS createdAt,
+         updated_at AS updatedAt
+       FROM category_rule_global
+       WHERE id = ?`
+    )
+    .get(ruleId) as GlobalRuleDbRow;
+  return { ok: true, data: mapGlobalRule(row) };
+}
+
+export function deleteGlobalCategoryRule(ruleId: string): { ok: true } | { ok: false; code: "NOT_FOUND" } {
+  const res = db.prepare(`DELETE FROM category_rule_global WHERE id = ?`).run(ruleId);
+  if (res.changes === 0) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  return { ok: true };
+}
+
+type RuleValidationFailureCode =
+  | "INVALID_PATTERN"
+  | "INVALID_CATEGORY"
+  | "INVALID_CONFIDENCE"
+  | "INVALID_PRIORITY"
+  /** Global built-in rules may only target default (non–household-scoped) leaf categories. */
+  | "BUILTIN_REQUIRES_GLOBAL_LEAF";
 
 export type CreateRuleFailure = { ok: false; code: RuleValidationFailureCode };
 

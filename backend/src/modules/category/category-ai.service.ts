@@ -86,7 +86,7 @@ const CLASSIFICATION_GUIDELINES = [
   "Use lower confidence when several leaves are plausible.",
   "Employer or payroll: credits with DES:PAYMENTS, CCD, PMT, or similar from a known employer name → prefer salary/wages (or the household leaf for earned income), not generic corporate or misc income.",
   "Telecom: T-MOBILE, TMOBILE, VERIZON, AT&T, etc. on debit → Utilities or Subscriptions, never Groceries.",
-  "Mortgage/home loan: LOAN PAYMT, MORTGAGE, UWM, escrow, home equity → prefer a housing/mortgage leaf over generic Debt Payments when such a leaf exists.",
+  "Mortgage/home loan: LOAN PAYMT, MORTGAGE, UWM, escrow, home equity → prefer Housing over Credit card payments or Loan payments when the description clearly matches the home loan.",
   "Zelle/Venmo/P2P: read memo text; reimbursement vs transfer vs shared expense.",
   "If no leaf fits well: set suggestedCategoryId to null, set suggestedNewCategoryName to a short specific label (e.g. Mortgage — LenderName), and explain in reason.",
   "If a broad leaf is correct but a subtype is obvious, pick the best leaf and name the subtype in reason; you may suggest suggestedNewCategoryName for a future subcategory."

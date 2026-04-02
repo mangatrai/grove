@@ -25,7 +25,7 @@ interface ClassificationAiMeta {
 }
 
 interface ClassificationExplainability {
-  source?: "db" | "default" | "none";
+  source?: "household" | "builtin" | "none" | "db" | "default";
   ruleId?: string | null;
   confidence?: number;
   reason?: string;
