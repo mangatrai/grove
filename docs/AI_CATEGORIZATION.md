@@ -1,5 +1,9 @@
 # AI categorization (canonicalize)
 
+## Status
+
+**Primary categorization** is **deterministic**: household `category_rule` rows, then **built-in keyword rules** in code. **OpenAI categorization is optional and experimental** — keep `AI_CATEGORY_ENABLED` off for production unless you explicitly want model suggestions (slower, non-deterministic, costs tokens).
+
 ## What runs when
 
 If **`AI_CATEGORY_ENABLED`** is set and **`OPENAI_API_KEY`** is present, after **deterministic category rules** (`classifyWithRules`) any row still **without** a category is sent to OpenAI in **batches**. Code: [`backend/src/modules/category/category-ai.service.ts`](../backend/src/modules/category/category-ai.service.ts), wired from [`backend/src/modules/canonical/canonical-ingest.service.ts`](../backend/src/modules/canonical/canonical-ingest.service.ts).

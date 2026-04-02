@@ -6,7 +6,7 @@ This document explains **all automated behaviors** when statements are imported 
 
 **Order of evaluation** (see `backend/src/modules/category/category-rules.ts`):
 
-1. **`category_rule` table** (rows from `/categories/rules`) — ordered by priority; first match wins on **fingerprint-normalized** description (lowercase, alphanumeric + spaces).
+1. **`category_rule` table** (rows from `/categories/rules`) — ordered by priority; first match wins on **fingerprint-normalized** description (lowercase, alphanumeric + spaces). The rules UI lists **built-in** (read-only) and **household** rules; you can add multiple patterns in one save, test a description, re-apply rules to the ledger, and preview parsed import sessions for rule learning.
 2. **Default keyword rules** in `classifyDefaultCategory()` — conservative substring heuristics if no DB rule matched.
 
 Default rules use stable **`ruleId`** strings for debugging (examples):
