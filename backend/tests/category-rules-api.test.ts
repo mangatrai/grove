@@ -74,6 +74,8 @@ describe("category rules API and classification explainability", () => {
 
     const listRes = await request(app).get("/categories/rules").set("authorization", `Bearer ${token}`);
     expect(listRes.status).toBe(200);
+    expect(Array.isArray(listRes.body.builtinRules)).toBe(true);
+    expect(listRes.body.builtinRules.length).toBeGreaterThan(0);
     expect(listRes.body.rules.some((r: { id: string }) => r.id === ruleId)).toBe(true);
 
     const disableRes = await request(app)
@@ -167,5 +169,29 @@ describe("category rules API and classification explainability", () => {
     ).find((x) => x.context?.raw?.description?.includes("MYSTERY UNSORTED CHARGE"));
     expect(row).toBeTruthy();
     expect(row?.context?.classification?.source).toBe("none");
+  });
+
+  it("creates multiple rules from comma-separated patterns", async () => {
+    const token = await loginAndGetToken();
+    const createRes = await request(app).post("/categories/rules").set("authorization", `Bearer ${token}`).send({
+      patterns: "alphaunique1, betaunique2",
+      matchType: "contains",
+      categoryId: GROCERIES_ID,
+      priority: 200
+    });
+    expect(createRes.status).toBe(201);
+    expect(Array.isArray(createRes.body.rules)).toBe(true);
+    expect(createRes.body.rules.length).toBe(2);
+  });
+
+  it("classifies a test description via POST /categories/rules/test", async () => {
+    const token = await loginAndGetToken();
+    const testRes = await request(app).post("/categories/rules/test").set("authorization", `Bearer ${token}`).send({
+      description: "WHOLE FOODS MARKET",
+      signedAmount: -12.34
+    });
+    expect(testRes.status).toBe(200);
+    expect(testRes.body.normalizedDescription).toContain("whole");
+    expect(testRes.body.classification.source).toBe("default");
   });
 });
