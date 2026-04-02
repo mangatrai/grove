@@ -29,11 +29,13 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 | `JWT_SECRET` | JWT signing; min 16 chars in schema (default exists for local dev only). |
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
 | `AI_CATEGORY_ENABLED` | Enable OpenAI categorization pass during canonicalize (default `false`). |
-| `AI_CATEGORY_AUTO_APPLY_MIN` | Confidence threshold for automatic category assignment (default `0.9`). The default is strict: many suggestions fall in the “review” band between this and `AI_CATEGORY_REVIEW_MIN`. Lowering (e.g. to `0.75`) reduces manual review at the cost of more automatic assignments. |
-| `AI_CATEGORY_REVIEW_MIN` | Minimum confidence to attach AI suggestion in review payload (default `0.6`). |
-| `AI_CATEGORY_BATCH_SIZE` | Max transactions per OpenAI chat request during canonicalize (default `28`, max `128`). Larger batches mean fewer round-trips; the service also splits a batch when the estimated JSON payload would exceed a safe size (large category lists or long descriptions). Batching does **not** change confidence thresholds—it only reduces HTTP round-trips. |
+| `AI_CATEGORY_AUTO_APPLY_MIN` | Confidence threshold for automatic category assignment (default `0.9`). Model-reported confidence only. Lower (e.g. `0.7`) reduces review backlog but increases wrong auto-labels. See [`docs/AI_CATEGORIZATION.md`](AI_CATEGORIZATION.md). |
+| `AI_CATEGORY_REVIEW_MIN` | Minimum confidence to attach AI suggestion in review payload `reason` JSON (default `0.6`). |
+| `AI_CATEGORY_BATCH_SIZE` | Max transactions per **single** OpenAI request (default `28`, max `128`). Log line counts vary: see [`docs/AI_CATEGORIZATION.md`](AI_CATEGORIZATION.md). Payload may split below this size if JSON is very large. |
+| `AI_CATEGORY_MAX_PARALLEL` | Concurrent OpenAI requests for different chunks of the same contiguous AI run (default `1`, max `8`). Higher can reduce wall time but may trigger rate limits. |
 | `OPENAI_API_KEY` | API key for OpenAI calls. |
-| `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). |
+| `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). Faster/cheaper models may trade categorization quality. |
+| `LOG_AI_DEBUG_BODY_MAX_CHARS` | With `LOG_LEVEL=debug`, max characters per logged OpenAI body snippet (default `4000`). |
 
 ## Frontend (Vite)
 

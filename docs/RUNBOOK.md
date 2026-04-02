@@ -41,7 +41,7 @@ Edit `.env`:
 | `PORT` / `FRONTEND_PORT` | API and Vite dev server ports. |
 | `VITE_PROXY_API` | (Optional) Base URL for API proxy in dev; default `http://127.0.0.1:4000`. |
 | `VITE_DEV_SIGNIN_EMAIL` / `VITE_DEV_SIGNIN_PASSWORD` | (Optional) Prefill sign-in on the home page in dev only; leave empty for no prefill. |
-| `AI_CATEGORY_*` + `OPENAI_*` | (Optional) OpenAI categorization controls. Keep `AI_CATEGORY_ENABLED=false` until you are ready. |
+| `AI_CATEGORY_*` + `OPENAI_*` | (Optional) OpenAI categorization during canonicalize. Keep `AI_CATEGORY_ENABLED=false` until ready. See [`AI_CATEGORIZATION.md`](AI_CATEGORIZATION.md) and [`CANONICALIZE_ASYNC.md`](CANONICALIZE_ASYNC.md). |
 | `LOG_LEVEL` | (Optional) Backend verbosity: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). See [`LOGGING.md`](LOGGING.md). |
 
 **API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run services:start` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
