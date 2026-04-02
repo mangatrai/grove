@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { db } from "../../db/sqlite.js";
+import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
 import { categoryHasChildren, categoryUsableByHousehold } from "./categories.service.js";
 import type { DbCategoryRule } from "./category-rules.js";
 
@@ -44,6 +45,23 @@ function mapRule(row: CategoryRuleDbRow): CategoryRuleRow {
 
 function normalizePattern(input: string): string {
   return input.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Split user input into multiple patterns (newline first, then comma-separated per line).
+ * Regex patterns containing commas should use one pattern per line.
+ */
+export function splitPatternInput(raw: string): string[] {
+  const parts: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    for (const piece of line.split(",")) {
+      const t = piece.trim();
+      if (t.length >= 2) {
+        parts.push(t);
+      }
+    }
+  }
+  return parts;
 }
 
 function isPatternValid(pattern: string, matchType: MatchType): boolean {
@@ -162,6 +180,83 @@ export function createCategoryRuleForHousehold(
     )
     .get(id, householdId) as CategoryRuleDbRow;
   return { ok: true, data: mapRule(row) };
+}
+
+export function createCategoryRulesFromPatterns(
+  householdId: string,
+  input: {
+    patternsRaw: string;
+    matchType: MatchType;
+    categoryId: string;
+    confidence: number;
+    priority: number;
+    enabled: boolean;
+  }
+): { ok: true; data: CategoryRuleRow[] } | CreateRuleFailure {
+  const patterns = splitPatternInput(input.patternsRaw);
+  if (patterns.length === 0) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  const created: CategoryRuleRow[] = [];
+  for (let i = 0; i < patterns.length; i++) {
+    const single = createCategoryRuleForHousehold(householdId, {
+      pattern: patterns[i]!,
+      matchType: input.matchType,
+      categoryId: input.categoryId,
+      confidence: input.confidence,
+      priority: input.priority + i,
+      enabled: input.enabled
+    });
+    if (!single.ok) {
+      return single;
+    }
+    created.push(single.data);
+  }
+  return { ok: true, data: created };
+}
+
+export function createRuleFromLedgerTransaction(
+  householdId: string,
+  transactionId: string,
+  input: {
+    categoryId: string;
+    matchType: MatchType;
+    scope: "contains" | "prefix";
+    confidence: number;
+    priority: number;
+    enabled: boolean;
+  }
+): { ok: true; data: CategoryRuleRow } | CreateRuleFailure | { ok: false; code: "NOT_FOUND" } {
+  const row = db
+    .prepare(
+      `SELECT merchant AS merchant, memo AS memo
+       FROM transaction_canonical
+       WHERE id = ? AND household_id = ?`
+    )
+    .get(transactionId, householdId) as { merchant: string | null; memo: string | null } | undefined;
+  if (!row) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  const norm = normalizeDescriptionForFingerprint(`${row.merchant ?? ""} ${row.memo ?? ""}`.trim());
+  if (norm.length < 2) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  let pattern = norm;
+  if (input.scope === "prefix") {
+    const words = norm.split(/\s+/).filter(Boolean);
+    pattern = words.slice(0, 4).join(" ");
+  }
+  if (pattern.length < 2) {
+    return { ok: false, code: "INVALID_PATTERN" };
+  }
+  return createCategoryRuleForHousehold(householdId, {
+    pattern: pattern.slice(0, 120),
+    matchType: input.matchType,
+    categoryId: input.categoryId,
+    confidence: input.confidence,
+    priority: input.priority,
+    enabled: input.enabled
+  });
 }
 
 export type UpdateRuleFailure = { ok: false; code: "NOT_FOUND" | RuleValidationFailureCode };
