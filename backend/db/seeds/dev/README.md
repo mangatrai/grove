@@ -4,6 +4,6 @@ These SQL files insert **sample `financial_account` rows** (Bank of America, Cit
 
 They run only when you pass **`--dev-seeds`** to `scripts/db.mjs` / `scripts/db.sh`, or use **`npm run db:seed:dev`** / **`npm run setup`**.
 
-**`npm run db:seed`** (default) applies only [`../0001_seed_defaults.sql`](../0001_seed_defaults.sql): default household, owner user, and **global category taxonomy** — no bank accounts.
+**`npm run db:seed`** (default) applies [`../0001_seed_defaults.sql`](../0001_seed_defaults.sql) (household, owner, category taxonomy) and [`../0002_seed_category_rule_global.sql`](../0002_seed_category_rule_global.sql) (built-in global classification rules) — no bank accounts.
 
 There is no separate “financial institutions” catalog table in SQLite; institution names on accounts are plain text. The curated institution list in the UI is shipped in frontend code, not seeded here.
