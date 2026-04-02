@@ -9,7 +9,8 @@ import { db } from "../src/db/sqlite.js";
 const app = buildApp();
 const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
 const GROCERIES_ID = "30000000-0000-0000-0000-000000000004";
-const UTILITIES_ID = "30000000-0000-0000-0000-000000000003";
+/** Built-in rules target Energy under Utilities for generic utility debit patterns. */
+const UTILITIES_ENERGY_ID = "30000000-0000-0000-0000-000000000118";
 const PARENT_INCOME_ID = "30000000-0000-0000-0000-000000000001";
 
 async function loginAndGetToken(): Promise<string> {
@@ -109,7 +110,7 @@ describe("category rules API and classification explainability", () => {
       `INSERT INTO category_rule
          (id, household_id, pattern, match_type, category_id, confidence, priority, enabled, created_at, updated_at)
        VALUES (?, ?, ?, 'contains', ?, 0.99, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(ruleId, household.household_id, patternToken, UTILITIES_ID);
+    ).run(ruleId, household.household_id, patternToken, UTILITIES_ENERGY_ID);
 
     const txnDate = new Date(Date.UTC(2026, 4, 1 + (Date.now() % 300))).toISOString().slice(0, 10);
     const sessionId = await createSessionWithCsv(
@@ -136,10 +137,10 @@ describe("category rules API and classification explainability", () => {
          LIMIT 1`
       )
       .get(sessionId) as { categoryId: string | null; classificationMeta: string | null } | undefined;
-    expect(row?.categoryId).toBe(UTILITIES_ID);
+    expect(row?.categoryId).toBe(UTILITIES_ENERGY_ID);
     expect(row?.classificationMeta).toBeTruthy();
     const meta = JSON.parse(row!.classificationMeta!) as { source?: string; ruleId?: string; confidence?: number };
-    expect(meta.source).toBe("db");
+    expect(meta.source).toBe("household");
     expect(meta.ruleId).toBe(ruleId);
     expect(meta.confidence).toBeCloseTo(0.99);
   });
@@ -192,6 +193,81 @@ describe("category rules API and classification explainability", () => {
     });
     expect(testRes.status).toBe(200);
     expect(testRes.body.normalizedDescription).toContain("whole");
-    expect(testRes.body.classification.source).toBe("default");
+    expect(testRes.body.classification.source).toBe("builtin");
+  });
+
+  it("rejects household-scoped category for built-in rule (BUILTIN_REQUIRES_GLOBAL_LEAF)", async () => {
+    const token = await loginAndGetToken();
+    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const customLeafId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO category (id, household_id, parent_id, name, is_default)
+       VALUES (?, ?, '30000000-0000-0000-0000-000000000107', 'API test household leaf', 0)`
+    ).run(customLeafId, household.household_id);
+    try {
+      const createRes = await request(app).post("/categories/rules/builtin").set("authorization", `Bearer ${token}`).send({
+        ruleKey: `hh_cat_${Date.now()}`,
+        pattern: `hh_cat_pat_${Date.now()}`,
+        matchType: "contains",
+        categoryId: customLeafId,
+        amountScope: "debit_only"
+      });
+      expect(createRes.status).toBe(400);
+      expect(createRes.body.code).toBe("BUILTIN_REQUIRES_GLOBAL_LEAF");
+      expect(String(createRes.body.message)).toContain("household");
+    } finally {
+      db.prepare(`DELETE FROM category WHERE id = ?`).run(customLeafId);
+    }
+  });
+
+  it("allows owner to create and delete a global built-in rule", async () => {
+    const token = await loginAndGetToken();
+    const key = `api_test_${Date.now()}`;
+    const createRes = await request(app).post("/categories/rules/builtin").set("authorization", `Bearer ${token}`).send({
+      ruleKey: key,
+      pattern: key,
+      matchType: "contains",
+      categoryId: GROCERIES_ID,
+      amountScope: "debit_only",
+      priority: 9999,
+      confidence: 0.75,
+      enabled: true
+    });
+    expect(createRes.status).toBe(201);
+    const id = createRes.body.rule.id as string;
+
+    const delRes = await request(app).delete(`/categories/rules/builtin/${id}`).set("authorization", `Bearer ${token}`);
+    expect(delRes.status).toBe(204);
+  });
+
+  it("blocks member from creating global built-in rules", async () => {
+    db.prepare(
+      `INSERT OR REPLACE INTO app_user
+       (id, household_id, email, role, password_hash, visibility_scope, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).run(
+      "20000000-0000-0000-0000-000000000099",
+      "10000000-0000-0000-0000-000000000001",
+      "member@example.com",
+      "member",
+      "$2a$10$Tg2KSaLf8qB4az.7LdyCvuQclHikol6qgE2ZWMJt5/chBWCfMO6eO",
+      "own"
+    );
+    const login = await request(app).post("/auth/login").send({
+      email: "member@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const createRes = await request(app).post("/categories/rules/builtin").set("authorization", `Bearer ${token}`).send({
+      ruleKey: "member_should_fail",
+      pattern: "member_should_fail",
+      matchType: "contains",
+      categoryId: GROCERIES_ID,
+      amountScope: "debit_only"
+    });
+    expect(createRes.status).toBe(403);
   });
 });

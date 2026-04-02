@@ -298,6 +298,11 @@ describe("import sessions and file intake", () => {
     expect(fetchResponse.status).toBe(200);
     expect(fetchResponse.body.session.status).toBe("processing");
     expect(fetchResponse.body.files.length).toBe(2);
+
+    const listRes = await request(app).get("/imports/sessions").set("authorization", `Bearer ${token}`);
+    expect(listRes.status).toBe(200);
+    expect(Array.isArray(listRes.body.sessions)).toBe(true);
+    expect(listRes.body.sessions.some((s: { id: string }) => s.id === sessionId)).toBe(true);
   });
 
   it("enforces session status transition order", async () => {
