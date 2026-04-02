@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { env } from "../../config/env.js";
 import { db } from "../../db/sqlite.js";
+import { log } from "../../logger.js";
 import { deleteStagingFilesForSession } from "../imports/import-session.service.js";
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
 import { classifyWithRules, type ClassificationResult } from "../category/category-rules.js";
@@ -430,6 +431,17 @@ export async function canonicalizeImportSession(
   };
 
   const seenFingerprintsThisRun = new Set<string>();
+  /** Fingerprints already queued in `ops` but not yet inserted (dedupe within same import run). */
+  const fingerprintsAwaitingInsert = new Set<string>();
+  /** Same-session rows queued before DB insert — used so near-duplicate detection matches deferred canonicalize. */
+  const pendingNearRows: Array<{
+    accountId: string;
+    normDate: string;
+    rounded: number;
+    fingerprint: string;
+    merchant: string;
+    memo: string | null;
+  }> = [];
   type PendingAiInsert = {
     row: (typeof rawRows)[number];
     parsed: RawPayloadWithAccount;
@@ -443,7 +455,8 @@ export async function canonicalizeImportSession(
     direction: "credit" | "debit";
     diag: CanonicalFileDiagnostics;
   };
-  const aiBuffer: PendingAiInsert[] = [];
+  type QueuedOp = { kind: "ai"; pending: PendingAiInsert } | { kind: "rule"; pending: PendingAiInsert };
+  const ops: QueuedOp[] = [];
 
   function insertCanonicalRow(p: PendingAiInsert, aiSuggestion: AiSuggestion | null): void {
     const { row, parsed, normDate, rounded, fingerprint, classification, merchant, memo, direction, diag } = p;
@@ -498,6 +511,12 @@ export async function canonicalizeImportSession(
       diag.inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
       seenFingerprintsThisRun.add(fingerprint);
+      {
+        const pi = pendingNearRows.findIndex((r) => r.fingerprint === fingerprint);
+        if (pi >= 0) {
+          pendingNearRows.splice(pi, 1);
+        }
+      }
       if (categoryId === null) {
         insertUnknownCategoryStmt.run(
           crypto.randomUUID(),
@@ -535,30 +554,68 @@ export async function canonicalizeImportSession(
       } else {
         throw err;
       }
+    } finally {
+      fingerprintsAwaitingInsert.delete(fingerprint);
     }
   }
 
-  async function flushOneAiChunk(): Promise<void> {
-    if (aiBuffer.length === 0) {
+  async function flushContiguousAiRun(run: PendingAiInsert[]): Promise<void> {
+    if (run.length === 0) {
       return;
     }
-    const chunk = aiBuffer.splice(0, env.AI_CATEGORY_BATCH_SIZE);
-    const map = await suggestCategoriesWithAiBatch(
-      householdId,
-      chunk.map((c) => ({
-        transactionId: c.row.raw_id,
-        normalizedDescription: c.normDesc,
-        signedAmount: c.rounded
-      }))
+    const batchSize = env.AI_CATEGORY_BATCH_SIZE;
+    const maxP = Math.max(1, env.AI_CATEGORY_MAX_PARALLEL);
+    const chunks: PendingAiInsert[][] = [];
+    for (let i = 0; i < run.length; i += batchSize) {
+      chunks.push(run.slice(i, i + batchSize));
+    }
+    log.debug(
+      `[canonical-ingest] AI run: ${run.length} row(s) -> ${chunks.length} OpenAI chunk(s), max_parallel=${maxP}, chunk_sizes=[${chunks.map((c) => c.length).join(",")}]`
     );
-    for (const p of chunk) {
-      insertCanonicalRow(p, map.get(p.row.raw_id) ?? null);
+    const merged = new Map<string, AiSuggestion | null>();
+    for (let w = 0; w < chunks.length; w += maxP) {
+      const wave = chunks.slice(w, w + maxP);
+      log.debug(
+        `[canonical-ingest] AI parallel wave: ${wave.map((ch) => ch.length).join("+")} txn(s) per concurrent request`
+      );
+      const maps = await Promise.all(
+        wave.map((ch) =>
+          suggestCategoriesWithAiBatch(
+            householdId,
+            ch.map((c) => ({
+              transactionId: c.row.raw_id,
+              normalizedDescription: c.normDesc,
+              signedAmount: c.rounded
+            }))
+          )
+        )
+      );
+      for (const m of maps) {
+        for (const [k, v] of m) {
+          merged.set(k, v);
+        }
+      }
+    }
+    for (const p of run) {
+      insertCanonicalRow(p, merged.get(p.row.raw_id) ?? null);
     }
   }
 
-  async function flushAllAiBeforeNonAi(): Promise<void> {
-    while (aiBuffer.length > 0) {
-      await flushOneAiChunk();
+  async function drainOpsQueue(): Promise<void> {
+    let idx = 0;
+    while (idx < ops.length) {
+      const run: PendingAiInsert[] = [];
+      while (idx < ops.length && ops[idx].kind === "ai") {
+        run.push(ops[idx].pending);
+        idx++;
+      }
+      if (run.length > 0) {
+        await flushContiguousAiRun(run);
+      }
+      while (idx < ops.length && ops[idx].kind === "rule") {
+        insertCanonicalRow(ops[idx].pending, null);
+        idx++;
+      }
     }
   }
 
@@ -604,7 +661,11 @@ export async function canonicalizeImportSession(
       normalizedDescription: normDesc
     });
 
-    if (existsStmt.get(householdId, fingerprint) || seenFingerprintsThisRun.has(fingerprint)) {
+    if (
+      existsStmt.get(householdId, fingerprint) ||
+      seenFingerprintsThisRun.has(fingerprint) ||
+      fingerprintsAwaitingInsert.has(fingerprint)
+    ) {
       duplicates += 1;
       diag.duplicateFingerprint += 1;
       continue;
@@ -645,6 +706,36 @@ export async function canonicalizeImportSession(
       }
     }
 
+    if (!isNear) {
+      for (const pr of pendingNearRows) {
+        if (
+          pr.accountId !== accountId ||
+          pr.normDate !== normDate ||
+          Math.abs(pr.rounded - rounded) >= 0.0001 ||
+          pr.fingerprint === fingerprint
+        ) {
+          continue;
+        }
+        const existingNorm = existingDescriptionFingerprint(pr.merchant, pr.memo);
+        if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
+          isNear = true;
+          insertResolutionStmt.run(
+            crypto.randomUUID(),
+            householdId,
+            row.raw_id,
+            JSON.stringify({
+              kind: "near_duplicate",
+              existingCanonicalId: null,
+              rawId: row.raw_id,
+              message:
+                "Same account, date, and amount as another row in this import with a similar but non-identical description fingerprint (pending insert)."
+            })
+          );
+          break;
+        }
+      }
+    }
+
     if (isNear) {
       nearDuplicates += 1;
       diag.nearDuplicate += 1;
@@ -671,18 +762,23 @@ export async function canonicalizeImportSession(
       diag
     };
 
+    fingerprintsAwaitingInsert.add(fingerprint);
+    pendingNearRows.push({
+      accountId,
+      normDate,
+      rounded,
+      fingerprint,
+      merchant,
+      memo
+    });
     if (classification.categoryId !== null) {
-      await flushAllAiBeforeNonAi();
-      insertCanonicalRow(pending, null);
+      ops.push({ kind: "rule", pending });
     } else {
-      aiBuffer.push(pending);
-      if (aiBuffer.length >= env.AI_CATEGORY_BATCH_SIZE) {
-        await flushOneAiChunk();
-      }
+      ops.push({ kind: "ai", pending });
     }
   }
 
-  await flushAllAiBeforeNonAi();
+  await drainOpsQueue();
 
   if (fileDiagnostics.size > 0) {
     const fileRows = db

@@ -6,7 +6,13 @@ describe("suggestCategoriesWithAiBatch", () => {
 
   beforeEach(() => {
     vi.resetModules();
-    process.env = { ...originalEnv, AI_CATEGORY_ENABLED: "1", OPENAI_API_KEY: "sk-test", OPENAI_MODEL: "gpt-4o-mini" };
+    process.env = {
+      ...originalEnv,
+      AI_CATEGORY_ENABLED: "1",
+      OPENAI_API_KEY: "sk-test",
+      OPENAI_MODEL: "gpt-4o-mini",
+      LOG_LEVEL: "info"
+    };
   });
 
   afterEach(() => {
