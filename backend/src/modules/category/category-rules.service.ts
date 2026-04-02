@@ -53,7 +53,6 @@ function isPatternValid(pattern: string, matchType: MatchType): boolean {
   if (matchType === "regex") {
     try {
       // Compile once during validation to catch bad regex upfront.
-      // eslint-disable-next-line no-new
       new RegExp(pattern, "i");
     } catch {
       return false;

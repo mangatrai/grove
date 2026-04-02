@@ -10,7 +10,6 @@ import {
   createHouseholdMember,
   getCurrentUserProfile,
   getHouseholdSettings,
-  getHouseholdMonthlySavingsTarget,
   listHouseholdMembers,
   patchCurrentUserProfile,
   patchHouseholdMember,
