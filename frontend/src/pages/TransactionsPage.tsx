@@ -29,7 +29,7 @@ type ResolutionDetailItem = {
       referenceId: string | null;
     } | null;
     classification: {
-      source?: "db" | "default" | "none";
+      source?: "household" | "builtin" | "none" | "db" | "default";
       ruleId?: string | null;
       confidence?: number;
       reason?: string;
@@ -184,10 +184,10 @@ function formatResolutionTypeLabel(t: string): string {
   }
 }
 
-function prettyClassificationSource(source?: "db" | "default" | "none"): string | null {
+function prettyClassificationSource(source?: "household" | "builtin" | "none" | "db" | "default"): string | null {
   if (!source) return null;
-  if (source === "db") return "Rule";
-  if (source === "default") return "Default rule";
+  if (source === "household" || source === "db") return "Household rule";
+  if (source === "builtin" || source === "default") return "Built-in rule";
   return "Uncategorized";
 }
 

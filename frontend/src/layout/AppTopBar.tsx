@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { apiJson, setToken, useAuthToken } from "../api";
-import { startImportSession } from "../import/startImportSession";
 
 type AppTopBarProps = {
   onOpenMobileNav: () => void;
@@ -26,7 +25,6 @@ type ProfileResponse = {
 export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   const token = useAuthToken();
   const navigate = useNavigate();
-  const [importBusy, setImportBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuLabel, setMenuLabel] = useState("Account");
   const menuRef = useRef<HTMLDivElement>(null);
@@ -69,14 +67,8 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
     };
   }, [token]);
 
-  async function onNewImport() {
-    setImportBusy(true);
-    try {
-      const id = await startImportSession();
-      navigate(`/imports/${id}`);
-    } finally {
-      setImportBusy(false);
-    }
+  function onNewImport() {
+    navigate("/imports");
   }
 
   function logout() {
@@ -102,8 +94,8 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
         </button>
         <div className="app-topbar__spacer" aria-hidden />
         <div className="app-topbar__actions">
-          <button type="button" disabled={importBusy} onClick={() => void onNewImport()}>
-            {importBusy ? "Starting…" : "New import"}
+          <button type="button" onClick={onNewImport}>
+            Import
           </button>
           <div className="user-menu" ref={menuRef}>
             <button

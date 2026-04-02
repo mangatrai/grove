@@ -1,23 +1,33 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 
 type CategoryRow = {
   id: string;
   name: string;
   parentId: string | null;
+  isDefault?: boolean;
+  householdScoped?: boolean;
 };
 
 type MatchType = "contains" | "prefix" | "regex";
 
+type AmountScope = "any" | "credit_only" | "debit_only";
+
 type BuiltinRuleRow = {
   origin: "builtin";
-  ruleId: string;
-  flow: "inflow" | "outflow";
+  id: string;
+  ruleKey: string;
+  pattern: string;
+  matchType: MatchType;
   categoryId: string;
-  keywords: string[];
-  summary: string;
+  amountScope: AmountScope;
+  confidence: number;
+  priority: number;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type CategoryRule = {
@@ -49,12 +59,36 @@ function assignableCategories(categories: CategoryRow[]): CategoryRow[] {
   });
 }
 
+function amountScopeShort(s: AmountScope): string {
+  switch (s) {
+    case "any":
+      return "Any amount";
+    case "credit_only":
+      return "Credits only";
+    case "debit_only":
+      return "Debits only";
+    default:
+      return s;
+  }
+}
+
 const emptyForm = {
   patterns: "",
   matchType: "contains" as MatchType,
   categoryId: "",
   priority: 100,
   confidence: 0.85,
+  enabled: true
+};
+
+const emptyGlobalForm = {
+  ruleKey: "",
+  pattern: "",
+  matchType: "contains" as MatchType,
+  categoryId: "",
+  amountScope: "debit_only" as AmountScope,
+  priority: 100,
+  confidence: 0.7,
   enabled: true
 };
 
@@ -67,33 +101,28 @@ export function CategoryRulesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [globalForm, setGlobalForm] = useState(emptyGlobalForm);
+  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<typeof emptyForm | null>(null);
+  const [editingBuiltinId, setEditingBuiltinId] = useState<string | null>(null);
+  const [editBuiltinDraft, setEditBuiltinDraft] = useState<typeof emptyGlobalForm | null>(null);
   const [ruleFilter, setRuleFilter] = useState("");
   const [testDesc, setTestDesc] = useState("");
   const [testAmount, setTestAmount] = useState("-10");
   const [testResult, setTestResult] = useState<unknown>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [recatMsg, setRecatMsg] = useState<string | null>(null);
-  const [sessionPreviewId, setSessionPreviewId] = useState("");
-  const [previewRows, setPreviewRows] = useState<
-    Array<{
-      rawId: string;
-      txnDate: string;
-      amount: number;
-      description: string;
-      normalizedDescription: string;
-      classification: {
-        categoryId: string | null;
-        ruleId: string | null;
-        source: string;
-        reason: string;
-      };
-    }>
-  >([]);
-  const [previewLoading, setPreviewLoading] = useState(false);
 
   const leaves = useMemo(() => assignableCategories(categories), [categories]);
+
+  /** Global built-in rules may only target default taxonomy leaves (not household-created categories). */
+  const globalBuiltinLeaves = useMemo(
+    () => leaves.filter((c) => !c.householdScoped),
+    [leaves]
+  );
+
+  const canEditGlobals = authRole === "owner" || authRole === "admin";
 
   const load = useCallback(async () => {
     const [catRes, rulesRes] = await Promise.all([
@@ -104,6 +133,15 @@ export function CategoryRulesPage() {
     setBuiltinRules(rulesRes.builtinRules ?? []);
     setRules(rulesRes.rules);
   }, []);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void apiJson<{ user: { role: "owner" | "admin" | "member" } }>("/auth/me")
+      .then((r) => setAuthRole(r.user.role))
+      .catch(() => setAuthRole(null));
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -125,22 +163,17 @@ export function CategoryRulesPage() {
     if (!q) {
       return builtinRules;
     }
-    return builtinRules.filter(
-      (b) =>
-        b.ruleId.toLowerCase().includes(q) ||
-        b.summary.toLowerCase().includes(q) ||
-        b.keywords.some((k) => k.toLowerCase().includes(q)) ||
-        categoryLabel(
-          categories.find((c) => c.id === b.categoryId) ?? {
-            id: b.categoryId,
-            name: b.categoryId,
-            parentId: null
-          },
-          categories
-        )
-          .toLowerCase()
-          .includes(q)
-    );
+    return builtinRules.filter((b) => {
+      const cat = categories.find((c) => c.id === b.categoryId);
+      const cn = cat ? categoryLabel(cat, categories).toLowerCase() : "";
+      return (
+        b.ruleKey.toLowerCase().includes(q) ||
+        b.pattern.toLowerCase().includes(q) ||
+        cn.includes(q) ||
+        b.matchType.includes(q) ||
+        b.amountScope.toLowerCase().includes(q)
+      );
+    });
   }, [builtinRules, ruleFilter, categories]);
 
   const filteredHousehold = useMemo(() => {
@@ -154,6 +187,27 @@ export function CategoryRulesPage() {
       return r.pattern.toLowerCase().includes(q) || cn.includes(q) || r.matchType.includes(q);
     });
   }, [rules, ruleFilter, categories]);
+
+  const builtinRuleGroups = useMemo(() => {
+    const m = new Map<string, BuiltinRuleRow[]>();
+    for (const b of filteredBuiltin) {
+      const k = `${b.categoryId}\u0000${b.amountScope}`;
+      m.set(k, [...(m.get(k) ?? []), b]);
+    }
+    return [...m.entries()].sort(([ka], [kb]) => {
+      const [aCat, aScope] = ka.split("\u0000");
+      const [bCat, bScope] = kb.split("\u0000");
+      const catA = categories.find((c) => c.id === aCat);
+      const catB = categories.find((c) => c.id === bCat);
+      const la = catA ? categoryLabel(catA, categories) : aCat;
+      const lb = catB ? categoryLabel(catB, categories) : bCat;
+      const d = la.localeCompare(lb);
+      if (d !== 0) {
+        return d;
+      }
+      return aScope.localeCompare(bScope);
+    });
+  }, [filteredBuiltin, categories]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -256,6 +310,140 @@ export function CategoryRulesPage() {
     setEditDraft(null);
   }
 
+  async function onCreateGlobal(e: FormEvent) {
+    e.preventDefault();
+    if (!canEditGlobals) {
+      return;
+    }
+    setError(null);
+    const pattern = globalForm.pattern.trim();
+    if (pattern.length < 2) {
+      setError("Enter a pattern (2+ characters) for the built-in rule.");
+      return;
+    }
+    if (!globalForm.categoryId) {
+      setError("Choose a category (leaf).");
+      return;
+    }
+    setSaving(true);
+    try {
+      await apiJson("/categories/rules/builtin", {
+        method: "POST",
+        body: JSON.stringify({
+          ruleKey: globalForm.ruleKey.trim() || undefined,
+          pattern,
+          matchType: globalForm.matchType,
+          categoryId: globalForm.categoryId,
+          amountScope: globalForm.amountScope,
+          priority: globalForm.priority,
+          confidence: globalForm.confidence,
+          enabled: globalForm.enabled
+        })
+      });
+      setGlobalForm(emptyGlobalForm);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not create built-in rule");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function patchBuiltinRule(id: string, body: Record<string, unknown>) {
+    setError(null);
+    try {
+      await apiJson(`/categories/rules/builtin/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body)
+      });
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    }
+  }
+
+  async function deleteBuiltinRule(id: string) {
+    if (!canEditGlobals || !window.confirm("Delete this built-in rule? This affects all households on this server.")) {
+      return;
+    }
+    setError(null);
+    try {
+      const res = await apiFetch(`/categories/rules/builtin/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || res.statusText);
+      }
+      setEditingBuiltinId(null);
+      setEditBuiltinDraft(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    }
+  }
+
+  function startEditBuiltin(r: BuiltinRuleRow) {
+    setEditingBuiltinId(r.id);
+    setEditBuiltinDraft({
+      ruleKey: r.ruleKey,
+      pattern: r.pattern,
+      matchType: r.matchType,
+      categoryId: r.categoryId,
+      amountScope: r.amountScope,
+      priority: r.priority,
+      confidence: r.confidence,
+      enabled: r.enabled
+    });
+  }
+
+  async function saveEditBuiltin() {
+    if (!editingBuiltinId || !editBuiltinDraft) {
+      return;
+    }
+    const pattern = editBuiltinDraft.pattern.trim();
+    if (pattern.length < 2) {
+      setError("Pattern must be at least 2 characters.");
+      return;
+    }
+    if (!editBuiltinDraft.categoryId) {
+      setError("Choose a category.");
+      return;
+    }
+    const rk = editBuiltinDraft.ruleKey.trim();
+    if (rk.length < 2) {
+      setError("Rule key must be at least 2 characters.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await apiJson(`/categories/rules/builtin/${editingBuiltinId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          ruleKey: rk,
+          pattern,
+          matchType: editBuiltinDraft.matchType,
+          categoryId: editBuiltinDraft.categoryId,
+          amountScope: editBuiltinDraft.amountScope,
+          priority: editBuiltinDraft.priority,
+          confidence: editBuiltinDraft.confidence,
+          enabled: editBuiltinDraft.enabled
+        })
+      });
+      setEditingBuiltinId(null);
+      setEditBuiltinDraft(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancelEditBuiltin() {
+    setEditingBuiltinId(null);
+    setEditBuiltinDraft(null);
+  }
+
   async function runTest() {
     setTestLoading(true);
     setTestResult(null);
@@ -289,28 +477,6 @@ export function CategoryRulesPage() {
     }
   }
 
-  async function loadSessionPreview() {
-    const sid = sessionPreviewId.trim();
-    if (!sid) {
-      setError("Enter an import session id (from Import workspace after parse).");
-      return;
-    }
-    setPreviewLoading(true);
-    setError(null);
-    try {
-      const res = await apiJson<{ rows: typeof previewRows }>("/categories/rules/rule-learning-preview", {
-        method: "POST",
-        body: JSON.stringify({ sessionId: sid })
-      });
-      setPreviewRows(res.rows);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Preview failed");
-      setPreviewRows([]);
-    } finally {
-      setPreviewLoading(false);
-    }
-  }
-
   if (!token) {
     return <Navigate to="/" replace />;
   }
@@ -320,20 +486,20 @@ export function CategoryRulesPage() {
       <div className="card">
         <h1>Classification rules</h1>
         <p className="muted">
-          <strong>Household rules</strong> in the table below are checked <strong>before</strong> built-in keyword rules
-          (lower priority numbers run first). Only <strong>leaf</strong> categories can be assigned.
+          <strong>Household rules</strong> run first, then <strong>built-in (global) rules</strong> stored in the database
+          (lower priority numbers run first within each group). Only <strong>leaf</strong> categories can be assigned.
         </p>
         <p className="muted">
-          Built-in rules are read-only heuristics from the app (same engine as import). Add household rules to override or
-          cover merchants the defaults miss.
+          Built-in rules apply to <strong>all households</strong> on this server. Owners and admins can edit them;
+          members can view only. Add household rules to override globals for your home.
         </p>
         <p className="muted">
           <Link to="/categories">Back to categories</Link>
           {" · "}
           <Link to="/transactions">Transactions</Link>
           {" · "}
-          <Link to="/import">Import workspace</Link> (create a session, parse, then paste session id for rule-learning
-          preview)
+          <Link to="/imports">Import</Link> — upload, parse, and run the read-only <strong>classification matcher preview</strong> on the
+          session page (recent sessions and <strong>Copy id</strong> live there too).
         </p>
 
         {error ? <p className="error">{error}</p> : null}
@@ -396,98 +562,333 @@ export function CategoryRulesPage() {
           </button>
         </div>
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Rule-learning preview (import session)</h2>
+        <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Built-in (global) rules</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          After you <strong>parse</strong> files in an import session, paste the session id here to preview categories for
-          each raw row (no ledger write).
+          Grouped by target category and amount scope. These rules apply to <strong>every household</strong> on this server;
+          only installation default leaves are valid targets (see add form below).
         </p>
-        <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-          <label className="category-rules-page__field" style={{ minWidth: "18rem", flex: "1 1 18rem" }}>
-            Import session id
-            <input
-              value={sessionPreviewId}
-              onChange={(e) => setSessionPreviewId(e.target.value)}
-              placeholder="uuid"
-              autoComplete="off"
-            />
-          </label>
-          <button type="button" disabled={previewLoading} onClick={() => void loadSessionPreview()}>
-            {previewLoading ? "Loading…" : "Load preview"}
-          </button>
-        </div>
-        {previewRows.length > 0 ? (
-          <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
-            <table className="ledger-table category-rules-page__table">
-              <thead>
-                <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Amount</th>
-                  <th scope="col">Description</th>
-                  <th scope="col">Preview category</th>
-                  <th scope="col">Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {previewRows.map((r) => {
-                  const cid = r.classification.categoryId;
-                  const cat = cid ? categories.find((c) => c.id === cid) : null;
-                  return (
-                    <tr key={r.rawId}>
-                      <td>{r.txnDate}</td>
-                      <td>{r.amount}</td>
-                      <td>
-                        <code style={{ fontSize: "0.78rem" }}>{r.description}</code>
-                      </td>
-                      <td>{cat ? categoryLabel(cat, categories) : "—"}</td>
-                      <td>{r.classification.source}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Built-in rules (read-only)</h2>
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && filteredBuiltin.length === 0 ? <p className="muted">No built-in rules match filter.</p> : null}
         {!loading && filteredBuiltin.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
-            <table className="ledger-table category-rules-page__table">
-              <thead>
-                <tr>
-                  <th scope="col">Source</th>
-                  <th scope="col">Rule id</th>
-                  <th scope="col">Flow</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Keywords</th>
-                  <th scope="col">Summary</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredBuiltin.map((b) => {
-                  const cat = categories.find((c) => c.id === b.categoryId);
-                  return (
-                    <tr key={b.ruleId}>
-                      <td>Built-in</td>
-                      <td>
-                        <code>{b.ruleId}</code>
-                      </td>
-                      <td>{b.flow}</td>
-                      <td>{cat ? categoryLabel(cat, categories) : b.categoryId}</td>
-                      <td>
-                        <code style={{ fontSize: "0.75rem" }}>{b.keywords.join(", ")}</code>
-                      </td>
-                      <td>{b.summary}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div>
+            {builtinRuleGroups.map(([key, groupRules]) => {
+              const [catId, scopeStr] = key.split("\u0000");
+              const scope = scopeStr as AmountScope;
+              const cat = categories.find((c) => c.id === catId);
+              const summaryTitle = `${cat ? categoryLabel(cat, categories) : "(unknown category)"} · ${amountScopeShort(scope)} (${groupRules.length})`;
+              return (
+                <details key={key} style={{ marginBottom: "1rem" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>{summaryTitle}</summary>
+                  <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
+                    <table className="ledger-table category-rules-page__table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Source</th>
+                          <th scope="col">On</th>
+                          <th scope="col">Rule key</th>
+                          <th scope="col">Pattern</th>
+                          <th scope="col">Match</th>
+                          <th scope="col">Amount</th>
+                          <th scope="col">Category</th>
+                          <th scope="col">Pri</th>
+                          <th scope="col">Conf</th>
+                          <th scope="col" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupRules.map((b) => {
+                          const rowCat = categories.find((c) => c.id === b.categoryId);
+                          const isEditing = editingBuiltinId === b.id;
+                          return (
+                            <tr key={b.id}>
+                              <td>Built-in</td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={editBuiltinDraft.enabled}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) => (d ? { ...d, enabled: e.target.checked } : d))
+                                    }
+                                  />
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={b.enabled}
+                                    onChange={() => void patchBuiltinRule(b.id, { enabled: !b.enabled })}
+                                    disabled={!canEditGlobals}
+                                    aria-label={`Enable built-in rule ${b.ruleKey}`}
+                                  />
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <input
+                                    value={editBuiltinDraft.ruleKey}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) => (d ? { ...d, ruleKey: e.target.value } : d))
+                                    }
+                                  />
+                                ) : (
+                                  <code className="category-rules-page__pattern">{b.ruleKey}</code>
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <input
+                                    value={editBuiltinDraft.pattern}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) => (d ? { ...d, pattern: e.target.value } : d))
+                                    }
+                                  />
+                                ) : (
+                                  <code className="category-rules-page__pattern">{b.pattern}</code>
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <select
+                                    value={editBuiltinDraft.matchType}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) =>
+                                        d ? { ...d, matchType: e.target.value as MatchType } : d
+                                      )
+                                    }
+                                  >
+                                    <option value="contains">contains</option>
+                                    <option value="prefix">prefix</option>
+                                    <option value="regex">regex</option>
+                                  </select>
+                                ) : (
+                                  b.matchType
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <select
+                                    value={editBuiltinDraft.amountScope}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) =>
+                                        d ? { ...d, amountScope: e.target.value as AmountScope } : d
+                                      )
+                                    }
+                                  >
+                                    <option value="any">any</option>
+                                    <option value="credit_only">credit only</option>
+                                    <option value="debit_only">debit only</option>
+                                  </select>
+                                ) : (
+                                  amountScopeShort(b.amountScope)
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <select
+                                    value={editBuiltinDraft.categoryId}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) =>
+                                        d ? { ...d, categoryId: e.target.value } : d
+                                      )
+                                    }
+                                  >
+                                    {globalBuiltinLeaves.map((c) => (
+                                      <option key={c.id} value={c.id}>
+                                        {categoryLabel(c, categories)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : rowCat ? (
+                                  categoryLabel(rowCat, categories)
+                                ) : (
+                                  <span className="muted">(missing)</span>
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={10000}
+                                    className="category-rules-page__num"
+                                    value={editBuiltinDraft.priority}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) =>
+                                        d ? { ...d, priority: Number(e.target.value) } : d
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  b.priority
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editBuiltinDraft ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={1}
+                                    step={0.05}
+                                    className="category-rules-page__num"
+                                    value={editBuiltinDraft.confidence}
+                                    onChange={(e) =>
+                                      setEditBuiltinDraft((d) =>
+                                        d ? { ...d, confidence: Number(e.target.value) } : d
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  b.confidence.toFixed(2)
+                                )}
+                              </td>
+                              <td>
+                                {canEditGlobals ? (
+                                  isEditing ? (
+                                    <span className="category-rules-page__row-actions">
+                                      <button type="button" disabled={saving} onClick={() => void saveEditBuiltin()}>
+                                        Save
+                                      </button>
+                                      <button type="button" className="secondary" onClick={cancelEditBuiltin}>
+                                        Cancel
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="secondary"
+                                        onClick={() => void deleteBuiltinRule(b.id)}
+                                      >
+                                        Delete
+                                      </button>
+                                    </span>
+                                  ) : (
+                                    <button type="button" className="secondary" onClick={() => startEditBuiltin(b)}>
+                                      Edit
+                                    </button>
+                                  )
+                                ) : (
+                                  <span className="muted">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              );
+            })}
           </div>
         ) : null}
 
+        {canEditGlobals ? (
+          <>
+            <h3 style={{ fontSize: "1rem", marginTop: "1rem" }}>Add built-in rule</h3>
+            <form onSubmit={(e) => void onCreateGlobal(e)} className="category-rules-page__form">
+              <p className="muted" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                Applies to <strong>all households</strong> on this server. Category must be an installation default leaf —
+                for categories you created under Categories, add a <strong>household</strong> rule instead.
+              </p>
+              <label className="category-rules-page__field">
+                Rule key (optional)
+                <input
+                  value={globalForm.ruleKey}
+                  onChange={(e) => setGlobalForm((f) => ({ ...f, ruleKey: e.target.value }))}
+                  placeholder="auto from pattern if empty"
+                  autoComplete="off"
+                />
+              </label>
+              <label className="category-rules-page__field" style={{ gridColumn: "1 / -1" }}>
+                Pattern
+                <input
+                  value={globalForm.pattern}
+                  onChange={(e) => setGlobalForm((f) => ({ ...f, pattern: e.target.value }))}
+                  placeholder="substring or regex"
+                  autoComplete="off"
+                  required
+                />
+              </label>
+              <label className="category-rules-page__field">
+                Match type
+                <select
+                  value={globalForm.matchType}
+                  onChange={(e) =>
+                    setGlobalForm((f) => ({ ...f, matchType: e.target.value as MatchType }))
+                  }
+                >
+                  <option value="contains">Contains (substring)</option>
+                  <option value="prefix">Prefix</option>
+                  <option value="regex">Regex (case-insensitive)</option>
+                </select>
+              </label>
+              <label className="category-rules-page__field">
+                Amount scope
+                <select
+                  value={globalForm.amountScope}
+                  onChange={(e) =>
+                    setGlobalForm((f) => ({ ...f, amountScope: e.target.value as AmountScope }))
+                  }
+                >
+                  <option value="any">Any amount</option>
+                  <option value="credit_only">Credits only</option>
+                  <option value="debit_only">Debits only</option>
+                </select>
+              </label>
+              <label className="category-rules-page__field">
+                Category
+                <select
+                  value={globalForm.categoryId}
+                  onChange={(e) => setGlobalForm((f) => ({ ...f, categoryId: e.target.value }))}
+                  required
+                >
+                  <option value="">Select…</option>
+                  {globalBuiltinLeaves.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {categoryLabel(c, categories)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="category-rules-page__field category-rules-page__field--narrow">
+                Priority
+                <input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  step={1}
+                  value={globalForm.priority}
+                  onChange={(e) => setGlobalForm((f) => ({ ...f, priority: Number(e.target.value) }))}
+                />
+              </label>
+              <label className="category-rules-page__field category-rules-page__field--narrow">
+                Confidence
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={globalForm.confidence}
+                  onChange={(e) => setGlobalForm((f) => ({ ...f, confidence: Number(e.target.value) }))}
+                />
+              </label>
+              <label className="category-rules-page__checkbox">
+                <input
+                  type="checkbox"
+                  checked={globalForm.enabled}
+                  onChange={(e) => setGlobalForm((f) => ({ ...f, enabled: e.target.checked }))}
+                />{" "}
+                Enabled
+              </label>
+              <button type="submit" disabled={saving || globalBuiltinLeaves.length === 0}>
+                {saving ? "Saving…" : "Add built-in rule"}
+              </button>
+            </form>
+          </>
+        ) : null}
+
         <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Add household rules</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Household rules run <strong>before</strong> built-ins and can target any assignable leaf for your home, including
+          categories you added. They <strong>override</strong> global rules when both match.
+        </p>
         <form onSubmit={(e) => void onCreate(e)} className="category-rules-page__form">
           <label className="category-rules-page__field" style={{ gridColumn: "1 / -1" }}>
             Pattern(s) — one per line or comma-separated (regex with commas: one pattern per line)

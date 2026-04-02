@@ -2042,6 +2042,24 @@ select.ledger-category-select {
   border-left: 3px solid var(--color-border);
 }
 
+.categories-page__edit-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 980;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 2rem 1rem;
+  overflow-y: auto;
+}
+
+.categories-page__edit-dialog {
+  width: min(28rem, 100%);
+  margin-top: 2vh;
+  padding: 1.1rem 1.25rem 1rem;
+}
+
 /* Category rules (household pattern → category) */
 .category-rules-page__form {
   display: flex;

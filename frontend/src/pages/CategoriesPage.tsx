@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 
 type CategoryRow = {
   id: string;
@@ -31,6 +31,23 @@ function compareRootCategories(a: CategoryRow, b: CategoryRow): number {
   return a.name.localeCompare(b.name);
 }
 
+function categoryHasChildren(categoryId: string, categories: CategoryRow[]): boolean {
+  return categories.some((c) => c.parentId === categoryId);
+}
+
+async function readErrorMessage(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const j = JSON.parse(text) as { message?: string };
+    if (j.message) {
+      return j.message;
+    }
+  } catch {
+    /* ignore */
+  }
+  return text || `${res.status} ${res.statusText}`;
+}
+
 export function CategoriesPage() {
   const token = useAuthToken();
   const [categories, setCategories] = useState<CategoryRow[]>([]);
@@ -40,6 +57,15 @@ export function CategoriesPage() {
   const [parentId, setParentId] = useState<string>("");
   const [addMode, setAddMode] = useState<"parent" | "child">("parent");
   const [saving, setSaving] = useState(false);
+  const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRow, setEditRow] = useState<HierarchyRow | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editParentId, setEditParentId] = useState<string>("");
+  const [editSaving, setEditSaving] = useState(false);
+
+  const canEditBuiltIns = authRole === "owner" || authRole === "admin";
 
   const load = useCallback(async () => {
     const res = await apiJson<{ categories: CategoryRow[] }>("/categories");
@@ -59,6 +85,15 @@ export function CategoriesPage() {
       .finally(() => setLoading(false));
   }, [token, load]);
 
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    void apiJson<{ user: { role: "owner" | "admin" | "member" } }>("/auth/me")
+      .then((r) => setAuthRole(r.user.role))
+      .catch(() => setAuthRole(null));
+  }, [token]);
+
   const topLevelParents = useMemo(
     () => categories.filter((c) => !c.parentId).sort(compareRootCategories),
     [categories]
@@ -77,6 +112,68 @@ export function CategoriesPage() {
     }
     return rows;
   }, [categories, topLevelParents]);
+
+  function openEdit(row: HierarchyRow) {
+    setError(null);
+    setEditRow(row);
+    if (row.kind === "parent") {
+      setEditName(row.category.name);
+      setEditParentId("");
+    } else {
+      setEditName(row.category.name);
+      setEditParentId(row.parent.id);
+    }
+    setEditOpen(true);
+  }
+
+  function closeEdit() {
+    setEditOpen(false);
+    setEditRow(null);
+    setEditName("");
+    setEditParentId("");
+  }
+
+  async function onSaveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editRow) {
+      return;
+    }
+    const trimmed = editName.trim();
+    if (!trimmed) {
+      setError("Name is required.");
+      return;
+    }
+    const cat = editRow.kind === "parent" ? editRow.category : editRow.category;
+    const isChild = editRow.kind === "child";
+    if (isChild && !editParentId) {
+      setError("Choose a parent group.");
+      return;
+    }
+
+    setEditSaving(true);
+    setError(null);
+    try {
+      const body: { name: string; parentId?: string | null } = { name: trimmed };
+      if (isChild) {
+        body.parentId = editParentId;
+      } else {
+        body.parentId = null;
+      }
+      const res = await apiFetch(`/categories/${cat.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        throw new Error(await readErrorMessage(res));
+      }
+      await load();
+      closeEdit();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save");
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -115,12 +212,23 @@ export function CategoriesPage() {
     }
     setError(null);
     try {
-      await apiJson(`/categories/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/categories/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(await readErrorMessage(res));
+      }
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not delete");
     }
   }
+
+  const showEditForRow = (row: HierarchyRow): boolean => {
+    const c = row.kind === "parent" ? row.category : row.category;
+    if (c.householdScoped) {
+      return true;
+    }
+    return canEditBuiltIns;
+  };
 
   if (!token) {
     return <Navigate to="/" replace />;
@@ -148,12 +256,67 @@ export function CategoriesPage() {
           household. &ldquo;—&rdquo; under parent group means that row <em>is</em> the top-level group (not a subcategory).
         </p>
         <p className="muted">
+          Built-in names can be renamed by <strong>owners and admins</strong> (applies to this database). Built-in
+          categories cannot be deleted.
+        </p>
+        <p className="muted">
           <Link to="/transactions">Back to Transactions</Link>
           {" · "}
           <Link to="/categories/rules">Classification rules</Link>
         </p>
 
         {error ? <p className="error">{error}</p> : null}
+
+        {editOpen && editRow ? (
+          <div
+            className="categories-page__edit-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="categories-edit-title"
+          >
+            <div className="categories-page__edit-dialog card">
+              <h2 id="categories-edit-title" style={{ fontSize: "1.05rem", marginTop: 0 }}>
+                Edit category
+              </h2>
+              <form onSubmit={(e) => void onSaveEdit(e)}>
+                <label className="categories-page__name-field">
+                  Name
+                  <input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                </label>
+                {editRow.kind === "child" ? (
+                  <label className="categories-page__parent-select">
+                    Parent group
+                    <select value={editParentId} onChange={(e) => setEditParentId(e.target.value)} required>
+                      <option value="">Select parent…</option>
+                      {topLevelParents.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : categoryHasChildren(editRow.category.id, categories) ? (
+                  <p className="muted" style={{ marginTop: "0.5rem" }}>
+                    This group has subcategories; only the name can be changed here.
+                  </p>
+                ) : null}
+                <div className="categories-page__edit-actions" style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
+                  <button type="submit" disabled={editSaving}>
+                    {editSaving ? "Saving…" : "Save"}
+                  </button>
+                  <button type="button" className="secondary" onClick={() => closeEdit()} disabled={editSaving}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
 
         <h2 style={{ fontSize: "1.05rem", marginTop: "1rem" }}>Add category</h2>
         <form onSubmit={(e) => void onCreate(e)} className="categories-page__add-form">
@@ -245,13 +408,20 @@ export function CategoriesPage() {
                         </td>
                         <td className="muted">{sourceLabel(c)}</td>
                         <td>
-                          {c.householdScoped ? (
-                            <button type="button" className="secondary" onClick={() => void onDelete(c.id)}>
-                              Delete
-                            </button>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
+                          <span style={{ display: "inline-flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                            {showEditForRow(row) ? (
+                              <button type="button" className="secondary" onClick={() => openEdit(row)}>
+                                Edit
+                              </button>
+                            ) : null}
+                            {c.householdScoped ? (
+                              <button type="button" className="secondary" onClick={() => void onDelete(c.id)}>
+                                Delete
+                              </button>
+                            ) : (
+                              <span className="muted">—</span>
+                            )}
+                          </span>
                         </td>
                       </tr>
                     );
@@ -264,13 +434,20 @@ export function CategoriesPage() {
                       <td className="categories-page__category-cell categories-page__category-cell--child">{c.name}</td>
                       <td className="muted">{sourceLabel(c)}</td>
                       <td>
-                        {c.householdScoped ? (
-                          <button type="button" className="secondary" onClick={() => void onDelete(c.id)}>
-                            Delete
-                          </button>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
+                        <span style={{ display: "inline-flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                          {showEditForRow(row) ? (
+                            <button type="button" className="secondary" onClick={() => openEdit(row)}>
+                              Edit
+                            </button>
+                          ) : null}
+                          {c.householdScoped ? (
+                            <button type="button" className="secondary" onClick={() => void onDelete(c.id)}>
+                              Delete
+                            </button>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </span>
                       </td>
                     </tr>
                   );

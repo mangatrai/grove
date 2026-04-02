@@ -95,6 +95,10 @@ function accountById(accounts: FinancialAccount[], id: string): FinancialAccount
 }
 
 /** Parses JSON error bodies from `apiJson` failures (e.g. 409 INVALID_TRANSITION). */
+function isUuid(s: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+}
+
 function messageFromApiError(err: unknown): string {
   if (!(err instanceof Error)) {
     return "Request failed";
@@ -176,8 +180,41 @@ type ImportSessionSummary = {
   files: ImportSessionFileSummaryRow[];
 };
 
+type ImportSessionListRow = {
+  id: string;
+  status: string;
+  sourceType: string;
+  startedAt: string;
+  finalizedAt: string | null;
+  fileCount: number;
+};
+
+type MatcherPreviewRow = {
+  rawId: string;
+  txnDate: string;
+  amount: number;
+  description: string;
+  normalizedDescription: string;
+  classification: {
+    categoryId: string | null;
+    ruleId: string | null;
+    source: string;
+    reason: string;
+  };
+};
+
+type CategoryLabelRow = { id: string; name: string; parentId: string | null };
+
+function categoryLabelForPreview(cat: CategoryLabelRow, all: CategoryLabelRow[]): string {
+  if (!cat.parentId) {
+    return cat.name;
+  }
+  const p = all.find((x) => x.id === cat.parentId);
+  return p ? `${p.name} › ${cat.name}` : cat.name;
+}
+
 export function ImportWorkspacePage() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const { sessionId } = useParams<{ sessionId?: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const showAdvanced = searchParams.get("advanced") === "1";
@@ -219,6 +256,12 @@ export function ImportWorkspacePage() {
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
   const [sessionSummary, setSessionSummary] = useState<ImportSessionSummary | null>(null);
   const [incomeInference, setIncomeInference] = useState<IncomeInferenceContext>({});
+  const [recentSessions, setRecentSessions] = useState<ImportSessionListRow[]>([]);
+  const [hubLoading, setHubLoading] = useState(false);
+  const [matcherPreviewRows, setMatcherPreviewRows] = useState<MatcherPreviewRow[]>([]);
+  const [matcherPreviewCategories, setMatcherPreviewCategories] = useState<CategoryLabelRow[]>([]);
+  const [matcherPreviewLoading, setMatcherPreviewLoading] = useState(false);
+  const [copySessionMsg, setCopySessionMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!sessionId) {
@@ -350,6 +393,36 @@ export function ImportWorkspacePage() {
       setFinalizeBusy(false);
     }
   }, [sessionId, load]);
+
+  useEffect(() => {
+    if (sessionId) {
+      return;
+    }
+    const raw = searchParams.get("sessionId")?.trim();
+    if (raw && isUuid(raw)) {
+      navigate(`/imports/${raw}`, { replace: true });
+    }
+  }, [sessionId, searchParams, navigate]);
+
+  useEffect(() => {
+    if (!token || sessionId) {
+      return;
+    }
+    setHubLoading(true);
+    setError(null);
+    void apiJson<{ sessions: ImportSessionListRow[] }>("/imports/sessions")
+      .then((r) => setRecentSessions(r.sessions ?? []))
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load sessions");
+      })
+      .finally(() => setHubLoading(false));
+  }, [token, sessionId]);
+
+  useEffect(() => {
+    setMatcherPreviewRows([]);
+    setMatcherPreviewCategories([]);
+    setCopySessionMsg(null);
+  }, [sessionId]);
 
   useEffect(() => {
     if (!showAdvanced || !token) {
@@ -782,7 +855,123 @@ export function ImportWorkspacePage() {
     }
   }
 
+  async function loadMatcherPreview() {
+    if (!sessionId) {
+      return;
+    }
+    setMatcherPreviewLoading(true);
+    setError(null);
+    try {
+      const [catRes, prevRes] = await Promise.all([
+        apiJson<{ categories: CategoryLabelRow[] }>("/categories"),
+        apiJson<{ rows: MatcherPreviewRow[] }>("/categories/rules/rule-learning-preview", {
+          method: "POST",
+          body: JSON.stringify({ sessionId })
+        })
+      ]);
+      setMatcherPreviewCategories(catRes.categories ?? []);
+      setMatcherPreviewRows(prevRes.rows ?? []);
+    } catch (err: unknown) {
+      setMatcherPreviewRows([]);
+      setMatcherPreviewCategories([]);
+      setError(err instanceof Error ? err.message : "Could not load classification preview");
+    } finally {
+      setMatcherPreviewLoading(false);
+    }
+  }
+
+  async function copySessionId() {
+    if (!sessionId || !navigator.clipboard?.writeText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      setCopySessionMsg("Copied");
+      window.setTimeout(() => setCopySessionMsg(null), 2000);
+    } catch {
+      setCopySessionMsg("Copy failed");
+      window.setTimeout(() => setCopySessionMsg(null), 2000);
+    }
+  }
+
   if (!sessionId) {
+    if (!token) {
+      return <Navigate to="/" replace />;
+    }
+    return (
+      <div>
+        <div className="card">
+          <h1>Import</h1>
+          <p className="muted">
+            Start a new session or continue one you already have. Parsed data stays in the database until you finalize the
+            flow or reset the app database — use <strong>Recent sessions</strong> so you don&apos;t lose your place.
+          </p>
+          {error ? <p className="error">{error}</p> : null}
+          <div className="row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
+            <button type="button" disabled={startingSession} onClick={() => void startNewImportSession()}>
+              {startingSession ? "Starting…" : "New import session"}
+            </button>
+            <Link to="/" className="muted">
+              Back to home
+            </Link>
+            <Link to="/categories/rules" className="muted">
+              Classification rules
+            </Link>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Recent sessions</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Open a session to upload files, parse, run import, or run the classification matcher preview. Sessions in{" "}
+            <strong>review</strong> still hold parsed rows and ledger posts you can undo before finalizing.
+          </p>
+          {hubLoading ? <p className="muted">Loading…</p> : null}
+          {!hubLoading && recentSessions.length === 0 ? (
+            <p className="muted">No sessions yet. Start a new import above.</p>
+          ) : null}
+          {!hubLoading && recentSessions.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Started</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Files</th>
+                    <th scope="col">Session id</th>
+                    <th scope="col" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentSessions.map((s) => (
+                    <tr key={s.id}>
+                      <td>{s.startedAt?.replace("T", " ").slice(0, 19) ?? "—"}</td>
+                      <td>
+                        <strong>{s.status}</strong>
+                      </td>
+                      <td>{s.fileCount}</td>
+                      <td>
+                        <code style={{ fontSize: "0.78rem" }}>{s.id.slice(0, 8)}…</code>
+                      </td>
+                      <td>
+                        <Link to={`/imports/${s.id}`}>Continue</Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0, fontSize: "0.88rem" }}>
+            Deep link: <code>/imports?sessionId=&lt;uuid&gt;</code> opens that session directly (bookmark or paste from{" "}
+            <strong>Copy id</strong> on the session page).
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!token) {
     return <Navigate to="/" replace />;
   }
 
@@ -795,7 +984,16 @@ export function ImportWorkspacePage() {
       <div className="card">
         <h1>Import session</h1>
         <p className="muted">
-          Session <code>{sessionId}</code> — status: <strong>{sessionStatus ?? "—"}</strong>
+          Session <code>{sessionId}</code>{" "}
+          <button type="button" className="secondary" style={{ fontSize: "0.82rem", verticalAlign: "middle" }} onClick={() => void copySessionId()}>
+            Copy id
+          </button>
+          {copySessionMsg ? (
+            <span className="muted" style={{ marginLeft: "0.45rem" }}>
+              {copySessionMsg}
+            </span>
+          ) : null}{" "}
+          — status: <strong>{sessionStatus ?? "—"}</strong>
         </p>
         {error ? <p className="error">{error}</p> : null}
         {message ? <p className="success">{message}</p> : null}
@@ -1243,6 +1441,61 @@ export function ImportWorkspacePage() {
             </button>
           </div>
         </details>
+      </div>
+
+      <div className="card">
+        <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Classification matcher preview (read-only)</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Dry-run of your current <Link to="/categories/rules">classification rules</Link> on parsed raw rows in{" "}
+          <strong>this</strong> session. This does <strong>not</strong> assign categories, post to the ledger, or create
+          rules — it only shows what would match today. After you change rules, click load again.
+        </p>
+        <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <button type="button" className="secondary" disabled={matcherPreviewLoading} onClick={() => void loadMatcherPreview()}>
+            {matcherPreviewLoading ? "Loading…" : "Load classification preview"}
+          </button>
+          {(sessionSummary?.totals.rawRows ?? 0) === 0 ? (
+            <span className="muted" style={{ fontSize: "0.88rem" }}>
+              Parse files first (or open a session that already has raw rows).
+            </span>
+          ) : (
+            <span className="muted" style={{ fontSize: "0.88rem" }}>
+              {sessionSummary?.totals.rawRows} raw row(s) in this session.
+            </span>
+          )}
+        </div>
+        {matcherPreviewRows.length > 0 ? (
+          <div style={{ overflowX: "auto", marginTop: "0.75rem" }}>
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Amount</th>
+                  <th scope="col">Description</th>
+                  <th scope="col">Preview category</th>
+                  <th scope="col">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {matcherPreviewRows.map((r) => {
+                  const cid = r.classification.categoryId;
+                  const cat = cid ? matcherPreviewCategories.find((c) => c.id === cid) : null;
+                  return (
+                    <tr key={r.rawId}>
+                      <td>{r.txnDate}</td>
+                      <td>{r.amount}</td>
+                      <td>
+                        <code style={{ fontSize: "0.78rem" }}>{r.description}</code>
+                      </td>
+                      <td>{cat ? categoryLabelForPreview(cat, matcherPreviewCategories) : "—"}</td>
+                      <td>{r.classification.source}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
       </div>
 
       {sessionStatus === "review" ? (

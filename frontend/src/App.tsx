@@ -27,6 +27,8 @@ export function App() {
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
+          <Route path="/import" element={<Navigate to="/imports" replace />} />
+          <Route path="/imports" element={<ImportWorkspacePage />} />
           <Route path="/imports/:sessionId" element={<ImportWorkspacePage />} />
         </Route>
         <Route path="/dashboard" element={<Navigate to="/" replace />} />
