@@ -1,5 +1,6 @@
 import express from "express";
 
+import { log } from "./logger.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
@@ -40,6 +41,14 @@ export function buildApp() {
   app.use("/resolution", resolutionRouter);
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
+
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    log.error(err instanceof Error ? err.stack ?? err.message : err);
+    if (res.headersSent) {
+      return;
+    }
+    res.status(500).json({ error: "Internal server error" });
+  });
 
   return app;
 }

@@ -33,6 +33,14 @@ type ResolutionDetailItem = {
       ruleId?: string | null;
       confidence?: number;
       reason?: string;
+      ai?: {
+        suggestedCategoryId?: string | null;
+        confidence?: number;
+        suggestedNewCategoryName?: string | null;
+        reason?: string;
+        model?: string;
+        autoApplied?: boolean;
+      } | null;
     } | null;
   };
 };
@@ -1630,6 +1638,53 @@ export function TransactionsPage() {
                                                 ) : null}
                                                 {explainReason ? (
                                                   <span className="resolution-explainability__reason">{explainReason}</span>
+                                                ) : null}
+                                              </div>
+                                            ) : null}
+                                            {it.context.classification?.ai ? (
+                                              <div
+                                                style={{
+                                                  marginTop: "0.5rem",
+                                                  padding: "0.5rem 0.65rem",
+                                                  borderRadius: "6px",
+                                                  border: "1px solid #c7d2fe",
+                                                  background: "#eef2ff",
+                                                  fontSize: "0.88rem"
+                                                }}
+                                              >
+                                                <strong>AI suggestion</strong>
+                                                {it.context.classification.ai.autoApplied ? (
+                                                  <span className="muted" style={{ marginLeft: "0.5rem", fontSize: "0.78rem" }}>
+                                                    (auto-applied)
+                                                  </span>
+                                                ) : null}
+                                                <p style={{ margin: "0.35rem 0 0", lineHeight: 1.4 }}>
+                                                  <span className="muted">Category: </span>
+                                                  {it.context.classification.ai.suggestedCategoryId
+                                                    ? categories.find(
+                                                        (c) => c.id === it.context.classification?.ai?.suggestedCategoryId
+                                                      )?.name ?? it.context.classification.ai.suggestedCategoryId
+                                                    : it.context.classification.ai.suggestedNewCategoryName?.trim() ||
+                                                      "—"}
+                                                  {typeof it.context.classification.ai.confidence === "number" ? (
+                                                    <>
+                                                      {" "}
+                                                      <span className="muted">
+                                                        ({(it.context.classification.ai.confidence * 100).toFixed(0)}%
+                                                        confidence)
+                                                      </span>
+                                                    </>
+                                                  ) : null}
+                                                </p>
+                                                {it.context.classification.ai.reason ? (
+                                                  <p style={{ margin: "0.35rem 0 0", color: "#334155" }}>
+                                                    {it.context.classification.ai.reason}
+                                                  </p>
+                                                ) : null}
+                                                {it.context.classification.ai.model ? (
+                                                  <p className="muted" style={{ margin: "0.25rem 0 0", fontSize: "0.78rem" }}>
+                                                    Model: {it.context.classification.ai.model}
+                                                  </p>
                                                 ) : null}
                                               </div>
                                             ) : null}

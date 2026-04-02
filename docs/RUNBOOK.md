@@ -42,8 +42,9 @@ Edit `.env`:
 | `VITE_PROXY_API` | (Optional) Base URL for API proxy in dev; default `http://127.0.0.1:4000`. |
 | `VITE_DEV_SIGNIN_EMAIL` / `VITE_DEV_SIGNIN_PASSWORD` | (Optional) Prefill sign-in on the home page in dev only; leave empty for no prefill. |
 | `AI_CATEGORY_*` + `OPENAI_*` | (Optional) OpenAI categorization controls. Keep `AI_CATEGORY_ENABLED=false` until you are ready. |
+| `LOG_LEVEL` | (Optional) Backend verbosity: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). See [`LOGGING.md`](LOGGING.md). |
 
-**API logs:** The backend prints to **stdout/stderr** only (no rotating log files). See [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
+**API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run services:start` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
 **Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 

@@ -4,9 +4,9 @@ import { env } from "../../config/env.js";
 import { db } from "../../db/sqlite.js";
 import { deleteStagingFilesForSession } from "../imports/import-session.service.js";
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
-import { classifyWithRules } from "../category/category-rules.js";
+import { classifyWithRules, type ClassificationResult } from "../category/category-rules.js";
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
-import { suggestCategoryWithAi } from "../category/category-ai.service.js";
+import { suggestCategoriesWithAiBatch, type AiSuggestion } from "../category/category-ai.service.js";
 import {
   computeTransactionFingerprint,
   descriptionsCompatibleForNearDuplicate,
@@ -429,6 +429,139 @@ export async function canonicalizeImportSession(
     return next;
   };
 
+  const seenFingerprintsThisRun = new Set<string>();
+  type PendingAiInsert = {
+    row: (typeof rawRows)[number];
+    parsed: RawPayloadWithAccount;
+    normDate: string;
+    normDesc: string;
+    rounded: number;
+    fingerprint: string;
+    classification: ClassificationResult;
+    merchant: string;
+    memo: string | null;
+    direction: "credit" | "debit";
+    diag: CanonicalFileDiagnostics;
+  };
+  const aiBuffer: PendingAiInsert[] = [];
+
+  function insertCanonicalRow(p: PendingAiInsert, aiSuggestion: AiSuggestion | null): void {
+    const { row, parsed, normDate, rounded, fingerprint, classification, merchant, memo, direction, diag } = p;
+    let categoryId = classification.categoryId;
+    if (
+      aiSuggestion?.suggestedCategoryId &&
+      aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
+    ) {
+      categoryId = aiSuggestion.suggestedCategoryId;
+    }
+    const classificationMeta = JSON.stringify({
+      source: classification.source,
+      ruleId: classification.ruleId,
+      confidence: classification.confidence,
+      reason: classification.reason,
+      ai: aiSuggestion
+        ? {
+            suggestedCategoryId: aiSuggestion.suggestedCategoryId,
+            confidence: aiSuggestion.confidence,
+            suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
+            reason: aiSuggestion.reason,
+            model: aiSuggestion.model,
+            autoApplied:
+              categoryId !== null &&
+              aiSuggestion.suggestedCategoryId === categoryId &&
+              aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
+          }
+        : null
+    });
+
+    const canonicalId = crypto.randomUUID();
+    const accountId = parsed.financial_account_id;
+
+    try {
+      insertStmt.run(
+        canonicalId,
+        householdId,
+        accountId,
+        categoryId,
+        normDate,
+        rounded,
+        direction,
+        merchant,
+        memo,
+        fingerprint,
+        `raw:${row.raw_id}`,
+        classificationMeta,
+        row.owner_scope ?? "household",
+        row.owner_scope === "person" ? row.owner_person_profile_id : null
+      );
+      inserted += 1;
+      diag.inserted += 1;
+      insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
+      seenFingerprintsThisRun.add(fingerprint);
+      if (categoryId === null) {
+        insertUnknownCategoryStmt.run(
+          crypto.randomUUID(),
+          householdId,
+          canonicalId,
+          JSON.stringify({
+            kind: "unknown_category",
+            message:
+              "No default keyword rule matched this description; assign a category from the ledger or review queue.",
+            classification: {
+              source: classification.source,
+              ruleId: classification.ruleId,
+              confidence: classification.confidence,
+              reason: classification.reason
+            },
+            ai:
+              aiSuggestion && aiSuggestion.confidence >= env.AI_CATEGORY_REVIEW_MIN
+                ? {
+                    suggestedCategoryId: aiSuggestion.suggestedCategoryId,
+                    confidence: aiSuggestion.confidence,
+                    suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
+                    reason: aiSuggestion.reason,
+                    model: aiSuggestion.model
+                  }
+                : null
+          })
+        );
+      }
+    } catch (err: unknown) {
+      const code =
+        err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
+      if (code === "SQLITE_CONSTRAINT_UNIQUE" || code.includes("SQLITE_CONSTRAINT")) {
+        duplicates += 1;
+        diag.duplicateFingerprint += 1;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  async function flushOneAiChunk(): Promise<void> {
+    if (aiBuffer.length === 0) {
+      return;
+    }
+    const chunk = aiBuffer.splice(0, env.AI_CATEGORY_BATCH_SIZE);
+    const map = await suggestCategoriesWithAiBatch(
+      householdId,
+      chunk.map((c) => ({
+        transactionId: c.row.raw_id,
+        normalizedDescription: c.normDesc,
+        signedAmount: c.rounded
+      }))
+    );
+    for (const p of chunk) {
+      insertCanonicalRow(p, map.get(p.row.raw_id) ?? null);
+    }
+  }
+
+  async function flushAllAiBeforeNonAi(): Promise<void> {
+    while (aiBuffer.length > 0) {
+      await flushOneAiChunk();
+    }
+  }
+
   for (const row of rawRows) {
     const diag = ensureFileDiag(row.file_id);
     let parsed: unknown;
@@ -471,7 +604,7 @@ export async function canonicalizeImportSession(
       normalizedDescription: normDesc
     });
 
-    if (existsStmt.get(householdId, fingerprint)) {
+    if (existsStmt.get(householdId, fingerprint) || seenFingerprintsThisRun.has(fingerprint)) {
       duplicates += 1;
       diag.duplicateFingerprint += 1;
       continue;
@@ -524,111 +657,32 @@ export async function canonicalizeImportSession(
     const memo = desc.length > 120 ? desc : null;
 
     const classification = classifyWithRules(normDesc, rounded, dbRules);
-    let categoryId = classification.categoryId;
-    let aiSuggestion:
-      | {
-          suggestedCategoryId: string | null;
-          confidence: number;
-          suggestedNewCategoryName: string | null;
-          reason: string;
-          model: string;
-        }
-      | null = null;
-    if (categoryId === null) {
-      aiSuggestion = await suggestCategoryWithAi({
-        householdId,
-        transactionId: row.raw_id,
-        normalizedDescription: normDesc,
-        signedAmount: rounded
-      });
-      if (
-        aiSuggestion?.suggestedCategoryId &&
-        aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
-      ) {
-        categoryId = aiSuggestion.suggestedCategoryId;
-      }
-    }
-    const classificationMeta = JSON.stringify({
-      source: classification.source,
-      ruleId: classification.ruleId,
-      confidence: classification.confidence,
-      reason: classification.reason,
-      ai: aiSuggestion
-        ? {
-            suggestedCategoryId: aiSuggestion.suggestedCategoryId,
-            confidence: aiSuggestion.confidence,
-            suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
-            reason: aiSuggestion.reason,
-            model: aiSuggestion.model,
-            autoApplied:
-              categoryId !== null &&
-              aiSuggestion.suggestedCategoryId === categoryId &&
-              aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
-          }
-        : null
-    });
+    const pending: PendingAiInsert = {
+      row,
+      parsed,
+      normDate,
+      normDesc,
+      rounded,
+      fingerprint,
+      classification,
+      merchant,
+      memo,
+      direction,
+      diag
+    };
 
-    const canonicalId = crypto.randomUUID();
-
-    try {
-      insertStmt.run(
-        canonicalId,
-        householdId,
-        accountId,
-        categoryId,
-        normDate,
-        rounded,
-        direction,
-        merchant,
-        memo,
-        fingerprint,
-        `raw:${row.raw_id}`,
-        classificationMeta,
-        row.owner_scope ?? "household",
-        row.owner_scope === "person" ? row.owner_person_profile_id : null
-      );
-      inserted += 1;
-      diag.inserted += 1;
-      insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
-      if (categoryId === null) {
-        insertUnknownCategoryStmt.run(
-          crypto.randomUUID(),
-          householdId,
-          canonicalId,
-          JSON.stringify({
-            kind: "unknown_category",
-            message:
-              "No default keyword rule matched this description; assign a category from the ledger or review queue.",
-              classification: {
-                source: classification.source,
-                ruleId: classification.ruleId,
-                confidence: classification.confidence,
-                reason: classification.reason
-              },
-              ai:
-                aiSuggestion && aiSuggestion.confidence >= env.AI_CATEGORY_REVIEW_MIN
-                  ? {
-                      suggestedCategoryId: aiSuggestion.suggestedCategoryId,
-                      confidence: aiSuggestion.confidence,
-                      suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
-                      reason: aiSuggestion.reason,
-                      model: aiSuggestion.model
-                    }
-                  : null
-          })
-        );
-      }
-    } catch (err: unknown) {
-      const code =
-        err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
-      if (code === "SQLITE_CONSTRAINT_UNIQUE" || code.includes("SQLITE_CONSTRAINT")) {
-        duplicates += 1;
-        diag.duplicateFingerprint += 1;
-      } else {
-        throw err;
+    if (classification.categoryId !== null) {
+      await flushAllAiBeforeNonAi();
+      insertCanonicalRow(pending, null);
+    } else {
+      aiBuffer.push(pending);
+      if (aiBuffer.length >= env.AI_CATEGORY_BATCH_SIZE) {
+        await flushOneAiChunk();
       }
     }
   }
+
+  await flushAllAiBeforeNonAi();
 
   if (fileDiagnostics.size > 0) {
     const fileRows = db

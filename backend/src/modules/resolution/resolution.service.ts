@@ -15,11 +15,22 @@ interface RawPreview {
   referenceId: string | null;
 }
 
+interface ClassificationAiMeta {
+  suggestedCategoryId?: string | null;
+  confidence?: number;
+  suggestedNewCategoryName?: string | null;
+  reason?: string;
+  model?: string;
+  autoApplied?: boolean;
+}
+
 interface ClassificationExplainability {
   source?: "db" | "default" | "none";
   ruleId?: string | null;
   confidence?: number;
   reason?: string;
+  /** Present when OpenAI returned a suggestion; stored on `transaction_canonical.classification_meta`. */
+  ai?: ClassificationAiMeta | null;
 }
 
 export interface ResolutionItemRow {
