@@ -1711,6 +1711,28 @@ export function TransactionsPage() {
                                                         });
                                                         forgetReviewDetail(t.id);
                                                         await load();
+                                                        const makeRule = window.confirm(
+                                                          "Create a household rule so similar descriptions map to this category? Uses a contains match on normalized text."
+                                                        );
+                                                        if (makeRule) {
+                                                          try {
+                                                            await apiJson("/categories/rules/from-ledger", {
+                                                              method: "POST",
+                                                              body: JSON.stringify({
+                                                                transactionId: t.id,
+                                                                categoryId,
+                                                                matchType: "contains",
+                                                                scope: "contains"
+                                                              })
+                                                            });
+                                                          } catch (ruleErr: unknown) {
+                                                            setError(
+                                                              ruleErr instanceof Error
+                                                                ? ruleErr.message
+                                                                : "Could not create rule from description"
+                                                            );
+                                                          }
+                                                        }
                                                       } catch (e: unknown) {
                                                         setError(e instanceof Error ? e.message : "Failed to set category");
                                                       } finally {
