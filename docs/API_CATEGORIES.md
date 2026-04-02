@@ -5,7 +5,7 @@
 Base path: `/categories` and `/categories/rules`  
 Auth: `Authorization: Bearer <JWT>`.
 
-Global defaults (`household_id` IS NULL) use a **two-level** tree: top-level parents (e.g. Shopping, Home & utilities) and leaf rows (`parent_id` set). Households may add **top-level** categories (`parentId: null`) or **subcategories** under any **top-level** parent they can use (global or household). Nesting deeper than parent → leaf is rejected (`MAX_DEPTH`).
+Global defaults (`household_id` IS NULL) use a **two-level** tree: top-level parents (e.g. Shopping, Home, Utilities) and leaf rows (`parent_id` set). Households may add **top-level** categories (`parentId: null`) or **subcategories** under any **top-level** parent they can use (global or household). Nesting deeper than parent → leaf is rejected (`MAX_DEPTH`).
 
 ## `GET /categories`
 
@@ -25,7 +25,7 @@ Global defaults (`household_id` IS NULL) use a **two-level** tree: top-level par
 }
 ```
 
-- **`householdScoped`** — `true` for rows created by the household (may be **PATCH**/**DELETE**); defaults are `false`.
+- **`householdScoped`** — `true` for rows created by the household (may be **PATCH**/**DELETE**); built-in defaults are `false` but **owners and admins** may **PATCH** (rename / reparent) installation default rows; **members** cannot edit built-ins.
 
 **401:** missing or invalid token.
 
@@ -49,7 +49,10 @@ Create a **household-owned** category.
 
 ## `PATCH /categories/:id`
 
-Rename or reparent a **household-owned** row only.
+Rename or reparent a category the household can use.
+
+- **Household-owned** (`householdScoped`): any authenticated member may update (same rules as before: `parentId` must be a top-level parent or `null`, max depth two levels).
+- **Built-in** (`household_id` IS NULL): **owner** or **admin** only. Changes apply to **this database** (all households sharing the same SQLite file see the same names). Classification rules still reference **`category_id`** — renaming a category does not change rule rows.
 
 **Body:** `{ "name": "…", "parentId": "uuid-or-null" }` (either field optional)
 
@@ -57,9 +60,13 @@ Rename or reparent a **household-owned** row only.
 
 **400:** invalid parent / depth / cycle.
 
-**403:** not a household-owned row (defaults are immutable).
+**403:** not allowed — e.g. **member** editing a built-in row, or not a category visible to this household.
 
 **404:** unknown id.
+
+**400** with code **`INVALID_REPARENT`:** cannot move a top-level group under another parent while it still has subcategories (remove or reassign children first).
+
+**401:** missing or invalid token.
 
 ## `DELETE /categories/:id`
 
@@ -67,22 +74,24 @@ Delete a **household-owned** category with **no** child rows and **no** `transac
 
 **204:** success.
 
-**403:** not household-owned.
+**403:** not household-owned, or **built-in** (`code`: **`BUILTIN_READONLY`**) — built-in categories cannot be deleted; rename them instead.
 
 **404:** unknown id.
 
-**409:** `HAS_CHILDREN` or `IN_USE`.
+**409:** `HAS_CHILDREN` or `IN_USE` (reassign transactions or remove subcategories first).
 
 **401:** missing or invalid token.
 
-UI: **`/categories`** (full-screen table + add parent/subcategory); **`/categories/rules`** (household pattern → category rules; link from Categories). **Ledger:** **`LedgerCategoryPicker`** — hierarchical columns + **inline `POST /categories`** for new parent/subcategory.
+UI: **`/categories`** (full-screen table + add parent/subcategory + **Edit** for household rows; **Edit** for built-ins when owner/admin); **`/categories/rules`** (household pattern → category rules; link from Categories). **Ledger:** **`LedgerCategoryPicker`** — hierarchical columns + **inline `POST /categories`** for new parent/subcategory.
 
 ## Category Rules MVP (`/categories/rules`)
 
-Household-managed classification rules are evaluated in deterministic order before built-in defaults:
+**Household** rules in `category_rule` are evaluated first, then **global** rows in `category_rule_global` (built-in defaults for this installation). Within each group:
 1) `priority` ascending  
 2) `createdAt` ascending  
 3) `id` ascending
+
+Global rules add **`amountScope`**: `any` | `credit_only` | `debit_only` (inflow vs outflow).
 
 Each rule targets one assignable category (leaf) and supports:
 - `matchType`: `contains` | `prefix` | `regex`
@@ -92,12 +101,28 @@ Each rule targets one assignable category (leaf) and supports:
 
 ### `GET /categories/rules`
 
-Returns household-owned rules.
+Returns **`builtinRules`** (global `category_rule_global` rows, each with `origin: "builtin"`, `ruleKey`, `amountScope`, …) and **`rules`** (household `category_rule` rows).
 
 **200:**
 
 ```json
 {
+  "builtinRules": [
+    {
+      "origin": "builtin",
+      "id": "uuid",
+      "ruleKey": "groceries_7_walmart",
+      "pattern": "walmart",
+      "matchType": "contains",
+      "categoryId": "uuid",
+      "amountScope": "debit_only",
+      "confidence": 0.7,
+      "priority": 240,
+      "enabled": true,
+      "createdAt": "timestamp",
+      "updatedAt": "timestamp"
+    }
+  ],
   "rules": [
     {
       "id": "uuid",
@@ -147,4 +172,21 @@ Update rule fields (including enable/disable).
 **404:** `NOT_FOUND`  
 **400:** same validation codes as create
 
-**UI:** authenticated **`/categories/rules`** (household rules table + add/edit; linked from **`/categories`**).
+### `POST /categories/rules/builtin` (owner / admin)
+
+Create a global built-in rule. Category must be a **default** leaf (`household_id` NULL) without children.
+
+**Body:** `ruleKey` (optional), `pattern`, `matchType`, `categoryId`, `amountScope`, `confidence`, `priority`, `enabled`.
+
+**201:** `{ "rule": { ... } }`  
+**403:** member role
+
+### `PATCH /categories/rules/builtin/:id` (owner / admin)
+
+Update a global rule (same fields as create, partial).
+
+### `DELETE /categories/rules/builtin/:id` (owner / admin)
+
+**204:** empty body on success.
+
+**UI:** authenticated **`/categories/rules`** (household rules + built-in rules; owner/admin can edit globals; linked from **`/categories`**).

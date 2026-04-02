@@ -1,22 +1,32 @@
 # Import classification, dedupe, and rules
 
-This document explains **all automated behaviors** when statements are imported (parse → canonicalize). The **Categories → Rules** UI (`/categories/rules`) is only **household-specific DB rules**; it is not the full picture.
+This document explains **all automated behaviors** when statements are imported (parse → canonicalize). The **Categories → Rules** UI (`/categories/rules`) manages **household** rules and **global built-in** rules (stored in SQLite).
 
 ## 1. Category assignment (`transaction_canonical.category_id`)
 
-**Order of evaluation** (see `backend/src/modules/category/category-rules.ts`):
+**Order of evaluation** (see `classifyWithRules` in `backend/src/modules/category/category-rules.ts` and `listEnabledDbRulesForClassification` in `category-rules.service.ts`):
 
-1. **`category_rule` table** (rows from `/categories/rules`) — ordered by priority; first match wins on **fingerprint-normalized** description (lowercase, alphanumeric + spaces). The rules UI lists **built-in** (read-only) and **household** rules; you can add multiple patterns in one save, test a description, re-apply rules to the ledger, and preview parsed import sessions for rule learning.
-2. **Default keyword rules** in `classifyDefaultCategory()` — conservative substring heuristics if no DB rule matched.
+1. **`category_rule` table** (per-household rows from `/categories/rules`) — ordered first; first match wins on **fingerprint-normalized** description (lowercase, alphanumeric + spaces). Household rules use **any** amount scope unless you model otherwise.
+2. **`category_rule_global` table** — installation-wide defaults (former keyword heuristics), merged **after** all enabled household rules for that household. Each row has an **`amount_scope`** (`any`, `credit_only`, `debit_only`) so inflow vs outflow behavior matches the old engine.
 
-Default rules use stable **`ruleId`** strings for debugging (examples):
+Built-in rows use stable **`rule_key`** values (examples):
 
-| Direction | ruleId (examples) | Intent |
-|-----------|-------------------|--------|
-| Inflow | `income_refunds_keywords`, `income_rental_income_keywords`, `income_interest`, `income_dividends`, `income_salary_inflow_keywords` | Refunds, rent, interest, dividends, payroll |
-| Outflow | `housing_keywords`, `utilities_keywords`, `dining_out_keywords`, `coffee_snacks_keywords`, `groceries_merchant`, `transport_keywords`, `debt_keywords`, `medical_keywords`, `pharmacy_keywords` | Bills, food, fuel, debt, health |
+| Direction | rule_key (examples) | Intent |
+|-----------|----------------------|--------|
+| Inflow | `income_refunds_refund`, `income_rental_rental_income`, `income_interest_*`, `income_salary_*` | Refunds, rent, interest, dividends, payroll |
+| Outflow | `housing_*`, `utilities_*`, `dining_*`, `coffee_*`, `groceries_*`, `transport_*`, `debt_*`, `medical_*`, `pharmacy_*` | Bills, food, fuel, debt, health |
 
 If nothing matches, **`category_id` is null** and an **`unknown_category`** resolution item may be created (see canonical ingest).
+
+### Global built-in vs household categories
+
+**Household rules** (`category_rule`) may assign any **leaf** category visible to the household, including categories the household created (`household_id` set on `category`).
+
+**Global built-in rules** (`category_rule_global`) apply to **every** household on the server. Their **`category_id` must reference a global default leaf**: `category.household_id IS NULL` and the category has **no children**. You cannot point a built-in rule at a household-scoped category; use a **household** rule for custom taxonomy (e.g. a custom “Loans” leaf). The API returns **`BUILTIN_REQUIRES_GLOBAL_LEAF`** when a built-in create/update would violate this.
+
+### Classification matcher preview (import session)
+
+**`POST /categories/rules/rule-learning-preview`** with an `import_session` id runs the same **`classifyWithRules`** matcher over **`transaction_raw`** rows for that session. It performs **no writes**: no ledger updates, no rule creation, no category persistence. The UI surfaces this on **`/imports/:sessionId`** as **Classification matcher preview (read-only)** so it sits next to parse/import workflow; use it to tune rules before or after canonicalize.
 
 ## 2. Exact duplicate skip
 

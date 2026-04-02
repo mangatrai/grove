@@ -104,11 +104,12 @@ paths:
   /categories/{categoryId}:
     patch:
       tags: [categories]
-      summary: Update household-owned category
+      summary: Update category (household row, or built-in for owner or admin)
+      description: Built-in defaults (household_id null) require owner or admin; changes apply to this database.
       security: [{ bearerAuth: [] }]
     delete:
       tags: [categories]
-      summary: Delete household-owned category
+      summary: Delete household-owned category (built-in returns 403 BUILTIN_READONLY)
       security: [{ bearerAuth: [] }]
   /categories/rules:
     get:
