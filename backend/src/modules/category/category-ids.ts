@@ -31,5 +31,10 @@ export const DEFAULT_CATEGORY_IDS = {
 
   // Transfers leaves (added in migration 0008)
   transfersIn: "30000000-0000-0000-0000-000000000115",
-  transfersOut: "30000000-0000-0000-0000-000000000116"
+  transfersOut: "30000000-0000-0000-0000-000000000116",
+
+  /** Insurance leaves (migration 0025) */
+  healthInsurance: "30000000-0000-0000-0000-000000000031",
+  lifeInsurance: "30000000-0000-0000-0000-000000000032",
+  otherInsurance: "30000000-0000-0000-0000-000000000033"
 } as const;
