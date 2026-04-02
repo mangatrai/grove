@@ -263,6 +263,49 @@ export function deleteStagingFilesForSession(sessionId: string): void {
   }
 }
 
+export type ImportSessionListRow = {
+  id: string;
+  status: ImportSessionStatus;
+  sourceType: string;
+  startedAt: string;
+  finalizedAt: string | null;
+  fileCount: number;
+};
+
+/**
+ * Recent import sessions for the household (newest first). Used for resume / wayfinding in the UI.
+ */
+export function listImportSessionsForHousehold(householdId: string, limit = 40): ImportSessionListRow[] {
+  const cap = Math.min(Math.max(limit, 1), 100);
+  const rows = db
+    .prepare(
+      `SELECT s.id AS id, s.status AS status, s.source_type AS sourceType, s.started_at AS startedAt,
+              s.finalized_at AS finalizedAt,
+              (SELECT COUNT(*) FROM import_file f WHERE f.session_id = s.id) AS fileCount
+       FROM import_session s
+       WHERE s.household_id = ?
+       ORDER BY s.started_at DESC
+       LIMIT ?`
+    )
+    .all(householdId, cap) as Array<{
+    id: string;
+    status: ImportSessionStatus;
+    sourceType: string;
+    startedAt: string;
+    finalizedAt: string | null;
+    fileCount: number;
+  }>;
+
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    sourceType: r.sourceType,
+    startedAt: r.startedAt,
+    finalizedAt: r.finalizedAt,
+    fileCount: Number(r.fileCount) || 0
+  }));
+}
+
 export function listFilesForSession(sessionId: string): Array<{
   id: string;
   file_name: string;

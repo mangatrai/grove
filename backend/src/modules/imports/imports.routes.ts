@@ -9,6 +9,7 @@ import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   createImportSession,
   listFilesForSession,
+  listImportSessionsForHousehold,
   listSessionDetail,
   persistSessionFiles,
   transitionSessionStatus,
@@ -146,6 +147,12 @@ importsRouter.post("/sessions", (req: AuthenticatedRequest, res) => {
       status: created.status
     }
   });
+});
+
+importsRouter.get("/sessions", (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const sessions = listImportSessionsForHousehold(householdId);
+  res.status(200).json({ sessions });
 });
 
 importsRouter.post(
