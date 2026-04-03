@@ -6,13 +6,15 @@ This complements [`IMPORT_CLASSIFICATION.md`](IMPORT_CLASSIFICATION.md), which d
 
 ## Default category taxonomy (parents and children)
 
-Source of truth: [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql), [`backend/db/migrations/0008_income_taxes_transfers_taxonomy.sql`](../backend/db/migrations/0008_income_taxes_transfers_taxonomy.sql), [`backend/db/migrations/0025_category_insurance_taxonomy.sql`](../backend/db/migrations/0025_category_insurance_taxonomy.sql), and [`backend/db/migrations/0027_taxonomy_refresh.sql`](../backend/db/migrations/0027_taxonomy_refresh.sql). Rules assign **leaf** categories only (see `classifyWithRules` in `backend/src/modules/category/category-rules.ts`).
+**Source of truth:** `household_id IS NULL` rows in **`category`**. Names and stable ids are defined in [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql); migrations `0006`–`0028` introduce history; **[`0029_sync_global_category_display_names.sql`](../backend/db/migrations/0029_sync_global_category_display_names.sql)** keeps **display names** aligned on upgraded databases. **Optional** [`0003_seed_default_household_categories.sql`](../backend/db/seeds/0003_seed_default_household_categories.sql) is reserved for future household-scoped install defaults (currently global taxonomy covers Loans, Travel, etc.).
+
+Rules assign **leaf** categories only (see `classifyWithRules` in `backend/src/modules/category/category-rules.ts`).
 
 **Top-level buckets**
 
 | ID suffix | Name | Notes |
 |-----------|------|--------|
-| `...001` | **Income** | Parent (Salary, Interest, … — see migration 0008) |
+| `...001` | **Income** | Parent |
 | `...101` | **Shopping** | Parent |
 | `...102` | **Home** | Parent |
 | `...103` | **Mobility** | Parent |
@@ -23,28 +25,32 @@ Source of truth: [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds
 | `...108` | **Insurance** | Parent |
 | `...109` | **Education** | Parent |
 | `...110` | **Giving** | Parent |
-| `...111` | **Taxes** | Parent (migration 0008; leaves expanded in 0027) |
-| `...112` | **Transfers** | Parent (migration 0008) |
+| `...111` | **Taxes** | Parent |
+| `...112` | **Transfers** | Parent |
 | `...117` | **Utilities** | Parent (split from former combined Home bucket, migration 0027) |
+| `...133` | **Loans** | Parent (global; loan-type leaves) |
+| `...134` | **Travel** | Parent |
 
-**Children by parent**
+**Children by parent (display names match seed + migration 0029)**
 
-- **Shopping** → Groceries (`...004`), Clothing (`...008`)
-- **Home** → Housing (`...002`), Furniture (`...034`), Maintenance and repairs (`...035`), Home improvement (`...036`)
-- **Utilities** → Energy (`...118`), Water trash and sewage (`...119`), Mobile phone (`...120`)
-- **Mobility** → Transit and fuel (`...005`), Auto maintenance (`...129`)
+- **Shopping** → Groceries (`...004`), Clothing (`...008`), Electronic (`...142`)
+- **Home** → Housing (`...002`), Furniture (`...034`), Maintenance (`...035`), Home improvement (`...036`), Appliances (`...136`), HOA Fees (`...146`)
+- **Utilities** → Energy (`...118`), City Water (`...119`), Mobile phone (`...120`)
+- **Mobility** → Public Transit (`...005`), Auto Maintenance (`...129`), Taxi (`...141`)
 - **Borrowing** → Credit card payments (`...006`), Loan payments (`...121`), Personal lending (`...122`)
 - **Investments** → Stocks (`...009`), 529 plan (`...126`), Real estate (`...127`), Crypto (`...128`)
 - **Healthcare** → Medical (`...020`), Pharmacy (`...021`), Fitness (`...022`), Wellness (`...125`)
 - **Food** → Dining out (`...023`), Coffee (`...024`), Snacks (`...124`)
-- **Insurance** → **Home insurance** (`...025`), **Auto insurance** (`...026`), Health insurance (`...031`), Life insurance (`...032`), Other insurance (`...033`)
-- **Education** → Tuition (`...027`), Childcare (`...028`), Activities and camps (`...123`)
+- **Insurance** → short labels: **Home** (`...025`), **Auto** (`...026`), **Health** (`...031`), **Life** (`...032`), **Other** (`...033`)
+- **Education** → Tuition (`...027`), Childcare (`...028`), Activities (`...123`), Camps (`...135`)
 - **Giving** → Charity (`...029`), Gifts (`...030`)
-- **Income** (0008) → Salary (`...007`), Interest (`...011`), Dividends (`...012`), Refunds (`...013`), Rental income (`...010`)
-- **Taxes** (0008 + 0027) → Federal income tax (`...113`), State income tax (`...130`), Sales tax (`...114`), Federal tax refund (`...131`), State tax refund (`...132`)
-- **Transfers** (0008) → Transfers in (`...115`), Transfers out (`...116`)
+- **Income** → Salary (`...007`), Interest (`...011`), Dividends (`...012`), Refunds (`...013`), Rental income (`...010`)
+- **Taxes** → Federal income tax (`...113`), State income tax (`...130`), Sales tax (`...114`), Federal tax refund (`...131`), State tax refund (`...132`)
+- **Transfers** → Transfers in (`...115`), Transfers out (`...116`)
+- **Loans** → Auto (`...137`), Heloc (`...138`), Home (`...139`), Personal (`...140`)
+- **Travel** → Airfare (`...143`), Car Rental (`...144`), Hotel (`...145`)
 
-**Insurance (explicit):** The parent **Insurance** includes **home** and **auto** as first-class leaves (`Home insurance`, `Auto insurance`), plus Health, Life, and Other insurance added in migration 0025.
+**PRD alignment:** `docs/FINANCE_APP_PRD.md` stays high-level; **shipped behavior** is summarized here and in **`docs/CHECKPOINT.md`** / **`docs/MVP_BACKLOG.md`**. Small deltas belong in **`docs/CHANGE_HISTORY.md`**.
 
 ---
 
