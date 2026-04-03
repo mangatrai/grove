@@ -228,6 +228,20 @@ export function CategoryRulesPage() {
     });
   }, [filteredBuiltin, categories]);
 
+  const householdRuleGroups = useMemo(() => {
+    const m = new Map<string, CategoryRule[]>();
+    for (const r of filteredHousehold) {
+      m.set(r.categoryId, [...(m.get(r.categoryId) ?? []), r]);
+    }
+    return [...m.entries()].sort(([ka], [kb]) => {
+      const catA = categories.find((c) => c.id === ka);
+      const catB = categories.find((c) => c.id === kb);
+      const la = catA ? categoryLabel(catA, categories) : ka;
+      const lb = catB ? categoryLabel(catB, categories) : kb;
+      return la.localeCompare(lb);
+    });
+  }, [filteredHousehold, categories]);
+
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -272,6 +286,21 @@ export function CategoryRulesPage() {
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Update failed");
+    }
+  }
+
+  async function deleteHouseholdRule(id: string) {
+    if (!window.confirm("Delete this household rule? This cannot be undone.")) {
+      return;
+    }
+    setError(null);
+    try {
+      await apiFetch(`/categories/rules/${id}`, { method: "DELETE" });
+      setEditingId(null);
+      setEditDraft(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete failed");
     }
   }
 
@@ -481,48 +510,66 @@ export function CategoryRulesPage() {
     }
   }
 
-  function exportRulesCsv() {
+  function buildExportCsvRows(originFilter: "all" | "builtin" | "household"): Array<Record<RulesCsvHeader, string>> {
     const out: Array<Record<RulesCsvHeader, string>> = [];
-    for (const b of builtinRules) {
-      const cat = categories.find((c) => c.id === b.categoryId);
-      out.push({
-        origin: "builtin",
-        id: b.id,
-        rule_key: b.ruleKey,
-        pattern: b.pattern,
-        match_type: b.matchType,
-        amount_scope: b.amountScope,
-        category_id: b.categoryId,
-        category_path: cat ? categoryPathForCsv(cat, categories) : "",
-        priority: String(b.priority),
-        confidence: String(b.confidence),
-        enabled: b.enabled ? "true" : "false"
-      });
+    if (originFilter !== "household") {
+      for (const b of builtinRules) {
+        const cat = categories.find((c) => c.id === b.categoryId);
+        out.push({
+          origin: "builtin",
+          id: b.id,
+          rule_key: b.ruleKey,
+          pattern: b.pattern,
+          match_type: b.matchType,
+          amount_scope: b.amountScope,
+          category_id: b.categoryId,
+          category_path: cat ? categoryPathForCsv(cat, categories) : "",
+          priority: String(b.priority),
+          confidence: String(b.confidence),
+          enabled: b.enabled ? "true" : "false"
+        });
+      }
     }
-    for (const r of rules) {
-      const cat = categories.find((c) => c.id === r.categoryId);
-      out.push({
-        origin: "household",
-        id: r.id,
-        rule_key: "",
-        pattern: r.pattern,
-        match_type: r.matchType,
-        amount_scope: "any",
-        category_id: r.categoryId,
-        category_path: cat ? categoryPathForCsv(cat, categories) : "",
-        priority: String(r.priority),
-        confidence: String(r.confidence),
-        enabled: r.enabled ? "true" : "false"
-      });
+    if (originFilter !== "builtin") {
+      for (const r of rules) {
+        const cat = categories.find((c) => c.id === r.categoryId);
+        out.push({
+          origin: "household",
+          id: r.id,
+          rule_key: "",
+          pattern: r.pattern,
+          match_type: r.matchType,
+          amount_scope: "any",
+          category_id: r.categoryId,
+          category_path: cat ? categoryPathForCsv(cat, categories) : "",
+          priority: String(r.priority),
+          confidence: String(r.confidence),
+          enabled: r.enabled ? "true" : "false"
+        });
+      }
     }
-    const csv = buildRulesCsvLines(out);
+    return out;
+  }
+
+  function downloadRulesCsvFile(rows: Array<Record<RulesCsvHeader, string>>, filenameStem: string) {
+    const csv = buildRulesCsvLines(rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `classification-rules-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `${filenameStem}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function exportRulesCsvAll() {
+    downloadRulesCsvFile(buildExportCsvRows("all"), "classification-rules-all");
+  }
+  function exportRulesCsvBuiltin() {
+    downloadRulesCsvFile(buildExportCsvRows("builtin"), "classification-rules-builtin");
+  }
+  function exportRulesCsvHousehold() {
+    downloadRulesCsvFile(buildExportCsvRows("household"), "classification-rules-household");
   }
 
   function onImportFileChange(file: File | null) {
@@ -721,37 +768,48 @@ export function CategoryRulesPage() {
   return (
     <div>
       <div className="card">
-        <h1>Classification rules</h1>
-        <p className="muted">
-          <strong>Household rules</strong> run first, then <strong>built-in (global) rules</strong> stored in the database
-          (lower priority numbers run first within each group). Only <strong>leaf</strong> categories can be assigned.
-        </p>
-        <p className="muted">
-          Built-in rules apply to <strong>all households</strong> on this server. Owners and admins can edit them;
-          members can view only. Add household rules to override globals for your home.
-        </p>
-        <p className="muted">
-          <Link to="/categories">Back to categories</Link>
-          {" · "}
-          <Link to="/transactions">Transactions</Link>
-          {" · "}
-          <Link to="/imports">Import</Link> — upload, parse, and run the read-only <strong>classification matcher preview</strong> on the
-          session page (recent sessions and <strong>Copy id</strong> live there too).
-        </p>
+        <div className="category-rules-page__section">
+          <h1 style={{ marginTop: 0 }}>Classification rules</h1>
+          <p className="muted">
+            <strong>Household rules</strong> run first, then <strong>built-in (global) rules</strong> stored in the database
+            (lower priority numbers run first within each group). Only <strong>leaf</strong> categories can be assigned.
+          </p>
+          <p className="muted">
+            Built-in rules apply to <strong>all households</strong> on this server. Owners and admins can edit them;
+            members can view only. Add household rules to override globals for your home.
+          </p>
+          <p className="muted">
+            <Link to="/categories">Back to categories</Link>
+            {" · "}
+            <Link to="/transactions">Transactions</Link>
+            {" · "}
+            <Link to="/imports">Import</Link> — upload, parse, and run the read-only <strong>classification matcher preview</strong> on the
+            session page (recent sessions and <strong>Copy id</strong> live there too).
+          </p>
+        </div>
 
         {error ? <p className="error">{error}</p> : null}
         {recatMsg ? <p className="muted">{recatMsg}</p> : null}
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.25rem" }}>Import / export (CSV)</h2>
+        <div className="category-rules-page__section">
+        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Import / export (CSV)</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Export includes both built-in and household rules in one file (<code>origin</code> column). Import is{" "}
+          Export built-in, household, or both in one file (<code>origin</code> column). Import is{" "}
           <strong>create-only</strong> (existing rule <code>id</code> values are ignored). Use{" "}
           <code>category_id</code> or <code>category_path</code> (e.g. <code>Home &gt; HOA Fees</code>).
         </p>
-        <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
-          <button type="button" className="secondary" onClick={exportRulesCsv} disabled={loading}>
-            Export rules (CSV)
+        <div className="category-rules-page__export-row">
+          <button type="button" className="secondary" onClick={exportRulesCsvAll} disabled={loading}>
+            Export all (CSV)
           </button>
+          <button type="button" className="secondary" onClick={exportRulesCsvBuiltin} disabled={loading}>
+            Export built-in (CSV)
+          </button>
+          <button type="button" className="secondary" onClick={exportRulesCsvHousehold} disabled={loading}>
+            Export household (CSV)
+          </button>
+        </div>
+        <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end", marginTop: "0.75rem" }}>
           <label className="category-rules-page__field" style={{ minWidth: "11rem" }}>
             Import as
             <select
@@ -820,8 +878,10 @@ export function CategoryRulesPage() {
             </table>
           </div>
         ) : null}
+        </div>
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.25rem" }}>Search &amp; test</h2>
+        <div className="category-rules-page__section">
+        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Search &amp; test</h2>
         <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
           <label className="category-rules-page__field" style={{ minWidth: "12rem", flex: "1 1 12rem" }}>
             Filter rules
@@ -877,8 +937,10 @@ export function CategoryRulesPage() {
             Re-apply (all posted)
           </button>
         </div>
+        </div>
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Built-in (global) rules</h2>
+        <div className="category-rules-page__section">
+        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Built-in (global) rules</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Grouped by target category and amount scope. These rules apply to <strong>every household</strong> on this server;
           only installation default leaves are valid targets (see add form below).
@@ -1207,8 +1269,10 @@ export function CategoryRulesPage() {
             </form>
           </>
         ) : null}
+        </div>
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Add household rules</h2>
+        <div className="category-rules-page__section">
+        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Add household rules</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Household rules run <strong>before</strong> built-ins and can target any assignable leaf for your home, including
           categories you added. They <strong>override</strong> global rules when both match.
@@ -1292,155 +1356,193 @@ export function CategoryRulesPage() {
         ) : null}
 
         <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Your household rules</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Grouped by target category (same layout as built-in rules).
+        </p>
         {!loading && filteredHousehold.length === 0 ? <p className="muted">No household rules match filter.</p> : null}
         {!loading && filteredHousehold.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
-            <table className="ledger-table category-rules-page__table">
-              <thead>
-                <tr>
-                  <th scope="col">Source</th>
-                  <th scope="col">On</th>
-                  <th scope="col">Pattern</th>
-                  <th scope="col">Match</th>
-                  <th scope="col">Category</th>
-                  <th scope="col">Pri</th>
-                  <th scope="col">Conf</th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {filteredHousehold.map((r) => {
-                  const cat = categories.find((c) => c.id === r.categoryId);
-                  const isEditing = editingId === r.id;
-                  return (
-                    <tr key={r.id}>
-                      <td>Household</td>
-                      <td>
-                        {isEditing && editDraft ? (
-                          <input
-                            type="checkbox"
-                            checked={editDraft.enabled}
-                            onChange={(e) =>
-                              setEditDraft((d) => (d ? { ...d, enabled: e.target.checked } : d))
-                            }
-                          />
-                        ) : (
-                          <input
-                            type="checkbox"
-                            checked={r.enabled}
-                            onChange={() => void patchRule(r.id, { enabled: !r.enabled })}
-                            aria-label={`Enable rule ${r.pattern}`}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        {isEditing && editDraft ? (
-                          <input
-                            value={editDraft.patterns}
-                            onChange={(e) => setEditDraft((d) => (d ? { ...d, patterns: e.target.value } : d))}
-                          />
-                        ) : (
-                          <code className="category-rules-page__pattern">{r.pattern}</code>
-                        )}
-                      </td>
-                      <td>
-                        {isEditing && editDraft ? (
-                          <select
-                            value={editDraft.matchType}
-                            onChange={(e) =>
-                              setEditDraft((d) =>
-                                d ? { ...d, matchType: e.target.value as MatchType } : d
-                              )
-                            }
-                          >
-                            <option value="contains">contains</option>
-                            <option value="prefix">prefix</option>
-                            <option value="regex">regex</option>
-                          </select>
-                        ) : (
-                          r.matchType
-                        )}
-                      </td>
-                      <td>
-                        {isEditing && editDraft ? (
-                          <select
-                            value={editDraft.categoryId}
-                            onChange={(e) =>
-                              setEditDraft((d) => (d ? { ...d, categoryId: e.target.value } : d))
-                            }
-                          >
-                            {leaves.map((c) => (
-                              <option key={c.id} value={c.id}>
-                                {categoryLabel(c, categories)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : cat ? (
-                          categoryLabel(cat, categories)
-                        ) : (
-                          <span className="muted">(missing)</span>
-                        )}
-                      </td>
-                      <td>
-                        {isEditing && editDraft ? (
-                          <input
-                            type="number"
-                            min={0}
-                            max={10000}
-                            className="category-rules-page__num"
-                            value={editDraft.priority}
-                            onChange={(e) =>
-                              setEditDraft((d) =>
-                                d ? { ...d, priority: Number(e.target.value) } : d
-                              )
-                            }
-                          />
-                        ) : (
-                          r.priority
-                        )}
-                      </td>
-                      <td>
-                        {isEditing && editDraft ? (
-                          <input
-                            type="number"
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            className="category-rules-page__num"
-                            value={editDraft.confidence}
-                            onChange={(e) =>
-                              setEditDraft((d) =>
-                                d ? { ...d, confidence: Number(e.target.value) } : d
-                              )
-                            }
-                          />
-                        ) : (
-                          r.confidence.toFixed(2)
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <span className="category-rules-page__row-actions">
-                            <button type="button" disabled={saving} onClick={() => void saveEdit()}>
-                              Save
-                            </button>
-                            <button type="button" className="secondary" onClick={cancelEdit}>
-                              Cancel
-                            </button>
-                          </span>
-                        ) : (
-                          <button type="button" className="secondary" onClick={() => startEdit(r)}>
-                            Edit
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div>
+            {householdRuleGroups.map(([categoryId, groupRules]) => {
+              const cat = categories.find((c) => c.id === categoryId);
+              const pri = groupRules.map((g) => g.priority);
+              const priMin = Math.min(...pri);
+              const priMax = Math.max(...pri);
+              const priRange =
+                priMin === priMax ? `priority ${priMin}` : `priority ${priMin}–${priMax}`;
+              const summaryTitle = `${cat ? categoryLabel(cat, categories) : "(unknown category)"} · ${groupRules.length} rule(s) · ${priRange}`;
+              return (
+                <details key={categoryId} style={{ marginBottom: "1rem" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 600 }}>{summaryTitle}</summary>
+                  <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
+                    <table className="ledger-table category-rules-page__table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Source</th>
+                          <th scope="col">On</th>
+                          <th scope="col">Pattern</th>
+                          <th scope="col">Match</th>
+                          <th scope="col">Category</th>
+                          <th scope="col">Pri</th>
+                          <th scope="col">Conf</th>
+                          <th scope="col" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupRules.map((r) => {
+                          const rowCat = categories.find((c) => c.id === r.categoryId);
+                          const isEditing = editingId === r.id;
+                          return (
+                            <tr key={r.id}>
+                              <td>Household</td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={editDraft.enabled}
+                                    onChange={(e) =>
+                                      setEditDraft((d) => (d ? { ...d, enabled: e.target.checked } : d))
+                                    }
+                                  />
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={r.enabled}
+                                    onChange={() => void patchRule(r.id, { enabled: !r.enabled })}
+                                    aria-label={`Enable rule ${r.pattern}`}
+                                  />
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <input
+                                    value={editDraft.patterns}
+                                    onChange={(e) =>
+                                      setEditDraft((d) => (d ? { ...d, patterns: e.target.value } : d))
+                                    }
+                                  />
+                                ) : (
+                                  <code className="category-rules-page__pattern">{r.pattern}</code>
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <select
+                                    value={editDraft.matchType}
+                                    onChange={(e) =>
+                                      setEditDraft((d) =>
+                                        d ? { ...d, matchType: e.target.value as MatchType } : d
+                                      )
+                                    }
+                                  >
+                                    <option value="contains">contains</option>
+                                    <option value="prefix">prefix</option>
+                                    <option value="regex">regex</option>
+                                  </select>
+                                ) : (
+                                  r.matchType
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <select
+                                    value={editDraft.categoryId}
+                                    onChange={(e) =>
+                                      setEditDraft((d) => (d ? { ...d, categoryId: e.target.value } : d))
+                                    }
+                                  >
+                                    {leaves.map((c) => (
+                                      <option key={c.id} value={c.id}>
+                                        {categoryLabel(c, categories)}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : rowCat ? (
+                                  categoryLabel(rowCat, categories)
+                                ) : (
+                                  <span className="muted">(missing)</span>
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={10000}
+                                    className="category-rules-page__num"
+                                    value={editDraft.priority}
+                                    onChange={(e) =>
+                                      setEditDraft((d) =>
+                                        d ? { ...d, priority: Number(e.target.value) } : d
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  r.priority
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={1}
+                                    step={0.05}
+                                    className="category-rules-page__num"
+                                    value={editDraft.confidence}
+                                    onChange={(e) =>
+                                      setEditDraft((d) =>
+                                        d ? { ...d, confidence: Number(e.target.value) } : d
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  r.confidence.toFixed(2)
+                                )}
+                              </td>
+                              <td>
+                                {isEditing ? (
+                                  <span className="category-rules-page__row-actions">
+                                    <button type="button" disabled={saving} onClick={() => void saveEdit()}>
+                                      Save
+                                    </button>
+                                    <button type="button" className="secondary" onClick={cancelEdit}>
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      onClick={() => void deleteHouseholdRule(r.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <span className="category-rules-page__row-actions">
+                                    <button type="button" className="secondary" onClick={() => startEdit(r)}>
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      onClick={() => void deleteHouseholdRule(r.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              );
+            })}
           </div>
         ) : null}
+        </div>
       </div>
     </div>
   );

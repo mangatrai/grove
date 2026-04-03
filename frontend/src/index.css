@@ -1343,6 +1343,10 @@ table.ledger-table thead th {
   border-radius: 6px;
   padding: 0.5rem 0.65rem;
   margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.25rem;
 }
 
 .transactions-modal__money-flow legend {
@@ -2078,6 +2082,27 @@ select.ledger-category-select {
 
 .category-rules-page__form--builtin > .category-rules-page__form-span {
   grid-column: 1 / -1;
+}
+
+.category-rules-page__section {
+  margin-top: 1.25rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.category-rules-page__section > h2:first-child,
+.category-rules-page__section > h3:first-child {
+  margin-top: 0;
+}
+
+.category-rules-page__export-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
 }
 
 .category-rules-page__field {
