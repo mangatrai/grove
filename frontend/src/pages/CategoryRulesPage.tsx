@@ -891,7 +891,12 @@ export function CategoryRulesPage() {
               const [catId, scopeStr] = key.split("\u0000");
               const scope = scopeStr as AmountScope;
               const cat = categories.find((c) => c.id === catId);
-              const summaryTitle = `${cat ? categoryLabel(cat, categories) : "(unknown category)"} · ${amountScopeShort(scope)} (${groupRules.length})`;
+              const pri = groupRules.map((g) => g.priority);
+              const priMin = Math.min(...pri);
+              const priMax = Math.max(...pri);
+              const priRange =
+                priMin === priMax ? `priority ${priMin}` : `priority ${priMin}–${priMax}`;
+              const summaryTitle = `${cat ? categoryLabel(cat, categories) : "(unknown category)"} · ${amountScopeShort(scope)} · ${groupRules.length} rule(s) · ${priRange}`;
               return (
                 <details key={key} style={{ marginBottom: "1rem" }}>
                   <summary style={{ cursor: "pointer", fontWeight: 600 }}>{summaryTitle}</summary>
