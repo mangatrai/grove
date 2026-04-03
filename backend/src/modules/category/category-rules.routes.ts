@@ -56,6 +56,7 @@ const createBodySchema = z
     patterns: z.string().optional(),
     matchType: matchTypeSchema,
     categoryId: z.string().uuid(),
+    amountScope: amountScopeSchema.optional().default("any"),
     confidence: z.number().min(0).max(1).optional().default(0.85),
     priority: z.number().int().min(0).max(10000).optional().default(100),
     enabled: z.boolean().optional().default(true)
@@ -83,6 +84,7 @@ categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
       patternsRaw: body.patterns!,
       matchType: body.matchType,
       categoryId: body.categoryId,
+      amountScope: body.amountScope,
       confidence: body.confidence,
       priority: body.priority,
       enabled: body.enabled
@@ -99,6 +101,7 @@ categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
     pattern: body.pattern!,
     matchType: body.matchType,
     categoryId: body.categoryId,
+    amountScope: body.amountScope,
     confidence: body.confidence,
     priority: body.priority,
     enabled: body.enabled
@@ -117,6 +120,7 @@ const bulkHouseholdRowSchema = z
     matchType: matchTypeSchema,
     categoryId: z.string().uuid().optional(),
     categoryPath: z.string().optional(),
+    amountScope: amountScopeSchema.optional(),
     confidence: z.number().min(0).max(1).optional(),
     priority: z.number().int().min(0).max(10000).optional(),
     enabled: z.boolean().optional()
@@ -265,6 +269,7 @@ const fromLedgerSchema = z.object({
   categoryId: z.string().uuid(),
   matchType: matchTypeSchema,
   scope: z.enum(["contains", "prefix"]),
+  amountScope: amountScopeSchema.optional().default("any"),
   confidence: z.number().min(0).max(1).optional().default(0.9),
   priority: z.number().int().min(0).max(10000).optional().default(100),
   enabled: z.boolean().optional().default(true)
@@ -281,6 +286,7 @@ categoryRulesRouter.post("/from-ledger", (req: AuthenticatedRequest, res) => {
     categoryId: parsed.data.categoryId,
     matchType: parsed.data.matchType,
     scope: parsed.data.scope,
+    amountScope: parsed.data.amountScope,
     confidence: parsed.data.confidence,
     priority: parsed.data.priority,
     enabled: parsed.data.enabled
@@ -320,6 +326,7 @@ const patchSchema = z
     pattern: z.string().min(1).optional(),
     matchType: matchTypeSchema.optional(),
     categoryId: z.string().uuid().optional(),
+    amountScope: amountScopeSchema.optional(),
     confidence: z.number().min(0).max(1).optional(),
     priority: z.number().int().min(0).max(10000).optional(),
     enabled: z.boolean().optional()

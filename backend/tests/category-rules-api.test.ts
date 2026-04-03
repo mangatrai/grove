@@ -71,6 +71,7 @@ describe("category rules API and classification explainability", () => {
     });
     expect(createRes.status).toBe(201);
     expect(createRes.body.rule.enabled).toBe(true);
+    expect(createRes.body.rule.amountScope).toBe("any");
     const ruleId = createRes.body.rule.id as string;
 
     const listRes = await request(app).get("/categories/rules").set("authorization", `Bearer ${token}`);
@@ -86,6 +87,34 @@ describe("category rules API and classification explainability", () => {
     expect(disableRes.status).toBe(200);
     expect(disableRes.body.rule.enabled).toBe(false);
     expect(disableRes.body.rule.confidence).toBe(0.65);
+  });
+
+  it("persists amountScope on household rules and applies it in POST /categories/rules/test", async () => {
+    const token = await loginAndGetToken();
+    const pattern = `amtscope_${Date.now()}`;
+    const createRes = await request(app).post("/categories/rules").set("authorization", `Bearer ${token}`).send({
+      pattern,
+      matchType: "contains",
+      categoryId: GROCERIES_ID,
+      amountScope: "debit_only",
+      priority: 5
+    });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.rule.amountScope).toBe("debit_only");
+
+    const testCredit = await request(app).post("/categories/rules/test").set("authorization", `Bearer ${token}`).send({
+      description: pattern,
+      signedAmount: 100
+    });
+    expect(testCredit.status).toBe(200);
+    expect(testCredit.body.classification.categoryId).toBeNull();
+
+    const testDebit = await request(app).post("/categories/rules/test").set("authorization", `Bearer ${token}`).send({
+      description: pattern,
+      signedAmount: -100
+    });
+    expect(testDebit.status).toBe(200);
+    expect(testDebit.body.classification.categoryId).toBe(GROCERIES_ID);
   });
 
   it("rejects unusable category in rule create (parent category)", async () => {

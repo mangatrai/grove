@@ -27,6 +27,7 @@ interface CategoryRuleDbRow {
   matchType: MatchType;
   categoryId: string;
   confidence: number;
+  amountScope: RuleAmountScope;
   priority: number;
   enabled: number;
   createdAt: string;
@@ -41,7 +42,7 @@ function mapRule(row: CategoryRuleDbRow): CategoryRuleRow {
     matchType: row.matchType,
     categoryId: row.categoryId,
     confidence: row.confidence,
-    amountScope: "any",
+    amountScope: row.amountScope,
     ruleOrigin: "household",
     priority: row.priority,
     enabled: row.enabled === 1,
@@ -103,6 +104,7 @@ export function listCategoryRulesForHousehold(householdId: string): CategoryRule
          match_type AS matchType,
          category_id AS categoryId,
          confidence,
+         amount_scope AS amountScope,
          priority,
          enabled,
          created_at AS createdAt,
@@ -134,7 +136,7 @@ export function listEnabledDbRulesForClassification(householdId: string): DbCate
            match_type,
            category_id,
            confidence,
-           'any' AS amount_scope,
+           amount_scope,
            'household' AS rule_origin,
            0 AS seg,
            priority,
@@ -424,8 +426,13 @@ type RuleValidationFailureCode =
   | "INVALID_CATEGORY"
   | "INVALID_CONFIDENCE"
   | "INVALID_PRIORITY"
+  | "INVALID_AMOUNT_SCOPE"
   /** Global built-in rules may only target default (non–household-scoped) leaf categories. */
   | "BUILTIN_REQUIRES_GLOBAL_LEAF";
+
+function isRuleAmountScope(v: unknown): v is RuleAmountScope {
+  return v === "any" || v === "credit_only" || v === "debit_only";
+}
 
 export type CreateRuleFailure = { ok: false; code: RuleValidationFailureCode };
 
@@ -435,6 +442,7 @@ export function createCategoryRuleForHousehold(
     pattern: string;
     matchType: MatchType;
     categoryId: string;
+    amountScope: RuleAmountScope;
     confidence: number;
     priority: number;
     enabled: boolean;
@@ -443,6 +451,9 @@ export function createCategoryRuleForHousehold(
   const pattern = normalizePattern(input.pattern);
   if (!isPatternValid(pattern, input.matchType)) {
     return { ok: false, code: "INVALID_PATTERN" };
+  }
+  if (!isRuleAmountScope(input.amountScope)) {
+    return { ok: false, code: "INVALID_AMOUNT_SCOPE" };
   }
   if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
     return { ok: false, code: "INVALID_CONFIDENCE" };
@@ -457,9 +468,19 @@ export function createCategoryRuleForHousehold(
   const id = crypto.randomUUID();
   db.prepare(
     `INSERT INTO category_rule (
-       id, household_id, pattern, match_type, category_id, confidence, priority, enabled, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-  ).run(id, householdId, pattern, input.matchType, input.categoryId, input.confidence, input.priority, input.enabled ? 1 : 0);
+       id, household_id, pattern, match_type, category_id, confidence, amount_scope, priority, enabled, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+  ).run(
+    id,
+    householdId,
+    pattern,
+    input.matchType,
+    input.categoryId,
+    input.confidence,
+    input.amountScope,
+    input.priority,
+    input.enabled ? 1 : 0
+  );
 
   const row = db
     .prepare(
@@ -470,6 +491,7 @@ export function createCategoryRuleForHousehold(
          match_type AS matchType,
          category_id AS categoryId,
          confidence,
+         amount_scope AS amountScope,
          priority,
          enabled,
          created_at AS createdAt,
@@ -490,6 +512,7 @@ export function bulkCreateCategoryRulesForHousehold(
     matchType: MatchType;
     categoryId?: string | null;
     categoryPath?: string | null;
+    amountScope?: RuleAmountScope;
     confidence?: number;
     priority?: number;
     enabled?: boolean;
@@ -517,10 +540,16 @@ export function bulkCreateCategoryRulesForHousehold(
       continue;
     }
 
+    const scope = row.amountScope ?? "any";
+    if (!isRuleAmountScope(scope)) {
+      errors.push({ index: i, code: "INVALID_AMOUNT_SCOPE", message: "Invalid amount_scope" });
+      continue;
+    }
     const out = createCategoryRuleForHousehold(householdId, {
       pattern: row.pattern,
       matchType: row.matchType,
       categoryId: resolved.id,
+      amountScope: scope,
       confidence: row.confidence ?? 0.85,
       priority: row.priority ?? 100,
       enabled: row.enabled ?? true
@@ -534,7 +563,9 @@ export function bulkCreateCategoryRulesForHousehold(
             ? "Invalid pattern or regex"
             : out.code === "INVALID_CATEGORY"
               ? "Category cannot be assigned"
-              : `Cannot create rule (${out.code})`
+              : out.code === "INVALID_AMOUNT_SCOPE"
+                ? "Invalid amount_scope"
+                : `Cannot create rule (${out.code})`
       });
       continue;
     }
@@ -636,6 +667,7 @@ export function createCategoryRulesFromPatterns(
     patternsRaw: string;
     matchType: MatchType;
     categoryId: string;
+    amountScope: RuleAmountScope;
     confidence: number;
     priority: number;
     enabled: boolean;
@@ -645,12 +677,16 @@ export function createCategoryRulesFromPatterns(
   if (patterns.length === 0) {
     return { ok: false, code: "INVALID_PATTERN" };
   }
+  if (!isRuleAmountScope(input.amountScope)) {
+    return { ok: false, code: "INVALID_AMOUNT_SCOPE" };
+  }
   const created: CategoryRuleRow[] = [];
   for (let i = 0; i < patterns.length; i++) {
     const single = createCategoryRuleForHousehold(householdId, {
       pattern: patterns[i]!,
       matchType: input.matchType,
       categoryId: input.categoryId,
+      amountScope: input.amountScope,
       confidence: input.confidence,
       priority: input.priority + i,
       enabled: input.enabled
@@ -670,6 +706,7 @@ export function createRuleFromLedgerTransaction(
     categoryId: string;
     matchType: MatchType;
     scope: "contains" | "prefix";
+    amountScope: RuleAmountScope;
     confidence: number;
     priority: number;
     enabled: boolean;
@@ -701,6 +738,7 @@ export function createRuleFromLedgerTransaction(
     pattern: pattern.slice(0, 120),
     matchType: input.matchType,
     categoryId: input.categoryId,
+    amountScope: input.amountScope,
     confidence: input.confidence,
     priority: input.priority,
     enabled: input.enabled
@@ -716,6 +754,7 @@ export function updateCategoryRuleForHousehold(
     pattern?: string;
     matchType?: MatchType;
     categoryId?: string;
+    amountScope?: RuleAmountScope;
     confidence?: number;
     priority?: number;
     enabled?: boolean;
@@ -730,6 +769,7 @@ export function updateCategoryRuleForHousehold(
          match_type AS matchType,
          category_id AS categoryId,
          confidence,
+         amount_scope AS amountScope,
          priority,
          enabled,
          created_at AS createdAt,
@@ -745,12 +785,16 @@ export function updateCategoryRuleForHousehold(
   const nextMatchType = updates.matchType ?? existing.matchType;
   const nextPattern = normalizePattern(updates.pattern ?? existing.pattern);
   const nextCategoryId = updates.categoryId ?? existing.categoryId;
+  const nextAmountScope = updates.amountScope ?? existing.amountScope;
   const nextConfidence = updates.confidence ?? existing.confidence;
   const nextPriority = updates.priority ?? existing.priority;
   const nextEnabled = updates.enabled ?? (existing.enabled === 1);
 
   if (!isPatternValid(nextPattern, nextMatchType)) {
     return { ok: false, code: "INVALID_PATTERN" };
+  }
+  if (!isRuleAmountScope(nextAmountScope)) {
+    return { ok: false, code: "INVALID_AMOUNT_SCOPE" };
   }
   if (!Number.isFinite(nextConfidence) || nextConfidence < 0 || nextConfidence > 1) {
     return { ok: false, code: "INVALID_CONFIDENCE" };
@@ -764,9 +808,19 @@ export function updateCategoryRuleForHousehold(
 
   db.prepare(
     `UPDATE category_rule
-     SET pattern = ?, match_type = ?, category_id = ?, confidence = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+     SET pattern = ?, match_type = ?, category_id = ?, confidence = ?, amount_scope = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND household_id = ?`
-  ).run(nextPattern, nextMatchType, nextCategoryId, nextConfidence, nextPriority, nextEnabled ? 1 : 0, ruleId, householdId);
+  ).run(
+    nextPattern,
+    nextMatchType,
+    nextCategoryId,
+    nextConfidence,
+    nextAmountScope,
+    nextPriority,
+    nextEnabled ? 1 : 0,
+    ruleId,
+    householdId
+  );
 
   const row = db
     .prepare(
@@ -777,6 +831,7 @@ export function updateCategoryRuleForHousehold(
          match_type AS matchType,
          category_id AS categoryId,
          confidence,
+         amount_scope AS amountScope,
          priority,
          enabled,
          created_at AS createdAt,

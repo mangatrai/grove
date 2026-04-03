@@ -101,4 +101,21 @@ describe("category rules (Epic 5.1)", () => {
     const r = classifyWithRules(norm, -50, [rule]);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.groceries);
   });
+
+  it("household debit_only rule skips credit amounts", () => {
+    const norm = normalizeDescriptionForFingerprint("SCOPE_TEST_VENDOR POS");
+    const rules: DbCategoryRule[] = [
+      {
+        id: "scope-debit",
+        pattern: "scope_test_vendor",
+        matchType: "contains",
+        categoryId: DEFAULT_CATEGORY_IDS.groceries,
+        confidence: 1,
+        amountScope: "debit_only",
+        ruleOrigin: "household"
+      }
+    ];
+    expect(classifyWithRules(norm, 50, rules).categoryId).toBeNull();
+    expect(classifyWithRules(norm, -50, rules).categoryId).toBe(DEFAULT_CATEGORY_IDS.groceries);
+  });
 });
