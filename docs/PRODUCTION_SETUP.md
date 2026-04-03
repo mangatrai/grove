@@ -24,6 +24,21 @@ Schema is applied in order from `backend/db/migrations/` via `scripts/db.mjs` (t
 
 Curated U.S. institution labels and household custom names are app-level (see Connected accounts). No separate production SQL is required for the catalog.
 
+## Koyeb (Node.js) — API service with SQLite
+
+[Koyeb](https://www.koyeb.com/) detects this repo as **Node.js** via the root [`package.json`](../package.json). The backend matches their **Express**-style deployment model (`npm run build` → `node dist/server.js`), not Next.js/Nuxt.
+
+| Topic | What to configure |
+|--------|-------------------|
+| **Package manager** | **npm** (workspaces). Use install at repo root unless you set the service **root directory** to `backend/`. |
+| **Node version** | Root and `backend` declare `"engines": { "node": "20.x" }` — set the same on Koyeb if you pin runtime. |
+| **Build (monorepo root)** | `npm ci` then `npm run build -w backend` (API only), or `npm run build` to also build the Vite frontend. |
+| **Start command** | From repo root: `npm run start -w backend`. If the service root is `backend/`: `npm ci && npm run build && npm start`. |
+| **`PORT`** | The API reads `PORT` (see backend `env.ts`); Koyeb injects `PORT` — no code change needed. |
+| **`NODE_ENV=production`** | Runtime is compiled JS; **devDependencies** (e.g. `tsx`, `typescript`) are not required at start. You only need `NPM_CONFIG_PRODUCTION=false` if something in **devDependencies** must exist at runtime (not the case for the default start script). |
+| **SQLite file** | Default DB path is under `./data/` (see `DB_PATH` / `DB_PATH_PROD`). Koyeb’s filesystem is **ephemeral** unless you attach a **persistent volume** and set `DB_PATH` (or equivalent) to a path on that volume. |
+| **Frontend (SPA)** | The Express app does **not** serve `frontend/dist` today. Options: a **second** Koyeb static service for the Vite build, a CDN, or future work to serve static files from the API and configure `VITE_*` / API base URL accordingly. |
+
 ## Postgres + Koyeb readiness (planned, not shipped)
 
 This app is currently SQLite-first in production. Before switching to hosted Postgres/Koyeb, track and complete:

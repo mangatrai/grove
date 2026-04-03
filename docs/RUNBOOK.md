@@ -114,6 +114,8 @@ Vite reads env from the **repository root** (`envDir` in [`frontend/vite.config.
 
 **Production:** change the default password immediately; consider not shipping dev seeds (see `PRODUCTION_SETUP.md`).
 
+**Hosted API (e.g. Koyeb):** Build/start commands, `PORT`, SQLite on a volume, and the split between API vs static frontend are summarized in [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) (section *Koyeb (Node.js) — API service with SQLite*).
+
 ## 8. Smoke checks
 
 - Sign in succeeds; **Home** loads.
