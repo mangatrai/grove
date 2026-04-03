@@ -15,6 +15,7 @@ import {
   createCategoryRulesFromPatterns,
   createGlobalCategoryRule,
   createRuleFromLedgerTransaction,
+  deleteCategoryRuleForHousehold,
   deleteGlobalCategoryRule,
   listCategoryRulesForHousehold,
   listEnabledDbRulesForClassification,
@@ -383,6 +384,16 @@ categoryRulesRouter.patch("/builtin/:id", requireRole(["owner", "admin"]), (req:
 
 categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
   const out = deleteGlobalCategoryRule(req.params.id);
+  if (!out.ok) {
+    res.status(404).json({ message: "Rule not found", code: out.code });
+    return;
+  }
+  res.status(204).send();
+});
+
+categoryRulesRouter.delete("/:id", (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const out = deleteCategoryRuleForHousehold(householdId, req.params.id);
   if (!out.ok) {
     res.status(404).json({ message: "Rule not found", code: out.code });
     return;

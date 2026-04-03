@@ -787,3 +787,14 @@ export function updateCategoryRuleForHousehold(
     .get(ruleId, householdId) as CategoryRuleDbRow;
   return { ok: true, data: mapRule(row) };
 }
+
+export function deleteCategoryRuleForHousehold(
+  householdId: string,
+  ruleId: string
+): { ok: true } | { ok: false; code: "NOT_FOUND" } {
+  const res = db.prepare(`DELETE FROM category_rule WHERE id = ? AND household_id = ?`).run(ruleId, householdId);
+  if (res.changes === 0) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  return { ok: true };
+}
