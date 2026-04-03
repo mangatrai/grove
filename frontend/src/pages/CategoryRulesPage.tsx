@@ -41,6 +41,7 @@ type CategoryRule = {
   pattern: string;
   matchType: MatchType;
   categoryId: string;
+  amountScope: AmountScope;
   confidence: number;
   priority: number;
   enabled: boolean;
@@ -82,6 +83,7 @@ const emptyForm = {
   patterns: "",
   matchType: "contains" as MatchType,
   categoryId: "",
+  amountScope: "any" as AmountScope,
   priority: 100,
   confidence: 0.85,
   enabled: true
@@ -203,7 +205,13 @@ export function CategoryRulesPage() {
     return rules.filter((r) => {
       const cat = categories.find((c) => c.id === r.categoryId);
       const cn = cat ? categoryLabel(cat, categories).toLowerCase() : "";
-      return r.pattern.toLowerCase().includes(q) || cn.includes(q) || r.matchType.includes(q);
+      const scope = (r.amountScope ?? "any").toLowerCase();
+      return (
+        r.pattern.toLowerCase().includes(q) ||
+        cn.includes(q) ||
+        r.matchType.includes(q) ||
+        scope.includes(q)
+      );
     });
   }, [rules, ruleFilter, categories]);
 
@@ -231,14 +239,22 @@ export function CategoryRulesPage() {
   const householdRuleGroups = useMemo(() => {
     const m = new Map<string, CategoryRule[]>();
     for (const r of filteredHousehold) {
-      m.set(r.categoryId, [...(m.get(r.categoryId) ?? []), r]);
+      const scope = r.amountScope ?? "any";
+      const k = `${r.categoryId}\u0000${scope}`;
+      m.set(k, [...(m.get(k) ?? []), r]);
     }
     return [...m.entries()].sort(([ka], [kb]) => {
-      const catA = categories.find((c) => c.id === ka);
-      const catB = categories.find((c) => c.id === kb);
-      const la = catA ? categoryLabel(catA, categories) : ka;
-      const lb = catB ? categoryLabel(catB, categories) : kb;
-      return la.localeCompare(lb);
+      const [aCat, aScope] = ka.split("\u0000");
+      const [bCat, bScope] = kb.split("\u0000");
+      const catA = categories.find((c) => c.id === aCat);
+      const catB = categories.find((c) => c.id === bCat);
+      const la = catA ? categoryLabel(catA, categories) : aCat;
+      const lb = catB ? categoryLabel(catB, categories) : bCat;
+      const d = la.localeCompare(lb);
+      if (d !== 0) {
+        return d;
+      }
+      return aScope.localeCompare(bScope);
     });
   }, [filteredHousehold, categories]);
 
@@ -262,6 +278,7 @@ export function CategoryRulesPage() {
           patterns,
           matchType: form.matchType,
           categoryId: form.categoryId,
+          amountScope: form.amountScope,
           priority: form.priority,
           confidence: form.confidence,
           enabled: form.enabled
@@ -310,6 +327,7 @@ export function CategoryRulesPage() {
       patterns: r.pattern,
       matchType: r.matchType,
       categoryId: r.categoryId,
+      amountScope: r.amountScope ?? "any",
       priority: r.priority,
       confidence: r.confidence,
       enabled: r.enabled
@@ -338,6 +356,7 @@ export function CategoryRulesPage() {
           pattern,
           matchType: editDraft.matchType,
           categoryId: editDraft.categoryId,
+          amountScope: editDraft.amountScope,
           priority: editDraft.priority,
           confidence: editDraft.confidence,
           enabled: editDraft.enabled
@@ -539,7 +558,7 @@ export function CategoryRulesPage() {
           rule_key: "",
           pattern: r.pattern,
           match_type: r.matchType,
-          amount_scope: "any",
+          amount_scope: r.amountScope ?? "any",
           category_id: r.categoryId,
           category_path: cat ? categoryPathForCsv(cat, categories) : "",
           priority: String(r.priority),
@@ -624,6 +643,7 @@ export function CategoryRulesPage() {
         matchType: MatchType;
         categoryId?: string;
         categoryPath?: string;
+        amountScope?: AmountScope;
         confidence?: number;
         priority?: number;
         enabled?: boolean;
@@ -639,11 +659,17 @@ export function CategoryRulesPage() {
         if (!categoryId && !categoryPath) {
           continue;
         }
+        let amountScope: AmountScope = "any";
+        const ascope = (row.amount_scope ?? "").trim().toLowerCase();
+        if (ascope && amountScopes.has(ascope as AmountScope)) {
+          amountScope = ascope as AmountScope;
+        }
         const priority = Number(row.priority);
         const confidence = Number(row.confidence);
         rules.push({
           pattern,
           matchType: mt,
+          amountScope,
           ...(categoryId ? { categoryId } : {}),
           ...(categoryPath ? { categoryPath } : {}),
           ...(Number.isFinite(confidence) ? { confidence } : {}),
@@ -1300,6 +1326,17 @@ export function CategoryRulesPage() {
             </select>
           </label>
           <label className="category-rules-page__field">
+            Amount scope
+            <select
+              value={form.amountScope}
+              onChange={(e) => setForm((f) => ({ ...f, amountScope: e.target.value as AmountScope }))}
+            >
+              <option value="any">Any amount</option>
+              <option value="credit_only">Credits only</option>
+              <option value="debit_only">Debits only</option>
+            </select>
+          </label>
+          <label className="category-rules-page__field">
             Category
             <select
               value={form.categoryId}
@@ -1357,21 +1394,23 @@ export function CategoryRulesPage() {
 
         <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Your household rules</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Grouped by target category (same layout as built-in rules).
+          Grouped by target category and amount scope (same layout as built-in rules).
         </p>
         {!loading && filteredHousehold.length === 0 ? <p className="muted">No household rules match filter.</p> : null}
         {!loading && filteredHousehold.length > 0 ? (
           <div>
-            {householdRuleGroups.map(([categoryId, groupRules]) => {
-              const cat = categories.find((c) => c.id === categoryId);
+            {householdRuleGroups.map(([groupKey, groupRules]) => {
+              const [catId, scopeStr] = groupKey.split("\u0000");
+              const scope = (scopeStr ?? "any") as AmountScope;
+              const cat = categories.find((c) => c.id === catId);
               const pri = groupRules.map((g) => g.priority);
               const priMin = Math.min(...pri);
               const priMax = Math.max(...pri);
               const priRange =
                 priMin === priMax ? `priority ${priMin}` : `priority ${priMin}–${priMax}`;
-              const summaryTitle = `${cat ? categoryLabel(cat, categories) : "(unknown category)"} · ${groupRules.length} rule(s) · ${priRange}`;
+              const summaryTitle = `${cat ? categoryLabel(cat, categories) : "(unknown category)"} · ${amountScopeShort(scope)} · ${groupRules.length} rule(s) · ${priRange}`;
               return (
-                <details key={categoryId} style={{ marginBottom: "1rem" }}>
+                <details key={groupKey} style={{ marginBottom: "1rem" }}>
                   <summary style={{ cursor: "pointer", fontWeight: 600 }}>{summaryTitle}</summary>
                   <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
                     <table className="ledger-table category-rules-page__table">
@@ -1381,6 +1420,7 @@ export function CategoryRulesPage() {
                           <th scope="col">On</th>
                           <th scope="col">Pattern</th>
                           <th scope="col">Match</th>
+                          <th scope="col">Amount</th>
                           <th scope="col">Category</th>
                           <th scope="col">Pri</th>
                           <th scope="col">Conf</th>
@@ -1440,6 +1480,24 @@ export function CategoryRulesPage() {
                                   </select>
                                 ) : (
                                   r.matchType
+                                )}
+                              </td>
+                              <td>
+                                {isEditing && editDraft ? (
+                                  <select
+                                    value={editDraft.amountScope}
+                                    onChange={(e) =>
+                                      setEditDraft((d) =>
+                                        d ? { ...d, amountScope: e.target.value as AmountScope } : d
+                                      )
+                                    }
+                                  >
+                                    <option value="any">any</option>
+                                    <option value="credit_only">credit only</option>
+                                    <option value="debit_only">debit only</option>
+                                  </select>
+                                ) : (
+                                  amountScopeShort(r.amountScope ?? "any")
                                 )}
                               </td>
                               <td>
