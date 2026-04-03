@@ -120,6 +120,22 @@ paths:
       tags: [categories]
       summary: Create category rule
       security: [{ bearerAuth: [] }]
+  /categories/rules/bulk:
+    post:
+      tags: [categories]
+      summary: Bulk create household category rules
+      description: >-
+        Best-effort batch create. Each rule needs pattern, matchType, and categoryId or categoryPath.
+        Response 200 with created rules and per-row errors.
+      security: [{ bearerAuth: [] }]
+  /categories/rules/builtin/bulk:
+    post:
+      tags: [categories]
+      summary: Bulk create global built-in category rules (owner or admin)
+      description: >-
+        Same as household bulk but amountScope per row; category must be a default global leaf.
+        Response 200 with created rules and per-row errors.
+      security: [{ bearerAuth: [] }]
   /categories/rules/{ruleId}:
     patch:
       tags: [categories]

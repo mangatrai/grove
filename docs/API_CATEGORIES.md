@@ -161,6 +161,45 @@ Create a rule.
 
 **400:** invalid payload or validation (`INVALID_PATTERN`, `INVALID_CATEGORY`, `INVALID_CONFIDENCE`, `INVALID_PRIORITY`).
 
+### `POST /categories/rules/bulk`
+
+Create many **household** rules in one request. **Best-effort:** each row is validated and inserted independently; the response always includes what succeeded and what failed.
+
+**Body:**
+
+```json
+{
+  "rules": [
+    {
+      "pattern": "costco",
+      "matchType": "contains",
+      "categoryId": "uuid",
+      "confidence": 0.85,
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "pattern": "whole foods",
+      "matchType": "contains",
+      "categoryPath": "Shopping > Groceries"
+    }
+  ]
+}
+```
+
+- Each element needs **`pattern`**, **`matchType`**, and either **`categoryId`** or **`categoryPath`** (non-empty).
+- **`categoryPath`** — human-readable path: top-level parent name, then `>` or `|` (trimmed segments), then leaf name (e.g. `Home > HOA Fees`). Case-insensitive name matching. Single-segment path resolves a **unique** leaf by name among categories the household can use; ambiguous or unknown names fail that row.
+- Omitted **`confidence`** / **`priority`** / **`enabled`** use the same defaults as single-row create (`0.85`, `100`, `true`).
+
+**200:**
+
+```json
+{
+  "created": [ { "...": "same shape as GET rules[]" } ],
+  "errors": [ { "index": 1, "message": "…", "code": "INVALID_PATTERN" } ]
+}
+```
+
 ### `PATCH /categories/rules/:id`
 
 Update rule fields (including enable/disable).
@@ -189,4 +228,14 @@ Update a global rule (same fields as create, partial).
 
 **204:** empty body on success.
 
-**UI:** authenticated **`/categories/rules`** (household rules + built-in rules; owner/admin can edit globals; linked from **`/categories`**).
+**UI:** authenticated **`/categories/rules`** (household rules + built-in rules; owner/admin can edit globals; linked from **`/categories`**). **CSV:** export/import from the same page — columns include `origin`, `id`, `rule_key`, `pattern`, `match_type`, `amount_scope`, `category_id`, `category_path`, `priority`, `confidence`, `enabled` (export is round-trip friendly for `category_path`; import is create-only and ignores exported `id`).
+
+### CSV column notes (rules)
+
+| Column | Notes |
+|--------|--------|
+| `origin` | `builtin` or `household` — used by the UI to filter rows when importing. |
+| `id` | Export only; import does not update existing rules. |
+| `rule_key` | Built-in rules only; optional on import (auto from pattern if empty). |
+| `amount_scope` | Built-in only; household rules export as `any`. |
+| `category_path` | e.g. `Shopping > Groceries`; alternative to `category_id`. |
