@@ -2,6 +2,12 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import {
+  buildRulesCsvLines,
+  categoryPathForCsv,
+  parseRulesCsv,
+  type RulesCsvHeader
+} from "../import/rulesCsv";
 
 type CategoryRow = {
   id: string;
@@ -113,6 +119,13 @@ export function CategoryRulesPage() {
   const [testResult, setTestResult] = useState<unknown>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [recatMsg, setRecatMsg] = useState<string | null>(null);
+  const [importMode, setImportMode] = useState<"household" | "builtin">("household");
+  const [importCsvError, setImportCsvError] = useState<string | null>(null);
+  const [importCsvRows, setImportCsvRows] = useState<
+    Array<Partial<Record<RulesCsvHeader, string>> & Record<string, string>>
+  >([]);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
 
   const leaves = useMemo(() => assignableCategories(categories), [categories]);
 
@@ -123,6 +136,12 @@ export function CategoryRulesPage() {
   );
 
   const canEditGlobals = authRole === "owner" || authRole === "admin";
+
+  useEffect(() => {
+    if (!canEditGlobals && importMode === "builtin") {
+      setImportMode("household");
+    }
+  }, [canEditGlobals, importMode]);
 
   const load = useCallback(async () => {
     const [catRes, rulesRes] = await Promise.all([
@@ -462,6 +481,224 @@ export function CategoryRulesPage() {
     }
   }
 
+  function exportRulesCsv() {
+    const out: Array<Record<RulesCsvHeader, string>> = [];
+    for (const b of builtinRules) {
+      const cat = categories.find((c) => c.id === b.categoryId);
+      out.push({
+        origin: "builtin",
+        id: b.id,
+        rule_key: b.ruleKey,
+        pattern: b.pattern,
+        match_type: b.matchType,
+        amount_scope: b.amountScope,
+        category_id: b.categoryId,
+        category_path: cat ? categoryPathForCsv(cat, categories) : "",
+        priority: String(b.priority),
+        confidence: String(b.confidence),
+        enabled: b.enabled ? "true" : "false"
+      });
+    }
+    for (const r of rules) {
+      const cat = categories.find((c) => c.id === r.categoryId);
+      out.push({
+        origin: "household",
+        id: r.id,
+        rule_key: "",
+        pattern: r.pattern,
+        match_type: r.matchType,
+        amount_scope: "any",
+        category_id: r.categoryId,
+        category_path: cat ? categoryPathForCsv(cat, categories) : "",
+        priority: String(r.priority),
+        confidence: String(r.confidence),
+        enabled: r.enabled ? "true" : "false"
+      });
+    }
+    const csv = buildRulesCsvLines(out);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `classification-rules-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function onImportFileChange(file: File | null) {
+    setImportCsvError(null);
+    setImportSummary(null);
+    setImportCsvRows([]);
+    if (!file) {
+      return;
+    }
+    void file.text().then((text) => {
+      const parsed = parseRulesCsv(text);
+      if (parsed.error) {
+        setImportCsvError(parsed.error);
+        return;
+      }
+      setImportCsvRows(parsed.rows);
+    });
+  }
+
+  function parseBoolCell(v: string | undefined, defaultTrue: boolean): boolean {
+    const s = (v ?? "").trim().toLowerCase();
+    if (s === "" || s === "1" || s === "true" || s === "yes") {
+      return true;
+    }
+    if (s === "0" || s === "false" || s === "no") {
+      return false;
+    }
+    return defaultTrue;
+  }
+
+  async function runCsvImport() {
+    setImportSummary(null);
+    setError(null);
+    const filtered = importCsvRows.filter((row) => {
+      const o = (row.origin ?? "").trim().toLowerCase();
+      if (importMode === "household") {
+        return o === "" || o === "household";
+      }
+      return o === "" || o === "builtin";
+    });
+    if (filtered.length === 0) {
+      setImportCsvError("No rows match the selected import mode (check the origin column).");
+      return;
+    }
+
+    const matchTypes = new Set<MatchType>(["contains", "prefix", "regex"]);
+    const amountScopes = new Set<AmountScope>(["any", "credit_only", "debit_only"]);
+
+    if (importMode === "household") {
+      const rules: Array<{
+        pattern: string;
+        matchType: MatchType;
+        categoryId?: string;
+        categoryPath?: string;
+        confidence?: number;
+        priority?: number;
+        enabled?: boolean;
+      }> = [];
+      for (const row of filtered) {
+        const pattern = (row.pattern ?? "").trim();
+        const mt = row.match_type as MatchType;
+        if (pattern.length < 2 || !matchTypes.has(mt)) {
+          continue;
+        }
+        const categoryId = (row.category_id ?? "").trim();
+        const categoryPath = (row.category_path ?? "").trim();
+        if (!categoryId && !categoryPath) {
+          continue;
+        }
+        const priority = Number(row.priority);
+        const confidence = Number(row.confidence);
+        rules.push({
+          pattern,
+          matchType: mt,
+          ...(categoryId ? { categoryId } : {}),
+          ...(categoryPath ? { categoryPath } : {}),
+          ...(Number.isFinite(confidence) ? { confidence } : {}),
+          ...(Number.isInteger(priority) ? { priority } : {}),
+          enabled: parseBoolCell(row.enabled, true)
+        });
+      }
+      if (rules.length === 0) {
+        setImportCsvError("No valid rows to import (need pattern, match_type, and category_id or category_path).");
+        return;
+      }
+      setImportBusy(true);
+      try {
+        const res = await apiJson<{
+          created: CategoryRule[];
+          errors: Array<{ index: number; message: string; code?: string }>;
+        }>("/categories/rules/bulk", {
+          method: "POST",
+          body: JSON.stringify({ rules })
+        });
+        setImportSummary(
+          `Household import: ${res.created.length} created, ${res.errors.length} row error(s).` +
+            (res.errors.length ? ` First: ${res.errors[0]?.message ?? ""}` : "")
+        );
+        setImportCsvRows([]);
+        await load();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Bulk import failed");
+      } finally {
+        setImportBusy(false);
+      }
+      return;
+    }
+
+    const rulesBuiltin: Array<{
+      pattern: string;
+      matchType: MatchType;
+      categoryId?: string;
+      categoryPath?: string;
+      amountScope: AmountScope;
+      ruleKey?: string;
+      confidence?: number;
+      priority?: number;
+      enabled?: boolean;
+    }> = [];
+    for (const row of filtered) {
+      const pattern = (row.pattern ?? "").trim();
+      const mt = row.match_type as MatchType;
+      if (pattern.length < 2 || !matchTypes.has(mt)) {
+        continue;
+      }
+      const categoryId = (row.category_id ?? "").trim();
+      const categoryPath = (row.category_path ?? "").trim();
+      if (!categoryId && !categoryPath) {
+        continue;
+      }
+      let amountScope: AmountScope = "debit_only";
+      const ascope = (row.amount_scope ?? "").trim().toLowerCase();
+      if (ascope && amountScopes.has(ascope as AmountScope)) {
+        amountScope = ascope as AmountScope;
+      }
+      const rk = (row.rule_key ?? "").trim();
+      const priority = Number(row.priority);
+      const confidence = Number(row.confidence);
+      rulesBuiltin.push({
+        pattern,
+        matchType: mt,
+        amountScope,
+        ...(categoryId ? { categoryId } : {}),
+        ...(categoryPath ? { categoryPath } : {}),
+        ...(rk ? { ruleKey: rk } : {}),
+        ...(Number.isFinite(confidence) ? { confidence } : {}),
+        ...(Number.isInteger(priority) ? { priority } : {}),
+        enabled: parseBoolCell(row.enabled, true)
+      });
+    }
+    if (rulesBuiltin.length === 0) {
+      setImportCsvError("No valid rows to import (need pattern, match_type, and category_id or category_path).");
+      return;
+    }
+    setImportBusy(true);
+    try {
+      const res = await apiJson<{
+        created: BuiltinRuleRow[];
+        errors: Array<{ index: number; message: string; code?: string }>;
+      }>("/categories/rules/builtin/bulk", {
+        method: "POST",
+        body: JSON.stringify({ rules: rulesBuiltin })
+      });
+      setImportSummary(
+        `Built-in import: ${res.created.length} created, ${res.errors.length} row error(s).` +
+          (res.errors.length ? ` First: ${res.errors[0]?.message ?? ""}` : "")
+      );
+      setImportCsvRows([]);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk import failed");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function runRecategorize(mode: "uncategorized_only" | "all") {
     setRecatMsg(null);
     setError(null);
@@ -504,6 +741,85 @@ export function CategoryRulesPage() {
 
         {error ? <p className="error">{error}</p> : null}
         {recatMsg ? <p className="muted">{recatMsg}</p> : null}
+
+        <h2 style={{ fontSize: "1.05rem", marginTop: "1.25rem" }}>Import / export (CSV)</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Export includes both built-in and household rules in one file (<code>origin</code> column). Import is{" "}
+          <strong>create-only</strong> (existing rule <code>id</code> values are ignored). Use{" "}
+          <code>category_id</code> or <code>category_path</code> (e.g. <code>Home &gt; HOA Fees</code>).
+        </p>
+        <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
+          <button type="button" className="secondary" onClick={exportRulesCsv} disabled={loading}>
+            Export rules (CSV)
+          </button>
+          <label className="category-rules-page__field" style={{ minWidth: "11rem" }}>
+            Import as
+            <select
+              value={importMode}
+              onChange={(e) => setImportMode(e.target.value as "household" | "builtin")}
+              disabled={importBusy}
+            >
+              <option value="household">Household rules</option>
+              <option value="builtin" disabled={!canEditGlobals}>
+                Built-in (global) rules
+              </option>
+            </select>
+          </label>
+          <label className="category-rules-page__field" style={{ minWidth: "14rem" }}>
+            CSV file
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              disabled={importBusy}
+              onChange={(e) => onImportFileChange(e.target.files?.[0] ?? null)}
+            />
+          </label>
+          <button type="button" disabled={importBusy || importCsvRows.length === 0} onClick={() => void runCsvImport()}>
+            {importBusy ? "Importing…" : "Import rows"}
+          </button>
+        </div>
+        {importCsvError ? <p className="error">{importCsvError}</p> : null}
+        {importSummary ? <p className="muted">{importSummary}</p> : null}
+        {importCsvRows.length > 0 ? (
+          <div style={{ marginTop: "0.5rem", overflowX: "auto" }}>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Preview (first 15 rows, filtered by import mode).
+            </p>
+            <table className="ledger-table category-rules-page__table">
+              <thead>
+                <tr>
+                  <th>origin</th>
+                  <th>pattern</th>
+                  <th>match_type</th>
+                  <th>amount_scope</th>
+                  <th>category_path</th>
+                </tr>
+              </thead>
+              <tbody>
+                {importCsvRows
+                  .filter((row) => {
+                    const o = (row.origin ?? "").trim().toLowerCase();
+                    if (importMode === "household") {
+                      return o === "" || o === "household";
+                    }
+                    return o === "" || o === "builtin";
+                  })
+                  .slice(0, 15)
+                  .map((row, i) => (
+                    <tr key={i}>
+                      <td>{row.origin ?? "—"}</td>
+                      <td>
+                        <code className="category-rules-page__pattern">{(row.pattern ?? "").slice(0, 48)}</code>
+                      </td>
+                      <td>{row.match_type ?? "—"}</td>
+                      <td>{row.amount_scope ?? "—"}</td>
+                      <td>{(row.category_path ?? "").slice(0, 40) || row.category_id?.slice(0, 8) || "—"}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
 
         <h2 style={{ fontSize: "1.05rem", marginTop: "1.25rem" }}>Search &amp; test</h2>
         <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
@@ -782,8 +1098,11 @@ export function CategoryRulesPage() {
         {canEditGlobals ? (
           <>
             <h3 style={{ fontSize: "1rem", marginTop: "1rem" }}>Add built-in rule</h3>
-            <form onSubmit={(e) => void onCreateGlobal(e)} className="category-rules-page__form">
-              <p className="muted" style={{ gridColumn: "1 / -1", margin: 0 }}>
+            <form
+              onSubmit={(e) => void onCreateGlobal(e)}
+              className="category-rules-page__form category-rules-page__form--builtin"
+            >
+              <p className="muted category-rules-page__form-span" style={{ margin: 0 }}>
                 Applies to <strong>all households</strong> on this server. Category must be an installation default leaf —
                 for categories you created under Categories, add a <strong>household</strong> rule instead.
               </p>
@@ -796,7 +1115,7 @@ export function CategoryRulesPage() {
                   autoComplete="off"
                 />
               </label>
-              <label className="category-rules-page__field" style={{ gridColumn: "1 / -1" }}>
+              <label className="category-rules-page__field category-rules-page__form-span">
                 Pattern
                 <input
                   value={globalForm.pattern}
