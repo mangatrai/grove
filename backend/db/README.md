@@ -6,8 +6,11 @@ This folder contains SQL-first migrations and seed data for Story 1.2.
 
 - `migrations/0001_init.sql`: core schema for household, auth, accounts, imports,
   canonical transactions, and resolution queues.
-- `seeds/0001_seed_defaults.sql`: default household, owner user, and starter
-  categories.
+- `seeds/0001_seed_defaults.sql`: default household, owner user, and global
+  category taxonomy (stable UUIDs).
+- `seeds/0002_seed_category_rule_global.sql`: default built-in classification rules.
+- `seeds/0003_seed_default_household_categories.sql`: placeholder for future
+  household-scoped install defaults (currently no-op; global taxonomy includes Loans, Travel, etc.).
 - `seeds/dev/*.sql`: optional dev-only fixtures (sample `financial_account` rows).
   Applied only with `scripts/db.mjs --seed --dev-seeds` (e.g. `npm run db:seed:dev` or `npm run setup`).
   `npm run db:seed` skips this folder. See `seeds/dev/README.md` and `docs/PRODUCTION_SETUP.md`.
