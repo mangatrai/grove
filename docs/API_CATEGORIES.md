@@ -91,13 +91,14 @@ UI: **`/categories`** (full-screen table + add parent/subcategory + **Edit** for
 2) `createdAt` ascending  
 3) `id` ascending
 
-Global rules add **`amountScope`**: `any` | `credit_only` | `debit_only` (inflow vs outflow). **Household** rules in `category_rule` are loaded with **`amount_scope` forced to `any`** for classification (the column in CSV exports is informational; credit/debit-specific household rules are not applied from CSV today).
+Both **household** (`category_rule`) and **global** (`category_rule_global`) rules store **`amountScope`**: `any` | `credit_only` | `debit_only` (signed amount: credits &gt; 0, debits &lt; 0). Omitted values on create default to **`any`**. CSV **`amount_scope`** is persisted for household imports.
 
 **Matching (import and re-apply):** canonical ingest builds a **fingerprint-normalized** description (lowercase, collapsed spaces, **non-alphanumeric characters stripped**, then truncated). For **`contains`** and **`prefix`**, the classifier compares that normalized text to the rule pattern **after the same normalization**, so patterns may include punctuation in storage but still match bank text that loses `:` / `*` / etc. **`regex`** rules are matched against the **fingerprint-normalized** description; authors should assume that normalized form (not raw bank punctuation).
 
 Each rule targets one assignable category (leaf) and supports:
 - `matchType`: `contains` | `prefix` | `regex`
 - `pattern`: stored lower-case with spaces normalized on write; **`contains`/`prefix`** matching uses fingerprint normalization as above (see **Matching**)
+- `amountScope` (household and built-in): `any` | `credit_only` | `debit_only`
 - `confidence`: `0..1`
 - `enabled`: `true|false`
 
@@ -132,6 +133,7 @@ Returns **`builtinRules`** (global `category_rule_global` rows, each with `origi
       "pattern": "whole foods",
       "matchType": "contains",
       "categoryId": "uuid",
+      "amountScope": "any",
       "confidence": 0.9,
       "priority": 10,
       "enabled": true,
@@ -153,15 +155,18 @@ Create a rule.
   "pattern": "starbucks",
   "matchType": "contains",
   "categoryId": "uuid",
+  "amountScope": "any",
   "confidence": 0.85,
   "priority": 100,
   "enabled": true
 }
 ```
 
+- **`amountScope`** — optional; defaults to `any`. Multi-pattern create (`patterns` body field) applies the same scope to every generated rule.
+
 **201:** `{ "rule": { ... } }`
 
-**400:** invalid payload or validation (`INVALID_PATTERN`, `INVALID_CATEGORY`, `INVALID_CONFIDENCE`, `INVALID_PRIORITY`).
+**400:** invalid payload or validation (`INVALID_PATTERN`, `INVALID_CATEGORY`, `INVALID_CONFIDENCE`, `INVALID_PRIORITY`, `INVALID_AMOUNT_SCOPE`).
 
 ### `POST /categories/rules/bulk`
 
@@ -176,6 +181,7 @@ Create many **household** rules in one request. **Best-effort:** each row is val
       "pattern": "costco",
       "matchType": "contains",
       "categoryId": "uuid",
+      "amountScope": "debit_only",
       "confidence": 0.85,
       "priority": 100,
       "enabled": true
@@ -189,7 +195,7 @@ Create many **household** rules in one request. **Best-effort:** each row is val
 }
 ```
 
-- Each element needs **`pattern`**, **`matchType`**, and either **`categoryId`** or **`categoryPath`** (non-empty).
+- Each element needs **`pattern`**, **`matchType`**, and either **`categoryId`** or **`categoryPath`** (non-empty). Optional **`amountScope`** (defaults to `any`).
 - **`categoryPath`** — human-readable path: top-level parent name, then `>` or `|` (trimmed segments), then leaf name (e.g. `Home > HOA Fees`). Case-insensitive name matching. Single-segment path resolves a **unique** leaf by name among categories the household can use; ambiguous or unknown names fail that row.
 - Omitted **`confidence`** / **`priority`** / **`enabled`** use the same defaults as single-row create (`0.85`, `100`, `true`).
 
@@ -247,5 +253,5 @@ Update a global rule (same fields as create, partial).
 | `origin` | `builtin` or `household` — used by the UI to filter rows when importing. |
 | `id` | Export only; import does not update existing rules. |
 | `rule_key` | Built-in rules only; optional on import (auto from pattern if empty). |
-| `amount_scope` | Built-in only for classification; household rows export a scope column but rules run as **`any`** at match time. |
+| `amount_scope` | `any` / `credit_only` / `debit_only` — stored for both built-in and household rules; defaults to `any` when omitted on import. |
 | `category_path` | e.g. `Shopping > Groceries`; alternative to `category_id`. |

@@ -6,8 +6,8 @@ This document explains **all automated behaviors** when statements are imported 
 
 **Order of evaluation** (see `classifyWithRules` in `backend/src/modules/category/category-rules.ts` and `listEnabledDbRulesForClassification` in `category-rules.service.ts`):
 
-1. **`category_rule` table** (per-household rows from `/categories/rules`) — ordered first; first match wins on **fingerprint-normalized** description (lowercase, alphanumeric + spaces). Household rules use **any** amount scope unless you model otherwise.
-2. **`category_rule_global` table** — installation-wide defaults (former keyword heuristics), merged **after** all enabled household rules for that household. Each row has an **`amount_scope`** (`any`, `credit_only`, `debit_only`) so inflow vs outflow behavior matches the old engine.
+1. **`category_rule` table** (per-household rows from `/categories/rules`) — ordered first; first match wins on **fingerprint-normalized** description (lowercase, alphanumeric + spaces). Each row has **`amount_scope`** (`any`, `credit_only`, `debit_only`), same semantics as built-ins.
+2. **`category_rule_global` table** — installation-wide defaults (former keyword heuristics), merged **after** all enabled household rules for that household. Each row has **`amount_scope`** (`any`, `credit_only`, `debit_only`).
 
 Built-in rows use stable **`rule_key`** values (examples):
 

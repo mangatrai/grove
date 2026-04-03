@@ -119,6 +119,9 @@ paths:
     post:
       tags: [categories]
       summary: Create category rule
+      description: >-
+        Body may include amountScope (any, credit_only, debit_only); defaults to any.
+        Matches multi-pattern field `patterns` for batch of rules sharing the same scope.
       security: [{ bearerAuth: [] }]
   /categories/rules/bulk:
     post:
@@ -126,7 +129,7 @@ paths:
       summary: Bulk create household category rules
       description: >-
         Best-effort batch create. Each rule needs pattern, matchType, and categoryId or categoryPath.
-        Response 200 with created rules and per-row errors.
+        Optional amountScope per row (defaults to any). Response 200 with created rules and per-row errors.
       security: [{ bearerAuth: [] }]
   /categories/rules/builtin/bulk:
     post:
