@@ -1,3 +1,5 @@
+import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
+
 /**
  * Rules assign **leaf** `category_id` values from `DEFAULT_CATEGORY_IDS` / seed (Epic 5.3 hierarchy).
  * Additional leaves (e.g. medical, dining out) use ids from `category-ids.ts` and migrations.
@@ -76,10 +78,12 @@ function matchesRule(normalizedDescription: string, rule: Pick<DbCategoryRule, "
     return false;
   }
   if (rule.matchType === "contains") {
-    return normalizedDescription.includes(rule.pattern);
+    const p = normalizeDescriptionForFingerprint(rule.pattern);
+    return p.length >= 2 && normalizedDescription.includes(p);
   }
   if (rule.matchType === "prefix") {
-    return normalizedDescription.startsWith(rule.pattern);
+    const p = normalizeDescriptionForFingerprint(rule.pattern);
+    return p.length >= 2 && normalizedDescription.startsWith(p);
   }
   try {
     const re = new RegExp(rule.pattern, "i");

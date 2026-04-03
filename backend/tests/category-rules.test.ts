@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { db } from "../src/db/sqlite.js";
-import { classifyWithRules } from "../src/modules/category/category-rules.js";
+import { classifyWithRules, type DbCategoryRule } from "../src/modules/category/category-rules.js";
 import { DEFAULT_CATEGORY_IDS } from "../src/modules/category/category-ids.js";
 import { listEnabledDbRulesForClassification } from "../src/modules/category/category-rules.service.js";
 import { normalizeDescriptionForFingerprint } from "../src/modules/canonical/transaction-fingerprint.js";
@@ -68,5 +68,37 @@ describe("category rules (Epic 5.1)", () => {
     const n = normalizeDescriptionForFingerprint("XYZ MYSTERY CO");
     const r = classifyNormalized(n, -10);
     expect(r.categoryId).toBeNull();
+  });
+
+  it("contains matches when stored pattern has punctuation bank text does not (fingerprint normalization)", () => {
+    const bankDesc =
+      '"FID BKG SVC LLC DES:MONEYLINE ID:XXXXX9040 XY7YX INDN:MANGAT RAI CO ID:XXXXX04600 PPD"';
+    const norm = normalizeDescriptionForFingerprint(bankDesc);
+    const rule: DbCategoryRule = {
+      id: "test-rule-punct",
+      pattern: "fid bkg svc llc des:moneyline",
+      matchType: "contains",
+      categoryId: DEFAULT_CATEGORY_IDS.groceries,
+      confidence: 0.9,
+      amountScope: "any",
+      ruleOrigin: "household"
+    };
+    const r = classifyWithRules(norm, -100, [rule]);
+    expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.groceries);
+  });
+
+  it("prefix matches using normalized pattern substrings", () => {
+    const norm = normalizeDescriptionForFingerprint("APPLECARD GSBANK DES:PAYMENT");
+    const rule: DbCategoryRule = {
+      id: "test-rule-prefix",
+      pattern: "applecard gsbank des:payment",
+      matchType: "prefix",
+      categoryId: DEFAULT_CATEGORY_IDS.groceries,
+      confidence: 0.9,
+      amountScope: "any",
+      ruleOrigin: "household"
+    };
+    const r = classifyWithRules(norm, -50, [rule]);
+    expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.groceries);
   });
 });
