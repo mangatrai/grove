@@ -242,6 +242,57 @@ describe("category rules API and classification explainability", () => {
     expect(delRes.status).toBe(204);
   });
 
+  it("POST /categories/rules/bulk creates via categoryPath and reports row errors", async () => {
+    const token = await loginAndGetToken();
+    const t = Date.now();
+    const res = await request(app).post("/categories/rules/bulk").set("authorization", `Bearer ${token}`).send({
+      rules: [
+        { pattern: `bulk_path_ok_${t}`, matchType: "contains", categoryPath: "Shopping > Groceries" },
+        { pattern: "x", matchType: "contains", categoryPath: "Shopping > Groceries" }
+      ]
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.created.length).toBe(1);
+    expect(res.body.errors.length).toBe(1);
+    expect(res.body.errors[0].index).toBe(1);
+  });
+
+  it("POST /categories/rules/builtin/bulk rejects household-only leaf with BUILTIN_REQUIRES_GLOBAL_LEAF", async () => {
+    const token = await loginAndGetToken();
+    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      household_id: string;
+    };
+    const customLeafId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO category (id, household_id, parent_id, name, is_default)
+       VALUES (?, ?, '30000000-0000-0000-0000-000000000107', 'Bulk builtin hh leaf', 0)`
+    ).run(customLeafId, household.household_id);
+    try {
+      const res = await request(app).post("/categories/rules/builtin/bulk").set("authorization", `Bearer ${token}`).send({
+        rules: [
+          {
+            pattern: `bulk_builtin_ok_${Date.now()}`,
+            matchType: "contains",
+            categoryId: GROCERIES_ID,
+            amountScope: "debit_only"
+          },
+          {
+            pattern: `bulk_builtin_bad_${Date.now()}`,
+            matchType: "contains",
+            categoryId: customLeafId,
+            amountScope: "debit_only"
+          }
+        ]
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.created.length).toBe(1);
+      expect(res.body.errors.length).toBe(1);
+      expect(res.body.errors[0].code).toBe("BUILTIN_REQUIRES_GLOBAL_LEAF");
+    } finally {
+      db.prepare(`DELETE FROM category WHERE id = ?`).run(customLeafId);
+    }
+  });
+
   it("blocks member from creating global built-in rules", async () => {
     db.prepare(
       `INSERT OR REPLACE INTO app_user
@@ -261,6 +312,10 @@ describe("category rules API and classification explainability", () => {
     });
     expect(login.status).toBe(200);
     const token = login.body.token as string;
+    const bulkRes = await request(app).post("/categories/rules/builtin/bulk").set("authorization", `Bearer ${token}`).send({
+      rules: [{ pattern: "member_bulk_fail", matchType: "contains", categoryId: GROCERIES_ID, amountScope: "any" }]
+    });
+    expect(bulkRes.status).toBe(403);
     const createRes = await request(app).post("/categories/rules/builtin").set("authorization", `Bearer ${token}`).send({
       ruleKey: "member_should_fail",
       pattern: "member_should_fail",

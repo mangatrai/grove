@@ -5,7 +5,8 @@ import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fin
 import {
   categoryAssignableForGlobalBuiltin,
   categoryHasChildren,
-  categoryUsableByHousehold
+  categoryUsableByHousehold,
+  resolveLeafCategoryIdForHousehold
 } from "./categories.service.js";
 import type { DbCategoryRule, RuleAmountScope } from "./category-rules.js";
 
@@ -478,6 +479,155 @@ export function createCategoryRuleForHousehold(
     )
     .get(id, householdId) as CategoryRuleDbRow;
   return { ok: true, data: mapRule(row) };
+}
+
+export type BulkRuleRowError = { index: number; message: string; code?: string };
+
+export function bulkCreateCategoryRulesForHousehold(
+  householdId: string,
+  rows: Array<{
+    pattern: string;
+    matchType: MatchType;
+    categoryId?: string | null;
+    categoryPath?: string | null;
+    confidence?: number;
+    priority?: number;
+    enabled?: boolean;
+  }>
+): { created: CategoryRuleRow[]; errors: BulkRuleRowError[] } {
+  const created: CategoryRuleRow[] = [];
+  const errors: BulkRuleRowError[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const resolved = resolveLeafCategoryIdForHousehold(householdId, {
+      categoryId: row.categoryId,
+      categoryPath: row.categoryPath
+    });
+    if (!resolved.ok) {
+      const message =
+        resolved.code === "MISSING_INPUT"
+          ? "Provide category_id or category_path"
+          : resolved.code === "AMBIGUOUS"
+            ? "Ambiguous category path or name"
+            : resolved.code === "NOT_LEAF"
+              ? "category_id must be a leaf category"
+              : "Category not found";
+      errors.push({ index: i, code: resolved.code, message });
+      continue;
+    }
+
+    const out = createCategoryRuleForHousehold(householdId, {
+      pattern: row.pattern,
+      matchType: row.matchType,
+      categoryId: resolved.id,
+      confidence: row.confidence ?? 0.85,
+      priority: row.priority ?? 100,
+      enabled: row.enabled ?? true
+    });
+    if (!out.ok) {
+      errors.push({
+        index: i,
+        code: out.code,
+        message:
+          out.code === "INVALID_PATTERN"
+            ? "Invalid pattern or regex"
+            : out.code === "INVALID_CATEGORY"
+              ? "Category cannot be assigned"
+              : `Cannot create rule (${out.code})`
+      });
+      continue;
+    }
+    created.push(out.data);
+  }
+
+  return { created, errors };
+}
+
+function autoRuleKeyFromPattern(pattern: string): string {
+  return `custom_${pattern
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 80)}`;
+}
+
+export function bulkCreateGlobalCategoryRules(
+  householdId: string,
+  rows: Array<{
+    pattern: string;
+    matchType: MatchType;
+    categoryId?: string | null;
+    categoryPath?: string | null;
+    amountScope: RuleAmountScope;
+    ruleKey?: string | null;
+    confidence?: number;
+    priority?: number;
+    enabled?: boolean;
+  }>
+): { created: GlobalCategoryRuleRow[]; errors: BulkRuleRowError[] } {
+  const created: GlobalCategoryRuleRow[] = [];
+  const errors: BulkRuleRowError[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]!;
+    const resolved = resolveLeafCategoryIdForHousehold(householdId, {
+      categoryId: row.categoryId,
+      categoryPath: row.categoryPath
+    });
+    if (!resolved.ok) {
+      const message =
+        resolved.code === "MISSING_INPUT"
+          ? "Provide category_id or category_path"
+          : resolved.code === "AMBIGUOUS"
+            ? "Ambiguous category path or name"
+            : resolved.code === "NOT_LEAF"
+              ? "category_id must be a leaf category"
+              : "Category not found";
+      errors.push({ index: i, code: resolved.code, message });
+      continue;
+    }
+    if (!categoryAssignableForGlobalBuiltin(resolved.id)) {
+      errors.push({
+        index: i,
+        code: "BUILTIN_REQUIRES_GLOBAL_LEAF",
+        message:
+          "Built-in rules may only target installation default category leaves (not household-created categories)."
+      });
+      continue;
+    }
+
+    const ruleKey = row.ruleKey?.trim() || autoRuleKeyFromPattern(row.pattern);
+
+    const out = createGlobalCategoryRule({
+      ruleKey,
+      pattern: row.pattern,
+      matchType: row.matchType,
+      categoryId: resolved.id,
+      amountScope: row.amountScope,
+      confidence: row.confidence ?? 0.7,
+      priority: row.priority ?? 100,
+      enabled: row.enabled ?? true
+    });
+    if (!out.ok) {
+      const message =
+        out.code === "BUILTIN_REQUIRES_GLOBAL_LEAF"
+          ? "Built-in rules may only target installation default category leaves."
+          : out.code === "INVALID_PATTERN"
+            ? "Invalid pattern, rule key, or duplicate rule_key"
+            : out.code === "INVALID_CONFIDENCE"
+              ? "Invalid confidence"
+              : out.code === "INVALID_PRIORITY"
+                ? "Invalid priority"
+                : `Cannot create rule (${out.code})`;
+      errors.push({ index: i, code: out.code, message });
+      continue;
+    }
+    created.push(out.data);
+  }
+
+  return { created, errors };
 }
 
 export function createCategoryRulesFromPatterns(

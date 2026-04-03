@@ -9,6 +9,8 @@ import { recategorizeHouseholdTransactions } from "./category-recategorize.servi
 import { classifyWithRules } from "./category-rules.js";
 import { listRuleLearningPreviewForSession } from "./category-rule-learning.service.js";
 import {
+  bulkCreateCategoryRulesForHousehold,
+  bulkCreateGlobalCategoryRules,
   createCategoryRuleForHousehold,
   createCategoryRulesFromPatterns,
   createGlobalCategoryRule,
@@ -106,6 +108,72 @@ categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
   }
 
   res.status(201).json({ rule: out.data });
+});
+
+const bulkHouseholdRowSchema = z
+  .object({
+    pattern: z.string(),
+    matchType: matchTypeSchema,
+    categoryId: z.string().uuid().optional(),
+    categoryPath: z.string().optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    priority: z.number().int().min(0).max(10000).optional(),
+    enabled: z.boolean().optional()
+  })
+  .refine(
+    (r) =>
+      (typeof r.categoryId === "string" && r.categoryId.length > 0) ||
+      (typeof r.categoryPath === "string" && r.categoryPath.trim().length > 0),
+    { message: "Each rule needs categoryId or categoryPath" }
+  );
+
+const bulkHouseholdSchema = z.object({
+  rules: z.array(bulkHouseholdRowSchema).min(1).max(2000)
+});
+
+categoryRulesRouter.post("/bulk", (req: AuthenticatedRequest, res) => {
+  const parsed = bulkHouseholdSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = bulkCreateCategoryRulesForHousehold(householdId, parsed.data.rules);
+  res.status(200).json({ created: out.created, errors: out.errors });
+});
+
+const bulkBuiltinRowSchema = z
+  .object({
+    pattern: z.string(),
+    matchType: matchTypeSchema,
+    categoryId: z.string().uuid().optional(),
+    categoryPath: z.string().optional(),
+    amountScope: amountScopeSchema,
+    ruleKey: z.string().min(2).max(120).optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    priority: z.number().int().min(0).max(10000).optional(),
+    enabled: z.boolean().optional()
+  })
+  .refine(
+    (r) =>
+      (typeof r.categoryId === "string" && r.categoryId.length > 0) ||
+      (typeof r.categoryPath === "string" && r.categoryPath.trim().length > 0),
+    { message: "Each rule needs categoryId or categoryPath" }
+  );
+
+const bulkBuiltinSchema = z.object({
+  rules: z.array(bulkBuiltinRowSchema).min(1).max(2000)
+});
+
+categoryRulesRouter.post("/builtin/bulk", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+  const parsed = bulkBuiltinSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = bulkCreateGlobalCategoryRules(householdId, parsed.data.rules);
+  res.status(200).json({ created: out.created, errors: out.errors });
 });
 
 const createBuiltinBodySchema = z.object({

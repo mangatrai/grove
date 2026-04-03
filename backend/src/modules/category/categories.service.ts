@@ -255,6 +255,93 @@ export function updateHouseholdCategory(
 export type DeleteCategoryFailure =
   | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "HAS_CHILDREN" | "IN_USE" };
 
+function nameEqualsInsensitive(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+export type ResolveLeafCategoryFailureCode =
+  | "MISSING_INPUT"
+  | "NOT_FOUND"
+  | "AMBIGUOUS"
+  | "NOT_LEAF";
+
+/**
+ * Resolve a household-assignable **leaf** category from `categoryId` and/or `categoryPath`
+ * (`Parent > Child` or `Parent | Child`, case-insensitive names).
+ * If `categoryId` is present and valid, it wins. Otherwise `categoryPath` is parsed.
+ */
+export function resolveLeafCategoryIdForHousehold(
+  householdId: string,
+  input: { categoryId?: string | null; categoryPath?: string | null }
+): { ok: true; id: string } | { ok: false; code: ResolveLeafCategoryFailureCode } {
+  const idIn = input.categoryId?.trim();
+  const pathIn = input.categoryPath?.trim();
+
+  if (idIn) {
+    if (!categoryUsableByHousehold(idIn, householdId)) {
+      return { ok: false, code: "NOT_FOUND" };
+    }
+    if (categoryHasChildren(idIn)) {
+      return { ok: false, code: "NOT_LEAF" };
+    }
+    return { ok: true, id: idIn };
+  }
+
+  if (!pathIn) {
+    return { ok: false, code: "MISSING_INPUT" };
+  }
+
+  const segments = pathIn
+    .split(/[>|]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (segments.length === 0) {
+    return { ok: false, code: "MISSING_INPUT" };
+  }
+
+  const all = listCategoriesForHousehold(householdId);
+  const usableLeaf = (cid: string) =>
+    categoryUsableByHousehold(cid, householdId) && !categoryHasChildren(cid);
+
+  if (segments.length === 1) {
+    const name = segments[0]!;
+    const matches = all.filter((c) => usableLeaf(c.id) && nameEqualsInsensitive(c.name, name));
+    if (matches.length === 0) {
+      return { ok: false, code: "NOT_FOUND" };
+    }
+    if (matches.length > 1) {
+      return { ok: false, code: "AMBIGUOUS" };
+    }
+    return { ok: true, id: matches[0]!.id };
+  }
+
+  if (segments.length > 2) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+
+  const parentName = segments[0]!;
+  const leafName = segments[1]!;
+  const topParents = all.filter((c) => c.parentId === null && nameEqualsInsensitive(c.name, parentName));
+  if (topParents.length === 0) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  if (topParents.length > 1) {
+    return { ok: false, code: "AMBIGUOUS" };
+  }
+  const parentId = topParents[0]!.id;
+  const children = all.filter(
+    (c) => c.parentId === parentId && nameEqualsInsensitive(c.name, leafName) && usableLeaf(c.id)
+  );
+  if (children.length === 0) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  if (children.length > 1) {
+    return { ok: false, code: "AMBIGUOUS" };
+  }
+  return { ok: true, id: children[0]!.id };
+}
+
 export function deleteHouseholdCategory(
   householdId: string,
   categoryId: string
