@@ -56,6 +56,35 @@ describe("resolveLeafCategoryIdForHousehold", () => {
     expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.taxesTaxPrep });
   });
 
+  it("resolves Mobility > Fuel", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Mobility > Fuel" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.mobilityFuel });
+  });
+
+  it("resolves Utilities > Internet", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Utilities > Internet" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.utilitiesInternet });
+  });
+
+  it("resolves Entertainment > Streaming", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, {
+      categoryPath: "Entertainment > Streaming"
+    });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.entertainmentStreaming });
+  });
+
+  it("resolves Banking > Fees", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Banking > Fees" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.bankingFees });
+  });
+
+  it("resolves Transfers > Cash withdrawal", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, {
+      categoryPath: "Transfers > Cash withdrawal"
+    });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.transfersCashWithdrawal });
+  });
+
   it("rejects parent category id (not a leaf)", () => {
     const r = resolveLeafCategoryIdForHousehold(householdId, {
       categoryId: DEFAULT_CATEGORY_IDS.home

@@ -1,6 +1,6 @@
 /**
  * Default taxonomy from `backend/db/seeds/0001_seed_defaults.sql` (household_id NULL).
- * Stable ids for rule engine and tests.
+ * Stable ids for rule engine and tests (includes migration 0032 Entertainment/Banking expansion).
  */
 export const DEFAULT_CATEGORY_IDS = {
   // Top-level parents (roll-up only)
@@ -13,20 +13,26 @@ export const DEFAULT_CATEGORY_IDS = {
   utilitiesParent: "30000000-0000-0000-0000-000000000117",
   loansParent: "30000000-0000-0000-0000-000000000133",
   travelParent: "30000000-0000-0000-0000-000000000134",
+  entertainmentParent: "30000000-0000-0000-0000-000000000152",
+  bankingParent: "30000000-0000-0000-0000-000000000153",
   housing: "30000000-0000-0000-0000-000000000002",
   utilitiesEnergy: "30000000-0000-0000-0000-000000000118",
   /** Display name in UI: "City Water" */
   utilitiesWater: "30000000-0000-0000-0000-000000000119",
   utilitiesMobile: "30000000-0000-0000-0000-000000000120",
+  utilitiesInternet: "30000000-0000-0000-0000-000000000156",
   groceries: "30000000-0000-0000-0000-000000000004",
   /** Shopping > General merchandise */
   shoppingGeneralMerchandise: "30000000-0000-0000-0000-000000000148",
+  shoppingPersonalCare: "30000000-0000-0000-0000-000000000159",
   /** Display name: "Public Transit" */
   transitAndFuel: "30000000-0000-0000-0000-000000000005",
   publicTransit: "30000000-0000-0000-0000-000000000005",
   /** Display name: "Auto Maintenance" */
   autoMaintenance: "30000000-0000-0000-0000-000000000129",
   mobilityTaxi: "30000000-0000-0000-0000-000000000141",
+  mobilityFuel: "30000000-0000-0000-0000-000000000154",
+  mobilityEvCharging: "30000000-0000-0000-0000-000000000155",
   creditCardPayments: "30000000-0000-0000-0000-000000000006",
   loanPayments: "30000000-0000-0000-0000-000000000121",
   personalLending: "30000000-0000-0000-0000-000000000122",
@@ -41,6 +47,7 @@ export const DEFAULT_CATEGORY_IDS = {
   incomeReimbursements: "30000000-0000-0000-0000-000000000151",
 
   medical: "30000000-0000-0000-0000-000000000020",
+  healthcareDental: "30000000-0000-0000-0000-000000000162",
   pharmacy: "30000000-0000-0000-0000-000000000021",
   fitness: "30000000-0000-0000-0000-000000000022",
   wellness: "30000000-0000-0000-0000-000000000125",
@@ -63,6 +70,12 @@ export const DEFAULT_CATEGORY_IDS = {
   travelAirfare: "30000000-0000-0000-0000-000000000143",
   travelCarRental: "30000000-0000-0000-0000-000000000144",
   travelHotel: "30000000-0000-0000-0000-000000000145",
+  travelDocuments: "30000000-0000-0000-0000-000000000157",
+  travelCruise: "30000000-0000-0000-0000-000000000158",
+
+  entertainmentStreaming: "30000000-0000-0000-0000-000000000160",
+  entertainmentMovies: "30000000-0000-0000-0000-000000000161",
+  bankingFees: "30000000-0000-0000-0000-000000000164",
 
   // Taxes leaves (migration 0008 + 0027)
   federalIncomeTax: "30000000-0000-0000-0000-000000000113",
@@ -76,6 +89,7 @@ export const DEFAULT_CATEGORY_IDS = {
   // Transfers leaves (added in migration 0008)
   transfersIn: "30000000-0000-0000-0000-000000000115",
   transfersOut: "30000000-0000-0000-0000-000000000116",
+  transfersCashWithdrawal: "30000000-0000-0000-0000-000000000163",
 
   /** Insurance leaves; display names: Home, Auto, Health, Life, Other */
   insuranceHome: "30000000-0000-0000-0000-000000000025",
