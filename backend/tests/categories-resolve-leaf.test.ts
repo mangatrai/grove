@@ -29,6 +29,33 @@ describe("resolveLeafCategoryIdForHousehold", () => {
     expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.homeHoaFees });
   });
 
+  it("resolves Investments > IRA", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Investments > IRA" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.investmentsIra });
+  });
+
+  it("resolves Shopping > General merchandise", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, {
+      categoryPath: "Shopping > General merchandise"
+    });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.shoppingGeneralMerchandise });
+  });
+
+  it("resolves Income > Reimbursements", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Income > Reimbursements" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.incomeReimbursements });
+  });
+
+  it("resolves Taxes > Property tax", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Taxes > Property tax" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.taxesPropertyTax });
+  });
+
+  it("resolves Taxes > Tax prep", () => {
+    const r = resolveLeafCategoryIdForHousehold(householdId, { categoryPath: "Taxes > Tax prep" });
+    expect(r).toEqual({ ok: true, id: DEFAULT_CATEGORY_IDS.taxesTaxPrep });
+  });
+
   it("rejects parent category id (not a leaf)", () => {
     const r = resolveLeafCategoryIdForHousehold(householdId, {
       categoryId: DEFAULT_CATEGORY_IDS.home

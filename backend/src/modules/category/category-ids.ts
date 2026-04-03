@@ -19,6 +19,8 @@ export const DEFAULT_CATEGORY_IDS = {
   utilitiesWater: "30000000-0000-0000-0000-000000000119",
   utilitiesMobile: "30000000-0000-0000-0000-000000000120",
   groceries: "30000000-0000-0000-0000-000000000004",
+  /** Shopping > General merchandise */
+  shoppingGeneralMerchandise: "30000000-0000-0000-0000-000000000148",
   /** Display name: "Public Transit" */
   transitAndFuel: "30000000-0000-0000-0000-000000000005",
   publicTransit: "30000000-0000-0000-0000-000000000005",
@@ -35,6 +37,8 @@ export const DEFAULT_CATEGORY_IDS = {
   incomeDividends: "30000000-0000-0000-0000-000000000012",
   incomeRentalIncome: "30000000-0000-0000-0000-000000000010",
   incomeRefunds: "30000000-0000-0000-0000-000000000013",
+  /** Income > Reimbursements */
+  incomeReimbursements: "30000000-0000-0000-0000-000000000151",
 
   medical: "30000000-0000-0000-0000-000000000020",
   pharmacy: "30000000-0000-0000-0000-000000000021",
@@ -53,6 +57,9 @@ export const DEFAULT_CATEGORY_IDS = {
   loansHome: "30000000-0000-0000-0000-000000000139",
   loansPersonal: "30000000-0000-0000-0000-000000000140",
 
+  /** Investments > IRA */
+  investmentsIra: "30000000-0000-0000-0000-000000000147",
+
   travelAirfare: "30000000-0000-0000-0000-000000000143",
   travelCarRental: "30000000-0000-0000-0000-000000000144",
   travelHotel: "30000000-0000-0000-0000-000000000145",
@@ -63,6 +70,8 @@ export const DEFAULT_CATEGORY_IDS = {
   salesTax: "30000000-0000-0000-0000-000000000114",
   federalTaxRefund: "30000000-0000-0000-0000-000000000131",
   stateTaxRefund: "30000000-0000-0000-0000-000000000132",
+  taxesPropertyTax: "30000000-0000-0000-0000-000000000149",
+  taxesTaxPrep: "30000000-0000-0000-0000-000000000150",
 
   // Transfers leaves (added in migration 0008)
   transfersIn: "30000000-0000-0000-0000-000000000115",
