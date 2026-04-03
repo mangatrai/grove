@@ -141,6 +141,11 @@ paths:
       tags: [categories]
       summary: Update rule
       security: [{ bearerAuth: [] }]
+    delete:
+      tags: [categories]
+      summary: Delete household category rule
+      description: Permanently removes a household rule (built-in rules use /categories/rules/builtin/{id}).
+      security: [{ bearerAuth: [] }]
   /imports/accounts:
     get:
       tags: [imports]

@@ -91,11 +91,13 @@ UI: **`/categories`** (full-screen table + add parent/subcategory + **Edit** for
 2) `createdAt` ascending  
 3) `id` ascending
 
-Global rules add **`amountScope`**: `any` | `credit_only` | `debit_only` (inflow vs outflow).
+Global rules add **`amountScope`**: `any` | `credit_only` | `debit_only` (inflow vs outflow). **Household** rules in `category_rule` are loaded with **`amount_scope` forced to `any`** for classification (the column in CSV exports is informational; credit/debit-specific household rules are not applied from CSV today).
+
+**Matching (import and re-apply):** canonical ingest builds a **fingerprint-normalized** description (lowercase, collapsed spaces, **non-alphanumeric characters stripped**, then truncated). For **`contains`** and **`prefix`**, the classifier compares that normalized text to the rule pattern **after the same normalization**, so patterns may include punctuation in storage but still match bank text that loses `:` / `*` / etc. **`regex`** rules are matched against the **fingerprint-normalized** description; authors should assume that normalized form (not raw bank punctuation).
 
 Each rule targets one assignable category (leaf) and supports:
 - `matchType`: `contains` | `prefix` | `regex`
-- `pattern`: normalized lower-case string (regex compiled/validated on write)
+- `pattern`: stored lower-case with spaces normalized on write; **`contains`/`prefix`** matching uses fingerprint normalization as above (see **Matching**)
 - `confidence`: `0..1`
 - `enabled`: `true|false`
 
@@ -211,6 +213,14 @@ Update rule fields (including enable/disable).
 **404:** `NOT_FOUND`  
 **400:** same validation codes as create
 
+### `DELETE /categories/rules/:id`
+
+Delete a **household** rule permanently (not the same as disabling via **PATCH**).
+
+**204:** empty body on success.
+
+**404:** unknown id or rule not in this household.
+
 ### `POST /categories/rules/builtin` (owner / admin)
 
 Create a global built-in rule. Category must be a **default** leaf (`household_id` NULL) without children.
@@ -237,5 +247,5 @@ Update a global rule (same fields as create, partial).
 | `origin` | `builtin` or `household` — used by the UI to filter rows when importing. |
 | `id` | Export only; import does not update existing rules. |
 | `rule_key` | Built-in rules only; optional on import (auto from pattern if empty). |
-| `amount_scope` | Built-in only; household rules export as `any`. |
+| `amount_scope` | Built-in only for classification; household rows export a scope column but rules run as **`any`** at match time. |
 | `category_path` | e.g. `Shopping > Groceries`; alternative to `category_id`. |
