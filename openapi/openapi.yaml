@@ -123,6 +123,13 @@ paths:
         Body may include amountScope (any, credit_only, debit_only); defaults to any.
         Matches multi-pattern field `patterns` for batch of rules sharing the same scope.
       security: [{ bearerAuth: [] }]
+  /categories/rules/household:
+    delete:
+      tags: [categories]
+      summary: Delete all household category rules
+      description: >-
+        Removes every row in category_rule for this household. Does not affect built-in global rules.
+      security: [{ bearerAuth: [] }]
   /categories/rules/bulk:
     post:
       tags: [categories]

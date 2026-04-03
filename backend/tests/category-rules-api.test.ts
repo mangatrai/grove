@@ -354,4 +354,46 @@ describe("category rules API and classification explainability", () => {
     });
     expect(createRes.status).toBe(403);
   });
+
+  it("DELETE /categories/rules/household removes all household rules", async () => {
+    const token = await loginAndGetToken();
+    const suffix = Date.now();
+    await request(app)
+      .post("/categories/rules")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        pattern: `bulk_del_a_${suffix}`,
+        matchType: "contains",
+        categoryId: GROCERIES_ID
+      });
+    await request(app)
+      .post("/categories/rules")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        pattern: `bulk_del_b_${suffix}`,
+        matchType: "contains",
+        categoryId: GROCERIES_ID
+      });
+    const before = await request(app).get("/categories/rules").set("authorization", `Bearer ${token}`);
+    expect(before.status).toBe(200);
+    const nBefore = (before.body.rules as unknown[]).filter(
+      (r: { pattern?: string }) =>
+        typeof r.pattern === "string" && (r.pattern === `bulk_del_a_${suffix}` || r.pattern === `bulk_del_b_${suffix}`)
+    ).length;
+    expect(nBefore).toBe(2);
+
+    const delRes = await request(app).delete("/categories/rules/household").set("authorization", `Bearer ${token}`);
+    expect(delRes.status).toBe(200);
+    expect(typeof delRes.body.deleted).toBe("number");
+    expect(delRes.body.deleted).toBeGreaterThanOrEqual(2);
+
+    const after = await request(app).get("/categories/rules").set("authorization", `Bearer ${token}`);
+    expect(after.status).toBe(200);
+    expect(
+      (after.body.rules as unknown[]).some(
+        (r: { pattern?: string }) =>
+          r.pattern === `bulk_del_a_${suffix}` || r.pattern === `bulk_del_b_${suffix}`
+      )
+    ).toBe(false);
+  });
 });

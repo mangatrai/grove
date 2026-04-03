@@ -853,3 +853,9 @@ export function deleteCategoryRuleForHousehold(
   }
   return { ok: true };
 }
+
+/** Removes every household classification rule for this home (e.g. before re-importing a full CSV). */
+export function deleteAllCategoryRulesForHousehold(householdId: string): { deleted: number } {
+  const res = db.prepare(`DELETE FROM category_rule WHERE household_id = ?`).run(householdId);
+  return { deleted: res.changes };
+}

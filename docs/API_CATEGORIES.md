@@ -227,6 +227,12 @@ Delete a **household** rule permanently (not the same as disabling via **PATCH**
 
 **404:** unknown id or rule not in this household.
 
+### `DELETE /categories/rules/household`
+
+Delete **all** household rules for the signed-in home. **Built-in** (`category_rule_global`) rows are unchanged.
+
+**200:** `{ "deleted": <number> }` — count of rows removed (may be `0` if there were no household rules).
+
 ### `POST /categories/rules/builtin` (owner / admin)
 
 Create a global built-in rule. Category must be a **default** leaf (`household_id` NULL) without children.

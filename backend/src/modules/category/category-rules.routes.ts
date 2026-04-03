@@ -15,6 +15,7 @@ import {
   createCategoryRulesFromPatterns,
   createGlobalCategoryRule,
   createRuleFromLedgerTransaction,
+  deleteAllCategoryRulesForHousehold,
   deleteCategoryRuleForHousehold,
   deleteGlobalCategoryRule,
   listCategoryRulesForHousehold,
@@ -396,6 +397,13 @@ categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), (req
     return;
   }
   res.status(204).send();
+});
+
+/** Delete all household rules for the signed-in home (built-in globals unchanged). Must be registered before /:id. */
+categoryRulesRouter.delete("/household", (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const { deleted } = deleteAllCategoryRulesForHousehold(householdId);
+  res.status(200).json({ deleted });
 });
 
 categoryRulesRouter.delete("/:id", (req: AuthenticatedRequest, res) => {

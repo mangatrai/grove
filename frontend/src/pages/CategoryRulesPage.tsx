@@ -321,6 +321,33 @@ export function CategoryRulesPage() {
     }
   }
 
+  async function deleteAllHouseholdRules() {
+    if (rules.length === 0) {
+      return;
+    }
+    if (
+      !window.confirm(
+        `Delete all ${rules.length} household rule(s)? Built-in (global) rules are not affected. This cannot be undone.`
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setRecatMsg(null);
+    setSaving(true);
+    try {
+      const res = await apiJson<{ deleted: number }>("/categories/rules/household", { method: "DELETE" });
+      setRecatMsg(`Deleted ${res.deleted} household rule(s).`);
+      setEditingId(null);
+      setEditDraft(null);
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Delete all failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function startEdit(r: CategoryRule) {
     setEditingId(r.id);
     setEditDraft({
@@ -821,7 +848,8 @@ export function CategoryRulesPage() {
         <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Import / export (CSV)</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Export built-in, household, or both in one file (<code>origin</code> column). Import is{" "}
-          <strong>create-only</strong> (existing rule <code>id</code> values are ignored). Use{" "}
+          <strong>create-only</strong> (existing rule <code>id</code> values are ignored — use{" "}
+          <strong>Delete all household rules</strong> before re-importing a full file if you want a clean slate). Use{" "}
           <code>category_id</code> or <code>category_path</code> (e.g. <code>Home &gt; HOA Fees</code>).
         </p>
         <div className="category-rules-page__export-row">
@@ -833,6 +861,15 @@ export function CategoryRulesPage() {
           </button>
           <button type="button" className="secondary" onClick={exportRulesCsvHousehold} disabled={loading}>
             Export household (CSV)
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void deleteAllHouseholdRules()}
+            disabled={loading || saving || rules.length === 0}
+            title="Remove every household rule so you can re-import a CSV without duplicates"
+          >
+            Delete all household rules
           </button>
         </div>
         <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end", marginTop: "0.75rem" }}>
