@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { db } from "../../db/sqlite.js";
+import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
 
 import { isParserProfileId } from "../imports/profiles/profile-ids.js";
 import {
@@ -9,63 +9,22 @@ import {
   type EmployerStub
 } from "./household.types.js";
 
-function isMissingSavingsTargetColumnError(e: unknown): boolean {
-  return (
-    e !== null &&
-    typeof e === "object" &&
-    "message" in e &&
-    typeof (e as { message?: string }).message === "string" &&
-    (e as { message: string }).message.includes("no such column") &&
-    (e as { message: string }).message.includes("monthly_savings_target_usd")
+export async function getHouseholdMonthlySavingsTarget(householdId: string): Promise<number | null> {
+  const row = await qGet<{ t: number | null }>(
+    `SELECT monthly_savings_target_usd AS t FROM household WHERE id = ?`,
+    householdId
   );
-}
-
-function isMissingIncomeOnboardingColumnError(e: unknown): boolean {
-  return (
-    e !== null &&
-    typeof e === "object" &&
-    "message" in e &&
-    typeof (e as { message?: string }).message === "string" &&
-    (e as { message: string }).message.includes("no such column") &&
-    ((e as { message: string }).message.includes("salary_deposit_financial_account_id") ||
-      (e as { message: string }).message.includes("employers_json"))
-  );
-}
-
-function isMissingProfileIncomeColumnError(e: unknown): boolean {
-  return (
-    e !== null &&
-    typeof e === "object" &&
-    "message" in e &&
-    typeof (e as { message?: string }).message === "string" &&
-    (e as { message: string }).message.includes("no such column") &&
-    ((e as { message: string }).message.includes("salary_deposit_financial_account_id") ||
-      (e as { message: string }).message.includes("employers_json"))
-  );
-}
-
-export function getHouseholdMonthlySavingsTarget(householdId: string): number | null {
-  try {
-    const row = db
-      .prepare(`SELECT monthly_savings_target_usd AS t FROM household WHERE id = ?`)
-      .get(householdId) as { t: number | null } | undefined;
-    if (!row) {
-      return null;
-    }
-    if (row.t === null || row.t === undefined) {
-      return null;
-    }
-    const n = Number(row.t);
-    if (!Number.isFinite(n) || n < 0) {
-      return null;
-    }
-    return Math.round(n * 100) / 100;
-  } catch (e: unknown) {
-    if (isMissingSavingsTargetColumnError(e)) {
-      return null;
-    }
-    throw e;
+  if (!row) {
+    return null;
   }
+  if (row.t === null || row.t === undefined) {
+    return null;
+  }
+  const n = Number(row.t);
+  if (!Number.isFinite(n) || n < 0) {
+    return null;
+  }
+  return Math.round(n * 100) / 100;
 }
 
 export type HouseholdSettings = {
@@ -74,100 +33,78 @@ export type HouseholdSettings = {
   employers: EmployerStub[];
 };
 
-export function getHouseholdSettings(householdId: string, userId?: string): HouseholdSettings | null {
-  try {
-    const base = db
-      .prepare(
-        `SELECT monthly_savings_target_usd AS monthlySavingsTargetUsd
-         FROM household WHERE id = ?`
-      )
-      .get(householdId) as
-      | {
-          monthlySavingsTargetUsd: number | null;
-        }
-      | undefined;
-    if (!base) {
-      return null;
+export async function getHouseholdSettings(householdId: string, userId?: string): Promise<HouseholdSettings | null> {
+  const base = await qGet<{ monthlySavingsTargetUsd: number | null }>(
+    `SELECT monthly_savings_target_usd AS "monthlySavingsTargetUsd"
+         FROM household WHERE id = ?`,
+    householdId
+  );
+  if (!base) {
+    return null;
+  }
+  let monthlySavingsTargetUsd: number | null = null;
+  if (base.monthlySavingsTargetUsd != null && Number.isFinite(Number(base.monthlySavingsTargetUsd))) {
+    const n = Number(base.monthlySavingsTargetUsd);
+    if (n >= 0) {
+      monthlySavingsTargetUsd = Math.round(n * 100) / 100;
     }
-    let monthlySavingsTargetUsd: number | null = null;
-    if (base.monthlySavingsTargetUsd != null && Number.isFinite(Number(base.monthlySavingsTargetUsd))) {
-      const n = Number(base.monthlySavingsTargetUsd);
-      if (n >= 0) {
-        monthlySavingsTargetUsd = Math.round(n * 100) / 100;
-      }
-    }
+  }
 
-    let salaryDepositFinancialAccountId: string | null = null;
-    let employers: EmployerStub[] = [];
+  let salaryDepositFinancialAccountId: string | null = null;
+  let employers: EmployerStub[] = [];
 
-    if (userId) {
-      try {
-        const profileRow = db
-          .prepare(
-            `SELECT salary_deposit_financial_account_id AS salaryDepositFinancialAccountId, employers_json AS employersJson
+  if (userId) {
+    const profileRow = await qGet<{
+      salaryDepositFinancialAccountId: string | null;
+      employersJson: string | null;
+    }>(
+      `SELECT salary_deposit_financial_account_id AS "salaryDepositFinancialAccountId", employers_json AS "employersJson"
              FROM person_profile
              WHERE household_id = ? AND linked_user_id = ?
-             LIMIT 1`
-          )
-          .get(householdId, userId) as
-          | {
-              salaryDepositFinancialAccountId: string | null;
-              employersJson: string | null;
-            }
-          | undefined;
+             LIMIT 1`,
+      householdId,
+      userId
+    );
 
-        if (profileRow) {
-          salaryDepositFinancialAccountId =
-            profileRow.salaryDepositFinancialAccountId == null
-              ? null
-              : String(profileRow.salaryDepositFinancialAccountId);
-          if (profileRow.employersJson?.trim()) {
-            try {
-              const parsed = JSON.parse(profileRow.employersJson) as unknown;
-              const arr = employersPayloadSchema.safeParse(parsed);
-              if (arr.success) {
-                employers = arr.data;
-              }
-            } catch {
-              employers = [];
-            }
+    if (profileRow) {
+      salaryDepositFinancialAccountId =
+        profileRow.salaryDepositFinancialAccountId == null
+          ? null
+          : String(profileRow.salaryDepositFinancialAccountId);
+      if (profileRow.employersJson?.trim()) {
+        try {
+          const parsed = JSON.parse(profileRow.employersJson) as unknown;
+          const arr = employersPayloadSchema.safeParse(parsed);
+          if (arr.success) {
+            employers = arr.data;
           }
-        }
-      } catch (e: unknown) {
-        if (!isMissingProfileIncomeColumnError(e)) {
-          throw e;
+        } catch {
+          employers = [];
         }
       }
     }
-
-    return {
-      monthlySavingsTargetUsd,
-      salaryDepositFinancialAccountId,
-      employers
-    };
-  } catch (e: unknown) {
-    if (isMissingIncomeOnboardingColumnError(e)) {
-      return {
-        monthlySavingsTargetUsd: getHouseholdMonthlySavingsTarget(householdId),
-        salaryDepositFinancialAccountId: null,
-        employers: []
-      };
-    }
-    throw e;
   }
+
+  return {
+    monthlySavingsTargetUsd,
+    salaryDepositFinancialAccountId,
+    employers
+  };
 }
 
-function accountBelongsToHousehold(accountId: string, householdId: string): boolean {
-  const row = db
-    .prepare(`SELECT 1 AS ok FROM financial_account WHERE id = ? AND household_id = ?`)
-    .get(accountId, householdId) as { ok: number } | undefined;
+async function accountBelongsToHousehold(accountId: string, householdId: string): Promise<boolean> {
+  const row = await qGet<{ ok: number }>(
+    `SELECT 1 AS ok FROM financial_account WHERE id = ? AND household_id = ?`,
+    accountId,
+    householdId
+  );
   return Boolean(row);
 }
 
-export function updateHouseholdMonthlySavingsTarget(
+export async function updateHouseholdMonthlySavingsTarget(
   householdId: string,
   monthlySavingsTargetUsd: number | null
-): { ok: true } | { ok: false; code: "INVALID_AMOUNT" | "MIGRATION_REQUIRED" } {
+): Promise<{ ok: true } | { ok: false; code: "INVALID_AMOUNT" }> {
   if (monthlySavingsTargetUsd !== null) {
     if (!Number.isFinite(monthlySavingsTargetUsd) || monthlySavingsTargetUsd < 0) {
       return { ok: false, code: "INVALID_AMOUNT" };
@@ -175,29 +112,22 @@ export function updateHouseholdMonthlySavingsTarget(
   }
   const value =
     monthlySavingsTargetUsd === null ? null : Math.round(monthlySavingsTargetUsd * 100) / 100;
-  try {
-    db.prepare(`UPDATE household SET monthly_savings_target_usd = ? WHERE id = ?`).run(value, householdId);
-    return { ok: true };
-  } catch (e: unknown) {
-    if (isMissingSavingsTargetColumnError(e)) {
-      return { ok: false, code: "MIGRATION_REQUIRED" };
-    }
-    throw e;
-  }
+  await qExec(`UPDATE household SET monthly_savings_target_usd = ? WHERE id = ?`, value, householdId);
+  return { ok: true };
 }
 
 export type PatchHouseholdSettingsInput = {
   monthlySavingsTargetUsd?: number | null;
 };
 
-export type PatchHouseholdSettingsFailure = { ok: false; code: "INVALID_AMOUNT" | "MIGRATION_REQUIRED" };
+export type PatchHouseholdSettingsFailure = { ok: false; code: "INVALID_AMOUNT" };
 
-export function patchHouseholdSettings(
+export async function patchHouseholdSettings(
   householdId: string,
   input: PatchHouseholdSettingsInput
-): { ok: true } | PatchHouseholdSettingsFailure {
+): Promise<{ ok: true } | PatchHouseholdSettingsFailure> {
   if (input.monthlySavingsTargetUsd !== undefined) {
-    const out = updateHouseholdMonthlySavingsTarget(householdId, input.monthlySavingsTargetUsd);
+    const out = await updateHouseholdMonthlySavingsTarget(householdId, input.monthlySavingsTargetUsd);
     if (!out.ok) {
       return out;
     }
@@ -254,12 +184,6 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
   };
 }
 
-function isSqliteConstraintError(err: unknown): boolean {
-  const code =
-    err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
-  return code === "SQLITE_CONSTRAINT_UNIQUE" || code.includes("SQLITE_CONSTRAINT");
-}
-
 export type PatchProfileInput = {
   firstName?: string;
   lastName?: string;
@@ -293,7 +217,13 @@ export type PatchMemberInput = {
   relationship?: HouseholdRelationship;
 };
 
-const getProfileByUserStmt = db.prepare<[string, string], MemberProfileRow>(`
+async function ensureCurrentUserProfile(
+  householdId: string,
+  userId: string,
+  role: "owner" | "admin" | "member"
+): Promise<HouseholdMemberProfile | null> {
+  const existing = await qGet<MemberProfileRow>(
+    `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
   FROM person_profile p
   JOIN household_membership m
@@ -301,76 +231,24 @@ const getProfileByUserStmt = db.prepare<[string, string], MemberProfileRow>(`
    AND m.household_id = p.household_id
   WHERE p.household_id = ? AND p.linked_user_id = ?
   LIMIT 1
-`);
-
-const getMemberByIdStmt = db.prepare<[string, string], MemberProfileRow>(`
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
-  FROM person_profile p
-  JOIN household_membership m
-    ON m.person_profile_id = p.id
-   AND m.household_id = p.household_id
-  WHERE p.household_id = ? AND p.id = ?
-  LIMIT 1
-`);
-
-const listMembersStmt = db.prepare<[string], MemberProfileRow>(`
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
-  FROM household_membership m
-  JOIN person_profile p
-    ON p.id = m.person_profile_id
-   AND p.household_id = m.household_id
-  WHERE m.household_id = ?
-  ORDER BY p.created_at ASC, p.id ASC
-`);
-
-const updateProfileByIdStmt = db.prepare<
-  [string, string | null, string | null, string | null, string, string]
->(`
-  UPDATE person_profile
-  SET full_name = ?, email = ?, phone_number = ?, avatar_key = ?
-  WHERE household_id = ? AND id = ?
-`);
-
-const updateLinkedUserEmailStmt = db.prepare<[string, string]>(`
-  UPDATE app_user
-  SET email = ?
-  WHERE id = ?
-`);
-
-const insertProfileStmt = db.prepare<[string, string, string, string | null, string | null, string | null]>(`
-  INSERT INTO person_profile (id, household_id, full_name, email, phone_number, avatar_key)
-  VALUES (?, ?, ?, ?, ?, ?)
-`);
-
-const insertMembershipStmt = db.prepare<[string, string, string, HouseholdMemberRole, HouseholdRelationship]>(`
-  INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
-  VALUES (?, ?, ?, ?, ?)
-`);
-
-const updateMembershipStmt = db.prepare<[HouseholdMemberRole, HouseholdRelationship, string, string]>(`
-  UPDATE household_membership
-  SET role = ?, relationship = ?
-  WHERE household_id = ? AND person_profile_id = ?
-`);
-
-const getAppUserStmt = db.prepare<[string, string], { email: string; role: "owner" | "admin" | "member" }>(`
-  SELECT email, role
-  FROM app_user
-  WHERE household_id = ? AND id = ?
-  LIMIT 1
-`);
-
-function ensureCurrentUserProfile(
-  householdId: string,
-  userId: string,
-  role: "owner" | "admin" | "member"
-): HouseholdMemberProfile | null {
-  const existing = getProfileByUserStmt.get(householdId, userId);
+`,
+    householdId,
+    userId
+  );
   if (existing) {
     return toHouseholdMemberProfile(existing);
   }
 
-  const user = getAppUserStmt.get(householdId, userId);
+  const user = await qGet<{ email: string; role: "owner" | "admin" | "member" }>(
+    `
+  SELECT email, role
+  FROM app_user
+  WHERE household_id = ? AND id = ?
+  LIMIT 1
+`,
+    householdId,
+    userId
+  );
   if (!user) {
     return null;
   }
@@ -381,41 +259,75 @@ function ensureCurrentUserProfile(
   const relationship: HouseholdRelationship = role === "owner" ? "self" : "other";
 
   try {
-    db.transaction(() => {
-      insertProfileStmt.run(profileId, householdId, "", user.email, null, null);
-      insertMembershipStmt.run(membershipId, householdId, profileId, membershipRole, relationship);
-      db.prepare(`UPDATE person_profile SET linked_user_id = ? WHERE household_id = ? AND id = ?`).run(
+    await qBegin(async (tx) => {
+      await tx.unsafe(
+        `INSERT INTO person_profile (id, household_id, full_name, email, phone_number, avatar_key)
+  VALUES ($1, $2, $3, $4, $5, $6)`,
+        [profileId, householdId, "", user.email, null, null] as never[]
+      );
+      await tx.unsafe(
+        `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+  VALUES ($1, $2, $3, $4, $5)`,
+        [membershipId, householdId, profileId, membershipRole, relationship] as never[]
+      );
+      await tx.unsafe(`UPDATE person_profile SET linked_user_id = $1 WHERE household_id = $2 AND id = $3`, [
         userId,
         householdId,
         profileId
-      );
-    })();
+      ] as never[]);
+    });
   } catch (err: unknown) {
-    if (!isSqliteConstraintError(err)) {
+    if (!isPgUniqueViolation(err)) {
       throw err;
     }
   }
 
-  const created = getProfileByUserStmt.get(householdId, userId);
+  const created = await qGet<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.linked_user_id = ?
+  LIMIT 1
+`,
+    householdId,
+    userId
+  );
   return created ? toHouseholdMemberProfile(created) : null;
 }
 
-export function getCurrentUserProfile(
+export async function getCurrentUserProfile(
   householdId: string,
   userId: string,
   role: "owner" | "admin" | "member"
-): HouseholdMemberProfile | null {
+): Promise<HouseholdMemberProfile | null> {
   return ensureCurrentUserProfile(householdId, userId, role);
 }
 
-export function patchCurrentUserProfile(
+export async function patchCurrentUserProfile(
   householdId: string,
   userId: string,
   role: "owner" | "admin" | "member",
   input: PatchProfileInput
-): { ok: true; profile: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" } {
-  const ensured = ensureCurrentUserProfile(householdId, userId, role);
-  const existing = ensured ? getProfileByUserStmt.get(householdId, userId) : undefined;
+): Promise<{ ok: true; profile: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" }> {
+  const ensured = await ensureCurrentUserProfile(householdId, userId, role);
+  const existing = ensured
+    ? await qGet<MemberProfileRow>(
+        `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.linked_user_id = ?
+  LIMIT 1
+`,
+        householdId,
+        userId
+      )
+    : undefined;
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -427,18 +339,15 @@ export function patchCurrentUserProfile(
   const nextEmail = input.email !== undefined ? input.email : existing.email;
   if (input.salaryDepositFinancialAccountId !== undefined) {
     const id = input.salaryDepositFinancialAccountId;
-    if (id !== null && !accountBelongsToHousehold(id, householdId)) {
+    if (id !== null && !(await accountBelongsToHousehold(id, householdId))) {
       return { ok: false, code: "NOT_FOUND" };
     }
-    try {
-      db.prepare(
-        `UPDATE person_profile SET salary_deposit_financial_account_id = ? WHERE household_id = ? AND linked_user_id = ?`
-      ).run(id, householdId, userId);
-    } catch (err: unknown) {
-      if (!isMissingProfileIncomeColumnError(err)) {
-        throw err;
-      }
-    }
+    await qExec(
+      `UPDATE person_profile SET salary_deposit_financial_account_id = ? WHERE household_id = ? AND linked_user_id = ?`,
+      id,
+      householdId,
+      userId
+    );
   }
   if (input.employers !== undefined) {
     for (const e of input.employers) {
@@ -457,51 +366,70 @@ export function patchCurrentUserProfile(
     if (!parsed.success) {
       return { ok: false, code: "NOT_FOUND" };
     }
-    try {
-      db.prepare(`UPDATE person_profile SET employers_json = ? WHERE household_id = ? AND linked_user_id = ?`).run(
-        JSON.stringify(parsed.data),
-        householdId,
-        userId
-      );
-    } catch (err: unknown) {
-      if (!isMissingProfileIncomeColumnError(err)) {
-        throw err;
-      }
-    }
+    await qExec(`UPDATE person_profile SET employers_json = ? WHERE household_id = ? AND linked_user_id = ?`, JSON.stringify(parsed.data), householdId, userId);
   }
 
   const nextPhone = input.phoneNumber !== undefined ? input.phoneNumber : existing.phone_number;
   const nextAvatar = input.avatarKey !== undefined ? input.avatarKey : existing.avatar_key;
 
   try {
-    db.transaction(() => {
-      updateProfileByIdStmt.run(nextFullName, nextEmail, nextPhone, nextAvatar, householdId, existing.id);
+    await qBegin(async (tx) => {
+      await tx.unsafe(
+        `UPDATE person_profile
+  SET full_name = $1, email = $2, phone_number = $3, avatar_key = $4
+  WHERE household_id = $5 AND id = $6`,
+        [nextFullName, nextEmail, nextPhone, nextAvatar, householdId, existing.id] as never[]
+      );
       if (input.email !== undefined && existing.linked_user_id && nextEmail !== null) {
-        updateLinkedUserEmailStmt.run(nextEmail, existing.linked_user_id);
+        await tx.unsafe(`UPDATE app_user SET email = $1 WHERE id = $2`, [nextEmail, existing.linked_user_id] as never[]);
       }
-    })();
+    });
   } catch (err: unknown) {
-    if (isSqliteConstraintError(err)) {
+    if (isPgUniqueViolation(err)) {
       return { ok: false, code: "EMAIL_CONFLICT" };
     }
     throw err;
   }
 
-  const updated = getMemberByIdStmt.get(householdId, existing.id);
+  const updated = await qGet<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    existing.id
+  );
   if (!updated) {
     return { ok: false, code: "NOT_FOUND" };
   }
   return { ok: true, profile: toHouseholdMemberProfile(updated) };
 }
 
-export function listHouseholdMembers(householdId: string): HouseholdMemberProfile[] {
-  return listMembersStmt.all(householdId).map(toHouseholdMemberProfile);
+export async function listHouseholdMembers(householdId: string): Promise<HouseholdMemberProfile[]> {
+  const rows = await qAll<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM household_membership m
+  JOIN person_profile p
+    ON p.id = m.person_profile_id
+   AND p.household_id = m.household_id
+  WHERE m.household_id = ?
+  ORDER BY p.created_at ASC, p.id ASC
+`,
+    householdId
+  );
+  return rows.map(toHouseholdMemberProfile);
 }
 
-export function createHouseholdMember(
+export async function createHouseholdMember(
   householdId: string,
   input: CreateMemberInput
-): { ok: true; member: HouseholdMemberProfile } | { ok: false; code: "EMAIL_CONFLICT" } {
+): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "EMAIL_CONFLICT" }> {
   const profileId = randomUUID();
   const membershipId = randomUUID();
   const email = input.email ?? null;
@@ -512,30 +440,62 @@ export function createHouseholdMember(
     input.fullName?.trim() ||
     [input.firstName?.trim() ?? "", input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
   try {
-    db.transaction(() => {
-      insertProfileStmt.run(profileId, householdId, fullName, email, phoneNumber, avatarKey);
-      insertMembershipStmt.run(membershipId, householdId, profileId, input.role, input.relationship);
-    })();
+    await qBegin(async (tx) => {
+      await tx.unsafe(
+        `INSERT INTO person_profile (id, household_id, full_name, email, phone_number, avatar_key)
+  VALUES ($1, $2, $3, $4, $5, $6)`,
+        [profileId, householdId, fullName, email, phoneNumber, avatarKey] as never[]
+      );
+      await tx.unsafe(
+        `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+  VALUES ($1, $2, $3, $4, $5)`,
+        [membershipId, householdId, profileId, input.role, input.relationship] as never[]
+      );
+    });
   } catch (err: unknown) {
-    if (isSqliteConstraintError(err)) {
+    if (isPgUniqueViolation(err)) {
       return { ok: false, code: "EMAIL_CONFLICT" };
     }
     throw err;
   }
 
-  const created = getMemberByIdStmt.get(householdId, profileId);
+  const created = await qGet<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    profileId
+  );
   if (!created) {
     throw new Error("Created member could not be loaded");
   }
   return { ok: true, member: toHouseholdMemberProfile(created) };
 }
 
-export function patchHouseholdMember(
+export async function patchHouseholdMember(
   householdId: string,
   memberId: string,
   input: PatchMemberInput
-): { ok: true; member: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" } {
-  const existing = getMemberByIdStmt.get(householdId, memberId);
+): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" }> {
+  const existing = await qGet<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    memberId
+  );
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -551,21 +511,43 @@ export function patchHouseholdMember(
   const nextRelationship = input.relationship ?? existing.relationship;
 
   try {
-    db.transaction(() => {
-      updateProfileByIdStmt.run(nextFullName, nextEmail, nextPhone, nextAvatar, householdId, memberId);
-      updateMembershipStmt.run(nextRole, nextRelationship, householdId, memberId);
+    await qBegin(async (tx) => {
+      await tx.unsafe(
+        `UPDATE person_profile
+  SET full_name = $1, email = $2, phone_number = $3, avatar_key = $4
+  WHERE household_id = $5 AND id = $6`,
+        [nextFullName, nextEmail, nextPhone, nextAvatar, householdId, memberId] as never[]
+      );
+      await tx.unsafe(
+        `UPDATE household_membership
+  SET role = $1, relationship = $2
+  WHERE household_id = $3 AND person_profile_id = $4`,
+        [nextRole, nextRelationship, householdId, memberId] as never[]
+      );
       if (input.email !== undefined && existing.linked_user_id && nextEmail !== null) {
-        updateLinkedUserEmailStmt.run(nextEmail, existing.linked_user_id);
+        await tx.unsafe(`UPDATE app_user SET email = $1 WHERE id = $2`, [nextEmail, existing.linked_user_id] as never[]);
       }
-    })();
+    });
   } catch (err: unknown) {
-    if (isSqliteConstraintError(err)) {
+    if (isPgUniqueViolation(err)) {
       return { ok: false, code: "EMAIL_CONFLICT" };
     }
     throw err;
   }
 
-  const updated = getMemberByIdStmt.get(householdId, memberId);
+  const updated = await qGet<MemberProfileRow>(
+    `
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    memberId
+  );
   if (!updated) {
     return { ok: false, code: "NOT_FOUND" };
   }

@@ -1,4 +1,4 @@
-import { db } from "../../db/sqlite.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 import { categoryUsableByHousehold } from "../category/categories.service.js";
 
 interface ResolutionReasonDetail {
@@ -71,15 +71,14 @@ export type ResolutionItemTypeFilter =
 /**
  * Open resolution items per type (for dashboard / nav badges).
  */
-export function countOpenResolutionItemsByType(householdId: string): Record<string, number> {
-  const rows = db
-    .prepare(
-      `SELECT type, COUNT(*) AS cnt
+export async function countOpenResolutionItemsByType(householdId: string): Promise<Record<string, number>> {
+  const rows = await qAll<{ type: string; cnt: string }>(
+    `SELECT type, COUNT(*)::text AS cnt
        FROM resolution_item
        WHERE household_id = ? AND status = 'open'
-       GROUP BY type`
-    )
-    .all(householdId) as Array<{ type: string; cnt: number }>;
+       GROUP BY type`,
+    householdId
+  );
   const out: Record<string, number> = {};
   for (const r of rows) {
     out[r.type] = Number(r.cnt);
@@ -91,10 +90,9 @@ export function countOpenResolutionItemsByType(householdId: string): Record<stri
  * Open duplicate_ambiguity items with no ledger row linking `source_ref = 'raw:' || target_id`
  * (near-duplicate skipped at ingest — invisible on Transactions → Needs review). See DOC-005.
  */
-export function countOpenDuplicateAmbiguityNotOnLedger(householdId: string): number {
-  const row = db
-    .prepare(
-      `SELECT COUNT(*) AS c
+export async function countOpenDuplicateAmbiguityNotOnLedger(householdId: string): Promise<number> {
+  const row = await qGet<{ c: string }>(
+    `SELECT COUNT(*)::text AS c
        FROM resolution_item ri
        WHERE ri.household_id = ?
          AND ri.type = 'duplicate_ambiguity'
@@ -104,9 +102,9 @@ export function countOpenDuplicateAmbiguityNotOnLedger(householdId: string): num
            WHERE tc.household_id = ri.household_id
              AND tc.source_ref IS NOT NULL
              AND tc.source_ref = ('raw:' || ri.target_id)
-         )`
-    )
-    .get(householdId) as { c: number } | undefined;
+         )`,
+    householdId
+  );
   return row ? Number(row.c) || 0 : 0;
 }
 
@@ -119,43 +117,7 @@ type ResolutionDbListRow = {
   createdAt: string;
 };
 
-type SqlGetStmt = { get: (...params: unknown[]) => unknown };
-
-type ResolutionContextStmts = {
-  rawContextStmt: SqlGetStmt;
-  unknownCanonStmt: SqlGetStmt;
-  canonTxnStmt: SqlGetStmt;
-};
-
-function createResolutionContextStmts(): ResolutionContextStmts {
-  return {
-    rawContextStmt: db.prepare(
-      `SELECT tr.file_id AS fileId, tr.extracted_payload_json AS payloadJson, f.file_name AS fileName, f.session_id AS sessionId
-       FROM transaction_raw tr
-       INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE tr.id = ?`
-    ) as SqlGetStmt,
-    unknownCanonStmt: db.prepare(
-      `SELECT
-         f.session_id AS sessionId,
-         f.id AS fileId,
-         f.file_name AS fileName,
-         tr.extracted_payload_json AS payloadJson,
-         tc.classification_meta AS classificationMeta
-       FROM transaction_canonical tc
-       INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
-       INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE tc.id = ? AND tc.household_id = ?`
-    ) as SqlGetStmt,
-    canonTxnStmt: db.prepare(
-      `SELECT merchant, memo, amount, txn_date, classification_meta AS classificationMeta
-       FROM transaction_canonical
-       WHERE id = ? AND household_id = ?`
-    ) as SqlGetStmt
-  };
-}
-
-function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stmts: ResolutionContextStmts): ResolutionItemRow {
+async function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string): Promise<ResolutionItemRow> {
   let reasonDetail: ResolutionReasonDetail | null = null;
   try {
     reasonDetail = JSON.parse(r.reason) as ResolutionReasonDetail;
@@ -170,15 +132,26 @@ function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stm
   let fileName: string | null = null;
 
   if (r.type === "unknown_category") {
-    const u = stmts.unknownCanonStmt.get(r.targetId, householdId) as
-      | {
-          sessionId: string;
-          fileId: string;
-          fileName: string;
-          payloadJson: string;
-          classificationMeta: string | null;
-        }
-      | undefined;
+    const u = await qGet<{
+      sessionId: string;
+      fileId: string;
+      fileName: string;
+      payloadJson: string;
+      classificationMeta: string | null;
+    }>(
+      `SELECT
+         f.session_id AS "sessionId",
+         f.id AS "fileId",
+         f.file_name AS "fileName",
+         tr.extracted_payload_json AS "payloadJson",
+         tc.classification_meta AS "classificationMeta"
+       FROM transaction_canonical tc
+       INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
+       INNER JOIN import_file f ON f.id = tr.file_id
+       WHERE tc.id = ? AND tc.household_id = ?`,
+      r.targetId,
+      householdId
+    );
     if (u) {
       sessionId = u.sessionId;
       fileId = u.fileId;
@@ -207,15 +180,19 @@ function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stm
         }
       }
     } else {
-      const co = stmts.canonTxnStmt.get(r.targetId, householdId) as
-        | {
-            merchant: string | null;
-            memo: string | null;
-            amount: number;
-            txn_date: string;
-            classificationMeta: string | null;
-          }
-        | undefined;
+      const co = await qGet<{
+        merchant: string | null;
+        memo: string | null;
+        amount: number;
+        txn_date: string;
+        classificationMeta: string | null;
+      }>(
+        `SELECT merchant, memo, amount, txn_date, classification_meta AS "classificationMeta"
+       FROM transaction_canonical
+       WHERE id = ? AND household_id = ?`,
+        r.targetId,
+        householdId
+      );
       if (co) {
         const desc = (co.merchant || co.memo || "").trim() || null;
         rawPreview = {
@@ -235,9 +212,18 @@ function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stm
     }
   } else {
     const rawId = reasonDetail?.rawId || r.targetId;
-    const rawCtx = stmts.rawContextStmt.get(rawId) as
-      | { fileId: string; payloadJson: string; fileName: string; sessionId: string }
-      | undefined;
+    const rawCtx = await qGet<{
+      fileId: string;
+      payloadJson: string;
+      fileName: string;
+      sessionId: string;
+    }>(
+      `SELECT tr.file_id AS "fileId", tr.extracted_payload_json AS "payloadJson", f.file_name AS "fileName", f.session_id AS "sessionId"
+       FROM transaction_raw tr
+       INNER JOIN import_file f ON f.id = tr.file_id
+       WHERE tr.id = ?`,
+      rawId
+    );
 
     if (rawCtx) {
       sessionId = rawCtx.sessionId;
@@ -260,15 +246,19 @@ function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stm
         rawPreview = null;
       }
     }
-    const co = stmts.canonTxnStmt.get(r.targetId, householdId) as
-      | {
-          merchant: string | null;
-          memo: string | null;
-          amount: number;
-          txn_date: string;
-          classificationMeta: string | null;
-        }
-      | undefined;
+    const co = await qGet<{
+      merchant: string | null;
+      memo: string | null;
+      amount: number;
+      txn_date: string;
+      classificationMeta: string | null;
+    }>(
+      `SELECT merchant, memo, amount, txn_date, classification_meta AS "classificationMeta"
+       FROM transaction_canonical
+       WHERE id = ? AND household_id = ?`,
+      r.targetId,
+      householdId
+    );
     if (co?.classificationMeta) {
       try {
         classification = JSON.parse(co.classificationMeta) as ClassificationExplainability;
@@ -299,20 +289,21 @@ function buildResolutionItemRow(r: ResolutionDbListRow, householdId: string, stm
 /**
  * Open / in_review resolution items tied to one canonical transaction (same link rules as ledger `openReviewItems`).
  */
-export function listOpenResolutionItemsForCanonicalTransaction(
+export async function listOpenResolutionItemsForCanonicalTransaction(
   householdId: string,
   canonicalTransactionId: string
-): { ok: true; items: ResolutionItemRow[] } | { ok: false; code: "NOT_FOUND" } {
-  const exists = db
-    .prepare(`SELECT 1 FROM transaction_canonical WHERE id = ? AND household_id = ?`)
-    .get(canonicalTransactionId, householdId);
+): Promise<{ ok: true; items: ResolutionItemRow[] } | { ok: false; code: "NOT_FOUND" }> {
+  const exists = await qGet(
+    `SELECT 1 FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    canonicalTransactionId,
+    householdId
+  );
   if (!exists) {
     return { ok: false, code: "NOT_FOUND" };
   }
 
-  const rows = db
-    .prepare(
-      `SELECT ri.id AS id, ri.type AS type, ri.target_id AS targetId, ri.reason AS reason, ri.status AS status, ri.created_at AS createdAt
+  const rows = await qAll<ResolutionDbListRow>(
+    `SELECT ri.id AS id, ri.type AS type, ri.target_id AS "targetId", ri.reason AS reason, ri.status AS status, ri.created_at AS "createdAt"
        FROM resolution_item ri
        WHERE ri.household_id = ?
          AND ri.status IN ('open', 'in_review')
@@ -328,30 +319,35 @@ export function listOpenResolutionItemsForCanonicalTransaction(
              )
            )
          )
-       ORDER BY datetime(ri.created_at) DESC`
-    )
-    .all(householdId, canonicalTransactionId, canonicalTransactionId) as ResolutionDbListRow[];
+       ORDER BY ri.created_at DESC`,
+    householdId,
+    canonicalTransactionId,
+    canonicalTransactionId
+  );
 
-  const stmts = createResolutionContextStmts();
-  return { ok: true, items: rows.map((r) => buildResolutionItemRow(r, householdId, stmts)) };
+  const items: ResolutionItemRow[] = [];
+  for (const r of rows) {
+    items.push(await buildResolutionItemRow(r, householdId));
+  }
+  return { ok: true, items };
 }
 
-export function listResolutionItemsForHousehold(
+export async function listResolutionItemsForHousehold(
   householdId: string,
   status: ResolutionStatus | "all" = "all",
   itemType: ResolutionItemTypeFilter = "all"
-): ResolutionItemRow[] {
+): Promise<ResolutionItemRow[]> {
   const typePart = itemType === "all" ? "" : " AND type = ?";
   const listSql =
     status === "all"
-      ? `SELECT id, type, target_id AS targetId, reason, status, created_at AS createdAt
+      ? `SELECT id, type, target_id AS "targetId", reason, status, created_at AS "createdAt"
          FROM resolution_item
          WHERE household_id = ?${typePart}
-         ORDER BY datetime(created_at) DESC`
-      : `SELECT id, type, target_id AS targetId, reason, status, created_at AS createdAt
+         ORDER BY created_at DESC`
+      : `SELECT id, type, target_id AS "targetId", reason, status, created_at AS "createdAt"
          FROM resolution_item
          WHERE household_id = ? AND status = ?${typePart}
-         ORDER BY datetime(created_at) DESC`;
+         ORDER BY created_at DESC`;
 
   const params: unknown[] =
     status === "all"
@@ -362,10 +358,13 @@ export function listResolutionItemsForHousehold(
         ? [householdId, status]
         : [householdId, status, itemType];
 
-  const rows = db.prepare(listSql).all(...params) as ResolutionDbListRow[];
+  const rows = await qAll<ResolutionDbListRow>(listSql, ...params);
 
-  const stmts = createResolutionContextStmts();
-  return rows.map((r) => buildResolutionItemRow(r, householdId, stmts));
+  const items: ResolutionItemRow[] = [];
+  for (const r of rows) {
+    items.push(await buildResolutionItemRow(r, householdId));
+  }
+  return items;
 }
 
 function canTransition(from: ResolutionStatus, to: ResolutionStatus): boolean {
@@ -381,14 +380,16 @@ function canTransition(from: ResolutionStatus, to: ResolutionStatus): boolean {
   return to === "open";
 }
 
-export function updateResolutionStatusForHousehold(
+export async function updateResolutionStatusForHousehold(
   householdId: string,
   itemId: string,
   nextStatus: ResolutionStatus
-): { ok: true; data: { id: string; status: ResolutionStatus } } | UpdateResolutionFailure {
-  const row = db
-    .prepare(`SELECT id, status FROM resolution_item WHERE id = ? AND household_id = ?`)
-    .get(itemId, householdId) as { id: string; status: ResolutionStatus } | undefined;
+): Promise<{ ok: true; data: { id: string; status: ResolutionStatus } } | UpdateResolutionFailure> {
+  const row = await qGet<{ id: string; status: ResolutionStatus }>(
+    `SELECT id, status FROM resolution_item WHERE id = ? AND household_id = ?`,
+    itemId,
+    householdId
+  );
   if (!row) {
     return { ok: false, code: "NOT_FOUND", message: "Resolution item not found" };
   }
@@ -403,7 +404,7 @@ export function updateResolutionStatusForHousehold(
     };
   }
 
-  db.prepare(`UPDATE resolution_item SET status = ? WHERE id = ?`).run(nextStatus, itemId);
+  await qExec(`UPDATE resolution_item SET status = ? WHERE id = ?`, nextStatus, itemId);
   return { ok: true, data: { id: itemId, status: nextStatus } };
 }
 
@@ -423,21 +424,20 @@ export interface BulkUpdateResolutionError {
 /**
  * Apply the same target status to many items (best-effort). Skips invalid transitions and missing rows.
  */
-export function bulkUpdateResolutionStatusForHousehold(
+export async function bulkUpdateResolutionStatusForHousehold(
   householdId: string,
   itemIds: string[],
   nextStatus: ResolutionStatus
-): { updated: BulkUpdateResolutionRow[]; errors: BulkUpdateResolutionError[] } {
+): Promise<{ updated: BulkUpdateResolutionRow[]; errors: BulkUpdateResolutionError[] }> {
   const updated: BulkUpdateResolutionRow[] = [];
   const errors: BulkUpdateResolutionError[] = [];
 
-  const select = db.prepare(
-    `SELECT id, status FROM resolution_item WHERE id = ? AND household_id = ?`
-  );
-  const runUpdate = db.prepare(`UPDATE resolution_item SET status = ? WHERE id = ?`);
-
   for (const itemId of itemIds) {
-    const row = select.get(itemId, householdId) as { id: string; status: ResolutionStatus } | undefined;
+    const row = await qGet<{ id: string; status: ResolutionStatus }>(
+      `SELECT id, status FROM resolution_item WHERE id = ? AND household_id = ?`,
+      itemId,
+      householdId
+    );
     if (!row) {
       errors.push({ id: itemId, code: "NOT_FOUND", message: "Resolution item not found" });
       continue;
@@ -453,7 +453,7 @@ export function bulkUpdateResolutionStatusForHousehold(
       continue;
     }
     if (row.status !== nextStatus) {
-      runUpdate.run(nextStatus, itemId);
+      await qExec(`UPDATE resolution_item SET status = ? WHERE id = ?`, nextStatus, itemId);
     }
     updated.push({ id: itemId, status: nextStatus });
   }
@@ -470,30 +470,26 @@ export interface BulkApplyCategoryError {
 /**
  * Set category on posted transactions for `unknown_category` items and mark those items resolved.
  */
-export function bulkApplyCategoryToUnknownItems(
+export async function bulkApplyCategoryToUnknownItems(
   householdId: string,
   itemIds: string[],
   categoryId: string
-): { ok: false; code: "INVALID_CATEGORY" } | { ok: true; updated: { id: string }[]; errors: BulkApplyCategoryError[] } {
-  if (!categoryUsableByHousehold(categoryId, householdId)) {
+): Promise<
+  { ok: false; code: "INVALID_CATEGORY" } | { ok: true; updated: { id: string }[]; errors: BulkApplyCategoryError[] }
+> {
+  if (!(await categoryUsableByHousehold(categoryId, householdId))) {
     return { ok: false, code: "INVALID_CATEGORY" };
   }
 
   const updated: { id: string }[] = [];
   const errors: BulkApplyCategoryError[] = [];
 
-  const selectItem = db.prepare(
-    `SELECT id, type, target_id AS targetId FROM resolution_item WHERE id = ? AND household_id = ?`
-  );
-  const updateTxn = db.prepare(
-    `UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ?`
-  );
-  const resolveItem = db.prepare(`UPDATE resolution_item SET status = 'resolved' WHERE id = ? AND household_id = ?`);
-
   for (const itemId of itemIds) {
-    const row = selectItem.get(itemId, householdId) as
-      | { id: string; type: string; targetId: string }
-      | undefined;
+    const row = await qGet<{ id: string; type: string; targetId: string }>(
+      `SELECT id, type, target_id AS "targetId" FROM resolution_item WHERE id = ? AND household_id = ?`,
+      itemId,
+      householdId
+    );
     if (!row) {
       errors.push({ id: itemId, code: "NOT_FOUND", message: "Resolution item not found" });
       continue;
@@ -502,12 +498,17 @@ export function bulkApplyCategoryToUnknownItems(
       errors.push({ id: itemId, code: "WRONG_TYPE", message: "Item is not unknown_category" });
       continue;
     }
-    const info = updateTxn.run(categoryId, row.targetId, householdId);
-    if (info.changes === 0) {
+    const touched = await qGet<{ id: string }>(
+      `UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ? RETURNING id`,
+      categoryId,
+      row.targetId,
+      householdId
+    );
+    if (!touched) {
       errors.push({ id: itemId, code: "NOT_FOUND", message: "Linked transaction not found" });
       continue;
     }
-    resolveItem.run(itemId, householdId);
+    await qExec(`UPDATE resolution_item SET status = 'resolved' WHERE id = ? AND household_id = ?`, itemId, householdId);
     updated.push({ id: itemId });
   }
 

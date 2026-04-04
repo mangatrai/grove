@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { db } from "../../db/sqlite.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 
 export interface CategoryRow {
   id: string;
@@ -44,99 +44,103 @@ function mapRow(
 /**
  * Global defaults (`household_id` NULL) plus any household-specific categories.
  */
-export function listCategoriesForHousehold(householdId: string): CategoryRow[] {
-  const rows = db
-    .prepare(
-      `SELECT id, name, parent_id AS parentId, is_default AS isDefault,
-              CASE WHEN household_id IS NOT NULL THEN 1 ELSE 0 END AS householdScoped
-       FROM category
-       WHERE household_id IS NULL OR household_id = ?
-       ORDER BY COALESCE(parent_id, id), name`
-    )
-    .all(householdId) as Array<{
+export async function listCategoriesForHousehold(householdId: string): Promise<CategoryRow[]> {
+  const rows = await qAll<{
     id: string;
     name: string;
     parentId: string | null;
     isDefault: number;
     householdScoped: number;
-  }>;
+  }>(
+    `SELECT id, name, parent_id AS "parentId", is_default AS "isDefault",
+              CASE WHEN household_id IS NOT NULL THEN 1 ELSE 0 END AS "householdScoped"
+       FROM category
+       WHERE household_id IS NULL OR household_id = ?
+       ORDER BY COALESCE(parent_id, id), name`,
+    householdId
+  );
 
   return rows.map((r) => mapRow(r));
 }
 
-export function categoryUsableByHousehold(categoryId: string, householdId: string): boolean {
-  const row = db
-    .prepare(
-      `SELECT 1 AS ok FROM category WHERE id = ? AND (household_id IS NULL OR household_id = ?)`
-    )
-    .get(categoryId, householdId) as { ok: number } | undefined;
+export async function categoryUsableByHousehold(categoryId: string, householdId: string): Promise<boolean> {
+  const row = await qGet<{ ok: number }>(
+    `SELECT 1 AS ok FROM category WHERE id = ? AND (household_id IS NULL OR household_id = ?)`,
+    categoryId,
+    householdId
+  );
   return Boolean(row);
 }
 
 /** Default taxonomy leaf (`household_id` NULL) usable as a global built-in rule target. */
-export function categoryAssignableForGlobalBuiltin(categoryId: string): boolean {
-  const row = db
-    .prepare(`SELECT household_id AS householdId FROM category WHERE id = ?`)
-    .get(categoryId) as { householdId: string | null } | undefined;
+export async function categoryAssignableForGlobalBuiltin(categoryId: string): Promise<boolean> {
+  const row = await qGet<{ householdId: string | null }>(
+    `SELECT household_id AS "householdId" FROM category WHERE id = ?`,
+    categoryId
+  );
   if (!row || row.householdId !== null) {
     return false;
   }
-  return !categoryHasChildren(categoryId);
+  return !(await categoryHasChildren(categoryId));
 }
 
-function getCategoryInternal(id: string): CategoryDbRow | undefined {
-  return db
-    .prepare(
-      `SELECT id, name, parent_id AS parentId, household_id AS householdId, is_default AS isDefault
-       FROM category WHERE id = ?`
-    )
-    .get(id) as CategoryDbRow | undefined;
+async function getCategoryInternal(id: string): Promise<CategoryDbRow | undefined> {
+  return qGet<CategoryDbRow>(
+    `SELECT id, name, parent_id AS "parentId", household_id AS "householdId", is_default AS "isDefault"
+       FROM category WHERE id = ?`,
+    id
+  );
 }
 
 /** True if `id` has at least one child row (used for ledger filter / roll-up). */
-export function categoryHasChildren(id: string): boolean {
-  const row = db
-    .prepare(`SELECT 1 AS ok FROM category WHERE parent_id = ? LIMIT 1`)
-    .get(id) as { ok: number } | undefined;
+export async function categoryHasChildren(id: string): Promise<boolean> {
+  const row = await qGet<{ ok: number }>(
+    `SELECT 1 AS ok FROM category WHERE parent_id = ? LIMIT 1`,
+    id
+  );
   return Boolean(row);
 }
 
 /**
  * Parent for a new subcategory must be a **top-level** row (`parent_id` IS NULL).
  */
-function parentAcceptsChild(parentId: string): boolean {
-  const row = getCategoryInternal(parentId);
+async function parentAcceptsChild(parentId: string): Promise<boolean> {
+  const row = await getCategoryInternal(parentId);
   return Boolean(row && row.parentId === null);
 }
 
 export type CreateCategoryFailure = { ok: false; code: "INVALID_NAME" | "INVALID_PARENT" | "MAX_DEPTH" };
 
-export function createHouseholdCategory(
+export async function createHouseholdCategory(
   householdId: string,
   name: string,
   parentId: string | null
-): { ok: true; data: CategoryRow } | CreateCategoryFailure {
+): Promise<{ ok: true; data: CategoryRow } | CreateCategoryFailure> {
   const trimmed = name.trim();
   if (!trimmed) {
     return { ok: false, code: "INVALID_NAME" };
   }
 
   if (parentId !== null) {
-    if (!categoryUsableByHousehold(parentId, householdId)) {
+    if (!(await categoryUsableByHousehold(parentId, householdId))) {
       return { ok: false, code: "INVALID_PARENT" };
     }
-    if (!parentAcceptsChild(parentId)) {
+    if (!(await parentAcceptsChild(parentId))) {
       return { ok: false, code: "MAX_DEPTH" };
     }
   }
 
   const id = crypto.randomUUID();
-  db.prepare(
-    `INSERT INTO category (id, household_id, parent_id, name, is_default) VALUES (?, ?, ?, ?, 0)`
-  ).run(id, householdId, parentId, trimmed);
+  await qExec(
+    `INSERT INTO category (id, household_id, parent_id, name, is_default) VALUES (?, ?, ?, ?, 0)`,
+    id,
+    householdId,
+    parentId,
+    trimmed
+  );
 
-  const row = getCategoryInternal(id)!;
-  return { ok: true, data: mapRowFromDb(row) };
+  const row = await getCategoryInternal(id);
+  return { ok: true, data: mapRowFromDb(row!) };
 }
 
 export type UpdateCategoryFailure =
@@ -153,8 +157,8 @@ export type UpdateCategoryFailure =
     };
 
 /** Built-in row (`household_id` NULL). Used by routes for auth branching. */
-export function getCategoryHouseholdId(categoryId: string): string | null | undefined {
-  const row = getCategoryInternal(categoryId);
+export async function getCategoryHouseholdId(categoryId: string): Promise<string | null | undefined> {
+  const row = await getCategoryInternal(categoryId);
   if (!row) {
     return undefined;
   }
@@ -165,12 +169,12 @@ export function getCategoryHouseholdId(categoryId: string): string | null | unde
  * Update a global default category (`household_id` IS NULL). Installation-wide for this DB.
  * Same depth rules as household updates; cannot move a top-level group under another if it still has subcategories.
  */
-export function updateDefaultCategory(
+export async function updateDefaultCategory(
   householdId: string,
   categoryId: string,
   updates: { name?: string; parentId?: string | null }
-): { ok: true; data: CategoryRow } | UpdateCategoryFailure {
-  const row = getCategoryInternal(categoryId);
+): Promise<{ ok: true; data: CategoryRow } | UpdateCategoryFailure> {
+  const row = await getCategoryInternal(categoryId);
   if (!row || row.householdId !== null) {
     return { ok: false, code: row ? "FORBIDDEN" : "NOT_FOUND" };
   }
@@ -185,35 +189,31 @@ export function updateDefaultCategory(
     if (nextParentId === categoryId) {
       return { ok: false, code: "CYCLE" };
     }
-    if (categoryHasChildren(categoryId) && nextParentId !== null) {
+    if ((await categoryHasChildren(categoryId)) && nextParentId !== null) {
       return { ok: false, code: "INVALID_REPARENT" };
     }
     if (nextParentId !== null) {
-      if (!categoryUsableByHousehold(nextParentId, householdId)) {
+      if (!(await categoryUsableByHousehold(nextParentId, householdId))) {
         return { ok: false, code: "INVALID_PARENT" };
       }
-      if (!parentAcceptsChild(nextParentId)) {
+      if (!(await parentAcceptsChild(nextParentId))) {
         return { ok: false, code: "MAX_DEPTH" };
       }
     }
   }
 
-  db.prepare(`UPDATE category SET name = ?, parent_id = ? WHERE id = ? AND household_id IS NULL`).run(
-    nextName,
-    nextParentId,
-    categoryId
-  );
+  await qExec(`UPDATE category SET name = ?, parent_id = ? WHERE id = ? AND household_id IS NULL`, nextName, nextParentId, categoryId);
 
-  const out = getCategoryInternal(categoryId)!;
-  return { ok: true, data: mapRowFromDb(out) };
+  const out = await getCategoryInternal(categoryId);
+  return { ok: true, data: mapRowFromDb(out!) };
 }
 
-export function updateHouseholdCategory(
+export async function updateHouseholdCategory(
   householdId: string,
   categoryId: string,
   updates: { name?: string; parentId?: string | null }
-): { ok: true; data: CategoryRow } | UpdateCategoryFailure {
-  const row = getCategoryInternal(categoryId);
+): Promise<{ ok: true; data: CategoryRow } | UpdateCategoryFailure> {
+  const row = await getCategoryInternal(categoryId);
   if (!row || row.householdId !== householdId) {
     return { ok: false, code: row ? "FORBIDDEN" : "NOT_FOUND" };
   }
@@ -228,28 +228,23 @@ export function updateHouseholdCategory(
     if (nextParentId === categoryId) {
       return { ok: false, code: "CYCLE" };
     }
-    if (categoryHasChildren(categoryId) && nextParentId !== null) {
+    if ((await categoryHasChildren(categoryId)) && nextParentId !== null) {
       return { ok: false, code: "INVALID_REPARENT" };
     }
     if (nextParentId !== null) {
-      if (!categoryUsableByHousehold(nextParentId, householdId)) {
+      if (!(await categoryUsableByHousehold(nextParentId, householdId))) {
         return { ok: false, code: "INVALID_PARENT" };
       }
-      if (!parentAcceptsChild(nextParentId)) {
+      if (!(await parentAcceptsChild(nextParentId))) {
         return { ok: false, code: "MAX_DEPTH" };
       }
     }
   }
 
-  db.prepare(`UPDATE category SET name = ?, parent_id = ? WHERE id = ? AND household_id = ?`).run(
-    nextName,
-    nextParentId,
-    categoryId,
-    householdId
-  );
+  await qExec(`UPDATE category SET name = ?, parent_id = ? WHERE id = ? AND household_id = ?`, nextName, nextParentId, categoryId, householdId);
 
-  const out = getCategoryInternal(categoryId)!;
-  return { ok: true, data: mapRowFromDb(out) };
+  const out = await getCategoryInternal(categoryId);
+  return { ok: true, data: mapRowFromDb(out!) };
 }
 
 export type DeleteCategoryFailure =
@@ -270,18 +265,18 @@ export type ResolveLeafCategoryFailureCode =
  * (`Parent > Child` or `Parent | Child`, case-insensitive names).
  * If `categoryId` is present and valid, it wins. Otherwise `categoryPath` is parsed.
  */
-export function resolveLeafCategoryIdForHousehold(
+export async function resolveLeafCategoryIdForHousehold(
   householdId: string,
   input: { categoryId?: string | null; categoryPath?: string | null }
-): { ok: true; id: string } | { ok: false; code: ResolveLeafCategoryFailureCode } {
+): Promise<{ ok: true; id: string } | { ok: false; code: ResolveLeafCategoryFailureCode }> {
   const idIn = input.categoryId?.trim();
   const pathIn = input.categoryPath?.trim();
 
   if (idIn) {
-    if (!categoryUsableByHousehold(idIn, householdId)) {
+    if (!(await categoryUsableByHousehold(idIn, householdId))) {
       return { ok: false, code: "NOT_FOUND" };
     }
-    if (categoryHasChildren(idIn)) {
+    if (await categoryHasChildren(idIn)) {
       return { ok: false, code: "NOT_LEAF" };
     }
     return { ok: true, id: idIn };
@@ -300,13 +295,18 @@ export function resolveLeafCategoryIdForHousehold(
     return { ok: false, code: "MISSING_INPUT" };
   }
 
-  const all = listCategoriesForHousehold(householdId);
-  const usableLeaf = (cid: string) =>
-    categoryUsableByHousehold(cid, householdId) && !categoryHasChildren(cid);
+  const all = await listCategoriesForHousehold(householdId);
+  const usableLeaf = async (cid: string) =>
+    (await categoryUsableByHousehold(cid, householdId)) && !(await categoryHasChildren(cid));
 
   if (segments.length === 1) {
     const name = segments[0]!;
-    const matches = all.filter((c) => usableLeaf(c.id) && nameEqualsInsensitive(c.name, name));
+    const matches = [];
+    for (const c of all) {
+      if ((await usableLeaf(c.id)) && nameEqualsInsensitive(c.name, name)) {
+        matches.push(c);
+      }
+    }
     if (matches.length === 0) {
       return { ok: false, code: "NOT_FOUND" };
     }
@@ -330,9 +330,16 @@ export function resolveLeafCategoryIdForHousehold(
     return { ok: false, code: "AMBIGUOUS" };
   }
   const parentId = topParents[0]!.id;
-  const children = all.filter(
-    (c) => c.parentId === parentId && nameEqualsInsensitive(c.name, leafName) && usableLeaf(c.id)
-  );
+  const children = [];
+  for (const c of all) {
+    if (
+      c.parentId === parentId &&
+      nameEqualsInsensitive(c.name, leafName) &&
+      (await usableLeaf(c.id))
+    ) {
+      children.push(c);
+    }
+  }
   if (children.length === 0) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -342,27 +349,25 @@ export function resolveLeafCategoryIdForHousehold(
   return { ok: true, id: children[0]!.id };
 }
 
-export function deleteHouseholdCategory(
+export async function deleteHouseholdCategory(
   householdId: string,
   categoryId: string
-): { ok: true } | DeleteCategoryFailure {
-  const row = getCategoryInternal(categoryId);
+): Promise<{ ok: true } | DeleteCategoryFailure> {
+  const row = await getCategoryInternal(categoryId);
   if (!row || row.householdId !== householdId) {
     return { ok: false, code: row ? "FORBIDDEN" : "NOT_FOUND" };
   }
 
-  const child = db.prepare(`SELECT 1 FROM category WHERE parent_id = ? LIMIT 1`).get(categoryId);
+  const child = await qGet(`SELECT 1 FROM category WHERE parent_id = ? LIMIT 1`, categoryId);
   if (child) {
     return { ok: false, code: "HAS_CHILDREN" };
   }
 
-  const inUse = db
-    .prepare(`SELECT 1 FROM transaction_canonical WHERE category_id = ? LIMIT 1`)
-    .get(categoryId);
+  const inUse = await qGet(`SELECT 1 FROM transaction_canonical WHERE category_id = ? LIMIT 1`, categoryId);
   if (inUse) {
     return { ok: false, code: "IN_USE" };
   }
 
-  db.prepare(`DELETE FROM category WHERE id = ? AND household_id = ?`).run(categoryId, householdId);
+  await qExec(`DELETE FROM category WHERE id = ? AND household_id = ?`, categoryId, householdId);
   return { ok: true };
 }

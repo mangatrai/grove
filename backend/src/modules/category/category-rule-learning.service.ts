@@ -1,4 +1,4 @@
-import { db } from "../../db/sqlite.js";
+import { qAll, qGet } from "../../db/query.js";
 import { normalizeAmountForFingerprint, normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
 import { classifyWithRules, type ClassificationResult } from "./category-rules.js";
 import { listEnabledDbRulesForClassification } from "./category-rules.service.js";
@@ -31,32 +31,33 @@ export type RuleLearningRow = {
 /**
  * Parsed raw rows for an import session (after parse), with preview classification.
  */
-export function listRuleLearningPreviewForSession(
+export async function listRuleLearningPreviewForSession(
   sessionId: string,
   householdId: string
-): { ok: true; rows: RuleLearningRow[] } | { ok: false; code: "NOT_FOUND" } {
-  const sessionOk = db
-    .prepare(`SELECT 1 FROM import_session WHERE id = ? AND household_id = ?`)
-    .get(sessionId, householdId);
+): Promise<{ ok: true; rows: RuleLearningRow[] } | { ok: false; code: "NOT_FOUND" }> {
+  const sessionOk = await qGet<{ ok: number }>(
+    `SELECT 1 AS ok FROM import_session WHERE id = ? AND household_id = ?`,
+    sessionId,
+    householdId
+  );
   if (!sessionOk) {
     return { ok: false, code: "NOT_FOUND" };
   }
 
-  const dbRules = listEnabledDbRulesForClassification(householdId);
-  const rawRows = db
-    .prepare(
-      `SELECT tr.id AS rawId, tr.file_id AS fileId, tr.row_index AS rowIndex, tr.extracted_payload_json AS payloadJson
-       FROM transaction_raw tr
-       INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE f.session_id = ?
-       ORDER BY f.id ASC, tr.row_index ASC`
-    )
-    .all(sessionId) as Array<{
+  const dbRules = await listEnabledDbRulesForClassification(householdId);
+  const rawRows = await qAll<{
     rawId: string;
     fileId: string;
     rowIndex: number;
     payloadJson: string;
-  }>;
+  }>(
+    `SELECT tr.id AS "rawId", tr.file_id AS "fileId", tr.row_index AS "rowIndex", tr.extracted_payload_json AS "payloadJson"
+       FROM transaction_raw tr
+       INNER JOIN import_file f ON f.id = tr.file_id
+       WHERE f.session_id = ?
+       ORDER BY f.id ASC, tr.row_index ASC`,
+    sessionId
+  );
 
   const out: RuleLearningRow[] = [];
   for (const rr of rawRows) {

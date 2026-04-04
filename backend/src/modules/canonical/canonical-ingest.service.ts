@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { env } from "../../config/env.js";
-import { db } from "../../db/sqlite.js";
+import { isPgUniqueViolation, qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { log } from "../../logger.js";
 import { deleteStagingFilesForSession } from "../imports/import-session.service.js";
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
@@ -281,80 +281,51 @@ export async function canonicalizeImportSession(
   sessionId: string,
   householdId: string
 ): Promise<{ ok: true; data: CanonicalizeOutcome } | CanonicalizeFailure> {
-  const session = db
-    .prepare(`SELECT id FROM import_session WHERE id = ? AND household_id = ?`)
-    .get(sessionId, householdId) as { id: string } | undefined;
+  const session = await qGet<{ id: string }>(
+    `SELECT id FROM import_session WHERE id = ? AND household_id = ?`,
+    sessionId,
+    householdId
+  );
   if (!session) {
-    return Promise.resolve({ ok: false, code: "NOT_FOUND", message: "Import session not found" });
+    return { ok: false, code: "NOT_FOUND", message: "Import session not found" };
   }
 
-  const rawRows = db
-    .prepare(
-      `SELECT tr.id AS raw_id, tr.file_id AS file_id, tr.extracted_payload_json AS payload_json,
-              f.owner_scope AS owner_scope, f.owner_person_profile_id AS owner_person_profile_id
-       FROM transaction_raw tr
-       INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE f.session_id = ?`
-    )
-    .all(sessionId) as Array<{
+  const rawRows = await qAll<{
     raw_id: string;
     file_id: string;
     payload_json: string;
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
-  }>;
+  }>(
+    `SELECT tr.id AS raw_id, tr.file_id AS file_id, tr.extracted_payload_json AS payload_json,
+              f.owner_scope AS owner_scope, f.owner_person_profile_id AS owner_person_profile_id
+       FROM transaction_raw tr
+       INNER JOIN import_file f ON f.id = tr.file_id
+       WHERE f.session_id = ?`,
+    sessionId
+  );
 
   if (rawRows.length === 0) {
-    const payslipLinked = db
-      .prepare(
-        `SELECT 1 AS ok FROM payslip_snapshot ps
+    const payslipLinked = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM payslip_snapshot ps
          INNER JOIN import_file f ON f.id = ps.import_file_id
          WHERE f.session_id = ?
-         LIMIT 1`
-      )
-      .get(sessionId) as { ok: number } | undefined;
+         LIMIT 1`,
+      sessionId
+    );
     if (payslipLinked) {
-      deleteStagingFilesForSession(sessionId);
-      return Promise.resolve({
+      await deleteStagingFilesForSession(sessionId);
+      return {
         ok: true,
         data: { inserted: 0, duplicates: 0, skipped: 0, nearDuplicates: 0 }
-      });
+      };
     }
-    return Promise.resolve({
+    return {
       ok: false,
       code: "NO_RAW_ROWS",
       message: "No transaction_raw rows for this session; run parse first"
-    });
+    };
   }
-
-  const accountOkStmt = db.prepare(
-    `SELECT 1 FROM financial_account WHERE id = ? AND household_id = ?`
-  );
-  const existsStmt = db.prepare(
-    `SELECT 1 FROM transaction_canonical WHERE household_id = ? AND fingerprint = ?`
-  );
-  const nearStmt = db.prepare(
-    `SELECT id, fingerprint, merchant, memo, amount
-     FROM transaction_canonical
-     WHERE household_id = ? AND account_id = ? AND txn_date = ?
-       AND ABS(CAST(amount AS REAL) - ?) < 0.0001
-       AND fingerprint != ?`
-  );
-  const insertResolutionStmt = db.prepare(
-    `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
-  );
-  const insertUnknownCategoryStmt = db.prepare(
-    `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
-  );
-  const insertStmt = db.prepare(
-    `INSERT INTO transaction_canonical (
-       id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
-       merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta,
-       owner_scope, owner_person_profile_id
-     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?, ?, ?)`
-  );
 
   const insertedCanonicalRows: Array<{ id: string; txnDate: string }> = [];
 
@@ -375,42 +346,11 @@ export async function canonicalizeImportSession(
     return Math.abs(isoToUtcMidnightMs(aIso) - isoToUtcMidnightMs(bIso)) / MS_PER_DAY;
   }
 
-  const selectTransferCandidatesStmt = db.prepare(
-    `SELECT id, account_id AS accountId, txn_date AS txnDate, amount AS amount,
-            merchant AS merchant, memo AS memo
-     FROM transaction_canonical
-     WHERE household_id = ?
-       AND status = 'posted'
-       AND transfer_group_id IS NULL
-       AND txn_date >= ? AND txn_date <= ?`
-  );
-
-  const updateTransferGroupStmt = db.prepare(
-    `UPDATE transaction_canonical
-     SET transfer_group_id = ?
-     WHERE id = ? AND transfer_group_id IS NULL`
-  );
-
-  const existsOpenAmbiguityForTargetStmt = db.prepare(
-    `SELECT 1
-     FROM resolution_item
-     WHERE household_id = ?
-       AND type = 'transfer_ambiguity'
-       AND status IN ('open', 'in_review')
-       AND target_id = ?
-     LIMIT 1`
-  );
-
-  const insertTransferAmbiguityStmt = db.prepare(
-    `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`
-  );
-
   let inserted = 0;
   let duplicates = 0;
   let skipped = 0;
   let nearDuplicates = 0;
-  const dbRules = listEnabledDbRulesForClassification(householdId);
+  const dbRules = await listEnabledDbRulesForClassification(householdId);
   const fileDiagnostics = new Map<string, CanonicalFileDiagnostics>();
   const ensureFileDiag = (fileId: string): CanonicalFileDiagnostics => {
     const existing = fileDiagnostics.get(fileId);
@@ -458,7 +398,7 @@ export async function canonicalizeImportSession(
   type QueuedOp = { kind: "ai"; pending: PendingAiInsert } | { kind: "rule"; pending: PendingAiInsert };
   const ops: QueuedOp[] = [];
 
-  function insertCanonicalRow(p: PendingAiInsert, aiSuggestion: AiSuggestion | null): void {
+  async function insertCanonicalRow(p: PendingAiInsert, aiSuggestion: AiSuggestion | null): Promise<void> {
     const { row, parsed, normDate, rounded, fingerprint, classification, merchant, memo, direction, diag } = p;
     let categoryId = classification.categoryId;
     if (
@@ -491,7 +431,12 @@ export async function canonicalizeImportSession(
     const accountId = parsed.financial_account_id;
 
     try {
-      insertStmt.run(
+      await qExec(
+        `INSERT INTO transaction_canonical (
+       id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+       merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta,
+       owner_scope, owner_person_profile_id
+     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?, ?, ?)`,
         canonicalId,
         householdId,
         accountId,
@@ -518,7 +463,9 @@ export async function canonicalizeImportSession(
         }
       }
       if (categoryId === null) {
-        insertUnknownCategoryStmt.run(
+        await qExec(
+          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'unknown_category', ?, ?, 'open')`,
           crypto.randomUUID(),
           householdId,
           canonicalId,
@@ -546,9 +493,7 @@ export async function canonicalizeImportSession(
         );
       }
     } catch (err: unknown) {
-      const code =
-        err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
-      if (code === "SQLITE_CONSTRAINT_UNIQUE" || code.includes("SQLITE_CONSTRAINT")) {
+      if (isPgUniqueViolation(err)) {
         duplicates += 1;
         diag.duplicateFingerprint += 1;
       } else {
@@ -597,7 +542,7 @@ export async function canonicalizeImportSession(
       }
     }
     for (const p of run) {
-      insertCanonicalRow(p, merged.get(p.row.raw_id) ?? null);
+      await insertCanonicalRow(p, merged.get(p.row.raw_id) ?? null);
     }
   }
 
@@ -613,7 +558,7 @@ export async function canonicalizeImportSession(
         await flushContiguousAiRun(run);
       }
       while (idx < ops.length && ops[idx].kind === "rule") {
-        insertCanonicalRow(ops[idx].pending, null);
+        await insertCanonicalRow(ops[idx].pending, null);
         idx++;
       }
     }
@@ -637,7 +582,12 @@ export async function canonicalizeImportSession(
     }
 
     const accountId = parsed.financial_account_id;
-    if (!accountOkStmt.get(accountId, householdId)) {
+    const acctOk = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM financial_account WHERE id = ? AND household_id = ?`,
+      accountId,
+      householdId
+    );
+    if (!acctOk) {
       skipped += 1;
       diag.invalidAccount += 1;
       continue;
@@ -661,8 +611,13 @@ export async function canonicalizeImportSession(
       normalizedDescription: normDesc
     });
 
+    const existsFp = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM transaction_canonical WHERE household_id = ? AND fingerprint = ?`,
+      householdId,
+      fingerprint
+    );
     if (
-      existsStmt.get(householdId, fingerprint) ||
+      existsFp ||
       seenFingerprintsThisRun.has(fingerprint) ||
       fingerprintsAwaitingInsert.has(fingerprint)
     ) {
@@ -671,26 +626,33 @@ export async function canonicalizeImportSession(
       continue;
     }
 
-    const nearCandidates = nearStmt.all(
-      householdId,
-      accountId,
-      normDate,
-      rounded,
-      fingerprint
-    ) as Array<{
+    const nearCandidates = await qAll<{
       id: string;
       fingerprint: string;
       merchant: string | null;
       memo: string | null;
       amount: number;
-    }>;
+    }>(
+      `SELECT id, fingerprint, merchant, memo, amount
+     FROM transaction_canonical
+     WHERE household_id = ? AND account_id = ? AND txn_date = ?
+       AND ABS(CAST(amount AS DOUBLE PRECISION) - CAST(? AS DOUBLE PRECISION)) < 0.0001
+       AND fingerprint != ?`,
+      householdId,
+      accountId,
+      normDate,
+      rounded,
+      fingerprint
+    );
 
     let isNear = false;
     for (const c of nearCandidates) {
       const existingNorm = existingDescriptionFingerprint(c.merchant, c.memo);
       if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
         isNear = true;
-        insertResolutionStmt.run(
+        await qExec(
+          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
           crypto.randomUUID(),
           householdId,
           row.raw_id,
@@ -719,7 +681,9 @@ export async function canonicalizeImportSession(
         const existingNorm = existingDescriptionFingerprint(pr.merchant, pr.memo);
         if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
           isNear = true;
-          insertResolutionStmt.run(
+          await qExec(
+            `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
             crypto.randomUUID(),
             householdId,
             row.raw_id,
@@ -781,11 +745,9 @@ export async function canonicalizeImportSession(
   await drainOpsQueue();
 
   if (fileDiagnostics.size > 0) {
-    const fileRows = db
-      .prepare(`SELECT id, confidence_summary FROM import_file WHERE session_id = ?`)
-      .all(sessionId) as Array<{ id: string; confidence_summary: string | null }>;
-    const updateConfidenceSummaryStmt = db.prepare(
-      `UPDATE import_file SET confidence_summary = ? WHERE id = ?`
+    const fileRows = await qAll<{ id: string; confidence_summary: string | null }>(
+      `SELECT id, confidence_summary FROM import_file WHERE session_id = ?`,
+      sessionId
     );
     for (const f of fileRows) {
       const canonical = fileDiagnostics.get(f.id);
@@ -815,7 +777,7 @@ export async function canonicalizeImportSession(
           invalidAmount: canonical.invalidAmount
         }
       };
-      updateConfidenceSummaryStmt.run(JSON.stringify(next), f.id);
+      await qExec(`UPDATE import_file SET confidence_summary = ? WHERE id = ?`, JSON.stringify(next), f.id);
     }
   }
 
@@ -827,14 +789,25 @@ export async function canonicalizeImportSession(
     const windowStart = addDaysIso(insertedDates[0]!, -2);
     const windowEnd = addDaysIso(insertedDates[insertedDates.length - 1]!, 2);
 
-    const candidates = selectTransferCandidatesStmt.all(householdId, windowStart, windowEnd) as Array<{
+    const candidates = await qAll<{
       id: string;
       accountId: string;
       txnDate: string;
       amount: number;
       merchant: string | null;
       memo: string | null;
-    }>;
+    }>(
+      `SELECT id, account_id AS "accountId", txn_date AS "txnDate", amount AS amount,
+            merchant AS merchant, memo AS memo
+     FROM transaction_canonical
+     WHERE household_id = ?
+       AND status = 'posted'
+       AND transfer_group_id IS NULL
+       AND txn_date >= ? AND txn_date <= ?`,
+      householdId,
+      windowStart,
+      windowEnd
+    );
 
     const debitRows: Array<{
       id: string;
@@ -872,7 +845,16 @@ export async function canonicalizeImportSession(
     const matched = new Set<string>();
     const insertedAmbiguityTargets = new Set<string>();
 
-    const runInTransaction = db.transaction(() => {
+    await qBegin(async (tx) => {
+      const txGet = async <T extends object>(sqlStr: string, ...params: unknown[]): Promise<T | undefined> => {
+        const { text, values } = sqlBind(sqlStr, params);
+        const rows = await tx.unsafe(text, values as never[]);
+        return Array.from(rows as Iterable<T>)[0];
+      };
+      const txExec = async (sqlStr: string, ...params: unknown[]): Promise<void> => {
+        const { text, values } = sqlBind(sqlStr, params);
+        await tx.unsafe(text, values as never[]);
+      };
       for (const debit of debitRows) {
         if (matched.has(debit.id)) continue;
 
@@ -931,9 +913,26 @@ export async function canonicalizeImportSession(
 
           for (const targetId of involvedTargetIds) {
             if (insertedAmbiguityTargets.has(targetId)) continue;
-            const exists = existsOpenAmbiguityForTargetStmt.get(householdId, targetId);
+            const exists = await txGet<{ ok: number }>(
+              `SELECT 1 AS ok
+     FROM resolution_item
+     WHERE household_id = ?
+       AND type = 'transfer_ambiguity'
+       AND status IN ('open', 'in_review')
+       AND target_id = ?
+     LIMIT 1`,
+              householdId,
+              targetId
+            );
             if (exists) continue;
-            insertTransferAmbiguityStmt.run(crypto.randomUUID(), householdId, targetId, reason);
+            await txExec(
+              `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`,
+              crypto.randomUUID(),
+              householdId,
+              targetId,
+              reason
+            );
             insertedAmbiguityTargets.add(targetId);
           }
           continue;
@@ -997,17 +996,46 @@ export async function canonicalizeImportSession(
             });
             for (const targetId of [debit.id, credit.id] as const) {
               if (insertedAmbiguityTargets.has(targetId)) continue;
-              const exists = existsOpenAmbiguityForTargetStmt.get(householdId, targetId);
+              const exists = await txGet<{ ok: number }>(
+                `SELECT 1 AS ok
+     FROM resolution_item
+     WHERE household_id = ?
+       AND type = 'transfer_ambiguity'
+       AND status IN ('open', 'in_review')
+       AND target_id = ?
+     LIMIT 1`,
+                householdId,
+                targetId
+              );
               if (exists) continue;
-              insertTransferAmbiguityStmt.run(crypto.randomUUID(), householdId, targetId, reason);
+              await txExec(
+                `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`,
+                crypto.randomUUID(),
+                householdId,
+                targetId,
+                reason
+              );
               insertedAmbiguityTargets.add(targetId);
             }
             continue;
           }
           // Unambiguous mutual match: assign one transfer_group_id for both rows.
           const groupId = crypto.randomUUID();
-          updateTransferGroupStmt.run(groupId, debit.id);
-          updateTransferGroupStmt.run(groupId, credit.id);
+          await txExec(
+            `UPDATE transaction_canonical
+     SET transfer_group_id = ?
+     WHERE id = ? AND transfer_group_id IS NULL`,
+            groupId,
+            debit.id
+          );
+          await txExec(
+            `UPDATE transaction_canonical
+     SET transfer_group_id = ?
+     WHERE id = ? AND transfer_group_id IS NULL`,
+            groupId,
+            credit.id
+          );
           matched.add(debit.id);
           matched.add(credit.id);
           continue;
@@ -1039,18 +1067,33 @@ export async function canonicalizeImportSession(
 
         for (const targetId of involvedTargetIds) {
           if (insertedAmbiguityTargets.has(targetId)) continue;
-          const exists = existsOpenAmbiguityForTargetStmt.get(householdId, targetId);
+          const exists = await txGet<{ ok: number }>(
+            `SELECT 1 AS ok
+     FROM resolution_item
+     WHERE household_id = ?
+       AND type = 'transfer_ambiguity'
+       AND status IN ('open', 'in_review')
+       AND target_id = ?
+     LIMIT 1`,
+            householdId,
+            targetId
+          );
           if (exists) continue;
-          insertTransferAmbiguityStmt.run(crypto.randomUUID(), householdId, targetId, reason);
+          await txExec(
+            `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`,
+            crypto.randomUUID(),
+            householdId,
+            targetId,
+            reason
+          );
           insertedAmbiguityTargets.add(targetId);
         }
       }
     });
-
-    runInTransaction();
   }
 
-  deleteStagingFilesForSession(sessionId);
+  await deleteStagingFilesForSession(sessionId);
 
-  return Promise.resolve({ ok: true, data: { inserted, duplicates, skipped, nearDuplicates } });
+  return { ok: true, data: { inserted, duplicates, skipped, nearDuplicates } };
 }

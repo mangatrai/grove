@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { db } from "../../db/sqlite.js";
+import { isPgUniqueViolation, qAll, qExec, qGet } from "../../db/query.js";
 import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
 import {
   categoryAssignableForGlobalBuiltin,
@@ -87,48 +87,46 @@ function isPatternValid(pattern: string, matchType: MatchType): boolean {
   return true;
 }
 
-function categoryAssignableByHousehold(categoryId: string, householdId: string): boolean {
-  if (!categoryUsableByHousehold(categoryId, householdId)) {
+async function categoryAssignableByHousehold(categoryId: string, householdId: string): Promise<boolean> {
+  if (!(await categoryUsableByHousehold(categoryId, householdId))) {
     return false;
   }
-  return !categoryHasChildren(categoryId);
+  return !(await categoryHasChildren(categoryId));
 }
 
-export function listCategoryRulesForHousehold(householdId: string): CategoryRuleRow[] {
-  const rows = db
-    .prepare(
-      `SELECT
+export async function listCategoryRulesForHousehold(householdId: string): Promise<CategoryRuleRow[]> {
+  const rows = await qAll<CategoryRuleDbRow>(
+    `SELECT
          id,
-         household_id AS householdId,
+         household_id AS "householdId",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
+         match_type AS "matchType",
+         category_id AS "categoryId",
          confidence,
-         amount_scope AS amountScope,
+         amount_scope AS "amountScope",
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule
        WHERE household_id = ?
-       ORDER BY enabled DESC, priority ASC, datetime(created_at) ASC, id ASC`
-    )
-    .all(householdId) as CategoryRuleDbRow[];
+       ORDER BY enabled DESC, priority ASC, created_at ASC, id ASC`,
+    householdId
+  );
 
   return rows.map(mapRule);
 }
 
-export function listEnabledDbRulesForClassification(householdId: string): DbCategoryRule[] {
-  const rows = db
-    .prepare(
-      `SELECT
+export async function listEnabledDbRulesForClassification(householdId: string): Promise<DbCategoryRule[]> {
+  const rows = await qAll<DbCategoryRule>(
+    `SELECT
          m.id AS id,
          m.pattern AS pattern,
-         m.match_type AS matchType,
-         m.category_id AS categoryId,
+         m.match_type AS "matchType",
+         m.category_id AS "categoryId",
          m.confidence AS confidence,
-         m.amount_scope AS amountScope,
-         m.rule_origin AS ruleOrigin
+         m.amount_scope AS "amountScope",
+         m.rule_origin AS "ruleOrigin"
        FROM (
          SELECT
            id,
@@ -160,9 +158,9 @@ export function listEnabledDbRulesForClassification(householdId: string): DbCate
          FROM category_rule_global
          WHERE enabled = 1
        ) AS m
-       ORDER BY m.seg ASC, m.priority ASC, datetime(m.created_at) ASC, m.sid ASC`
-    )
-    .all(householdId) as DbCategoryRule[];
+       ORDER BY m.seg ASC, m.priority ASC, m.created_at ASC, m.sid ASC`,
+    householdId
+  );
   return rows;
 }
 
@@ -210,30 +208,28 @@ function mapGlobalRule(row: GlobalRuleDbRow): GlobalCategoryRuleRow {
   };
 }
 
-export function listGlobalCategoryRules(): GlobalCategoryRuleRow[] {
-  const rows = db
-    .prepare(
-      `SELECT
+export async function listGlobalCategoryRules(): Promise<GlobalCategoryRuleRow[]> {
+  const rows = await qAll<GlobalRuleDbRow>(
+    `SELECT
          id,
-         rule_key AS ruleKey,
+         rule_key AS "ruleKey",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
-         amount_scope AS amountScope,
+         match_type AS "matchType",
+         category_id AS "categoryId",
+         amount_scope AS "amountScope",
          confidence,
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule_global
-       ORDER BY enabled DESC, priority ASC, datetime(created_at) ASC, id ASC`
-    )
-    .all() as GlobalRuleDbRow[];
+       ORDER BY enabled DESC, priority ASC, created_at ASC, id ASC`
+  );
 
   return rows.map(mapGlobalRule);
 }
 
-export function createGlobalCategoryRule(input: {
+export async function createGlobalCategoryRule(input: {
   ruleKey: string;
   pattern: string;
   matchType: MatchType;
@@ -242,7 +238,7 @@ export function createGlobalCategoryRule(input: {
   confidence: number;
   priority: number;
   enabled: boolean;
-}): { ok: true; data: GlobalCategoryRuleRow } | CreateRuleFailure {
+}): Promise<{ ok: true; data: GlobalCategoryRuleRow } | CreateRuleFailure> {
   const pattern = normalizePattern(input.pattern);
   if (!isPatternValid(pattern, input.matchType)) {
     return { ok: false, code: "INVALID_PATTERN" };
@@ -257,17 +253,16 @@ export function createGlobalCategoryRule(input: {
   if (rk.length < 2 || rk.length > 120) {
     return { ok: false, code: "INVALID_PATTERN" };
   }
-  if (!categoryAssignableForGlobalBuiltin(input.categoryId)) {
+  if (!(await categoryAssignableForGlobalBuiltin(input.categoryId))) {
     return { ok: false, code: "BUILTIN_REQUIRES_GLOBAL_LEAF" };
   }
 
   const id = crypto.randomUUID();
   try {
-    db.prepare(
+    await qExec(
       `INSERT INTO category_rule_global (
          id, rule_key, pattern, match_type, category_id, amount_scope, confidence, priority, enabled, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-    ).run(
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       id,
       rk,
       pattern,
@@ -279,35 +274,33 @@ export function createGlobalCategoryRule(input: {
       input.enabled ? 1 : 0
     );
   } catch (e: unknown) {
-    const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
-    if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+    if (isPgUniqueViolation(e)) {
       return { ok: false, code: "INVALID_PATTERN" };
     }
     throw e;
   }
 
-  const row = db
-    .prepare(
-      `SELECT
+  const row = (await qGet<GlobalRuleDbRow>(
+    `SELECT
          id,
-         rule_key AS ruleKey,
+         rule_key AS "ruleKey",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
-         amount_scope AS amountScope,
+         match_type AS "matchType",
+         category_id AS "categoryId",
+         amount_scope AS "amountScope",
          confidence,
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule_global
-       WHERE id = ?`
-    )
-    .get(id) as GlobalRuleDbRow;
+       WHERE id = ?`,
+    id
+  ))!;
   return { ok: true, data: mapGlobalRule(row) };
 }
 
-export function updateGlobalCategoryRule(
+export async function updateGlobalCategoryRule(
   ruleId: string,
   updates: {
     ruleKey?: string;
@@ -319,25 +312,24 @@ export function updateGlobalCategoryRule(
     priority?: number;
     enabled?: boolean;
   }
-): { ok: true; data: GlobalCategoryRuleRow } | UpdateRuleFailure {
-  const existing = db
-    .prepare(
-      `SELECT
+): Promise<{ ok: true; data: GlobalCategoryRuleRow } | UpdateRuleFailure> {
+  const existing = await qGet<GlobalRuleDbRow>(
+    `SELECT
          id,
-         rule_key AS ruleKey,
+         rule_key AS "ruleKey",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
-         amount_scope AS amountScope,
+         match_type AS "matchType",
+         category_id AS "categoryId",
+         amount_scope AS "amountScope",
          confidence,
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule_global
-       WHERE id = ?`
-    )
-    .get(ruleId) as GlobalRuleDbRow | undefined;
+       WHERE id = ?`,
+    ruleId
+  );
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -363,17 +355,16 @@ export function updateGlobalCategoryRule(
   if (!Number.isInteger(nextPriority) || nextPriority < 0 || nextPriority > 10000) {
     return { ok: false, code: "INVALID_PRIORITY" };
   }
-  if (!categoryAssignableForGlobalBuiltin(nextCategoryId)) {
+  if (!(await categoryAssignableForGlobalBuiltin(nextCategoryId))) {
     return { ok: false, code: "BUILTIN_REQUIRES_GLOBAL_LEAF" };
   }
 
   try {
-    db.prepare(
+    await qExec(
       `UPDATE category_rule_global
        SET rule_key = ?, pattern = ?, match_type = ?, category_id = ?, amount_scope = ?,
            confidence = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ?`
-    ).run(
+       WHERE id = ?`,
       nextKeyRaw,
       nextPattern,
       nextMatchType,
@@ -385,37 +376,37 @@ export function updateGlobalCategoryRule(
       ruleId
     );
   } catch (e: unknown) {
-    const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : "";
-    if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+    if (isPgUniqueViolation(e)) {
       return { ok: false, code: "INVALID_PATTERN" };
     }
     throw e;
   }
 
-  const row = db
-    .prepare(
-      `SELECT
+  const row = (await qGet<GlobalRuleDbRow>(
+    `SELECT
          id,
-         rule_key AS ruleKey,
+         rule_key AS "ruleKey",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
-         amount_scope AS amountScope,
+         match_type AS "matchType",
+         category_id AS "categoryId",
+         amount_scope AS "amountScope",
          confidence,
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule_global
-       WHERE id = ?`
-    )
-    .get(ruleId) as GlobalRuleDbRow;
+       WHERE id = ?`,
+    ruleId
+  ))!;
   return { ok: true, data: mapGlobalRule(row) };
 }
 
-export function deleteGlobalCategoryRule(ruleId: string): { ok: true } | { ok: false; code: "NOT_FOUND" } {
-  const res = db.prepare(`DELETE FROM category_rule_global WHERE id = ?`).run(ruleId);
-  if (res.changes === 0) {
+export async function deleteGlobalCategoryRule(
+  ruleId: string
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
+  const del = await qGet<{ id: string }>(`DELETE FROM category_rule_global WHERE id = ? RETURNING id`, ruleId);
+  if (!del) {
     return { ok: false, code: "NOT_FOUND" };
   }
   return { ok: true };
@@ -436,7 +427,7 @@ function isRuleAmountScope(v: unknown): v is RuleAmountScope {
 
 export type CreateRuleFailure = { ok: false; code: RuleValidationFailureCode };
 
-export function createCategoryRuleForHousehold(
+export async function createCategoryRuleForHousehold(
   householdId: string,
   input: {
     pattern: string;
@@ -447,7 +438,7 @@ export function createCategoryRuleForHousehold(
     priority: number;
     enabled: boolean;
   }
-): { ok: true; data: CategoryRuleRow } | CreateRuleFailure {
+): Promise<{ ok: true; data: CategoryRuleRow } | CreateRuleFailure> {
   const pattern = normalizePattern(input.pattern);
   if (!isPatternValid(pattern, input.matchType)) {
     return { ok: false, code: "INVALID_PATTERN" };
@@ -461,16 +452,15 @@ export function createCategoryRuleForHousehold(
   if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 10000) {
     return { ok: false, code: "INVALID_PRIORITY" };
   }
-  if (!categoryAssignableByHousehold(input.categoryId, householdId)) {
+  if (!(await categoryAssignableByHousehold(input.categoryId, householdId))) {
     return { ok: false, code: "INVALID_CATEGORY" };
   }
 
   const id = crypto.randomUUID();
-  db.prepare(
+  await qExec(
     `INSERT INTO category_rule (
        id, household_id, pattern, match_type, category_id, confidence, amount_scope, priority, enabled, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-  ).run(
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     id,
     householdId,
     pattern,
@@ -482,30 +472,30 @@ export function createCategoryRuleForHousehold(
     input.enabled ? 1 : 0
   );
 
-  const row = db
-    .prepare(
-      `SELECT
+  const row = (await qGet<CategoryRuleDbRow>(
+    `SELECT
          id,
-         household_id AS householdId,
+         household_id AS "householdId",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
+         match_type AS "matchType",
+         category_id AS "categoryId",
          confidence,
-         amount_scope AS amountScope,
+         amount_scope AS "amountScope",
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule
-       WHERE id = ? AND household_id = ?`
-    )
-    .get(id, householdId) as CategoryRuleDbRow;
+       WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  ))!;
   return { ok: true, data: mapRule(row) };
 }
 
 export type BulkRuleRowError = { index: number; message: string; code?: string };
 
-export function bulkCreateCategoryRulesForHousehold(
+export async function bulkCreateCategoryRulesForHousehold(
   householdId: string,
   rows: Array<{
     pattern: string;
@@ -517,13 +507,13 @@ export function bulkCreateCategoryRulesForHousehold(
     priority?: number;
     enabled?: boolean;
   }>
-): { created: CategoryRuleRow[]; errors: BulkRuleRowError[] } {
+): Promise<{ created: CategoryRuleRow[]; errors: BulkRuleRowError[] }> {
   const created: CategoryRuleRow[] = [];
   const errors: BulkRuleRowError[] = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
-    const resolved = resolveLeafCategoryIdForHousehold(householdId, {
+    const resolved = await resolveLeafCategoryIdForHousehold(householdId, {
       categoryId: row.categoryId,
       categoryPath: row.categoryPath
     });
@@ -545,7 +535,7 @@ export function bulkCreateCategoryRulesForHousehold(
       errors.push({ index: i, code: "INVALID_AMOUNT_SCOPE", message: "Invalid amount_scope" });
       continue;
     }
-    const out = createCategoryRuleForHousehold(householdId, {
+    const out = await createCategoryRuleForHousehold(householdId, {
       pattern: row.pattern,
       matchType: row.matchType,
       categoryId: resolved.id,
@@ -584,7 +574,7 @@ function autoRuleKeyFromPattern(pattern: string): string {
     .slice(0, 80)}`;
 }
 
-export function bulkCreateGlobalCategoryRules(
+export async function bulkCreateGlobalCategoryRules(
   householdId: string,
   rows: Array<{
     pattern: string;
@@ -597,13 +587,13 @@ export function bulkCreateGlobalCategoryRules(
     priority?: number;
     enabled?: boolean;
   }>
-): { created: GlobalCategoryRuleRow[]; errors: BulkRuleRowError[] } {
+): Promise<{ created: GlobalCategoryRuleRow[]; errors: BulkRuleRowError[] }> {
   const created: GlobalCategoryRuleRow[] = [];
   const errors: BulkRuleRowError[] = [];
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
-    const resolved = resolveLeafCategoryIdForHousehold(householdId, {
+    const resolved = await resolveLeafCategoryIdForHousehold(householdId, {
       categoryId: row.categoryId,
       categoryPath: row.categoryPath
     });
@@ -619,7 +609,7 @@ export function bulkCreateGlobalCategoryRules(
       errors.push({ index: i, code: resolved.code, message });
       continue;
     }
-    if (!categoryAssignableForGlobalBuiltin(resolved.id)) {
+    if (!(await categoryAssignableForGlobalBuiltin(resolved.id))) {
       errors.push({
         index: i,
         code: "BUILTIN_REQUIRES_GLOBAL_LEAF",
@@ -631,7 +621,7 @@ export function bulkCreateGlobalCategoryRules(
 
     const ruleKey = row.ruleKey?.trim() || autoRuleKeyFromPattern(row.pattern);
 
-    const out = createGlobalCategoryRule({
+    const out = await createGlobalCategoryRule({
       ruleKey,
       pattern: row.pattern,
       matchType: row.matchType,
@@ -661,7 +651,7 @@ export function bulkCreateGlobalCategoryRules(
   return { created, errors };
 }
 
-export function createCategoryRulesFromPatterns(
+export async function createCategoryRulesFromPatterns(
   householdId: string,
   input: {
     patternsRaw: string;
@@ -672,7 +662,7 @@ export function createCategoryRulesFromPatterns(
     priority: number;
     enabled: boolean;
   }
-): { ok: true; data: CategoryRuleRow[] } | CreateRuleFailure {
+): Promise<{ ok: true; data: CategoryRuleRow[] } | CreateRuleFailure> {
   const patterns = splitPatternInput(input.patternsRaw);
   if (patterns.length === 0) {
     return { ok: false, code: "INVALID_PATTERN" };
@@ -682,7 +672,7 @@ export function createCategoryRulesFromPatterns(
   }
   const created: CategoryRuleRow[] = [];
   for (let i = 0; i < patterns.length; i++) {
-    const single = createCategoryRuleForHousehold(householdId, {
+    const single = await createCategoryRuleForHousehold(householdId, {
       pattern: patterns[i]!,
       matchType: input.matchType,
       categoryId: input.categoryId,
@@ -699,7 +689,7 @@ export function createCategoryRulesFromPatterns(
   return { ok: true, data: created };
 }
 
-export function createRuleFromLedgerTransaction(
+export async function createRuleFromLedgerTransaction(
   householdId: string,
   transactionId: string,
   input: {
@@ -711,14 +701,14 @@ export function createRuleFromLedgerTransaction(
     priority: number;
     enabled: boolean;
   }
-): { ok: true; data: CategoryRuleRow } | CreateRuleFailure | { ok: false; code: "NOT_FOUND" } {
-  const row = db
-    .prepare(
-      `SELECT merchant AS merchant, memo AS memo
+): Promise<{ ok: true; data: CategoryRuleRow } | CreateRuleFailure | { ok: false; code: "NOT_FOUND" }> {
+  const row = await qGet<{ merchant: string | null; memo: string | null }>(
+    `SELECT merchant AS merchant, memo AS memo
        FROM transaction_canonical
-       WHERE id = ? AND household_id = ?`
-    )
-    .get(transactionId, householdId) as { merchant: string | null; memo: string | null } | undefined;
+       WHERE id = ? AND household_id = ?`,
+    transactionId,
+    householdId
+  );
   if (!row) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -747,7 +737,7 @@ export function createRuleFromLedgerTransaction(
 
 export type UpdateRuleFailure = { ok: false; code: "NOT_FOUND" | RuleValidationFailureCode };
 
-export function updateCategoryRuleForHousehold(
+export async function updateCategoryRuleForHousehold(
   householdId: string,
   ruleId: string,
   updates: {
@@ -759,25 +749,25 @@ export function updateCategoryRuleForHousehold(
     priority?: number;
     enabled?: boolean;
   }
-): { ok: true; data: CategoryRuleRow } | UpdateRuleFailure {
-  const existing = db
-    .prepare(
-      `SELECT
+): Promise<{ ok: true; data: CategoryRuleRow } | UpdateRuleFailure> {
+  const existing = await qGet<CategoryRuleDbRow>(
+    `SELECT
          id,
-         household_id AS householdId,
+         household_id AS "householdId",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
+         match_type AS "matchType",
+         category_id AS "categoryId",
          confidence,
-         amount_scope AS amountScope,
+         amount_scope AS "amountScope",
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule
-       WHERE id = ? AND household_id = ?`
-    )
-    .get(ruleId, householdId) as CategoryRuleDbRow | undefined;
+       WHERE id = ? AND household_id = ?`,
+    ruleId,
+    householdId
+  );
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -802,15 +792,14 @@ export function updateCategoryRuleForHousehold(
   if (!Number.isInteger(nextPriority) || nextPriority < 0 || nextPriority > 10000) {
     return { ok: false, code: "INVALID_PRIORITY" };
   }
-  if (!categoryAssignableByHousehold(nextCategoryId, householdId)) {
+  if (!(await categoryAssignableByHousehold(nextCategoryId, householdId))) {
     return { ok: false, code: "INVALID_CATEGORY" };
   }
 
-  db.prepare(
+  await qExec(
     `UPDATE category_rule
      SET pattern = ?, match_type = ?, category_id = ?, confidence = ?, amount_scope = ?, priority = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND household_id = ?`
-  ).run(
+     WHERE id = ? AND household_id = ?`,
     nextPattern,
     nextMatchType,
     nextCategoryId,
@@ -822,40 +811,47 @@ export function updateCategoryRuleForHousehold(
     householdId
   );
 
-  const row = db
-    .prepare(
-      `SELECT
+  const row = (await qGet<CategoryRuleDbRow>(
+    `SELECT
          id,
-         household_id AS householdId,
+         household_id AS "householdId",
          pattern,
-         match_type AS matchType,
-         category_id AS categoryId,
+         match_type AS "matchType",
+         category_id AS "categoryId",
          confidence,
-         amount_scope AS amountScope,
+         amount_scope AS "amountScope",
          priority,
          enabled,
-         created_at AS createdAt,
-         updated_at AS updatedAt
+         created_at AS "createdAt",
+         updated_at AS "updatedAt"
        FROM category_rule
-       WHERE id = ? AND household_id = ?`
-    )
-    .get(ruleId, householdId) as CategoryRuleDbRow;
+       WHERE id = ? AND household_id = ?`,
+    ruleId,
+    householdId
+  ))!;
   return { ok: true, data: mapRule(row) };
 }
 
-export function deleteCategoryRuleForHousehold(
+export async function deleteCategoryRuleForHousehold(
   householdId: string,
   ruleId: string
-): { ok: true } | { ok: false; code: "NOT_FOUND" } {
-  const res = db.prepare(`DELETE FROM category_rule WHERE id = ? AND household_id = ?`).run(ruleId, householdId);
-  if (res.changes === 0) {
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
+  const del = await qGet<{ id: string }>(
+    `DELETE FROM category_rule WHERE id = ? AND household_id = ? RETURNING id`,
+    ruleId,
+    householdId
+  );
+  if (!del) {
     return { ok: false, code: "NOT_FOUND" };
   }
   return { ok: true };
 }
 
 /** Removes every household classification rule for this home (e.g. before re-importing a full CSV). */
-export function deleteAllCategoryRulesForHousehold(householdId: string): { deleted: number } {
-  const res = db.prepare(`DELETE FROM category_rule WHERE household_id = ?`).run(householdId);
-  return { deleted: res.changes };
+export async function deleteAllCategoryRulesForHousehold(householdId: string): Promise<{ deleted: number }> {
+  const rows = await qAll<{ id: string }>(
+    `DELETE FROM category_rule WHERE household_id = ? RETURNING id`,
+    householdId
+  );
+  return { deleted: rows.length };
 }
