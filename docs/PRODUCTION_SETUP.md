@@ -6,7 +6,7 @@ Schema is applied in order from `backend/db/migrations/` via `scripts/db.mjs` (t
 
 ## Seeds
 
-- **`backend/db/seeds/0001_seed_defaults.sql`** — Global default category taxonomy, a bootstrap household, and the seeded owner user (for first login when used). **Apply this** for a usable empty app (no sample bank accounts).
+- **`backend/db/seeds/0001_bootstrap.sql`** — Global default category taxonomy, bootstrap household, seeded owner user, and built-in global classification rules. **Apply this** for a usable empty app (no sample bank accounts).
 - **`backend/db/seeds/dev/*.sql`** — Dev-only sample **`financial_account`** rows (BoA/Citi/Chase/Marcus). Applied **only** with **`--dev-seeds`**. The payslip import account is created from **Profile → Employer Setup**, not from seed SQL.
 
 **`npm run db:seed`** runs migrations + **`0001` only** — appropriate for production-style databases where users create real accounts in Settings.

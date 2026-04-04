@@ -1,6 +1,6 @@
 # End-to-end runbook (brand new environment)
 
-Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Migration order: [`backend/db/README.md`](../backend/db/README.md).
+Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Database layout and baseline notes: [`backend/db/README.md`](../backend/db/README.md).
 
 ## 1. Prerequisites
 
@@ -46,9 +46,12 @@ Edit `.env`:
 
 **API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run services:start` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
-**Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
+**Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 
 ## 5. Database (schema + seeds)
+
+**Schema baseline:** New installs apply a **single** migration file, [`backend/db/migrations/0001_baseline.sql`](../backend/db/migrations/0001_baseline.sql). If your SQLite file was created with the **old** 32-file chain, `schema_migrations` will not match this repo — use a **fresh** DB (`db:cleanup` + `db:seed` / `setup`) after backup. Legacy SQL lives under [`backend/db/migrations_archive/`](../backend/db/migrations_archive/).
+
 
 **Which file is used:** The API and all `npm run db:*` scripts resolve the same path via [`scripts/print-db-path.mjs`](../scripts/print-db-path.mjs) (same rules as the backend). To print it:
 
@@ -109,7 +112,7 @@ Vite reads env from the **repository root** (`envDir` in [`frontend/vite.config.
 ## 7. First sign-in
 
 1. Open the home page (`/`).
-2. Sign in with the **seeded** user from `0001_seed_defaults.sql` (default **owner@example.com** / **ChangeMe123!**) unless you changed the seed file.
+2. Sign in with the **seeded** user from `0001_bootstrap.sql` (default **owner@example.com** / **ChangeMe123!**) unless you changed the seed file.
 3. You should land on the cash snapshot / dashboard after auth.
 
 **Production:** change the default password immediately; consider not shipping dev seeds (see `PRODUCTION_SETUP.md`).

@@ -47,7 +47,7 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 
 ## Known hardcoded defaults (ops)
 
-- **Seed user row:** [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql) — email and bcrypt hash for the default password.
+- **Seed user row:** [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) — email and bcrypt hash for the default password.
 - **Tests:** `backend` `npm test` runs `MODE=TEST` with `DB_PATH` unset so the test DB path is deterministic (see [`scripts/prep-test-db.sh`](../scripts/prep-test-db.sh)).
 
 See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset.

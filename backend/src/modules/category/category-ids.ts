@@ -1,5 +1,5 @@
 /**
- * Default taxonomy from `backend/db/seeds/0001_seed_defaults.sql` (household_id NULL).
+ * Default taxonomy from `backend/db/seeds/0001_bootstrap.sql` (household_id NULL).
  * Stable ids for rule engine and tests (includes migration 0032 Entertainment/Banking expansion).
  */
 export const DEFAULT_CATEGORY_IDS = {
