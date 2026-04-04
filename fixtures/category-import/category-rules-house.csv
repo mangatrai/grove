@@ -1,0 +1,88 @@
+origin,id,rule_key,pattern,match_type,amount_scope,category_id,category_path,priority,confidence,enabled
+household,,,FID BKG SVC LLC DES:MONEYLINE ID:ZXXXXX,contains,debit_only,,Investments > Stocks,40,0.98,true
+household,,,FID BKG SVC LLC DES:MONEYLINE ID:XXXXX904,contains,debit_only,,Investments > 529 plan,40,0.98,true
+household,,,FID BKG SVC LLC DES:MONEYLINE ID:XXXXX9787,contains,debit_only,,Investments > IRA,40,0.98,true
+household,,,UNITEDWHOLESALE,contains,debit_only,,Loans > Home,40,0.97,true
+household,,,Online scheduled payment to CSL 0664,contains,debit_only,,Loans > Auto,40,0.98,true
+household,,,MANGAT RAI DES:ACH XFER,contains,debit_only,,Loans > Auto,40,0.95,true
+household,,,KEEP THE CHANGE TRANSFER,contains,debit_only,,Transfers > Transfers out,40,0.95,true
+household,,,KEEP THE CHANGE TRANSFER,contains,credit_only,,Transfers > Transfers in,40,0.95,true
+
+household,,,APPLECARD GSBANK,contains,debit_only,,Transfers > Transfers out,40,0.97,true
+household,,,CITI AUTOPAY,contains,debit_only,,Transfers > Transfers out,40,0.96,true
+household,,,CHASE CREDIT CRD,contains,debit_only,,Transfers > Transfers out,40,0.96,true
+household,,,DISCOVER DES:E-PAYMENT,contains,debit_only,,Transfers > Transfers out,40,0.96,true
+household,,,AMERICAN EXPRESS DES:ACH PMT,contains,debit_only,,Transfers > Transfers out,40,0.96,true
+household,,,CAPITAL ONE DES:CRCARDPMT,contains,debit_only,,Transfers > Transfers out,40,0.96,true
+
+household,,,Wealthfront DES:EDI PYMNTS,contains,debit_only,,Transfers > Transfers out,40,0.98,true
+household,,,Wealthfront DES:EDI PYMNTS,contains,credit_only,,Transfers > Transfers in,40,0.98,true
+household,,,Transfer WEALTHFRONT BROKERAGE LLC,contains,credit_only,,Transfers > Transfers in,40,0.98,true
+household,,,GOLDMAN SACHS BA DES:TRANSFER,contains,debit_only,,Transfers > Transfers out,40,0.97,true
+household,,,Online Banking transfer from SAV 9021,contains,credit_only,,Transfers > Transfers in,40,0.97,true
+household,,,Online Banking transfer from SAV 9021,contains,debit_only,,Transfers > Transfers out,40,0.90,true
+household,,,Online transfer to CHK 6335,contains,debit_only,,Transfers > Transfers out,40,0.98,true
+household,,,Mobile transfer to CHK 6335,contains,debit_only,,Transfers > Transfers out,40,0.98,true
+household,,,BKOFAMERICA MOBILE,contains,credit_only,,Transfers > Transfers in,50,0.92,true
+household,,,CYBRID-REMIT2ANY,contains,debit_only,,Transfers > Transfers out,60,0.75,true
+
+household,,,FUNDRISEINCOME,contains,debit_only,,Investments > Real estate,40,0.95,true
+household,,,FUNDRISE REAL ES,contains,debit_only,,Investments > Real estate,40,0.95,true
+household,,,DataStax Inc-OSV,contains,credit_only,,Income > Salary,50,0.93,true
+
+household,,,PL*InsightAssoci,contains,debit_only,,Home > HOA Fees,40,0.98,true
+household,,,PL*PAYLEASE,contains,debit_only,,Home > HOA Fees,40,0.98,true
+household,,,DIVINE AUDIO VIS,contains,debit_only,,Home > Home improvement,60,0.82,true
+
+household,,,CITYOFLEWISVILLE DES:UTIL BILL,contains,debit_only,,Utilities > City Water,40,0.98,true
+household,,,PROTECTIVE LIFE DES:E-PAYMENTS,contains,debit_only,,Insurance > Life,40,0.98,true
+
+household,,,Fyle DES:Fyle,contains,credit_only,,Income > Reimbursements,40,0.98,true
+household,,,NAVIA BENEFIT SO DES:FLEXIBLE B,contains,credit_only,,Income > Reimbursements,40,0.98,true
+household,,,IBM Corporation DES:PAYMENTS,contains,credit_only,,Income > Reimbursements,40,0.98,true
+household,,,IBM 3141 DES:PAYROLL ID:,contains,credit_only,,Income > Salary,40,0.99,true
+household,,,APPLE CASH DES:BANK XFER,contains,credit_only,,Income > Reimbursements,40,0.90,true
+household,,,PAYPAL DES:TRANSFER,contains,credit_only,,Income > Reimbursements,40,0.90,true
+household,,,GOLDMAN SACHS BA DES:P2P,contains,credit_only,,Income > Reimbursements,50,0.80,true
+household,,,CINC OUTGOING,contains,credit_only,,Income > Dividends,50,0.95,true
+
+household,,,TARGET DEBIT CRD,contains,any,,Shopping > General merchandise,40,0.96,true
+household,,,AMAZON,contains,debit_only,,Shopping > General merchandise,60,0.80,true
+household,,,AMZN,contains,debit_only,,Shopping > General merchandise,60,0.80,true
+household,,,WALMART,contains,debit_only,,Shopping > General merchandise,60,0.80,true
+household,,,COSTCO,contains,debit_only,,Shopping > General merchandise,60,0.80,true
+household,,,KROGER,contains,debit_only,,Shopping > Groceries,40,0.98,true
+household,,,HEB,contains,debit_only,,Shopping > Groceries,40,0.98,true
+
+household,,,UBER,contains,debit_only,,Mobility > Taxi,60,0.90,true
+household,,,LYFT,contains,debit_only,,Mobility > Taxi,60,0.90,true
+household,,,CHEVRON,contains,debit_only,,Mobility > Fuel,90,0.75,true
+household,,,SHELL,contains,debit_only,,Mobility > Fuel,90,0.75,true
+household,,,EXXON,contains,debit_only,,Mobility > Fuel,90,0.75,true
+
+household,,,SOUTHWEST,contains,debit_only,,Travel > Airfare,60,0.90,true
+household,,,DELTA,contains,debit_only,,Travel > Airfare,60,0.90,true
+household,,,UNITED AIRLINES,contains,debit_only,,Travel > Airfare,60,0.90,true
+household,,,MARRIOTT,contains,debit_only,,Travel > Hotel,60,0.90,true
+household,,,HILTON,contains,debit_only,,Travel > Hotel,60,0.90,true
+household,,,HYATT,contains,debit_only,,Travel > Hotel,60,0.90,true
+
+household,,,IRS DES:USATAXPYMT,contains,debit_only,,Taxes > Federal income tax,40,0.98,true
+household,,,IRS,contains,credit_only,,Taxes > Federal tax refund,90,0.85,true
+household,,,TURBOTAX,contains,debit_only,,Taxes > Tax prep,40,0.90,true
+household,,,COLLIN COUNTY,contains,debit_only,,Taxes > Property tax,40,0.97,true
+household,,,DENTON COUNTY,contains,debit_only,,Taxes > Property tax,40,0.97,true
+household,,,COUNTY TAX,contains,debit_only,,Taxes > Property tax,90,0.75,true
+household,,,FEDERAL WITHHOLDING,contains,debit_only,,Taxes > Federal income tax,40,0.95,true
+
+household,,,STARBUCKS,contains,debit_only,,Food > Coffee,60,0.95,true
+household,,,CHICK-FIL-A,contains,debit_only,,Food > Dining out,60,0.95,true
+household,,,MCDONALDS,contains,debit_only,,Food > Dining out,60,0.95,true
+household,,,STONEBROOK PEDIATRIC,contains,debit_only,,Healthcare > Medical,50,0.95,true
+
+household,,,BRGHTWHL,contains,any,,Education > Childcare,40,0.98,true
+household,,,ATT DES:,contains,debit_only,,Utilities > Mobile phone,40,0.95,true
+household,,,TMOBILE,contains,debit_only,,Utilities > Mobile phone,40,0.96,true
+household,,,ZELLE,contains,credit_only,,Income > Reimbursements,40,0.88,true
+household,,,FRONTIER,contains,debit_only,,Utilities > Internet,40,0.95,true
+household,,,BKOFAMERICA ATM,contains,debit_only,,Transfers > Cash withdrawal,40,0.98,true
