@@ -10,7 +10,7 @@
 | **UX-** | Design / UX polish — layout, visuals, affordances (not always a bug). |
 | **FIX-** | Bug or correctness fix (backend, migrations, tests). |
 | **DB-** | Schema / migration / seed semantics worth remembering. |
-| **PRD-** | Documented deviation from `docs/FINANCE_APP_PRD.md` or backlog intent — *by design* after decision. |
+| **PRD-** | Documented deviation from historical PRD / backlog intent — *by design* after decision (archived: `docs/archive/FINANCE_APP_PRD.md`). |
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/household-finance-app`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
@@ -614,4 +614,4 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 - When you ship a user-visible tweak or fix a surprising behavior, add a **short entry** with ID, **what**, **why**, and file pointers if non-obvious.  
 - When a decision **contradicts** the PRD or backlog text, add or update a **PRD-** bullet here and optionally a one-line pointer in **`docs/DECISIONS_LOG.md`**.  
-- **`docs/CHECKPOINT.md`** stays the **summary** of “where we are”; this file is the **audit trail**.
+- **Implementation status** was summarized in **`docs/archive/CHECKPOINT.md`** (archived); this file remains the **audit trail** for shipped changes.

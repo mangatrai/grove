@@ -43,7 +43,7 @@ Operators may still want to **reclaim disk space** after they trust extracted ro
 
 ### Core Subsystems
 1. **Web App**
-   - **Home (`/`)** = cash dashboard when authenticated; **Import** via header **New import** only (no Import nav item); Import Transactions flow (upload, per-file account mapping, profile selection), resolution queue, ledger, manual edits. See `frontend/README.md` and `docs/DECISIONS_LOG.md` D-013.
+   - **Home (`/`)** = cash dashboard when authenticated; **Import** via header **New import** only (no Import nav item); Import Transactions flow (upload, per-file account mapping, profile selection), resolution queue, ledger, manual edits. See `frontend/README.md` and `docs/archive/DECISIONS_LOG.md` D-013.
 2. **Ingestion API**
    - Multi-file upload and import session management.
 3. **Parser Engine**

@@ -1,6 +1,6 @@
 # API: Categories (Epic 5.1 / 5.3)
 
-> **Progress:** Hierarchy seed (migrations **`0006`**, **`0007`**, **`0008`**), **`0009`** (**`category_rule`** + **`classification_meta`**), household CRUD, **`LedgerCategoryPicker`** (inline create + hierarchical flyout), **`/categories`** and **`/categories/rules`** UIs — see **`docs/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`**. **IA:** **D-014** — keep **Transactions** as primary categorization; **`/categories`** + **`/categories/rules`** stay as secondary taxonomy + rules authoring (**DOC-008**).
+> **Progress:** Hierarchy seed (migrations **`0006`**, **`0007`**, **`0008`**), **`0009`** (**`category_rule`** + **`classification_meta`**), household CRUD, **`LedgerCategoryPicker`** (inline create + hierarchical flyout), **`/categories`** and **`/categories/rules`** UIs — see **`docs/CHANGE_HISTORY.md`** (historical status snapshots: **`docs/archive/CHECKPOINT.md`**). **IA:** **D-014** — keep **Transactions** as primary categorization; **`/categories`** + **`/categories/rules`** stay as secondary taxonomy + rules authoring (**DOC-008**). Decision detail: **`docs/archive/DECISIONS_LOG.md`**.
 
 Base path: `/categories` and `/categories/rules`  
 Auth: `Authorization: Bearer <JWT>`.

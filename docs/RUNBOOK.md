@@ -168,15 +168,16 @@ node scripts/print-db-path.mjs
 | Port in use | Change `PORT` / `FRONTEND_PORT` in `.env` or stop the other process. |
 | 401 / invalid token | Clear browser storage for the site; sign in again. |
 | Missing tables / old schema | Run `npm run setup` or `npm run db:seed` after `db:cleanup`. |
-| Import staging disk | See [`IMPORT_STAGING_PURGE.md`](IMPORT_STAGING_PURGE.md); `npm run import:purge -- --help`. |
+| Import staging disk | See [`archive/IMPORT_STAGING_PURGE.md`](archive/IMPORT_STAGING_PURGE.md); `npm run import:purge -- --help`. |
 
 ## Related docs
 
-- [`README.md`](../README.md) — quick start summary  
+- [`README.md`](../README.md) — product summary and developer quick start  
+- [`USER_GUIDE.md`](USER_GUIDE.md) — using the app (imports, transactions, settings)  
 - [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) — `.env` reference (DB path, Vite, transfer thresholds)  
 - [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) — production DB and seeds  
-- [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) — product scope  
-- [`CHECKPOINT.md`](CHECKPOINT.md) — implementation status  
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — system design  
+- [`archive/README.md`](archive/README.md) — historical planning and handoff docs  
 
 ## 11. Production roadmap notes (SQLite -> Postgres / Koyeb)
 

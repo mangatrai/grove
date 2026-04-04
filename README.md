@@ -58,7 +58,7 @@ npm run lint      # eslint both workspaces
 
 ## Import staging cleanup
 
-Dry-run by default; see `npm run import:purge -- --help` before using destructive flags. Background: [`docs/IMPORT_STAGING_PURGE.md`](docs/IMPORT_STAGING_PURGE.md).
+Dry-run by default; see `npm run import:purge -- --help` before using destructive flags. Background: [`docs/archive/IMPORT_STAGING_PURGE.md`](docs/archive/IMPORT_STAGING_PURGE.md).
 
 ## Sample CSV templates
 

@@ -1,13 +1,5 @@
 # API documentation index
 
-- **`openapi/openapi.yaml`** — Machine-readable OpenAPI 3.1 description of HTTP routes (source of truth for path inventory).
-- **Topic guides** (request/response detail and product notes):
-  - `docs/API_HOUSEHOLD.md`
-  - `docs/API_HOUSEHOLD_PROFILE.md`
-  - `docs/API_IMPORT_SESSIONS.md`
-  - `docs/API_LEDGER.md`
-  - `docs/API_CATEGORIES.md`
-  - `docs/API_CASH_SUMMARY.md`
-  - `docs/API_RESOLUTION.md`
+**Source of truth for routes:** [`openapi/openapi.yaml`](../openapi/openapi.yaml) (OpenAPI 3.1).
 
-Prefer **`openapi/openapi.yaml`** for route discovery; use the topic guides where behavior is explained in prose.
+**Topic guides** (prose behavior and examples): [`API_HOUSEHOLD.md`](API_HOUSEHOLD.md), [`API_HOUSEHOLD_PROFILE.md`](API_HOUSEHOLD_PROFILE.md), [`API_IMPORT_SESSIONS.md`](API_IMPORT_SESSIONS.md), [`API_LEDGER.md`](API_LEDGER.md), [`API_CATEGORIES.md`](API_CATEGORIES.md), [`API_CASH_SUMMARY.md`](API_CASH_SUMMARY.md), [`API_RESOLUTION.md`](API_RESOLUTION.md).
