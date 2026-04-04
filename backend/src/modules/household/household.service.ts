@@ -476,7 +476,7 @@ export function patchCurrentUserProfile(
   try {
     db.transaction(() => {
       updateProfileByIdStmt.run(nextFullName, nextEmail, nextPhone, nextAvatar, householdId, existing.id);
-      if (input.email !== undefined && existing.linked_user_id) {
+      if (input.email !== undefined && existing.linked_user_id && nextEmail !== null) {
         updateLinkedUserEmailStmt.run(nextEmail, existing.linked_user_id);
       }
     })();
@@ -554,7 +554,7 @@ export function patchHouseholdMember(
     db.transaction(() => {
       updateProfileByIdStmt.run(nextFullName, nextEmail, nextPhone, nextAvatar, householdId, memberId);
       updateMembershipStmt.run(nextRole, nextRelationship, householdId, memberId);
-      if (input.email !== undefined && existing.linked_user_id) {
+      if (input.email !== undefined && existing.linked_user_id && nextEmail !== null) {
         updateLinkedUserEmailStmt.run(nextEmail, existing.linked_user_id);
       }
     })();

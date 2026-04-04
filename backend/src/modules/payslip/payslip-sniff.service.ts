@@ -99,6 +99,7 @@ export function suggestPayslipFromText(
 
 export async function sniffPayslipPdfBuffer(
   householdId: string,
+  userId: string,
   buffer: Buffer
 ): Promise<
   | { ok: true; normalizedText: string; suggestion: SniffSuggestion }
