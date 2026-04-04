@@ -1,5 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import express from "express";
 
+import { env } from "./config/env.js";
 import { log } from "./logger.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
@@ -26,6 +31,28 @@ function corsMiddleware(): express.RequestHandler {
   };
 }
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/** Built Vite output (served when `MODE=PROD` and this directory exists). */
+const frontendDist = path.resolve(__dirname, "../../frontend/dist");
+
+/** GET paths owned by the JSON API — do not serve SPA `index.html` for these. */
+const API_PATH_PREFIXES = [
+  "/health",
+  "/auth",
+  "/household",
+  "/categories",
+  "/imports",
+  "/transactions",
+  "/resolution",
+  "/reports",
+  "/payslips"
+];
+
+function isApiPath(urlPath: string): boolean {
+  return API_PATH_PREFIXES.some((prefix) => urlPath === prefix || urlPath.startsWith(`${prefix}/`));
+}
+
 export function buildApp() {
   const app = express();
 
@@ -41,6 +68,21 @@ export function buildApp() {
   app.use("/resolution", resolutionRouter);
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
+
+  if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
+    app.use(express.static(frontendDist, { index: false }));
+    app.get("*", (req, res, next) => {
+      if (req.method !== "GET" || isApiPath(req.path)) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(frontendDist, "index.html"), (err) => {
+        if (err) {
+          next(err);
+        }
+      });
+    });
+  }
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     log.error(err instanceof Error ? err.stack ?? err.message : err);

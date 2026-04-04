@@ -37,7 +37,7 @@ Curated U.S. institution labels and household custom names are app-level (see Co
 | **`PORT`** | The API reads `PORT` (see backend `env.ts`); Koyeb injects `PORT` — no code change needed. |
 | **`NODE_ENV=production`** | Runtime is compiled JS; **devDependencies** (e.g. `tsx`, `typescript`) are not required at start. You only need `NPM_CONFIG_PRODUCTION=false` if something in **devDependencies** must exist at runtime (not the case for the default start script). |
 | **SQLite file** | Default DB path is under `./data/` (see `DB_PATH` / `DB_PATH_PROD`). Koyeb’s filesystem is **ephemeral** unless you attach a **persistent volume** and set `DB_PATH` (or equivalent) to a path on that volume. |
-| **Frontend (SPA)** | The Express app does **not** serve `frontend/dist` today. Options: a **second** Koyeb static service for the Vite build, a CDN, or future work to serve static files from the API and configure `VITE_*` / API base URL accordingly. |
+| **Frontend (SPA)** | With **`MODE=PROD`** and a prior **`npm run build`** (includes Vite), Express serves **`frontend/dist`** and falls back to **`index.html`** for client-side routes (same origin as the API — no extra `VITE_PROXY_API` needed). With **`MODE=TEST`**, the API behaves as before (no static UI from Express — use Vite on `FRONTEND_PORT` locally). If `dist` is missing while `MODE=PROD`, the API still runs and **`GET /`** returns “Cannot GET /”. |
 
 ## Postgres + Koyeb readiness (planned, not shipped)
 
