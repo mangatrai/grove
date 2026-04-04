@@ -15,6 +15,7 @@ Self-hosted household finance: import bank and card activity, categorize with ru
 | **HTTP API** | [`openapi/openapi.yaml`](openapi/openapi.yaml) · [`docs/API_INDEX.md`](docs/API_INDEX.md) |
 | **System design** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | **Release / change log** | [`docs/CHANGE_HISTORY.md`](docs/CHANGE_HISTORY.md) |
+| **Dead code / optional features audit** | [`docs/DEAD_CODE.md`](docs/DEAD_CODE.md) |
 
 ## Quick start (development)
 

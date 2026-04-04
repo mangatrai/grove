@@ -6,7 +6,7 @@ This complements [`IMPORT_CLASSIFICATION.md`](IMPORT_CLASSIFICATION.md), which d
 
 ## Default category taxonomy (parents and children)
 
-**Source of truth:** `household_id IS NULL` rows in **`category`**. Names and stable ids are defined in [`backend/db/seeds/0001_seed_defaults.sql`](../backend/db/seeds/0001_seed_defaults.sql); migrations `0006`–`0028` introduce history; **[`0029_sync_global_category_display_names.sql`](../backend/db/migrations/0029_sync_global_category_display_names.sql)** keeps **display names** aligned on upgraded databases. **Optional** [`0003_seed_default_household_categories.sql`](../backend/db/seeds/0003_seed_default_household_categories.sql) is reserved for future household-scoped install defaults (currently global taxonomy covers Loans, Travel, etc.).
+**Source of truth:** `household_id IS NULL` rows in **`category`**. Names and stable ids are defined in [`backend/db/seeds/0001_bootstrap.sql`](../../backend/db/seeds/0001_bootstrap.sql) (archived incremental history under [`migrations_archive/`](../../backend/db/migrations_archive/)). **Display-name sync** was in **`0029_sync_global_category_display_names.sql`** (archived). **Optional** household-scoped install hook was former **`0003`** (comment in bootstrap); global taxonomy covers Loans, Travel, etc.
 
 Rules assign **leaf** categories only (see `classifyWithRules` in `backend/src/modules/category/category-rules.ts`).
 
@@ -66,7 +66,7 @@ Rules assign **leaf** categories only (see `classifyWithRules` in `backend/src/m
    - Queues **near-duplicate** and **transfer** handling separately (resolution items, not only “unknown category”).
    - **Classifies** each row: `classifyWithRules(normalizedDescription, amount, dbRules)`:
      1. **Household `category_rule` rows** (from Category Rules UI), priority order, first match wins on normalized text.
-     2. **`category_rule_global`** rows (built-in defaults, table from migration `0026_category_rule_global.sql`, default rows from seed `0002_seed_category_rule_global.sql`), merged after household rules.
+     2. **`category_rule_global`** rows (built-in defaults; DDL in baseline / archived `0026`, data in `0001_bootstrap.sql`), merged after household rules.
      3. If still **no category**, the row is queued for **optional AI** (if enabled): batched OpenAI suggestions; high-confidence suggestions can auto-apply per `AI_CATEGORY_*` env thresholds.
    - Inserts **`transaction_canonical`** with `category_id` (possibly null) and classification metadata JSON.
    - If `category_id` is still null, creates an **`unknown_category`** resolution item so the user can fix it from review / ledger.
