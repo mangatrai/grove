@@ -24,20 +24,40 @@ Schema is applied in order from `backend/db/migrations/` via `scripts/db.mjs` (t
 
 Curated U.S. institution labels and household custom names are app-level (see Connected accounts). No separate production SQL is required for the catalog.
 
-## Koyeb (Node.js) — API service with SQLite
+## Koyeb (Node.js) — buildpack overrides
 
-[Koyeb](https://www.koyeb.com/) detects this repo as **Node.js** via the root [`package.json`](../package.json). The backend matches their **Express**-style deployment model (`npm run build` → `node dist/server.js`), not Next.js/Nuxt.
+[Koyeb](https://www.koyeb.com/) detects this repo as **Node.js** via the root [`package.json`](../package.json). The backend follows the usual **Express** pattern (`npm run build` → `node dist/server.js`). Use **npm workspaces** from the **repository root** so dependencies resolve correctly.
+
+| Override | Value |
+|----------|--------|
+| **Work directory** | **`.`** (repo root) |
+| **Build command** | **`npm ci && npm run build -w backend`** |
+| **Run command** | **`npm run start -w backend`** |
+
+If you leave **work directory** at the root, **keep** `-w backend` on the start command (the root `package.json` has no top-level `start` script). If you instead set work directory to **`backend/`**, use **`npm start`** there and **omit** `-w backend`.
+
+**Frontend (SPA) on the same service:** With **`MODE=PROD`**, Express serves **`frontend/dist`** when that folder exists. The build command above **only compiles the API**; it does **not** run Vite. To ship the UI from the same Koyeb service, use a build that also produces `frontend/dist`, e.g. **`npm ci && npm run build`** (root script: backend + frontend) or **`npm ci && npm run build -w backend && npm run build -w frontend`**.
+
+### `PORT` (Koyeb)
+
+- The API listens on **`PORT`** (see backend [`env.ts`](../backend/src/config/env.ts)).
+- In the Koyeb service **environment variables**, set **`PORT`** to the **same number** as the port you expose (e.g. **8000** if the service exposes **8000**). If Koyeb already injects **`PORT`** for that port, you do not need to duplicate it.
+- **Do not** set **`FRONTEND_PORT`** for the API-only runtime on Koyeb; it is for local Vite dev.
+
+### Health check (Koyeb)
+
+- Prefer an **HTTP** health check when available: **GET** path **`/health`** — expect **200** and JSON like `{"status":"ok"}`.
+- **TCP** on the same port as **`PORT`** only verifies the process is listening; it does not hit **`/health`**.
+
+### Other notes
 
 | Topic | What to configure |
 |--------|-------------------|
-| **Package manager** | **npm** (workspaces). Use install at repo root unless you set the service **root directory** to `backend/`. |
-| **Node version** | Root and `backend` declare `"engines": { "node": "20.x" }` — set the same on Koyeb if you pin runtime. |
-| **Build (monorepo root)** | `npm ci` then `npm run build -w backend` (API only), or `npm run build` to also build the Vite frontend. |
-| **Start command** | From repo root: `npm run start -w backend`. If the service root is `backend/`: `npm ci && npm run build && npm start`. |
-| **`PORT`** | The API reads `PORT` (see backend `env.ts`); Koyeb injects `PORT` — no code change needed. |
-| **`NODE_ENV=production`** | Runtime is compiled JS; **devDependencies** (e.g. `tsx`, `typescript`) are not required at start. You only need `NPM_CONFIG_PRODUCTION=false` if something in **devDependencies** must exist at runtime (not the case for the default start script). |
-| **SQLite file** | Default DB path is under `./data/` (see `DB_PATH` / `DB_PATH_PROD`). Koyeb’s filesystem is **ephemeral** unless you attach a **persistent volume** and set `DB_PATH` (or equivalent) to a path on that volume. |
-| **Frontend (SPA)** | With **`MODE=PROD`** and a prior **`npm run build`** (includes Vite), Express serves **`frontend/dist`** and falls back to **`index.html`** for client-side routes (same origin as the API — no extra `VITE_PROXY_API` needed). With **`MODE=TEST`**, the API behaves as before (no static UI from Express — use Vite on `FRONTEND_PORT` locally). If `dist` is missing while `MODE=PROD`, the API still runs and **`GET /`** returns “Cannot GET /”. |
+| **Node version** | Root and `backend` declare `"engines": { "node": "20.x" }` — align Koyeb if you pin runtime. |
+| **`MODE`** | Use **`MODE=PROD`** for production SQLite path and for serving **`frontend/dist`** when present (see above). |
+| **Runtime** | Output is compiled JS; **devDependencies** are not required at **`npm start`** unless you changed the start script. |
+| **SQLite file** | Default DB path is under **`./data/`** (see **`DB_PATH`** / **`DB_PATH_PROD`**). Koyeb’s filesystem is **ephemeral** unless you attach a **persistent volume** and point **`DB_PATH`** at a path on that volume. |
+| **Local vs prod UI** | With **`MODE=TEST`**, Express does not serve the SPA from **`frontend/dist`** (use Vite on **`FRONTEND_PORT`** locally). If **`MODE=PROD`** but **`dist`** is missing, the API still runs; **`GET /`** may show “Cannot GET /” until a full frontend build is deployed. |
 
 ## Postgres + Koyeb readiness (planned, not shipped)
 

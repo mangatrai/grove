@@ -5,8 +5,8 @@ household,,,FID BKG SVC LLC DES:MONEYLINE ID:XXXXX9787,contains,debit_only,,Inve
 household,,,UNITEDWHOLESALE,contains,debit_only,,Loans > Home,40,0.97,true
 household,,,Online scheduled payment to CSL 0664,contains,debit_only,,Loans > Auto,40,0.98,true
 household,,,MANGAT RAI DES:ACH XFER,contains,debit_only,,Loans > Auto,40,0.95,true
-household,,,KEEP THE CHANGE TRANSFER,contains,debit_only,,Transfers > Transfers out,40,0.95,true
-household,,,KEEP THE CHANGE TRANSFER,contains,credit_only,,Transfers > Transfers in,40,0.95,true
+household,,,KEEP THE CHANGE,contains,debit_only,,Transfers > Transfers out,40,0.95,true
+household,,,KEEPTHECHANGE,contains,credit_only,,Transfers > Transfers in,40,0.95,true
 
 household,,,APPLECARD GSBANK,contains,debit_only,,Transfers > Transfers out,40,0.97,true
 household,,,CITI AUTOPAY,contains,debit_only,,Transfers > Transfers out,40,0.96,true
@@ -19,8 +19,8 @@ household,,,Wealthfront DES:EDI PYMNTS,contains,debit_only,,Transfers > Transfer
 household,,,Wealthfront DES:EDI PYMNTS,contains,credit_only,,Transfers > Transfers in,40,0.98,true
 household,,,Transfer WEALTHFRONT BROKERAGE LLC,contains,credit_only,,Transfers > Transfers in,40,0.98,true
 household,,,GOLDMAN SACHS BA DES:TRANSFER,contains,debit_only,,Transfers > Transfers out,40,0.97,true
-household,,,Online Banking transfer from SAV 9021,contains,credit_only,,Transfers > Transfers in,40,0.97,true
-household,,,Online Banking transfer from SAV 9021,contains,debit_only,,Transfers > Transfers out,40,0.90,true
+household,,,Online Banking transfer,contains,credit_only,,Transfers > Transfers in,40,0.97,true
+household,,,Online Banking transfer,contains,debit_only,,Transfers > Transfers out,40,0.90,true
 household,,,Online transfer to CHK 6335,contains,debit_only,,Transfers > Transfers out,40,0.98,true
 household,,,Mobile transfer to CHK 6335,contains,debit_only,,Transfers > Transfers out,40,0.98,true
 household,,,BKOFAMERICA MOBILE,contains,credit_only,,Transfers > Transfers in,50,0.92,true
