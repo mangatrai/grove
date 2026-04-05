@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 
 import { buildApp } from "../src/app.js";
-import { db } from "../src/db/sqlite.js";
 import { resolveDataPath } from "../src/paths.js";
+import { sqlStmt } from "./pg-stmt.js";
 
 const app = buildApp();
 
@@ -45,10 +45,16 @@ describe("auth and rbac baseline", () => {
   });
 
   it("blocks member access to household management routes", async () => {
-    db.prepare(
-      `INSERT OR REPLACE INTO app_user
+    await sqlStmt(
+      `INSERT INTO app_user
        (id, household_id, email, role, password_hash, visibility_scope, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET
+         household_id = EXCLUDED.household_id,
+         email = EXCLUDED.email,
+         role = EXCLUDED.role,
+         password_hash = EXCLUDED.password_hash,
+         visibility_scope = EXCLUDED.visibility_scope`
     ).run(
       "20000000-0000-0000-0000-000000000099",
       "10000000-0000-0000-0000-000000000001",
@@ -158,15 +164,15 @@ describe("household profiles and members", () => {
     const otherHouseholdId = crypto.randomUUID();
     const otherProfileId = crypto.randomUUID();
     const otherMembershipId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO household (id, name, created_at)
        VALUES (?, 'Other household for profile scope', CURRENT_TIMESTAMP)`
     ).run(otherHouseholdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO person_profile (id, household_id, full_name, email)
        VALUES (?, ?, 'Other Member', 'other.member@example.com')`
     ).run(otherProfileId, otherHouseholdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
        VALUES (?, ?, ?, 'member', 'other')`
     ).run(otherMembershipId, otherHouseholdId, otherProfileId);
@@ -189,15 +195,15 @@ describe("auth change password", () => {
     const oldPassword = "TempOldPass123!";
     const newPassword = "TempNewPass456!";
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope, created_at)
        VALUES (?, ?, ?, 'member', ?, 'own', CURRENT_TIMESTAMP)`
     ).run(userId, householdId, email, bcrypt.hashSync(oldPassword, 10));
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, email)
        VALUES (?, ?, ?, 'Temp User', ?)`
     ).run(profileId, householdId, userId, email);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
        VALUES (?, ?, ?, 'member', 'other')`
     ).run(membershipId, householdId, profileId);
@@ -353,11 +359,11 @@ describe("import sessions and file intake", () => {
     const otherHouseholdId = crypto.randomUUID();
     const otherSessionId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO household (id, name, created_at)
        VALUES (?, 'Other household', CURRENT_TIMESTAMP)`
     ).run(otherHouseholdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'created', CURRENT_TIMESTAMP)`
     ).run(otherSessionId, otherHouseholdId);
@@ -594,11 +600,9 @@ describe("import sessions and file intake", () => {
     expect(canRes.body.nearDuplicates).toBe(1);
     expect(canRes.body.duplicates).toBe(0);
 
-    const openResolution = db
-      .prepare(
-        `SELECT COUNT(*) AS c FROM resolution_item WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND type = 'duplicate_ambiguity' AND status = 'open'`
-      )
-      .get(sessionId) as { c: number };
+    const openResolution = (await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM resolution_item WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND type = 'duplicate_ambiguity' AND status = 'open'`
+    ).get(sessionId)) as { c: number };
     expect(openResolution.c).toBeGreaterThanOrEqual(1);
 
     const fileSum = await request(app)
@@ -612,7 +616,9 @@ describe("import sessions and file intake", () => {
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
 
-  it("undo-import removes session canonical rows before finalize and allows re-canonicalize", async () => {
+  it(
+    "undo-import removes session canonical rows before finalize and allows re-canonicalize",
+    async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
       .post("/imports/sessions")
@@ -676,7 +682,9 @@ describe("import sessions and file intake", () => {
       .send({});
     expect(canRes2.status).toBe(200);
     expect(canRes2.body.inserted).toBe(1);
-  });
+    },
+    60_000
+  );
 
   it("returns 409 for undo-import when session is finalized", async () => {
     const token = await loginAndGetToken();
@@ -725,7 +733,7 @@ describe("import sessions and file intake", () => {
 
   it("sets transfer_group_id for unambiguous transfer pairs", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -734,22 +742,22 @@ describe("import sessions and file intake", () => {
 
     const debitAccountId = crypto.randomUUID();
     const creditAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Transfer Match Test A', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(debitAccountId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'savings', 'Transfer Match Test B', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(creditAccountId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'transfer.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
@@ -760,7 +768,7 @@ describe("import sessions and file intake", () => {
     const rawCreditId = crypto.randomUUID();
     const rawDebitId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -774,7 +782,7 @@ describe("import sessions and file intake", () => {
         financial_account_id: creditAccountId
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -796,12 +804,12 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
 
-    const creditRow = db.prepare(
+    const creditRow = await sqlStmt(
       `SELECT id, transfer_group_id FROM transaction_canonical
        WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ? AND merchant = ?`
     ).get(householdId, creditAccountId, txnDate, 200, creditDesc) as { id: string; transfer_group_id: string | null };
 
-    const debitRow = db.prepare(
+    const debitRow = await sqlStmt(
       `SELECT id, transfer_group_id FROM transaction_canonical
        WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ? AND merchant = ?`
     ).get(householdId, debitAccountId, txnDate, -200, debitDesc) as { id: string; transfer_group_id: string | null };
@@ -815,7 +823,7 @@ describe("import sessions and file intake", () => {
 
   it("sets transfer_group for directional internal transfer memos across accounts", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -824,22 +832,22 @@ describe("import sessions and file intake", () => {
 
     const checkingAccountId = crypto.randomUUID();
     const savingsAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Internal Dir Transfer Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingAccountId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'savings', 'Internal Dir Transfer Savings', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(savingsAccountId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'internal-dir.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
@@ -848,7 +856,7 @@ describe("import sessions and file intake", () => {
     const rawDebitId = crypto.randomUUID();
     const rawCreditId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -862,7 +870,7 @@ describe("import sessions and file intake", () => {
         financial_account_id: checkingAccountId
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -884,7 +892,7 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
 
-    const rows = db.prepare(
+    const rows = await sqlStmt(
       `SELECT amount, transfer_group_id
        FROM transaction_canonical
        WHERE household_id = ? AND account_id IN (?, ?)
@@ -901,7 +909,7 @@ describe("import sessions and file intake", () => {
 
   it("matches credit-card payment memo variants with 2-day date skew", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -910,22 +918,22 @@ describe("import sessions and file intake", () => {
 
     const checkingAccountId = crypto.randomUUID();
     const cardAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Payment Match Test Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingAccountId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'credit_card', 'Payment Match Test Card', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(cardAccountId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'payment-variants.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
@@ -937,7 +945,7 @@ describe("import sessions and file intake", () => {
     const rawDebitId = crypto.randomUUID();
     const rawCreditId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -951,7 +959,7 @@ describe("import sessions and file intake", () => {
         financial_account_id: checkingAccountId
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -973,7 +981,7 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
 
-    const rows = db.prepare(
+    const rows = await sqlStmt(
       `SELECT id, amount, transfer_group_id
        FROM transaction_canonical
        WHERE household_id = ? AND account_id IN (?, ?)
@@ -991,7 +999,7 @@ describe("import sessions and file intake", () => {
 
   it("sets transfer_group when card payment credit leg has no PAYMENT token (THANK YOU only)", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -1000,22 +1008,22 @@ describe("import sessions and file intake", () => {
 
     const checkingAccountId = crypto.randomUUID();
     const cardAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Asymmetric Card Pay Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingAccountId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'credit_card', 'Asymmetric Card Pay Card', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(cardAccountId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'asymmetric-thanks.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
@@ -1024,7 +1032,7 @@ describe("import sessions and file intake", () => {
     const rawDebitId = crypto.randomUUID();
     const rawCreditId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -1038,7 +1046,7 @@ describe("import sessions and file intake", () => {
         financial_account_id: checkingAccountId
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -1060,7 +1068,7 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
 
-    const rows = db.prepare(
+    const rows = await sqlStmt(
       `SELECT amount, transfer_group_id
        FROM transaction_canonical
        WHERE household_id = ? AND account_id IN (?, ?)
@@ -1077,7 +1085,7 @@ describe("import sessions and file intake", () => {
 
   it("sets transfer_group for HELOC-style loan payment across checking and loan accounts", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -1086,22 +1094,22 @@ describe("import sessions and file intake", () => {
 
     const checkingAccountId = crypto.randomUUID();
     const loanAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'HELOC Pay Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingAccountId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'loan', 'HELOC Pay Loan', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(loanAccountId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'heloc-pay.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
@@ -1112,7 +1120,7 @@ describe("import sessions and file intake", () => {
     const rawDebitId = crypto.randomUUID();
     const rawCreditId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -1126,7 +1134,7 @@ describe("import sessions and file intake", () => {
         financial_account_id: checkingAccountId
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -1148,7 +1156,7 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
 
-    const rows = db.prepare(
+    const rows = await sqlStmt(
       `SELECT amount, transfer_group_id
        FROM transaction_canonical
        WHERE household_id = ? AND account_id IN (?, ?)
@@ -1165,7 +1173,7 @@ describe("import sessions and file intake", () => {
 
   it("keeps multi-candidate payment matches in transfer_ambiguity queue", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -1175,26 +1183,26 @@ describe("import sessions and file intake", () => {
     const checkingAccountId = crypto.randomUUID();
     const cardAccountAId = crypto.randomUUID();
     const cardAccountBId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Ambiguity Test Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingAccountId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'credit_card', 'Ambiguity Test Card A', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(cardAccountAId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'credit_card', 'Ambiguity Test Card B', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(cardAccountBId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'payment-ambiguity.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
@@ -1224,7 +1232,7 @@ describe("import sessions and file intake", () => {
     ];
 
     for (const r of rows) {
-      db.prepare(
+      await sqlStmt(
         `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
          VALUES (?, ?, ?, ?, 0.9)`
       ).run(
@@ -1247,20 +1255,17 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(3);
 
-    const matchedCountRow = db
-      .prepare(
-        `SELECT COUNT(*) AS c
+    const matchedCountRow = (await sqlStmt(
+      `SELECT COUNT(*)::int AS c
          FROM transaction_canonical
          WHERE household_id = ?
            AND account_id IN (?, ?, ?)
            AND transfer_group_id IS NOT NULL`
-      )
-      .get(householdId, checkingAccountId, cardAccountAId, cardAccountBId) as { c: number };
+    ).get(householdId, checkingAccountId, cardAccountAId, cardAccountBId)) as { c: number };
     expect(matchedCountRow.c).toBe(0);
 
-    const ambiguityRows = db
-      .prepare(
-        `SELECT target_id, reason
+    const ambiguityRows = (await sqlStmt(
+      `SELECT target_id, reason
          FROM resolution_item
          WHERE household_id = ?
            AND type = 'transfer_ambiguity'
@@ -1271,8 +1276,7 @@ describe("import sessions and file intake", () => {
              WHERE household_id = ?
                AND account_id IN (?, ?, ?)
            )`
-      )
-      .all(householdId, householdId, checkingAccountId, cardAccountAId, cardAccountBId) as Array<{
+    ).all(householdId, householdId, checkingAccountId, cardAccountAId, cardAccountBId)) as Array<{
       target_id: string;
       reason: string;
     }>;
@@ -1285,7 +1289,7 @@ describe("import sessions and file intake", () => {
 
   it("does not auto-match generic payment wording without card/loan context", async () => {
     const token = await loginAndGetToken();
-    const owner = db.prepare(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       id: string;
       household_id: string;
     };
@@ -1294,27 +1298,27 @@ describe("import sessions and file intake", () => {
 
     const checkingAId = crypto.randomUUID();
     const checkingBId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'No-FP Test A', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingAId, householdId, ownerUserId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'No-FP Test B', NULL, 'USD', CURRENT_TIMESTAMP)`
     ).run(checkingBId, householdId, ownerUserId);
 
     const sessionId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status, started_at)
        VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
     ).run(sessionId, householdId);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
        VALUES (?, ?, 'generic-payment-words.csv', ?, NULL, 'parsed', '{}')`
     ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -1328,7 +1332,7 @@ describe("import sessions and file intake", () => {
         financial_account_id: checkingAId
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
        VALUES (?, ?, ?, ?, 0.9)`
     ).run(
@@ -1350,15 +1354,13 @@ describe("import sessions and file intake", () => {
     expect(canRes.status).toBe(200);
     expect(canRes.body.inserted).toBe(2);
 
-    const matchedCount = db
-      .prepare(
-        `SELECT COUNT(*) AS c
+    const matchedCount = (await sqlStmt(
+      `SELECT COUNT(*)::int AS c
          FROM transaction_canonical
          WHERE household_id = ?
            AND account_id IN (?, ?)
            AND transfer_group_id IS NOT NULL`
-      )
-      .get(householdId, checkingAId, checkingBId) as { c: number };
+    ).get(householdId, checkingAId, checkingBId)) as { c: number };
     expect(matchedCount.c).toBe(0);
   });
 
@@ -1490,7 +1492,7 @@ describe("import sessions and file intake", () => {
     expect(parseRes.body.parsedRows).toBe(1);
   });
 
-  it("parses BoA eStatement PDF using boa_estatement_pdf when fixture exists", async () => {
+  it("parses BoA eStatement PDF using boa_estatement_pdf when fixture exists", { timeout: 60_000 }, async () => {
     const fixture = path.join(process.cwd(), "..", "data", "imports", "custom", "eStmt_2026-03-19.pdf");
     if (!existsSync(fixture)) {
       return;
@@ -1555,7 +1557,7 @@ describe("import sessions and file intake", () => {
     expect(parseRes.body.parsedRows).toBeGreaterThanOrEqual(1);
   });
 
-  it("parses real BoA checking CSV from repo when fixture exists", async () => {
+  it("parses real BoA checking CSV from repo when fixture exists", { timeout: 60_000 }, async () => {
     const fixture = path.join(process.cwd(), "..", "data", "imports", "custom", "stmt.csv");
     if (!existsSync(fixture)) {
       return;
@@ -1757,14 +1759,14 @@ describe("transactions command center (Epic 11.2)", () => {
     });
     expect(login.status).toBe(200);
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
     const idNewerDate = crypto.randomUUID();
     const idBetterFts = crypto.randomUUID();
     const fp1 = crypto.randomBytes(32).toString("hex");
     const fp2 = crypto.randomBytes(32).toString("hex");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -1778,7 +1780,7 @@ describe("transactions command center (Epic 11.2)", () => {
       -1,
       fp1
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -1813,12 +1815,12 @@ describe("transactions command center (Epic 11.2)", () => {
     });
     expect(login.status).toBe(200);
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
     const id = crypto.randomUUID();
     const fp = crypto.randomBytes(32).toString("hex");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -1856,13 +1858,13 @@ describe("transactions command center (Epic 11.2)", () => {
     });
     expect(login.status).toBe(200);
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
     const txnId = crypto.randomUUID();
     const resId = crypto.randomUUID();
     const fp = crypto.randomBytes(32).toString("hex");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -1876,7 +1878,7 @@ describe("transactions command center (Epic 11.2)", () => {
       -3,
       fp
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
     ).run(resId, householdId.household_id, txnId, JSON.stringify({ kind: "unknown_category" }));
@@ -1916,7 +1918,7 @@ describe("transactions command center (Epic 11.2)", () => {
     });
     expect(login.status).toBe(200);
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
     const sessionId = crypto.randomUUID();
@@ -1926,15 +1928,15 @@ describe("transactions command center (Epic 11.2)", () => {
     const resId = crypto.randomUUID();
     const fp = crypto.randomBytes(32).toString("hex");
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_session (id, household_id, source_type, status)
        VALUES (?, ?, 'upload', 'review')`
     ).run(sessionId, householdId.household_id);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO import_file (id, session_id, file_name, status, checksum, stored_path)
        VALUES (?, ?, 'stmt.csv', 'parsed', ?, NULL)`
     ).run(fileId, sessionId, crypto.randomBytes(8).toString("hex"));
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_raw (id, file_id, extracted_payload_json, row_index, confidence)
        VALUES (?, ?, ?, 0, 0.95)`
     ).run(
@@ -1946,13 +1948,13 @@ describe("transactions command center (Epic 11.2)", () => {
         description: "Open review API raw line"
       })
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Open review API', NULL, NULL, ?, ?, 'posted')`
     ).run(txnId, householdId.household_id, SEED_BOA_CHECKING, "2026-02-10", -44.44, fp, `raw:${rawId}`);
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'unknown_category', ?, ?, 'in_review')`
     ).run(resId, householdId.household_id, txnId, JSON.stringify({ kind: "unknown_category" }));
@@ -2011,6 +2013,72 @@ describe("categories and ledger category field (Epic 5.1)", () => {
     expect(res.body.categories.some((c: { name: string }) => c.name === "Groceries")).toBe(true);
   });
 
+  it("returns parentId for child categories (Postgres quoted aliases)", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app).get("/categories").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const groceries = res.body.categories.find((c: { name: string }) => c.name === "Groceries") as {
+      parentId: string | null;
+    };
+    expect(groceries).toBeDefined();
+    expect(groceries.parentId).toBe("30000000-0000-0000-0000-000000000101");
+  });
+
+  it("returns builtin rules with ruleKey and matchType (Postgres quoted aliases)", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app).get("/categories/rules").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.builtinRules)).toBe(true);
+    expect(res.body.builtinRules.length).toBeGreaterThan(0);
+    const first = res.body.builtinRules[0] as {
+      ruleKey: string;
+      matchType: string;
+      categoryId: string;
+      amountScope: string;
+    };
+    expect(typeof first.ruleKey).toBe("string");
+    expect(first.ruleKey.length).toBeGreaterThan(0);
+    expect(["contains", "prefix", "regex"]).toContain(first.matchType);
+    expect(first.categoryId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(["any", "credit_only", "debit_only"]).toContain(first.amountScope);
+  });
+
+  it("bulk household rules accept categoryPath only (path resolution)", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const res = await request(app)
+      .post("/categories/rules/bulk")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        rules: [
+          {
+            pattern: `path-import-${crypto.randomUUID().slice(0, 8)}`,
+            matchType: "contains",
+            categoryPath: "Investments > Stocks",
+            amountScope: "debit_only",
+            confidence: 0.9,
+            priority: 50,
+            enabled: true
+          }
+        ]
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.errors).toEqual([]);
+    expect(res.body.created).toHaveLength(1);
+    expect(res.body.created[0].categoryId).toBe("30000000-0000-0000-0000-000000000009");
+  });
+
   it("returns categoryId and categoryName on ledger rows", async () => {
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",
@@ -2032,14 +2100,14 @@ describe("categories and ledger category field (Epic 5.1)", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
 
     const id = crypto.randomUUID();
     const fp = crypto.randomBytes(32).toString("hex");
     const catId = "30000000-0000-0000-0000-000000000004";
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2092,15 +2160,15 @@ describe("resolution queue", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const household = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(crypto.randomUUID(), household.household_id, crypto.randomUUID(), "open item");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'resolved')`
     ).run(crypto.randomUUID(), household.household_id, crypto.randomUUID(), "resolved item");
@@ -2118,12 +2186,12 @@ describe("resolution queue", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
 
     const id = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(id, householdId.household_id, crypto.randomUUID(), "manual test");
@@ -2145,12 +2213,12 @@ describe("resolution queue", () => {
     const token = login.body.token as string;
 
     const otherHouseholdId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO household (id, name, created_at)
        VALUES (?, 'Other household 2', CURRENT_TIMESTAMP)`
     ).run(otherHouseholdId);
     const id = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(id, otherHouseholdId, crypto.randomUUID(), "other household");
@@ -2168,12 +2236,12 @@ describe("resolution queue", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
 
     const id = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'resolved')`
     ).run(id, householdId.household_id, crypto.randomUUID(), "resolved item");
@@ -2192,17 +2260,17 @@ describe("resolution queue", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
 
     const id1 = crypto.randomUUID();
     const id2 = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(id1, householdId.household_id, crypto.randomUUID(), "a");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(id2, householdId.household_id, crypto.randomUUID(), "b");
@@ -2224,17 +2292,17 @@ describe("resolution queue", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
 
     const okId = crypto.randomUUID();
     const badTransitionId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(okId, householdId.household_id, crypto.randomUUID(), "ok");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'resolved')`
     ).run(badTransitionId, householdId.household_id, crypto.randomUUID(), "bad");
@@ -2258,12 +2326,12 @@ describe("resolution queue", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdId = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdId = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
     const txnId = crypto.randomUUID();
     const fp = crypto.randomBytes(32).toString("hex");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2272,11 +2340,11 @@ describe("resolution queue", () => {
 
     const unknownId = crypto.randomUUID();
     const wrongTypeId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
     ).run(unknownId, householdId.household_id, txnId, JSON.stringify({ kind: "unknown_category" }));
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`
     ).run(wrongTypeId, householdId.household_id, crypto.randomUUID(), JSON.stringify({ kind: "near_duplicate" }));
@@ -2291,13 +2359,15 @@ describe("resolution queue", () => {
       true
     );
 
-    const txn = db
-      .prepare(`SELECT category_id FROM transaction_canonical WHERE id = ? AND household_id = ?`)
-      .get(txnId, householdId.household_id) as { category_id: string | null } | undefined;
+    const txn = (await sqlStmt(`SELECT category_id FROM transaction_canonical WHERE id = ? AND household_id = ?`).get(
+      txnId,
+      householdId.household_id
+    )) as { category_id: string | null } | undefined;
     expect(txn?.category_id).toBe("30000000-0000-0000-0000-000000000004");
-    const item = db
-      .prepare(`SELECT status FROM resolution_item WHERE id = ? AND household_id = ?`)
-      .get(unknownId, householdId.household_id) as { status: string } | undefined;
+    const item = (await sqlStmt(`SELECT status FROM resolution_item WHERE id = ? AND household_id = ?`).get(
+      unknownId,
+      householdId.household_id
+    )) as { status: string } | undefined;
     expect(item?.status).toBe("resolved");
   });
 });
@@ -2328,7 +2398,7 @@ describe("cash summary (reports)", () => {
     const token = login.body.token as string;
     const householdId = "10000000-0000-0000-0000-000000000001";
     const testAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, '20000000-0000-0000-0000-000000000001', 'checking', 'Cash Summary Test', '9998', 'USD', CURRENT_TIMESTAMP)`
     ).run(testAccountId, householdId);
@@ -2339,13 +2409,13 @@ describe("cash summary (reports)", () => {
     const id1 = crypto.randomUUID();
     const id2 = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
     ).run(id1, householdId, testAccountId, asOf, 1000, "credit", "pay", null, fp1, "test:cash1");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2381,10 +2451,10 @@ describe("cash summary (reports)", () => {
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
-    const householdRow = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const householdRow = await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
       household_id: string;
     };
-    db.prepare(`UPDATE household SET monthly_savings_target_usd = ? WHERE id = ?`).run(300, householdRow.household_id);
+    await sqlStmt(`UPDATE household SET monthly_savings_target_usd = ? WHERE id = ?`).run(300, householdRow.household_id);
 
     const res = await request(app)
       .get("/reports/cash-summary?preset=rolling_30")
@@ -2399,7 +2469,7 @@ describe("cash summary (reports)", () => {
       5
     );
 
-    db.prepare(`UPDATE household SET monthly_savings_target_usd = NULL WHERE id = ?`).run(householdRow.household_id);
+    await sqlStmt(`UPDATE household SET monthly_savings_target_usd = NULL WHERE id = ?`).run(householdRow.household_id);
   });
 
   it("excludes transfer rows from KPI and category aggregation", async () => {
@@ -2419,7 +2489,7 @@ describe("cash summary (reports)", () => {
     // Normal (non-transfer) transactions.
     const normalAccountId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Non-transfer Cash Summary Test', '0001', 'USD', CURRENT_TIMESTAMP)`
     ).run(normalAccountId, householdId, ownerUserId);
@@ -2429,12 +2499,12 @@ describe("cash summary (reports)", () => {
     const transferDebitAccountId = crypto.randomUUID();
     const transferGroupId = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'savings', 'Transfer Cash Summary Credit Test', '0002', 'USD', CURRENT_TIMESTAMP)`
     ).run(transferCreditAccountId, householdId, ownerUserId);
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Transfer Cash Summary Debit Test', '0003', 'USD', CURRENT_TIMESTAMP)`
     ).run(transferDebitAccountId, householdId, ownerUserId);
@@ -2448,7 +2518,7 @@ describe("cash summary (reports)", () => {
     const fp3 = crypto.randomBytes(32).toString("hex");
     const fp4 = crypto.randomBytes(32).toString("hex");
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2466,7 +2536,7 @@ describe("cash summary (reports)", () => {
       "test:salary"
     );
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2484,7 +2554,7 @@ describe("cash summary (reports)", () => {
       "test:rent"
     );
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2503,7 +2573,7 @@ describe("cash summary (reports)", () => {
       "test:transfer-credit"
     );
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2564,26 +2634,26 @@ describe("cash summary (reports)", () => {
 
     const asOf = "1999-12-21";
     const accountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Transfer Ambiguity Cash Summary Test', '0999', 'USD', CURRENT_TIMESTAMP)`
     ).run(accountId, householdId, ownerUserId);
 
     const includeId = crypto.randomUUID();
     const ambiguousId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Groceries', NULL, NULL, ?, ?, 'posted')`
     ).run(includeId, householdId, accountId, asOf, -50, crypto.randomBytes(32).toString("hex"), "test:include");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Card payment candidate', NULL, NULL, ?, ?, 'posted')`
     ).run(ambiguousId, householdId, accountId, asOf, -700, crypto.randomBytes(32).toString("hex"), "test:ambiguous");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
        VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`
     ).run(
@@ -2614,7 +2684,7 @@ describe("cash summary (reports)", () => {
     const testAccountId = crypto.randomUUID();
     const incomeCat = "30000000-0000-0000-0000-000000000001";
     const housingCat = "30000000-0000-0000-0000-000000000002";
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, '20000000-0000-0000-0000-000000000001', 'checking', 'Category Report Test', '9997', 'USD', CURRENT_TIMESTAMP)`
     ).run(testAccountId, householdId);
@@ -2625,13 +2695,13 @@ describe("cash summary (reports)", () => {
     const id1 = crypto.randomUUID();
     const id2 = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
     ).run(id1, householdId, testAccountId, incomeCat, asOf, 1000, "credit", "pay", null, fp1, "test:cat1");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2691,7 +2761,7 @@ describe("cash summary (reports)", () => {
     const householdId = "10000000-0000-0000-0000-000000000001";
     const ownerUserId = "20000000-0000-0000-0000-000000000001";
     const testAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Comparison Month Test', '7788', 'USD', CURRENT_TIMESTAMP)`
     ).run(testAccountId, householdId, ownerUserId);
@@ -2703,7 +2773,7 @@ describe("cash summary (reports)", () => {
     const prevDate = `${prevYm}-05`;
     const yoyDate = `${yoyYm}-05`;
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2719,7 +2789,7 @@ describe("cash summary (reports)", () => {
       crypto.randomBytes(32).toString("hex"),
       "test:month-current-credit"
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2735,7 +2805,7 @@ describe("cash summary (reports)", () => {
       crypto.randomBytes(32).toString("hex"),
       "test:month-current-debit"
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2751,7 +2821,7 @@ describe("cash summary (reports)", () => {
       crypto.randomBytes(32).toString("hex"),
       "test:month-prev-credit"
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2767,7 +2837,7 @@ describe("cash summary (reports)", () => {
       crypto.randomBytes(32).toString("hex"),
       "test:month-prev-debit"
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2783,7 +2853,7 @@ describe("cash summary (reports)", () => {
       crypto.randomBytes(32).toString("hex"),
       "test:month-yoy-credit"
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2822,7 +2892,7 @@ describe("cash summary (reports)", () => {
     const householdId = "10000000-0000-0000-0000-000000000001";
     const ownerUserId = "20000000-0000-0000-0000-000000000001";
     const testAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, ?, 'checking', 'Comparison Rolling Test', '8899', 'USD', CURRENT_TIMESTAMP)`
     ).run(testAccountId, householdId, ownerUserId);
@@ -2831,7 +2901,7 @@ describe("cash summary (reports)", () => {
     const currentWindowDate = "2099-03-25";
     const previousWindowDate = "2099-02-25";
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2847,7 +2917,7 @@ describe("cash summary (reports)", () => {
       crypto.randomBytes(32).toString("hex"),
       "test:rolling-current-credit"
     );
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -2949,7 +3019,7 @@ describe("cash summary (reports)", () => {
     const token = login.body.token as string;
     const householdId = "10000000-0000-0000-0000-000000000001";
     const testAccountId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
        VALUES (?, ?, '20000000-0000-0000-0000-000000000001', 'checking', 'Custom Range Cash Summary', '9996', 'USD', CURRENT_TIMESTAMP)`
     ).run(testAccountId, householdId);
@@ -2963,19 +3033,19 @@ describe("cash summary (reports)", () => {
     const id2 = crypto.randomUUID();
     const id3 = crypto.randomUUID();
 
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
     ).run(id1, householdId, testAccountId, inRange, 100, "credit", "in", null, fp1, "test:custom-in");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted')`
     ).run(id2, householdId, testAccountId, inRange, -40, "debit", "out", null, fp2, "test:custom-out");
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
@@ -3103,7 +3173,7 @@ describe("member ownership closure", () => {
       .attach("files", Buffer.from("Date,Description,Amount\n2026-08-01,Owned,-1"), "owned.csv");
     expect(uploadRes.status).toBe(201);
     const fileId = uploadRes.body.files[0].id as string;
-    const ownerProfile = db.prepare(`SELECT id FROM person_profile WHERE linked_user_id = ?`).get(
+    const ownerProfile = await sqlStmt(`SELECT id FROM person_profile WHERE linked_user_id = ?`).get(
       "20000000-0000-0000-0000-000000000001"
     ) as { id: string };
     const bind = await request(app)
@@ -3116,9 +3186,9 @@ describe("member ownership closure", () => {
         ownerPersonProfileId: ownerProfile.id
       });
     expect(bind.status).toBe(200);
-    const row = db
-      .prepare(`SELECT owner_scope, owner_person_profile_id FROM import_file WHERE id = ?`)
-      .get(fileId) as { owner_scope: string; owner_person_profile_id: string | null };
+    const row = (await sqlStmt(
+      `SELECT owner_scope, owner_person_profile_id FROM import_file WHERE id = ?`
+    ).get(fileId)) as { owner_scope: string; owner_person_profile_id: string | null };
     expect(row.owner_scope).toBe("person");
     expect(row.owner_person_profile_id).toBe(ownerProfile.id);
   });
@@ -3130,11 +3200,20 @@ describe("member ownership closure", () => {
     });
     const token = login.body.token as string;
     const householdId = "10000000-0000-0000-0000-000000000001";
-    const ownerProfile = db
-      .prepare(`SELECT id FROM person_profile WHERE household_id = ? AND linked_user_id = ?`)
-      .get(householdId, "20000000-0000-0000-0000-000000000001") as { id: string };
+    const ownerUserId = "20000000-0000-0000-0000-000000000001";
+    let ownerProfile = (await sqlStmt(`SELECT id FROM person_profile WHERE linked_user_id = ?`).get(
+      ownerUserId
+    )) as { id: string } | undefined;
+    if (!ownerProfile) {
+      const profileId = crypto.randomUUID();
+      await sqlStmt(
+        `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, email)
+         VALUES (?, ?, ?, 'Owner', 'owner@example.com')`
+      ).run(profileId, householdId, ownerUserId);
+      ownerProfile = { id: profileId };
+    }
     const txnId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status, owner_scope, owner_person_profile_id

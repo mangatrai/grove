@@ -4,7 +4,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
-import { db } from "../src/db/sqlite.js";
+import { sqlStmt } from "./pg-stmt.js";
 
 const app = buildApp();
 const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
@@ -130,12 +130,12 @@ describe("category rules API and classification explainability", () => {
 
   it("uses DB rule precedence before defaults during canonicalize", async () => {
     const token = await loginAndGetToken();
-    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const household = (await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com")) as {
       household_id: string;
     };
     const ruleId = crypto.randomUUID();
     const patternToken = `dbpri${Date.now()}`;
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO category_rule
          (id, household_id, pattern, match_type, category_id, confidence, priority, enabled, created_at, updated_at)
        VALUES (?, ?, ?, 'contains', ?, 0.99, 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
@@ -156,16 +156,14 @@ describe("category rules API and classification explainability", () => {
       .send({});
     expect(canRes.status).toBe(200);
 
-    const row = db
-      .prepare(
-        `SELECT tc.category_id AS categoryId, tc.classification_meta AS classificationMeta
+    const row = (await sqlStmt(
+      `SELECT tc.category_id AS "categoryId", tc.classification_meta AS "classificationMeta"
          FROM transaction_canonical tc
          INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
          INNER JOIN import_file f ON tr.file_id = f.id
          WHERE f.session_id = ?
          LIMIT 1`
-      )
-      .get(sessionId) as { categoryId: string | null; classificationMeta: string | null } | undefined;
+    ).get(sessionId)) as { categoryId: string | null; classificationMeta: string | null } | undefined;
     expect(row?.categoryId).toBe(UTILITIES_ENERGY_ID);
     expect(row?.classificationMeta).toBeTruthy();
     const meta = JSON.parse(row!.classificationMeta!) as { source?: string; ruleId?: string; confidence?: number };
@@ -227,11 +225,11 @@ describe("category rules API and classification explainability", () => {
 
   it("rejects household-scoped category for built-in rule (BUILTIN_REQUIRES_GLOBAL_LEAF)", async () => {
     const token = await loginAndGetToken();
-    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const household = (await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com")) as {
       household_id: string;
     };
     const customLeafId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO category (id, household_id, parent_id, name, is_default)
        VALUES (?, ?, '30000000-0000-0000-0000-000000000107', 'API test household leaf', 0)`
     ).run(customLeafId, household.household_id);
@@ -247,7 +245,7 @@ describe("category rules API and classification explainability", () => {
       expect(createRes.body.code).toBe("BUILTIN_REQUIRES_GLOBAL_LEAF");
       expect(String(createRes.body.message)).toContain("household");
     } finally {
-      db.prepare(`DELETE FROM category WHERE id = ?`).run(customLeafId);
+      await sqlStmt(`DELETE FROM category WHERE id = ?`).run(customLeafId);
     }
   });
 
@@ -288,11 +286,11 @@ describe("category rules API and classification explainability", () => {
 
   it("POST /categories/rules/builtin/bulk rejects household-only leaf with BUILTIN_REQUIRES_GLOBAL_LEAF", async () => {
     const token = await loginAndGetToken();
-    const household = db.prepare(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+    const household = (await sqlStmt(`SELECT household_id FROM app_user WHERE email = ?`).get("owner@example.com")) as {
       household_id: string;
     };
     const customLeafId = crypto.randomUUID();
-    db.prepare(
+    await sqlStmt(
       `INSERT INTO category (id, household_id, parent_id, name, is_default)
        VALUES (?, ?, '30000000-0000-0000-0000-000000000107', 'Bulk builtin hh leaf', 0)`
     ).run(customLeafId, household.household_id);
@@ -318,15 +316,21 @@ describe("category rules API and classification explainability", () => {
       expect(res.body.errors.length).toBe(1);
       expect(res.body.errors[0].code).toBe("BUILTIN_REQUIRES_GLOBAL_LEAF");
     } finally {
-      db.prepare(`DELETE FROM category WHERE id = ?`).run(customLeafId);
+      await sqlStmt(`DELETE FROM category WHERE id = ?`).run(customLeafId);
     }
   });
 
   it("blocks member from creating global built-in rules", async () => {
-    db.prepare(
-      `INSERT OR REPLACE INTO app_user
+    await sqlStmt(
+      `INSERT INTO app_user
        (id, household_id, email, role, password_hash, visibility_scope, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET
+         household_id = EXCLUDED.household_id,
+         email = EXCLUDED.email,
+         role = EXCLUDED.role,
+         password_hash = EXCLUDED.password_hash,
+         visibility_scope = EXCLUDED.visibility_scope`
     ).run(
       "20000000-0000-0000-0000-000000000099",
       "10000000-0000-0000-0000-000000000001",

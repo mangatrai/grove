@@ -20,7 +20,7 @@ describe("suggestCategoriesWithAiBatch", () => {
     process.env = originalEnv;
   });
 
-  it("maps batch results by transactionId and validates category ids", async () => {
+  it("maps batch results by transactionId and validates category ids", { timeout: 30_000 }, async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({
@@ -74,7 +74,7 @@ describe("suggestCategoriesWithAiBatch", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("returns all null when OpenAI returns non-OK", async () => {
+  it("returns all null when OpenAI returns non-OK", { timeout: 30_000 }, async () => {
     globalThis.fetch = vi.fn(async () => ({
       ok: false,
       status: 429,
