@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
@@ -218,6 +218,8 @@ export function SettingsPage() {
   const [accountOwners, setAccountOwners] = useState<Array<{ id: string; label: string }>>([]);
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [exportZipBusy, setExportZipBusy] = useState(false);
+  const [exportZipMessage, setExportZipMessage] = useState<string | null>(null);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
@@ -330,6 +332,58 @@ export function SettingsPage() {
       setLoadingHousehold(false);
     }
   }, []);
+
+  const runHouseholdZipExport = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    setExportZipBusy(true);
+    setExportZipMessage(null);
+    try {
+      const { jobId } = await apiJson<{ jobId: string }>("/exports/household", { method: "POST" });
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        const st = await apiJson<{ status: string; error: string | null }>(`/exports/${jobId}`);
+        if (st.status === "failed") {
+          throw new Error(st.error ?? "Export failed");
+        }
+        if (st.status === "complete") {
+          const res = await apiFetch(`/exports/${jobId}/download`);
+          if (!res.ok) {
+            const t = await res.text();
+            let detail = t || `Download failed (${res.status})`;
+            try {
+              const j = JSON.parse(t) as { message?: string };
+              if (typeof j.message === "string" && j.message.trim()) {
+                detail = `${res.status}: ${j.message}`;
+              }
+            } catch {
+              /* plain text body */
+            }
+            throw new Error(detail);
+          }
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `household-export-${jobId}.zip`;
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          setExportZipMessage("Download started.");
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      throw new Error("Export timed out; wait a moment and try again.");
+    } catch (e: unknown) {
+      setExportZipMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExportZipBusy(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     if (!token) {
@@ -1007,6 +1061,20 @@ export function SettingsPage() {
                     </button>
                   </div>
                 </div>
+
+                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>
+                  Data export
+                </h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Download a ZIP archive (JSON inside: manifest + full bundle). Restoring on another host is not implemented
+                  yet; keep the file as a backup.
+                </p>
+                {exportZipMessage ? (
+                  <p className={exportZipMessage === "Download started." ? "success" : "error"}>{exportZipMessage}</p>
+                ) : null}
+                <button type="button" className="secondary" disabled={exportZipBusy} onClick={() => void runHouseholdZipExport()}>
+                  {exportZipBusy ? "Preparing export…" : "Download household ZIP"}
+                </button>
 
               </>
             ) : null}
