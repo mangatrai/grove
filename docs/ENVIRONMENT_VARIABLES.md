@@ -2,16 +2,26 @@
 
 Single-page index for operators. The backend loads the **repository root** `.env` (see [`backend/src/config/env.ts`](../backend/src/config/env.ts)). Vite uses the same root `.env` via `envDir` in [`frontend/vite.config.ts`](../frontend/vite.config.ts).
 
-## Database path (same as `node scripts/print-db-path.mjs`)
+## Database (PostgreSQL — required)
+
+The API and **`scripts/db.sh`** use **`DATABASE_*`** only (no SQLite / `DB_PATH`). Local testing: see root **`docker-compose.yml`** (port **5433**) and [`.env.example`](../.env.example).
 
 | Variable | Meaning |
 |----------|---------|
-| `MODE` | `TEST` or `PROD` — selects default file when `DB_PATH` is unset. |
-| `DB_PATH` | Optional override; wins over `MODE` and `DB_PATH_*`. |
-| `DB_PATH_TEST` | Relative to repo root or absolute; default `./data/household-finance-test.sqlite`. |
-| `DB_PATH_PROD` | Same; default `./data/household-finance-prod.sqlite`. |
+| `DATABASE_HOST` | **Required.** Postgres hostname (e.g. `127.0.0.1` or managed host). |
+| `DATABASE_PORT` | Port (default **5432**). |
+| `DATABASE_USER` | **Required.** Role name. |
+| `DATABASE_PASSWORD` | Password (may be empty for some local setups). |
+| `DATABASE_NAME` | **Required.** Database name. |
+| `DATABASE_SSL` | Default **on** (`ssl: 'require'`). Set **`0`** / **`false`** for local Postgres without TLS (e.g. Docker on localhost). |
 
-`npm run db:cleanup`, `npm run db:init`, and `npm run db:seed` resolve the SQLite file with the same rules as the API.
+**Test vs prod:** same variable names; point CI/local at your **test** instance and production (e.g. Koyeb) at **prod**.
+
+Migrations: [`backend/db/migrations_pg/`](../backend/db/migrations_pg/). Seeds: [`backend/db/seeds_pg/`](../backend/db/seeds_pg/) (and `seeds_pg/dev/` for sample accounts). Legacy SQLite artifacts under `backend/db/migrations/` and `seeds/` are **not** applied by the app.
+
+**Reset local data:** `npm run db:cleanup` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes` (drops `public` on the DB above, then migrations + bootstrap + **dev sample accounts** by default). For bootstrap only: `npm run db:cleanup -- --no-dev-seeds`.
+
+See [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md) and [`RUNBOOK.md`](RUNBOOK.md).
 
 ## Backend (runtime)
 
@@ -23,6 +33,7 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 
 | Variable | Notes |
 |----------|--------|
+| `MODE` | `TEST` or `PROD`. Affects static SPA serving when **`frontend/dist`** exists; **not** used to pick a database file. |
 | `LOG_LEVEL` | Backend only: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). |
 | `LOG_FILE` | Optional. Repo-relative or absolute path; timestamped lines are appended (tee with stdout/stderr). Empty = disabled. See [`LOGGING.md`](LOGGING.md). |
 | `PORT` | API listen port (default `4000`). |
@@ -47,15 +58,7 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 
 ## Known hardcoded defaults (ops)
 
-- **Seed user row:** [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) — email and bcrypt hash for the default password.
-- **Tests:** `backend` `npm test` runs `MODE=TEST` with `DB_PATH` unset so the test DB path is deterministic (see [`scripts/prep-test-db.sh`](../scripts/prep-test-db.sh)).
+- **Seed user row:** [`backend/db/seeds_pg/0001_bootstrap.sql`](../backend/db/seeds_pg/0001_bootstrap.sql) — email and bcrypt hash for the default password (same content as legacy SQLite seed).
+- **Tests:** `backend` `npm test` runs **`scripts/prep-test-db.sh`** (resets schema on the configured Postgres) then migrations + seeds + Vitest. **`DATABASE_*`** must be set (see `docker-compose.yml`).
 
-See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset.
-
-## Postgres / Koyeb (planned)
-
-Current runtime is SQLite-only. Postgres/Koyeb production deployment is tracked as planned work:
-- add a Postgres-backed migration runner path (or dialect-safe migration strategy),
-- define `DATABASE_URL` / SSL / pooling env contract,
-- add startup migration policy for container deploys,
-- validate health checks + rollback strategy for Koyeb.
+See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset. Operator Q&A: [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md).

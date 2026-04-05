@@ -1,6 +1,6 @@
 # End-to-end runbook (brand new environment)
 
-Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Database layout and baseline notes: [`backend/db/README.md`](../backend/db/README.md).
+Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Database layout and baseline notes: [`backend/db/README.md`](../backend/db/README.md). **Operator FAQ** (import sessions, recategorize scope, exports, Postgres probe): [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md). **Postgres cutover** roadmap: [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md).
 
 ## 1. Prerequisites
 
@@ -130,28 +130,21 @@ npm run lint
 npm test
 ```
 
-## 9. Stop and reset
+## 9. Stop and reset (Postgres)
 
-**Stop the API before cleanup.** If SQLite is still open, `rm` can remove the directory entry while Node keeps the **old** database in memory — the UI will still show transactions until you stop the process. On macOS/Linux, `db:cleanup` uses `lsof` and **refuses** to delete while something holds the file (unless you set `DB_CLEANUP_ALLOW_OPEN=1` and then restart the API yourself).
+**Stop the API before cleanup** so connections are not held against objects you are about to drop.
 
 ```bash
 npm run services:stop
 ```
 
-Compare paths: the backend logs `SQLite: /absolute/path/...` on startup; `node scripts/print-db-path.mjs` must print the same path.
+**`npm run db:cleanup`** runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes`: it **drops and recreates** the Postgres `public` schema using **`DATABASE_*`** from the repo root `.env` (see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)), then applies migrations and seeds.
 
-**Reset the database file the API uses (destructive):**
+- **Default:** after cleanup you get **bootstrap** (`0001_bootstrap.sql`) **and** **dev sample financial accounts** (BoA / Citi / Chase / Marcus — same as `db:seed:dev`’s extra step). Dev seeds do **not** insert `transaction_canonical` rows; the ledger stays empty until you import.
+- **Bootstrap only (no sample accounts):**  
+  `npm run db:cleanup -- --no-dev-seeds`
 
-`npm run db:cleanup` runs `scripts/db-cleanup.sh` with `--yes` and removes the resolved SQLite path (and `-wal` / `-shm`).
-
-**Full wipe + reseed:**
-
-```bash
-npm run db:cleanup
-npm run db:seed
-# or, if you want the sample bank accounts again:
-# npm run db:seed:dev
-```
+**`npm run db:seed`** (without cleanup) runs migrations + bootstrap only — it does **not** remove rows already inserted by a previous cleanup’s dev-seed step.
 
 Then start the API again (`npm run services:start` or `npm run dev:backend`). Clear site storage or sign out if you had an old JWT.
 
@@ -167,7 +160,7 @@ node scripts/print-db-path.mjs
 
 | Symptom | Check |
 |---------|--------|
-| `db:cleanup` ran but the UI still shows old rows | **API was still holding the DB open** (most common): stop with `npm run services:stop`, run `db:cleanup` again, then `db:seed` and restart. Or wrong file: compare backend log line `SQLite: …` with `node scripts/print-db-path.mjs`. |
+| `db:cleanup` ran but the UI still shows old rows | **API still connected** to Postgres: stop services, run cleanup again. Or **wrong database**: cleanup uses `DATABASE_HOST` / `DATABASE_NAME` from `.env` — must match the instance the API uses. |
 | Port in use | Change `PORT` / `FRONTEND_PORT` in `.env` or stop the other process. |
 | 401 / invalid token | Clear browser storage for the site; sign in again. |
 | Missing tables / old schema | Run `npm run setup` or `npm run db:seed` after `db:cleanup`. |
@@ -188,6 +181,6 @@ The current setup and scripts are SQLite-centric. For Koyeb + hosted Postgres mi
 phase after parser/categorization stabilization:
 
 - add Postgres runtime support and migration compatibility,
-- define `DATABASE_URL` + SSL/pooling env contract,
+- define Koyeb-style **`DATABASE_*`** fields + SSL/pooling env contract,
 - decide startup migration strategy for container deploys,
 - validate backups/rollback and health-check behavior in Koyeb.
