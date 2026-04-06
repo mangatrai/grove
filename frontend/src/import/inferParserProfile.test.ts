@@ -43,9 +43,26 @@ describe("inferParserProfile", () => {
     expect(inferParserProfile(boaChecking, "eStmt_2026-01.pdf")).toBe("boa_estatement_pdf");
   });
 
-  it("uses IBM payslip for payslip account type even when filename is generic", () => {
+  it("uses IBM payslip for payslip account type when filename is generic and no employer list", () => {
     expect(inferParserProfile(payslipPlaceholder, "eStmt_2026-01.pdf")).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
     expect(inferParserProfile(payslipPlaceholder, "download.pdf")).toBe(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
+  });
+
+  it("uses sole employer parser for payslip account when generic PDF name", () => {
+    const income = {
+      employers: [{ id: "emp-1", parserProfileId: "deloitte_payslip_pdf" }]
+    };
+    expect(inferParserProfile(payslipPlaceholder, "download.pdf", income)).toBe("deloitte_payslip_pdf");
+  });
+
+  it("does not auto-infer payslip parser when multiple employers are configured", () => {
+    const income = {
+      employers: [
+        { id: "a", parserProfileId: IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID },
+        { id: "b", parserProfileId: "deloitte_payslip_pdf" }
+      ]
+    };
+    expect(inferParserProfile(payslipPlaceholder, "download.pdf", income)).toBe(null);
   });
 
   it("uses salary deposit + employers to infer payslip on generic PDF names (before BOA eStatement)", () => {

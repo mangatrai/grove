@@ -90,9 +90,17 @@ export function inferParserProfile(
 
   /**
    * `financial_account.type === payslip` — synthetic import target (not a bank account).
-   * Any PDF on this account uses the IBM payslip parser; avoids mis-inferring bank e-statements on generic filenames.
+   * Single employer: use that employer's parser (must match import binding). Multiple employers: no auto profile
+   * (user picks employer; UI syncs `parserProfileId`). With no employer list, default to IBM for backward compatibility.
    */
   if (t === "payslip" && ext === ".pdf") {
+    const emps = income?.employers;
+    if (emps && emps.length > 1) {
+      return null;
+    }
+    if (emps && emps.length === 1) {
+      return emps[0]?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+    }
     return IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
   }
 

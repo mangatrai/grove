@@ -262,6 +262,7 @@ export function ImportWorkspacePage() {
   const [matcherPreviewCategories, setMatcherPreviewCategories] = useState<CategoryLabelRow[]>([]);
   const [matcherPreviewLoading, setMatcherPreviewLoading] = useState(false);
   const [copySessionMsg, setCopySessionMsg] = useState<string | null>(null);
+  const [removingFileId, setRemovingFileId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!sessionId) {
@@ -307,6 +308,7 @@ export function ImportWorkspacePage() {
       setIncomeInference({});
     }
     try {
+      // Lists all household person profiles for Belongs-to (owner/admin). Members without this role fall through to profile-only fallback below.
       const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
         "/household/members"
       );
@@ -593,23 +595,85 @@ export function ImportWorkspacePage() {
   const onEmployerChange = useCallback(
     async (fileId: string, employerId: string) => {
       const accountId = drafts[fileId]?.accountId ?? "";
-      const profileId = drafts[fileId]?.profileId ?? "";
+      const file = files.find((ff) => ff.id === fileId);
+      const acc = accountById(accounts, accountId);
+      const prev = drafts[fileId];
+      const ownerScope = prev?.ownerScope ?? "household";
+      const ownerPersonProfileId =
+        ownerScope === "person" && prev?.ownerPersonProfileId?.trim()
+          ? prev.ownerPersonProfileId
+          : null;
+
+      if (!employerId) {
+        const inferred = inferParserProfile(acc as FinancialAccountLike | undefined, file?.file_name, incomeInference);
+        setDrafts((d) => ({
+          ...d,
+          [fileId]: {
+            ...d[fileId]!,
+            employerId: "",
+            profileId: inferred ?? ""
+          }
+        }));
+        if (accountId && inferred) {
+          await persistBinding(fileId, accountId, inferred, null, ownerScope, ownerPersonProfileId);
+        }
+        return;
+      }
+
+      const emp = householdEmployers.find((e) => e.id === employerId);
+      const nextProfileId = emp?.parserProfileId ?? prev?.profileId ?? "";
       setDrafts((d) => ({
         ...d,
-        [fileId]: { ...d[fileId]!, employerId }
+        [fileId]: {
+          ...d[fileId]!,
+          employerId,
+          profileId: nextProfileId || d[fileId]!.profileId
+        }
       }));
-      if (accountId && profileId) {
-        await persistBinding(
-          fileId,
-          accountId,
-          profileId,
-          employerId || null,
-          drafts[fileId]?.ownerScope ?? "household",
-          drafts[fileId]?.ownerPersonProfileId || null
-        );
+      if (accountId && nextProfileId) {
+        await persistBinding(fileId, accountId, nextProfileId, employerId, ownerScope, ownerPersonProfileId);
       }
     },
-    [drafts, persistBinding]
+    [drafts, persistBinding, files, accounts, householdEmployers, incomeInference]
+  );
+
+  const removeFileFromSession = useCallback(
+    async (fileId: string) => {
+      if (!sessionId) {
+        return;
+      }
+      const ok = window.confirm(
+        "Remove this file from the session? Staged data for this file (including parsed rows or payslip snapshot if any) will be deleted."
+      );
+      if (!ok) {
+        return;
+      }
+      setRemovingFileId(fileId);
+      setError(null);
+      try {
+        const res = await apiFetch(`/imports/sessions/${sessionId}/files/${fileId}`, { method: "DELETE" });
+        const text = await res.text();
+        if (!res.ok) {
+          let msg = text || res.statusText;
+          try {
+            const j = JSON.parse(text) as { message?: string };
+            if (typeof j.message === "string" && j.message.length > 0) {
+              msg = j.message;
+            }
+          } catch {
+            /* use raw */
+          }
+          throw new Error(msg);
+        }
+        setMessage("File removed from session.");
+        await load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not remove file");
+      } finally {
+        setRemovingFileId(null);
+      }
+    },
+    [sessionId, load]
   );
 
   const onBelongsToChange = useCallback(
@@ -1164,6 +1228,19 @@ export function ImportWorkspacePage() {
                     <td>
                       <div>{f.file_name}</div>
                       <span className="muted">status: {f.status}</span>
+                      {sessionStatus !== "finalized" ? (
+                        <div style={{ marginTop: "0.35rem" }}>
+                          <button
+                            type="button"
+                            className="secondary"
+                            style={{ fontSize: "0.85rem" }}
+                            disabled={removingFileId === f.id}
+                            onClick={() => void removeFileFromSession(f.id)}
+                          >
+                            {removingFileId === f.id ? "Removing…" : "Remove from session"}
+                          </button>
+                        </div>
+                      ) : null}
                     </td>
                     <td>
                       <HierarchicalSearchPicker
