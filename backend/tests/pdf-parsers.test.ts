@@ -69,6 +69,20 @@ describe("Deloitte payslip PDF text parser (v1 = IBM summary heuristics)", () =>
     expect(parsed!.netPayCurrent).toBe(5555.55);
     expect(parsed!.netPayYtd).toBe(11111.11);
   });
+
+  it("does not require Deloitte branding in text (logo-only PDFs often omit extractable brand)", () => {
+    const text = `
+Pay Statement
+Payment Date: 01/16/2025
+Gross Pay $5,000.00 $10,000.00
+Net Pay $3,200.00 $6,400.00
+`;
+    const parsed = parseDeloittePayslipFromText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.grossPayCurrent).toBe(5000);
+    expect(parsed!.netPayCurrent).toBe(3200);
+    expect((parsed!.rawExtractJson as { detectedDeloitteKeyword?: boolean }).detectedDeloitteKeyword).toBe(false);
+  });
 });
 
 describe("IBM payslip PDF text parser (Pay and Contributions summary)", () => {

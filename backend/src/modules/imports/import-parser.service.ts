@@ -62,6 +62,8 @@ export interface ParseFailure {
   ok?: false;
   code: ParseFailureCode;
   message: string;
+  /** Populated for `NO_SUPPORTED_FILES` so clients can distinguish duplicate checksum vs parse errors. */
+  skippedFiles?: Array<{ fileId: string; reason: string }>;
 }
 
 function pickColumn(row: Record<string, string>, columnName: string | undefined): string {
@@ -433,7 +435,12 @@ export async function parseSessionImportFiles(
   }
 
   if (outcome.parsedFiles === 0) {
-    return { ok: false, code: "NO_SUPPORTED_FILES", message: "No files were parsed successfully" };
+    return {
+      ok: false,
+      code: "NO_SUPPORTED_FILES",
+      message: "No files were parsed successfully",
+      skippedFiles: outcome.skippedFiles
+    };
   }
 
   await qExec(`UPDATE import_session SET status = 'review' WHERE id = ?`, sessionId);

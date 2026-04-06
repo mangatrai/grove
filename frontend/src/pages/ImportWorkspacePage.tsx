@@ -128,6 +128,26 @@ function messageFromApiError(err: unknown): string {
   return text;
 }
 
+/** Append per-file parse skip reasons when API returns `skippedFiles` (e.g. duplicate payslip vs parse failure). */
+function enrichImportErrorWithSkippedFiles(message: string): string {
+  const jsonStart = message.indexOf("{");
+  if (jsonStart < 0) {
+    return message;
+  }
+  try {
+    const j = JSON.parse(message.slice(jsonStart)) as {
+      skippedFiles?: Array<{ fileId: string; reason: string }>;
+    };
+    if (!j.skippedFiles?.length) {
+      return message;
+    }
+    const detail = j.skippedFiles.map((s) => s.reason).join("; ");
+    return `${message.trim()} — Per file: ${detail}`;
+  } catch {
+    return message;
+  }
+}
+
 type LastImportSummary = {
   parsedFiles: number;
   parsedRows: number;
@@ -870,7 +890,8 @@ export function ImportWorkspacePage() {
       setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Parse failed");
+      const raw = err instanceof Error ? err.message : "Parse failed";
+      setError(enrichImportErrorWithSkippedFiles(raw));
     }
   }
 
@@ -941,7 +962,8 @@ export function ImportWorkspacePage() {
       );
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed");
+      const raw = err instanceof Error ? err.message : "Import failed";
+      setError(enrichImportErrorWithSkippedFiles(raw));
     } finally {
       setPipelineBusy(false);
     }

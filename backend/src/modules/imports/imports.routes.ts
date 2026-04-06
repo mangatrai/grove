@@ -437,7 +437,8 @@ importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedReques
     const status = mapParseFailureToStatus(result);
     res.status(status).json({
       message: result.message,
-      code: result.code
+      code: result.code,
+      ...(result.skippedFiles && result.skippedFiles.length > 0 ? { skippedFiles: result.skippedFiles } : {})
     });
     return;
   }
