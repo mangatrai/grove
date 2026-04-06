@@ -541,6 +541,34 @@ export function ImportWorkspacePage() {
         return;
       }
 
+      /** Payslip + multiple employers: inference is intentionally null — default first employer so binding persists and the employer control stays usable. */
+      const accountType = (account?.type ?? "").toLowerCase();
+      if (accountType === "payslip" && householdEmployers.length > 1) {
+        const emp0 = householdEmployers[0]!;
+        const defaultProfile = emp0.parserProfileId ?? "ibm_pay_contributions_pdf";
+        const nextOwnerScope = drafts[fileId]?.ownerScope ?? "household";
+        const nextOwnerPersonProfileId = drafts[fileId]?.ownerPersonProfileId ?? "";
+        setDrafts((d) => ({
+          ...d,
+          [fileId]: {
+            accountId,
+            profileId: defaultProfile,
+            employerId: emp0.id,
+            ownerScope: nextOwnerScope,
+            ownerPersonProfileId: nextOwnerPersonProfileId
+          }
+        }));
+        await persistBinding(
+          fileId,
+          accountId,
+          defaultProfile,
+          emp0.id,
+          nextOwnerScope,
+          nextOwnerScope === "person" ? nextOwnerPersonProfileId : null
+        );
+        return;
+      }
+
       setDrafts((d) => ({
         ...d,
         [fileId]: {
@@ -1214,6 +1242,10 @@ export function ImportWorkspacePage() {
                 );
                 const savedProfile = f.parser_profile_id ?? drafts[f.id]?.profileId ?? "";
                 const profileForRow = drafts[f.id]?.profileId || f.parser_profile_id || "";
+                const isPayslipAccount = (acc?.type ?? "").toLowerCase() === "payslip";
+                const showEmployerSelect =
+                  householdEmployers.length > 1 &&
+                  (PAYSLIP_PARSER_IDS.has(profileForRow) || isPayslipAccount);
                 const autoLine =
                   inferred && savedProfile && profilesEquivalent(inferred, savedProfile) ? (
                     <span className="success">Ready: {friendlyParserLabel(inferred)}</span>
@@ -1254,7 +1286,7 @@ export function ImportWorkspacePage() {
                     </td>
                     {householdEmployers.length > 1 ? (
                       <td>
-                        {PAYSLIP_PARSER_IDS.has(profileForRow) ? (
+                        {showEmployerSelect ? (
                           <select
                             value={drafts[f.id]?.employerId ?? ""}
                             onChange={(e) => void onEmployerChange(f.id, e.target.value)}
