@@ -311,6 +311,37 @@ describe("import sessions and file intake", () => {
     expect(listRes.body.sessions.some((s: { id: string }) => s.id === sessionId)).toBe(true);
   });
 
+  it("deletes a staged import file from the session", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    expect(sessionResponse.status).toBe(201);
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const uploadResponse = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from("row1,row2"), "statement.csv")
+      .attach("files", Buffer.from("other"), "other.csv");
+
+    expect(uploadResponse.status).toBe(201);
+    const fileId = uploadResponse.body.files[0].id as string;
+
+    const delRes = await request(app)
+      .delete(`/imports/sessions/${sessionId}/files/${fileId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(delRes.status).toBe(200);
+    expect(delRes.body.deleted).toBe(true);
+
+    const fetchResponse = await request(app)
+      .get(`/imports/sessions/${sessionId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(fetchResponse.status).toBe(200);
+    expect(fetchResponse.body.files.length).toBe(1);
+  });
+
   it("enforces session status transition order", async () => {
     const token = await loginAndGetToken();
 

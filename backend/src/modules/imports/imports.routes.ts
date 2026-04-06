@@ -32,6 +32,7 @@ import { canonicalizeImportSession } from "../canonical/canonical-ingest.service
 import { parseSessionImportFiles, type ParseFailure, type ParseColumnMapping } from "./import-parser.service.js";
 import { createHouseholdCustomInstitution, listHouseholdCustomInstitutions } from "./household-institutions.service.js";
 import { listUsInstitutionLabels } from "./institution-catalog.js";
+import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-file-delete.service.js";
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -121,6 +122,17 @@ function mapBindingFailureToStatus(failure: BindingFailure): number {
     case "INVALID_EMPLOYER":
     case "EMPLOYER_PARSER_MISMATCH":
       return 400;
+    default:
+      return 500;
+  }
+}
+
+function mapDeleteImportFileFailureToStatus(failure: DeleteImportFileFailure): number {
+  switch (failure.code) {
+    case "NOT_FOUND":
+      return 404;
+    case "SESSION_FINALIZED":
+      return 409;
     default:
       return 500;
   }
@@ -356,6 +368,22 @@ importsRouter.patch(
     res.status(200).json({ fileId: req.params.fileId, updated: true });
   }
 );
+
+importsRouter.delete("/sessions/:sessionId/files/:fileId", async (req: AuthenticatedRequest, res) => {
+  const result = await deleteImportSessionFile(
+    req.params.sessionId,
+    req.params.fileId,
+    req.authUser!.householdId
+  );
+  if (!result.ok) {
+    res.status(mapDeleteImportFileFailureToStatus(result)).json({
+      message: result.message,
+      code: result.code
+    });
+    return;
+  }
+  res.status(200).json({ fileId: req.params.fileId, deleted: true });
+});
 
 importsRouter.get("/sessions/:sessionId/summary", async (req: AuthenticatedRequest, res) => {
   const summary = await getImportSessionSummary(req.params.sessionId, req.authUser!.householdId);
