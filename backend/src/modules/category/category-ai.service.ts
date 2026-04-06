@@ -56,14 +56,17 @@ function normalizeAiSuggestion(raw: unknown): Omit<AiSuggestion, "model"> | null
   return { suggestedCategoryId, suggestedNewCategoryName, confidence, reason };
 }
 
-function finalizeSuggestion(householdId: string, parsed: Omit<AiSuggestion, "model"> | null): AiSuggestion | null {
+async function finalizeSuggestion(
+  householdId: string,
+  parsed: Omit<AiSuggestion, "model"> | null
+): Promise<AiSuggestion | null> {
   if (!parsed) {
     return null;
   }
   if (parsed.suggestedCategoryId) {
     if (
-      !categoryUsableByHousehold(parsed.suggestedCategoryId, householdId) ||
-      categoryHasChildren(parsed.suggestedCategoryId)
+      !(await categoryUsableByHousehold(parsed.suggestedCategoryId, householdId)) ||
+      (await categoryHasChildren(parsed.suggestedCategoryId))
     ) {
       return {
         ...parsed,
@@ -76,9 +79,15 @@ function finalizeSuggestion(householdId: string, parsed: Omit<AiSuggestion, "mod
 }
 
 /** Leaf categories: id + name only (smaller prompt than including parentId). */
-function leafCategoriesPayload(householdId: string) {
-  const all = listCategoriesForHousehold(householdId);
-  return all.filter((c) => !categoryHasChildren(c.id)).map((c) => ({ id: c.id, name: c.name }));
+async function leafCategoriesPayload(householdId: string) {
+  const all = await listCategoriesForHousehold(householdId);
+  const out: { id: string; name: string }[] = [];
+  for (const c of all) {
+    if (!(await categoryHasChildren(c.id))) {
+      out.push({ id: c.id, name: c.name });
+    }
+  }
+  return out;
 }
 
 const CLASSIFICATION_GUIDELINES = [
@@ -97,12 +106,12 @@ const MAX_ESTIMATED_USER_JSON_CHARS = 100_000;
 /** When a single row still exceeds the budget, cap description length sent to OpenAI. */
 const SINGLE_ITEM_DESC_TRUNCATE_CHARS = 12_000;
 
-function buildUserContentObject(
+async function buildUserContentObject(
   householdId: string,
   items: AiBatchInput[],
   normalizedDescriptionMax?: number
 ) {
-  const categories = leafCategoriesPayload(householdId);
+  const categories = await leafCategoriesPayload(householdId);
   const transactions = items.map((it) => {
     let nd = it.normalizedDescription;
     if (
@@ -130,8 +139,8 @@ function buildUserContentObject(
   };
 }
 
-function estimateUserContentChars(householdId: string, items: AiBatchInput[]): number {
-  return JSON.stringify(buildUserContentObject(householdId, items)).length;
+async function estimateUserContentChars(householdId: string, items: AiBatchInput[]): Promise<number> {
+  return JSON.stringify(await buildUserContentObject(householdId, items)).length;
 }
 
 export async function suggestCategoryWithAi(input: AiInput): Promise<AiSuggestion | null> {
@@ -169,7 +178,7 @@ export async function suggestCategoriesWithAiBatch(
     return out;
   }
 
-  const est = estimateUserContentChars(householdId, items);
+  const est = await estimateUserContentChars(householdId, items);
   if (est > MAX_ESTIMATED_USER_JSON_CHARS) {
     if (items.length > 1) {
       const mid = Math.ceil(items.length / 2);
@@ -193,7 +202,7 @@ export async function suggestCategoriesWithAiBatch(
       ? SINGLE_ITEM_DESC_TRUNCATE_CHARS
       : undefined;
 
-  const userObject = buildUserContentObject(householdId, items, descMax);
+  const userObject = await buildUserContentObject(householdId, items, descMax);
   const userJson = JSON.stringify(userObject);
 
   const systemContent =
@@ -280,7 +289,7 @@ export async function suggestCategoriesWithAiBatch(
       if (!tid || !out.has(tid)) {
         continue;
       }
-      out.set(tid, finalizeSuggestion(householdId, parsed));
+      out.set(tid, await finalizeSuggestion(householdId, parsed));
     }
   } catch (err) {
     log.warn("[category-ai] batch request failed:", err instanceof Error ? err.message : err);

@@ -49,13 +49,13 @@ export type SniffSuggestion = {
  * Suggest parser + employer from PDF text + household employer list.
  * Does not persist; optional step before upload or import binding.
  */
-export function suggestPayslipFromText(
+export async function suggestPayslipFromText(
   householdId: string,
   userId: string,
   normalizedText: string
-): SniffSuggestion {
+): Promise<SniffSuggestion> {
   const hints = detectPayslipSignals(normalizedText);
-  const employers = listHouseholdEmployers(householdId, userId);
+  const employers = await listHouseholdEmployers(householdId, userId);
 
   let suggestedParserProfileId: string = IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
   let confidence: "high" | "low" = "low";
@@ -118,6 +118,6 @@ export async function sniffPayslipPdfBuffer(
   return {
     ok: true,
     normalizedText,
-    suggestion: suggestPayslipFromText(householdId, userId, normalizedText)
+    suggestion: await suggestPayslipFromText(householdId, userId, normalizedText)
   };
 }

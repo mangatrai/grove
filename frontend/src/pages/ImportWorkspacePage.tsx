@@ -1109,37 +1109,24 @@ export function ImportWorkspacePage() {
       <div className="card">
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Files & account</h2>
         <p className="muted">
-          For each file, pick the account it belongs to. The menu shows the institution, account type, and last four
-          digits when available so you can tell accounts apart. We detect the file format automatically — you
-          don&apos;t choose parsers unless you use advanced mode.{" "}
-          <strong>Employer payslip PDFs:</strong> use <strong>Settings → Profile</strong> to set your{" "}
-          <strong>salary deposit</strong> account and at least one <strong>employer</strong> — then choosing that bank
-          account for a PDF can suggest the employer payslip parser even when the file name is generic (e.g.{" "}
-          <code>download.pdf</code>). Or bind to your <strong>payslip</strong> account (the label comes from{" "}
-          <strong>Profile → Employer Setup</strong>) so generic PDF names map to the payslip parser. Payslip summaries
-          are <strong>not</strong> posted as bank transactions.
+          Assign each file to an account and confirm the format. Format is inferred automatically unless you use{" "}
+          <strong>Advanced</strong>. Then use <a href="#import-run-import">Run import</a> below.
         </p>
-        <p
-          className="muted"
-          style={{
-            marginTop: "0.65rem",
-            padding: "0.65rem 0.75rem",
-            borderLeft: "3px solid var(--hf-border-strong, #94a3b8)",
-            background: "var(--hf-callout-bg, rgba(148, 163, 184, 0.12))"
-          }}
-        >
-          <strong>IBM Pay &amp; Contributions PDF:</strong> For a pay-stub PDF (e.g. SuccessFactors / Pay and Contributions),
-          pick <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if we don&apos;t auto-detect it, or use a filename like
-          “payslip” or “paystub” for a suggestion. Parse may show <strong>0</strong> ledger lines — that&apos;s
-          expected. After every file has an account and format, go to the{" "}
-          <a href="#import-run-import">
-            <strong>Run import</strong>
-          </a>{" "}
-          section below and press <strong>Run import</strong> — that runs parse <em>and</em> finish (canonicalize) in one
-          step so staging clears. Summaries appear under <Link to="/payslips">Payslips</Link>, not in the transaction
-          ledger. (Advanced: separate <strong>Parse session</strong> / <strong>Canonicalize</strong> only lives under{" "}
-          <em>Separate steps</em> in that section.)
-        </p>
+        <details className="muted" style={{ marginTop: "0.35rem", fontSize: "0.9rem" }}>
+          <summary style={{ cursor: "pointer", userSelect: "none" }}>
+            Payslip PDFs, IBM pay stubs, and where results appear
+          </summary>
+          <p style={{ marginTop: "0.5rem", marginBottom: "0.35rem" }}>
+            <strong>Payslips:</strong> Set salary deposit + employers under <strong>Settings → Profile</strong>. Generic
+            filenames still map if you pick the right account or payslip bucket from <strong>Employer Setup</strong>.
+            Payslip data shows under <Link to="/payslips">Payslips</Link>, not the bank ledger.
+          </p>
+          <p style={{ marginBottom: 0 }}>
+            <strong>IBM Pay &amp; Contributions:</strong> choose <strong>{friendlyParserLabel("ibm_pay_contributions_pdf")}</strong> if
+            needed; <strong>0</strong> ledger lines after parse is normal. <strong>Run import</strong> runs parse and
+            canonicalize together; split steps live under <em>Separate steps</em> in Run import.
+          </p>
+        </details>
         {files.length === 0 ? (
           <p className="muted">No files yet.</p>
         ) : (

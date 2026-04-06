@@ -138,13 +138,13 @@ npm test
 npm run services:stop
 ```
 
-**`npm run db:cleanup`** runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes`: it **drops and recreates** the Postgres `public` schema using **`DATABASE_*`** from the repo root `.env` (see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)), then applies migrations and seeds.
+**`npm run db:cleanup`** runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes`: it **drops and recreates** the Postgres `public` schema using **`DATABASE_*`** from the repo root `.env` (see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)), then applies migrations and **bootstrap seed only** (default household, owner user, global categories — no sample bank accounts).
 
-- **Default:** after cleanup you get **bootstrap** (`0001_bootstrap.sql`) **and** **dev sample financial accounts** (BoA / Citi / Chase / Marcus — same as `db:seed:dev`’s extra step). Dev seeds do **not** insert `transaction_canonical` rows; the ledger stays empty until you import.
-- **Bootstrap only (no sample accounts):**  
-  `npm run db:cleanup -- --no-dev-seeds`
+- **Sample dev accounts** (BoA / Citi / Chase / Marcus):  
+  `npm run db:cleanup -- --yes --with-dev-seeds`  
+  (equivalent to also running `npm run db:seed:dev` after a bootstrap-only cleanup.)
 
-**`npm run db:seed`** (without cleanup) runs migrations + bootstrap only — it does **not** remove rows already inserted by a previous cleanup’s dev-seed step.
+**`npm run db:seed`** runs migrations + bootstrap only. **`npm run db:seed:dev`** adds the dev `financial_account` rows without dropping the schema.
 
 Then start the API again (`npm run services:start` or `npm run dev:backend`). Clear site storage or sign out if you had an old JWT.
 

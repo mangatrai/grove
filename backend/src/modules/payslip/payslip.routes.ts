@@ -31,14 +31,14 @@ const idParamSchema = z.object({
 export const payslipRouter = Router();
 payslipRouter.use(requireAuth);
 
-payslipRouter.get("/", (req: AuthenticatedRequest, res) => {
+payslipRouter.get("/", async (req: AuthenticatedRequest, res) => {
   const parsed = listQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid query", issues: parsed.error.flatten() });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const { total, items } = listPayslipSnapshots(householdId, {
+  const { total, items } = await listPayslipSnapshots(householdId, {
     limit: parsed.data.limit,
     offset: parsed.data.offset,
     ownerScope: parsed.data.ownerScope,
@@ -91,7 +91,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       ? (req.body as { employerId: string }).employerId
       : undefined;
 
-  const resolved = resolvePayslipUploadContext(householdId, req.authUser!.userId, employerIdRaw);
+  const resolved = await resolvePayslipUploadContext(householdId, req.authUser!.userId, employerIdRaw);
   if (!resolved.ok) {
     res.status(400).json({
       message: resolved.message,
@@ -134,7 +134,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
     return;
   }
 
-  const result = insertPayslipSnapshot(
+  const result = await insertPayslipSnapshot(
     householdId,
     fileName,
     checksum,
@@ -156,14 +156,14 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
   res.status(201).json({ snapshot: result.snapshot });
 });
 
-payslipRouter.get("/:id", (req: AuthenticatedRequest, res) => {
+payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
   const parsed = idParamSchema.safeParse(req.params);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payslip id", issues: parsed.error.flatten() });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const snapshot = getPayslipSnapshotForHousehold(householdId, parsed.data.id);
+  const snapshot = await getPayslipSnapshotForHousehold(householdId, parsed.data.id);
   if (!snapshot) {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
     return;

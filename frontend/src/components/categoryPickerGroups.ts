@@ -37,39 +37,58 @@ export function buildCategoryFilterGroups(categories: CategoryOption[]): Hierarc
   ];
 }
 
-/** Leaf-only categories (same rule targets as `/categories/rules`). */
-function assignableLeafCategories(categories: CategoryOption[]): CategoryOption[] {
-  const idsWithChildren = new Set(
-    categories.filter((c) => c.parentId).map((c) => c.parentId as string)
-  );
-  return categories.filter((c) => !idsWithChildren.has(c.id));
-}
-
 /**
- * Transaction row / Add transaction: only assignable leaves, labels aligned with filter (`Parent > Child`).
- * If `selectedId` points at a non-leaf (legacy row), include it once so the current value stays visible.
+ * Ledger row / Add transaction: top-level groups are selectable; children use `Parent > Child`.
+ * Merges into one logical tree in `HierarchicalSearchPicker` (General parents first, then child paths).
  */
 export function buildCategoryAssignmentGroups(
   categories: CategoryOption[],
   selectedId?: string | null
 ): HierarchicalPickerGroup[] {
   const byId = new Map(categories.map((c) => [c.id, c]));
-  const assignable = assignableLeafCategories(categories);
-  const assignableIds = new Set(assignable.map((c) => c.id));
-  const rowLabel = (c: CategoryOption) =>
-    c.parentId && byId.get(c.parentId) ? `${byId.get(c.parentId)!.name} > ${c.name}` : c.name;
-  let items = assignable
-    .map((c) => {
-      const label = rowLabel(c);
-      return { value: c.id, label, displayLabel: c.name, searchText: label };
-    })
-    .sort((a, b) => a.label.localeCompare(b.label));
-  if (selectedId && !assignableIds.has(selectedId)) {
-    const row = byId.get(selectedId);
-    if (row) {
-      const label = rowLabel(row);
-      items = [{ value: row.id, label, displayLabel: row.name, searchText: label }, ...items];
+  const parents = categories.filter((c) => c.parentId === null).sort((a, b) => a.name.localeCompare(b.name));
+  const byParent = new Map<string, CategoryOption[]>();
+  for (const c of categories) {
+    if (c.parentId) {
+      byParent.set(c.parentId, [...(byParent.get(c.parentId) ?? []), c]);
     }
   }
-  return [{ group: "Categories", items }];
+
+  const generalItems = parents.map((p) => ({
+    value: p.id,
+    label: p.name,
+    displayLabel: p.name,
+    searchText: p.name
+  }));
+
+  const childItems = parents.flatMap((p) =>
+    (byParent.get(p.id) ?? [])
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => ({
+        value: c.id,
+        label: `${p.name} > ${c.name}`,
+        displayLabel: c.name,
+        searchText: `${p.name} ${c.name}`
+      }))
+  );
+
+  const seen = new Set<string>([...generalItems.map((i) => i.value), ...childItems.map((i) => i.value)]);
+  if (selectedId && !seen.has(selectedId)) {
+    const row = byId.get(selectedId);
+    if (row) {
+      const label =
+        row.parentId && byId.get(row.parentId) ? `${byId.get(row.parentId)!.name} > ${row.name}` : row.name;
+      generalItems.unshift({
+        value: row.id,
+        label,
+        displayLabel: row.name,
+        searchText: label
+      });
+    }
+  }
+
+  return [
+    { group: "General", items: generalItems },
+    { group: "Categories", items: childItems }
+  ];
 }

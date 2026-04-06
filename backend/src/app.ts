@@ -9,6 +9,7 @@ import { log } from "./logger.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
+import { exportsRouter } from "./modules/export/exports.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { householdRouter } from "./modules/household/household.routes.js";
 import { importsRouter } from "./modules/imports/imports.routes.js";
@@ -46,7 +47,8 @@ const API_PATH_PREFIXES = [
   "/transactions",
   "/resolution",
   "/reports",
-  "/payslips"
+  "/payslips",
+  "/exports"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -68,6 +70,7 @@ export function buildApp() {
   app.use("/resolution", resolutionRouter);
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
+  app.use("/exports", exportsRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

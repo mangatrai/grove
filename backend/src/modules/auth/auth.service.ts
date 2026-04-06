@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 
-import { db } from "../../db/sqlite.js";
+import { qExec, qGet } from "../../db/query.js";
 import { env } from "../../config/env.js";
 import type { AuthUser, Role } from "./types.js";
 
@@ -11,42 +11,23 @@ interface DbLoginUser extends AuthUser {
   tokenVersion: number;
 }
 
-const getUserByEmailStmt = db.prepare<[string], {
-  id: string;
-  household_id: string;
-  role: Role;
-  email: string;
-  password_hash: string;
-  token_version: number;
-}>(`
+async function findUserByEmail(email: string): Promise<DbLoginUser | null> {
+  const row = await qGet<{
+    id: string;
+    household_id: string;
+    role: Role;
+    email: string;
+    password_hash: string;
+    token_version: number;
+  }>(
+    `
   SELECT id, household_id, role, email, password_hash, token_version
   FROM app_user
   WHERE lower(email) = lower(?)
   LIMIT 1
-`);
-
-const getUserHashByIdStmt = db.prepare<[string], { password_hash: string }>(`
-  SELECT password_hash
-  FROM app_user
-  WHERE id = ?
-  LIMIT 1
-`);
-
-const updateUserPasswordStmt = db.prepare<[string, string]>(`
-  UPDATE app_user
-  SET password_hash = ?, token_version = token_version + 1
-  WHERE id = ?
-`);
-
-const getUserTokenVersionByIdStmt = db.prepare<[string], { token_version: number }>(`
-  SELECT token_version
-  FROM app_user
-  WHERE id = ?
-  LIMIT 1
-`);
-
-function findUserByEmail(email: string): DbLoginUser | null {
-  const row = getUserByEmailStmt.get(email);
+`,
+    email
+  );
   if (!row) {
     return null;
   }
@@ -65,8 +46,8 @@ export interface LoginPayload {
   password: string;
 }
 
-export function login(payload: LoginPayload): string | null {
-  const user = findUserByEmail(payload.email);
+export async function login(payload: LoginPayload): Promise<string | null> {
+  const user = await findUserByEmail(payload.email);
   if (!user) {
     return null;
   }
@@ -88,7 +69,7 @@ export function login(payload: LoginPayload): string | null {
   );
 }
 
-export function verifyToken(token: string): AuthUser | null {
+export async function verifyToken(token: string): Promise<AuthUser | null> {
   try {
     const payload = jwt.verify(token, env.JWT_SECRET) as {
       sub: string;
@@ -96,7 +77,15 @@ export function verifyToken(token: string): AuthUser | null {
       role: Role;
       tokenVersion?: number;
     };
-    const row = getUserTokenVersionByIdStmt.get(payload.sub);
+    const row = await qGet<{ token_version: number }>(
+      `
+  SELECT token_version
+  FROM app_user
+  WHERE id = ?
+  LIMIT 1
+`,
+      payload.sub
+    );
     if (!row) {
       return null;
     }
@@ -114,12 +103,20 @@ export function verifyToken(token: string): AuthUser | null {
   }
 }
 
-export function changePassword(
+export async function changePassword(
   userId: string,
   currentPassword: string,
   newPassword: string
-): { ok: true } | { ok: false; code: "INVALID_CURRENT_PASSWORD" | "NOT_FOUND" } {
-  const row = getUserHashByIdStmt.get(userId);
+): Promise<{ ok: true } | { ok: false; code: "INVALID_CURRENT_PASSWORD" | "NOT_FOUND" }> {
+  const row = await qGet<{ password_hash: string }>(
+    `
+  SELECT password_hash
+  FROM app_user
+  WHERE id = ?
+  LIMIT 1
+`,
+    userId
+  );
   if (!row) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -128,6 +125,14 @@ export function changePassword(
     return { ok: false, code: "INVALID_CURRENT_PASSWORD" };
   }
   const nextHash = bcrypt.hashSync(newPassword, 10);
-  updateUserPasswordStmt.run(nextHash, userId);
+  await qExec(
+    `
+  UPDATE app_user
+  SET password_hash = ?, token_version = token_version + 1
+  WHERE id = ?
+`,
+    nextHash,
+    userId
+  );
   return { ok: true };
 }

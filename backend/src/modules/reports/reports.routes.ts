@@ -12,7 +12,17 @@ const emptyToUndef = (v: unknown) => (v === "" || v === undefined || v === null 
 
 const querySchema = z
   .object({
-    preset: z.enum(["month", "ytd", "rolling_30", "rolling_90"]).optional(),
+    preset: z
+      .enum([
+        "month",
+        "ytd",
+        "rolling_7",
+        "rolling_30",
+        "rolling_90",
+        "rolling_180",
+        "prev_calendar_year"
+      ])
+      .optional(),
     month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
     asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     dateFrom: z.preprocess(emptyToUndef, z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()),
@@ -56,7 +66,7 @@ const querySchema = z
     }
   });
 
-reportsRouter.get("/cash-summary", (req: AuthenticatedRequest, res) => {
+reportsRouter.get("/cash-summary", async (req: AuthenticatedRequest, res) => {
   const parsed = querySchema.safeParse(req.query ?? {});
   if (!parsed.success) {
     const customMsgs = parsed.error.issues
@@ -76,7 +86,7 @@ reportsRouter.get("/cash-summary", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
 
   try {
-    const data = getCashSummary(householdId, {
+    const data = await getCashSummary(householdId, {
       preset: q.preset,
       month: q.month,
       asOf: q.asOf,

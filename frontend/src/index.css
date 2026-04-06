@@ -703,6 +703,14 @@ a {
   box-shadow: var(--shadow-card);
 }
 
+.dashboard-page {
+  width: 100%;
+}
+
+.dashboard-page__hero {
+  margin-bottom: 1rem;
+}
+
 /* Payslip detail — definition lists */
 .payslip-detail-dl {
   display: grid;
@@ -881,6 +889,21 @@ textarea {
   border-radius: 8px;
   box-shadow: var(--shadow-float);
   overflow: hidden;
+}
+
+/* Portaled to document.body — position/top/left/maxHeight set inline (fixed; avoids table overflow clip). */
+.hs-picker__menu--portal {
+  position: fixed;
+  min-width: 24rem;
+  max-width: min(42rem, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.hs-picker__menu--portal .hs-picker__panes {
+  flex: 1;
+  min-height: 0;
 }
 
 .hs-picker__search-wrap {
@@ -1375,6 +1398,12 @@ table.ledger-table thead th {
   gap: 1rem 1.5rem;
   align-items: flex-end;
   margin-top: 0.75rem;
+}
+
+.dashboard-controls--period {
+  padding-top: 0.75rem;
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--color-border, #e2e8f0);
 }
 
 .dashboard-controls label {

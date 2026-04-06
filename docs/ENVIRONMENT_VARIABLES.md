@@ -19,7 +19,7 @@ The API and **`scripts/db.sh`** use **`DATABASE_*`** only (no SQLite / `DB_PATH`
 
 Migrations: [`backend/db/migrations_pg/`](../backend/db/migrations_pg/). Seeds: [`backend/db/seeds_pg/`](../backend/db/seeds_pg/) (and `seeds_pg/dev/` for sample accounts). Legacy SQLite artifacts under `backend/db/migrations/` and `seeds/` are **not** applied by the app.
 
-**Reset local data:** `npm run db:cleanup` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes` (drops `public` on the DB above, then migrations + bootstrap + **dev sample accounts** by default). For bootstrap only: `npm run db:cleanup -- --no-dev-seeds`.
+**Reset local data:** `npm run db:cleanup -- --yes` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) (drops `public`, then migrations + **bootstrap seed only**). Add **`--with-dev-seeds`** after `--yes` to also load sample BoA/Chase/Citi/Marcus `financial_account` rows.
 
 See [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md) and [`RUNBOOK.md`](RUNBOOK.md).
 

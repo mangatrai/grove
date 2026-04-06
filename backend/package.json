@@ -11,23 +11,24 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
-    "test": "bash -c 'export MODE=TEST; unset DB_PATH; bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed --dev-seeds && vitest run'"
+    "test": "bash -c 'export MODE=TEST; bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed --dev-seeds && vitest run'"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^12.4.1",
     "csv-parse": "^5.5.6",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "pdf-parse": "^1.1.1",
+    "postgres": "^3.4.8",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/archiver": "^7.0.0",
     "@types/bcryptjs": "^2.4.6",
-    "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/multer": "^2.0.0",

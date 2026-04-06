@@ -1,72 +1,81 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
-import { db } from "../src/db/sqlite.js";
+import { qGet } from "../src/db/query.js";
 import { classifyWithRules, type DbCategoryRule } from "../src/modules/category/category-rules.js";
 import { DEFAULT_CATEGORY_IDS } from "../src/modules/category/category-ids.js";
 import { listEnabledDbRulesForClassification } from "../src/modules/category/category-rules.service.js";
 import { normalizeDescriptionForFingerprint } from "../src/modules/canonical/transaction-fingerprint.js";
 
-const householdId = (
-  db.prepare(`SELECT household_id AS h FROM app_user WHERE email = ?`).get("owner@example.com") as { h: string }
-).h;
+let householdId: string;
 
-function classifyNormalized(norm: string, signedAmount: number) {
-  const rules = listEnabledDbRulesForClassification(householdId);
+beforeAll(async () => {
+  const row = await qGet<{ h: string }>(
+    `SELECT household_id AS h FROM app_user WHERE email = ?`,
+    "owner@example.com"
+  );
+  if (!row) {
+    throw new Error("seed owner missing");
+  }
+  householdId = row.h;
+});
+
+async function classifyNormalized(norm: string, signedAmount: number) {
+  const rules = await listEnabledDbRulesForClassification(householdId);
   return classifyWithRules(norm, signedAmount, rules);
 }
 
 describe("category rules (Epic 5.1)", () => {
-  it("classifies inflow payroll as Income->Salary", () => {
+  it("classifies inflow payroll as Income->Salary", async () => {
     const n = normalizeDescriptionForFingerprint("ADP PAYROLL");
-    const r = classifyNormalized(n, 3000);
+    const r = await classifyNormalized(n, 3000);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.incomeSalary);
   });
 
-  it("classifies inflow interest as Income->Interest", () => {
+  it("classifies inflow interest as Income->Interest", async () => {
     const n = normalizeDescriptionForFingerprint("INT PYMT");
-    const r = classifyNormalized(n, 12.34);
+    const r = await classifyNormalized(n, 12.34);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.incomeInterest);
   });
 
-  it("classifies inflow dividends as Income->Dividends", () => {
+  it("classifies inflow dividends as Income->Dividends", async () => {
     const n = normalizeDescriptionForFingerprint("VANGUARD DIVIDEND");
-    const r = classifyNormalized(n, 56.78);
+    const r = await classifyNormalized(n, 56.78);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.incomeDividends);
   });
 
-  it("classifies inflow rental income as Income->Rental income", () => {
+  it("classifies inflow rental income as Income->Rental income", async () => {
     const n = normalizeDescriptionForFingerprint("RENTAL INCOME");
-    const r = classifyNormalized(n, 1000);
+    const r = await classifyNormalized(n, 1000);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.incomeRentalIncome);
   });
 
-  it("classifies inflow refunds as Income->Refunds", () => {
+  it("classifies inflow refunds as Income->Refunds", async () => {
     const n = normalizeDescriptionForFingerprint("AMZ REFUND");
-    const r = classifyNormalized(n, 10);
+    const r = await classifyNormalized(n, 10);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.incomeRefunds);
   });
 
-  it("classifies grocery merchants on debit", () => {
+  it("classifies grocery merchants on debit", async () => {
     const n = normalizeDescriptionForFingerprint("WHOLE FOODS MK #1234");
-    const r = classifyNormalized(n, -45.2);
+    const r = await classifyNormalized(n, -45.2);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.groceries);
   });
 
-  it("classifies coffee shops before grocery merchants", () => {
+  it("classifies coffee shops before grocery merchants", async () => {
     const n = normalizeDescriptionForFingerprint("STARBUCKS STORE 1234");
-    const r = classifyNormalized(n, -6.5);
+    const r = await classifyNormalized(n, -6.5);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.coffee);
   });
 
-  it("classifies dining delivery keywords", () => {
+  it("classifies dining delivery keywords", async () => {
     const n = normalizeDescriptionForFingerprint("DOORDASH SUBSCRIPTION");
-    const r = classifyNormalized(n, -12);
+    const r = await classifyNormalized(n, -12);
     expect(r.categoryId).toBe(DEFAULT_CATEGORY_IDS.diningOut);
   });
 
-  it("returns null for unmatched debit", () => {
+  it("returns null for unmatched debit", async () => {
     const n = normalizeDescriptionForFingerprint("XYZ MYSTERY CO");
-    const r = classifyNormalized(n, -10);
+    const r = await classifyNormalized(n, -10);
     expect(r.categoryId).toBeNull();
   });
 

@@ -1,26 +1,27 @@
 #!/usr/bin/env bash
-# Resets Postgres `public` schema, reapplies migrations, then seeds.
-# Default: bootstrap + dev sample accounts (same as historical "full dev reset").
-# Pass --no-dev-seeds for bootstrap-only (no BOA/Chase/Markus sample accounts).
+# Resets Postgres `public` schema, reapplies migrations, then bootstrap seed only.
+# Default: wipe + minimal app data (no sample bank accounts).
+# Pass --with-dev-seeds to also load dev_0002/dev_0003 (BoA/Citi/Chase/Marcus fixtures).
 # Stop the backend first so it does not keep stale connections to dropped objects.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 YES=false
-DEV_SEEDS=true
+DEV_SEEDS=false
 for arg in "$@"; do
   case "$arg" in
     --yes) YES=true ;;
+    --with-dev-seeds) DEV_SEEDS=true ;;
     --no-dev-seeds) DEV_SEEDS=false ;;
   esac
 done
 
 if [[ "$YES" != "true" ]]; then
   echo "Refusing cleanup without --yes flag."
-  echo "Usage: bash scripts/db-cleanup.sh --yes [--no-dev-seeds]"
-  echo "  Drops/recreates public schema on DATABASE_* from .env, then runs migrations + seed."
-  echo "  Default reapplies dev seeds (sample financial accounts). Use --no-dev-seeds for bootstrap only."
+  echo "Usage: bash scripts/db-cleanup.sh --yes [--with-dev-seeds]"
+  echo "  Drops/recreates public schema on DATABASE_* from .env, then migrations + bootstrap seed."
+  echo "  Default: bootstrap only. Add --with-dev-seeds for sample financial_account rows."
   exit 1
 fi
 

@@ -1,7 +1,15 @@
-import { db } from "../../db/sqlite.js";
+import { qAll, qGet } from "../../db/query.js";
 import { getHouseholdMonthlySavingsTarget } from "../household/household.service.js";
 
-export type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90" | "custom";
+export type CashPreset =
+  | "month"
+  | "ytd"
+  | "rolling_7"
+  | "rolling_30"
+  | "rolling_90"
+  | "rolling_180"
+  | "prev_calendar_year"
+  | "custom";
 
 /** Inclusive span guard for `dateFrom`/`dateTo` custom ranges (API). */
 export const CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS = 366;
@@ -326,10 +334,16 @@ function buildRangeLabel(preset: CashPreset, start: string, end: string, month?:
     }
     case "ytd":
       return `Year to date (${start} – ${end})`;
+    case "rolling_7":
+      return `Last 7 days (${start} – ${end})`;
     case "rolling_30":
       return `Last 30 days (${start} – ${end})`;
     case "rolling_90":
       return `Last 90 days (${start} – ${end})`;
+    case "rolling_180":
+      return `Last 180 days (${start} – ${end})`;
+    case "prev_calendar_year":
+      return `Previous calendar year (${start} – ${end})`;
     default:
       return `${start} – ${end}`;
   }
@@ -382,6 +396,10 @@ export function resolveCashRange(input: CashSummaryInput): {
       end = asOf;
       break;
     }
+    case "rolling_7":
+      end = asOf;
+      start = daysBefore(asOf, 6);
+      break;
     case "rolling_30":
       end = asOf;
       start = daysBefore(asOf, 29);
@@ -390,6 +408,19 @@ export function resolveCashRange(input: CashSummaryInput): {
       end = asOf;
       start = daysBefore(asOf, 89);
       break;
+    case "rolling_180":
+      end = asOf;
+      start = daysBefore(asOf, 179);
+      break;
+    case "prev_calendar_year": {
+      const y = Number(asOf.slice(0, 4)) - 1;
+      if (!Number.isFinite(y)) {
+        throw new Error("INVALID_PRESET");
+      }
+      start = `${y}-01-01`;
+      end = `${y}-12-31`;
+      break;
+    }
     default:
       throw new Error("INVALID_PRESET");
   }
@@ -440,35 +471,40 @@ function transferReportingExclusionClause(tcAlias = "tc"): string {
            )`;
 }
 
-function aggregateForRange(
+async function aggregateForRange(
   householdId: string,
   start: string,
   end: string,
   accountId?: string,
   ownerScope?: "household" | "person",
   ownerPersonProfileId?: string
-): CashSummaryHousehold {
+): Promise<CashSummaryHousehold> {
   const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
-  const row = db
-    .prepare(
-      `SELECT
+  const row = await qGet<{
+    inflows: string | number;
+    outflows: string | number;
+    net: string | number;
+    cnt: string | number;
+  }>(
+    `SELECT
          COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
          COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows,
          COALESCE(SUM(tc.amount), 0) AS net,
-         COUNT(*) AS cnt
+         COUNT(*)::int AS cnt
        FROM transaction_canonical tc
        WHERE tc.household_id = ?
          AND tc.status = 'posted'
          AND tc.txn_date >= ? AND tc.txn_date <= ?
          ${transferReportingExclusionClause("tc")}
-         ${acctSql}`
-    )
-    .get(householdId, start, end, ...acctParams) as {
-    inflows: number;
-    outflows: number;
-    net: number;
-    cnt: number;
-  };
+         ${acctSql}`,
+    householdId,
+    start,
+    end,
+    ...acctParams
+  );
+  if (!row) {
+    return { inflows: 0, outflows: 0, net: 0, transactionCount: 0 };
+  }
 
   return {
     inflows: roundMoney(Number(row.inflows)),
@@ -510,6 +546,18 @@ function resolveComparisonRanges(_input: CashSummaryInput, range: CashSummaryRan
     };
   }
 
+  if (range.preset === "prev_calendar_year") {
+    const y = Number(range.start.slice(0, 4));
+    const prevY = y - 1;
+    return {
+      previous: {
+        label: "Prior calendar year",
+        start: `${prevY}-01-01`,
+        end: `${prevY}-12-31`
+      }
+    };
+  }
+
   // rolling windows compare against the immediately preceding window length.
   const dayCountInclusive =
     Math.round(
@@ -534,26 +582,34 @@ function computeDelta(current: CashSummaryHousehold, baseline: CashSummaryHouseh
   };
 }
 
-function aggregateByAccount(
+async function aggregateByAccount(
   householdId: string,
   start: string,
   end: string,
   accountId?: string,
   ownerScope?: "household" | "person",
   ownerPersonProfileId?: string
-): CashSummaryAccountRow[] {
+): Promise<CashSummaryAccountRow[]> {
   const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
-  const rows = db
-    .prepare(
-      `SELECT
-         tc.account_id AS accountId,
+  const rows = await qAll<{
+    accountId: string;
+    institution: string;
+    accountType: string;
+    accountMask: string | null;
+    inflows: string | number;
+    outflows: string | number;
+    net: string | number;
+    cnt: string | number;
+  }>(
+    `SELECT
+         tc.account_id AS "accountId",
          fa.institution AS institution,
-         fa.type AS accountType,
-         fa.account_mask AS accountMask,
+         fa.type AS "accountType",
+         fa.account_mask AS "accountMask",
          COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
          COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows,
          COALESCE(SUM(tc.amount), 0) AS net,
-         COUNT(*) AS cnt
+         COUNT(*)::int AS cnt
        FROM transaction_canonical tc
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
        WHERE tc.household_id = ?
@@ -561,19 +617,13 @@ function aggregateByAccount(
          AND tc.txn_date >= ? AND tc.txn_date <= ?
          ${transferReportingExclusionClause("tc")}
          ${acctSql}
-       GROUP BY tc.account_id
-       ORDER BY fa.institution, fa.account_mask`
-    )
-    .all(householdId, start, end, ...acctParams) as Array<{
-    accountId: string;
-    institution: string;
-    accountType: string;
-    accountMask: string | null;
-    inflows: number;
-    outflows: number;
-    net: number;
-    cnt: number;
-  }>;
+       GROUP BY tc.account_id, fa.institution, fa.type, fa.account_mask
+       ORDER BY fa.institution, fa.account_mask`,
+    householdId,
+    start,
+    end,
+    ...acctParams
+  );
 
   return rows.map((r) => ({
     accountId: r.accountId,
@@ -587,7 +637,7 @@ function aggregateByAccount(
   }));
 }
 
-function aggregateByCategory(
+async function aggregateByCategory(
   householdId: string,
   start: string,
   end: string,
@@ -595,12 +645,12 @@ function aggregateByCategory(
   ownerScope: "household" | "person" | undefined,
   ownerPersonProfileId: string | undefined,
   rollup: "leaf" | "parent"
-): CashSummaryCategoryRow[] {
+): Promise<CashSummaryCategoryRow[]> {
   const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
 
   const leafQuery = `SELECT
-         tc.category_id AS categoryId,
-         COALESCE(c.name, 'Uncategorized') AS categoryName,
+         tc.category_id AS "categoryId",
+         MAX(COALESCE(c.name, 'Uncategorized')) AS "categoryName",
          COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
          COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows,
          COALESCE(SUM(tc.amount), 0) AS net,
@@ -616,8 +666,8 @@ function aggregateByCategory(
        ORDER BY outflows DESC, inflows DESC`;
 
   const parentQuery = `SELECT
-         CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END AS categoryId,
-         CASE WHEN tc.category_id IS NULL THEN 'Uncategorized' ELSE COALESCE(p.name, c.name) END AS categoryName,
+         CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END AS "categoryId",
+         MAX(CASE WHEN tc.category_id IS NULL THEN 'Uncategorized' ELSE COALESCE(p.name, c.name) END) AS "categoryName",
          COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
          COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows,
          COALESCE(SUM(tc.amount), 0) AS net,
@@ -633,16 +683,14 @@ function aggregateByCategory(
        GROUP BY CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END
        ORDER BY outflows DESC, inflows DESC`;
 
-  const rows = db
-    .prepare(rollup === "parent" ? parentQuery : leafQuery)
-    .all(householdId, start, end, ...acctParams) as Array<{
+  const rows = await qAll<{
     categoryId: string | null;
     categoryName: string;
-    inflows: number;
-    outflows: number;
-    net: number;
-    cnt: number;
-  }>;
+    inflows: string | number;
+    outflows: string | number;
+    net: string | number;
+    cnt: string | number;
+  }>(rollup === "parent" ? parentQuery : leafQuery, householdId, start, end, ...acctParams);
 
   return rows.map((r) => ({
     categoryId: r.categoryId,
@@ -654,13 +702,13 @@ function aggregateByCategory(
   }));
 }
 
-function monthlyTrend(
+async function monthlyTrend(
   householdId: string,
   rangeEnd: string,
   accountId?: string,
   ownerScope?: "household" | "person",
   ownerPersonProfileId?: string
-): CashSummaryTrendPoint[] {
+): Promise<CashSummaryTrendPoint[]> {
   const endYm = rangeEnd.slice(0, 7);
   const points: CashSummaryTrendPoint[] = [];
   const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
@@ -671,9 +719,12 @@ function monthlyTrend(
     const monthEndFull = lastDayOfMonth(ym);
     const capEnd = ym === endYm ? minDate(monthEndFull, rangeEnd) : monthEndFull;
 
-    const row = db
-      .prepare(
-        `SELECT
+    const row = await qGet<{
+      inflows: string | number;
+      outflows: string | number;
+      net: string | number;
+    }>(
+      `SELECT
            COALESCE(SUM(CASE WHEN tc.amount > 0 THEN tc.amount ELSE 0 END), 0) AS inflows,
            COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows,
            COALESCE(SUM(tc.amount), 0) AS net
@@ -682,13 +733,16 @@ function monthlyTrend(
            AND tc.status = 'posted'
            AND tc.txn_date >= ? AND tc.txn_date <= ?
            ${transferReportingExclusionClause("tc")}
-           ${acctSql}`
-      )
-      .get(householdId, monthStart, capEnd, ...acctParams) as {
-      inflows: number;
-      outflows: number;
-      net: number;
-    };
+           ${acctSql}`,
+      householdId,
+      monthStart,
+      capEnd,
+      ...acctParams
+    );
+    if (!row) {
+      points.push({ month: ym, inflows: 0, outflows: 0, net: 0 });
+      continue;
+    }
 
     points.push({
       month: ym,
@@ -701,21 +755,21 @@ function monthlyTrend(
   return points;
 }
 
-function buildMonthlyOutflowsByCategory(
+async function buildMonthlyOutflowsByCategory(
   householdId: string,
   rangeEnd: string,
   accountId: string | undefined,
   ownerScope: "household" | "person" | undefined,
   ownerPersonProfileId: string | undefined,
   rollup: "leaf" | "parent"
-): CashSummaryMonthCategoryOutflows[] {
+): Promise<CashSummaryMonthCategoryOutflows[]> {
   const endYm = rangeEnd.slice(0, 7);
   const points: CashSummaryMonthCategoryOutflows[] = [];
   const { sql: acctSql, params: acctParams } = ownershipFilterClause(accountId, ownerScope, ownerPersonProfileId);
 
   const leafMonthly = `SELECT
-           tc.category_id AS categoryId,
-           COALESCE(c.name, 'Uncategorized') AS categoryName,
+           tc.category_id AS "categoryId",
+           MAX(COALESCE(c.name, 'Uncategorized')) AS "categoryName",
            COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows
          FROM transaction_canonical tc
          LEFT JOIN category c ON c.id = tc.category_id
@@ -729,8 +783,8 @@ function buildMonthlyOutflowsByCategory(
          ORDER BY outflows DESC`;
 
   const parentMonthly = `SELECT
-           CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END AS categoryId,
-           CASE WHEN tc.category_id IS NULL THEN 'Uncategorized' ELSE COALESCE(p.name, c.name) END AS categoryName,
+           CASE WHEN tc.category_id IS NULL THEN NULL ELSE COALESCE(p.id, c.id) END AS "categoryId",
+           MAX(CASE WHEN tc.category_id IS NULL THEN 'Uncategorized' ELSE COALESCE(p.name, c.name) END) AS "categoryName",
            COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS outflows
          FROM transaction_canonical tc
          LEFT JOIN category c ON c.id = tc.category_id
@@ -750,13 +804,11 @@ function buildMonthlyOutflowsByCategory(
     const monthEndFull = lastDayOfMonth(ym);
     const capEnd = ym === endYm ? minDate(monthEndFull, rangeEnd) : monthEndFull;
 
-    const rows = db
-      .prepare(rollup === "parent" ? parentMonthly : leafMonthly)
-      .all(householdId, monthStart, capEnd, ...acctParams) as Array<{
+    const rows = await qAll<{
       categoryId: string | null;
       categoryName: string;
-      outflows: number;
-    }>;
+      outflows: string | number;
+    }>(rollup === "parent" ? parentMonthly : leafMonthly, householdId, monthStart, capEnd, ...acctParams);
 
     points.push({
       month: ym,
@@ -771,24 +823,26 @@ function buildMonthlyOutflowsByCategory(
   return points;
 }
 
-export function assertAccountInHousehold(accountId: string, householdId: string): boolean {
-  const row = db
-    .prepare(`SELECT 1 AS ok FROM financial_account WHERE id = ? AND household_id = ?`)
-    .get(accountId, householdId) as { ok: number } | undefined;
+export async function assertAccountInHousehold(accountId: string, householdId: string): Promise<boolean> {
+  const row = await qGet<{ ok: number }>(
+    `SELECT 1 AS ok FROM financial_account WHERE id = ? AND household_id = ?`,
+    accountId,
+    householdId
+  );
   return Boolean(row);
 }
 
-export function getCashSummary(householdId: string, input: CashSummaryInput): CashSummaryResult {
+export async function getCashSummary(householdId: string, input: CashSummaryInput): Promise<CashSummaryResult> {
   const { range, asOf } = resolveCashRange(input);
 
-  if (input.accountId && !assertAccountInHousehold(input.accountId, householdId)) {
+  if (input.accountId && !(await assertAccountInHousehold(input.accountId, householdId))) {
     throw new Error("ACCOUNT_NOT_FOUND");
   }
   if (input.ownerScope === "person" && !input.ownerPersonProfileId) {
     throw new Error("OWNER_PERSON_REQUIRED");
   }
 
-  const household = aggregateForRange(
+  const household = await aggregateForRange(
     householdId,
     range.start,
     range.end,
@@ -797,7 +851,7 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
     input.ownerPersonProfileId
   );
   const comparisonRanges = resolveComparisonRanges(input, range);
-  const previousHousehold = aggregateForRange(
+  const previousHousehold = await aggregateForRange(
     householdId,
     comparisonRanges.previous.start,
     comparisonRanges.previous.end,
@@ -806,7 +860,7 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
     input.ownerPersonProfileId
   );
   const yearOverYearHousehold = comparisonRanges.yearOverYear
-    ? aggregateForRange(
+    ? await aggregateForRange(
         householdId,
         comparisonRanges.yearOverYear.start,
         comparisonRanges.yearOverYear.end,
@@ -816,7 +870,7 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
       )
     : null;
   const byAccount = input.breakdown
-    ? aggregateByAccount(
+    ? await aggregateByAccount(
         householdId,
         range.start,
         range.end,
@@ -826,32 +880,31 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
       )
     : null;
   const rollup = input.categoryRollup ?? "parent";
-  const byCategory = input.categoryBreakdown
-    ? (() => {
-        const current = aggregateByCategory(
-          householdId,
-          range.start,
-          range.end,
-          input.accountId,
-          input.ownerScope,
-          input.ownerPersonProfileId,
-          rollup
-        );
-        const previous = aggregateByCategory(
-          householdId,
-          comparisonRanges.previous.start,
-          comparisonRanges.previous.end,
-          input.accountId,
-          input.ownerScope,
-          input.ownerPersonProfileId,
-          rollup
-        );
-        return mergeCategoryPreviousAndDeltas(current, previous);
-      })()
-    : null;
-  const trend = monthlyTrend(householdId, range.end, input.accountId, input.ownerScope, input.ownerPersonProfileId);
+  let byCategory: CashSummaryCategoryRow[] | null = null;
+  if (input.categoryBreakdown) {
+    const current = await aggregateByCategory(
+      householdId,
+      range.start,
+      range.end,
+      input.accountId,
+      input.ownerScope,
+      input.ownerPersonProfileId,
+      rollup
+    );
+    const previous = await aggregateByCategory(
+      householdId,
+      comparisonRanges.previous.start,
+      comparisonRanges.previous.end,
+      input.accountId,
+      input.ownerScope,
+      input.ownerPersonProfileId,
+      rollup
+    );
+    byCategory = mergeCategoryPreviousAndDeltas(current, previous);
+  }
+  const trend = await monthlyTrend(householdId, range.end, input.accountId, input.ownerScope, input.ownerPersonProfileId);
   const monthlyOutflowsByCategory = input.categoryBreakdown
-    ? buildMonthlyOutflowsByCategory(
+    ? await buildMonthlyOutflowsByCategory(
         householdId,
         range.end,
         input.accountId,
@@ -861,7 +914,7 @@ export function getCashSummary(householdId: string, input: CashSummaryInput): Ca
       )
     : null;
 
-  const monthlyTarget = getHouseholdMonthlySavingsTarget(householdId);
+  const monthlyTarget = await getHouseholdMonthlySavingsTarget(householdId);
   const spendingPower = buildSpendingPower(household, range.start, range.end, monthlyTarget);
 
   return {

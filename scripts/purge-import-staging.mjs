@@ -1,24 +1,23 @@
 #!/usr/bin/env node
 /**
- * Epic 2.4 — Purge staged import files under data/imports/<sessionId>/ and clear stored_path in DB.
+ * Epic 2.4 — Purge staged import files under data/imports/<sessionId>/ and clear stored_path in Postgres.
  *
  * Default: dry-run (prints actions only). Destructive runs require --execute --i-understand.
  *
- * IMPORTANT: TEST and PROD use different SQLite files but the SAME data/imports/ tree. Use
- *   --mode=PROD   or   --mode=TEST   to match the database where your sessions live (see .env MODE).
+ * Uses DATABASE_* from repo root .env (same as the backend).
  *
  * Usage:
  *   node scripts/purge-import-staging.mjs --all-sessions --dry-run
- *   node scripts/purge-import-staging.mjs --mode=PROD --all-sessions --execute --i-understand
- *   node scripts/purge-import-staging.mjs --orphan-dirs --dry-run
+ *   node scripts/purge-import-staging.mjs --all-sessions --execute --i-understand
  *
- * See docs/IMPORT_STAGING_PURGE.md
+ * See docs/IMPORT_STAGING_PURGE.md (may still mention SQLite in places).
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+
+import postgres from "postgres";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
@@ -52,94 +51,47 @@ function loadEnvFile() {
   }
 }
 
-function resolveDbPath() {
-  const mode = (process.env.MODE || "TEST").toUpperCase();
-  if (process.env.DB_PATH) {
-    const p = process.env.DB_PATH;
-    return path.isAbsolute(p) ? p : path.join(repoRoot, p);
+async function connectSql() {
+  const host = process.env.DATABASE_HOST;
+  const user = process.env.DATABASE_USER;
+  const database = process.env.DATABASE_NAME;
+  if (!host || !user || !database) {
+    console.error("Missing DATABASE_HOST, DATABASE_USER, or DATABASE_NAME");
+    process.exit(1);
   }
-  const rel =
-    mode === "PROD"
-      ? process.env.DB_PATH_PROD || "data/household-finance-prod.sqlite"
-      : process.env.DB_PATH_TEST || "data/household-finance-test.sqlite";
-  return path.join(repoRoot, rel.replace(/^\.\//, ""));
+  const port = Number(process.env.DATABASE_PORT || "5432");
+  const password = process.env.DATABASE_PASSWORD ?? "";
+  const ssl =
+    String(process.env.DATABASE_SSL || "1").trim() === "0" ||
+    String(process.env.DATABASE_SSL || "").toLowerCase() === "false"
+      ? false
+      : "require";
+  return postgres({
+    host,
+    port,
+    database,
+    username: user,
+    password,
+    max: 5,
+    ssl
+  });
 }
 
-/** Session ids that exist in either test or prod DB (same disk tree for both). */
-function getSessionIdsUnionFromBothDbs() {
-  const paths = [
-    path.join(repoRoot, "data", "household-finance-test.sqlite"),
-    path.join(repoRoot, "data", "household-finance-prod.sqlite")
-  ];
-  const set = new Set();
-  for (const p of paths) {
-    if (!fs.existsSync(p)) {
-      continue;
-    }
-    const db = new Database(p);
-    try {
-      const rows = db.prepare(`SELECT id FROM import_session`).all();
-      for (const r of rows) {
-        set.add(r.id);
-      }
-    } finally {
-      db.close();
-    }
-  }
-  return set;
-}
-
-/**
- * Remove UUID-named dirs under imports/ that are not import_session ids in ANY local DB file.
- * Does not touch `custom/` (reserved). Does not update DB (orphans have no session row here).
- */
-function runOrphanDirCleanup(importsRoot, dryRun) {
-  if (!fs.existsSync(importsRoot)) {
-    return;
-  }
-  const protectedIds = getSessionIdsUnionFromBothDbs();
-  const entries = fs.readdirSync(importsRoot, { withFileTypes: true });
-  for (const ent of entries) {
-    if (!ent.isDirectory()) {
-      continue;
-    }
-    const name = ent.name;
-    if (name === "custom") {
-      continue;
-    }
-    if (!UUID_DIR.test(name)) {
-      continue;
-    }
-    if (protectedIds.has(name)) {
-      continue;
-    }
-    const dir = path.join(importsRoot, name);
-    if (dryRun) {
-      console.log(`[dry-run] Would remove orphan dir (no import_session in test/prod DB): ${dir}`);
-    } else {
-      fs.rmSync(dir, { recursive: true, force: true });
-      console.log(`Removed orphan dir: ${dir}`);
-    }
-  }
+async function getSessionIdsFromDb(sql) {
+  const rows = await sql`SELECT id FROM import_session`;
+  return new Set(rows.map((r) => r.id));
 }
 
 function printHelp() {
-  console.log(`purge-import-staging.mjs — remove data/imports/<sessionId>/ and clear import_file.stored_path
+  console.log(`purge-import-staging.mjs — remove data/imports/<sessionId>/ and clear import_file.stored_path (Postgres)
 
-TEST and PROD use different SQLite files but the SAME data/imports/ folder. If your imports are in
-the prod DB, you must use  --mode=PROD  or imports will look "invisible" to this script.
-
-  --mode=TEST|PROD       Override MODE for which database file to use (default: .env MODE)
-
-Scope (pick exactly one, unless using --orphan-dirs as the only scope):
   --session=<uuid>           One import session
   --older-than-days=<n>      Sessions with started_at older than N days
-  --all-sessions             Every session id in import_session (for the selected DB only)
-  --orphan-dirs              Only remove UUID-named dirs under data/imports/ that are NOT in
-                             either test or prod import_session (safe for shared disk tree)
+  --all-sessions             Every session id in import_session
+  --orphan-dirs              Remove UUID dirs under data/imports/ not in import_session
 
-Optional after a main scope (not with --orphan-dirs-only duplicate):
-  --also-orphans             After main work, also run orphan-dir cleanup (same as --orphan-dirs logic)
+Optional:
+  --also-orphans             After main work, also run orphan-dir cleanup
 
 Mode:
   --dry-run                  Print actions only (default if --execute not passed)
@@ -170,27 +122,41 @@ function printRemainingFooter(importsRoot) {
   }
 }
 
-function main() {
+async function runOrphanDirCleanup(sql, importsRoot, dryRun) {
+  if (!fs.existsSync(importsRoot)) {
+    return;
+  }
+  const protectedIds = await getSessionIdsFromDb(sql);
+  const entries = fs.readdirSync(importsRoot, { withFileTypes: true });
+  for (const ent of entries) {
+    if (!ent.isDirectory()) {
+      continue;
+    }
+    const name = ent.name;
+    if (name === "custom") {
+      continue;
+    }
+    if (!UUID_DIR.test(name)) {
+      continue;
+    }
+    if (protectedIds.has(name)) {
+      continue;
+    }
+    const dir = path.join(importsRoot, name);
+    if (dryRun) {
+      console.log(`[dry-run] Would remove orphan dir (no import_session row): ${dir}`);
+    } else {
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.log(`Removed orphan dir: ${dir}`);
+    }
+  }
+}
+
+async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     printHelp();
     process.exit(0);
-  }
-
-  let cliMode = null;
-  for (const a of args) {
-    if (a.startsWith("--mode=")) {
-      cliMode = a.slice("--mode=".length).trim().toUpperCase();
-      if (cliMode !== "TEST" && cliMode !== "PROD") {
-        console.error("Error: --mode must be TEST or PROD");
-        process.exit(1);
-      }
-    }
-  }
-
-  loadEnvFile();
-  if (cliMode) {
-    process.env.MODE = cliMode;
   }
 
   let dryRun = true;
@@ -241,125 +207,118 @@ function main() {
     process.exit(1);
   }
 
+  loadEnvFile();
   const importsRoot = path.join(repoRoot, "data", "imports");
 
-  if (orphanDirsOnly) {
-    const modeEffective = (process.env.MODE || "TEST").toUpperCase();
-    console.log(`Repository root: ${repoRoot}`);
-    console.log(`MODE (from .env / --mode): ${modeEffective}`);
-    console.log(`Staging directory: ${importsRoot}`);
-    console.log(`Run mode: ${dryRun ? "DRY-RUN (no changes)" : "EXECUTE"}`);
-    console.log(`Orphan dirs: remove UUID folders not listed in import_session in EITHER test or prod DB.\n`);
-    runOrphanDirCleanup(importsRoot, dryRun);
-    printRemainingFooter(importsRoot);
-    console.log(dryRun ? "\nDry-run complete. Re-run with --execute --i-understand to apply." : "\nDone.");
-    process.exit(0);
-  }
+  const sql = await connectSql();
 
-  const mainScopes = [
-    sessionId,
-    olderThanDays != null && !Number.isNaN(olderThanDays),
-    allSessions
-  ].filter(Boolean).length;
-  if (mainScopes !== 1) {
-    console.error("Error: specify exactly one of --session=UUID | --older-than-days=N | --all-sessions");
-    printHelp();
-    process.exit(1);
-  }
+  try {
+    if (orphanDirsOnly) {
+      console.log(`Repository root: ${repoRoot}`);
+      console.log(`Staging directory: ${importsRoot}`);
+      console.log(`Run mode: ${dryRun ? "DRY-RUN (no changes)" : "EXECUTE"}`);
+      console.log(`Orphan dirs: remove UUID folders not listed in import_session.\n`);
+      await runOrphanDirCleanup(sql, importsRoot, dryRun);
+      printRemainingFooter(importsRoot);
+      console.log(dryRun ? "\nDry-run complete. Re-run with --execute --i-understand to apply." : "\nDone.");
+      return;
+    }
 
-  if (olderThanDays != null && (Number.isNaN(olderThanDays) || olderThanDays < 0)) {
-    console.error("Error: --older-than-days must be a non-negative integer.");
-    process.exit(1);
-  }
-
-  const dbPath = resolveDbPath();
-  if (!fs.existsSync(dbPath)) {
-    console.error("Database file not found:", dbPath);
-    process.exit(1);
-  }
-
-  const db = new Database(dbPath);
-  db.pragma("foreign_keys = ON");
-
-  /** @type {string[]} */
-  let sessionIds = [];
-
-  if (sessionId) {
-    const row = db.prepare(`SELECT id FROM import_session WHERE id = ?`).get(sessionId);
-    if (!row) {
-      console.error("No import_session row for id:", sessionId);
-      db.close();
+    const mainScopes = [
+      sessionId,
+      olderThanDays != null && !Number.isNaN(olderThanDays),
+      allSessions
+    ].filter(Boolean).length;
+    if (mainScopes !== 1) {
+      console.error("Error: specify exactly one of --session=UUID | --older-than-days=N | --all-sessions");
+      printHelp();
       process.exit(1);
     }
-    sessionIds = [sessionId];
-  } else if (olderThanDays != null) {
-    sessionIds = db
-      .prepare(
-        `SELECT id FROM import_session
-         WHERE datetime(started_at) < datetime('now', '-' || CAST(? AS TEXT) || ' days')`
-      )
-      .all(String(olderThanDays))
-      .map((r) => r.id);
-  } else {
-    sessionIds = db.prepare(`SELECT id FROM import_session`).all().map((r) => r.id);
-  }
 
-  const modeEffective = (process.env.MODE || "TEST").toUpperCase();
-  console.log(`Repository root: ${repoRoot}`);
-  console.log(`MODE (for DB path): ${modeEffective}`);
-  console.log(`Database file: ${dbPath}`);
-  console.log(`Staging directory (session dirs deleted here): ${importsRoot}`);
-  console.log(`Run mode: ${dryRun ? "DRY-RUN (no changes)" : "EXECUTE"}`);
-  console.log(`Sessions from THIS database targeted: ${sessionIds.length}`);
-  if (alsoOrphans) {
-    console.log(`Also: orphan-dir cleanup after (UUID dirs not in test or prod import_session).`);
-  }
-  console.log(
-    "\nNote: This does NOT delete import_session / import_file / transaction rows — only files on disk and stored_path in THIS database.\n"
-  );
-
-  if (sessionIds.length === 0) {
-    console.log("Nothing to do for session scope (no matching sessions).");
-    db.close();
-    if (alsoOrphans) {
-      runOrphanDirCleanup(importsRoot, dryRun);
+    if (olderThanDays != null && (Number.isNaN(olderThanDays) || olderThanDays < 0)) {
+      console.error("Error: --older-than-days must be a non-negative integer.");
+      process.exit(1);
     }
-    printRemainingFooter(importsRoot);
-    console.log(dryRun ? "\nDry-run complete." : "\nDone.");
-    process.exit(0);
-  }
 
-  const clearStmt = db.prepare(`UPDATE import_file SET stored_path = NULL WHERE session_id = ?`);
+    /** @type {string[]} */
+    let sessionIds = [];
 
-  for (const sid of sessionIds) {
-    const dir = path.join(importsRoot, sid);
-    const exists = fs.existsSync(dir);
-    if (dryRun) {
-      console.log(`[dry-run] Would remove directory: ${dir} (${exists ? "exists" : "missing"})`);
-      const cnt = db.prepare(`SELECT COUNT(*) AS c FROM import_file WHERE session_id = ?`).get(sid).c;
-      console.log(`[dry-run] Would set stored_path = NULL for ${cnt} import_file row(s) in session ${sid}`);
-    } else {
-      if (exists) {
-        fs.rmSync(dir, { recursive: true, force: true });
-        console.log(`Removed: ${dir}`);
-      } else {
-        console.log(`(no directory) ${dir}`);
+    if (sessionId) {
+      const row = await sql`SELECT id FROM import_session WHERE id = ${sessionId} LIMIT 1`;
+      if ([...row].length === 0) {
+        console.error("No import_session row for id:", sessionId);
+        process.exit(1);
       }
-      const info = clearStmt.run(sid);
-      console.log(`Updated import_file: cleared stored_path on ${info.changes} row(s) for session ${sid}`);
+      sessionIds = [sessionId];
+    } else if (olderThanDays != null) {
+      const rows = await sql.unsafe(
+        `SELECT id FROM import_session WHERE started_at < NOW() - $1::interval`,
+        [`${olderThanDays} days`]
+      );
+      sessionIds = rows.map((r) => r.id);
+    } else {
+      const rows = await sql`SELECT id FROM import_session`;
+      sessionIds = rows.map((r) => r.id);
     }
+
+    console.log(`Repository root: ${repoRoot}`);
+    console.log(`Staging directory: ${importsRoot}`);
+    console.log(`Run mode: ${dryRun ? "DRY-RUN (no changes)" : "EXECUTE"}`);
+    console.log(`Sessions targeted: ${sessionIds.length}`);
+    if (alsoOrphans) {
+      console.log(`Also: orphan-dir cleanup after.`);
+    }
+    console.log(
+      "\nNote: This does NOT delete import_session / import_file / transaction rows — only files on disk and stored_path.\n"
+    );
+
+    if (sessionIds.length === 0) {
+      console.log("Nothing to do for session scope (no matching sessions).");
+      if (alsoOrphans) {
+        await runOrphanDirCleanup(sql, importsRoot, dryRun);
+      }
+      printRemainingFooter(importsRoot);
+      console.log(dryRun ? "\nDry-run complete." : "\nDone.");
+      return;
+    }
+
+    for (const sid of sessionIds) {
+      const dir = path.join(importsRoot, sid);
+      const exists = fs.existsSync(dir);
+      if (dryRun) {
+        console.log(`[dry-run] Would remove directory: ${dir} (${exists ? "exists" : "missing"})`);
+        const cntRows = await sql`SELECT COUNT(*)::int AS c FROM import_file WHERE session_id = ${sid}`;
+        const cnt = Number(cntRows[0]?.c ?? 0);
+        console.log(`[dry-run] Would set stored_path = NULL for ${cnt} import_file row(s) in session ${sid}`);
+      } else {
+        if (exists) {
+          fs.rmSync(dir, { recursive: true, force: true });
+          console.log(`Removed: ${dir}`);
+        } else {
+          console.log(`(no directory) ${dir}`);
+        }
+        const upd = await sql`
+          UPDATE import_file SET stored_path = NULL WHERE session_id = ${sid}
+        `;
+        const n = Number(upd.count ?? 0);
+        console.log(`Updated import_file: cleared stored_path on ${n} row(s) for session ${sid}`);
+      }
+    }
+
+    if (alsoOrphans) {
+      console.log("\n--- Orphan dir pass ---\n");
+      await runOrphanDirCleanup(sql, importsRoot, dryRun);
+    }
+
+    printRemainingFooter(importsRoot);
+
+    console.log(dryRun ? "\nDry-run complete. Re-run with --execute --i-understand to apply." : "\nDone.");
+  } finally {
+    await sql.end({ timeout: 5 });
   }
-
-  db.close();
-
-  if (alsoOrphans) {
-    console.log("\n--- Orphan dir pass ---\n");
-    runOrphanDirCleanup(importsRoot, dryRun);
-  }
-
-  printRemainingFooter(importsRoot);
-
-  console.log(dryRun ? "\nDry-run complete. Re-run with --execute --i-understand to apply." : "\nDone.");
 }
 
-main();
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

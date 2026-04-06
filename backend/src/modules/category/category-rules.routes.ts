@@ -31,10 +31,10 @@ const amountScopeSchema = z.enum(["any", "credit_only", "debit_only"]);
 export const categoryRulesRouter = Router();
 categoryRulesRouter.use(requireAuth);
 
-categoryRulesRouter.get("/", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.get("/", async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
-  const rules = listCategoryRulesForHousehold(householdId);
-  const builtinRules = listGlobalCategoryRules().map((b) => ({
+  const rules = await listCategoryRulesForHousehold(householdId);
+  const builtinRules = (await listGlobalCategoryRules()).map((b) => ({
     origin: "builtin" as const,
     id: b.id,
     ruleKey: b.ruleKey,
@@ -69,7 +69,7 @@ const createBodySchema = z
     { message: "Provide pattern or patterns (multi-line / comma-separated)" }
   );
 
-categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/", async (req: AuthenticatedRequest, res) => {
   const parsed = createBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -81,7 +81,7 @@ categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
   const multi = typeof body.patterns === "string" && body.patterns.trim().length > 0;
 
   if (multi) {
-    const out = createCategoryRulesFromPatterns(householdId, {
+    const out = await createCategoryRulesFromPatterns(householdId, {
       patternsRaw: body.patterns!,
       matchType: body.matchType,
       categoryId: body.categoryId,
@@ -98,7 +98,7 @@ categoryRulesRouter.post("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const out = createCategoryRuleForHousehold(householdId, {
+  const out = await createCategoryRuleForHousehold(householdId, {
     pattern: body.pattern!,
     matchType: body.matchType,
     categoryId: body.categoryId,
@@ -137,14 +137,14 @@ const bulkHouseholdSchema = z.object({
   rules: z.array(bulkHouseholdRowSchema).min(1).max(2000)
 });
 
-categoryRulesRouter.post("/bulk", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/bulk", async (req: AuthenticatedRequest, res) => {
   const parsed = bulkHouseholdSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = bulkCreateCategoryRulesForHousehold(householdId, parsed.data.rules);
+  const out = await bulkCreateCategoryRulesForHousehold(householdId, parsed.data.rules);
   res.status(200).json({ created: out.created, errors: out.errors });
 });
 
@@ -171,14 +171,14 @@ const bulkBuiltinSchema = z.object({
   rules: z.array(bulkBuiltinRowSchema).min(1).max(2000)
 });
 
-categoryRulesRouter.post("/builtin/bulk", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/builtin/bulk", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = bulkBuiltinSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = bulkCreateGlobalCategoryRules(householdId, parsed.data.rules);
+  const out = await bulkCreateGlobalCategoryRules(householdId, parsed.data.rules);
   res.status(200).json({ created: out.created, errors: out.errors });
 });
 
@@ -193,7 +193,7 @@ const createBuiltinBodySchema = z.object({
   enabled: z.boolean().optional().default(true)
 });
 
-categoryRulesRouter.post("/builtin", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/builtin", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = createBuiltinBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -208,7 +208,7 @@ categoryRulesRouter.post("/builtin", requireRole(["owner", "admin"]), (req: Auth
       .replace(/\s+/g, "_")
       .replace(/[^a-z0-9_]/g, "")
       .slice(0, 80)}`;
-  const out = createGlobalCategoryRule({
+  const out = await createGlobalCategoryRule({
     ruleKey,
     pattern: b.pattern,
     matchType: b.matchType,
@@ -234,7 +234,7 @@ const testSchema = z.object({
   signedAmount: z.number().finite()
 });
 
-categoryRulesRouter.post("/test", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/test", async (req: AuthenticatedRequest, res) => {
   const parsed = testSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -242,7 +242,7 @@ categoryRulesRouter.post("/test", (req: AuthenticatedRequest, res) => {
   }
   const householdId = req.authUser!.householdId;
   const norm = normalizeDescriptionForFingerprint(parsed.data.description);
-  const dbRules = listEnabledDbRulesForClassification(householdId);
+  const dbRules = await listEnabledDbRulesForClassification(householdId);
   const classification = classifyWithRules(norm, parsed.data.signedAmount, dbRules);
   res.status(200).json({
     normalizedDescription: norm,
@@ -254,14 +254,14 @@ const recategorizeSchema = z.object({
   mode: z.enum(["uncategorized_only", "all"]).default("uncategorized_only")
 });
 
-categoryRulesRouter.post("/recategorize", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/recategorize", async (req: AuthenticatedRequest, res) => {
   const parsed = recategorizeSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const result = recategorizeHouseholdTransactions(householdId, parsed.data.mode);
+  const result = await recategorizeHouseholdTransactions(householdId, parsed.data.mode);
   res.status(200).json(result);
 });
 
@@ -276,14 +276,14 @@ const fromLedgerSchema = z.object({
   enabled: z.boolean().optional().default(true)
 });
 
-categoryRulesRouter.post("/from-ledger", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/from-ledger", async (req: AuthenticatedRequest, res) => {
   const parsed = fromLedgerSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = createRuleFromLedgerTransaction(householdId, parsed.data.transactionId, {
+  const out = await createRuleFromLedgerTransaction(householdId, parsed.data.transactionId, {
     categoryId: parsed.data.categoryId,
     matchType: parsed.data.matchType,
     scope: parsed.data.scope,
@@ -307,14 +307,14 @@ const previewSessionSchema = z.object({
   sessionId: z.string().uuid()
 });
 
-categoryRulesRouter.post("/rule-learning-preview", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/rule-learning-preview", async (req: AuthenticatedRequest, res) => {
   const parsed = previewSessionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = listRuleLearningPreviewForSession(parsed.data.sessionId, householdId);
+  const out = await listRuleLearningPreviewForSession(parsed.data.sessionId, householdId);
   if (!out.ok) {
     res.status(404).json({ message: "Session not found", code: out.code });
     return;
@@ -334,7 +334,7 @@ const patchSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
-categoryRulesRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   const parsed = patchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -342,7 +342,7 @@ categoryRulesRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
   }
 
   const householdId = req.authUser!.householdId;
-  const out = updateCategoryRuleForHousehold(householdId, req.params.id, parsed.data);
+  const out = await updateCategoryRuleForHousehold(householdId, req.params.id, parsed.data);
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {
       res.status(404).json({ message: "Rule not found", code: out.code });
@@ -368,13 +368,13 @@ const patchBuiltinSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
-categoryRulesRouter.patch("/builtin/:id", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.patch("/builtin/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = patchBuiltinSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  const out = updateGlobalCategoryRule(req.params.id, parsed.data);
+  const out = await updateGlobalCategoryRule(req.params.id, parsed.data);
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {
       res.status(404).json({ message: "Rule not found", code: out.code });
@@ -390,8 +390,8 @@ categoryRulesRouter.patch("/builtin/:id", requireRole(["owner", "admin"]), (req:
   res.status(200).json({ rule: out.data });
 });
 
-categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
-  const out = deleteGlobalCategoryRule(req.params.id);
+categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const out = await deleteGlobalCategoryRule(req.params.id);
   if (!out.ok) {
     res.status(404).json({ message: "Rule not found", code: out.code });
     return;
@@ -400,15 +400,15 @@ categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), (req
 });
 
 /** Delete all household rules for the signed-in home (built-in globals unchanged). Must be registered before /:id. */
-categoryRulesRouter.delete("/household", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.delete("/household", async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
-  const { deleted } = deleteAllCategoryRulesForHousehold(householdId);
+  const { deleted } = await deleteAllCategoryRulesForHousehold(householdId);
   res.status(200).json({ deleted });
 });
 
-categoryRulesRouter.delete("/:id", (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
-  const out = deleteCategoryRuleForHousehold(householdId, req.params.id);
+  const out = await deleteCategoryRuleForHousehold(householdId, req.params.id);
   if (!out.ok) {
     res.status(404).json({ message: "Rule not found", code: out.code });
     return;

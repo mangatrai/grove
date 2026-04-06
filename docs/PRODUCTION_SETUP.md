@@ -64,7 +64,7 @@ If you leave **work directory** at the root, **keep** `-w backend` on the start 
 This app is currently SQLite-first in production. Before switching to hosted Postgres/Koyeb, track and complete:
 
 1. DB runtime abstraction for Postgres (driver + query/migration compatibility).
-2. Env contract (`DATABASE_URL`, SSL mode, pool size) and secret handling.
+2. Env contract (**`DATABASE_HOST`**, **`DATABASE_USER`**, **`DATABASE_PASSWORD`**, **`DATABASE_NAME`**, port, **`DATABASE_SSL`** / pool size) and secret handling.
 3. Startup migration policy (safe one-shot migration before serving traffic).
 4. Operational playbook: backup/restore, rollback, and schema drift checks.
 5. Koyeb deploy checklist: health endpoint, zero-downtime rollout behavior, and failure recovery.

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { db } from "../../db/sqlite.js";
+import { qGet } from "../../db/query.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
@@ -72,7 +72,7 @@ const postManualSchema = z.object({
 export const ledgerRouter = Router();
 ledgerRouter.use(requireAuth);
 
-ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
+ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
   const parsed = querySchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid query", issues: parsed.error.issues });
@@ -153,7 +153,7 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
       : undefined;
 
   if (sessionId) {
-    const result = listCanonicalTransactionsForImportSession(householdId, sessionId, limit, offset, filters);
+    const result = await listCanonicalTransactionsForImportSession(householdId, sessionId, limit, offset, filters);
     if ("code" in result && result.code === "SESSION_NOT_FOUND") {
       res.status(404).json({ message: "Import session not found", code: result.code });
       return;
@@ -162,11 +162,11 @@ ledgerRouter.get("/", (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const result = listCanonicalTransactions(householdId, limit, offset, filters);
+  const result = await listCanonicalTransactions(householdId, limit, offset, filters);
   res.status(200).json(result);
 });
 
-ledgerRouter.post("/", (req: AuthenticatedRequest, res) => {
+ledgerRouter.post("/", async (req: AuthenticatedRequest, res) => {
   const parsed = postManualSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid body", issues: parsed.error.issues });
@@ -176,7 +176,7 @@ ledgerRouter.post("/", (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const userId = req.authUser!.userId;
   const body = parsed.data;
-  const out = createManualCanonicalTransaction(householdId, userId, {
+  const out = await createManualCanonicalTransaction(householdId, userId, {
     accountId: body.accountId,
     txnDate: body.txnDate,
     amount: body.amount,
@@ -224,14 +224,14 @@ const txnIdParamSchema = z.object({
   id: z.string().uuid()
 });
 
-ledgerRouter.get("/:id/open-review", (req: AuthenticatedRequest, res) => {
+ledgerRouter.get("/:id/open-review", async (req: AuthenticatedRequest, res) => {
   const parsed = txnIdParamSchema.safeParse(req.params);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid transaction id" });
     return;
   }
   const householdId = req.authUser!.householdId;
-  const out = listOpenResolutionItemsForCanonicalTransaction(householdId, parsed.data.id);
+  const out = await listOpenResolutionItemsForCanonicalTransaction(householdId, parsed.data.id);
   if (!out.ok) {
     res.status(404).json({ message: "Transaction not found" });
     return;
@@ -239,7 +239,7 @@ ledgerRouter.get("/:id/open-review", (req: AuthenticatedRequest, res) => {
   res.status(200).json({ items: out.items });
 });
 
-ledgerRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
+ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   const parsed = patchCategorySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -253,15 +253,13 @@ ledgerRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
       res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
       return;
     }
-    const ownerOk = db
-      .prepare(`SELECT 1 FROM person_profile WHERE household_id = ? AND id = ?`)
-      .get(householdId, ownerId);
+    const ownerOk = await qGet(`SELECT 1 FROM person_profile WHERE household_id = ? AND id = ?`, householdId, ownerId);
     if (!ownerOk) {
       res.status(400).json({ message: "Owner person profile not found for household" });
       return;
     }
   }
-  const out = updateCanonicalTransactionCategory(
+  const out = await updateCanonicalTransactionCategory(
     householdId,
     req.params.id,
     parsed.data.categoryId,

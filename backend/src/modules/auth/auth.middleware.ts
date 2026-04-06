@@ -7,24 +7,28 @@ export interface AuthenticatedRequest extends Request {
   authUser?: AuthUser;
 }
 
-export function requireAuth(
+export async function requireAuth(
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
-): void {
-  const authHeader = req.header("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    res.status(401).json({ message: "Missing bearer token" });
-    return;
-  }
+): Promise<void> {
+  try {
+    const authHeader = req.header("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      res.status(401).json({ message: "Missing bearer token" });
+      return;
+    }
 
-  const token = authHeader.replace("Bearer ", "");
-  const user = verifyToken(token);
-  if (!user) {
-    res.status(401).json({ message: "Invalid token" });
-    return;
-  }
+    const token = authHeader.replace("Bearer ", "");
+    const user = await verifyToken(token);
+    if (!user) {
+      res.status(401).json({ message: "Invalid token" });
+      return;
+    }
 
-  req.authUser = user;
-  next();
+    req.authUser = user;
+    next();
+  } catch (err) {
+    next(err);
+  }
 }

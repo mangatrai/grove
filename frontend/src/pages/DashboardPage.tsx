@@ -18,7 +18,15 @@ import { apiJson, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 
-type CashPreset = "month" | "ytd" | "rolling_30" | "rolling_90" | "custom";
+type CashPreset =
+  | "month"
+  | "ytd"
+  | "rolling_7"
+  | "rolling_30"
+  | "rolling_90"
+  | "rolling_180"
+  | "prev_calendar_year"
+  | "custom";
 
 type CashSummaryCategoryRow = {
   categoryId: string | null;
@@ -188,7 +196,14 @@ function daysBeforeIso(endIso: string, days: number): string {
 }
 
 function asPreset(v: string | null): CashPreset {
-  return v === "month" || v === "ytd" || v === "rolling_30" || v === "rolling_90" || v === "custom"
+  return v === "month" ||
+    v === "ytd" ||
+    v === "rolling_7" ||
+    v === "rolling_30" ||
+    v === "rolling_90" ||
+    v === "rolling_180" ||
+    v === "prev_calendar_year" ||
+    v === "custom"
     ? v
     : "rolling_30";
 }
@@ -634,9 +649,9 @@ export function DashboardPage() {
   }, [data?.monthlyOutflowsByCategory]);
 
   return (
-    <div>
-      <div className="card">
-        <h1>Home</h1>
+    <main className="dashboard-page" aria-labelledby="dashboard-heading">
+      <div className="card dashboard-page__hero">
+        <h1 id="dashboard-heading">Home</h1>
         <div className="dashboard-scope-bar">
           <div className="dashboard-scope-bar__title">Scope</div>
           <div className="dashboard-scope-bar__controls-row">
@@ -667,9 +682,7 @@ export function DashboardPage() {
               />
             </label>
           </div>
-          <p className="dashboard-scope-bar__hint muted">
-            KPIs, trends, and charts below use this account filter together with the period you set.
-          </p>
+          <p className="dashboard-scope-bar__hint muted">Applies to all figures and charts on this page.</p>
         </div>
         {data && resolutionSummary && (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
           <p
@@ -682,8 +695,7 @@ export function DashboardPage() {
               marginBottom: "0.75rem"
             }}
           >
-            <strong>{resolutionSummary.openByType.unknown_category}</strong> posted transaction(s) have no category
-            yet.{" "}
+            <strong>{resolutionSummary.openByType.unknown_category}</strong> uncategorized —{" "}
             <Link
               to={`/transactions?${new URLSearchParams({
                 needsReview: "true",
@@ -695,18 +707,12 @@ export function DashboardPage() {
                 ...(ownerScope === "person" && ownerPersonProfileId ? { ownerPersonProfileId } : {})
               }).toString()}`}
             >
-              Open Transactions → Needs review
-            </Link>{" "}
-            to assign categories in
-            bulk or per row.
+              Review in Transactions
+            </Link>
           </p>
         ) : null}
-        <p className="muted">
-          Posted transaction totals by period — household cashflow plus category splits (rules + categories you set on
-          each row).
-        </p>
 
-        <div className="dashboard-controls">
+        <div className="dashboard-controls dashboard-controls--period">
           <label>
             Period
             <select
@@ -727,8 +733,11 @@ export function DashboardPage() {
             >
               <option value="month">Calendar month</option>
               <option value="ytd">Year to date</option>
+              <option value="rolling_7">Last 7 days</option>
               <option value="rolling_30">Last 30 days</option>
               <option value="rolling_90">Last 90 days</option>
+              <option value="rolling_180">Last 180 days</option>
+              <option value="prev_calendar_year">Previous calendar year</option>
               <option value="custom">Custom range</option>
             </select>
           </label>
@@ -795,8 +804,7 @@ export function DashboardPage() {
         {preset === "custom" ? (
           <>
             <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.88rem" }}>
-              Custom range is limited to <strong>366 days</strong> (inclusive) per request — long analysis windows need
-              multiple exports or presets for now.
+              Custom range: max <strong>366</strong> days per load.
             </p>
             {customRangeValidationError ? (
               <p className="error" style={{ marginTop: "0.35rem", fontSize: "0.86rem" }}>
@@ -1253,6 +1261,6 @@ export function DashboardPage() {
           </>
         ) : null}
       </div>
-    </div>
+    </main>
   );
 }

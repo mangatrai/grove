@@ -1,4 +1,4 @@
-import { db } from "../../db/sqlite.js";
+import { qAll, qExec } from "../../db/query.js";
 import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
 import { classifyWithRules, type ClassificationResult } from "./category-rules.js";
 import { listEnabledDbRulesForClassification } from "./category-rules.service.js";
@@ -14,32 +14,27 @@ export type RecategorizeMode = "uncategorized_only" | "all";
  * Re-run DB + built-in rules over existing posted canonical rows.
  * Does not change rows that still classify to null (unknown).
  */
-export function recategorizeHouseholdTransactions(
+export async function recategorizeHouseholdTransactions(
   householdId: string,
   mode: RecategorizeMode
-): { ok: true; examined: number; updated: number } {
-  const dbRules = listEnabledDbRulesForClassification(householdId);
+): Promise<{ ok: true; examined: number; updated: number }> {
+  const dbRules = await listEnabledDbRulesForClassification(householdId);
   const where =
     mode === "uncategorized_only"
       ? "tc.household_id = ? AND tc.status = 'posted' AND tc.category_id IS NULL"
       : "tc.household_id = ? AND tc.status = 'posted'";
 
-  const rows = db
-    .prepare(
-      `SELECT tc.id AS id, tc.amount AS amount, tc.merchant AS merchant, tc.memo AS memo, tc.category_id AS category_id
-       FROM transaction_canonical tc
-       WHERE ${where}`
-    )
-    .all(householdId) as Array<{
+  const rows = await qAll<{
     id: string;
     amount: number;
     merchant: string | null;
     memo: string | null;
     category_id: string | null;
-  }>;
-
-  const updateStmt = db.prepare(
-    `UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ?`
+  }>(
+    `SELECT tc.id AS id, tc.amount AS amount, tc.merchant AS merchant, tc.memo AS memo, tc.category_id AS category_id
+       FROM transaction_canonical tc
+       WHERE ${where}`,
+    householdId
   );
 
   let updated = 0;
@@ -49,7 +44,12 @@ export function recategorizeHouseholdTransactions(
     const classification: ClassificationResult = classifyWithRules(norm, rounded, dbRules);
     const next = classification.categoryId;
     if (next !== null && next !== r.category_id) {
-      updateStmt.run(next, r.id, householdId);
+      await qExec(
+        `UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ?`,
+        next,
+        r.id,
+        householdId
+      );
       updated += 1;
     }
   }

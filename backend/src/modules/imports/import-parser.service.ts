@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 
-import { db } from "../../db/sqlite.js";
+import { qAll, qExec } from "../../db/query.js";
 
 import { getSessionForHousehold, type ServiceResult } from "./import-session.service.js";
 import { resolveParserAdapter } from "./parsers/parser-registry.js";
@@ -167,20 +167,12 @@ export async function parseSessionImportFiles(
   userId: string,
   request: ParseRequest
 ): Promise<ServiceResult<ParseOutcome> | ParseFailure> {
-  const session = getSessionForHousehold(sessionId, householdId);
+  const session = await getSessionForHousehold(sessionId, householdId);
   if (!session) {
     return { ok: false, code: "NOT_FOUND", message: "Import session not found" };
   }
 
-  const files = db
-    .prepare(
-      `SELECT id, file_name, stored_path, status, financial_account_id, parser_profile_id, employer_id,
-              owner_scope, owner_person_profile_id
-       FROM import_file
-       WHERE session_id = ?
-       ORDER BY uploaded_at ASC`
-    )
-    .all(sessionId) as Array<{
+  const files = await qAll<{
     id: string;
     file_name: string;
     stored_path: string | null;
@@ -190,7 +182,14 @@ export async function parseSessionImportFiles(
     employer_id: string | null;
     owner_scope: "household" | "person" | null;
     owner_person_profile_id: string | null;
-  }>;
+  }>(
+    `SELECT id, file_name, stored_path, status, financial_account_id, parser_profile_id, employer_id,
+              owner_scope, owner_person_profile_id
+       FROM import_file
+       WHERE session_id = ?
+       ORDER BY uploaded_at ASC`,
+    sessionId
+  );
 
   if (files.length === 0) {
     return { ok: false, code: "NO_SUPPORTED_FILES", message: "No files in import session" };
@@ -204,18 +203,6 @@ export async function parseSessionImportFiles(
       message: "Each file must have financial_account_id and parser_profile_id before parse"
     };
   }
-
-  const updateFileStatusStmt = db.prepare(
-    `UPDATE import_file
-     SET status = ?, confidence_summary = ?
-     WHERE id = ?`
-  );
-
-  const deleteRawRowsStmt = db.prepare(`DELETE FROM transaction_raw WHERE file_id = ?`);
-  const insertRawRowStmt = db.prepare(
-    `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
-     VALUES (?, ?, ?, ?, ?)`
-  );
 
   const outcome: ParseOutcome = {
     parsedFiles: 0,
@@ -232,12 +219,22 @@ export async function parseSessionImportFiles(
     const profileId = file.parser_profile_id as ParserProfileId;
     const buffer = fs.readFileSync(file.stored_path);
 
-    updateFileStatusStmt.run("processing", JSON.stringify({ stage: "parsing", profile: profileId }), file.id);
+    await qExec(
+      `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
+      "processing",
+      JSON.stringify({ stage: "parsing", profile: profileId }),
+      file.id
+    );
 
     try {
       if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf") {
-        if (!requireEmployerForPayslipImport(householdId, userId, file.employer_id)) {
-          updateFileStatusStmt.run(
+        if (!(await requireEmployerForPayslipImport(householdId, userId, file.employer_id))) {
+          await qExec(
+            `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
             "failed",
             JSON.stringify({
               stage: "failed",
@@ -250,9 +247,12 @@ export async function parseSessionImportFiles(
           continue;
         }
         if (file.employer_id) {
-          const emp = findEmployerById(householdId, file.employer_id, userId);
+          const emp = await findEmployerById(householdId, file.employer_id, userId);
           if (!emp) {
-            updateFileStatusStmt.run(
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
               "failed",
               JSON.stringify({ stage: "failed", reason: "invalid_employer", profile: profileId }),
               file.id
@@ -261,7 +261,10 @@ export async function parseSessionImportFiles(
             continue;
           }
           if (employerParserProfileId(emp) !== profileId) {
-            updateFileStatusStmt.run(
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
               "failed",
               JSON.stringify({ stage: "failed", reason: "employer_parser_mismatch", profile: profileId }),
               file.id
@@ -270,12 +273,15 @@ export async function parseSessionImportFiles(
             continue;
           }
         }
-        deleteRawRowsStmt.run(file.id);
+        await qExec(`DELETE FROM transaction_raw WHERE file_id = ?`, file.id);
         const checksum = sha256Hex(buffer);
         const parseResult = await parsePayslipPdfByProfile(buffer, profileId);
         if (!parseResult.ok) {
           if (parseResult.reason === "unsupported_parser") {
-            updateFileStatusStmt.run(
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
               "failed",
               JSON.stringify({
                 stage: "failed",
@@ -287,7 +293,10 @@ export async function parseSessionImportFiles(
             outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_unsupported_parser" });
             continue;
           }
-          updateFileStatusStmt.run(
+          await qExec(
+            `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
             "failed",
             JSON.stringify({ stage: "failed", reason: parseResult.reason, profile: profileId }),
             file.id
@@ -295,7 +304,7 @@ export async function parseSessionImportFiles(
           outcome.skippedFiles.push({ fileId: file.id, reason: `payslip_${parseResult.reason}` });
           continue;
         }
-        const ins = insertPayslipSnapshot(
+        const ins = await insertPayslipSnapshot(
           householdId,
           file.file_name,
           checksum,
@@ -307,7 +316,10 @@ export async function parseSessionImportFiles(
           file.owner_scope === "person" ? file.owner_person_profile_id : null
         );
         if (!ins.ok) {
-          updateFileStatusStmt.run(
+          await qExec(
+            `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
             "failed",
             JSON.stringify({
               stage: "failed",
@@ -321,7 +333,10 @@ export async function parseSessionImportFiles(
           continue;
         }
         outcome.parsedFiles += 1;
-        updateFileStatusStmt.run(
+        await qExec(
+          `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
           "parsed",
           JSON.stringify({
             stage: "parsed",
@@ -336,7 +351,10 @@ export async function parseSessionImportFiles(
 
       const extracted = await extractByProfileWithDiagnostics(profileId, buffer, file.file_name, request);
       if ("code" in extracted) {
-        updateFileStatusStmt.run(
+        await qExec(
+          `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
           "failed",
           JSON.stringify({ stage: "failed", reason: extracted.code }),
           file.id
@@ -349,15 +367,18 @@ export async function parseSessionImportFiles(
       }
 
       const payloads = extracted.rows;
-      deleteRawRowsStmt.run(file.id);
+      await qExec(`DELETE FROM transaction_raw WHERE file_id = ?`, file.id);
 
       let parsedRowsForFile = 0;
-      payloads.forEach((payload, index) => {
+      for (let index = 0; index < payloads.length; index++) {
+        const payload = payloads[index]!;
         const rowPayload = {
           ...payload,
           financial_account_id: file.financial_account_id
         };
-        insertRawRowStmt.run(
+        await qExec(
+          `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+     VALUES (?, ?, ?, ?, ?)`,
           crypto.randomUUID(),
           file.id,
           index + 1,
@@ -365,11 +386,14 @@ export async function parseSessionImportFiles(
           0.9
         );
         parsedRowsForFile += 1;
-      });
+      }
 
       outcome.parsedFiles += 1;
       outcome.parsedRows += parsedRowsForFile;
-      updateFileStatusStmt.run(
+      await qExec(
+        `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
         "parsed",
         JSON.stringify({
           stage: "parsed",
@@ -380,7 +404,10 @@ export async function parseSessionImportFiles(
         file.id
       );
     } catch {
-      updateFileStatusStmt.run(
+      await qExec(
+        `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
         "failed",
         JSON.stringify({ stage: "failed", reason: "parse_error" }),
         file.id
@@ -393,6 +420,6 @@ export async function parseSessionImportFiles(
     return { ok: false, code: "NO_SUPPORTED_FILES", message: "No files were parsed successfully" };
   }
 
-  db.prepare(`UPDATE import_session SET status = 'review' WHERE id = ?`).run(sessionId);
+  await qExec(`UPDATE import_session SET status = 'review' WHERE id = ?`, sessionId);
   return { ok: true, data: outcome };
 }

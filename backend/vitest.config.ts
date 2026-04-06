@@ -9,7 +9,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tests/**/*.test.ts"],
-    /** One worker avoids two Vitest files fighting over the same on-disk test SQLite. */
+    /** One worker avoids parallel tests sharing the same Postgres database. */
     fileParallelism: false,
     /** After all tests: remove data/imports/<uuid>/ (see tests/global-setup.ts teardown). */
     globalSetup: path.join(__dirname, "tests/global-setup.ts")

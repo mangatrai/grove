@@ -3,16 +3,18 @@ import type { EmployerStub } from "../household/household.types.js";
 import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
 
 /** Employers are stored on the signed-in user’s `person_profile` (Epic 12.5). */
-export function listHouseholdEmployers(householdId: string, userId: string): EmployerStub[] {
-  return getHouseholdSettings(householdId, userId)?.employers ?? [];
+export async function listHouseholdEmployers(householdId: string, userId: string): Promise<EmployerStub[]> {
+  const settings = await getHouseholdSettings(householdId, userId);
+  return settings?.employers ?? [];
 }
 
-export function findEmployerById(
+export async function findEmployerById(
   householdId: string,
   employerId: string,
   userId: string
-): EmployerStub | null {
-  return listHouseholdEmployers(householdId, userId).find((e) => e.id === employerId) ?? null;
+): Promise<EmployerStub | null> {
+  const employers = await listHouseholdEmployers(householdId, userId);
+  return employers.find((e) => e.id === employerId) ?? null;
 }
 
 export function employerParserProfileId(e: EmployerStub): string {
@@ -37,14 +39,15 @@ export function payslipBucketInstitutionFromEmployers(employers: EmployerStub[])
  * - 1 employer → that employer’s parser + id (no dropdown required)
  * - 2+ employers → `employerId` body field required
  */
-export function resolvePayslipUploadContext(
+export async function resolvePayslipUploadContext(
   householdId: string,
   userId: string,
   employerIdRaw: string | undefined
-):
+): Promise<
   | { ok: true; parserProfileId: string; employerId: string | null }
-  | { ok: false; code: "EMPLOYER_REQUIRED" | "INVALID_EMPLOYER"; message: string } {
-  const employers = listHouseholdEmployers(householdId, userId);
+  | { ok: false; code: "EMPLOYER_REQUIRED" | "INVALID_EMPLOYER"; message: string }
+> {
+  const employers = await listHouseholdEmployers(householdId, userId);
   const trimmed = employerIdRaw?.trim();
 
   if (employers.length === 0) {
@@ -63,7 +66,7 @@ export function resolvePayslipUploadContext(
     };
   }
 
-  const employer = findEmployerById(householdId, trimmed, userId);
+  const employer = await findEmployerById(householdId, trimmed, userId);
   if (!employer) {
     return { ok: false, code: "INVALID_EMPLOYER", message: "Employer not found in household settings" };
   }
@@ -72,10 +75,11 @@ export function resolvePayslipUploadContext(
 }
 
 /** Import parse when `import_file.employer_id` is null: require explicit employer if multiple configured. */
-export function requireEmployerForPayslipImport(
+export async function requireEmployerForPayslipImport(
   householdId: string,
   userId: string,
   employerId: string | null | undefined
-): boolean {
-  return listHouseholdEmployers(householdId, userId).length <= 1 || Boolean(employerId?.trim());
+): Promise<boolean> {
+  const employers = await listHouseholdEmployers(householdId, userId);
+  return employers.length <= 1 || Boolean(employerId?.trim());
 }

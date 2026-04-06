@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { db } from "../../db/sqlite.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 import type { ParsedPayslipSummary } from "./payslip.types.js";
 
 export type PayslipSnapshotRow = {
@@ -68,19 +68,19 @@ export function sha256Hex(buffer: Buffer): string {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
-export function findPayslipByHouseholdChecksum(
+export async function findPayslipByHouseholdChecksum(
   householdId: string,
   fileChecksum: string
-): PayslipSnapshotRow | null {
-  const row = db
-    .prepare(
-      `SELECT * FROM payslip_snapshot WHERE household_id = ? AND file_checksum = ?`
-    )
-    .get(householdId, fileChecksum) as Record<string, unknown> | undefined;
+): Promise<PayslipSnapshotRow | null> {
+  const row = await qGet<Record<string, unknown>>(
+    `SELECT * FROM payslip_snapshot WHERE household_id = ? AND file_checksum = ?`,
+    householdId,
+    fileChecksum
+  );
   return row ? rowToSnapshot(row) : null;
 }
 
-export function insertPayslipSnapshot(
+export async function insertPayslipSnapshot(
   householdId: string,
   fileName: string,
   fileChecksum: string,
@@ -90,18 +90,20 @@ export function insertPayslipSnapshot(
   employerId?: string | null,
   ownerScope?: "household" | "person",
   ownerPersonProfileId?: string | null
-):
+): Promise<
   | { ok: true; snapshot: PayslipSnapshotRow }
-  | { ok: false; code: "DUPLICATE_PAYSLIP"; existing: PayslipSnapshotRow } {
-  const existing = findPayslipByHouseholdChecksum(householdId, fileChecksum);
+  | { ok: false; code: "DUPLICATE_PAYSLIP"; existing: PayslipSnapshotRow }
+> {
+  const existing = await findPayslipByHouseholdChecksum(householdId, fileChecksum);
   if (existing) {
     return { ok: false, code: "DUPLICATE_PAYSLIP", existing };
   }
 
   const id = crypto.randomUUID();
   const rawJson = JSON.stringify(parsed.rawExtractJson ?? {});
+  const scope = ownerScope ?? "household";
 
-  db.prepare(
+  await qExec(
     `INSERT INTO payslip_snapshot (
       id, household_id, file_name, file_checksum, parser_profile_id, import_file_id, employer_id,
       owner_scope, owner_person_profile_id,
@@ -121,8 +123,7 @@ export function insertPayslipSnapshot(
       ?, ?,
       ?, ?,
       ?, ?
-    )`
-  ).run(
+    )`,
     id,
     householdId,
     fileName,
@@ -130,8 +131,8 @@ export function insertPayslipSnapshot(
     parserProfileId,
     importFileId ?? null,
     employerId ?? null,
-    ownerScope ?? "household",
-    ownerScope === "person" ? (ownerPersonProfileId ?? null) : null,
+    scope,
+    scope === "person" ? (ownerPersonProfileId ?? null) : null,
     parsed.payPeriodStart,
     parsed.payPeriodEnd,
     parsed.payDate,
@@ -149,14 +150,14 @@ export function insertPayslipSnapshot(
     rawJson
   );
 
-  const row = db.prepare(`SELECT * FROM payslip_snapshot WHERE id = ?`).get(id) as Record<
-    string,
-    unknown
-  >;
+  const row = await qGet<Record<string, unknown>>(`SELECT * FROM payslip_snapshot WHERE id = ?`, id);
+  if (!row) {
+    throw new Error("payslip_snapshot insert missing row");
+  }
   return { ok: true, snapshot: rowToSnapshot(row) };
 }
 
-export function listPayslipSnapshots(
+export async function listPayslipSnapshots(
   householdId: string,
   opts: {
     limit: number;
@@ -164,9 +165,9 @@ export function listPayslipSnapshots(
     ownerScope?: "household" | "person";
     ownerPersonProfileId?: string | null;
   }
-): { total: number; items: PayslipSnapshotRow[] } {
+): Promise<{ total: number; items: PayslipSnapshotRow[] }> {
   const where: string[] = ["household_id = ?"];
-  const params: Array<string | number | null> = [householdId];
+  const params: unknown[] = [householdId];
   if (opts.ownerScope === "household") {
     where.push("owner_scope = 'household'");
   } else if (opts.ownerScope === "person" && opts.ownerPersonProfileId) {
@@ -174,27 +175,31 @@ export function listPayslipSnapshots(
     params.push(opts.ownerPersonProfileId);
   }
 
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) AS c FROM payslip_snapshot WHERE ${where.join(" AND ")}`)
-    .get(...params) as { c: number };
-  const total = Number(totalRow.c) || 0;
-  const rows = db
-    .prepare(
-      `SELECT * FROM payslip_snapshot
+  const totalRow = await qGet<{ c: string | number }>(
+    `SELECT COUNT(*)::int AS c FROM payslip_snapshot WHERE ${where.join(" AND ")}`,
+    ...params
+  );
+  const total = Number(totalRow?.c) || 0;
+  const rows = await qAll<Record<string, unknown>>(
+    `SELECT * FROM payslip_snapshot
        WHERE ${where.join(" AND ")}
        ORDER BY created_at DESC, id DESC
-       LIMIT ? OFFSET ?`
-    )
-    .all(...params, opts.limit, opts.offset) as Record<string, unknown>[];
+       LIMIT ? OFFSET ?`,
+    ...params,
+    opts.limit,
+    opts.offset
+  );
   return { total, items: rows.map((r) => rowToSnapshot(r)) };
 }
 
-export function getPayslipSnapshotForHousehold(
+export async function getPayslipSnapshotForHousehold(
   householdId: string,
   id: string
-): PayslipSnapshotRow | null {
-  const row = db
-    .prepare(`SELECT * FROM payslip_snapshot WHERE id = ? AND household_id = ?`)
-    .get(id, householdId) as Record<string, unknown> | undefined;
+): Promise<PayslipSnapshotRow | null> {
+  const row = await qGet<Record<string, unknown>>(
+    `SELECT * FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
   return row ? rowToSnapshot(row) : null;
 }

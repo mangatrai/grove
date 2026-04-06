@@ -39,7 +39,7 @@ const bulkApplyCategorySchema = z.object({
   categoryId: z.string().uuid()
 });
 
-resolutionRouter.post("/bulk-apply-category", (req: AuthenticatedRequest, res) => {
+resolutionRouter.post("/bulk-apply-category", async (req: AuthenticatedRequest, res) => {
   const parsed = bulkApplyCategorySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -47,7 +47,7 @@ resolutionRouter.post("/bulk-apply-category", (req: AuthenticatedRequest, res) =
   }
   const householdId = req.authUser!.householdId;
   const uniqueIds = [...new Set(parsed.data.ids)];
-  const out = bulkApplyCategoryToUnknownItems(householdId, uniqueIds, parsed.data.categoryId);
+  const out = await bulkApplyCategoryToUnknownItems(householdId, uniqueIds, parsed.data.categoryId);
   if (!out.ok) {
     res.status(400).json({ message: "Category is not available for this household", code: out.code });
     return;
@@ -55,7 +55,7 @@ resolutionRouter.post("/bulk-apply-category", (req: AuthenticatedRequest, res) =
   res.status(200).json({ updated: out.updated, errors: out.errors });
 });
 
-resolutionRouter.post("/bulk", (req: AuthenticatedRequest, res) => {
+resolutionRouter.post("/bulk", async (req: AuthenticatedRequest, res) => {
   const parsed = bulkBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -63,19 +63,19 @@ resolutionRouter.post("/bulk", (req: AuthenticatedRequest, res) => {
   }
   const householdId = req.authUser!.householdId;
   const uniqueIds = [...new Set(parsed.data.ids)];
-  const out = bulkUpdateResolutionStatusForHousehold(householdId, uniqueIds, parsed.data.status);
+  const out = await bulkUpdateResolutionStatusForHousehold(householdId, uniqueIds, parsed.data.status);
   res.status(200).json(out);
 });
 
-resolutionRouter.get("/summary", (req: AuthenticatedRequest, res) => {
+resolutionRouter.get("/summary", async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
-  const openByType = countOpenResolutionItemsByType(householdId);
+  const openByType = await countOpenResolutionItemsByType(householdId);
   const totalOpen = Object.values(openByType).reduce((a, b) => a + b, 0);
-  const openDuplicateAmbiguityNotOnLedger = countOpenDuplicateAmbiguityNotOnLedger(householdId);
+  const openDuplicateAmbiguityNotOnLedger = await countOpenDuplicateAmbiguityNotOnLedger(householdId);
   res.status(200).json({ openByType, totalOpen, openDuplicateAmbiguityNotOnLedger });
 });
 
-resolutionRouter.get("/", (req: AuthenticatedRequest, res) => {
+resolutionRouter.get("/", async (req: AuthenticatedRequest, res) => {
   const q = listQuerySchema.safeParse(req.query ?? {});
   if (!q.success) {
     res.status(400).json({ message: "Invalid query", issues: q.error.issues });
@@ -83,7 +83,7 @@ resolutionRouter.get("/", (req: AuthenticatedRequest, res) => {
   }
   const householdId = req.authUser!.householdId;
   const typeFilter = q.data.type as ResolutionItemTypeFilter;
-  const items = listResolutionItemsForHousehold(householdId, q.data.status, typeFilter);
+  const items = await listResolutionItemsForHousehold(householdId, q.data.status, typeFilter);
   res.status(200).json({ items, status: q.data.status, type: q.data.type });
 });
 
@@ -91,7 +91,7 @@ const statusSchema = z.object({
   status: z.enum(["open", "in_review", "resolved"])
 });
 
-resolutionRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
+resolutionRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   const parsed = statusSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -99,7 +99,7 @@ resolutionRouter.patch("/:id", (req: AuthenticatedRequest, res) => {
   }
 
   const householdId = req.authUser!.householdId;
-  const out = updateResolutionStatusForHousehold(householdId, req.params.id, parsed.data.status);
+  const out = await updateResolutionStatusForHousehold(householdId, req.params.id, parsed.data.status);
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {
       res.status(404).json({ message: out.message, code: out.code });

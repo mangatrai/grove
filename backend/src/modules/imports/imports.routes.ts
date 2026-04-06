@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { db } from "../../db/sqlite.js";
+import { qGet } from "../../db/query.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   createImportSession,
@@ -129,7 +129,7 @@ function mapBindingFailureToStatus(failure: BindingFailure): number {
 export const importsRouter = Router();
 importsRouter.use(requireAuth);
 
-importsRouter.post("/sessions", (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions", async (req: AuthenticatedRequest, res) => {
   const parsed = createSessionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -137,7 +137,7 @@ importsRouter.post("/sessions", (req: AuthenticatedRequest, res) => {
   }
 
   const householdId = req.authUser!.householdId;
-  const created = createImportSession(householdId, parsed.data.sourceType);
+  const created = await createImportSession(householdId, parsed.data.sourceType);
 
   res.status(201).json({
     session: {
@@ -149,23 +149,23 @@ importsRouter.post("/sessions", (req: AuthenticatedRequest, res) => {
   });
 });
 
-importsRouter.get("/sessions", (req: AuthenticatedRequest, res) => {
+importsRouter.get("/sessions", async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
-  const sessions = listImportSessionsForHousehold(householdId);
+  const sessions = await listImportSessionsForHousehold(householdId);
   res.status(200).json({ sessions });
 });
 
 importsRouter.post(
   "/sessions/:sessionId/files",
   upload.array("files"),
-  (req: AuthenticatedRequest, res) => {
+  async (req: AuthenticatedRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined;
     if (!files || files.length === 0) {
       res.status(400).json({ message: "No files provided" });
       return;
     }
 
-    const result = persistSessionFiles(req.params.sessionId, req.authUser!.householdId, files);
+    const result = await persistSessionFiles(req.params.sessionId, req.authUser!.householdId, files);
     if (!result.ok) {
       res.status(mapServiceFailureToStatus(result)).json({
         message: result.message,
@@ -180,14 +180,14 @@ importsRouter.post(
   }
 );
 
-importsRouter.patch("/sessions/:sessionId/status", (req: AuthenticatedRequest, res) => {
+importsRouter.patch("/sessions/:sessionId/status", async (req: AuthenticatedRequest, res) => {
   const parsed = sessionStatusSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
 
-  const result = transitionSessionStatus(
+  const result = await transitionSessionStatus(
     req.params.sessionId,
     req.authUser!.householdId,
     parsed.data.status
@@ -206,14 +206,14 @@ importsRouter.patch("/sessions/:sessionId/status", (req: AuthenticatedRequest, r
   res.status(200).json({ sessionId: result.data.sessionId, status: result.data.status });
 });
 
-importsRouter.get("/accounts", (req: AuthenticatedRequest, res) => {
+importsRouter.get("/accounts", async (req: AuthenticatedRequest, res) => {
   const { householdId, userId } = req.authUser!;
-  ensurePayslipImportBucketAccount(householdId, userId);
-  const accounts = listHouseholdFinancialAccounts(householdId);
+  await ensurePayslipImportBucketAccount(householdId, userId);
+  const accounts = await listHouseholdFinancialAccounts(householdId);
   res.status(200).json({ accounts });
 });
 
-importsRouter.post("/accounts", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+importsRouter.post("/accounts", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = accountUpsertSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -224,15 +224,17 @@ importsRouter.post("/accounts", requireRole(["owner", "admin"]), (req: Authentic
     return;
   }
   if (parsed.data.ownerPersonProfileId) {
-    const ok = db
-      .prepare(`SELECT 1 FROM person_profile WHERE id = ? AND household_id = ?`)
-      .get(parsed.data.ownerPersonProfileId, req.authUser!.householdId);
+    const ok = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ?`,
+      parsed.data.ownerPersonProfileId,
+      req.authUser!.householdId
+    );
     if (!ok) {
       res.status(400).json({ message: "Owner person profile not found for household" });
       return;
     }
   }
-  const created = createHouseholdFinancialAccount({
+  const created = await createHouseholdFinancialAccount({
     householdId: req.authUser!.householdId,
     ownerUserId: req.authUser!.userId,
     type: parsed.data.type,
@@ -245,7 +247,7 @@ importsRouter.post("/accounts", requireRole(["owner", "admin"]), (req: Authentic
   res.status(201).json({ id: created.id });
 });
 
-importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ accountId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ message: "Invalid account id", issues: params.error.issues });
@@ -261,15 +263,17 @@ importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), (re
     return;
   }
   if (parsed.data.ownerPersonProfileId) {
-    const ok = db
-      .prepare(`SELECT 1 FROM person_profile WHERE id = ? AND household_id = ?`)
-      .get(parsed.data.ownerPersonProfileId, req.authUser!.householdId);
-    if (!ok) {
+    const personOk = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ?`,
+      parsed.data.ownerPersonProfileId,
+      req.authUser!.householdId
+    );
+    if (!personOk) {
       res.status(400).json({ message: "Owner person profile not found for household" });
       return;
     }
   }
-  const ok = updateHouseholdFinancialAccount({
+  const ok = await updateHouseholdFinancialAccount({
     accountId: params.data.accountId,
     householdId: req.authUser!.householdId,
     type: parsed.data.type,
@@ -290,9 +294,9 @@ importsRouter.get("/parser-profiles", (_req, res) => {
   res.status(200).json({ profiles: PARSER_PROFILE_IDS });
 });
 
-importsRouter.get("/institutions", (req: AuthenticatedRequest, res) => {
+importsRouter.get("/institutions", async (req: AuthenticatedRequest, res) => {
   const catalog = listUsInstitutionLabels();
-  const custom = listHouseholdCustomInstitutions(req.authUser!.householdId);
+  const custom = await listHouseholdCustomInstitutions(req.authUser!.householdId);
   res.status(200).json({ catalog, custom });
 });
 
@@ -300,13 +304,13 @@ const customInstitutionBodySchema = z.object({
   displayName: z.string().min(2).max(120)
 });
 
-importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), (req: AuthenticatedRequest, res) => {
+importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = customInstitutionBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  const result = createHouseholdCustomInstitution(req.authUser!.householdId, parsed.data.displayName);
+  const result = await createHouseholdCustomInstitution(req.authUser!.householdId, parsed.data.displayName);
   if (!result.ok) {
     if (result.code === "DUPLICATE") {
       res.status(409).json({ message: "That institution name is already saved for your household." });
@@ -320,14 +324,14 @@ importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), (req
 
 importsRouter.patch(
   "/sessions/:sessionId/files/:fileId",
-  (req: AuthenticatedRequest, res) => {
+  async (req: AuthenticatedRequest, res) => {
     const parsed = fileBindingSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
       return;
     }
 
-    const result = updateImportFileBinding(
+    const result = await updateImportFileBinding(
       req.params.sessionId,
       req.params.fileId,
       req.authUser!.householdId,
@@ -353,8 +357,8 @@ importsRouter.patch(
   }
 );
 
-importsRouter.get("/sessions/:sessionId/summary", (req: AuthenticatedRequest, res) => {
-  const summary = getImportSessionSummary(req.params.sessionId, req.authUser!.householdId);
+importsRouter.get("/sessions/:sessionId/summary", async (req: AuthenticatedRequest, res) => {
+  const summary = await getImportSessionSummary(req.params.sessionId, req.authUser!.householdId);
   if (!summary) {
     res.status(404).json({ message: "Import session not found" });
     return;
@@ -362,14 +366,14 @@ importsRouter.get("/sessions/:sessionId/summary", (req: AuthenticatedRequest, re
   res.status(200).json(summary);
 });
 
-importsRouter.get("/sessions/:sessionId", (req: AuthenticatedRequest, res) => {
-  const session = listSessionDetail(req.params.sessionId, req.authUser!.householdId);
+importsRouter.get("/sessions/:sessionId", async (req: AuthenticatedRequest, res) => {
+  const session = await listSessionDetail(req.params.sessionId, req.authUser!.householdId);
   if (!session) {
     res.status(404).json({ message: "Import session not found" });
     return;
   }
 
-  const files = listFilesForSession(session.id);
+  const files = await listFilesForSession(session.id);
 
   res.status(200).json({
     session: {
@@ -431,8 +435,8 @@ importsRouter.post("/sessions/:sessionId/canonicalize", async (req: Authenticate
   res.status(200).json(result.data);
 });
 
-importsRouter.post("/sessions/:sessionId/undo-import", (req: AuthenticatedRequest, res) => {
-  const result = rollbackImportSessionLedger(req.params.sessionId, req.authUser!.householdId);
+importsRouter.post("/sessions/:sessionId/undo-import", async (req: AuthenticatedRequest, res) => {
+  const result = await rollbackImportSessionLedger(req.params.sessionId, req.authUser!.householdId);
   if (!result.ok) {
     res.status(mapRollbackFailureToStatus(result)).json({
       message: result.message,

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { db } from "../../db/sqlite.js";
+import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
 import { categoryHasChildren, categoryUsableByHousehold } from "../category/categories.service.js";
 import {
   computeTransactionFingerprint,
@@ -56,7 +56,7 @@ export interface LedgerListFilters {
   /** Restrict to rows linked to one import file via `source_ref = raw:<id>` chain. */
   fileId?: string;
   accountId?: string;
-  /** Full-text search on merchant + memo via FTS5 (`ledger_search_fts`), BM25-ranked when non-empty. */
+  /** Full-text search on merchant + memo (`search_document` tsvector + substring fallback). */
   search?: string;
   amountMin?: number;
   amountMax?: number;
@@ -94,7 +94,7 @@ const NEEDS_REVIEW_PREDICATE = `(
 )`;
 
 const OPEN_REVIEW_ITEMS_SUBQUERY = `(
-    SELECT group_concat(ri.id || ':' || ri.type || ':' || ri.status, '|')
+    SELECT string_agg(ri.id || ':' || ri.type || ':' || ri.status, '|' ORDER BY ri.id)
     FROM resolution_item ri
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
@@ -176,27 +176,10 @@ function buildReviewReasons(
   return [...set];
 }
 
-/** FTS5 MATCH: whitespace tokens, escape `"` as `""`, AND across tokens. */
-function buildFtsMatchQuery(raw: string): string {
-  const tokens = raw
-    .trim()
-    .split(/\s+/)
-    .filter((t) => t.length > 0);
-  if (tokens.length === 0) {
-    return '""';
-  }
-  return tokens
-    .map((t) => {
-      const escaped = t.replace(/"/g, '""');
-      return `"${escaped}"`;
-    })
-    .join(" AND ");
-}
-
-function ledgerFilterClause(householdId: string, filters: LedgerListFilters | undefined): {
+async function ledgerFilterClause(householdId: string, filters: LedgerListFilters | undefined): Promise<{
   sql: string;
   params: unknown[];
-} {
+}> {
   if (!filters) {
     return { sql: "", params: [] };
   }
@@ -209,7 +192,7 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
     parts.push("tc.category_id IS NULL");
   } else if (filters.categoryId) {
     const cid = filters.categoryId;
-    if (categoryHasChildren(cid)) {
+    if (await categoryHasChildren(cid)) {
       parts.push(
         "(tc.category_id = ? OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ? AND (household_id IS NULL OR household_id = ?)))"
       );
@@ -246,11 +229,11 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
     params.push(filters.ownerPersonProfileId);
   }
   if (filters.amountMin !== undefined && Number.isFinite(filters.amountMin)) {
-    parts.push("CAST(tc.amount AS REAL) >= ?");
+    parts.push("CAST(tc.amount AS DOUBLE PRECISION) >= ?");
     params.push(filters.amountMin);
   }
   if (filters.amountMax !== undefined && Number.isFinite(filters.amountMax)) {
-    parts.push("CAST(tc.amount AS REAL) <= ?");
+    parts.push("CAST(tc.amount AS DOUBLE PRECISION) <= ?");
     params.push(filters.amountMax);
   }
   if (filters.resolutionTypes && filters.resolutionTypes.length > 0) {
@@ -272,12 +255,12 @@ function ledgerFilterClause(householdId: string, filters: LedgerListFilters | un
     params.push(...filters.resolutionTypes);
   }
   if (filters.search !== undefined && filters.search.trim() !== "") {
-    const needle = filters.search.trim().toLowerCase();
-    const ftsMatch = buildFtsMatchQuery(filters.search.trim());
+    const raw = filters.search.trim();
+    const needle = raw.toLowerCase();
     parts.push(
-      `(instr(lower(coalesce(tc.merchant, '') || ' ' || coalesce(tc.memo, '')), ?) > 0 OR EXISTS (SELECT 1 FROM ledger_search_fts WHERE ledger_search_fts.rowid = tc.rowid AND ledger_search_fts MATCH ?))`
+      `(tc.search_document @@ plainto_tsquery('english', ?) OR POSITION(? IN LOWER(COALESCE(tc.merchant, '') || ' ' || COALESCE(tc.memo, ''))) > 0)`
     );
-    params.push(needle, ftsMatch);
+    params.push(raw, needle);
   }
   if (parts.length === 0) {
     return { sql: "", params: [] };
@@ -362,53 +345,36 @@ function txSelectSql(includeReviewMeta: boolean): string {
   return `${base}, ${OPEN_REVIEW_ITEMS_SUBQUERY} AS open_review_items_blob, ${IMPORT_SESSION_SUBQUERY} AS import_session_id`;
 }
 
-export function listCanonicalTransactions(
+export async function listCanonicalTransactions(
   householdId: string,
   limit: number,
   offset: number,
   filters?: LedgerListFilters
-): ListCanonicalResult {
-  const xf = ledgerFilterClause(householdId, filters);
+): Promise<ListCanonicalResult> {
+  const xf = await ledgerFilterClause(householdId, filters);
   const includeReview = Boolean(filters?.needsReviewOnly);
   const sel = txSelectSql(includeReview);
   const orderBy = `ORDER BY tc.txn_date DESC, tc.created_at DESC`;
   const countParams = [householdId, ...xf.params];
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) AS cnt FROM transaction_canonical tc WHERE tc.household_id = ?${xf.sql}`)
-    .get(...countParams) as { cnt: number };
-  const total = Number(totalRow.cnt);
+  const totalRow = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt FROM transaction_canonical tc WHERE tc.household_id = ?${xf.sql}`,
+    ...countParams
+  );
+  const total = Number(totalRow?.cnt ?? 0);
 
-  const rows = db
-    .prepare(
-      `SELECT ${sel}
+  type Row = Parameters<typeof mapRow>[0];
+  const rows = await qAll<Row>(
+    `SELECT ${sel}
        FROM transaction_canonical tc
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
        LEFT JOIN category c ON c.id = tc.category_id
        WHERE tc.household_id = ?${xf.sql}
        ${orderBy}
-       LIMIT ? OFFSET ?`
-    )
-    .all(...countParams, limit, offset) as Array<{
-    id: string;
-    txn_date: string;
-    amount: number;
-    direction: string;
-    merchant: string | null;
-    memo: string | null;
-    status: string;
-    account_id: string;
-    institution: string;
-    account_type: string;
-    account_mask: string | null;
-    source_ref: string | null;
-    created_at: string;
-    category_id: string | null;
-    category_name: string | null;
-    owner_scope: "household" | "person";
-    owner_person_profile_id: string | null;
-    open_review_items_blob?: string | null;
-    import_session_id?: string | null;
-  }>;
+       LIMIT ? OFFSET ?`,
+    ...countParams,
+    limit,
+    offset
+  );
 
   const transactions: CanonicalTransactionRow[] = rows.map((r) => mapRow(r, { includeReviewReasons: includeReview }));
 
@@ -418,40 +384,37 @@ export function listCanonicalTransactions(
 /**
  * Ledger rows whose canonical row links (via `source_ref`) to raw rows from files in this import session.
  */
-export function listCanonicalTransactionsForImportSession(
+export async function listCanonicalTransactionsForImportSession(
   householdId: string,
   sessionId: string,
   limit: number,
   offset: number,
   filters?: LedgerListFilters
-): ListCanonicalResult | { ok: false; code: "SESSION_NOT_FOUND" } {
-  const session = db
-    .prepare(`SELECT 1 FROM import_session WHERE id = ? AND household_id = ?`)
-    .get(sessionId, householdId);
+): Promise<ListCanonicalResult | { ok: false; code: "SESSION_NOT_FOUND" }> {
+  const session = await qGet(`SELECT 1 FROM import_session WHERE id = ? AND household_id = ?`, sessionId, householdId);
   if (!session) {
     return { ok: false, code: "SESSION_NOT_FOUND" };
   }
 
-  const xf = ledgerFilterClause(householdId, filters);
+  const xf = await ledgerFilterClause(householdId, filters);
   const includeReview = Boolean(filters?.needsReviewOnly);
   const sel = txSelectSql(includeReview);
   const orderBy = `ORDER BY tc.txn_date DESC, tc.created_at DESC`;
   const countParams = [sessionId, householdId, ...xf.params];
 
-  const totalRow = db
-    .prepare(
-      `SELECT COUNT(*) AS cnt
+  const totalRow = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt
        FROM transaction_canonical tc
        INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
        INNER JOIN import_file f ON f.id = tr.file_id
-       WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}`
-    )
-    .get(...countParams) as { cnt: number };
-  const total = Number(totalRow.cnt);
+       WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}`,
+    ...countParams
+  );
+  const total = Number(totalRow?.cnt ?? 0);
 
-  const rows = db
-    .prepare(
-      `SELECT ${sel}
+  type Row = Parameters<typeof mapRow>[0];
+  const rows = await qAll<Row>(
+    `SELECT ${sel}
        FROM transaction_canonical tc
        INNER JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
        LEFT JOIN category c ON c.id = tc.category_id
@@ -459,57 +422,41 @@ export function listCanonicalTransactionsForImportSession(
        INNER JOIN import_file f ON f.id = tr.file_id
        WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}
        ${orderBy}
-       LIMIT ? OFFSET ?`
-    )
-    .all(...countParams, limit, offset) as Array<{
-    id: string;
-    txn_date: string;
-    amount: number;
-    direction: string;
-    merchant: string | null;
-    memo: string | null;
-    status: string;
-    account_id: string;
-    institution: string;
-    account_type: string;
-    account_mask: string | null;
-    source_ref: string | null;
-    created_at: string;
-    category_id: string | null;
-    category_name: string | null;
-    owner_scope: "household" | "person";
-    owner_person_profile_id: string | null;
-    open_review_items_blob?: string | null;
-    import_session_id?: string | null;
-  }>;
+       LIMIT ? OFFSET ?`,
+    ...countParams,
+    limit,
+    offset
+  );
 
   const transactions: CanonicalTransactionRow[] = rows.map((r) => mapRow(r, { includeReviewReasons: includeReview }));
 
   return { total, limit, offset, sessionId, transactions };
 }
 
-export function updateCanonicalTransactionCategory(
+export async function updateCanonicalTransactionCategory(
   householdId: string,
   transactionId: string,
   categoryId: string | null,
   ownerScope?: "household" | "person",
   ownerPersonProfileId?: string | null
-):
+): Promise<
   | { ok: true; data: { id: string; categoryId: string | null; categoryName: string | null } }
-  | { ok: false; code: "NOT_FOUND" | "INVALID_CATEGORY" } {
-  if (categoryId !== null && !categoryUsableByHousehold(categoryId, householdId)) {
+  | { ok: false; code: "NOT_FOUND" | "INVALID_CATEGORY" }
+> {
+  if (categoryId !== null && !(await categoryUsableByHousehold(categoryId, householdId))) {
     return { ok: false, code: "INVALID_CATEGORY" };
   }
 
-  const exists = db
-    .prepare(
-      `SELECT owner_scope AS owner_scope, owner_person_profile_id AS owner_person_profile_id
+  const exists = await qGet<{
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
+  }>(
+    `SELECT owner_scope AS owner_scope, owner_person_profile_id AS owner_person_profile_id
        FROM transaction_canonical
-       WHERE id = ? AND household_id = ?`
-    )
-    .get(transactionId, householdId) as
-    | { owner_scope: "household" | "person"; owner_person_profile_id: string | null }
-    | undefined;
+       WHERE id = ? AND household_id = ?`,
+    transactionId,
+    householdId
+  );
   if (!exists) {
     return { ok: false, code: "NOT_FOUND" };
   }
@@ -517,34 +464,41 @@ export function updateCanonicalTransactionCategory(
   const nextOwnerScope = ownerScope ?? exists.owner_scope;
   const nextOwnerPersonProfileId =
     nextOwnerScope === "person" ? (ownerPersonProfileId ?? exists.owner_person_profile_id ?? null) : null;
-  db.prepare(
+  await qExec(
     `UPDATE transaction_canonical
      SET category_id = ?, owner_scope = ?, owner_person_profile_id = ?
-     WHERE id = ? AND household_id = ?`
-  ).run(categoryId, nextOwnerScope, nextOwnerPersonProfileId, transactionId, householdId);
+     WHERE id = ? AND household_id = ?`,
+    categoryId,
+    nextOwnerScope,
+    nextOwnerPersonProfileId,
+    transactionId,
+    householdId
+  );
 
   if (categoryId !== null) {
-    db.prepare(
+    await qExec(
       `UPDATE resolution_item SET status = 'resolved'
-       WHERE household_id = ? AND type = 'unknown_category' AND target_id = ? AND status != 'resolved'`
-    ).run(householdId, transactionId);
+       WHERE household_id = ? AND type = 'unknown_category' AND target_id = ? AND status != 'resolved'`,
+      householdId,
+      transactionId
+    );
   }
 
-  const row = db
-    .prepare(
-      `SELECT tc.id AS id, tc.category_id AS category_id, c.name AS category_name
+  const row = await qGet<{ id: string; category_id: string | null; category_name: string | null }>(
+    `SELECT tc.id AS id, tc.category_id AS category_id, c.name AS category_name
        FROM transaction_canonical tc
        LEFT JOIN category c ON c.id = tc.category_id
-       WHERE tc.id = ? AND tc.household_id = ?`
-    )
-    .get(transactionId, householdId) as { id: string; category_id: string | null; category_name: string | null };
+       WHERE tc.id = ? AND tc.household_id = ?`,
+    transactionId,
+    householdId
+  );
 
   return {
     ok: true,
     data: {
-      id: row.id,
-      categoryId: row.category_id,
-      categoryName: row.category_name
+      id: row!.id,
+      categoryId: row!.category_id,
+      categoryName: row!.category_name
     }
   };
 }
@@ -560,7 +514,7 @@ export type CreateManualTransactionResult =
  * Insert a single posted canonical row from the UI (manual entry). Uses the same fingerprint contract as import.
  * When `categoryId` is null, creates an `unknown_category` resolution item (same attention path as ingest).
  */
-export function createManualCanonicalTransaction(
+export async function createManualCanonicalTransaction(
   householdId: string,
   userId: string,
   input: {
@@ -571,20 +525,18 @@ export function createManualCanonicalTransaction(
     memo: string | null;
     categoryId: string | null;
   }
-): CreateManualTransactionResult {
+): Promise<CreateManualTransactionResult> {
   const rounded = normalizeAmountForFingerprint(input.amount);
   if (!Number.isFinite(rounded) || rounded === 0) {
     return { ok: false, code: "INVALID_AMOUNT" };
   }
 
-  const accountOk = db
-    .prepare(`SELECT 1 FROM financial_account WHERE id = ? AND household_id = ?`)
-    .get(input.accountId, householdId);
+  const accountOk = await qGet(`SELECT 1 FROM financial_account WHERE id = ? AND household_id = ?`, input.accountId, householdId);
   if (!accountOk) {
     return { ok: false, code: "INVALID_ACCOUNT" };
   }
 
-  if (input.categoryId !== null && !categoryUsableByHousehold(input.categoryId, householdId)) {
+  if (input.categoryId !== null && !(await categoryUsableByHousehold(input.categoryId, householdId))) {
     return { ok: false, code: "INVALID_CATEGORY" };
   }
 
@@ -608,52 +560,48 @@ export function createManualCanonicalTransaction(
   const sourceRef = `manual:${crypto.randomUUID()}`;
   const classificationMeta = JSON.stringify({ source: "manual" });
 
-  const insertTx = db.prepare(
-    `INSERT INTO transaction_canonical (
+  try {
+    await qBegin(async (tx) => {
+      await tx.unsafe(
+        `INSERT INTO transaction_canonical (
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
        merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?)`
-  );
-
-  const insertUnknown = db.prepare(
-    `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'unknown_category', ?, ?, 'open')`
-  );
-
-  try {
-    db.transaction(() => {
-      insertTx.run(
-        id,
-        householdId,
-        input.accountId,
-        userId,
-        input.categoryId,
-        normDate,
-        rounded,
-        direction,
-        merchantCol,
-        memoCol,
-        fingerprint,
-        sourceRef,
-        classificationMeta
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, $11, $12, 'posted', $13)`,
+        [
+          id,
+          householdId,
+          input.accountId,
+          userId,
+          input.categoryId,
+          normDate,
+          rounded,
+          direction,
+          merchantCol,
+          memoCol,
+          fingerprint,
+          sourceRef,
+          classificationMeta
+        ] as never[]
       );
       if (input.categoryId === null) {
-        insertUnknown.run(
-          crypto.randomUUID(),
-          householdId,
-          id,
-          JSON.stringify({
-            kind: "unknown_category",
-            message: "Manual entry — assign a category from Transactions or the review queue.",
-            classification: { source: "manual" as const }
-          })
+        await tx.unsafe(
+          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+     VALUES ($1, $2, 'unknown_category', $3, $4, 'open')`,
+          [
+            crypto.randomUUID(),
+            householdId,
+            id,
+            JSON.stringify({
+              kind: "unknown_category",
+              message: "Manual entry — assign a category from Transactions or the review queue.",
+              classification: { source: "manual" as const }
+            })
+          ] as never[]
         );
       }
-    })();
+    });
   } catch (err: unknown) {
-    const code =
-      err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
-    if (code === "SQLITE_CONSTRAINT_UNIQUE" || code.includes("SQLITE_CONSTRAINT")) {
+    if (isPgUniqueViolation(err)) {
       return { ok: false, code: "DUPLICATE_FINGERPRINT" };
     }
     throw err;

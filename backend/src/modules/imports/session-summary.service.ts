@@ -1,4 +1,4 @@
-import { db } from "../../db/sqlite.js";
+import { qAll, qGet } from "../../db/query.js";
 
 export interface ImportSessionFileSummary {
   fileId: string;
@@ -95,15 +95,14 @@ function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function reconciliationForFile(fileId: string): ImportSessionFileSummary["reconciliation"] {
-  const rows = db
-    .prepare(
-      `SELECT row_index, extracted_payload_json
+async function reconciliationForFile(fileId: string): Promise<ImportSessionFileSummary["reconciliation"]> {
+  const rows = await qAll<{ row_index: number; extracted_payload_json: string }>(
+    `SELECT row_index, extracted_payload_json
        FROM transaction_raw
        WHERE file_id = ?
-       ORDER BY row_index ASC`
-    )
-    .all(fileId) as Array<{ row_index: number; extracted_payload_json: string }>;
+       ORDER BY row_index ASC`,
+    fileId
+  );
 
   if (rows.length === 0) {
     return {
@@ -195,22 +194,23 @@ function toCountMap(rows: Array<{ file_id: string; cnt: number }>): Map<string, 
  * Per-file import outcomes for a session (Epic 6): parsed vs posted, near-duplicate flags, open review load, and
  * remaining unposted (exact duplicate or skipped). Uses grouped queries (no N+1 per file).
  */
-export function getImportSessionSummary(
+export async function getImportSessionSummary(
   sessionId: string,
   householdId: string
-): ImportSessionSummary | null {
-  const session = db
-    .prepare(`SELECT id FROM import_session WHERE id = ? AND household_id = ?`)
-    .get(sessionId, householdId) as { id: string } | undefined;
+): Promise<ImportSessionSummary | null> {
+  const session = await qGet<{ id: string }>(
+    `SELECT id FROM import_session WHERE id = ? AND household_id = ?`,
+    sessionId,
+    householdId
+  );
   if (!session) {
     return null;
   }
 
-  const fileRows = db
-    .prepare(
-      `SELECT id, file_name, status, confidence_summary FROM import_file WHERE session_id = ? ORDER BY uploaded_at ASC`
-    )
-    .all(sessionId) as Array<{ id: string; file_name: string; status: string; confidence_summary: string | null }>;
+  const fileRows = await qAll<{ id: string; file_name: string; status: string; confidence_summary: string | null }>(
+    `SELECT id, file_name, status, confidence_summary FROM import_file WHERE session_id = ? ORDER BY uploaded_at ASC`,
+    sessionId
+  );
 
   const fileIds = fileRows.map((f) => f.id);
   if (fileIds.length === 0) {
@@ -232,61 +232,59 @@ export function getImportSessionSummary(
   const placeholders = fileIds.map(() => "?").join(", ");
 
   const rawByFile = toCountMap(
-    db
-      .prepare(
-        `SELECT file_id, COUNT(*) AS cnt
+    await qAll<{ file_id: string; cnt: number }>(
+      `SELECT file_id, COUNT(*)::int AS cnt
          FROM transaction_raw
          WHERE file_id IN (${placeholders})
-         GROUP BY file_id`
-      )
-      .all(...fileIds) as Array<{ file_id: string; cnt: number }>
+         GROUP BY file_id`,
+      ...fileIds
+    )
   );
 
   const canonicalByFile = toCountMap(
-    db
-      .prepare(
-        `SELECT tr.file_id AS file_id, COUNT(*) AS cnt
+    await qAll<{ file_id: string; cnt: number }>(
+      `SELECT tr.file_id AS file_id, COUNT(*)::int AS cnt
          FROM transaction_canonical tc
          INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
          WHERE tc.household_id = ? AND tr.file_id IN (${placeholders})
-         GROUP BY tr.file_id`
-      )
-      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+         GROUP BY tr.file_id`,
+      householdId,
+      ...fileIds
+    )
   );
 
   const nearDupByFile = toCountMap(
-    db
-      .prepare(
-        `SELECT tr.file_id AS file_id, COUNT(*) AS cnt
+    await qAll<{ file_id: string; cnt: number }>(
+      `SELECT tr.file_id AS file_id, COUNT(*)::int AS cnt
          FROM resolution_item ri
          INNER JOIN transaction_raw tr ON ri.target_id = tr.id
          WHERE ri.household_id = ?
            AND ri.type = 'duplicate_ambiguity'
            AND tr.file_id IN (${placeholders})
-         GROUP BY tr.file_id`
-      )
-      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+         GROUP BY tr.file_id`,
+      householdId,
+      ...fileIds
+    )
   );
 
   const openNearByFile = toCountMap(
-    db
-      .prepare(
-        `SELECT tr.file_id AS file_id, COUNT(*) AS cnt
+    await qAll<{ file_id: string; cnt: number }>(
+      `SELECT tr.file_id AS file_id, COUNT(*)::int AS cnt
          FROM resolution_item ri
          INNER JOIN transaction_raw tr ON ri.target_id = tr.id
          WHERE ri.household_id = ?
            AND ri.type = 'duplicate_ambiguity'
            AND ri.status IN ('open', 'in_review')
            AND tr.file_id IN (${placeholders})
-         GROUP BY tr.file_id`
-      )
-      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+         GROUP BY tr.file_id`,
+      householdId,
+      ...fileIds
+    )
   );
 
   const openCanonicalByFile = toCountMap(
-    db
-      .prepare(
-        `SELECT tr.file_id AS file_id, COUNT(DISTINCT ri.id) AS cnt
+    await qAll<{ file_id: string; cnt: number }>(
+      `SELECT tr.file_id AS file_id, COUNT(DISTINCT ri.id)::int AS cnt
          FROM resolution_item ri
          INNER JOIN transaction_canonical tc ON ri.target_id = tc.id
          INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
@@ -294,9 +292,10 @@ export function getImportSessionSummary(
            AND ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch')
            AND ri.status IN ('open', 'in_review')
            AND tr.file_id IN (${placeholders})
-         GROUP BY tr.file_id`
-      )
-      .all(householdId, ...fileIds) as Array<{ file_id: string; cnt: number }>
+         GROUP BY tr.file_id`,
+      householdId,
+      ...fileIds
+    )
   );
 
   let totalRaw = 0;
@@ -307,7 +306,8 @@ export function getImportSessionSummary(
   let totalReconAvailable = 0;
   let totalReconMismatch = 0;
 
-  const files: ImportSessionFileSummary[] = fileRows.map((f) => {
+  const files: ImportSessionFileSummary[] = [];
+  for (const f of fileRows) {
     let diagnostics: ImportSessionFileSummary["diagnostics"] | undefined;
     if (f.confidence_summary) {
       try {
@@ -333,7 +333,7 @@ export function getImportSessionSummary(
       0,
       rawRowCount - canonicalRowCount - nearDuplicatesFlagged
     );
-    const reconciliation = reconciliationForFile(f.id);
+    const reconciliation = await reconciliationForFile(f.id);
 
     totalRaw += rawRowCount;
     totalCanon += canonicalRowCount;
@@ -347,7 +347,7 @@ export function getImportSessionSummary(
       }
     }
 
-    return {
+    files.push({
       fileId: f.id,
       fileName: f.file_name,
       status: f.status,
@@ -358,8 +358,8 @@ export function getImportSessionSummary(
       notPostedExactDuplicateOrSkipped,
       reconciliation,
       diagnostics
-    };
-  });
+    });
+  }
 
   return {
     sessionId,

@@ -27,6 +27,6 @@
     "import:purge": "node scripts/purge-import-staging.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^12.4.1"
+    "postgres": "^3.4.8"
   }
 }

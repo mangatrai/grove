@@ -2,15 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MIGRATIONS_DIR="$ROOT_DIR/backend/db/migrations"
-SEEDS_DIR="$ROOT_DIR/backend/db/seeds"
-
-DB_PATH="$(node "$ROOT_DIR/scripts/print-db-path.mjs" | tr -d '\r\n')"
 
 usage() {
   echo "Usage: scripts/db.sh --init [--seed] [--dev-seeds]"
-  echo "  --seed        Apply backend/db/seeds/*.sql (household, owner user, global categories)."
-  echo "  --dev-seeds   Also apply backend/db/seeds/dev/*.sql (sample financial_account rows)."
+  echo "  Applies backend/db/migrations_pg and optional backend/db/seeds_pg (Postgres)."
   exit 1
 }
 
@@ -42,24 +37,12 @@ if [[ "$INIT" != "true" ]]; then
   usage
 fi
 
-mkdir -p "$(dirname "$DB_PATH")"
-
-SEED_FLAG=""
+ARGS=(--init)
 if [[ "$SEED" == "true" ]]; then
-  SEED_FLAG="--seed"
+  ARGS+=(--seed)
 fi
-DEV_SEEDS_FLAG=""
 if [[ "$DEV_SEEDS" == "true" ]]; then
-  DEV_SEEDS_FLAG="--dev-seeds"
+  ARGS+=(--dev-seeds)
 fi
 
-echo "Using DB path (matches backend): $DB_PATH"
-
-node "$ROOT_DIR/scripts/db.mjs" \
-  --db-path "$DB_PATH" \
-  --migrations-dir "$MIGRATIONS_DIR" \
-  --seeds-dir "$SEEDS_DIR" \
-  $SEED_FLAG \
-  $DEV_SEEDS_FLAG
-
-echo "Database ready at: $DB_PATH"
+node "$ROOT_DIR/scripts/db-pg.mjs" "${ARGS[@]}"

@@ -13,7 +13,7 @@ const loginSchema = z.object({
 
 export const authRouter = Router();
 
-authRouter.post("/login", (req, res) => {
+authRouter.post("/login", async (req, res) => {
   const parsed = loginSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({
@@ -23,7 +23,7 @@ authRouter.post("/login", (req, res) => {
     return;
   }
 
-  const token = login(parsed.data);
+  const token = await login(parsed.data);
   if (!token) {
     res.status(401).json({ message: "Invalid credentials" });
     return;
@@ -45,7 +45,7 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8)
 });
 
-authRouter.post("/change-password", requireAuth, (req: AuthenticatedRequest, res) => {
+authRouter.post("/change-password", requireAuth, async (req: AuthenticatedRequest, res) => {
   const parsed = changePasswordSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({
@@ -54,7 +54,7 @@ authRouter.post("/change-password", requireAuth, (req: AuthenticatedRequest, res
     });
     return;
   }
-  const out = changePassword(
+  const out = await changePassword(
     req.authUser!.userId,
     parsed.data.currentPassword,
     parsed.data.newPassword
