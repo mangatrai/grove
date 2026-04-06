@@ -229,16 +229,19 @@ export async function listGlobalCategoryRules(): Promise<GlobalCategoryRuleRow[]
   return rows.map(mapGlobalRule);
 }
 
-export async function createGlobalCategoryRule(input: {
-  ruleKey: string;
-  pattern: string;
-  matchType: MatchType;
-  categoryId: string;
-  amountScope: RuleAmountScope;
-  confidence: number;
-  priority: number;
-  enabled: boolean;
-}): Promise<{ ok: true; data: GlobalCategoryRuleRow } | CreateRuleFailure> {
+export async function createGlobalCategoryRule(
+  input: {
+    ruleKey: string;
+    pattern: string;
+    matchType: MatchType;
+    categoryId: string;
+    amountScope: RuleAmountScope;
+    confidence: number;
+    priority: number;
+    enabled: boolean;
+  },
+  opts?: { skipGlobalBuiltinAssignableCheck?: boolean }
+): Promise<{ ok: true; data: GlobalCategoryRuleRow } | CreateRuleFailure> {
   const pattern = normalizePattern(input.pattern);
   if (!isPatternValid(pattern, input.matchType)) {
     return { ok: false, code: "INVALID_PATTERN" };
@@ -253,7 +256,10 @@ export async function createGlobalCategoryRule(input: {
   if (rk.length < 2 || rk.length > 120) {
     return { ok: false, code: "INVALID_PATTERN" };
   }
-  if (!(await categoryAssignableForGlobalBuiltin(input.categoryId))) {
+  if (
+    !opts?.skipGlobalBuiltinAssignableCheck &&
+    !(await categoryAssignableForGlobalBuiltin(input.categoryId))
+  ) {
     return { ok: false, code: "BUILTIN_REQUIRES_GLOBAL_LEAF" };
   }
 
@@ -437,7 +443,8 @@ export async function createCategoryRuleForHousehold(
     confidence: number;
     priority: number;
     enabled: boolean;
-  }
+  },
+  opts?: { skipCategoryAssignableCheck?: boolean }
 ): Promise<{ ok: true; data: CategoryRuleRow } | CreateRuleFailure> {
   const pattern = normalizePattern(input.pattern);
   if (!isPatternValid(pattern, input.matchType)) {
@@ -452,7 +459,10 @@ export async function createCategoryRuleForHousehold(
   if (!Number.isInteger(input.priority) || input.priority < 0 || input.priority > 10000) {
     return { ok: false, code: "INVALID_PRIORITY" };
   }
-  if (!(await categoryAssignableByHousehold(input.categoryId, householdId))) {
+  if (
+    !opts?.skipCategoryAssignableCheck &&
+    !(await categoryAssignableByHousehold(input.categoryId, householdId))
+  ) {
     return { ok: false, code: "INVALID_CATEGORY" };
   }
 
@@ -495,6 +505,10 @@ export async function createCategoryRuleForHousehold(
 
 export type BulkRuleRowError = { index: number; message: string; code?: string };
 
+function bulkRuleResolveCacheKey(row: { categoryId?: string | null; categoryPath?: string | null }): string {
+  return `${row.categoryId ?? ""}\u0001${row.categoryPath ?? ""}`;
+}
+
 export async function bulkCreateCategoryRulesForHousehold(
   householdId: string,
   rows: Array<{
@@ -510,13 +524,23 @@ export async function bulkCreateCategoryRulesForHousehold(
 ): Promise<{ created: CategoryRuleRow[]; errors: BulkRuleRowError[] }> {
   const created: CategoryRuleRow[] = [];
   const errors: BulkRuleRowError[] = [];
+  const resolveCache = new Map<
+    string,
+    Awaited<ReturnType<typeof resolveLeafCategoryIdForHousehold>>
+  >();
+  const assignableByCategoryId = new Map<string, boolean>();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
-    const resolved = await resolveLeafCategoryIdForHousehold(householdId, {
-      categoryId: row.categoryId,
-      categoryPath: row.categoryPath
-    });
+    const cacheKey = bulkRuleResolveCacheKey(row);
+    let resolved = resolveCache.get(cacheKey);
+    if (resolved === undefined) {
+      resolved = await resolveLeafCategoryIdForHousehold(householdId, {
+        categoryId: row.categoryId,
+        categoryPath: row.categoryPath
+      });
+      resolveCache.set(cacheKey, resolved);
+    }
     if (!resolved.ok) {
       const message =
         resolved.code === "MISSING_INPUT"
@@ -530,20 +554,34 @@ export async function bulkCreateCategoryRulesForHousehold(
       continue;
     }
 
+    let assignable = assignableByCategoryId.get(resolved.id);
+    if (assignable === undefined) {
+      assignable = await categoryAssignableByHousehold(resolved.id, householdId);
+      assignableByCategoryId.set(resolved.id, assignable);
+    }
+    if (!assignable) {
+      errors.push({ index: i, code: "INVALID_CATEGORY", message: "Category cannot be assigned" });
+      continue;
+    }
+
     const scope = row.amountScope ?? "any";
     if (!isRuleAmountScope(scope)) {
       errors.push({ index: i, code: "INVALID_AMOUNT_SCOPE", message: "Invalid amount_scope" });
       continue;
     }
-    const out = await createCategoryRuleForHousehold(householdId, {
-      pattern: row.pattern,
-      matchType: row.matchType,
-      categoryId: resolved.id,
-      amountScope: scope,
-      confidence: row.confidence ?? 0.85,
-      priority: row.priority ?? 100,
-      enabled: row.enabled ?? true
-    });
+    const out = await createCategoryRuleForHousehold(
+      householdId,
+      {
+        pattern: row.pattern,
+        matchType: row.matchType,
+        categoryId: resolved.id,
+        amountScope: scope,
+        confidence: row.confidence ?? 0.85,
+        priority: row.priority ?? 100,
+        enabled: row.enabled ?? true
+      },
+      { skipCategoryAssignableCheck: true }
+    );
     if (!out.ok) {
       errors.push({
         index: i,
@@ -590,13 +628,23 @@ export async function bulkCreateGlobalCategoryRules(
 ): Promise<{ created: GlobalCategoryRuleRow[]; errors: BulkRuleRowError[] }> {
   const created: GlobalCategoryRuleRow[] = [];
   const errors: BulkRuleRowError[] = [];
+  const resolveCache = new Map<
+    string,
+    Awaited<ReturnType<typeof resolveLeafCategoryIdForHousehold>>
+  >();
+  const globalBuiltinAssignableByCategoryId = new Map<string, boolean>();
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]!;
-    const resolved = await resolveLeafCategoryIdForHousehold(householdId, {
-      categoryId: row.categoryId,
-      categoryPath: row.categoryPath
-    });
+    const cacheKey = bulkRuleResolveCacheKey(row);
+    let resolved = resolveCache.get(cacheKey);
+    if (resolved === undefined) {
+      resolved = await resolveLeafCategoryIdForHousehold(householdId, {
+        categoryId: row.categoryId,
+        categoryPath: row.categoryPath
+      });
+      resolveCache.set(cacheKey, resolved);
+    }
     if (!resolved.ok) {
       const message =
         resolved.code === "MISSING_INPUT"
@@ -609,7 +657,12 @@ export async function bulkCreateGlobalCategoryRules(
       errors.push({ index: i, code: resolved.code, message });
       continue;
     }
-    if (!(await categoryAssignableForGlobalBuiltin(resolved.id))) {
+    let globalOk = globalBuiltinAssignableByCategoryId.get(resolved.id);
+    if (globalOk === undefined) {
+      globalOk = await categoryAssignableForGlobalBuiltin(resolved.id);
+      globalBuiltinAssignableByCategoryId.set(resolved.id, globalOk);
+    }
+    if (!globalOk) {
       errors.push({
         index: i,
         code: "BUILTIN_REQUIRES_GLOBAL_LEAF",
@@ -621,16 +674,19 @@ export async function bulkCreateGlobalCategoryRules(
 
     const ruleKey = row.ruleKey?.trim() || autoRuleKeyFromPattern(row.pattern);
 
-    const out = await createGlobalCategoryRule({
-      ruleKey,
-      pattern: row.pattern,
-      matchType: row.matchType,
-      categoryId: resolved.id,
-      amountScope: row.amountScope,
-      confidence: row.confidence ?? 0.7,
-      priority: row.priority ?? 100,
-      enabled: row.enabled ?? true
-    });
+    const out = await createGlobalCategoryRule(
+      {
+        ruleKey,
+        pattern: row.pattern,
+        matchType: row.matchType,
+        categoryId: resolved.id,
+        amountScope: row.amountScope,
+        confidence: row.confidence ?? 0.7,
+        priority: row.priority ?? 100,
+        enabled: row.enabled ?? true
+      },
+      { skipGlobalBuiltinAssignableCheck: true }
+    );
     if (!out.ok) {
       const message =
         out.code === "BUILTIN_REQUIRES_GLOBAL_LEAF"
