@@ -28,7 +28,8 @@ Bank and card exports are not uniform: CSVs differ in headers, debit/credit spli
    This keeps correctness logic in one place as new bank adapters are added.
 
 4. **UX: Import Transactions**  
-   Flow: user uploads CSV/PDF → **per file**, map to a **household financial account** (and optionally confirm/chosen profile) → run adapter → review grid → finalize.  
+   Flow: user uploads CSV/PDF → **per file**, map to a **household financial account** (and optionally confirm/chosen profile) → **parse** (to `transaction_raw`) → **canonicalize** (to `transaction_canonical`, dedupe, classification, resolution items) → review grid → session **finalize**.  
+   **Run import** in the UI chains parse + canonicalize. Ledger rows appear **at canonicalize**, not at finalize; **undo-import** (while session is `review`) removes canonical rows tied to that session’s raw rows. User-facing detail: [`USER_GUIDE.md`](USER_GUIDE.md) § Importing statements.  
    Auto-detect can suggest profile + mapping; user confirmation remains the safety gate for low confidence.
 
 **Shared building blocks:** date/amount parsing helpers, CSV “find header row” / section skipping utilities, reusable tests on **fixtures per institution** (redacted exports).
@@ -72,14 +73,19 @@ Operators may still want to **reclaim disk space** after they trust extracted ro
 1. User uploads statement/payslip files (batch).
 2. Import session created; files checksummed and staged.
 3. User maps each file to a target **financial account** (and confirms or selects parser profile when needed).
-4. Per-file **adapter** runs; outputs rows in the normalized interchange format.
-5. **Canonical ingest service** persists raw rows and maps toward canonical schema (single path).
-6. Dedupe fingerprint computed; duplicates blocked or routed to unresolved queue.
+4. Per-file **adapter** runs on **parse**; outputs rows persisted as **`transaction_raw`**.
+5. **Canonical ingest** (**canonicalize**) maps raw rows to **`transaction_canonical`** (posted ledger rows), single write path.
+6. Dedupe fingerprint computed; duplicates blocked or routed to **`resolution_item`** queue.
 7. Classification and transfer matching run with confidence thresholds.
-8. Inbox displays summary and unresolved counts.
-9. User bulk reviews/fixes and finalizes import.
-10. Posted canonical transactions update dashboards and ledger adapter output.
-11. Raw files purged per retention policy.
+8. Inbox / Transactions **Needs review** shows unresolved counts and row-level context.
+9. User bulk reviews/fixes categories and resolution statuses; optional **undo-import** while session is `review` rolls back that session’s canonical inserts.
+10. User **finalizes** the import session (terminal session state); ledger rows are already live from step 5.
+11. Posted canonical transactions update dashboards and ledger adapter output.
+12. Staged raw files purged per retention policy after successful canonicalize (see USER_GUIDE).
+
+### Planned ledger surface (product backlog)
+
+Editable **memo/description**, **delete** / **bulk delete**, and **bulk recategorize** outside the unknown-category resolution flow are **not implemented**; requirements live in [`USER_GUIDE.md`](USER_GUIDE.md) § Ledger edits (planned).
 
 ## 5. Key Domain Model (Conceptual)
 - `Household`
