@@ -54,6 +54,21 @@ describe("Deloitte payslip PDF text parser (v1 = IBM summary heuristics)", () =>
     expect((parsed!.rawExtractJson as { parserProfile?: string }).parserProfile).toBe("deloitte_payslip_pdf");
     expect((parsed!.rawExtractJson as { detectedDeloitteKeyword?: boolean }).detectedDeloitteKeyword).toBe(true);
   });
+
+  it("regex fallback recovers Gross/Net when labels are not IBM defaults (Total Remuneration + Net Distribution)", () => {
+    const text = `
+      Deloitte
+      Pay Statement
+      Total Remuneration 7,777.77 15,555.55
+      Net Distribution 5,555.55 11,111.11
+    `;
+    const parsed = parseDeloittePayslipFromText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.grossPayCurrent).toBe(7777.77);
+    expect(parsed!.grossPayYtd).toBe(15555.55);
+    expect(parsed!.netPayCurrent).toBe(5555.55);
+    expect(parsed!.netPayYtd).toBe(11111.11);
+  });
 });
 
 describe("IBM payslip PDF text parser (Pay and Contributions summary)", () => {
