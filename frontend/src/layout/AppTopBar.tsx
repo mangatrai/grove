@@ -48,22 +48,30 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
       return;
     }
     let cancelled = false;
-    void apiJson<ProfileResponse>("/household/profile")
-      .then((r) => {
-        if (cancelled) {
-          return;
-        }
-        const firstName = r.profile.fullName.trim().split(/\s+/)[0] ?? "Account";
-        const emoji = AVATAR_KEY_EMOJI[r.profile.avatarKey ?? ""] ?? "👤";
-        setMenuLabel(`${emoji} ${firstName}`);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMenuLabel("Account");
-        }
-      });
+    function loadLabel() {
+      void apiJson<ProfileResponse>("/household/profile")
+        .then((r) => {
+          if (cancelled) {
+            return;
+          }
+          const firstName = r.profile.fullName.trim().split(/\s+/)[0] ?? "Account";
+          const emoji = AVATAR_KEY_EMOJI[r.profile.avatarKey ?? ""] ?? "👤";
+          setMenuLabel(`${emoji} ${firstName}`);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setMenuLabel("Account");
+          }
+        });
+    }
+    loadLabel();
+    function onProfileUpdated() {
+      loadLabel();
+    }
+    window.addEventListener("app:household-profile-updated", onProfileUpdated);
     return () => {
       cancelled = true;
+      window.removeEventListener("app:household-profile-updated", onProfileUpdated);
     };
   }, [token]);
 
