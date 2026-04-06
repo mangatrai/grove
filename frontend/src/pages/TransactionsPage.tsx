@@ -413,6 +413,15 @@ export function TransactionsPage() {
     ownerProfiles.length
   ]);
 
+  const refreshCategories = useCallback(async () => {
+    try {
+      const catRes = await apiJson<{ categories: CategoryOption[] }>("/categories");
+      setCategories(catRes.categories);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   useEffect(() => {
     if (!token) {
       return;
@@ -1330,49 +1339,27 @@ export function TransactionsPage() {
             >
               Reopen
             </button>
-            <label
+            <div
               style={{
                 marginBottom: 0,
                 marginLeft: "0.25rem",
+                minWidth: "12rem",
+                maxWidth: "20rem",
                 opacity: unknownCategoryResolutionIdsInSelection.length === 0 ? 0.55 : 1
               }}
             >
-              <span className="muted" style={{ marginRight: "0.35rem" }}>
+              <span className="muted" style={{ display: "block", marginBottom: "0.2rem" }}>
                 Category (unknown-category items)
               </span>
-              <select
-                value={bulkCategoryId}
-                onChange={(e) => setBulkCategoryId(e.target.value)}
-                disabled={savingBulk}
-                style={{ minWidth: "10rem" }}
-              >
-                <option value="">—</option>
-                {categories
-                  .filter((c) => !c.parentId)
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((p) => {
-                    const children = categories
-                      .filter((c) => c.parentId === p.id)
-                      .sort((a, b) => a.name.localeCompare(b.name));
-                    if (children.length === 0) {
-                      return (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      );
-                    }
-                    return (
-                      <optgroup key={p.id} label={p.name}>
-                        {children.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    );
-                  })}
-              </select>
-            </label>
+              <LedgerCategoryPicker
+                categories={categories}
+                value={bulkCategoryId || null}
+                disabled={savingBulk || unknownCategoryResolutionIdsInSelection.length === 0}
+                onChange={(id) => setBulkCategoryId(id ?? "")}
+                onCategoryCreated={() => void refreshCategories()}
+                ariaLabel="Bulk category for unknown-category resolution items"
+              />
+            </div>
             <button
               type="button"
               disabled={savingBulk || !bulkCategoryId || unknownCategoryResolutionIdsInSelection.length === 0}

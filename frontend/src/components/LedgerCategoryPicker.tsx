@@ -11,13 +11,16 @@ export function LedgerCategoryPicker({
   value,
   disabled,
   onChange,
-  ariaLabel
+  ariaLabel,
+  onCategoryCreated
 }: {
   categories: CategoryOption[];
   value: string | null;
   disabled: boolean;
   onChange: (categoryId: string | null) => void | Promise<void>;
   ariaLabel: string;
+  /** Called after a new group or subcategory is created via this picker (parent can refetch categories). */
+  onCategoryCreated?: () => void | Promise<void>;
 }) {
   const [savingCreate, setSavingCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +47,7 @@ export function LedgerCategoryPicker({
         body: JSON.stringify({ name: name.trim(), parentId: null })
       });
       await Promise.resolve(onChange(res.category.id));
+      await Promise.resolve(onCategoryCreated?.());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not create group");
     } finally {
@@ -64,6 +68,7 @@ export function LedgerCategoryPicker({
         body: JSON.stringify({ name: name.trim(), parentId: parent.id })
       });
       await Promise.resolve(onChange(res.category.id));
+      await Promise.resolve(onCategoryCreated?.());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Could not create subcategory");
     } finally {
