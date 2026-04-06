@@ -8,10 +8,12 @@ import { resolveParserAdapter } from "./parsers/parser-registry.js";
 import {
   parseBoaCheckingOrSavingsCsv,
   parseBoaCheckingOrSavingsCsvDetailed,
-  type BoaCsvDiagnostics
+  type BoaCsvDiagnostics,
+  type BoaStatementBalances
 } from "./profiles/boa-checking-savings-csv.js";
 import { parseBoaCreditCardCsv } from "./profiles/boa-credit-card-csv.js";
-import { parseBoaEStatementPdf } from "./profiles/boa-estatement-pdf.js";
+import { parseBoaEStatementFromTextDetailed } from "./profiles/boa-estatement-pdf.js";
+import { extractPdfText } from "./profiles/pdf-text.js";
 import { parseChaseCardCsv } from "./profiles/chase-card-csv.js";
 import { parseCitiCardCsv } from "./profiles/citi-card-csv.js";
 import { parseMarcusOnlineSavingsPdf } from "./profiles/marcus-online-savings-pdf.js";
@@ -134,12 +136,15 @@ async function extractByProfile(
       return parseBoaCheckingOrSavingsCsv(buffer);
     case "boa_credit_card_csv":
       return parseBoaCreditCardCsv(buffer);
-    case "boa_estatement_pdf":
-      return await parseBoaEStatementPdf(buffer);
+    case "boa_estatement_pdf": {
+      const text = await extractPdfText(buffer);
+      return parseBoaEStatementFromTextDetailed(text).rows;
+    }
     case "marcus_online_savings_pdf":
       return await parseMarcusOnlineSavingsPdf(buffer);
     case "ibm_pay_contributions_pdf":
     case "adp_payslip_pdf":
+    case "deloitte_payslip_pdf":
       throw new Error("payslip PDF profiles are handled in parseSessionImportFiles");
   }
 }
@@ -149,10 +154,20 @@ async function extractByProfileWithDiagnostics(
   buffer: Buffer,
   fileName: string,
   request: ParseRequest
-): Promise<{ rows: NormalizedRawPayload[]; diagnostics?: ParserDiagnostics } | ParseFailure> {
+): Promise<{
+  rows: NormalizedRawPayload[];
+  diagnostics?: ParserDiagnostics;
+  statementBalances?: BoaStatementBalances | null;
+} | ParseFailure> {
   if (profileId === "boa_checking_csv" || profileId === "boa_savings_csv") {
-    const parsed = parseBoaCheckingOrSavingsCsvDetailed(buffer);
-    return { rows: parsed.rows, diagnostics: { boaCsv: parsed.diagnostics } };
+    const src = profileId === "boa_savings_csv" ? "boa_savings_csv" : "boa_checking_csv";
+    const parsed = parseBoaCheckingOrSavingsCsvDetailed(buffer, src);
+    return { rows: parsed.rows, diagnostics: { boaCsv: parsed.diagnostics }, statementBalances: parsed.statementBalances };
+  }
+  if (profileId === "boa_estatement_pdf") {
+    const text = await extractPdfText(buffer);
+    const parsed = parseBoaEStatementFromTextDetailed(text);
+    return { rows: parsed.rows, statementBalances: parsed.statementBalances };
   }
   const extracted = await extractByProfile(profileId, buffer, fileName, request);
   if (!Array.isArray(extracted)) {
@@ -229,7 +244,7 @@ export async function parseSessionImportFiles(
     );
 
     try {
-      if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf") {
+      if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf" || profileId === "deloitte_payslip_pdf") {
         if (!(await requireEmployerForPayslipImport(householdId, userId, file.employer_id))) {
           await qExec(
             `UPDATE import_file
@@ -399,7 +414,8 @@ export async function parseSessionImportFiles(
           stage: "parsed",
           parsedRows: parsedRowsForFile,
           profile: profileId,
-          parserDiagnostics: extracted.diagnostics ?? null
+          parserDiagnostics: extracted.diagnostics ?? null,
+          ...(extracted.statementBalances != null ? { statementBalances: extracted.statementBalances } : {})
         }),
         file.id
       );

@@ -1,5 +1,79 @@
 import { countCsvDataLines, parseAmount, parseCsvWithHeader, sliceBoaTransactionTable } from "./tabular-helpers.js";
 
+/** Statement-period balances from BoA web export summary block (above transaction table). */
+export type BoaStatementBalances = {
+  currency: "USD";
+  beginning: number | null;
+  ending: number | null;
+  /** ISO date (YYYY-MM-DD) for beginning balance "as of" when parsed. */
+  asOfStart: string | null;
+  /** ISO date for ending balance "as of" when parsed. */
+  asOfEnd: string | null;
+  source: "boa_checking_csv" | "boa_savings_csv" | "boa_estatement_pdf";
+};
+
+function mmddyyyyToIso(s: string): string | null {
+  const m = s.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) {
+    return null;
+  }
+  return `${m[3]}-${m[1]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}`;
+}
+
+/**
+ * Parses "Beginning balance as of …" / "Ending balance as of …" lines in the CSV preamble
+ * (lines before `Date,Description,Amount,...`).
+ */
+export function parseBoaCsvStatementBalances(
+  fullText: string,
+  source: BoaStatementBalances["source"]
+): BoaStatementBalances | null {
+  const lines = fullText.split(/\r?\n/);
+  const headerIdx = lines.findIndex((line) => {
+    const lower = line.toLowerCase();
+    return lower.startsWith("date,") && lower.includes("description") && lower.includes("amount");
+  });
+  if (headerIdx < 0) {
+    return null;
+  }
+  let beginning: number | null = null;
+  let ending: number | null = null;
+  let asOfStart: string | null = null;
+  let asOfEnd: string | null = null;
+
+  for (const line of lines.slice(0, headerIdx)) {
+    const lower = line.toLowerCase();
+    if (!lower.includes("balance")) {
+      continue;
+    }
+    const dateM = line.match(/as of\s+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+    const amounts = line.match(/\d{1,3}(?:,\d{3})*\.\d{2}/g);
+    const amt = amounts?.length ? parseAmount(amounts[amounts.length - 1]!) : null;
+    const iso = dateM ? mmddyyyyToIso(dateM[1]!) : null;
+    if (lower.includes("beginning balance")) {
+      if (amt !== null) {
+        beginning = amt;
+      }
+      if (iso) {
+        asOfStart = iso;
+      }
+    }
+    if (lower.includes("ending balance")) {
+      if (amt !== null) {
+        ending = amt;
+      }
+      if (iso) {
+        asOfEnd = iso;
+      }
+    }
+  }
+
+  if (beginning === null && ending === null) {
+    return null;
+  }
+  return { currency: "USD", beginning, ending, asOfStart, asOfEnd, source };
+}
+
 export interface NormalizedRawPayload {
   txn_date: string;
   posting_date: string;
@@ -25,9 +99,12 @@ export interface BoaCsvDiagnostics {
 }
 
 export function parseBoaCheckingOrSavingsCsvDetailed(
-  buffer: Buffer
-): { rows: NormalizedRawPayload[]; diagnostics: BoaCsvDiagnostics } {
-  const sliced = sliceBoaTransactionTable(buffer.toString("utf8"));
+  buffer: Buffer,
+  statementSource: "boa_checking_csv" | "boa_savings_csv" = "boa_checking_csv"
+): { rows: NormalizedRawPayload[]; diagnostics: BoaCsvDiagnostics; statementBalances: BoaStatementBalances | null } {
+  const fullText = buffer.toString("utf8");
+  const statementBalances = parseBoaCsvStatementBalances(fullText, statementSource);
+  const sliced = sliceBoaTransactionTable(fullText);
   if (!sliced) {
     return {
       rows: [],
@@ -39,7 +116,8 @@ export function parseBoaCheckingOrSavingsCsvDetailed(
         droppedInvalidAmount: 0,
         droppedBeginningBalance: 0,
         droppedLikelyMalformedCsvRows: 0
-      }
+      },
+      statementBalances
     };
   }
 
@@ -110,7 +188,8 @@ export function parseBoaCheckingOrSavingsCsvDetailed(
       droppedInvalidAmount,
       droppedBeginningBalance,
       droppedLikelyMalformedCsvRows: Math.max(0, dataLineCount - strictCsvRows.length)
-    }
+    },
+    statementBalances
   };
 }
 
