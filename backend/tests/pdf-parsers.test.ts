@@ -83,6 +83,15 @@ Net Pay $3,200.00 $6,400.00
     expect(parsed!.netPayCurrent).toBe(3200);
     expect((parsed!.rawExtractJson as { detectedDeloitteKeyword?: boolean }).detectedDeloitteKeyword).toBe(false);
   });
+
+  it("parses glued labels and zero-width noise like some pdf-parse outputs", () => {
+    const text =
+      "Pay\u200b Statement\u00a0GrossPay\u200c5,000.00\u00a010,000.00 NetPay 3,200.00 6,400.00";
+    const parsed = parseDeloittePayslipFromText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.grossPayCurrent).toBe(5000);
+    expect(parsed!.netPayCurrent).toBe(3200);
+  });
 });
 
 describe("IBM payslip PDF text parser (Pay and Contributions summary)", () => {
