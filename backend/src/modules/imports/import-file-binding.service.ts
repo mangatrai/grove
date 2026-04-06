@@ -10,7 +10,7 @@ import {
 } from "../payslip/payslip-employer-resolve.service.js";
 import { isParserProfileId } from "./profiles/profile-ids.js";
 
-const PAYSLIP_PARSER_PROFILES = new Set(["ibm_pay_contributions_pdf", "adp_payslip_pdf"]);
+const PAYSLIP_PARSER_PROFILES = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
 
 /**
  * Ensures one `payslip` bucket row for import binding; `institution` follows Profile → Employer Setup.

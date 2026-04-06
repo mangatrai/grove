@@ -1,6 +1,6 @@
 import { extractPdfText } from "../imports/profiles/pdf-text.js";
 import { normalizePdfExtractText } from "./profiles/ibm-payslip-pdf.js";
-import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
+import { DELOITTE_PAYSLIP_PDF_PROFILE_ID, IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
 import { listHouseholdEmployers } from "./payslip-employer-resolve.service.js";
 
 export type SniffHints = {
@@ -13,7 +13,14 @@ export function detectPayslipSignals(normalizedText: string): SniffHints {
   const t = normalizedText.slice(0, 120_000);
   const ibmSignals: string[] = [];
   const adpSignals: string[] = [];
+  const deloitteSignals: string[] = [];
 
+  if (/\bdeloitte\b/i.test(t)) {
+    deloitteSignals.push("deloitte_brand");
+  }
+  if (/\bpay\s+statement\b/i.test(t) && /\bdeloitte\b/i.test(t)) {
+    deloitteSignals.push("deloitte_pay_statement");
+  }
   if (/\bsuccessfactors\b/i.test(t)) {
     ibmSignals.push("successfactors");
   }
@@ -34,7 +41,7 @@ export function detectPayslipSignals(normalizedText: string): SniffHints {
     adpSignals.push("adp_portal");
   }
 
-  return { ibmSignals, adpSignals };
+  return { ibmSignals, adpSignals, deloitteSignals };
 }
 
 export type SniffSuggestion = {
@@ -63,23 +70,32 @@ export async function suggestPayslipFromText(
 
   const adpScore = hints.adpSignals.length;
   const ibmScore = hints.ibmSignals.length;
+  const deloitteScore = hints.deloitteSignals.length;
 
-  if (adpScore > 0 && adpScore >= ibmScore) {
+  if (adpScore > 0 && adpScore >= ibmScore && adpScore >= deloitteScore) {
     suggestedParserProfileId = "adp_payslip_pdf";
     if (adpScore >= 1) {
       confidence = "high";
     }
     note =
       "Text looks like ADP; full ADP parsing is not implemented yet — choose IBM if this is actually an IBM/SuccessFactors PDF, or wait for ADP support.";
+  } else if (deloitteScore >= 2 && deloitteScore >= ibmScore) {
+    suggestedParserProfileId = DELOITTE_PAYSLIP_PDF_PROFILE_ID;
+    confidence = "high";
+  } else if (deloitteScore >= 1 && ibmScore === 0 && adpScore === 0) {
+    suggestedParserProfileId = DELOITTE_PAYSLIP_PDF_PROFILE_ID;
+    confidence = "low";
+    note = "Deloitte keyword found; confirm employer parser is set to Deloitte Pay Statement if parse fails.";
   } else if (ibmScore > 0) {
     suggestedParserProfileId = IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
     confidence = ibmScore >= 2 ? "high" : "low";
   }
 
   let suggestedEmployerId: string | null = null;
-  const matching = employers.filter(
-    (e) => (e.parserProfileId?.trim() || IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID) === suggestedParserProfileId
-  );
+  const matching = employers.filter((e) => {
+    const pid = e.parserProfileId?.trim() || IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+    return pid === suggestedParserProfileId;
+  });
   if (matching.length === 1) {
     suggestedEmployerId = matching[0]!.id;
   } else if (matching.length > 1) {

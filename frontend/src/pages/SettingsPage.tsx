@@ -871,6 +871,7 @@ export function SettingsPage() {
                         disabled={savingProfile}
                       >
                         <option value="ibm_pay_contributions_pdf">IBM Pay &amp; Contributions (PDF)</option>
+                        <option value="deloitte_payslip_pdf">Deloitte Pay Statement (PDF)</option>
                         <option value="adp_payslip_pdf">ADP (PDF — not implemented)</option>
                       </select>
                     </label>

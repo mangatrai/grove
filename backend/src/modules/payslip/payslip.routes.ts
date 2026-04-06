@@ -109,7 +109,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
     if (parseResult.reason === "unsupported_parser") {
       res.status(422).json({
         message:
-          "This payslip parser is not implemented yet. Only IBM Pay & Contributions PDF is supported today.",
+          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF), Deloitte Pay Statement (PDF).",
         code: "UNSUPPORTED_PARSER",
         parserProfileId: parseResult.parserProfileId
       });

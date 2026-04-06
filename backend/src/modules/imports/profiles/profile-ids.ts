@@ -11,6 +11,8 @@ export const PARSER_PROFILE_IDS = [
   "marcus_online_savings_pdf",
   /** Epic 3.3 — employer payslip (summary only; stored in payslip_snapshot, not ledger) */
   "ibm_pay_contributions_pdf",
+  /** Deloitte Pay Statement PDF — v1 uses same Current/YTD summary heuristics as IBM where text matches */
+  "deloitte_payslip_pdf",
   /** Registered for onboarding; parse not implemented yet — use IBM or wait for ADP adapter */
   "adp_payslip_pdf"
 ] as const;

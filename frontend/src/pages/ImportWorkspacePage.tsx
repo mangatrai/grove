@@ -12,7 +12,7 @@ import {
 } from "../import/inferParserProfile";
 import { friendlyParserLabel } from "../import/profileLabels";
 
-const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "adp_payslip_pdf"]);
+const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
 
 type ImportFileRow = {
   id: string;

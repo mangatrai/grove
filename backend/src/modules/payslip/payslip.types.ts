@@ -19,3 +19,4 @@ export type ParsedPayslipSummary = {
 };
 
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf" as const;
+export const DELOITTE_PAYSLIP_PDF_PROFILE_ID = "deloitte_payslip_pdf" as const;

@@ -63,13 +63,25 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 ---
 
+## 5.1 Deloitte Pay Statement (`deloitte_payslip_pdf`)
+
+**Profile:** `deloitte_payslip_pdf` — employer parser option in Settings; same import and `payslip_snapshot` storage as IBM.
+
+**v1 behavior:** Text extraction uses `pdf-parse` like other PDF profiles. The parser **reuses IBM v1 summary heuristics** (`parseIbmPayslipFromText`) on normalized text so **Current / YTD** buckets (gross, taxes, deductions, net, hours, pay period, pay date) populate when the layout matches the IBM-style strip. `rawExtractJson` includes `parserProfile: "deloitte_payslip_pdf"` and `detectedDeloitteKeyword` when the word “Deloitte” appears in the extract.
+
+**Sample PDFs in `data/imports/custom/`:** If `pdf-parse` returns little or no readable text (image-only / scanned payslip), upload returns **`NO_PDF_TEXT`** or **`PARSE_FAILED`**. Improving that requires **OCR** or a vendor-specific text layer — backlog (same as other image PDFs).
+
+**Potential data on real Deloitte stubs (not all captured in v1):** employer legal name, employee id, department, earnings breakdown lines, benefit deductions, tax breakdowns, banking instructions, leave balances. **Deferred** to Story 3.3c+ line-item / tax detail.
+
+---
+
 ## 6. Phased roadmap (Story 3.3)
 
 | Phase | Deliverable |
 |--------|-------------|
 | **3.3a — v1** | IBM profile: summary block + period + YTD; dedicated storage; tests on golden PDFs. |
 | **3.3b** | List + detail + charts (**gross/net/tax** trends); read-only. |
-| **3.3c+** | Additional employers; line-item / tax detail; employer HSA, imputed income; reconciliation UX to bank deposit. |
+| **3.3c+** | Additional employers (incl. Deloitte profile); line-item / tax detail; employer HSA, imputed income; reconciliation UX to bank deposit; OCR for scanned payslips. |
 
 ---
 

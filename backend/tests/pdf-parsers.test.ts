@@ -10,6 +10,7 @@ import {
   parseCurrentYtdPair,
   parseIbmPayslipFromText
 } from "../src/modules/payslip/profiles/ibm-payslip-pdf.js";
+import { parseDeloittePayslipFromText } from "../src/modules/payslip/profiles/deloitte-payslip-pdf.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +41,18 @@ Total other subtractions \t-$179,712.15
     expect(rows[1]!.amount).toBe(0.39);
     expect(rows[2]!.amount).toBe(-205.09);
     expect(rows[3]!.amount).toBe(-110000);
+  });
+});
+
+describe("Deloitte payslip PDF text parser (v1 = IBM summary heuristics)", () => {
+  it("parses Current and YTD from Deloitte-labeled fixture text", () => {
+    const text = readFileSync(path.join(__dirname, "fixtures", "deloitte-payslip-sample.txt"), "utf8");
+    const parsed = parseDeloittePayslipFromText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.grossPayCurrent).toBe(5000);
+    expect(parsed!.netPayCurrent).toBe(3200);
+    expect((parsed!.rawExtractJson as { parserProfile?: string }).parserProfile).toBe("deloitte_payslip_pdf");
+    expect((parsed!.rawExtractJson as { detectedDeloitteKeyword?: boolean }).detectedDeloitteKeyword).toBe(true);
   });
 });
 
