@@ -348,31 +348,46 @@ export function SettingsPage() {
           throw new Error(st.error ?? "Export failed");
         }
         if (st.status === "complete") {
-          const res = await apiFetch(`/exports/${jobId}/download`);
-          if (!res.ok) {
+          const maxAttempts = 6;
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (attempt > 0) {
+              await new Promise((r) => setTimeout(r, 250));
+            }
+            const res = await apiFetch(`/exports/${jobId}/download`);
+            if (res.ok) {
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `household-export-${jobId}.zip`;
+              a.rel = "noopener";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+              URL.revokeObjectURL(url);
+              setExportZipMessage("Download started.");
+              return;
+            }
             const t = await res.text();
-            let detail = t || `Download failed (${res.status})`;
+            let code: string | undefined;
+            let msg = t || `Download failed (${res.status})`;
             try {
-              const j = JSON.parse(t) as { message?: string };
+              const j = JSON.parse(t) as { code?: string; message?: string };
               if (typeof j.message === "string" && j.message.trim()) {
-                detail = `${res.status}: ${j.message}`;
+                msg = j.message.trim();
+              }
+              if (typeof j.code === "string") {
+                code = j.code;
               }
             } catch {
               /* plain text body */
             }
-            throw new Error(detail);
+            const retryable = code === "EXPORT_FILE_MISSING" || code === "EXPORT_NOT_READY";
+            if (!retryable || attempt === maxAttempts - 1) {
+              const suffix = code ? ` (${code})` : "";
+              throw new Error(`${res.status}: ${msg}${suffix}`);
+            }
           }
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = `household-export-${jobId}.zip`;
-          a.rel = "noopener";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(url);
-          setExportZipMessage("Download started.");
           return;
         }
         await new Promise((r) => setTimeout(r, 400));
@@ -571,6 +586,7 @@ export function SettingsPage() {
       });
       setProfileSuccess("Profile saved.");
       await loadProfile();
+      window.dispatchEvent(new CustomEvent("app:household-profile-updated"));
       try {
         const acct = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
         setAccounts(acct.accounts);

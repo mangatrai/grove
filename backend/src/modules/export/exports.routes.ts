@@ -60,8 +60,21 @@ exportsRouter.get("/:jobId/download", async (req: AuthenticatedRequest, res) => 
     return;
   }
   const file = await readExportFileIfReady(householdId, jobId);
-  if (!file) {
-    res.status(404).json({ message: "Export not ready or not found" });
+  if (!file.ok) {
+    const human =
+      file.code === "EXPORT_NOT_READY"
+        ? "Export not ready yet"
+        : file.code === "EXPORT_FILE_MISSING"
+          ? "Export file missing on disk"
+          : file.code === "EXPORT_MISSING_PATH"
+            ? "Export job has no storage path"
+            : "Export job not found";
+    res.status(404).json({
+      code: file.code,
+      message: human,
+      jobStatus: file.jobStatus ?? null,
+      storagePath: file.storagePath
+    });
     return;
   }
   res.setHeader("Content-Type", "application/zip");
@@ -78,7 +91,7 @@ exportsRouter.get("/:jobId", async (req: AuthenticatedRequest, res) => {
   }
   const job = await getExportJob(householdId, jobId);
   if (!job) {
-    res.status(404).json({ message: "Export job not found" });
+    res.status(404).json({ code: "EXPORT_JOB_NOT_FOUND", message: "Export job not found" });
     return;
   }
   res.json({

@@ -104,28 +104,47 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
   }
 }
 
-export async function readExportFileIfReady(
-  householdId: string,
-  jobId: string
-): Promise<{ path: string; buffer: Buffer } | null> {
+export type ExportDownloadFailureCode =
+  | "EXPORT_JOB_NOT_FOUND"
+  | "EXPORT_NOT_READY"
+  | "EXPORT_MISSING_PATH"
+  | "EXPORT_FILE_MISSING";
+
+export type ExportDownloadResult =
+  | { ok: true; path: string; buffer: Buffer }
+  | { ok: false; code: ExportDownloadFailureCode; jobStatus?: string; storagePath: string | null };
+
+export async function readExportFileIfReady(householdId: string, jobId: string): Promise<ExportDownloadResult> {
   const job = await getExportJob(householdId, jobId);
   if (!job) {
-    log.warn(`Export download: job not found jobId=${jobId} householdId=${householdId}`);
-    return null;
+    log.info(
+      `Export download refused: EXPORT_JOB_NOT_FOUND jobId=${jobId} householdId=${householdId} (job row missing)`
+    );
+    return { ok: false, code: "EXPORT_JOB_NOT_FOUND", storagePath: null };
   }
   if (job.status !== "complete") {
-    log.warn(
-      `Export download: not ready jobId=${jobId} status=${job.status} error=${job.errorText ?? "none"} path=${job.storagePath ?? "none"}`
+    log.info(
+      `Export download refused: EXPORT_NOT_READY jobId=${jobId} status=${job.status} error=${job.errorText ?? "none"} path=${job.storagePath ?? "none"}`
     );
-    return null;
+    return {
+      ok: false,
+      code: "EXPORT_NOT_READY",
+      jobStatus: job.status,
+      storagePath: job.storagePath
+    };
   }
   if (!job.storagePath) {
-    log.warn(`Export download: missing storage_path jobId=${jobId}`);
-    return null;
+    log.info(`Export download refused: EXPORT_MISSING_PATH jobId=${jobId} status=complete`);
+    return { ok: false, code: "EXPORT_MISSING_PATH", jobStatus: job.status, storagePath: null };
   }
   if (!fs.existsSync(job.storagePath)) {
-    log.warn(`Export download: file missing jobId=${jobId} path=${job.storagePath}`);
-    return null;
+    log.info(`Export download refused: EXPORT_FILE_MISSING jobId=${jobId} path=${job.storagePath}`);
+    return {
+      ok: false,
+      code: "EXPORT_FILE_MISSING",
+      jobStatus: job.status,
+      storagePath: job.storagePath
+    };
   }
-  return { path: job.storagePath, buffer: fs.readFileSync(job.storagePath) };
+  return { ok: true, path: job.storagePath, buffer: fs.readFileSync(job.storagePath) };
 }
