@@ -29,7 +29,7 @@ const sql = postgres({
 | [`scripts/preset-pg-test.mjs`](../scripts/preset-pg-test.mjs) | Reset `public` schema for tests |
 | [`scripts/db.sh`](../scripts/db.sh) | Wraps `db-pg.mjs` |
 | [`scripts/prep-test-db.sh`](../scripts/prep-test-db.sh) | Preset + clean import staging dirs |
-| [`docker-compose.yml`](../docker-compose.yml) | Local Postgres 16 on host port **5433** |
+| [`docker-compose.yml`](../docker-compose.yml) | Local Postgres 18 on host port **5433** (image `mirror.gcr.io/library/postgres:18`; volume mounted at `/var/lib/postgresql` per PG18+ image layout; bind mount e.g. `./data/postgres:/var/lib/postgresql`) |
 
 ## Environment contract
 

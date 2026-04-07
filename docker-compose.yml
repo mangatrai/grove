@@ -1,6 +1,19 @@
+# Local Postgres for dev (matches managed Postgres major version in use).
+# Start: `docker compose up -d` from repo root; point `.env` at localhost:5433, DATABASE_SSL=0.
+#
+# Image pull: uses Google’s mirror of Docker Hub (`mirror.gcr.io/library/...`) so `docker compose up`
+# does not need to reach registry-1.docker.io directly — helps on VPNs / firewalls / Docker Hub timeouts.
+# To use Docker Hub instead: set `image: postgres:18`.
+#
+# Data persistence (Postgres 18+ images): mount the *parent* directory only — see docker-library/postgres#1259.
+# - Named volume `hf_pg_data` survives restarts; survives `docker compose down` (no -v).
+# - Remove with: `docker compose down -v` (deletes the named volume).
+# - If you previously used PG ≤16 images with `.../data`, run `docker compose down -v` once, then `up -d`,
+#   so the volume is recreated for 18+ layout (dev DB only; dump first if you need the data).
+# - Bind mount example: `./data/postgres:/var/lib/postgresql`
 services:
   postgres:
-    image: postgres:16
+    image: mirror.gcr.io/library/postgres:18
     ports:
       - "5433:5432"
     environment:
@@ -8,7 +21,7 @@ services:
       POSTGRES_PASSWORD: household
       POSTGRES_DB: household_finance_test
     volumes:
-      - hf_pg_data:/var/lib/postgresql/data
+      - hf_pg_data:/var/lib/postgresql
 
 volumes:
   hf_pg_data:
