@@ -13,6 +13,45 @@ export function normalizePdfExtractText(text: string): string {
   return text.replace(/\u00a0/g, " ").replace(/\u2009/g, " ");
 }
 
+const ZWSP_AND_SOFT_HYPHEN = /[\u200b-\u200d\ufeff\u00ad]/g;
+
+/**
+ * True when `pdf-parse` returned many characters but no payroll-like English and no currency-shaped
+ * tokens — typical of image/outline PDFs or broken font encodings (regex parsers cannot recover).
+ */
+export function payslipPdfExtractLooksUnusable(rawText: string): boolean {
+  const compact = normalizePdfExtractText(rawText.replace(ZWSP_AND_SOFT_HYPHEN, "")).trim();
+  if (compact.length < 120) {
+    return false;
+  }
+  if (hasPayslipMoneyLikeToken(compact)) {
+    return false;
+  }
+  if (hasPayslipEnglishHints(compact)) {
+    return false;
+  }
+  return true;
+}
+
+function hasPayslipMoneyLikeToken(s: string): boolean {
+  if (/\b\d{1,3}(?:,\d{3})+\.\d{2}\b/.test(s)) {
+    return true;
+  }
+  if (/\b-?\d+\.\d{2}\b/.test(s)) {
+    return true;
+  }
+  if (/\b\d{1,3}(?:\.\d{3})+,\d{2}\b/.test(s)) {
+    return true;
+  }
+  return false;
+}
+
+function hasPayslipEnglishHints(s: string): boolean {
+  return /\b(?:gross|net\s*pay|earnings|deduction|withhold|pay\s+statement|pay\s+period|pay\s+date|ytd|federal|medicare|social\s*security|w-?2|remuneration|distribution)\b/i.test(
+    s
+  );
+}
+
 function parseMoneyToken(s: string): number | null {
   const n = Number(s.replace(/,/g, ""));
   return Number.isFinite(n) ? n : null;
@@ -378,7 +417,11 @@ export function parseIbmPayslipFromText(text: string): ParsedPayslipSummary | nu
   return parsed;
 }
 
-export type PayslipPdfParseFailureReason = "empty_pdf_text" | "no_summary_fields" | "pdf_read_error";
+export type PayslipPdfParseFailureReason =
+  | "empty_pdf_text"
+  | "no_summary_fields"
+  | "pdf_extract_unreadable"
+  | "pdf_read_error";
 
 export type PayslipPdfParseResult =
   | { ok: true; summary: ParsedPayslipSummary }
@@ -394,6 +437,9 @@ export async function parseIbmPayslipPdf(buffer: Buffer): Promise<PayslipPdfPars
   const normalized = normalizePdfExtractText(text).trim();
   if (!normalized) {
     return { ok: false, reason: "empty_pdf_text" };
+  }
+  if (payslipPdfExtractLooksUnusable(text)) {
+    return { ok: false, reason: "pdf_extract_unreadable" };
   }
   const summary = parseIbmPayslipFromText(normalized);
   if (!summary) {

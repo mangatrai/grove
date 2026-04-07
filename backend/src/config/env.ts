@@ -89,7 +89,14 @@ const envSchema = z.object({
     return s === "" ? undefined : s;
   }, z.string().optional()),
   /** Max characters logged per debug line for OpenAI request/response bodies (`LOG_LEVEL=debug`). */
-  LOG_AI_DEBUG_BODY_MAX_CHARS: optionalIntEnv(4000, 200, 50_000)
+  LOG_AI_DEBUG_BODY_MAX_CHARS: optionalIntEnv(4000, 200, 50_000),
+  /** Unstructured Platform API (Jobs). Deloitte payslip PDFs require `UNSTRUCTURED_API_KEY` set. */
+  UNSTRUCTURED_API_KEY: z.string().optional(),
+  UNSTRUCTURED_API_URL: z.string().default("https://platform.unstructuredapp.io/api/v1"),
+  /** Min milliseconds between Unstructured job status polls per file (default 2 min). */
+  UNSTRUCTURED_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
+  /** Jobs API `request_data.template_id` for Deloitte payslips. */
+  UNSTRUCTURED_DELOITTE_TEMPLATE_ID: z.string().default("hi_res_and_enrichment")
 });
 
 export const env = envSchema.parse(process.env);

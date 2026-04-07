@@ -29,7 +29,9 @@ import {
   type RollbackImportSessionFailure
 } from "./import-session-rollback.service.js";
 import { canonicalizeImportSession } from "../canonical/canonical-ingest.service.js";
+import { env } from "../../config/env.js";
 import { parseSessionImportFiles, type ParseFailure, type ParseColumnMapping } from "./import-parser.service.js";
+import { reconcileUnstructuredImportSession } from "./unstructured-import-reconcile.service.js";
 import { createHouseholdCustomInstitution, listHouseholdCustomInstitutions } from "./household-institutions.service.js";
 import { listUsInstitutionLabels } from "./institution-catalog.js";
 import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-file-delete.service.js";
@@ -444,6 +446,26 @@ importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedReques
   }
 
   res.status(200).json(result.data);
+});
+
+importsRouter.post("/sessions/:sessionId/reconcile-unstructured", async (req: AuthenticatedRequest, res) => {
+  if (!env.UNSTRUCTURED_API_KEY?.trim()) {
+    res.status(503).json({ message: "Unstructured API not configured", code: "UNSTRUCTURED_NOT_CONFIGURED" });
+    return;
+  }
+  const force = req.query.force === "1" || req.query.force === "true";
+  try {
+    const data = await reconcileUnstructuredImportSession(req.params.sessionId, req.authUser!.householdId, {
+      force
+    });
+    res.status(200).json(data);
+  } catch (e) {
+    if (e instanceof Error && e.message === "Import session not found") {
+      res.status(404).json({ message: e.message });
+      return;
+    }
+    throw e;
+  }
 });
 
 importsRouter.post("/sessions/:sessionId/canonicalize", async (req: AuthenticatedRequest, res) => {
