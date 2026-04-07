@@ -1,11 +1,25 @@
 /**
  * Deloitte Pay Statement from Unstructured Platform partition output (Jobs download JSON).
+ *
  * Primary: Table `metadata.text_as_html` (row/cell structure). Fallback: Table `text`.
+ * When `text_as_html` is missing, plain `Table.text` still works for totals, but the summary
+ * header line contains a column label `Net Pay` before the true `NET PAY $… $…` totals row.
+ * Net extraction therefore prefers the totals line (`NET PAY` + `$` or last `NET PAY` match).
  */
 import { load } from "cheerio";
 
 import type { ParsedPayslipSummary } from "../payslip.types.js";
-import { normalizePdfExtractText, parsePayDate, parsePayPeriod, payslipSummaryHasMinimumFields } from "./ibm-payslip-pdf.js";
+import {
+  normalizePdfExtractText,
+  parsePayDate,
+  parsePayPeriod,
+  payslipSummaryHasMinimumFields
+} from "./ibm-payslip-pdf.js";
+import {
+  parseDeloitteDates,
+  parseDeloitteSummaryDeductions,
+  tableHtmlThTextBlob
+} from "./deloitte-unstructured-helpers.js";
 
 export type UnstructuredPartitionElement = {
   type?: string;
@@ -30,9 +44,30 @@ function twoMoneyValuesAfterLabel(rowText: string, labelRe: RegExp): { current: 
     return null;
   }
   const tail = rowText.slice(m.index! + m[0].length);
-  const nums = [...tail.matchAll(/\$?\s*([\d,]+\.\d{2})/g)].map((x) => parseMoneyToken(x[1]!)).filter((x): x is number => x !== null);
+  const nums = [...tail.matchAll(/\$?\s*([\d,]+\.\d{2})/g)]
+    .map((x) => parseMoneyToken(x[1]!))
+    .filter((x): x is number => x !== null);
   if (nums.length >= 2) {
     return { current: nums[0]!, ytd: nums[1]! };
+  }
+  return null;
+}
+
+/**
+ * Prefer the true totals row: Deloitte uses `NET PAY $current $ytd`. The summary strip uses
+ * `Net Pay` as a column header with different numbers after it — match last `NET PAY` or
+ * a row that includes `NET PAY` immediately followed by `$`.
+ */
+function netPayPairFromRowTexts(rowTexts: string[]): { current: number; ytd: number } | null {
+  const netRows = rowTexts.filter((t) => /\bNET\s+PAY\b/i.test(t));
+  const withDollar = netRows.filter((t) => /\bNET\s+PAY\s*\$/i.test(t));
+  const ordered = withDollar.length > 0 ? withDollar : netRows;
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const t = ordered[i]!;
+    const p = twoMoneyValuesAfterLabel(t, /\bNET\s+PAY\b/i);
+    if (p) {
+      return p;
+    }
   }
   return null;
 }
@@ -44,17 +79,22 @@ function extractTotalsFromHtml(html: string): {
   netYtd: number;
 } | null {
   const $ = load(html);
+  const rowTexts = $("tr")
+    .toArray()
+    .map((tr) => $(tr).text().replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
   let grossPair: { current: number; ytd: number } | null = null;
-  let netPair: { current: number; ytd: number } | null = null;
-  for (const tr of $("tr").toArray()) {
-    const t = $(tr).text().replace(/\s+/g, " ").trim();
-    if (!grossPair && /TOTAL\s+GROSS/i.test(t)) {
+  for (const t of rowTexts) {
+    if (/TOTAL\s+GROSS/i.test(t)) {
       grossPair = twoMoneyValuesAfterLabel(t, /TOTAL\s+GROSS/i);
-    }
-    if (!netPair && /NET\s+PAY/i.test(t)) {
-      netPair = twoMoneyValuesAfterLabel(t, /NET\s+PAY/i);
+      if (grossPair) {
+        break;
+      }
     }
   }
+  const netPair = netPayPairFromRowTexts(rowTexts);
+
   if (!grossPair || !netPair) {
     return null;
   }
@@ -66,6 +106,25 @@ function extractTotalsFromHtml(html: string): {
   };
 }
 
+/**
+ * Plain `Table.text` contains two `NET PAY` phrases: a summary `Net Pay` column and the
+ * `NET PAY $… $…` line — use {@link netPayPairFromRowTexts} on single-line “rows” derived
+ * from the whole blob by splitting would be fragile; instead scan for last `NET PAY` match.
+ */
+function extractNetPayPairFromPlainText(one: string): { current: number; ytd: number } | null {
+  const re = /\bNET\s+PAY\b/gi;
+  let m: RegExpExecArray | null;
+  let last: RegExpExecArray | null = null;
+  while ((m = re.exec(one)) !== null) {
+    last = m;
+  }
+  if (!last) {
+    return null;
+  }
+  const sliceFrom = one.slice(last.index!);
+  return twoMoneyValuesAfterLabel(sliceFrom, /^\s*NET\s+PAY\b/i);
+}
+
 /** Fallback when HTML is missing: same anchors on flattened table text. */
 function extractTotalsFromPlainText(text: string): {
   grossCurrent: number;
@@ -75,7 +134,7 @@ function extractTotalsFromPlainText(text: string): {
 } | null {
   const one = text.replace(/\s+/g, " ");
   const gross = twoMoneyValuesAfterLabel(one, /TOTAL\s+GROSS/i);
-  const net = twoMoneyValuesAfterLabel(one, /NET\s+PAY/i);
+  const net = extractNetPayPairFromPlainText(one);
   if (!gross || !net) {
     return null;
   }
@@ -119,21 +178,29 @@ export function parseDeloittePayslipFromUnstructuredElements(
   }
 
   const ctx = contextTextFromElements(elements);
-  const period = parsePayPeriod(ctx);
-  const payDate = parsePayDate(ctx);
+  const thBlob = tableHtmlThTextBlob(html);
+  const dateCtx = [ctx, thBlob].filter(Boolean).join("\n");
+  const deloitteDates = parseDeloitteDates(dateCtx);
+  const ibmPeriod = parsePayPeriod(ctx);
+  const payPeriodStart = deloitteDates.payPeriodStart ?? ibmPeriod.start;
+  const payPeriodEnd = deloitteDates.payPeriodEnd ?? ibmPeriod.end;
+  const payDate = deloitteDates.payDate ?? parsePayDate(ctx);
+
+  const oneLine = plain.replace(/\s+/g, " ");
+  const summaryDed = parseDeloitteSummaryDeductions(oneLine);
 
   const parsed: ParsedPayslipSummary = {
-    payPeriodStart: period.start,
-    payPeriodEnd: period.end,
+    payPeriodStart,
+    payPeriodEnd,
     payDate,
     hoursOrDaysCurrent: null,
     grossPayCurrent: totals.grossCurrent,
     grossPayYtd: totals.grossYtd,
-    employeeTaxesCurrent: null,
+    employeeTaxesCurrent: summaryDed?.employeeTaxesCurrent ?? null,
     employeeTaxesYtd: null,
-    preTaxDeductionsCurrent: null,
+    preTaxDeductionsCurrent: summaryDed?.preTaxDeductionsCurrent ?? null,
     preTaxDeductionsYtd: null,
-    postTaxDeductionsCurrent: null,
+    postTaxDeductionsCurrent: summaryDed?.postTaxDeductionsCurrent ?? null,
     postTaxDeductionsYtd: null,
     netPayCurrent: totals.netCurrent,
     netPayYtd: totals.netYtd,

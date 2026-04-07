@@ -67,9 +67,19 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 **Profile:** `deloitte_payslip_pdf` — employer parser option in Settings; same import and `payslip_snapshot` storage as IBM.
 
-**v1 behavior:** Text extraction uses `pdf-parse` like other PDF profiles. The parser **reuses IBM v1 summary heuristics** (`parseIbmPayslipFromText`) on normalized text so **Current / YTD** buckets (gross, taxes, deductions, net, hours, pay period, pay date) populate when the layout matches the IBM-style strip. `rawExtractJson` includes `parserProfile: "deloitte_payslip_pdf"` and `detectedDeloitteKeyword` when the word “Deloitte” appears in the extract.
+**v1 behavior (current):** Deloitte is processed via **Unstructured Jobs API** from Import flow (async), not local `pdf-parse`. The parser reads Unstructured partition JSON with **HTML-first** extraction from `Table.metadata.text_as_html` (fallback: `Table.text`). Imports should include `text_as_html` on the partitioned `Table` when the platform provides it; the plain-text path still resolves totals by preferring the real **`NET PAY $… $…`** line over an earlier summary-column **`Net Pay`** label in the same flattened string.
 
-**Sample PDFs in `data/imports/custom/`:** If `pdf-parse` returns little or no readable text (image-only / scanned payslip), upload returns **`NO_PDF_TEXT`** or **`PARSE_FAILED`**. Improving that requires **OCR** or a vendor-specific text layer — backlog (same as other image PDFs).
+**Current extracted fields (Deloitte v1 async):**
+- `grossPayCurrent`, `grossPayYtd` from `TOTAL GROSS`
+- `netPayCurrent`, `netPayYtd` from `NET PAY` (totals row)
+- `payPeriodStart`, `payPeriodEnd`, `payDate` from Deloitte header phrasing (e.g. `Period … Begin`, `End Date Paid`, and flat `Table.text` date triples), with IBM-style regexes as fallback
+- `preTaxDeductionsCurrent`, `employeeTaxesCurrent`, `postTaxDeductionsCurrent` from the header **summary strip** (`Total Earnings` … `Net Pay` and five amounts); YTD for those buckets not taken from that strip
+
+**Current non-goals (still deferred):**
+- Full Deloitte line-item reconstruction (every earnings/deduction row, per-line tax breakdown, hours)
+- Direct `/payslips/upload` Deloitte parse (Deloitte upload path instructs users to use Import + Unstructured)
+
+**Sample PDFs in `data/imports/custom/`:** For image-like Deloitte PDFs, Import submits to Unstructured and stores job ids on `import_file`. Session remains `processing` until reconcile completes (auto poll ~2 min in UI, or manual “Check Unstructured now”).
 
 **Potential data on real Deloitte stubs (not all captured in v1):** employer legal name, employee id, department, earnings breakdown lines, benefit deductions, tax breakdowns, banking instructions, leave balances. **Deferred** to Story 3.3c+ line-item / tax detail.
 
