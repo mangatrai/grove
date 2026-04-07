@@ -128,6 +128,16 @@ function messageFromApiError(err: unknown): string {
   return text;
 }
 
+function friendlyImportSkipReason(reason: string): string {
+  if (reason === "payslip_pdf_extract_unreadable") {
+    return "payslip_pdf_extract_unreadable (PDF has no usable text for parsing — re-export from payroll or use a text-based PDF)";
+  }
+  if (reason === "payslip_unstructured_api_not_configured") {
+    return "payslip_unstructured_api_not_configured (set UNSTRUCTURED_API_KEY for Deloitte)";
+  }
+  return reason;
+}
+
 /** Append per-file parse skip reasons when API returns `skippedFiles` (e.g. duplicate payslip vs parse failure). */
 function enrichImportErrorWithSkippedFiles(message: string): string {
   const jsonStart = message.indexOf("{");
@@ -141,7 +151,7 @@ function enrichImportErrorWithSkippedFiles(message: string): string {
     if (!j.skippedFiles?.length) {
       return message;
     }
-    const detail = j.skippedFiles.map((s) => s.reason).join("; ");
+    const detail = j.skippedFiles.map((s) => friendlyImportSkipReason(s.reason)).join("; ");
     return `${message.trim()} — Per file: ${detail}`;
   } catch {
     return message;
@@ -415,6 +425,47 @@ export function ImportWorkspacePage() {
       setFinalizeBusy(false);
     }
   }, [sessionId, load]);
+
+  const runReconcileUnstructured = useCallback(
+    async (force: boolean) => {
+      if (!sessionId) {
+        return;
+      }
+      setError(null);
+      try {
+        const q = force ? "?force=true" : "";
+        const r = await apiJson<{
+          stillPending: boolean;
+          completedFiles: number;
+          polledFiles: number;
+        }>(`/imports/sessions/${sessionId}/reconcile-unstructured${q}`, { method: "POST", body: "{}" });
+        await load();
+        if (r.completedFiles > 0) {
+          setMessage(
+            `Unstructured: parsed ${r.completedFiles} Deloitte file(s).${r.stillPending ? " More still in progress." : ""}`
+          );
+        } else if (r.polledFiles > 0 && r.stillPending) {
+          setMessage("Unstructured job still running; next automatic check in 2 minutes (or use Check now).");
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Reconcile failed");
+      }
+    },
+    [sessionId, load]
+  );
+
+  useEffect(() => {
+    const pending = files.some(
+      (f) => f.parser_profile_id === "deloitte_payslip_pdf" && f.status === "processing"
+    );
+    if (!sessionId || !pending) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void runReconcileUnstructured(false);
+    }, 120_000);
+    return () => clearInterval(id);
+  }, [sessionId, files, runReconcileUnstructured]);
 
   useEffect(() => {
     if (sessionId) {
@@ -883,11 +934,20 @@ export function ImportWorkspacePage() {
       body.sheetName = sheetName;
     }
     try {
-      const out = await apiJson<{ parsedFiles: number; parsedRows: number; skippedFiles: unknown[] }>(
-        `/imports/sessions/${sessionId}/parse`,
-        { method: "POST", body: JSON.stringify(body) }
-      );
-      setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
+      const out = await apiJson<{
+        parsedFiles: number;
+        parsedRows: number;
+        skippedFiles?: unknown[];
+        unstructuredPending?: number;
+      }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
+      const up = out.unstructuredPending ?? 0;
+      if (up > 0) {
+        setMessage(
+          `Submitted ${up} Deloitte PDF(s) to Unstructured. Session stays in processing until the job finishes — automatic check every 2 minutes, or use “Check Unstructured now”.`
+        );
+      } else {
+        setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
+      }
       await load();
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Parse failed";
@@ -935,10 +995,19 @@ export function ImportWorkspacePage() {
       body.sheetName = sheetName;
     }
     try {
-      const parseOut = await apiJson<{ parsedFiles: number; parsedRows: number }>(
-        `/imports/sessions/${sessionId}/parse`,
-        { method: "POST", body: JSON.stringify(body) }
-      );
+      const parseOut = await apiJson<{
+        parsedFiles: number;
+        parsedRows: number;
+        unstructuredPending?: number;
+      }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
+      if ((parseOut.unstructuredPending ?? 0) > 0) {
+        setMessage(
+          "Deloitte PDF(s) sent to Unstructured. Wait until files show “parsed”, then run import again (or use Check Unstructured now)."
+        );
+        setPipelineBusy(false);
+        await load();
+        return;
+      }
       await load();
       const canonOut = await apiJson<CanonicalizeResult>(`/imports/sessions/${sessionId}/canonicalize`, {
         method: "POST",
@@ -1516,9 +1585,9 @@ export function ImportWorkspacePage() {
       <div className="card" id="import-run-import">
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Run import</h2>
         <p className="muted">
-          One step parses every file and then loads transactions into your ledger (dedupe included). Employer payslip
-          PDFs follow the same button: you&apos;ll still see <strong>0</strong> new ledger lines, but this step finishes
-          the session and clears staging. Use separate steps only if you need to debug.
+          One step parses every file and then loads transactions into your ledger (dedupe included). IBM payslip PDFs
+          finish in one step. <strong>Deloitte</strong> PDFs are sent to Unstructured — wait until they show parsed, then
+          run import again. Use separate steps only if you need to debug.
         </p>
         <div className="row">
           <button
@@ -1550,9 +1619,18 @@ export function ImportWorkspacePage() {
           <summary className="muted" style={{ cursor: "pointer" }}>
             Separate steps (parse only / canonicalize only)
           </summary>
-          <div className="row" style={{ marginTop: "0.75rem" }}>
+          <div className="row" style={{ marginTop: "0.75rem", flexWrap: "wrap", gap: "0.5rem" }}>
             <button type="button" className="secondary" disabled={!allFilesReady || pipelineBusy} onClick={() => void runParse()}>
               Parse session
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={!sessionId || pipelineBusy}
+              title="Poll Unstructured for completed Deloitte jobs (bypasses 2-minute throttle)"
+              onClick={() => void runReconcileUnstructured(true)}
+            >
+              Check Unstructured now (Deloitte)
             </button>
             <button type="button" className="secondary" disabled={pipelineBusy} onClick={() => void runCanonicalize()}>
               Canonicalize (dedupe)
