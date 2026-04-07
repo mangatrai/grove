@@ -72,7 +72,7 @@ export function parseCurrentYtdPair(line: string): { current: number | null; ytd
   return { current, ytd };
 }
 
-function normalizeUsDateToIso(mmddyyyy: string): string | null {
+export function normalizeUsDateToIso(mmddyyyy: string): string | null {
   const m = mmddyyyy.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) {
     return null;
