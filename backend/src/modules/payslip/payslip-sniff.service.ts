@@ -6,6 +6,7 @@ import { listHouseholdEmployers } from "./payslip-employer-resolve.service.js";
 export type SniffHints = {
   ibmSignals: string[];
   adpSignals: string[];
+  deloitteSignals: string[];
 };
 
 /** Light keyword signals in extracted PDF text (first pages). */

@@ -8,9 +8,9 @@ import { parseBoaEStatementFromText } from "../src/modules/imports/profiles/boa-
 import { parseMarcusOnlineSavingsFromText } from "../src/modules/imports/profiles/marcus-online-savings-pdf.js";
 import {
   parseCurrentYtdPair,
-  parseIbmPayslipFromText
+  parseIbmPayslipFromText,
+  payslipPdfExtractLooksUnusable
 } from "../src/modules/payslip/profiles/ibm-payslip-pdf.js";
-import { parseDeloittePayslipFromText } from "../src/modules/payslip/profiles/deloitte-payslip-pdf.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,57 +44,13 @@ Total other subtractions \t-$179,712.15
   });
 });
 
-describe("Deloitte payslip PDF text parser (v1 = IBM summary heuristics)", () => {
-  it("parses Current and YTD from Deloitte-labeled fixture text", () => {
-    const text = readFileSync(path.join(__dirname, "fixtures", "deloitte-payslip-sample.txt"), "utf8");
-    const parsed = parseDeloittePayslipFromText(text);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.grossPayCurrent).toBe(5000);
-    expect(parsed!.netPayCurrent).toBe(3200);
-    expect((parsed!.rawExtractJson as { parserProfile?: string }).parserProfile).toBe("deloitte_payslip_pdf");
-    expect((parsed!.rawExtractJson as { detectedDeloitteKeyword?: boolean }).detectedDeloitteKeyword).toBe(true);
-  });
-
-  it("regex fallback recovers Gross/Net when labels are not IBM defaults (Total Remuneration + Net Distribution)", () => {
-    const text = `
-      Deloitte
-      Pay Statement
-      Total Remuneration 7,777.77 15,555.55
-      Net Distribution 5,555.55 11,111.11
-    `;
-    const parsed = parseDeloittePayslipFromText(text);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.grossPayCurrent).toBe(7777.77);
-    expect(parsed!.grossPayYtd).toBe(15555.55);
-    expect(parsed!.netPayCurrent).toBe(5555.55);
-    expect(parsed!.netPayYtd).toBe(11111.11);
-  });
-
-  it("does not require Deloitte branding in text (logo-only PDFs often omit extractable brand)", () => {
-    const text = `
-Pay Statement
-Payment Date: 01/16/2025
-Gross Pay $5,000.00 $10,000.00
-Net Pay $3,200.00 $6,400.00
-`;
-    const parsed = parseDeloittePayslipFromText(text);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.grossPayCurrent).toBe(5000);
-    expect(parsed!.netPayCurrent).toBe(3200);
-    expect((parsed!.rawExtractJson as { detectedDeloitteKeyword?: boolean }).detectedDeloitteKeyword).toBe(false);
-  });
-
-  it("parses glued labels and zero-width noise like some pdf-parse outputs", () => {
-    const text =
-      "Pay\u200b Statement\u00a0GrossPay\u200c5,000.00\u00a010,000.00 NetPay 3,200.00 6,400.00";
-    const parsed = parseDeloittePayslipFromText(text);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.grossPayCurrent).toBe(5000);
-    expect(parsed!.netPayCurrent).toBe(3200);
-  });
-});
-
 describe("IBM payslip PDF text parser (Pay and Contributions summary)", () => {
+  it("marks long non-semantic pdf-parse output as unusable (no money, no payroll words)", () => {
+    const garbage = `${"@\u0007\u0001".repeat(80)}BIB8@BIB9`;
+    expect(garbage.length).toBeGreaterThan(120);
+    expect(payslipPdfExtractLooksUnusable(garbage)).toBe(true);
+  });
+
   it("parses Current and YTD from fixture text", () => {
     const text = readFileSync(path.join(__dirname, "fixtures", "ibm-payslip-sample.txt"), "utf8");
     const parsed = parseIbmPayslipFromText(text);

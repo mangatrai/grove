@@ -1,5 +1,4 @@
 import type { ParserProfileId } from "../imports/profiles/profile-ids.js";
-import { parseDeloittePayslipPdf } from "./profiles/deloitte-payslip-pdf.js";
 import type { PayslipPdfParseResult as IbmPayslipPdfParseResult } from "./profiles/ibm-payslip-pdf.js";
 import { parseIbmPayslipPdf } from "./profiles/ibm-payslip-pdf.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID, IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
@@ -16,7 +15,7 @@ export async function parsePayslipPdfByProfile(
     return parseIbmPayslipPdf(buffer);
   }
   if (parserProfileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID) {
-    return parseDeloittePayslipPdf(buffer);
+    return { ok: false, reason: "unsupported_parser", parserProfileId: DELOITTE_PAYSLIP_PDF_PROFILE_ID };
   }
   if (parserProfileId === "adp_payslip_pdf") {
     return { ok: false, reason: "unsupported_parser", parserProfileId };

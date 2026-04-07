@@ -14,6 +14,7 @@ import {
   listPayslipSnapshots,
   sha256Hex
 } from "./payslip.service.js";
+import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "./payslip.types.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -107,9 +108,18 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
 
   if (!parseResult.ok) {
     if (parseResult.reason === "unsupported_parser") {
+      if (parseResult.parserProfileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID) {
+        res.status(422).json({
+          message:
+            "Deloitte Pay Statement PDFs are processed via Import (Unstructured). Use Import → bind employer → Parse, then wait for processing or run Reconcile.",
+          code: "DELOITTE_USE_IMPORT",
+          parserProfileId: parseResult.parserProfileId
+        });
+        return;
+      }
       res.status(422).json({
         message:
-          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF), Deloitte Pay Statement (PDF).",
+          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF), Deloitte Pay Statement (PDF) via Import.",
         code: "UNSUPPORTED_PARSER",
         parserProfileId: parseResult.parserProfileId
       });
