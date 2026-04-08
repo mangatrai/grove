@@ -89,10 +89,81 @@ describe("payslip-canonical-map", () => {
     expect(summary.grossPayCurrent).toBe(5000);
     expect(summary.employeeTaxesCurrent).toBe(800);
     expect(summary.netPayCurrent).toBe(4000);
+    expect(summary.hoursOrDaysCurrent).toBe("80");
+    expect(summary.rawExtractJson.hoursDefaultBiweekly80).toBe(true);
     expect(hybrid.employerEinOrFein).toBe("12-3456789");
     expect(hybrid.employeeId).toBe("E1");
     expect(JSON.parse(hybrid.taxProfileJson!)).toMatchObject({ marital_status: null });
     expect(hybrid.canonicalExtractJson).toContain("Acme");
+  });
+
+  it("uses explicit hours when model provides them (no biweekly default)", () => {
+    const ex = minimalExtract({
+      employment_context: {
+        ...minimalExtract().employment_context,
+        hours_or_days_worked_current: 86.67
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.hoursOrDaysCurrent).toBe("86.67");
+    expect(summary.rawExtractJson.hoursDefaultBiweekly80).toBeUndefined();
+  });
+
+  it("fills employee taxes from line_items.tax_deductions when summary tax fields are null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        tax_deductions_current: null,
+        tax_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        tax_deductions: [
+          {
+            name: "Fed",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 1000,
+            amount_ytd: 5000,
+            raw_section: "TAX DEDUCTION(S)"
+          },
+          {
+            name: "SS",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 175.44,
+            amount_ytd: 441.41,
+            raw_section: "TAX DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.employeeTaxesCurrent).toBeCloseTo(1175.44, 2);
+    expect(summary.employeeTaxesYtd).toBeCloseTo(5441.41, 2);
+    expect(summary.rawExtractJson.taxDeductionsFilledFromLineItems).toEqual({ current: true, ytd: true });
+  });
+
+  it("fills post-tax from other_deductions when post_tax summary is null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: null,
+        post_tax_deductions_ytd: null,
+        other_deductions_current: 42,
+        other_deductions_ytd: 99
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.postTaxDeductionsCurrent).toBe(42);
+    expect(summary.postTaxDeductionsYtd).toBe(99);
+    expect(summary.rawExtractJson.postTaxFilledFromOtherDeductions).toEqual({ current: true, ytd: true });
   });
 
   it("validateCanonicalForImport passes for minimal good extract", () => {

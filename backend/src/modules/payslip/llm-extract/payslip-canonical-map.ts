@@ -1,35 +1,114 @@
 import type { ParsedPayslipSummary, PayslipHybridColumns } from "../payslip.types.js";
-import type { PayslipLlmExtract } from "./payslip-llm.schema.js";
+import type { PayslipLlmExtract, PayslipLineItem } from "./payslip-llm.schema.js";
 
 export type CanonicalMapResult = {
   summary: ParsedPayslipSummary;
   hybrid: PayslipHybridColumns;
 };
 
+/** Deloitte biweekly default when the model does not report hours on the stub. */
+const DEFAULT_DELOITTE_BIWEEKLY_HOURS = 80;
+
+function sumLineItemColumn(items: PayslipLineItem[], key: "amount_current" | "amount_ytd"): number | null {
+  let sum = 0;
+  let any = false;
+  for (const row of items) {
+    const v = row[key];
+    if (v != null && Number.isFinite(v)) {
+      sum += v;
+      any = true;
+    }
+  }
+  return any ? sum : null;
+}
+
+/** Warn-only when gross - pre - tax - post differs materially from net (rounding / employer layout). */
+function approxNetSanityNote(
+  s: PayslipLlmExtract["summary"],
+  employeeTaxesCurrent: number | null,
+  postTaxCurrent: number | null
+): Record<string, unknown> {
+  const gross = s.gross_pay_current;
+  const pre = s.pre_tax_deductions_current ?? 0;
+  const net = s.net_pay_current;
+  if (gross == null || net == null) {
+    return {};
+  }
+  const implied = gross - pre - (employeeTaxesCurrent ?? 0) - (postTaxCurrent ?? 0);
+  const delta = Math.abs(implied - net);
+  if (delta <= 1) {
+    return {};
+  }
+  return {
+    bucketArithmeticCheck: {
+      impliedNetFromBuckets: Math.round(implied * 100) / 100,
+      statedNet: net,
+      delta: Math.round(delta * 100) / 100
+    }
+  };
+}
+
 /**
  * Map validated canonical LLM extract into legacy `ParsedPayslipSummary` columns plus hybrid columns.
- * Employee taxes bucket maps from summary tax_deductions_* (IBM/Deloitte both expose taxes in that bucket).
+ * Employee taxes bucket maps from summary tax_deductions_*; falls back to summing `line_items.tax_deductions`
+ * when summary fields are null. Post-tax uses post_tax_* or, when null, other_deductions_* (e.g. Deloitte).
+ * Hours default to 80 when absent (biweekly Deloitte assumption).
  */
 export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTokens?: number | null): CanonicalMapResult {
   const s = extract.summary;
   const emp = extract.employee;
   const em = extract.source_employer;
+  const taxLines = extract.line_items.tax_deductions;
+  const taxSumCurrent = sumLineItemColumn(taxLines, "amount_current");
+  const taxSumYtd = sumLineItemColumn(taxLines, "amount_ytd");
+
+  let employeeTaxesCurrent = s.tax_deductions_current;
+  let employeeTaxesYtd = s.tax_deductions_ytd;
+  const taxFromLines: { current?: boolean; ytd?: boolean } = {};
+  if (employeeTaxesCurrent == null && taxSumCurrent != null) {
+    employeeTaxesCurrent = taxSumCurrent;
+    taxFromLines.current = true;
+  }
+  if (employeeTaxesYtd == null && taxSumYtd != null) {
+    employeeTaxesYtd = taxSumYtd;
+    taxFromLines.ytd = true;
+  }
+
+  let postTaxCurrent = s.post_tax_deductions_current;
+  let postTaxYtd = s.post_tax_deductions_ytd;
+  const postFromOther: { current?: boolean; ytd?: boolean } = {};
+  if (postTaxCurrent == null && s.other_deductions_current != null) {
+    postTaxCurrent = s.other_deductions_current;
+    postFromOther.current = true;
+  }
+  if (postTaxYtd == null && s.other_deductions_ytd != null) {
+    postTaxYtd = s.other_deductions_ytd;
+    postFromOther.ytd = true;
+  }
+
+  let hoursOrDaysCurrent: string | null =
+    extract.employment_context.hours_or_days_worked_current != null
+      ? String(extract.employment_context.hours_or_days_worked_current)
+      : null;
+  let hoursDefaultedBiweekly80 = false;
+  if (hoursOrDaysCurrent == null) {
+    hoursOrDaysCurrent = String(DEFAULT_DELOITTE_BIWEEKLY_HOURS);
+    hoursDefaultedBiweekly80 = true;
+  }
+
   const summary: ParsedPayslipSummary = {
     payPeriodStart: extract.pay_period.start_date,
     payPeriodEnd: extract.pay_period.end_date,
     payDate: extract.pay_period.pay_date,
-    hoursOrDaysCurrent:
-      extract.employment_context.hours_or_days_worked_current != null
-        ? String(extract.employment_context.hours_or_days_worked_current)
-        : null,
+    hoursOrDaysCurrent,
     grossPayCurrent: s.gross_pay_current,
     grossPayYtd: s.gross_pay_ytd,
-    employeeTaxesCurrent: s.tax_deductions_current,
-    employeeTaxesYtd: s.tax_deductions_ytd,
+    employeeTaxesCurrent,
+    employeeTaxesYtd,
     preTaxDeductionsCurrent: s.pre_tax_deductions_current,
     preTaxDeductionsYtd: s.pre_tax_deductions_ytd,
-    postTaxDeductionsCurrent: s.post_tax_deductions_current,
-    postTaxDeductionsYtd: s.post_tax_deductions_ytd,
+    postTaxDeductionsCurrent: postTaxCurrent,
+    postTaxDeductionsYtd: postTaxYtd,
     netPayCurrent: s.net_pay_current,
     netPayYtd: s.net_pay_ytd,
     rawExtractJson: {
@@ -39,7 +118,11 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
       totalEarningsCurrent: s.total_earnings_current,
       totalEarningsYtd: s.total_earnings_ytd,
       taxableEarningsCurrent: s.taxable_earnings_current,
-      taxableEarningsYtd: s.taxable_earnings_ytd
+      taxableEarningsYtd: s.taxable_earnings_ytd,
+      ...(hoursDefaultedBiweekly80 ? { hoursDefaultBiweekly80: true } : {}),
+      ...(Object.keys(taxFromLines).length > 0 ? { taxDeductionsFilledFromLineItems: taxFromLines } : {}),
+      ...(Object.keys(postFromOther).length > 0 ? { postTaxFilledFromOtherDeductions: postFromOther } : {}),
+      ...approxNetSanityNote(s, employeeTaxesCurrent, postTaxCurrent)
     }
   };
 
