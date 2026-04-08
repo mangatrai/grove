@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 
 import { env } from "../../config/env.js";
+import { log } from "../../logger.js";
 import { qAll, qExec } from "../../db/query.js";
 
 import { getSessionForHousehold, type ServiceResult } from "./import-session.service.js";
@@ -29,7 +30,7 @@ import {
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "../payslip/payslip.types.js";
-import { unstructuredJobsCreate } from "./unstructured-jobs.service.js";
+import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
 
 export interface ParseColumnMapping {
   date: string;
@@ -49,7 +50,9 @@ export interface ParseOutcome {
   parsedFiles: number;
   parsedRows: number;
   skippedFiles: Array<{ fileId: string; reason: string }>;
-  /** Deloitte PDFs submitted to Unstructured Jobs; poll `/reconcile-unstructured` until parsed. */
+  /** Deloitte PDFs queued for async LLM extract; poll `/reconcile-payslip-async` until parsed. */
+  asyncPayslipPending?: number;
+  /** @deprecated Same as asyncPayslipPending (legacy clients). */
   unstructuredPending?: number;
 }
 
@@ -298,7 +301,7 @@ export async function parseSessionImportFiles(
         await qExec(`DELETE FROM transaction_raw WHERE file_id = ?`, file.id);
 
         if (profileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID) {
-          if (!env.UNSTRUCTURED_API_KEY?.trim()) {
+          if (!env.OPENAI_API_KEY?.trim()) {
             await qExec(
               `UPDATE import_file
      SET status = ?, confidence_summary = ?
@@ -306,54 +309,35 @@ export async function parseSessionImportFiles(
               "failed",
               JSON.stringify({
                 stage: "failed",
-                reason: "unstructured_api_not_configured",
+                reason: "openai_api_not_configured",
                 profile: profileId
               }),
               file.id
             );
-            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_unstructured_api_not_configured" });
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_openai_api_not_configured" });
             continue;
           }
-          try {
-            const created = await unstructuredJobsCreate({
-              pdfBuffer: buffer,
-              fileName: file.file_name || "payslip.pdf",
-              templateId: env.UNSTRUCTURED_DELOITTE_TEMPLATE_ID
-            });
-            outcome.unstructuredPending = (outcome.unstructuredPending ?? 0) + 1;
-            await qExec(
-              `UPDATE import_file
+          log.info("[Import parse] queueing Deloitte PDF for async LLM payslip extract", {
+            importFileId: file.id,
+            fileName: file.file_name,
+            pdfBytes: buffer.byteLength,
+            provider: OPENAI_LLM_PAYSLIP_PROVIDER
+          });
+          outcome.asyncPayslipPending = (outcome.asyncPayslipPending ?? 0) + 1;
+          await qExec(
+            `UPDATE import_file
      SET status = ?, confidence_summary = ?,
-         unstructured_job_id = ?, unstructured_input_file_id = ?, unstructured_last_poll_at = NULL
+         payslip_async_provider = ?, payslip_async_last_poll_at = NULL
      WHERE id = ?`,
-              "processing",
-              JSON.stringify({
-                stage: "unstructured_job_submitted",
-                profile: profileId,
-                unstructuredJobId: created.jobId,
-                unstructuredInputFileId: created.inputFileId
-              }),
-              created.jobId,
-              created.inputFileId,
-              file.id
-            );
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            await qExec(
-              `UPDATE import_file
-     SET status = ?, confidence_summary = ?
-     WHERE id = ?`,
-              "failed",
-              JSON.stringify({
-                stage: "failed",
-                reason: "unstructured_job_submit_failed",
-                detail: msg.slice(0, 500),
-                profile: profileId
-              }),
-              file.id
-            );
-            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_unstructured_job_submit_failed" });
-          }
+            "processing",
+            JSON.stringify({
+              stage: "llm_queued",
+              profile: profileId,
+              payslipAsyncProvider: OPENAI_LLM_PAYSLIP_PROVIDER
+            }),
+            OPENAI_LLM_PAYSLIP_PROVIDER,
+            file.id
+          );
           continue;
         }
 
@@ -500,8 +484,8 @@ export async function parseSessionImportFiles(
     }
   }
 
-  const unstructuredPending = outcome.unstructuredPending ?? 0;
-  if (outcome.parsedFiles === 0 && unstructuredPending === 0) {
+  const asyncPayslipPending = outcome.asyncPayslipPending ?? 0;
+  if (outcome.parsedFiles === 0 && asyncPayslipPending === 0) {
     return {
       ok: false,
       code: "NO_SUPPORTED_FILES",
@@ -510,10 +494,17 @@ export async function parseSessionImportFiles(
     };
   }
 
-  if (unstructuredPending > 0) {
+  if (asyncPayslipPending > 0) {
     await qExec(`UPDATE import_session SET status = 'processing' WHERE id = ?`, sessionId);
   } else {
     await qExec(`UPDATE import_session SET status = 'review' WHERE id = ?`, sessionId);
   }
-  return { ok: true, data: outcome };
+  return {
+    ok: true,
+    data: {
+      ...outcome,
+      asyncPayslipPending,
+      unstructuredPending: asyncPayslipPending
+    }
+  };
 }

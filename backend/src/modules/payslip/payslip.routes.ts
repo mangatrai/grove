@@ -12,6 +12,7 @@ import {
   getPayslipSnapshotForHousehold,
   insertPayslipSnapshot,
   listPayslipSnapshots,
+  patchPayslipSnapshotForHousehold,
   sha256Hex
 } from "./payslip.service.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "./payslip.types.js";
@@ -28,6 +29,25 @@ const listQuerySchema = z.object({
 const idParamSchema = z.object({
   id: z.string().uuid()
 });
+
+const payslipPatchSchema = z
+  .object({
+    payPeriodStart: z.string().nullable().optional(),
+    payPeriodEnd: z.string().nullable().optional(),
+    payDate: z.string().nullable().optional(),
+    grossPayCurrent: z.number().nullable().optional(),
+    grossPayYtd: z.number().nullable().optional(),
+    employeeTaxesCurrent: z.number().nullable().optional(),
+    employeeTaxesYtd: z.number().nullable().optional(),
+    preTaxDeductionsCurrent: z.number().nullable().optional(),
+    preTaxDeductionsYtd: z.number().nullable().optional(),
+    postTaxDeductionsCurrent: z.number().nullable().optional(),
+    postTaxDeductionsYtd: z.number().nullable().optional(),
+    netPayCurrent: z.number().nullable().optional(),
+    netPayYtd: z.number().nullable().optional(),
+    hoursOrDaysCurrent: z.string().nullable().optional()
+  })
+  .strict();
 
 export const payslipRouter = Router();
 payslipRouter.use(requireAuth);
@@ -179,4 +199,24 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
   res.json(snapshot);
+});
+
+payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
+  const params = idParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid payslip id", issues: params.error.flatten() });
+    return;
+  }
+  const body = payslipPatchSchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ message: "Invalid payload", issues: body.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const updated = await patchPayslipSnapshotForHousehold(householdId, params.data.id, body.data);
+  if (!updated) {
+    res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.json({ snapshot: updated });
 });

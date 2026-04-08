@@ -20,3 +20,18 @@ export type ParsedPayslipSummary = {
 
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf" as const;
 export const DELOITTE_PAYSLIP_PDF_PROFILE_ID = "deloitte_payslip_pdf" as const;
+
+/** Optional LLM hybrid columns; used when inserting from `openai_llm_payslip` pipeline. */
+export type PayslipHybridColumns = {
+  canonicalExtractJson: string;
+  currency: string | null;
+  employerDisplayName: string | null;
+  employeeDisplayName: string | null;
+  employerEinOrFein: string | null;
+  employeeId: string | null;
+  personnelNumber: string | null;
+  talentId: string | null;
+  taxProfileJson: string | null;
+  paymentSummaryJson: string | null;
+  extractionMetadataJson: string | null;
+};
