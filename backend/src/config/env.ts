@@ -18,17 +18,6 @@ function optionalIntEnv(defaultVal: number, min: number, max: number) {
   );
 }
 
-function optionalFloatEnv(defaultVal: number, min: number, max: number) {
-  return z.preprocess(
-    (val: unknown) => {
-      if (val === undefined || val === "") return defaultVal;
-      const n = Number(val);
-      return Number.isFinite(n) ? n : defaultVal;
-    },
-    z.number().min(min).max(max)
-  );
-}
-
 function optionalBoolEnv(defaultVal: boolean) {
   return z.preprocess((val: unknown) => {
     if (val === undefined || val === "") return defaultVal;
@@ -62,13 +51,6 @@ const envSchema = z.object({
   /** Multi-candidate: weaker narrow if best ≥ this and runner-up score is below this ceiling. */
   TRANSFER_DISAMBIG_WEAK_MIN_SCORE: optionalIntEnv(45, 0, 100),
   TRANSFER_DISAMBIG_WEAK_MAX_SECOND_SCORE: optionalIntEnv(25, 0, 100),
-  AI_CATEGORY_ENABLED: optionalBoolEnv(false),
-  /** Max transactions per OpenAI chat request when batching categorization (1–128). */
-  AI_CATEGORY_BATCH_SIZE: optionalIntEnv(28, 1, 128),
-  /** Concurrent OpenAI requests for different chunks of the same AI run (1–8). Use 1 to avoid rate limits. */
-  AI_CATEGORY_MAX_PARALLEL: optionalIntEnv(1, 1, 8),
-  AI_CATEGORY_AUTO_APPLY_MIN: optionalFloatEnv(0.9, 0, 1),
-  AI_CATEGORY_REVIEW_MIN: optionalFloatEnv(0.6, 0, 1),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   /**
@@ -88,8 +70,6 @@ const envSchema = z.object({
     const s = String(val).trim();
     return s === "" ? undefined : s;
   }, z.string().optional()),
-  /** Max characters logged per debug line for OpenAI request/response bodies (`LOG_LEVEL=debug`). */
-  LOG_AI_DEBUG_BODY_MAX_CHARS: optionalIntEnv(4000, 200, 50_000),
   /** Min milliseconds between background polls for async LLM payslip import (default 2 min). */
   PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000)
 });

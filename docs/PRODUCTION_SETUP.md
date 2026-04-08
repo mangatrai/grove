@@ -16,8 +16,7 @@ Schema is applied in order from `backend/db/migrations/` via `scripts/db.mjs` (t
 ## Environment
 
 - Set `JWT_SECRET` and database path in `.env` (see `.env.example`).
-- If you are enabling AI categorization, set `AI_CATEGORY_ENABLED=true`, `OPENAI_API_KEY`, and tune
-  `AI_CATEGORY_AUTO_APPLY_MIN` / `AI_CATEGORY_REVIEW_MIN`.
+- Set `OPENAI_API_KEY` if you use **Deloitte payslip** import (async LLM extract); transaction categories are **rules-only** (no OpenAI categorization).
 - Change default seeded credentials immediately after first deploy.
 
 ## Institution list

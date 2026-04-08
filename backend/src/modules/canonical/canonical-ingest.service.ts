@@ -2,12 +2,10 @@ import crypto from "node:crypto";
 
 import { env } from "../../config/env.js";
 import { isPgUniqueViolation, qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
-import { log } from "../../logger.js";
 import { deleteStagingFilesForSession } from "../imports/import-session.service.js";
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
 import { classifyWithRules, type ClassificationResult } from "../category/category-rules.js";
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
-import { suggestCategoriesWithAiBatch, type AiSuggestion } from "../category/category-ai.service.js";
 import {
   computeTransactionFingerprint,
   descriptionsCompatibleForNearDuplicate,
@@ -382,7 +380,7 @@ export async function canonicalizeImportSession(
     merchant: string;
     memo: string | null;
   }> = [];
-  type PendingAiInsert = {
+  type PendingCanonInsert = {
     row: (typeof rawRows)[number];
     parsed: RawPayloadWithAccount;
     normDate: string;
@@ -395,36 +393,16 @@ export async function canonicalizeImportSession(
     direction: "credit" | "debit";
     diag: CanonicalFileDiagnostics;
   };
-  type QueuedOp = { kind: "ai"; pending: PendingAiInsert } | { kind: "rule"; pending: PendingAiInsert };
-  const ops: QueuedOp[] = [];
+  const ops: PendingCanonInsert[] = [];
 
-  async function insertCanonicalRow(p: PendingAiInsert, aiSuggestion: AiSuggestion | null): Promise<void> {
+  async function insertCanonicalRow(p: PendingCanonInsert): Promise<void> {
     const { row, parsed, normDate, rounded, fingerprint, classification, merchant, memo, direction, diag } = p;
-    let categoryId = classification.categoryId;
-    if (
-      aiSuggestion?.suggestedCategoryId &&
-      aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
-    ) {
-      categoryId = aiSuggestion.suggestedCategoryId;
-    }
+    const categoryId = classification.categoryId;
     const classificationMeta = JSON.stringify({
       source: classification.source,
       ruleId: classification.ruleId,
       confidence: classification.confidence,
-      reason: classification.reason,
-      ai: aiSuggestion
-        ? {
-            suggestedCategoryId: aiSuggestion.suggestedCategoryId,
-            confidence: aiSuggestion.confidence,
-            suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
-            reason: aiSuggestion.reason,
-            model: aiSuggestion.model,
-            autoApplied:
-              categoryId !== null &&
-              aiSuggestion.suggestedCategoryId === categoryId &&
-              aiSuggestion.confidence >= env.AI_CATEGORY_AUTO_APPLY_MIN
-          }
-        : null
+      reason: classification.reason
     });
 
     const canonicalId = crypto.randomUUID();
@@ -478,17 +456,7 @@ export async function canonicalizeImportSession(
               ruleId: classification.ruleId,
               confidence: classification.confidence,
               reason: classification.reason
-            },
-            ai:
-              aiSuggestion && aiSuggestion.confidence >= env.AI_CATEGORY_REVIEW_MIN
-                ? {
-                    suggestedCategoryId: aiSuggestion.suggestedCategoryId,
-                    confidence: aiSuggestion.confidence,
-                    suggestedNewCategoryName: aiSuggestion.suggestedNewCategoryName,
-                    reason: aiSuggestion.reason,
-                    model: aiSuggestion.model
-                  }
-                : null
+            }
           })
         );
       }
@@ -504,63 +472,9 @@ export async function canonicalizeImportSession(
     }
   }
 
-  async function flushContiguousAiRun(run: PendingAiInsert[]): Promise<void> {
-    if (run.length === 0) {
-      return;
-    }
-    const batchSize = env.AI_CATEGORY_BATCH_SIZE;
-    const maxP = Math.max(1, env.AI_CATEGORY_MAX_PARALLEL);
-    const chunks: PendingAiInsert[][] = [];
-    for (let i = 0; i < run.length; i += batchSize) {
-      chunks.push(run.slice(i, i + batchSize));
-    }
-    log.debug(
-      `[canonical-ingest] AI run: ${run.length} row(s) -> ${chunks.length} OpenAI chunk(s), max_parallel=${maxP}, chunk_sizes=[${chunks.map((c) => c.length).join(",")}]`
-    );
-    const merged = new Map<string, AiSuggestion | null>();
-    for (let w = 0; w < chunks.length; w += maxP) {
-      const wave = chunks.slice(w, w + maxP);
-      log.debug(
-        `[canonical-ingest] AI parallel wave: ${wave.map((ch) => ch.length).join("+")} txn(s) per concurrent request`
-      );
-      const maps = await Promise.all(
-        wave.map((ch) =>
-          suggestCategoriesWithAiBatch(
-            householdId,
-            ch.map((c) => ({
-              transactionId: c.row.raw_id,
-              normalizedDescription: c.normDesc,
-              signedAmount: c.rounded
-            }))
-          )
-        )
-      );
-      for (const m of maps) {
-        for (const [k, v] of m) {
-          merged.set(k, v);
-        }
-      }
-    }
-    for (const p of run) {
-      await insertCanonicalRow(p, merged.get(p.row.raw_id) ?? null);
-    }
-  }
-
   async function drainOpsQueue(): Promise<void> {
-    let idx = 0;
-    while (idx < ops.length) {
-      const run: PendingAiInsert[] = [];
-      while (idx < ops.length && ops[idx].kind === "ai") {
-        run.push(ops[idx].pending);
-        idx++;
-      }
-      if (run.length > 0) {
-        await flushContiguousAiRun(run);
-      }
-      while (idx < ops.length && ops[idx].kind === "rule") {
-        await insertCanonicalRow(ops[idx].pending, null);
-        idx++;
-      }
+    for (const p of ops) {
+      await insertCanonicalRow(p);
     }
   }
 
@@ -712,7 +626,7 @@ export async function canonicalizeImportSession(
     const memo = desc.length > 120 ? desc : null;
 
     const classification = classifyWithRules(normDesc, rounded, dbRules);
-    const pending: PendingAiInsert = {
+    const pending: PendingCanonInsert = {
       row,
       parsed,
       normDate,
@@ -735,11 +649,7 @@ export async function canonicalizeImportSession(
       merchant,
       memo
     });
-    if (classification.categoryId !== null) {
-      ops.push({ kind: "rule", pending });
-    } else {
-      ops.push({ kind: "ai", pending });
-    }
+    ops.push(pending);
   }
 
   await drainOpsQueue();

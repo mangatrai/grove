@@ -1,9 +1,5 @@
 # Dead code and optional features (audit notes)
 
-## AI categorization
-
-OpenAI-backed suggestions after deterministic rules remain **optional** and **off by default** (`AI_CATEGORY_ENABLED=false`). The code path is covered by tests (`category-ai-batch.test.ts`) and is intentionally retained for households that want model-assisted labeling.
-
 ## Finding unused exports
 
 Run occasionally from the backend workspace:

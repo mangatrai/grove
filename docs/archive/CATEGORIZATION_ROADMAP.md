@@ -67,7 +67,7 @@ Rules assign **leaf** categories only (see `classifyWithRules` in `backend/src/m
    - **Classifies** each row: `classifyWithRules(normalizedDescription, amount, dbRules)`:
      1. **Household `category_rule` rows** (from Category Rules UI), priority order, first match wins on normalized text.
      2. **`category_rule_global`** rows (built-in defaults; DDL in baseline / archived `0026`, data in `0001_bootstrap.sql`), merged after household rules.
-     3. If still **no category**, the row is queued for **optional AI** (if enabled): batched OpenAI suggestions; high-confidence suggestions can auto-apply per `AI_CATEGORY_*` env thresholds.
+     3. If still **no category**, the row is inserted without a category and surfaced in the review queue (rules-only; no model categorization).
    - Inserts **`transaction_canonical`** with `category_id` (possibly null) and classification metadata JSON.
    - If `category_id` is still null, creates an **`unknown_category`** resolution item so the user can fix it from review / ledger.
 5. **After import** — User may open **Transactions**, filter **Needs review**, assign categories, and (from the UI) **create a household rule from a ledger row** so future imports match without re-labeling.

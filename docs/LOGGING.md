@@ -1,9 +1,5 @@
 # Logging
 
-## AI categorization debug
-
-With **`LOG_LEVEL=debug`**, [`backend/src/modules/category/category-ai.service.ts`](../backend/src/modules/category/category-ai.service.ts) logs truncated OpenAI request/response bodies. Cap size with **`LOG_AI_DEBUG_BODY_MAX_CHARS`** (see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)). Payloads may contain **PII** — use only in trusted environments. Overview: [`AI_CATEGORIZATION.md`](AI_CATEGORIZATION.md).
-
 ## Backend: `LOG_LEVEL`
 
 The API reads **`LOG_LEVEL`** from the **repository root** `.env` (same file as other backend variables; see [`backend/src/config/env.ts`](../backend/src/config/env.ts)).
