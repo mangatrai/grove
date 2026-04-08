@@ -133,7 +133,10 @@ function friendlyImportSkipReason(reason: string): string {
     return "payslip_pdf_extract_unreadable (PDF has no usable text for parsing — re-export from payroll or use a text-based PDF)";
   }
   if (reason === "payslip_unstructured_api_not_configured") {
-    return "payslip_unstructured_api_not_configured (set UNSTRUCTURED_API_KEY for Deloitte)";
+    return "payslip_unstructured_api_not_configured (legacy; use OPENAI_API_KEY for Deloitte LLM parse)";
+  }
+  if (reason === "payslip_openai_api_not_configured") {
+    return "payslip_openai_api_not_configured (set OPENAI_API_KEY for Deloitte payslip extraction)";
   }
   return reason;
 }
@@ -426,7 +429,7 @@ export function ImportWorkspacePage() {
     }
   }, [sessionId, load]);
 
-  const runReconcileUnstructured = useCallback(
+  const runReconcilePayslipAsync = useCallback(
     async (force: boolean) => {
       if (!sessionId) {
         return;
@@ -438,14 +441,14 @@ export function ImportWorkspacePage() {
           stillPending: boolean;
           completedFiles: number;
           polledFiles: number;
-        }>(`/imports/sessions/${sessionId}/reconcile-unstructured${q}`, { method: "POST", body: "{}" });
+        }>(`/imports/sessions/${sessionId}/reconcile-payslip-async${q}`, { method: "POST", body: "{}" });
         await load();
         if (r.completedFiles > 0) {
           setMessage(
-            `Unstructured: parsed ${r.completedFiles} Deloitte file(s).${r.stillPending ? " More still in progress." : ""}`
+            `Payslip LLM: parsed ${r.completedFiles} Deloitte file(s).${r.stillPending ? " More still in progress." : ""}`
           );
         } else if (r.polledFiles > 0 && r.stillPending) {
-          setMessage("Unstructured job still running; next automatic check in 2 minutes (or use Check now).");
+          setMessage("Payslip extraction still running; next automatic check in 2 minutes (or use Check now).");
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Reconcile failed");
@@ -461,11 +464,17 @@ export function ImportWorkspacePage() {
     if (!sessionId || !pending) {
       return;
     }
+    const kickoff = window.setTimeout(() => {
+      void runReconcilePayslipAsync(false);
+    }, 2500);
     const id = window.setInterval(() => {
-      void runReconcileUnstructured(false);
+      void runReconcilePayslipAsync(false);
     }, 120_000);
-    return () => clearInterval(id);
-  }, [sessionId, files, runReconcileUnstructured]);
+    return () => {
+      clearTimeout(kickoff);
+      clearInterval(id);
+    };
+  }, [sessionId, files, runReconcilePayslipAsync]);
 
   useEffect(() => {
     if (sessionId) {
@@ -938,12 +947,13 @@ export function ImportWorkspacePage() {
         parsedFiles: number;
         parsedRows: number;
         skippedFiles?: unknown[];
+        asyncPayslipPending?: number;
         unstructuredPending?: number;
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
-      const up = out.unstructuredPending ?? 0;
+      const up = out.asyncPayslipPending ?? out.unstructuredPending ?? 0;
       if (up > 0) {
         setMessage(
-          `Submitted ${up} Deloitte PDF(s) to Unstructured. Session stays in processing until the job finishes — automatic check every 2 minutes, or use “Check Unstructured now”.`
+          `Queued ${up} Deloitte PDF(s) for payslip extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes, or use “Check now”.`
         );
       } else {
         setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
@@ -998,11 +1008,12 @@ export function ImportWorkspacePage() {
       const parseOut = await apiJson<{
         parsedFiles: number;
         parsedRows: number;
+        asyncPayslipPending?: number;
         unstructuredPending?: number;
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
-      if ((parseOut.unstructuredPending ?? 0) > 0) {
+      if ((parseOut.asyncPayslipPending ?? parseOut.unstructuredPending ?? 0) > 0) {
         setMessage(
-          "Deloitte PDF(s) sent to Unstructured. Wait until files show “parsed”, then run import again (or use Check Unstructured now)."
+          "Deloitte PDF(s) queued for payslip extraction. Wait until files show “parsed”, then run import again (or use Check now)."
         );
         setPipelineBusy(false);
         await load();
@@ -1586,7 +1597,7 @@ export function ImportWorkspacePage() {
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Run import</h2>
         <p className="muted">
           One step parses every file and then loads transactions into your ledger (dedupe included). IBM payslip PDFs
-          finish in one step. <strong>Deloitte</strong> PDFs are sent to Unstructured — wait until they show parsed, then
+          finish in one step. <strong>Deloitte</strong> PDFs are extracted via OpenAI (background) — wait until they show parsed, then
           run import again. Use separate steps only if you need to debug.
         </p>
         <div className="row">
@@ -1627,10 +1638,10 @@ export function ImportWorkspacePage() {
               type="button"
               className="secondary"
               disabled={!sessionId || pipelineBusy}
-              title="Poll Unstructured for completed Deloitte jobs (bypasses 2-minute throttle)"
-              onClick={() => void runReconcileUnstructured(true)}
+              title="Poll for completed Deloitte payslip extraction (bypasses 2-minute throttle)"
+              onClick={() => void runReconcilePayslipAsync(true)}
             >
-              Check Unstructured now (Deloitte)
+              Check now (Deloitte payslip)
             </button>
             <button type="button" className="secondary" disabled={pipelineBusy} onClick={() => void runCanonicalize()}>
               Canonicalize (dedupe)

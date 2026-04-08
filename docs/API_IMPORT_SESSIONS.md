@@ -174,11 +174,11 @@ Supported adapters in MVP:
 - Excel (`.xlsx`, `.xls`)
 - PDF (`.pdf`) — profile-specific behavior:
   - `boa_estatement_pdf`, `marcus_online_savings_pdf`, `ibm_pay_contributions_pdf`: local parse path
-  - `deloitte_payslip_pdf`: async Unstructured Jobs path (no local Deloitte pdf-parse fallback)
+  - `deloitte_payslip_pdf`: async OpenAI LLM payslip path (queued on `import_file`, background reconcile)
 
 **Employer payslip (`ibm_pay_contributions_pdf`):** extraction runs the IBM payslip parser. On success, a row is written to **`payslip_snapshot`** with **`import_file_id`** set to this session file. **No** **`transaction_raw`** rows are created. **`200`** still returns **`parsedFiles`** ≥ 1 and typically **`parsedRows`: 0** (ledger line count). Duplicate payslip checksum for the household may mark the file **`failed`** / skip with a payslip-specific reason.
 
-**Employer payslip (`deloitte_payslip_pdf`):** parse submits each Deloitte PDF to Unstructured Jobs and stores `unstructured_job_id` + `unstructured_input_file_id` on `import_file`. `POST .../parse` returns `200` with `unstructuredPending` count while session remains `processing`. Use reconcile endpoint below until jobs complete and `payslip_snapshot` rows are inserted.
+**Employer payslip (`deloitte_payslip_pdf`):** parse queues each Deloitte PDF for async LLM extraction (`payslip_async_provider = openai_llm_payslip` on `import_file`). `POST .../parse` returns `200` with `asyncPayslipPending` (and legacy alias `unstructuredPending`) while session remains `processing`. Requires `OPENAI_API_KEY`. Poll **`POST .../reconcile-payslip-async`** (or deprecated `reconcile-unstructured`, same behavior) until files are `parsed` and `payslip_snapshot` rows are inserted.
 
 **Profile `generic_tabular`:** user supplies column mapping (and optional `sheetName` for Excel).
 
@@ -201,28 +201,31 @@ Required mapping keys: `date`, `description`, `amount`.
 
 **Named bank/proprietary profiles** (`chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, **`ibm_pay_contributions_pdf`**, **`deloitte_payslip_pdf`**): mapping is **not** used; send `{}` or omit `mapping` as allowed by the route.
 
-**200:** `{ "parsedFiles", "parsedRows", "skippedFiles", "unstructuredPending?" }`  
+**200:** `{ "parsedFiles", "parsedRows", "skippedFiles", "asyncPayslipPending?", "unstructuredPending?" }`  
 **400:** invalid payload/mapping (`code: "INVALID_MAPPING"` for generic_tabular when columns are wrong)  
 **404:** session not found / wrong household  
 **409:** no supported files for parsing
 
 ---
 
-### `POST /imports/sessions/:sessionId/reconcile-unstructured`
+### `POST /imports/sessions/:sessionId/reconcile-payslip-async`
 
-Polls Unstructured Jobs for Deloitte import files in this session and finalizes completed ones into `payslip_snapshot`.
+Runs background OpenAI payslip extraction for Deloitte files queued in this session and inserts `payslip_snapshot` rows (canonical JSON + hybrid columns).
 
 Query:
 - `force=true|1` (optional) — bypass per-file throttle window.
 
 Behavior:
-- Reads only Deloitte files with pending `unstructured_job_id` in `status = processing`.
-- Applies throttle interval from backend env (`UNSTRUCTURED_POLL_INTERVAL_MS`) unless `force=true`.
-- On completed jobs, downloads JSON, parses Deloitte summary, inserts `payslip_snapshot`, and marks file `parsed`.
+- Reads Deloitte files with `payslip_async_provider = openai_llm_payslip` in `status = processing`.
+- Throttle: `PAYSLIP_ASYNC_POLL_INTERVAL_MS` (default 120s) unless `force=true`.
+- On success: vision + JSON-schema extract, Zod validation, map to snapshot, mark file `parsed`.
 
 **200:** `{ "polledFiles", "completedFiles", "stillPending", "errors": [ { "fileId", "message" } ] }`  
 **404:** session not found / wrong household  
-**503:** Unstructured API not configured (`UNSTRUCTURED_NOT_CONFIGURED`)
+
+### `POST /imports/sessions/:sessionId/reconcile-unstructured` (deprecated)
+
+Alias for `reconcile-payslip-async` (same response shape). Prefer `reconcile-payslip-async`.
 
 ---
 

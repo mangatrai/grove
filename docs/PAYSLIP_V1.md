@@ -41,7 +41,7 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 - **Heuristics:** regex + line-oriented parsing on the **header/summary block** only; golden tests on fixtures — **not** full PDF table reconstruction.
 - **fixtures (local / gitignored if sensitive):** e.g. `data/imports/custom/Feb_Commission_PayCheck.pdf`, `Feb_Regular_paycheck.pdf` — use copies in `backend/tests/fixtures/` for CI if policy allows.
 
-**Risks:** PDF text order can jumble; v1 should expose **parse confidence** and a path to **manual correction** later (Epic 6 overlap).
+**Risks:** PDF text order can jumble; v1 should expose **parse confidence** and a path to **manual correction** later (Epic 6 overlap). **Longer-term:** full **manual payslip entry** (see [§7](#7-epic--manual-payslip-entry-backlog)) if parsers fail or users prefer typing.
 
 ---
 
@@ -67,7 +67,7 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 **Profile:** `deloitte_payslip_pdf` — employer parser option in Settings; same import and `payslip_snapshot` storage as IBM.
 
-**v1 behavior (current):** Deloitte is processed via **Unstructured Jobs API** from Import flow (async), not local `pdf-parse`. The parser reads Unstructured partition JSON with **HTML-first** extraction from `Table.metadata.text_as_html` (fallback: `Table.text`). Imports should include `text_as_html` on the partitioned `Table` when the platform provides it; the plain-text path still resolves totals by preferring the real **`NET PAY $… $…`** line over an earlier summary-column **`Net Pay`** label in the same flattened string.
+**v1 behavior (current):** Deloitte Pay Statement PDFs in **Import** use **async OpenAI LLM extraction** (canonical JSON schema + Zod), not Unstructured Jobs. Files are queued on `import_file` and finalized by background **`POST /imports/sessions/:sessionId/reconcile-payslip-async`** (auto-poll in UI). **IBM** remains local `pdf-parse`. The legacy Unstructured+table parser module may remain in-repo for fixtures/tests but is not the Import path.
 
 **Current extracted fields (Deloitte v1 async):**
 - `grossPayCurrent`, `grossPayYtd` from `TOTAL GROSS`
@@ -85,6 +85,16 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 ---
 
+## 5.2 LLM payslip extraction (experimental POC)
+
+**Not wired to import or `payslip_snapshot`.** A separate path uses **OpenAI** vision + **structured JSON** (`response_format.type: json_schema`) with a canonical schema ([`payslip.schema.json`](../backend/src/modules/payslip/llm-extract/payslip.schema.json)) and **Zod** validation ([`payslip-llm.schema.ts`](../backend/src/modules/payslip/llm-extract/payslip-llm.schema.ts)). Server fields (`page_count`, `parser_source`, `extraction_model`, `extracted_at`) are merged in TypeScript after the call.
+
+**Prerequisites:** **Poppler** so `pdftoppm` is on `PATH` (e.g. macOS: `brew install poppler`). **Env:** `OPENAI_API_KEY`, optional `OPENAI_MODEL` (see repo root `.env` / [`backend/src/config/env.ts`](../backend/src/config/env.ts)).
+
+**Run (from repo root):** `npm run extract-payslip-llm -w backend` — optional CLI argument: path to a PDF (defaults to `data/imports/custom/Pay Statement_2026_0206.pdf`). Output is pretty-printed JSON on stdout. Single request per run (no automatic retries).
+
+---
+
 ## 6. Phased roadmap (Story 3.3)
 
 | Phase | Deliverable |
@@ -92,17 +102,46 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 | **3.3a — v1** | IBM profile: summary block + period + YTD; dedicated storage; tests on golden PDFs. |
 | **3.3b** | List + detail + charts (**gross/net/tax** trends); read-only. |
 | **3.3c+** | Additional employers (incl. Deloitte profile); line-item / tax detail; employer HSA, imputed income; reconciliation UX to bank deposit; OCR for scanned payslips. |
+| **Future — manual entry epic** | See [§7](#7-epic--manual-payslip-entry-backlog): form-based capture of the same summary fields as parse (period, pay date, Current/YTD buckets, pay type). |
 
 ---
 
-## 7. Dependencies
+## 7. Epic — Manual payslip entry (backlog)
+
+**Goal:** Let users **add or correct a payslip without relying on PDF parse** (Unstructured, IBM regex, etc.). Same **`payslip_snapshot`** shape as upload/import so list, detail, and charts stay consistent.
+
+**Why (product):**
+
+- Parser variance (e.g. Deloitte + Unstructured output layout) may fail or drift; users still need income history.
+- Some users will prefer typing numbers once over fighting extraction.
+- Complements **parse confidence** and **human fix** flows ([Epic 6](#9-related-backlog-entries) overlap).
+
+**UX (high level):**
+
+- **Date pickers:** pay period **start** and **end**, and **pay date** (aligned with v1 snapshot fields `payPeriodStart`, `payPeriodEnd`, `payDate`).
+- **Pay type:** at minimum distinguish **regular pay** vs **commission** (and room for future splits); stored in snapshot metadata or dedicated columns when implemented.
+- **Amounts:** collect **Current** and **YTD** for every summary bucket we surface today and expect on real stubs — mirror **`ParsedPayslipSummary`** / IBM-style summary: gross, employee taxes, pre-tax deductions, post-tax deductions, net pay, hours/days if used.
+- **Screen template:** use the **IBM Pay and Contributions** stub as the **reference layout** — it has the richest summary block in-product; the manual form should expose the same categories (and optional advanced rows) so nothing important is missing for IBM households and others map into the same fields.
+
+**Backend (directional):**
+
+- **`POST /payslips`** (or **`POST /payslips/manual`**) with validated body → insert **`payslip_snapshot`** with **`import_file_id` null** (or a synthetic “manual” marker), **`parser_profile_id`** = employer-appropriate profile or a dedicated **`manual`** profile — **decide at implementation** to avoid breaking charts/filters.
+- Reuse validation rules from parse path where possible.
+
+**Explicitly out of scope for this epic definition:** full line-item grids (can follow in a later phase); auto-link to bank deposits (separate reconciliation story).
+
+**Related:** Deloitte Unstructured path ([§5.1](#51-deloitte-pay-statement-deloitte_payslip_pdf)); IBM v1 summary ([§2](#2-v1-scope--first-summary-block-only-first-table)).
+
+---
+
+## 8. Dependencies
 
 - **Epic 4.2** — fingerprint dedupe / idempotency hardening (parallel or prerequisite for stable “real data” confidence).
 - **Epic 3.1** — parser profile contract (payslip profile plugs into the same abstraction as bank PDFs where practical).
 
 ---
 
-## 8. Related backlog entries
+## 9. Related backlog entries
 
 - `docs/MVP_BACKLOG.md` — **Epic 3 Story 3.3** (updated to reference this doc).
 - **Epic 6** — inbox / resolution / review-before-post may overlap when payslip needs **human fix** for bad extractions.
