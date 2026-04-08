@@ -9,6 +9,9 @@ export default async function globalSetup() {
   await getSql();
 
   return async function teardown() {
+    const { closeSql } = await import("../src/db/query.js");
+    await closeSql();
+
     const script = path.join(repoRoot, "scripts", "clean-import-session-dirs.mjs");
     const mod = (await import(pathToFileURL(script).href)) as {
       default: () => Promise<void>;

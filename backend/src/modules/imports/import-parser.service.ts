@@ -52,8 +52,6 @@ export interface ParseOutcome {
   skippedFiles: Array<{ fileId: string; reason: string }>;
   /** Deloitte PDFs queued for async LLM extract; poll `/reconcile-payslip-async` until parsed. */
   asyncPayslipPending?: number;
-  /** @deprecated Same as asyncPayslipPending (legacy clients). */
-  unstructuredPending?: number;
 }
 
 type ParserDiagnostics = {
@@ -503,8 +501,7 @@ export async function parseSessionImportFiles(
     ok: true,
     data: {
       ...outcome,
-      asyncPayslipPending,
-      unstructuredPending: asyncPayslipPending
+      asyncPayslipPending
     }
   };
 }

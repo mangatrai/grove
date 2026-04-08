@@ -78,3 +78,12 @@ export function isPgUniqueViolation(err: unknown): boolean {
     String((err as { code: unknown }).code) === "23505"
   );
 }
+
+/** Close the shared pool (Vitest global teardown; avoids 10s "close timed out" on exit). */
+export async function closeSql(): Promise<void> {
+  if (sqlSingleton) {
+    await sqlSingleton.end({ timeout: 5 });
+    sqlSingleton = null;
+    initPromise = null;
+  }
+}

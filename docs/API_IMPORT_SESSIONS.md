@@ -138,7 +138,7 @@ Lists supported **parser profile IDs** (bank/format adapters). The client picks 
 
 **200:** `{ "profiles": [ { "id", "label" } ] }`
 
-Known IDs include: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf` (Bank of America eStatement PDF), `marcus_online_savings_pdf` (Marcus / Goldman Sachs online savings PDF), **`ibm_pay_contributions_pdf`** (IBM / SuccessFactors-style **employer payslip** PDF — text-based; stores a **`payslip_snapshot`**, not ledger lines), **`deloitte_payslip_pdf`** (Deloitte Pay Statement — **async Unstructured Jobs** flow via Import).
+Known IDs include: `generic_tabular`, `chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf` (Bank of America eStatement PDF), `marcus_online_savings_pdf` (Marcus / Goldman Sachs online savings PDF), **`ibm_pay_contributions_pdf`** (IBM / SuccessFactors-style **employer payslip** PDF — text-based; stores a **`payslip_snapshot`**, not ledger lines), **`deloitte_payslip_pdf`** (Deloitte Pay Statement — **async OpenAI LLM** extraction via Import).
 
 ---
 
@@ -178,7 +178,7 @@ Supported adapters in MVP:
 
 **Employer payslip (`ibm_pay_contributions_pdf`):** extraction runs the IBM payslip parser. On success, a row is written to **`payslip_snapshot`** with **`import_file_id`** set to this session file. **No** **`transaction_raw`** rows are created. **`200`** still returns **`parsedFiles`** ≥ 1 and typically **`parsedRows`: 0** (ledger line count). Duplicate payslip checksum for the household may mark the file **`failed`** / skip with a payslip-specific reason.
 
-**Employer payslip (`deloitte_payslip_pdf`):** parse queues each Deloitte PDF for async LLM extraction (`payslip_async_provider = openai_llm_payslip` on `import_file`). `POST .../parse` returns `200` with `asyncPayslipPending` (and legacy alias `unstructuredPending`) while session remains `processing`. Requires `OPENAI_API_KEY`. Poll **`POST .../reconcile-payslip-async`** (or deprecated `reconcile-unstructured`, same behavior) until files are `parsed` and `payslip_snapshot` rows are inserted.
+**Employer payslip (`deloitte_payslip_pdf`):** parse queues each Deloitte PDF for async LLM extraction (`payslip_async_provider = openai_llm_payslip` on `import_file`). `POST .../parse` returns `200` with `asyncPayslipPending` while session remains `processing`. Requires `OPENAI_API_KEY`. Poll **`POST .../reconcile-payslip-async`** until files are `parsed` and `payslip_snapshot` rows are inserted.
 
 **Profile `generic_tabular`:** user supplies column mapping (and optional `sheetName` for Excel).
 
@@ -201,7 +201,7 @@ Required mapping keys: `date`, `description`, `amount`.
 
 **Named bank/proprietary profiles** (`chase_card_csv`, `citi_card_csv`, `boa_checking_csv`, `boa_savings_csv`, `boa_credit_card_csv`, `boa_estatement_pdf`, `marcus_online_savings_pdf`, **`ibm_pay_contributions_pdf`**, **`deloitte_payslip_pdf`**): mapping is **not** used; send `{}` or omit `mapping` as allowed by the route.
 
-**200:** `{ "parsedFiles", "parsedRows", "skippedFiles", "asyncPayslipPending?", "unstructuredPending?" }`  
+**200:** `{ "parsedFiles", "parsedRows", "skippedFiles", "asyncPayslipPending?" }`  
 **400:** invalid payload/mapping (`code: "INVALID_MAPPING"` for generic_tabular when columns are wrong)  
 **404:** session not found / wrong household  
 **409:** no supported files for parsing
@@ -222,10 +222,6 @@ Behavior:
 
 **200:** `{ "polledFiles", "completedFiles", "stillPending", "errors": [ { "fileId", "message" } ] }`  
 **404:** session not found / wrong household  
-
-### `POST /imports/sessions/:sessionId/reconcile-unstructured` (deprecated)
-
-Alias for `reconcile-payslip-async` (same response shape). Prefer `reconcile-payslip-async`.
 
 ---
 

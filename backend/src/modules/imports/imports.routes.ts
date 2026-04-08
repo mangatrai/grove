@@ -463,23 +463,6 @@ importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", async (req: A
   }
 });
 
-/** @deprecated Prefer `POST .../reconcile-payslip-async`. Delegates to the same LLM async reconcile. */
-importsRouter.post("/sessions/:sessionId/reconcile-unstructured", async (req: AuthenticatedRequest, res) => {
-  const force = req.query.force === "1" || req.query.force === "true";
-  try {
-    const data = await reconcilePayslipAsyncImportSession(req.params.sessionId, req.authUser!.householdId, {
-      force
-    });
-    res.status(200).json(data);
-  } catch (e) {
-    if (e instanceof Error && e.message === "Import session not found") {
-      res.status(404).json({ message: e.message });
-      return;
-    }
-    throw e;
-  }
-});
-
 importsRouter.post("/sessions/:sessionId/canonicalize", async (req: AuthenticatedRequest, res) => {
   const result = await canonicalizeImportSession(req.params.sessionId, req.authUser!.householdId);
   if (!result.ok) {

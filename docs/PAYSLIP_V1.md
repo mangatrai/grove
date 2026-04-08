@@ -67,7 +67,7 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 **Profile:** `deloitte_payslip_pdf` — employer parser option in Settings; same import and `payslip_snapshot` storage as IBM.
 
-**v1 behavior (current):** Deloitte Pay Statement PDFs in **Import** use **async OpenAI LLM extraction** (canonical JSON schema + Zod), not Unstructured Jobs. Files are queued on `import_file` and finalized by background **`POST /imports/sessions/:sessionId/reconcile-payslip-async`** (auto-poll in UI). **IBM** remains local `pdf-parse`. The legacy Unstructured+table parser module may remain in-repo for fixtures/tests but is not the Import path.
+**v1 behavior (current):** Deloitte Pay Statement PDFs in **Import** use **async OpenAI LLM extraction** (canonical JSON schema + Zod). Files are queued on `import_file` and finalized by background **`POST /imports/sessions/:sessionId/reconcile-payslip-async`** (auto-poll in UI). **IBM** remains local `pdf-parse`.
 
 **Current extracted fields (Deloitte v1 async):**
 - `grossPayCurrent`, `grossPayYtd` from `TOTAL GROSS`
@@ -77,9 +77,9 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 **Current non-goals (still deferred):**
 - Full Deloitte line-item reconstruction (every earnings/deduction row, per-line tax breakdown, hours)
-- Direct `/payslips/upload` Deloitte parse (Deloitte upload path instructs users to use Import + Unstructured)
+- Direct `/payslips/upload` Deloitte parse (Deloitte upload path instructs users to use Import with async LLM extraction)
 
-**Sample PDFs in `data/imports/custom/`:** For image-like Deloitte PDFs, Import submits to Unstructured and stores job ids on `import_file`. Session remains `processing` until reconcile completes (auto poll ~2 min in UI, or manual “Check Unstructured now”).
+**Sample PDFs in `data/imports/custom/`:** Deloitte PDFs are queued on `import_file` for OpenAI extraction. Session remains `processing` until reconcile completes (auto poll ~2 min in UI, or manual “Check now”).
 
 **Potential data on real Deloitte stubs (not all captured in v1):** employer legal name, employee id, department, earnings breakdown lines, benefit deductions, tax breakdowns, banking instructions, leave balances. **Deferred** to Story 3.3c+ line-item / tax detail.
 
@@ -108,11 +108,11 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 ## 7. Epic — Manual payslip entry (backlog)
 
-**Goal:** Let users **add or correct a payslip without relying on PDF parse** (Unstructured, IBM regex, etc.). Same **`payslip_snapshot`** shape as upload/import so list, detail, and charts stay consistent.
+**Goal:** Let users **add or correct a payslip without relying on PDF parse** (LLM extract, IBM regex, etc.). Same **`payslip_snapshot`** shape as upload/import so list, detail, and charts stay consistent.
 
 **Why (product):**
 
-- Parser variance (e.g. Deloitte + Unstructured output layout) may fail or drift; users still need income history.
+- Parser variance (e.g. Deloitte LLM vs IBM regex) may fail or drift; users still need income history.
 - Some users will prefer typing numbers once over fighting extraction.
 - Complements **parse confidence** and **human fix** flows ([Epic 6](#9-related-backlog-entries) overlap).
 
@@ -130,7 +130,7 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 **Explicitly out of scope for this epic definition:** full line-item grids (can follow in a later phase); auto-link to bank deposits (separate reconciliation story).
 
-**Related:** Deloitte Unstructured path ([§5.1](#51-deloitte-pay-statement-deloitte_payslip_pdf)); IBM v1 summary ([§2](#2-v1-scope--first-summary-block-only-first-table)).
+**Related:** Deloitte import path ([§5.1](#51-deloitte-pay-statement-deloitte_payslip_pdf)); IBM v1 summary ([§2](#2-v1-scope--first-summary-block-only-first-table)).
 
 ---
 

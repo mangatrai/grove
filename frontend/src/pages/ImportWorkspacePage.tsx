@@ -132,9 +132,6 @@ function friendlyImportSkipReason(reason: string): string {
   if (reason === "payslip_pdf_extract_unreadable") {
     return "payslip_pdf_extract_unreadable (PDF has no usable text for parsing — re-export from payroll or use a text-based PDF)";
   }
-  if (reason === "payslip_unstructured_api_not_configured") {
-    return "payslip_unstructured_api_not_configured (legacy; use OPENAI_API_KEY for Deloitte LLM parse)";
-  }
   if (reason === "payslip_openai_api_not_configured") {
     return "payslip_openai_api_not_configured (set OPENAI_API_KEY for Deloitte payslip extraction)";
   }
@@ -948,9 +945,8 @@ export function ImportWorkspacePage() {
         parsedRows: number;
         skippedFiles?: unknown[];
         asyncPayslipPending?: number;
-        unstructuredPending?: number;
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
-      const up = out.asyncPayslipPending ?? out.unstructuredPending ?? 0;
+      const up = out.asyncPayslipPending ?? 0;
       if (up > 0) {
         setMessage(
           `Queued ${up} Deloitte PDF(s) for payslip extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes, or use “Check now”.`
@@ -1009,9 +1005,8 @@ export function ImportWorkspacePage() {
         parsedFiles: number;
         parsedRows: number;
         asyncPayslipPending?: number;
-        unstructuredPending?: number;
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
-      if ((parseOut.asyncPayslipPending ?? parseOut.unstructuredPending ?? 0) > 0) {
+      if ((parseOut.asyncPayslipPending ?? 0) > 0) {
         setMessage(
           "Deloitte PDF(s) queued for payslip extraction. Wait until files show “parsed”, then run import again (or use Check now)."
         );

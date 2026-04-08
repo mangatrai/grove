@@ -47,10 +47,7 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 | `OPENAI_API_KEY` | API key for OpenAI calls. |
 | `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). Faster/cheaper models may trade categorization quality. |
 | `LOG_AI_DEBUG_BODY_MAX_CHARS` | With `LOG_LEVEL=debug`, max characters per logged OpenAI body snippet (default `4000`). |
-| `UNSTRUCTURED_API_KEY` | Unstructured Platform API key. Required for Deloitte payslip import/reconcile endpoints. |
-| `UNSTRUCTURED_API_URL` | Unstructured Platform base URL (default `https://platform.unstructuredapp.io/api/v1`). |
-| `UNSTRUCTURED_POLL_INTERVAL_MS` | Minimum milliseconds between status polls per Deloitte file (default `120000`). |
-| `UNSTRUCTURED_DELOITTE_TEMPLATE_ID` | Jobs API `request_data.template_id` for Deloitte processing (default `hi_res_and_enrichment`). |
+| `PAYSLIP_ASYNC_POLL_INTERVAL_MS` | Minimum milliseconds between background polls for queued Deloitte LLM extraction during import (default `120000`). |
 
 ## Frontend (Vite)
 

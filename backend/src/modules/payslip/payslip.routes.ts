@@ -131,7 +131,7 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       if (parseResult.parserProfileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID) {
         res.status(422).json({
           message:
-            "Deloitte Pay Statement PDFs are processed via Import (Unstructured). Use Import → bind employer → Parse, then wait for processing or run Reconcile.",
+            "Deloitte Pay Statement PDFs are processed via Import (async OpenAI extraction). Use Import → bind employer → Parse, then wait for processing or run Reconcile.",
           code: "DELOITTE_USE_IMPORT",
           parserProfileId: parseResult.parserProfileId
         });
