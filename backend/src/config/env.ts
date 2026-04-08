@@ -95,6 +95,8 @@ const envSchema = z.object({
   UNSTRUCTURED_API_URL: z.string().default("https://platform.unstructuredapp.io/api/v1"),
   /** Min milliseconds between Unstructured job status polls per file (default 2 min). */
   UNSTRUCTURED_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
+  /** Min milliseconds between background polls for async LLM payslip import (default 2 min). */
+  PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
   /** Jobs API `request_data.template_id` for Deloitte payslips. */
   UNSTRUCTURED_DELOITTE_TEMPLATE_ID: z.string().default("hi_res_and_enrichment")
 });
