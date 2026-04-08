@@ -237,16 +237,36 @@ function firstLineIndexMatching(lines: string[], patterns: RegExp[]): number {
   return -1;
 }
 
+function firstLineIndexMatchingFrom(lines: string[], minIndex: number, patterns: RegExp[]): number {
+  for (let i = minIndex; i < lines.length; i++) {
+    const t = lines[i]!.trim();
+    if (!t) {
+      continue;
+    }
+    for (const re of patterns) {
+      if (re.test(t)) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
 /**
- * IBM "Net Pay" summary often lists Current / YTD dollar amounts on the lines **above** the `Net Pay` label.
+ * IBM "Net Pay" summary: take at most the **two money-only lines immediately above** the standalone
+ * `Net Pay` label (stops at a non-money line so post-tax rows are not mistaken for net).
+ * Walking up, `pair[0]` is closest to `Net Pay` (typically YTD row), `pair[1]` the row above (Current).
  */
 function currentYtdBeforeNetPayLabel(lines: string[]): { current: number | null; ytd: number | null } {
   const idx = lines.findIndex((l) => /^\s*net\s+pay\s*$/i.test(l.trim()));
   if (idx <= 0) {
     return { current: null, ytd: null };
   }
-  const vals: number[] = [];
+  const pair: number[] = [];
   for (let i = idx - 1; i >= Math.max(0, idx - 15); i--) {
+    if (pair.length >= 2) {
+      break;
+    }
     const t = lines[i]!.trim();
     if (!t) {
       continue;
@@ -256,16 +276,16 @@ function currentYtdBeforeNetPayLabel(lines: string[]): { current: number | null;
     }
     const only = isMoneyOnlyLine(lines[i]!);
     if (only !== null) {
-      vals.unshift(only);
-    } else if (vals.length) {
+      pair.push(only);
+    } else if (pair.length) {
       break;
     }
   }
-  if (vals.length >= 2) {
-    return { current: vals[vals.length - 1]!, ytd: vals[vals.length - 2]! };
+  if (pair.length >= 2) {
+    return { current: pair[1]!, ytd: pair[0]! };
   }
-  if (vals.length === 1) {
-    return { current: vals[0]!, ytd: null };
+  if (pair.length === 1) {
+    return { current: pair[0]!, ytd: null };
   }
   return { current: null, ytd: null };
 }
@@ -304,7 +324,81 @@ const EMP_TAX_PATTERNS: RegExp[] = [/employee\s+taxes?/i, /tax\s+withholdings?/i
 
 const POST_TAX_PATTERNS: RegExp[] = [/post[-\s]?tax\s+deductions?/i, /post[-\s]?tax/i];
 
+/** IBM may label post-tax-style rows as "Other Deductions" instead of "Post-Tax". */
+const OTHER_DEDUCTIONS_PATTERNS: RegExp[] = [/other\s+deductions?/i];
+
 const HOURS_LINE_PATTERNS: RegExp[] = [/(?:hours|days)\s+worked/i, /hours\s*&\s*days/i, /hours\/days/i];
+
+/** Section headers for forward scans: stop before the next summary row (avoids grabbing unlabeled amounts). */
+const BOUNDARY_PATTERN_GROUPS: RegExp[][] = [
+  HOURS_LINE_PATTERNS,
+  GROSS_LINE_PATTERNS,
+  PRE_TAX_PATTERNS,
+  EMP_TAX_PATTERNS,
+  [...POST_TAX_PATTERNS, ...OTHER_DEDUCTIONS_PATTERNS],
+  [/^\s*net\s+pay\s*$/i],
+  [/^payment\s+information$/i]
+];
+
+/** Like `currentYtdAfterLineIndex` but does not read money lines beyond `endExclusive` (next section). */
+function currentYtdAfterLineIndexBounded(
+  lines: string[],
+  labelLineIdx: number,
+  endExclusive: number
+): { current: number | null; ytd: number | null } {
+  if (labelLineIdx === -1) {
+    return { current: null, ytd: null };
+  }
+  const cap = Math.min(lines.length, endExclusive);
+  const labelLine = lines[labelLineIdx]!;
+  const onLabel = parseCurrentYtdPair(labelLine);
+  if (onLabel.current !== null || onLabel.ytd !== null) {
+    return onLabel;
+  }
+  const vals: number[] = [];
+  for (let i = labelLineIdx + 1; i < Math.min(labelLineIdx + 15, cap) && vals.length < 2; i++) {
+    const t = lines[i]!.trim();
+    if (!t) {
+      continue;
+    }
+    if (/^(current|ytd|amount)$/i.test(t)) {
+      continue;
+    }
+    const only = isMoneyOnlyLine(lines[i]!);
+    if (only !== null) {
+      vals.push(only);
+      continue;
+    }
+    const pair = parseCurrentYtdPair(lines[i]!);
+    if (pair.current !== null || pair.ytd !== null) {
+      return pair;
+    }
+    if (vals.length) {
+      break;
+    }
+  }
+  if (vals.length >= 2) {
+    return { current: vals[0]!, ytd: vals[1]! };
+  }
+  if (vals.length === 1) {
+    return { current: vals[0]!, ytd: null };
+  }
+  return { current: null, ytd: null };
+}
+
+function nextSectionBoundaryExclusive(lines: string[], labelLineIdx: number): number {
+  if (labelLineIdx < 0) {
+    return lines.length;
+  }
+  let best = lines.length;
+  for (const group of BOUNDARY_PATTERN_GROUPS) {
+    const hit = firstLineIndexMatchingFrom(lines, labelLineIdx + 1, group);
+    if (hit !== -1 && hit < best) {
+      best = hit;
+    }
+  }
+  return best;
+}
 
 /**
  * Parse IBM-style Pay and Contributions summary text (regex on Current / YTD columns).
@@ -321,7 +415,8 @@ export function parseIbmPayslipFromText(text: string): ParsedPayslipSummary | nu
   const payDate = parsePayDate(trimmed);
 
   const grossIdx = firstLineIndexMatching(lines, GROSS_LINE_PATTERNS);
-  let gross = currentYtdAfterLineIndex(lines, grossIdx);
+  const grossEnd = grossIdx !== -1 ? nextSectionBoundaryExclusive(lines, grossIdx) : lines.length;
+  let gross = currentYtdAfterLineIndexBounded(lines, grossIdx, grossEnd);
   if (gross.current === null && gross.ytd === null && grossIdx !== -1) {
     gross = parseCurrentYtdPair(lines[grossIdx]!);
   }
@@ -335,31 +430,39 @@ export function parseIbmPayslipFromText(text: string): ParsedPayslipSummary | nu
   let net = currentYtdBeforeNetPayLabel(lines);
   if (net.current === null && net.ytd === null) {
     const netIdx = firstLineIndexMatching(lines, NET_LINE_PATTERNS);
-    net = currentYtdAfterLineIndex(lines, netIdx);
+    const netEnd = netIdx !== -1 ? nextSectionBoundaryExclusive(lines, netIdx) : lines.length;
+    net = currentYtdAfterLineIndexBounded(lines, netIdx, netEnd);
     if (net.current === null && net.ytd === null && netIdx !== -1) {
       net = parseCurrentYtdPair(lines[netIdx]!);
     }
   }
 
   const preIdx = firstLineIndexMatching(lines, PRE_TAX_PATTERNS);
-  let preTax = currentYtdAfterLineIndex(lines, preIdx);
+  const preEnd = preIdx !== -1 ? nextSectionBoundaryExclusive(lines, preIdx) : lines.length;
+  let preTax = currentYtdAfterLineIndexBounded(lines, preIdx, preEnd);
   if (preTax.current === null && preTax.ytd === null && preIdx !== -1) {
     preTax = parseCurrentYtdPair(lines[preIdx]!);
   }
 
   const empIdx = firstLineIndexMatching(lines, EMP_TAX_PATTERNS);
-  let empTax = currentYtdAfterLineIndex(lines, empIdx);
+  const empEnd = empIdx !== -1 ? nextSectionBoundaryExclusive(lines, empIdx) : lines.length;
+  let empTax = currentYtdAfterLineIndexBounded(lines, empIdx, empEnd);
   if (empTax.current === null && empTax.ytd === null && empIdx !== -1) {
     empTax = parseCurrentYtdPair(lines[empIdx]!);
   }
 
-  const postIdx = firstLineIndexMatching(lines, POST_TAX_PATTERNS);
-  let postTax = currentYtdAfterLineIndex(lines, postIdx);
+  let postIdx = firstLineIndexMatching(lines, POST_TAX_PATTERNS);
+  if (postIdx === -1) {
+    postIdx = firstLineIndexMatching(lines, OTHER_DEDUCTIONS_PATTERNS);
+  }
+  const postEnd = postIdx !== -1 ? nextSectionBoundaryExclusive(lines, postIdx) : lines.length;
+  let postTax = currentYtdAfterLineIndexBounded(lines, postIdx, postEnd);
   if (postTax.current === null && postTax.ytd === null && postIdx !== -1) {
     postTax = parseCurrentYtdPair(lines[postIdx]!);
   }
 
   const hoursIdx = firstLineIndexMatching(lines, HOURS_LINE_PATTERNS);
+  const hoursEnd = hoursIdx !== -1 ? nextSectionBoundaryExclusive(lines, hoursIdx) : lines.length;
   let hoursOrDaysCurrent: string | null = null;
   if (hoursIdx !== -1) {
     const hoursLineStr = lines[hoursIdx]!;
@@ -367,7 +470,7 @@ export function parseIbmPayslipFromText(text: string): ParsedPayslipSummary | nu
     if (nums && nums.length >= 1) {
       hoursOrDaysCurrent = nums[0]!.replace(/,/g, "");
     } else {
-      const hPair = currentYtdAfterLineIndex(lines, hoursIdx);
+      const hPair = currentYtdAfterLineIndexBounded(lines, hoursIdx, hoursEnd);
       if (hPair.current !== null) {
         hoursOrDaysCurrent = hPair.current.toFixed(2);
       }

@@ -75,6 +75,26 @@ describe("IBM payslip PDF text parser (Pay and Contributions summary)", () => {
     });
   });
 
+  it("parses golden Feb-style IBM summary (section-bounded Current/YTD)", () => {
+    const text = readFileSync(path.join(__dirname, "fixtures", "ibm-payslip-feb-regular.txt"), "utf8");
+    const parsed = parseIbmPayslipFromText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.payPeriodStart).toBe("2026-02-16");
+    expect(parsed!.payPeriodEnd).toBe("2026-02-28");
+    expect(parsed!.payDate).toBe("2026-02-27");
+    expect(parsed!.hoursOrDaysCurrent).toBe("80.00");
+    expect(parsed!.grossPayCurrent).toBe(9588.75);
+    expect(parsed!.grossPayYtd).toBe(48313.79);
+    expect(parsed!.preTaxDeductionsCurrent).toBe(1096.42);
+    expect(parsed!.preTaxDeductionsYtd).toBe(18200.21);
+    expect(parsed!.employeeTaxesCurrent).toBe(3175.4);
+    expect(parsed!.employeeTaxesYtd).toBe(15225.21);
+    expect(parsed!.postTaxDeductionsCurrent).toBe(250);
+    expect(parsed!.postTaxDeductionsYtd).toBe(1200);
+    expect(parsed!.netPayCurrent).toBe(4350.17);
+    expect(parsed!.netPayYtd).toBe(8700.34);
+  });
+
   it("parses IBM SuccessFactors PDF extract (label line separate from Current/YTD amounts)", () => {
     const text = `
 Employee Name:
@@ -92,12 +112,11 @@ Hours/Days Worked
 Gross Pay
 9,588.75
 48,313.79
-966.76
-8,482.42
 Post Tax Deductions
 1,096.42
 18,200.21
 4,350.17
+8,700.34
 Net Pay
 Payment Information
 Pay Date
@@ -112,6 +131,25 @@ Pay Date
     expect(parsed!.grossPayCurrent).toBe(9588.75);
     expect(parsed!.grossPayYtd).toBe(48313.79);
     expect(parsed!.netPayCurrent).toBe(4350.17);
+  });
+
+  it("maps Other Deductions to post-tax when Post-Tax label is absent", () => {
+    const text = `
+01/01/2026-01/15/2026
+Gross Pay
+5,000.00
+10,000.00
+Other Deductions
+50.00
+100.00
+4,000.00
+8,000.00
+Net Pay
+`;
+    const parsed = parseIbmPayslipFromText(text);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.postTaxDeductionsCurrent).toBe(50);
+    expect(parsed!.postTaxDeductionsYtd).toBe(100);
   });
 
   it("accepts alternate labels (total earnings, pay begin / end dates)", () => {
