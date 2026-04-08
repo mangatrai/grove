@@ -8,10 +8,11 @@
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/modules/payslip/llm-extract && cp src/modules/payslip/llm-extract/payslip.schema.json dist/modules/payslip/llm-extract/",
     "start": "node dist/server.js",
     "lint": "eslint . --ext .ts",
-    "test": "bash -c 'export MODE=TEST; bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed --dev-seeds && vitest run'"
+    "test": "bash -c 'export MODE=TEST; bash ../scripts/prep-test-db.sh && bash ../scripts/db.sh --init --seed --dev-seeds && vitest run'",
+    "extract-payslip-llm": "tsx scripts/extract-payslip-llm.ts"
   },
   "dependencies": {
     "archiver": "^7.0.1",
@@ -22,6 +23,7 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "openai": "^4.77.0",
     "pdf-parse": "^1.1.1",
     "postgres": "^3.4.8",
     "xlsx": "^0.18.5",

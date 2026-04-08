@@ -1,0 +1,226 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "document_type": { "type": "string" },
+    "source_employer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "legal_entity": { "type": ["string", "null"] },
+        "ein_or_fein": { "type": ["string", "null"] },
+        "address": { "type": ["string", "null"] }
+      },
+      "required": ["name", "legal_entity", "ein_or_fein", "address"]
+    },
+    "employee": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "employee_id": { "type": ["string", "null"] },
+        "personnel_number": { "type": ["string", "null"] },
+        "talent_id": { "type": ["string", "null"] },
+        "address": { "type": ["string", "null"] }
+      },
+      "required": ["name", "employee_id", "personnel_number", "talent_id", "address"]
+    },
+    "pay_period": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start_date": { "type": ["string", "null"] },
+        "end_date": { "type": ["string", "null"] },
+        "pay_date": { "type": ["string", "null"] }
+      },
+      "required": ["start_date", "end_date", "pay_date"]
+    },
+    "employment_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rate": { "type": ["number", "null"] },
+        "rate_type": { "type": ["string", "null"] },
+        "cost_center": { "type": ["string", "null"] },
+        "hours_or_days_worked_current": { "type": ["number", "null"] },
+        "hours_or_days_worked_ytd": { "type": ["number", "null"] }
+      },
+      "required": [
+        "rate",
+        "rate_type",
+        "cost_center",
+        "hours_or_days_worked_current",
+        "hours_or_days_worked_ytd"
+      ]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "currency": { "type": ["string", "null"] },
+        "gross_pay_current": { "type": ["number", "null"] },
+        "gross_pay_ytd": { "type": ["number", "null"] },
+        "total_earnings_current": { "type": ["number", "null"] },
+        "total_earnings_ytd": { "type": ["number", "null"] },
+        "taxable_earnings_current": { "type": ["number", "null"] },
+        "taxable_earnings_ytd": { "type": ["number", "null"] },
+        "pre_tax_deductions_current": { "type": ["number", "null"] },
+        "pre_tax_deductions_ytd": { "type": ["number", "null"] },
+        "post_tax_deductions_current": { "type": ["number", "null"] },
+        "post_tax_deductions_ytd": { "type": ["number", "null"] },
+        "tax_deductions_current": { "type": ["number", "null"] },
+        "tax_deductions_ytd": { "type": ["number", "null"] },
+        "other_deductions_current": { "type": ["number", "null"] },
+        "other_deductions_ytd": { "type": ["number", "null"] },
+        "other_information_current": { "type": ["number", "null"] },
+        "other_information_ytd": { "type": ["number", "null"] },
+        "net_pay_current": { "type": ["number", "null"] },
+        "net_pay_ytd": { "type": ["number", "null"] }
+      },
+      "required": [
+        "currency",
+        "gross_pay_current",
+        "gross_pay_ytd",
+        "total_earnings_current",
+        "total_earnings_ytd",
+        "taxable_earnings_current",
+        "taxable_earnings_ytd",
+        "pre_tax_deductions_current",
+        "pre_tax_deductions_ytd",
+        "post_tax_deductions_current",
+        "post_tax_deductions_ytd",
+        "tax_deductions_current",
+        "tax_deductions_ytd",
+        "other_deductions_current",
+        "other_deductions_ytd",
+        "other_information_current",
+        "other_information_ytd",
+        "net_pay_current",
+        "net_pay_ytd"
+      ]
+    },
+    "line_items": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "earnings": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } },
+        "pre_tax_deductions": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } },
+        "post_tax_deductions": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } },
+        "tax_deductions": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } },
+        "other_deductions": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } },
+        "other_information": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } },
+        "taxable_earnings": { "type": "array", "items": { "$ref": "#/$defs/LineItem" } }
+      },
+      "required": [
+        "earnings",
+        "pre_tax_deductions",
+        "post_tax_deductions",
+        "tax_deductions",
+        "other_deductions",
+        "other_information",
+        "taxable_earnings"
+      ]
+    },
+    "tax_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "marital_status": { "type": ["string", "null"] },
+        "federal_credits": { "type": ["number", "null"] },
+        "state_credits": { "type": ["number", "null"] },
+        "additional_withholding_federal": { "type": ["number", "null"] },
+        "additional_withholding_state": { "type": ["number", "null"] }
+      },
+      "required": [
+        "marital_status",
+        "federal_credits",
+        "state_credits",
+        "additional_withholding_federal",
+        "additional_withholding_state"
+      ]
+    },
+    "payment_information": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "payment_type": { "type": ["string", "null"] },
+          "bank_name": { "type": ["string", "null"] },
+          "bank_location": { "type": ["string", "null"] },
+          "account_or_check_number_masked": { "type": ["string", "null"] },
+          "amount": { "type": ["number", "null"] },
+          "currency": { "type": ["string", "null"] },
+          "pay_date": { "type": ["string", "null"] }
+        },
+        "required": [
+          "payment_type",
+          "bank_name",
+          "bank_location",
+          "account_or_check_number_masked",
+          "amount",
+          "currency",
+          "pay_date"
+        ]
+      }
+    }
+  },
+  "required": [
+    "document_type",
+    "source_employer",
+    "employee",
+    "pay_period",
+    "employment_context",
+    "summary",
+    "line_items",
+    "tax_profile",
+    "payment_information"
+  ],
+  "$defs": {
+    "LineItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": ["string", "null"] },
+        "authority": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] },
+        "dates": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "start_date": { "type": ["string", "null"] },
+            "end_date": { "type": ["string", "null"] },
+            "raw": { "type": ["string", "null"] }
+          },
+          "required": ["start_date", "end_date", "raw"]
+        },
+        "hours_or_days": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "current": { "type": ["number", "null"] },
+            "ytd": { "type": ["number", "null"] }
+          },
+          "required": ["current", "ytd"]
+        },
+        "rate": { "type": ["number", "null"] },
+        "amount_current": { "type": ["number", "null"] },
+        "amount_ytd": { "type": ["number", "null"] },
+        "raw_section": { "type": ["string", "null"] }
+      },
+      "required": [
+        "name",
+        "authority",
+        "description",
+        "dates",
+        "hours_or_days",
+        "rate",
+        "amount_current",
+        "amount_ytd",
+        "raw_section"
+      ]
+    }
+  }
+}
