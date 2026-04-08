@@ -66,6 +66,9 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     "Prefer ISO dates YYYY-MM-DD when you can infer a full date from the document.",
     "Numbers must be plain JSON numbers without currency symbols or thousands separators.",
     "Map each table row into the appropriate line_items section; use raw_section for the section label when helpful.",
+    "Taxes: put every row from a TAX DEDUCTION(S) / withholding section into line_items.tax_deductions with amount_current and amount_ytd per row.",
+    "Set summary.tax_deductions_current and summary.tax_deductions_ytd to the section totals (sums of those rows) when the stub shows totals; if only line items are visible, the totals can be left null (the server may sum line items).",
+    "Employer-specific labels: map 'Other Deductions' (and similar) into summary.other_deductions_* and/or line_items.other_deductions; map post-tax-style deductions into summary.post_tax_deductions_* or other_deductions_* consistently with the document.",
     "Do not invent totals; use null if unclear."
   ].join(" ");
 
