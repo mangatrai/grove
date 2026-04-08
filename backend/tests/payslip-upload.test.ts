@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ibmFixture = path.join(__dirname, "fixtures", "ibm-payslip-sample.txt");
@@ -16,6 +16,21 @@ vi.mock("../src/modules/imports/profiles/pdf-text.js", () => ({
 import { buildApp } from "../src/app.js";
 
 const app = buildApp();
+
+/** Stable upload/import behavior when the test DB has multiple employers (requires employerId). */
+beforeAll(async () => {
+  const login = await request(app).post("/auth/login").send({
+    email: "owner@example.com",
+    password: "ChangeMe123!"
+  });
+  expect(login.status).toBe(200);
+  const token = login.body.token as string;
+  const cleared = await request(app)
+    .patch("/household/profile")
+    .set("authorization", `Bearer ${token}`)
+    .send({ employers: [] });
+  expect(cleared.status).toBe(200);
+});
 
 describe("POST /payslips/upload", () => {
   async function loginToken(): Promise<string> {

@@ -38,7 +38,7 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 ## 3. Parsing (technical approach)
 
 - **One payslip profile** to start (e.g. **IBM** “Pay and Contributions Statement”), driven by **`pdf-parse` text** (same stack as other PDF profiles).
-- **Heuristics:** regex + line-oriented parsing on the **header/summary block** only; golden tests on fixtures — **not** full PDF table reconstruction.
+- **Heuristics:** regex + line-oriented parsing on the **header/summary block** only; golden tests on fixtures — **not** full PDF table reconstruction. **Hours:** v1 uses the summary line (e.g. “Hours/Days Worked”) when the PDF exposes it; some IBM layouts show a different figure in the **Earnings** detail (e.g. 86.67 vs 80 in the header). Parsing **hours per pay period from Earnings line items** is **deferred** ([§9](#9-related-backlog-entries)).
 - **fixtures (local / gitignored if sensitive):** e.g. `data/imports/custom/Feb_Commission_PayCheck.pdf`, `Feb_Regular_paycheck.pdf` — use copies in `backend/tests/fixtures/` for CI if policy allows.
 
 **Risks:** PDF text order can jumble; v1 should expose **parse confidence** and a path to **manual correction** later (Epic 6 overlap). **Longer-term:** full **manual payslip entry** (see [§7](#7-epic--manual-payslip-entry-backlog)) if parsers fail or users prefer typing.
@@ -70,6 +70,7 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 **v1 behavior (current):** Deloitte Pay Statement PDFs in **Import** use **async OpenAI LLM extraction** (canonical JSON schema + Zod). Files are queued on `import_file` and finalized by background **`POST /imports/sessions/:sessionId/reconcile-payslip-async`** (auto-poll in UI). **IBM** remains local `pdf-parse`.
 
 **Current extracted fields (Deloitte v1 async):**
+- **Hours:** when the model omits `hours_or_days_worked_current`, the mapper applies a **product default of 80** (biweekly assumption) — not read from the PDF. See canonical-map tests for regression coverage.
 - `grossPayCurrent`, `grossPayYtd` from `TOTAL GROSS`
 - `netPayCurrent`, `netPayYtd` from `NET PAY` (totals row)
 - `payPeriodStart`, `payPeriodEnd`, `payDate` from Deloitte header phrasing (e.g. `Period … Begin`, `End Date Paid`, and flat `Table.text` date triples), with IBM-style regexes as fallback
@@ -145,3 +146,4 @@ For **v1**, extract and persist **only** the top **Current / YTD** summary strip
 
 - `docs/MVP_BACKLOG.md` — **Epic 3 Story 3.3** (updated to reference this doc).
 - **Epic 6** — inbox / resolution / review-before-post may overlap when payslip needs **human fix** for bad extractions.
+- **IBM — Earnings hours vs summary strip:** extract **per-period hours** from the Earnings section / line items when product needs a single “hours worked” that matches pay calculation (requires richer text or table extraction). **Deloitte LLM — tax/post-tax fallbacks:** mapper sums `line_items.tax_deductions` when summary tax totals are missing; coalesces **Other Deductions** into post-tax when `post_tax_deductions_*` is null — see `backend/tests/payslip-canonical-map.test.ts` and IBM fixtures in `backend/tests/pdf-parsers.test.ts`.

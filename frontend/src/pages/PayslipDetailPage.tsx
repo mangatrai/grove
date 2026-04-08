@@ -146,7 +146,7 @@ export function PayslipDetailPage() {
               <dd>{periodLabel(detail)}</dd>
               <dt>Pay date</dt>
               <dd>{detail.payDate ?? "—"}</dd>
-              <dt>Hours / days (current)</dt>
+              <dt>Hours worked</dt>
               <dd>{detail.hoursOrDaysCurrent ?? "—"}</dd>
             </dl>
           </div>
