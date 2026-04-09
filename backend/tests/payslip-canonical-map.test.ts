@@ -302,6 +302,72 @@ describe("payslip-canonical-map", () => {
     });
   });
 
+  it("backfills missing post-tax YTD from OTHER DEDUCTION(S) rows when model leaves post_tax YTD null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: 267.13,
+        post_tax_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        post_tax_deductions: [
+          {
+            name: "After-Tax Deduction",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 267.13,
+            amount_ytd: null,
+            raw_section: "After-Tax Ded"
+          }
+        ],
+        other_deductions: [
+          {
+            name: "Award Received",
+            authority: null,
+            description: "02/07",
+            dates: { start_date: null, end_date: null, raw: "02/07" },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 250,
+            amount_ytd: 250,
+            raw_section: "OTHER DEDUCTION(S):"
+          },
+          {
+            name: "Imp Inc Core Life",
+            authority: null,
+            description: "02/07",
+            dates: { start_date: null, end_date: null, raw: "02/07" },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 6.65,
+            amount_ytd: 19.95,
+            raw_section: "OTHER DEDUCTION(S):"
+          },
+          {
+            name: "Imp Inc Core LTD",
+            authority: null,
+            description: "02/07",
+            dates: { start_date: null, end_date: null, raw: "02/07" },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 10.48,
+            amount_ytd: 31.44,
+            raw_section: "OTHER DEDUCTION(S):"
+          }
+        ]
+      }
+    });
+
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.postTaxDeductionsCurrent).toBeCloseTo(267.13, 2);
+    expect(summary.postTaxDeductionsYtd).toBeCloseTo(301.39, 2);
+    expect(summary.rawExtractJson.postTaxFilledFromOtherDeductionRows).toEqual({ ytd: true });
+  });
+
   it("validateCanonicalForImport passes for minimal good extract", () => {
     expect(validateCanonicalForImport(minimalExtract())).toEqual({ ok: true });
   });

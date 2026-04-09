@@ -22,6 +22,14 @@ function sumLineItemColumn(items: PayslipLineItem[], key: "amount_current" | "am
   return any ? sum : null;
 }
 
+function sumOtherDeductionsMarkedAsPostTax(
+  items: PayslipLineItem[],
+  key: "amount_current" | "amount_ytd"
+): number | null {
+  const likelyPostTaxRows = items.filter((row) => /OTHER\s+DEDUCTION/i.test(row.raw_section ?? ""));
+  return sumLineItemColumn(likelyPostTaxRows, key);
+}
+
 /** Warn-only when gross - pre - tax - post differs materially from net (rounding / employer layout). */
 function approxNetSanityNote(
   s: PayslipLlmExtract["summary"],
@@ -68,6 +76,9 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   const postTaxLines = extract.line_items.post_tax_deductions;
   const postTaxSumCurrent = sumLineItemColumn(postTaxLines, "amount_current");
   const postTaxSumYtd = sumLineItemColumn(postTaxLines, "amount_ytd");
+  const otherDeductionLines = extract.line_items.other_deductions;
+  const otherAsPostTaxSumCurrent = sumOtherDeductionsMarkedAsPostTax(otherDeductionLines, "amount_current");
+  const otherAsPostTaxSumYtd = sumOtherDeductionsMarkedAsPostTax(otherDeductionLines, "amount_ytd");
 
   let preTaxCurrent = s.pre_tax_deductions_current;
   let preTaxYtd = s.pre_tax_deductions_ytd;
@@ -103,6 +114,15 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   if (postTaxYtd == null && postTaxSumYtd != null) {
     postTaxYtd = postTaxSumYtd;
     postFromLines.ytd = true;
+  }
+  const postFromOtherDeductionRows: { current?: boolean; ytd?: boolean } = {};
+  if (postTaxCurrent == null && otherAsPostTaxSumCurrent != null) {
+    postTaxCurrent = otherAsPostTaxSumCurrent;
+    postFromOtherDeductionRows.current = true;
+  }
+  if (postTaxYtd == null && otherAsPostTaxSumYtd != null) {
+    postTaxYtd = otherAsPostTaxSumYtd;
+    postFromOtherDeductionRows.ytd = true;
   }
 
   let hoursOrDaysCurrent: string | null =
@@ -142,6 +162,9 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
       ...(Object.keys(preFromLines).length > 0 ? { preTaxFilledFromLineItems: preFromLines } : {}),
       ...(Object.keys(taxFromLines).length > 0 ? { taxDeductionsFilledFromLineItems: taxFromLines } : {}),
       ...(Object.keys(postFromLines).length > 0 ? { postTaxFilledFromLineItems: postFromLines } : {}),
+      ...(Object.keys(postFromOtherDeductionRows).length > 0
+        ? { postTaxFilledFromOtherDeductionRows: postFromOtherDeductionRows }
+        : {}),
       ...approxNetSanityNote(s, employeeTaxesCurrent, postTaxCurrent)
     }
   };
