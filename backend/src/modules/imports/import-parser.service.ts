@@ -340,7 +340,7 @@ export async function parseSessionImportFiles(
         }
 
         const checksum = sha256Hex(buffer);
-        const parseResult = await parsePayslipPdfByProfile(buffer, profileId);
+        const parseResult = await parsePayslipPdfByProfile(buffer, profileId, { pdfPath: file.stored_path });
         if (!parseResult.ok) {
           if (parseResult.reason === "unsupported_parser") {
             await qExec(
@@ -358,15 +358,65 @@ export async function parseSessionImportFiles(
             outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_unsupported_parser" });
             continue;
           }
+          if (parseResult.reason === "openai_api_not_configured") {
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
+              "failed",
+              JSON.stringify({
+                stage: "failed",
+                reason: "openai_api_not_configured",
+                profile: profileId
+              }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_openai_api_not_configured" });
+            continue;
+          }
+          if (parseResult.reason === "llm_canonical_validation_failed") {
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
+              "failed",
+              JSON.stringify({
+                stage: "failed",
+                reason: "llm_canonical_validation_failed",
+                detail: parseResult.detail,
+                profile: profileId
+              }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_llm_canonical_validation_failed" });
+            continue;
+          }
+          if (parseResult.reason === "llm_extraction_failed") {
+            await qExec(
+              `UPDATE import_file
+     SET status = ?, confidence_summary = ?
+     WHERE id = ?`,
+              "failed",
+              JSON.stringify({
+                stage: "failed",
+                reason: "llm_extraction_failed",
+                message: parseResult.message,
+                profile: profileId
+              }),
+              file.id
+            );
+            outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_llm_extraction_failed" });
+            continue;
+          }
           await qExec(
             `UPDATE import_file
      SET status = ?, confidence_summary = ?
      WHERE id = ?`,
             "failed",
-            JSON.stringify({ stage: "failed", reason: parseResult.reason, profile: profileId }),
+            JSON.stringify({ stage: "failed", reason: "payslip_parse_unknown", profile: profileId }),
             file.id
           );
-          outcome.skippedFiles.push({ fileId: file.id, reason: `payslip_${parseResult.reason}` });
+          outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_parse_failed" });
           continue;
         }
         const ins = await insertPayslipSnapshot(
@@ -378,7 +428,8 @@ export async function parseSessionImportFiles(
           file.id,
           file.employer_id,
           file.owner_scope === "person" ? "person" : "household",
-          file.owner_scope === "person" ? file.owner_person_profile_id : null
+          file.owner_scope === "person" ? file.owner_person_profile_id : null,
+          parseResult.hybrid
         );
         if (!ins.ok) {
           await qExec(

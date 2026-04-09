@@ -139,28 +139,37 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
       }
       res.status(422).json({
         message:
-          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF), Deloitte Pay Statement (PDF) via Import.",
+          "This payslip parser is not implemented yet. Supported parsers: IBM Pay & Contributions (PDF, OpenAI vision), Deloitte Pay Statement (PDF) via Import.",
         code: "UNSUPPORTED_PARSER",
         parserProfileId: parseResult.parserProfileId
       });
       return;
     }
-    const body: Record<string, unknown> = {
-      message:
-        parseResult.reason === "empty_pdf_text"
-          ? "No selectable text in this PDF. Image-only or scanned payslips need OCR or a text-based export."
-          : parseResult.reason === "pdf_read_error"
-            ? "Could not read the PDF file."
-            : "Could not find gross pay, net pay, or pay period fields in the extracted text. The layout may differ from supported templates (IBM-style Current/YTD summary).",
-      code:
-        parseResult.reason === "empty_pdf_text"
-          ? "NO_PDF_TEXT"
-          : parseResult.reason === "pdf_read_error"
-            ? "PDF_READ_ERROR"
-            : "PARSE_FAILED",
-      fileChecksum: checksum
-    };
-    res.status(422).json(body);
+    if (parseResult.reason === "openai_api_not_configured") {
+      res.status(422).json({
+        message: "OpenAI API key is not configured. Set OPENAI_API_KEY to extract IBM payslips.",
+        code: "OPENAI_API_NOT_CONFIGURED"
+      });
+      return;
+    }
+    if (parseResult.reason === "llm_canonical_validation_failed") {
+      res.status(422).json({
+        message: "Extracted payslip did not pass validation.",
+        code: "LLM_CANONICAL_VALIDATION_FAILED",
+        detail: parseResult.detail,
+        fileChecksum: checksum
+      });
+      return;
+    }
+    if (parseResult.reason === "llm_extraction_failed") {
+      res.status(422).json({
+        message: parseResult.message,
+        code: "LLM_EXTRACTION_FAILED",
+        fileChecksum: checksum
+      });
+      return;
+    }
+    res.status(422).json({ message: "Payslip parse failed.", code: "PARSE_FAILED", fileChecksum: checksum });
     return;
   }
 
@@ -171,7 +180,10 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
     resolved.parserProfileId,
     parseResult.summary,
     null,
-    resolved.employerId
+    resolved.employerId,
+    undefined,
+    undefined,
+    parseResult.hybrid
   );
 
   if (!result.ok) {

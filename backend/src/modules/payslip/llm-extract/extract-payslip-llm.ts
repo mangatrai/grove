@@ -1,4 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import OpenAI from "openai";
@@ -26,7 +29,10 @@ function loadPayslipJsonSchema(): Record<string, unknown> {
 export const PAYSLIP_JSON_SCHEMA_FOR_OPENAI: Record<string, unknown> = loadPayslipJsonSchema();
 
 export type ExtractPayslipLlmOptions = {
-  pdfPath: string;
+  /** On-disk PDF (avoids a temp copy when the file is already stored). */
+  pdfPath?: string;
+  /** PDF bytes; written to a temp file for rendering (exactly one of `pdfPath` or `pdfBuffer` required). */
+  pdfBuffer?: Buffer;
   /** Override model (defaults to `env.OPENAI_MODEL`). */
   model?: string;
 };
@@ -47,11 +53,37 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
   extract: PayslipLlmExtract;
   usage: OpenAI.Chat.Completions.ChatCompletion["usage"];
 }> {
+  const hasPath = options.pdfPath != null && options.pdfPath.length > 0;
+  const hasBuf = options.pdfBuffer != null && options.pdfBuffer.byteLength > 0;
+  if (hasPath === hasBuf) {
+    throw new Error("Exactly one of pdfPath or pdfBuffer must be provided.");
+  }
+
   const apiKey = requireApiKey();
   const model = options.model ?? env.OPENAI_MODEL;
   const client = new OpenAI({ apiKey, maxRetries: 0 });
 
-  const { pages, pageCount } = renderPdfPagesToPng(options.pdfPath, { dpi: 200, scaleToMaxPx: 2048 });
+  let pdfPathForRender: string;
+  let tempDir: string | undefined;
+  if (hasPath) {
+    pdfPathForRender = options.pdfPath!;
+  } else {
+    tempDir = await mkdtemp(join(tmpdir(), "payslip-pdf-"));
+    pdfPathForRender = join(tempDir, "payslip.pdf");
+    await writeFile(pdfPathForRender, options.pdfBuffer!);
+  }
+
+  let pageCount: number;
+  let pages: Buffer[];
+  try {
+    const rendered = renderPdfPagesToPng(pdfPathForRender, { dpi: 200, scaleToMaxPx: 2048 });
+    pageCount = rendered.pageCount;
+    pages = rendered.pages;
+  } finally {
+    if (tempDir) {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
 
   const imageParts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = pages.map((buf) => ({
     type: "image_url",

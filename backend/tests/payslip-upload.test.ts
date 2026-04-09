@@ -6,12 +6,98 @@ import { fileURLToPath } from "node:url";
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
+process.env.OPENAI_API_KEY ??= "test-key-for-payslip-upload-tests";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ibmFixture = path.join(__dirname, "fixtures", "ibm-payslip-sample.txt");
 
-vi.mock("../src/modules/imports/profiles/pdf-text.js", () => ({
-  extractPdfText: async () => readFileSync(ibmFixture, "utf8")
-}));
+import type { PayslipLlmExtract } from "../src/modules/payslip/llm-extract/payslip-llm.schema.js";
+
+function mockLlmExtract(): PayslipLlmExtract {
+  return {
+    document_type: "payslip",
+    source_employer: {
+      name: "Acme",
+      legal_entity: null,
+      ein_or_fein: "12-3456789",
+      address: "1 Main St"
+    },
+    employee: {
+      name: "Jane Doe",
+      employee_id: "E1",
+      personnel_number: null,
+      talent_id: null,
+      address: null
+    },
+    pay_period: {
+      start_date: "2026-01-01",
+      end_date: "2026-01-15",
+      pay_date: "2026-01-15"
+    },
+    employment_context: {
+      rate: null,
+      rate_type: null,
+      cost_center: null,
+      hours_or_days_worked_current: null,
+      hours_or_days_worked_ytd: null
+    },
+    summary: {
+      currency: "USD",
+      gross_pay_current: 5000,
+      gross_pay_ytd: 10000,
+      total_earnings_current: null,
+      total_earnings_ytd: null,
+      taxable_earnings_current: null,
+      taxable_earnings_ytd: null,
+      pre_tax_deductions_current: 100,
+      pre_tax_deductions_ytd: 200,
+      post_tax_deductions_current: 50,
+      post_tax_deductions_ytd: 100,
+      tax_deductions_current: 800,
+      tax_deductions_ytd: 1600,
+      other_deductions_current: null,
+      other_deductions_ytd: null,
+      other_information_current: null,
+      other_information_ytd: null,
+      net_pay_current: 4000,
+      net_pay_ytd: 8000
+    },
+    line_items: {
+      earnings: [],
+      pre_tax_deductions: [],
+      post_tax_deductions: [],
+      tax_deductions: [],
+      other_deductions: [],
+      other_information: [],
+      taxable_earnings: []
+    },
+    tax_profile: {
+      marital_status: null,
+      federal_credits: null,
+      state_credits: null,
+      additional_withholding_federal: null,
+      additional_withholding_state: null
+    },
+    payment_information: [],
+    document_metadata: {
+      page_count: 1,
+      parser_source: "test",
+      extraction_model: "test-model",
+      extracted_at: new Date().toISOString()
+    }
+  };
+}
+
+vi.mock("../src/modules/payslip/llm-extract/extract-payslip-llm.js", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../src/modules/payslip/llm-extract/extract-payslip-llm.js")>();
+  return {
+    ...mod,
+    extractPayslipFromPdf: vi.fn().mockResolvedValue({
+      extract: mockLlmExtract(),
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    })
+  };
+});
 
 import { buildApp } from "../src/app.js";
 
