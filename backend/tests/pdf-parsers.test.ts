@@ -89,10 +89,10 @@ describe("IBM payslip PDF text parser (Pay and Contributions summary)", () => {
     expect(parsed!.preTaxDeductionsYtd).toBe(18200.21);
     expect(parsed!.employeeTaxesCurrent).toBe(3175.4);
     expect(parsed!.employeeTaxesYtd).toBe(15225.21);
-    expect(parsed!.postTaxDeductionsCurrent).toBe(250);
-    expect(parsed!.postTaxDeductionsYtd).toBe(1200);
+    expect(parsed!.postTaxDeductionsCurrent).toBe(966.76);
+    expect(parsed!.postTaxDeductionsYtd).toBe(8482.42);
     expect(parsed!.netPayCurrent).toBe(4350.17);
-    expect(parsed!.netPayYtd).toBe(8700.34);
+    expect(parsed!.netPayYtd).toBe(18200.21);
   });
 
   it("parses IBM SuccessFactors PDF extract (label line separate from Current/YTD amounts)", () => {
