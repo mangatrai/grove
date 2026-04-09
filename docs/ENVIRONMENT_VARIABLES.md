@@ -39,9 +39,10 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 | `PORT` | API listen port (default `4000`). |
 | `JWT_SECRET` | JWT signing; min 16 chars in schema (default exists for local dev only). |
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
-| `OPENAI_API_KEY` | API key for OpenAI (required for Deloitte payslip LLM import path when used). |
+| `OPENAI_API_KEY` | API key for OpenAI (**required** for **IBM** and **Deloitte** payslip PDF extraction — upload, import parse, and Deloitte async reconcile). |
 | `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). Used by payslip extraction and any other OpenAI-backed features. |
 | `PAYSLIP_ASYNC_POLL_INTERVAL_MS` | Minimum milliseconds between background polls for queued Deloitte LLM extraction during import (default `120000`). |
+| `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS` | Max **inclusive** day span for **`GET /reports/cash-summary`** when both **`dateFrom`** and **`dateTo`** are set (default `1096`, min `31`, max `4000`). |
 
 ## Frontend (Vite)
 

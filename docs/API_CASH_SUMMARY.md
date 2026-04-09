@@ -29,7 +29,7 @@ Aggregates **posted** `transaction_canonical` rows for the household (optional *
 - **ytd** — `year(asOf)-01-01` through `asOf` inclusive.
 - **rolling_30** — `asOf` minus 29 days through `asOf` (30 days inclusive).
 - **rolling_90** — 90 days inclusive ending `asOf`.
-- **Custom** — when **`dateFrom`** and **`dateTo`** are both valid calendar dates: that inclusive window. Maximum span **366** inclusive days; `dateFrom` must be ≤ `dateTo`. Response `range.preset` is **`custom`** and `asOf` equals **`dateTo`** (trend windows still anchor on `range.end`). If both dates are sent, they define the range even if `preset` is also present.
+- **Custom** — when **`dateFrom`** and **`dateTo`** are both valid calendar dates: that inclusive window. Maximum span is **`CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS`** from the server environment (default **1096** ≈ three years); `dateFrom` must be ≤ `dateTo`. Response `range.preset` is **`custom`**, **`maxCustomRangeDays`** echoes the limit, and `asOf` equals **`dateTo`** (trend windows still anchor on `range.end`). If both dates are sent, they define the range even if `preset` is also present.
 
 When **`categoryBreakdown=true`**, **`byCategory[]`** also includes per-category prior-window totals/deltas using the same **`previousPeriod`** rules as `comparison.previousPeriod`:
 - `previousInflows`, `previousOutflows`, `previousNet`

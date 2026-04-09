@@ -46,6 +46,8 @@ type CashSummaryCategoryRow = {
 type CashSummaryResponse = {
   range: { start: string; end: string; preset: CashPreset; label: string };
   asOf: string;
+  /** Server max inclusive days for custom dateFrom/dateTo; matches env CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS. */
+  maxCustomRangeDays: number;
   household: {
     inflows: number;
     outflows: number;
@@ -159,7 +161,7 @@ function friendlyCashSummaryLoadError(err: unknown): string {
   }
   const m = err.message;
   if (m.includes("CUSTOM_RANGE_TOO_LONG") || m.includes("CUSTOM_RANGE")) {
-    return "Custom date range cannot exceed 366 days (inclusive). Try a shorter span.";
+    return "Custom date range is longer than the server allows (see CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS). Try a shorter span.";
   }
   return m;
 }
@@ -358,22 +360,6 @@ export function DashboardPage() {
   const customRangeDirty =
     preset === "custom" &&
     (customDraftFrom !== customAppliedFrom || customDraftTo !== customAppliedTo);
-  const customRangeValidationError = useMemo(() => {
-    if (preset !== "custom") {
-      return null;
-    }
-    if (!customDraftFrom || !customDraftTo) {
-      return "Choose both custom range dates.";
-    }
-    if (customDraftFrom > customDraftTo) {
-      return "Custom range start must be on or before end date.";
-    }
-    const days = inclusiveCalendarDaysPreview(customDraftFrom, customDraftTo);
-    if (days > 366) {
-      return "Custom range cannot exceed 366 days.";
-    }
-    return null;
-  }, [preset, customDraftFrom, customDraftTo]);
 
   useEffect(() => {
     const next = new URLSearchParams();
@@ -413,6 +399,24 @@ export function DashboardPage() {
   } | null>(null);
   const [targetPreviewUsd, setTargetPreviewUsd] = useState(0);
   const [savingTarget, setSavingTarget] = useState(false);
+
+  const customRangeValidationError = useMemo(() => {
+    if (preset !== "custom") {
+      return null;
+    }
+    if (!customDraftFrom || !customDraftTo) {
+      return "Choose both custom range dates.";
+    }
+    if (customDraftFrom > customDraftTo) {
+      return "Custom range start must be on or before end date.";
+    }
+    const days = inclusiveCalendarDaysPreview(customDraftFrom, customDraftTo);
+    const cap = data?.maxCustomRangeDays ?? 1096;
+    if (days > cap) {
+      return `Custom range cannot exceed ${cap} days (inclusive).`;
+    }
+    return null;
+  }, [preset, customDraftFrom, customDraftTo, data?.maxCustomRangeDays]);
 
   useEffect(() => {
     if (!token) {
@@ -804,7 +808,7 @@ export function DashboardPage() {
         {preset === "custom" ? (
           <>
             <p className="muted" style={{ marginTop: "0.5rem", fontSize: "0.88rem" }}>
-              Custom range: max <strong>366</strong> days per load.
+              Custom range: max <strong>{data?.maxCustomRangeDays ?? 1096}</strong> inclusive days per load (server limit).
             </p>
             {customRangeValidationError ? (
               <p className="error" style={{ marginTop: "0.35rem", fontSize: "0.86rem" }}>

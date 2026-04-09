@@ -71,7 +71,9 @@ const envSchema = z.object({
     return s === "" ? undefined : s;
   }, z.string().optional()),
   /** Min milliseconds between background polls for async LLM payslip import (default 2 min). */
-  PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000)
+  PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
+  /** Max inclusive span (days) for `GET /reports/cash-summary` when `dateFrom`+`dateTo` are set. Default ~3 years. */
+  CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS: optionalIntEnv(1096, 31, 4000)
 });
 
 export const env = envSchema.parse(process.env);

@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-09
 
+### CR-055 — Cash summary: configurable custom range cap + maxCustomRangeDays in API; Dashboard alignment
+- **Type:** CR / API / UX / DOC
+- **What:** **`CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS`** env (default **1096**). **`GET /reports/cash-summary`** returns **`maxCustomRangeDays`** and enforces the limit. **Home** dashboard uses it for client-side validation and hint text.
+- **Why:** Epic 7 follow-up — prior **366**-day cap was tight for multi-year analysis.
+- **Files:** [`env.ts`](backend/src/config/env.ts), [`cash-summary.service.ts`](backend/src/modules/reports/cash-summary.service.ts), [`DashboardPage.tsx`](frontend/src/pages/DashboardPage.tsx), [`docs/API_CASH_SUMMARY.md`](docs/API_CASH_SUMMARY.md), [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md), [`.env.example`](.env.example), [`app.test.ts`](backend/tests/app.test.ts).
+
 ### CR-054 — Ledger list: expose classificationMeta; Transactions UI classification hint
 - **Type:** API / UX / DOC
 - **What:** **`GET /transactions`** responses include **`classificationMeta`** (rules audit: source, ruleId, confidence, reason). **Transactions** category column shows a short hint + link to **Category rules** for household rules.

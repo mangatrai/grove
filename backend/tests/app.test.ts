@@ -2489,6 +2489,8 @@ describe("cash summary (reports)", () => {
       .set("authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
+    expect(typeof res.body.maxCustomRangeDays).toBe("number");
+    expect(res.body.maxCustomRangeDays).toBeGreaterThanOrEqual(31);
     expect(res.body.household.inflows).toBe(1000);
     expect(res.body.household.outflows).toBe(250.5);
     expect(res.body.household.net).toBe(749.5);
@@ -3058,14 +3060,14 @@ describe("cash summary (reports)", () => {
     expect(res.body.message).toBe("INVALID_DATE_ORDER");
   });
 
-  it("returns 400 for custom range longer than 366 inclusive days", async () => {
+  it("returns 400 for custom range longer than configured max inclusive days", async () => {
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",
       password: "ChangeMe123!"
     });
     const token = login.body.token as string;
     const res = await request(app)
-      .get("/reports/cash-summary?dateFrom=2024-01-01&dateTo=2025-01-01")
+      .get("/reports/cash-summary?dateFrom=2018-01-01&dateTo=2025-06-01")
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(400);
     expect(res.body.message).toBe("CUSTOM_RANGE_TOO_LONG");

@@ -1,4 +1,5 @@
 import { qAll, qGet } from "../../db/query.js";
+import { env } from "../../config/env.js";
 import { getHouseholdMonthlySavingsTarget } from "../household/household.service.js";
 
 export type CashPreset =
@@ -11,8 +12,10 @@ export type CashPreset =
   | "prev_calendar_year"
   | "custom";
 
-/** Inclusive span guard for `dateFrom`/`dateTo` custom ranges (API). */
-export const CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS = 366;
+/** Inclusive span guard for `dateFrom`/`dateTo` custom ranges — from env (see `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS`). */
+export function getCashSummaryMaxCustomRangeDays(): number {
+  return env.CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS;
+}
 
 export interface CashSummaryInput {
   /** Required unless both `dateFrom` and `dateTo` are set (custom range). */
@@ -138,6 +141,8 @@ export interface CashSummarySpendingPower {
 export interface CashSummaryResult {
   range: CashSummaryRange;
   asOf: string;
+  /** Same as server env `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS` — for UI validation copy. */
+  maxCustomRangeDays: number;
   household: CashSummaryHousehold;
   /** Optional period comparisons. Added for Epic 7. */
   comparison?: {
@@ -304,7 +309,7 @@ function assertCustomDateRange(dateFrom: string, dateTo: string): void {
     throw new Error("INVALID_DATE_ORDER");
   }
   const days = inclusiveCalendarDays(dateFrom, dateTo);
-  if (days > CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS) {
+  if (days > env.CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS) {
     throw new Error("CUSTOM_RANGE_TOO_LONG");
   }
 }
@@ -920,6 +925,7 @@ export async function getCashSummary(householdId: string, input: CashSummaryInpu
   return {
     range,
     asOf,
+    maxCustomRangeDays: env.CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS,
     household,
     spendingPower,
     comparison: {
