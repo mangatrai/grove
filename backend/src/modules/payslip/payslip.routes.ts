@@ -2,14 +2,20 @@ import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 
-import type { ParserProfileId } from "../imports/profiles/profile-ids.js";
+import { qGet } from "../../db/query.js";
+import { isParserProfileId, type ParserProfileId } from "../imports/profiles/profile-ids.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { resolvePayslipUploadContext } from "./payslip-employer-resolve.service.js";
+import {
+  employerParserProfileId,
+  findEmployerById,
+  resolvePayslipUploadContext
+} from "./payslip-employer-resolve.service.js";
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
 import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
 import {
   getPayslipSnapshotForHousehold,
+  insertManualPayslipSnapshot,
   insertPayslipSnapshot,
   listPayslipSnapshots,
   patchPayslipSnapshotForHousehold,
@@ -48,6 +54,21 @@ const payslipPatchSchema = z
     hoursOrDaysCurrent: z.string().nullable().optional()
   })
   .strict();
+
+const manualPayslipBodySchema = payslipPatchSchema
+  .merge(
+    z.object({
+      employerId: z.union([z.string().uuid(), z.null()]).optional(),
+      parserProfileId: z.string().min(1).max(120).optional(),
+      ownerScope: z.enum(["household", "person"]).optional(),
+      ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional()
+    })
+  )
+  .strict()
+  .refine(
+    (d) => d.payDate != null || d.netPayCurrent != null || d.grossPayCurrent != null,
+    "Provide at least pay date, gross pay, or net pay"
+  );
 
 export const payslipRouter = Router();
 payslipRouter.use(requireAuth);
@@ -95,6 +116,106 @@ payslipRouter.post("/sniff", upload.single("file"), async (req: AuthenticatedReq
     suggestedEmployerId: s.suggestedEmployerId,
     note: s.note
   });
+});
+
+payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
+  const parsed = manualPayslipBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  const body = parsed.data;
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+
+  const ownerScope = body.ownerScope ?? "household";
+  const ownerPersonProfileId = ownerScope === "person" ? (body.ownerPersonProfileId ?? null) : null;
+  if (ownerScope === "person" && !ownerPersonProfileId) {
+    res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+    return;
+  }
+  if (ownerScope === "person" && ownerPersonProfileId) {
+    const ownerOk = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ? LIMIT 1`,
+      ownerPersonProfileId,
+      householdId
+    );
+    if (!ownerOk) {
+      res.status(400).json({ message: "Owner person profile not found for household" });
+      return;
+    }
+  }
+
+  const employerIdRaw =
+    body.employerId === undefined || body.employerId === null ? undefined : body.employerId;
+
+  const resolved = await resolvePayslipUploadContext(householdId, userId, employerIdRaw);
+  if (!resolved.ok) {
+    res.status(400).json({
+      message: resolved.message,
+      code: resolved.code
+    });
+    return;
+  }
+
+  let parserProfileId = resolved.parserProfileId;
+  if (body.parserProfileId) {
+    if (!isParserProfileId(body.parserProfileId)) {
+      res.status(400).json({ message: "Unknown parser profile id", code: "INVALID_PROFILE" });
+      return;
+    }
+    if (resolved.employerId) {
+      const emp = await findEmployerById(householdId, resolved.employerId, userId);
+      if (!emp) {
+        res.status(400).json({ message: "Employer not found in household settings", code: "INVALID_EMPLOYER" });
+        return;
+      }
+      const want = employerParserProfileId(emp);
+      if (want !== body.parserProfileId) {
+        res.status(400).json({
+          message: `Employer is configured for ${want}; selected format was ${body.parserProfileId}`,
+          code: "EMPLOYER_PARSER_MISMATCH"
+        });
+        return;
+      }
+    } else {
+      parserProfileId = body.parserProfileId as ParserProfileId;
+    }
+  }
+
+  let employerDisplayName: string | null = null;
+  if (resolved.employerId) {
+    const emp = await findEmployerById(householdId, resolved.employerId, userId);
+    employerDisplayName = emp?.displayName?.trim() ? String(emp.displayName).trim() : null;
+  }
+
+  const summary = {
+    payPeriodStart: body.payPeriodStart ?? null,
+    payPeriodEnd: body.payPeriodEnd ?? null,
+    payDate: body.payDate ?? null,
+    hoursOrDaysCurrent: body.hoursOrDaysCurrent ?? null,
+    grossPayCurrent: body.grossPayCurrent ?? null,
+    grossPayYtd: body.grossPayYtd ?? null,
+    employeeTaxesCurrent: body.employeeTaxesCurrent ?? null,
+    employeeTaxesYtd: body.employeeTaxesYtd ?? null,
+    preTaxDeductionsCurrent: body.preTaxDeductionsCurrent ?? null,
+    preTaxDeductionsYtd: body.preTaxDeductionsYtd ?? null,
+    postTaxDeductionsCurrent: body.postTaxDeductionsCurrent ?? null,
+    postTaxDeductionsYtd: body.postTaxDeductionsYtd ?? null,
+    netPayCurrent: body.netPayCurrent ?? null,
+    netPayYtd: body.netPayYtd ?? null
+  };
+
+  const result = await insertManualPayslipSnapshot(householdId, {
+    parserProfileId,
+    employerId: resolved.employerId,
+    employerDisplayName,
+    ownerScope,
+    ownerPersonProfileId,
+    summary
+  });
+
+  res.status(201).json({ snapshot: result.snapshot });
 });
 
 payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRequest, res) => {

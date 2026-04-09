@@ -280,6 +280,21 @@ paths:
       tags: [reports]
       summary: Cash summary / KPIs
       security: [{ bearerAuth: [] }]
+  /reports/balance-sheet:
+    get:
+      tags: [reports]
+      summary: Balance sheet / net worth snapshot (assets vs liabilities)
+      security: [{ bearerAuth: [] }]
+  /reports/balance-sheet/manual:
+    post:
+      tags: [reports]
+      summary: Upsert manual account balance snapshot
+      security: [{ bearerAuth: [] }]
+  /reports/balance-sheet/manual/{id}:
+    patch:
+      tags: [reports]
+      summary: Update manual balance snapshot amount/currency
+      security: [{ bearerAuth: [] }]
   /payslips:
     get:
       tags: [payslips]
@@ -289,6 +304,11 @@ paths:
     post:
       tags: [payslips]
       summary: Upload payslip PDF
+      security: [{ bearerAuth: [] }]
+  /payslips/manual:
+    post:
+      tags: [payslips]
+      summary: Create payslip from manual summary (synthetic checksum; file name Manual entry)
       security: [{ bearerAuth: [] }]
   /payslips/sniff:
     post:

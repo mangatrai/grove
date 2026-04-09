@@ -1,0 +1,43 @@
+# Balance sheet / net worth API
+
+**Auth:** Bearer JWT (same as other household APIs).
+
+## `GET /reports/balance-sheet`
+
+**Query**
+
+| Param | Required | Description |
+|--------|----------|-------------|
+| `asOf` | No | ISO date `YYYY-MM-DD` (defaults to **today** UTC). |
+
+**Response:** JSON with:
+
+- **`asOf`** — date used for the view.
+- **`assets`** / **`liabilities`** — arrays of account rows (excludes `payslip` bucket accounts). Each row includes **`financialAccountId`**, **`institution`**, **`accountMask`**, **`type`**, **`currency`**, **`side`** (`asset` \| `liability`), **`balance`**, **`balanceAsOf`**, **`balanceSource`** (`manual` \| `import` \| null), **`importFileId`** (when import-derived).
+- **`totals`** — **`assets`**, **`liabilities`**, **`netWorth`** (sums where balances exist; `null` when nothing to sum).
+
+**Resolution (per account):**
+
+1. Latest **manual** `account_balance_snapshot` with `as_of_date <= asOf` wins.
+2. Otherwise, the latest **parsed** `import_file` for that account whose `confidence_summary.statementBalances` includes a usable **ending** balance, with `asOfEnd` (when present) not after `asOf`.
+
+## `POST /reports/balance-sheet/manual`
+
+**Body (JSON)**
+
+| Field | Type | Required |
+|--------|------|----------|
+| `financialAccountId` | UUID | Yes |
+| `asOfDate` | `YYYY-MM-DD` | Yes |
+| `amount` | number | Yes |
+| `currency` | string | No (default `USD`) |
+
+Creates or updates the **manual** snapshot for `(account, as_of_date)`.
+
+**Errors:** `404 ACCOUNT_NOT_FOUND`, `400 INVALID_ACCOUNT` (payslip bucket).
+
+## `PATCH /reports/balance-sheet/manual/:id`
+
+**Body:** any of `amount`, `currency` (at least one required).
+
+Updates an existing **manual** snapshot owned by the household.

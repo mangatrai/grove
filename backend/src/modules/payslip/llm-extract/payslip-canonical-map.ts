@@ -22,11 +22,19 @@ function sumLineItemColumn(items: PayslipLineItem[], key: "amount_current" | "am
   return any ? sum : null;
 }
 
+function isOtherDeductionPostTaxRow(row: PayslipLineItem): boolean {
+  if (/OTHER\s+DEDUCTION/i.test(row.raw_section ?? "")) {
+    return true;
+  }
+  const label = `${row.name ?? ""} ${row.description ?? ""}`.trim();
+  return /\bother\s+deduction/i.test(label);
+}
+
 function sumOtherDeductionsMarkedAsPostTax(
   items: PayslipLineItem[],
   key: "amount_current" | "amount_ytd"
 ): number | null {
-  const likelyPostTaxRows = items.filter((row) => /OTHER\s+DEDUCTION/i.test(row.raw_section ?? ""));
+  const likelyPostTaxRows = items.filter((row) => isOtherDeductionPostTaxRow(row));
   return sumLineItemColumn(likelyPostTaxRows, key);
 }
 

@@ -3344,3 +3344,41 @@ describe("member ownership closure", () => {
     expect(sum.body.household.inflows).toBeGreaterThan(0);
   });
 });
+
+describe("balance sheet (reports)", () => {
+  it("returns 401 without auth", async () => {
+    const res = await request(app).get("/reports/balance-sheet");
+    expect(res.status).toBe(401);
+  });
+
+  it("POST manual balance then GET balance-sheet includes asset row", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const asOf = "2026-06-30";
+    const post = await request(app)
+      .post("/reports/balance-sheet/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        financialAccountId: SEED_BOA_CHECKING,
+        asOfDate: "2026-06-15",
+        amount: 4321,
+        currency: "USD"
+      });
+    expect(post.status).toBe(201);
+
+    const get = await request(app)
+      .get(`/reports/balance-sheet?asOf=${encodeURIComponent(asOf)}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(get.status).toBe(200);
+    expect(get.body.asOf).toBe(asOf);
+    const row = get.body.assets.find((a: { financialAccountId: string }) => a.financialAccountId === SEED_BOA_CHECKING);
+    expect(row).toBeDefined();
+    expect(row.balance).toBe(4321);
+    expect(row.balanceSource).toBe("manual");
+    expect(typeof get.body.totals.netWorth).toBe("number");
+  });
+});

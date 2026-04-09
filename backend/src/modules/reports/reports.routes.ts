@@ -3,6 +3,11 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import {
+  getBalanceSheet,
+  patchManualBalanceSnapshot,
+  upsertManualBalanceSnapshot
+} from "./balance-sheet.service.js";
 import { getCashSummary } from "./cash-summary.service.js";
 
 export const reportsRouter = Router();
@@ -65,6 +70,85 @@ const querySchema = z
       });
     }
   });
+
+const balanceSheetQuerySchema = z.object({
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
+});
+
+const manualBalancePostSchema = z
+  .object({
+    financialAccountId: z.string().uuid(),
+    asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    amount: z.number().finite(),
+    currency: z.string().min(3).max(8).optional().default("USD")
+  })
+  .strict();
+
+const manualBalancePatchSchema = z
+  .object({
+    amount: z.number().finite().optional(),
+    currency: z.string().min(3).max(8).optional()
+  })
+  .strict()
+  .refine((o) => o.amount !== undefined || o.currency !== undefined, {
+    message: "Provide amount and/or currency"
+  });
+
+reportsRouter.get("/balance-sheet", async (req: AuthenticatedRequest, res) => {
+  const parsed = balanceSheetQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid query", issues: parsed.error.flatten() });
+    return;
+  }
+  const asOf = parsed.data.asOf ?? new Date().toISOString().slice(0, 10);
+  const householdId = req.authUser!.householdId;
+  const data = await getBalanceSheet(householdId, asOf);
+  res.status(200).json(data);
+});
+
+reportsRouter.post("/balance-sheet/manual", async (req: AuthenticatedRequest, res) => {
+  const parsed = manualBalancePostSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  try {
+    const out = await upsertManualBalanceSnapshot(householdId, parsed.data);
+    res.status(201).json(out);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "ACCOUNT_NOT_FOUND") {
+      res.status(404).json({ message: "Financial account not found for this household", code: "ACCOUNT_NOT_FOUND" });
+      return;
+    }
+    if (msg === "PAYSLIP_ACCOUNT_NOT_ALLOWED") {
+      res.status(400).json({ message: "Payslip bucket accounts cannot hold statement balances", code: "INVALID_ACCOUNT" });
+      return;
+    }
+    throw e;
+  }
+});
+
+reportsRouter.patch("/balance-sheet/manual/:id", async (req: AuthenticatedRequest, res) => {
+  const idParsed = z.object({ id: z.string().uuid() }).safeParse(req.params);
+  if (!idParsed.success) {
+    res.status(400).json({ message: "Invalid snapshot id" });
+    return;
+  }
+  const body = manualBalancePatchSchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ message: "Invalid payload", issues: body.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const updated = await patchManualBalanceSnapshot(householdId, idParsed.data.id, body.data);
+  if (!updated) {
+    res.status(404).json({ message: "Manual balance snapshot not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.status(200).json(updated);
+});
 
 reportsRouter.get("/cash-summary", async (req: AuthenticatedRequest, res) => {
   const parsed = querySchema.safeParse(req.query ?? {});

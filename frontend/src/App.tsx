@@ -5,9 +5,11 @@ import { ShellLayout } from "./layout/ShellLayout";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { CategoryRulesPage } from "./pages/CategoryRulesPage";
 import { HomeRoute } from "./pages/HomeRoute";
+import { NetWorthPage } from "./pages/NetWorthPage";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PayslipDetailPage } from "./pages/PayslipDetailPage";
+import { PayslipManualPage } from "./pages/PayslipManualPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
 import { ResolutionQueuePage } from "./pages/ResolutionQueuePage";
 import { TransactionsPage } from "./pages/TransactionsPage";
@@ -21,8 +23,10 @@ export function App() {
         <Route element={<RequireAuth />}>
           <Route path="/categories/rules" element={<CategoryRulesPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
+          <Route path="/net-worth" element={<NetWorthPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/resolution-queue" element={<ResolutionQueuePage />} />
+          <Route path="/payslips/new" element={<PayslipManualPage />} />
           <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />

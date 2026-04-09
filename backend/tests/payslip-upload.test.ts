@@ -185,6 +185,52 @@ describe("POST /payslips/upload", () => {
   });
 });
 
+describe("POST /payslips/manual", () => {
+  async function loginToken(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  it("returns 401 without auth", async () => {
+    const res = await request(app).post("/payslips/manual").send({ payDate: "2026-02-01", netPayCurrent: 100 });
+    expect(res.status).toBe(401);
+  });
+
+  it("creates manual snapshot with synthetic checksum and Manual entry file name", async () => {
+    const token = await loginToken();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        payDate: "2026-02-15",
+        netPayCurrent: 1234.56,
+        grossPayCurrent: 2000,
+        parserProfileId: "ibm_pay_contributions_pdf"
+      });
+
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    expect(snap.fileName).toBe("Manual entry");
+    expect(snap.fileChecksum).toMatch(/^[a-f0-9]{64}$/);
+    expect(snap.parserProfileId).toBe("ibm_pay_contributions_pdf");
+    expect(snap.netPayCurrent).toBe(1234.56);
+    expect(snap.rawExtractJson).toMatchObject({ source: "manual" });
+  });
+
+  it("rejects payload with no pay date and no gross/net", async () => {
+    const token = await loginToken();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({ payPeriodStart: "2026-01-01" });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("GET /payslips/:id", () => {
   async function loginToken(): Promise<string> {
     const res = await request(app).post("/auth/login").send({

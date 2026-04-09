@@ -20,6 +20,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-09
 
+### FIX-058 — Payslip mapper: infer OTHER DEDUCTION post-tax rows from line name when raw_section is blank
+- **Type:** FIX / test / prompt
+- **What:** **`sumOtherDeductionsMarkedAsPostTax`** also matches **`name` / `description`** with **`other deduction`**. Regression test + LLM prompt line clarifying **`line_items.other_deductions`** naming when **`raw_section`** is missing.
+- **Why:** Epic 4 — some extractions omit **`raw_section`** on miscellaneous rows; post-tax totals were dropped.
+- **Files:** [`payslip-canonical-map.ts`](backend/src/modules/payslip/llm-extract/payslip-canonical-map.ts), [`extract-payslip-llm.ts`](backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts), [`payslip-canonical-map.test.ts`](backend/tests/payslip-canonical-map.test.ts).
+
+### CR-057 — Net worth v1: account_balance_snapshot + balance-sheet APIs + /net-worth UI
+- **Type:** CR / DB / API / UX / DOC
+- **What:** Migration **`account_balance_snapshot`**; **`GET /reports/balance-sheet`**, **`POST/PATCH /reports/balance-sheet/manual`**; **Net worth** page and sidebar nav. Manual balances override import **`statementBalances`** hints per account.
+- **Why:** Epic 2 minimal balance sheet — assets vs liabilities with manual entry; charts/history deferred in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
+- **Files:** [`0005_account_balance_snapshot.sql`](backend/db/migrations_pg/0005_account_balance_snapshot.sql), [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`reports.routes.ts`](backend/src/modules/reports/reports.routes.ts), [`app.test.ts`](backend/tests/app.test.ts), [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`App.tsx`](frontend/src/App.tsx), [`AppSidebar.tsx`](frontend/src/layout/AppSidebar.tsx), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md), [`openapi.yaml`](openapi/openapi.yaml).
+
+### CR-056 — Manual payslip: POST /payslips/manual + /payslips/new form
+- **Type:** CR / API / UX / DOC
+- **What:** **`POST /payslips/manual`** inserts **`payslip_snapshot`** with **`Manual entry`** file name and a **synthetic SHA-256 checksum** (`manual:` + UUID). **`/payslips/new`** form; list links **Add manually**. **`PATCH /payslips/:id`** remains the edit path.
+- **Why:** Epic 1 / PAYSLIP_V1 §7 — income history without a parseable PDF.
+- **Files:** [`payslip.service.ts`](backend/src/modules/payslip/payslip.service.ts), [`payslip.routes.ts`](backend/src/modules/payslip/payslip.routes.ts), [`payslip-upload.test.ts`](backend/tests/payslip-upload.test.ts), [`PayslipManualPage.tsx`](frontend/src/pages/PayslipManualPage.tsx), [`PayslipsPage.tsx`](frontend/src/pages/PayslipsPage.tsx), [`App.tsx`](frontend/src/App.tsx), [`PAYSLIP_V1.md`](docs/PAYSLIP_V1.md), [`openapi.yaml`](openapi/openapi.yaml).
+
 ### CR-055 — Cash summary: configurable custom range cap + maxCustomRangeDays in API; Dashboard alignment
 - **Type:** CR / API / UX / DOC
 - **What:** **`CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS`** env (default **1096**). **`GET /reports/cash-summary`** returns **`maxCustomRangeDays`** and enforces the limit. **Home** dashboard uses it for client-side validation and hint text.

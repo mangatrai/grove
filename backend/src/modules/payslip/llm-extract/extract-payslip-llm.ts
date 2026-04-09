@@ -106,6 +106,7 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     "Taxes: put every row from a TAX DEDUCTION(S) / withholding section into line_items.tax_deductions with amount_current and amount_ytd per row.",
     "Set summary.tax_deductions_current and summary.tax_deductions_ytd to the section totals (sums of those rows) when the stub shows totals; if only line items are visible, the totals can be left null (the server may sum line items).",
     "Deloitte: rows labeled OTHER DEDUCTION(S) are post-tax — put them in line_items.post_tax_deductions and roll section totals into summary.post_tax_deductions_current and summary.post_tax_deductions_ytd (not summary.other_deductions_* or line_items.other_deductions). Keep YTD values from those rows in amount_ytd even when current is blank.",
+    "If the PDF lists true post-tax rows only under line_items.other_deductions, still name them clearly (e.g. starting with \"Other deduction\") and set raw_section to the visible section label (e.g. OTHER DEDUCTION(S)) when possible — the server can also infer post-tax from the name if raw_section is blank.",
     "Deloitte: 'After-Tax Ded' / after-tax deduction totals map to summary.post_tax_deductions_current (and YTD when shown).",
     "Deloitte: 'TAXABLE EARNINGS (FED)' and similar federal taxable lines belong in summary.taxable_earnings_current / summary.taxable_earnings_ytd only — do not treat them as gross pay.",
     "Do not invent totals; use null if unclear."

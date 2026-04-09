@@ -148,7 +148,8 @@ export function PayslipsPage() {
       <div className="card">
         <h1>Payslips</h1>
         <p className="muted" style={{ marginBottom: 0 }}>
-          Add payslip PDFs via <Link to="/imports">New import</Link>. Manage employers in{" "}
+          Add payslip PDFs via <Link to="/imports">New import</Link>, or{" "}
+          <Link to="/payslips/new">add a stub manually</Link> (no PDF). Manage employers in{" "}
           <Link to="/settings/profile">Settings → Profile</Link>.
         </p>
       </div>
@@ -175,7 +176,10 @@ export function PayslipsPage() {
       ) : null}
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Saved stubs</h2>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+          <h2 style={{ margin: 0 }}>Saved stubs</h2>
+          <Link to="/payslips/new">Add manually</Link>
+        </div>
         {loadError ? <p className="error">{loadError}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && data && data.items.length === 0 ? (

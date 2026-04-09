@@ -368,6 +368,38 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.postTaxFilledFromOtherDeductionRows).toEqual({ ytd: true });
   });
 
+  it("treats other_deductions rows as post-tax when the line name says Other deduction but raw_section is null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: null,
+        post_tax_deductions_ytd: null,
+        other_deductions_current: null,
+        other_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        other_deductions: [
+          {
+            name: "Other deduction — parking",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 25,
+            amount_ytd: 100,
+            raw_section: null
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.postTaxDeductionsCurrent).toBe(25);
+    expect(summary.postTaxDeductionsYtd).toBe(100);
+    expect(summary.rawExtractJson.postTaxFilledFromOtherDeductionRows).toEqual({ current: true, ytd: true });
+  });
+
   it("validateCanonicalForImport passes for minimal good extract", () => {
     expect(validateCanonicalForImport(minimalExtract())).toEqual({ ok: true });
   });

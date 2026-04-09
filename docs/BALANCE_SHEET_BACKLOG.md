@@ -1,31 +1,29 @@
-# Balance sheet and net worth (backlog)
+# Balance sheet and net worth
 
-Planned product work for a household **cash / net-worth summary** distinct from the transaction ledger. **Not implemented** as of this document; **BoA statement balances** are now captured on import in `import_file.confidence_summary.statementBalances` (see parse paths) as a feeder for future snapshots.
+Household **assets vs liabilities** view, separate from the transaction ledger. **Shipped v1** (**CR-057**): **`GET /reports/balance-sheet`**, **`POST/PATCH /reports/balance-sheet/manual`**, table **`account_balance_snapshot`**, UI **`/net-worth`**.
 
-## Epic: Summary page (working name)
+## Shipped (minimal v1)
 
-**Goal:** A dedicated page (name TBD: **Summary**, **Net worth**, or **Balances**) that answers: “What do we have vs what we owe?” at a glance, with optional history.
+- **API:** [`docs/API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md) — **`asOf`** query; manual snapshots override import hints per account; optional read-only **import** balances from `import_file.confidence_summary.statementBalances` when no manual row applies.
+- **Data:** `account_balance_snapshot` (PG migration **`0005`**; SQLite mirror **`0004`** in `backend/db/migrations/`).
+- **UI:** Sidebar **Net worth** — totals + asset/liability tables + manual entry form.
 
-### Stories
+## Deferred
 
-1. **Assets vs liabilities layout**  
-   Two-column (or grouped) view of **financial accounts** from Settings → Connected accounts. Classify by account type / user tags: **assets** — liquid cash (checking, savings), investments; **liabilities** — credit cards, loans, mortgages, HELOCs. Align labels with `financial_account` / institution metadata.
+1. **Charts / history UX** — line or area series of assets, liabilities, and net over time; per-account trends (see original Epic 7 intent).
+2. **Full “balances over time”** — multi–time-slice comparison, statement-period alignment beyond a single `asOf`.
+3. **Household vs member subtotals** on this page (accounts already have owner scope; filtering not in v1 UI).
+4. **Normalized import snapshots** — writing `source = import` rows from ingestion (v1 uses `confidence_summary` read path only).
 
-2. **Balances over time**  
-   **Time-slice** selection: e.g. end of last calendar year, end of last month, custom `as_of` date. Data sources: (a) **import-derived** ending balances from statement parsers (e.g. BoA `statementBalances.asOfEnd` / `ending`), (b) **manual** balance entry with audit (`updated_at`, optional note).
+### Original story list (for reference)
 
-3. **Charts**  
-   Line or area chart: total assets, total liabilities, net (assets − liabilities) over time. Optional per-account drill-down.
+1. **Assets vs liabilities layout** — **partially shipped** (type-based classification: checking/savings/investment vs credit_card/loan/mortgage).
+2. **Balances over time** — **deferred** (manual date per snapshot only; no history chart).
+3. **Charts** — **deferred**.
+4. **Editable balances** — **shipped** via manual POST/PATCH; import remains read-only hints.
+5. **Household vs member** — **deferred** for this page.
 
-4. **Editable balances**  
-   User can correct or enter a balance for an account at a date; store **source** (`import` | `manual`) and timestamp. Display should show the balance as-of date clearly (e.g. label: “Balance on 2026-01-31”).
-
-5. **Household vs member**  
-   Respect **belongs-to** / owner scope on accounts (same model as Settings → Accounts) for filtering or subtotals.
-
-## Data model (future)
-
-Likely a dedicated table, e.g. `account_balance_snapshot` (`financial_account_id`, `as_of_date`, `amount`, `currency`, `source`, `import_file_id` nullable, `created_at`). `import_file.confidence_summary.statementBalances` remains useful for **debugging and single-file context** until snapshots are normalized.
+**BoA statement balances** continue to land in `import_file.confidence_summary.statementBalances` on parse; v1 reads them when no manual snapshot applies.
 
 ## Related
 

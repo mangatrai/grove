@@ -133,6 +133,67 @@ export async function findPayslipByHouseholdChecksum(
   return row ? rowToSnapshot(row) : null;
 }
 
+/** Synthetic checksum so manual rows never collide with PDF file hashes. */
+export function syntheticManualPayslipChecksum(): string {
+  const token = crypto.randomUUID();
+  return sha256Hex(Buffer.from(`manual:${token}`, "utf8"));
+}
+
+const MANUAL_FILE_NAME = "Manual entry";
+
+/** Insert a user-typed payslip row: same snapshot shape as PDF upload, unique synthetic checksum. */
+export async function insertManualPayslipSnapshot(
+  householdId: string,
+  input: {
+    parserProfileId: string;
+    employerId: string | null;
+    employerDisplayName: string | null;
+    ownerScope: "household" | "person";
+    ownerPersonProfileId: string | null;
+    summary: Omit<ParsedPayslipSummary, "rawExtractJson">;
+  }
+): Promise<{ ok: true; snapshot: PayslipSnapshotRow }> {
+  const checksum = syntheticManualPayslipChecksum();
+  const parsed: ParsedPayslipSummary = {
+    ...input.summary,
+    rawExtractJson: {
+      source: "manual",
+      createdAt: new Date().toISOString()
+    }
+  };
+  const hybrid: PayslipHybridColumns = {
+    canonicalExtractJson: JSON.stringify({ version: 1, source: "manual" }),
+    currency: "USD",
+    employerDisplayName: input.employerDisplayName,
+    employeeDisplayName: null,
+    employerEinOrFein: null,
+    employeeId: null,
+    personnelNumber: null,
+    talentId: null,
+    taxProfileJson: null,
+    paymentSummaryJson: null,
+    extractionMetadataJson: JSON.stringify({ source: "manual", createdAt: new Date().toISOString() })
+  };
+
+  const result = await insertPayslipSnapshot(
+    householdId,
+    MANUAL_FILE_NAME,
+    checksum,
+    input.parserProfileId,
+    parsed,
+    null,
+    input.employerId,
+    input.ownerScope,
+    input.ownerPersonProfileId,
+    hybrid
+  );
+
+  if (!result.ok) {
+    throw new Error("unexpected duplicate checksum for manual payslip");
+  }
+  return result;
+}
+
 export async function insertPayslipSnapshot(
   householdId: string,
   fileName: string,
