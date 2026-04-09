@@ -65,12 +65,15 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     "Use null for any field that is absent or not visible.",
     "Prefer ISO dates YYYY-MM-DD when you can infer a full date from the document.",
     "Numbers must be plain JSON numbers without currency symbols or thousands separators.",
+    "Deloitte-style layout: the stub often has two side-by-side column groups (Current vs YTD). Pair each Current amount with the YTD in the same column group only — do not mix Current from one block with YTD from another.",
     "Map each table row into the appropriate line_items section; use raw_section for the section label when helpful.",
     "For PRE-TAX DEDUCTION(S), POST-TAX DEDUCTION(S), and OTHER DEDUCTION(S), capture each visible row with both amount_current and amount_ytd when the table shows Current/YTD columns.",
     "If a section has row-level Current/YTD values but the section header/summary total is absent, keep summary fields null and still return line_items rows with amount_ytd populated.",
     "Taxes: put every row from a TAX DEDUCTION(S) / withholding section into line_items.tax_deductions with amount_current and amount_ytd per row.",
     "Set summary.tax_deductions_current and summary.tax_deductions_ytd to the section totals (sums of those rows) when the stub shows totals; if only line items are visible, the totals can be left null (the server may sum line items).",
-    "Employer-specific labels: map 'Other Deductions' (and similar) into summary.other_deductions_* and/or line_items.other_deductions; map post-tax-style deductions into summary.post_tax_deductions_* or other_deductions_* consistently with the document, and include YTD where shown.",
+    "Deloitte: rows labeled OTHER DEDUCTION(S) are post-tax — put them in line_items.post_tax_deductions and roll section totals into summary.post_tax_deductions_current and summary.post_tax_deductions_ytd (not summary.other_deductions_* or line_items.other_deductions).",
+    "Deloitte: 'After-Tax Ded' / after-tax deduction totals map to summary.post_tax_deductions_current (and YTD when shown).",
+    "Deloitte: 'TAXABLE EARNINGS (FED)' and similar federal taxable lines belong in summary.taxable_earnings_current / summary.taxable_earnings_ytd only — do not treat them as gross pay.",
     "Do not invent totals; use null if unclear."
   ].join(" ");
 

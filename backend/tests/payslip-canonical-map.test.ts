@@ -150,7 +150,7 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.taxDeductionsFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
-  it("fills post-tax from other_deductions when post_tax summary is null", () => {
+  it("fills post-tax from line_items.post_tax_deductions when post_tax summary is null", () => {
     const ex = minimalExtract({
       summary: {
         ...minimalExtract().summary,
@@ -158,12 +158,39 @@ describe("payslip-canonical-map", () => {
         post_tax_deductions_ytd: null,
         other_deductions_current: 42,
         other_deductions_ytd: 99
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        post_tax_deductions: [
+          {
+            name: "Row A",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 10,
+            amount_ytd: 20,
+            raw_section: "POST-TAX DEDUCTION(S)"
+          },
+          {
+            name: "Row B",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 32,
+            amount_ytd: 79,
+            raw_section: "POST-TAX DEDUCTION(S)"
+          }
+        ]
       }
     });
     const { summary } = mapCanonicalExtractToPersist(ex);
     expect(summary.postTaxDeductionsCurrent).toBe(42);
     expect(summary.postTaxDeductionsYtd).toBe(99);
-    expect(summary.rawExtractJson.postTaxFilledFromOtherDeductions).toEqual({ current: true, ytd: true });
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
   it("fills pre-tax from line_items.pre_tax_deductions when summary pre-tax fields are null", () => {
@@ -218,7 +245,7 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.preTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
-  it("fills post-tax from line_items.other_deductions when post-tax and other_deductions summary fields are null", () => {
+  it("fills post-tax from line_items.post_tax_deductions only (Deloitte OTHER DEDUCTION rows modeled as post-tax lines)", () => {
     const ex = minimalExtract({
       summary: {
         ...minimalExtract().summary,
@@ -229,7 +256,7 @@ describe("payslip-canonical-map", () => {
       },
       line_items: {
         ...minimalExtract().line_items,
-        other_deductions: [
+        post_tax_deductions: [
           {
             name: "Award Received",
             authority: null,
@@ -270,8 +297,8 @@ describe("payslip-canonical-map", () => {
     expect(summary.postTaxDeductionsCurrent).toBeCloseTo(267.13, 2);
     expect(summary.postTaxDeductionsYtd).toBeCloseTo(301.39, 2);
     expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({
-      current: "other_deductions",
-      ytd: "other_deductions"
+      current: true,
+      ytd: true
     });
   });
 

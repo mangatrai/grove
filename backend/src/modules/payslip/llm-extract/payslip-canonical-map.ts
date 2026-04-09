@@ -50,8 +50,9 @@ function approxNetSanityNote(
 
 /**
  * Map validated canonical LLM extract into legacy `ParsedPayslipSummary` columns plus hybrid columns.
- * Employee taxes bucket maps from summary tax_deductions_*; falls back to summing `line_items.tax_deductions`
- * when summary fields are null. Post-tax uses post_tax_* or, when null, other_deductions_* (e.g. Deloitte).
+ * Employee taxes: summary tax_deductions_* or sum of `line_items.tax_deductions`.
+ * Pre-tax / post-tax: summary fields or sums of `line_items.pre_tax_deductions` / `line_items.post_tax_deductions` only
+ * (do not map `other_deductions` into post-tax — Deloitte OTHER DEDUCTION(S) belongs in post_tax line items per prompt).
  * Hours default to 80 when absent (biweekly Deloitte assumption).
  */
 export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTokens?: number | null): CanonicalMapResult {
@@ -67,9 +68,6 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   const postTaxLines = extract.line_items.post_tax_deductions;
   const postTaxSumCurrent = sumLineItemColumn(postTaxLines, "amount_current");
   const postTaxSumYtd = sumLineItemColumn(postTaxLines, "amount_ytd");
-  const otherLines = extract.line_items.other_deductions;
-  const otherSumCurrent = sumLineItemColumn(otherLines, "amount_current");
-  const otherSumYtd = sumLineItemColumn(otherLines, "amount_ytd");
 
   let preTaxCurrent = s.pre_tax_deductions_current;
   let preTaxYtd = s.pre_tax_deductions_ytd;
@@ -97,30 +95,14 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
 
   let postTaxCurrent = s.post_tax_deductions_current;
   let postTaxYtd = s.post_tax_deductions_ytd;
-  const postFromOther: { current?: boolean; ytd?: boolean } = {};
-  const postFromLines: { current?: "post_tax_deductions" | "other_deductions"; ytd?: "post_tax_deductions" | "other_deductions" } =
-    {};
-  if (postTaxCurrent == null && s.other_deductions_current != null) {
-    postTaxCurrent = s.other_deductions_current;
-    postFromOther.current = true;
-  }
-  if (postTaxYtd == null && s.other_deductions_ytd != null) {
-    postTaxYtd = s.other_deductions_ytd;
-    postFromOther.ytd = true;
-  }
+  const postFromLines: { current?: boolean; ytd?: boolean } = {};
   if (postTaxCurrent == null && postTaxSumCurrent != null) {
     postTaxCurrent = postTaxSumCurrent;
-    postFromLines.current = "post_tax_deductions";
-  } else if (postTaxCurrent == null && otherSumCurrent != null) {
-    postTaxCurrent = otherSumCurrent;
-    postFromLines.current = "other_deductions";
+    postFromLines.current = true;
   }
   if (postTaxYtd == null && postTaxSumYtd != null) {
     postTaxYtd = postTaxSumYtd;
-    postFromLines.ytd = "post_tax_deductions";
-  } else if (postTaxYtd == null && otherSumYtd != null) {
-    postTaxYtd = otherSumYtd;
-    postFromLines.ytd = "other_deductions";
+    postFromLines.ytd = true;
   }
 
   let hoursOrDaysCurrent: string | null =
@@ -159,7 +141,6 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
       ...(hoursDefaultedBiweekly80 ? { hoursDefaultBiweekly80: true } : {}),
       ...(Object.keys(preFromLines).length > 0 ? { preTaxFilledFromLineItems: preFromLines } : {}),
       ...(Object.keys(taxFromLines).length > 0 ? { taxDeductionsFilledFromLineItems: taxFromLines } : {}),
-      ...(Object.keys(postFromOther).length > 0 ? { postTaxFilledFromOtherDeductions: postFromOther } : {}),
       ...(Object.keys(postFromLines).length > 0 ? { postTaxFilledFromLineItems: postFromLines } : {}),
       ...approxNetSanityNote(s, employeeTaxesCurrent, postTaxCurrent)
     }
