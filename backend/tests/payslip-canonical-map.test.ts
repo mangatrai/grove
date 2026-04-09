@@ -166,6 +166,115 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.postTaxFilledFromOtherDeductions).toEqual({ current: true, ytd: true });
   });
 
+  it("fills pre-tax from line_items.pre_tax_deductions when summary pre-tax fields are null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        pre_tax_deductions_current: null,
+        pre_tax_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        pre_tax_deductions: [
+          {
+            name: "401k",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 1853.27,
+            amount_ytd: 5479.23,
+            raw_section: "PRE-TAX DEDUCTION(S)"
+          },
+          {
+            name: "Flex Spending (Health)",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 96.15,
+            amount_ytd: 288.45,
+            raw_section: "PRE-TAX DEDUCTION(S)"
+          },
+          {
+            name: "Flex Spending (Dep Care)",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 57.69,
+            amount_ytd: 173.07,
+            raw_section: "PRE-TAX DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.preTaxDeductionsCurrent).toBeCloseTo(2007.11, 2);
+    expect(summary.preTaxDeductionsYtd).toBeCloseTo(5940.75, 2);
+    expect(summary.rawExtractJson.preTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
+  });
+
+  it("fills post-tax from line_items.other_deductions when post-tax and other_deductions summary fields are null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: null,
+        post_tax_deductions_ytd: null,
+        other_deductions_current: null,
+        other_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        other_deductions: [
+          {
+            name: "Award Received",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 250,
+            amount_ytd: 250,
+            raw_section: "OTHER DEDUCTION(S)"
+          },
+          {
+            name: "Imp Inc Core Life",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 6.65,
+            amount_ytd: 19.95,
+            raw_section: "OTHER DEDUCTION(S)"
+          },
+          {
+            name: "Imp Inc Core LTD",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 10.48,
+            amount_ytd: 31.44,
+            raw_section: "OTHER DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.postTaxDeductionsCurrent).toBeCloseTo(267.13, 2);
+    expect(summary.postTaxDeductionsYtd).toBeCloseTo(301.39, 2);
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({
+      current: "other_deductions",
+      ytd: "other_deductions"
+    });
+  });
+
   it("validateCanonicalForImport passes for minimal good extract", () => {
     expect(validateCanonicalForImport(minimalExtract())).toEqual({ ok: true });
   });

@@ -58,9 +58,30 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   const s = extract.summary;
   const emp = extract.employee;
   const em = extract.source_employer;
+  const preTaxLines = extract.line_items.pre_tax_deductions;
+  const preTaxSumCurrent = sumLineItemColumn(preTaxLines, "amount_current");
+  const preTaxSumYtd = sumLineItemColumn(preTaxLines, "amount_ytd");
   const taxLines = extract.line_items.tax_deductions;
   const taxSumCurrent = sumLineItemColumn(taxLines, "amount_current");
   const taxSumYtd = sumLineItemColumn(taxLines, "amount_ytd");
+  const postTaxLines = extract.line_items.post_tax_deductions;
+  const postTaxSumCurrent = sumLineItemColumn(postTaxLines, "amount_current");
+  const postTaxSumYtd = sumLineItemColumn(postTaxLines, "amount_ytd");
+  const otherLines = extract.line_items.other_deductions;
+  const otherSumCurrent = sumLineItemColumn(otherLines, "amount_current");
+  const otherSumYtd = sumLineItemColumn(otherLines, "amount_ytd");
+
+  let preTaxCurrent = s.pre_tax_deductions_current;
+  let preTaxYtd = s.pre_tax_deductions_ytd;
+  const preFromLines: { current?: boolean; ytd?: boolean } = {};
+  if (preTaxCurrent == null && preTaxSumCurrent != null) {
+    preTaxCurrent = preTaxSumCurrent;
+    preFromLines.current = true;
+  }
+  if (preTaxYtd == null && preTaxSumYtd != null) {
+    preTaxYtd = preTaxSumYtd;
+    preFromLines.ytd = true;
+  }
 
   let employeeTaxesCurrent = s.tax_deductions_current;
   let employeeTaxesYtd = s.tax_deductions_ytd;
@@ -77,6 +98,8 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   let postTaxCurrent = s.post_tax_deductions_current;
   let postTaxYtd = s.post_tax_deductions_ytd;
   const postFromOther: { current?: boolean; ytd?: boolean } = {};
+  const postFromLines: { current?: "post_tax_deductions" | "other_deductions"; ytd?: "post_tax_deductions" | "other_deductions" } =
+    {};
   if (postTaxCurrent == null && s.other_deductions_current != null) {
     postTaxCurrent = s.other_deductions_current;
     postFromOther.current = true;
@@ -84,6 +107,20 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   if (postTaxYtd == null && s.other_deductions_ytd != null) {
     postTaxYtd = s.other_deductions_ytd;
     postFromOther.ytd = true;
+  }
+  if (postTaxCurrent == null && postTaxSumCurrent != null) {
+    postTaxCurrent = postTaxSumCurrent;
+    postFromLines.current = "post_tax_deductions";
+  } else if (postTaxCurrent == null && otherSumCurrent != null) {
+    postTaxCurrent = otherSumCurrent;
+    postFromLines.current = "other_deductions";
+  }
+  if (postTaxYtd == null && postTaxSumYtd != null) {
+    postTaxYtd = postTaxSumYtd;
+    postFromLines.ytd = "post_tax_deductions";
+  } else if (postTaxYtd == null && otherSumYtd != null) {
+    postTaxYtd = otherSumYtd;
+    postFromLines.ytd = "other_deductions";
   }
 
   let hoursOrDaysCurrent: string | null =
@@ -105,8 +142,8 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
     grossPayYtd: s.gross_pay_ytd,
     employeeTaxesCurrent,
     employeeTaxesYtd,
-    preTaxDeductionsCurrent: s.pre_tax_deductions_current,
-    preTaxDeductionsYtd: s.pre_tax_deductions_ytd,
+    preTaxDeductionsCurrent: preTaxCurrent,
+    preTaxDeductionsYtd: preTaxYtd,
     postTaxDeductionsCurrent: postTaxCurrent,
     postTaxDeductionsYtd: postTaxYtd,
     netPayCurrent: s.net_pay_current,
@@ -120,8 +157,10 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
       taxableEarningsCurrent: s.taxable_earnings_current,
       taxableEarningsYtd: s.taxable_earnings_ytd,
       ...(hoursDefaultedBiweekly80 ? { hoursDefaultBiweekly80: true } : {}),
+      ...(Object.keys(preFromLines).length > 0 ? { preTaxFilledFromLineItems: preFromLines } : {}),
       ...(Object.keys(taxFromLines).length > 0 ? { taxDeductionsFilledFromLineItems: taxFromLines } : {}),
       ...(Object.keys(postFromOther).length > 0 ? { postTaxFilledFromOtherDeductions: postFromOther } : {}),
+      ...(Object.keys(postFromLines).length > 0 ? { postTaxFilledFromLineItems: postFromLines } : {}),
       ...approxNetSanityNote(s, employeeTaxesCurrent, postTaxCurrent)
     }
   };
