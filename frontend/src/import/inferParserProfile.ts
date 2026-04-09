@@ -15,7 +15,11 @@ export type FinancialAccountLike = {
 /** Optional household income settings from `GET /household/settings` to improve payslip PDF inference. */
 export type IncomeInferenceContext = {
   salaryDepositAccountId?: string | null;
-  employers?: ReadonlyArray<{ id: string; parserProfileId?: string }>;
+  employers?: ReadonlyArray<{
+    id: string;
+    parserProfileId?: string;
+    salaryDepositFinancialAccountId?: string | null;
+  }>;
 };
 
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf";
@@ -111,16 +115,14 @@ export function inferParserProfile(
   const sal = income?.salaryDepositAccountId;
   const emps = income?.employers;
   const accId = account.id;
-  if (
-    ext === ".pdf" &&
-    accId &&
-    sal &&
-    accId === sal &&
-    emps &&
-    emps.length > 0 &&
-    !filenameLooksLikeBankStatementPdf(fileName)
-  ) {
-    return emps[0]?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+  if (ext === ".pdf" && accId && emps && emps.length > 0 && !filenameLooksLikeBankStatementPdf(fileName)) {
+    const legacySalaryMatch = Boolean(sal && accId === sal);
+    const matchedEmployer = emps.find(
+      (e) => e.salaryDepositFinancialAccountId != null && accId === e.salaryDepositFinancialAccountId
+    );
+    if (legacySalaryMatch || matchedEmployer) {
+      return (matchedEmployer ?? emps[0])?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+    }
   }
 
   if (inst === "marcus" && t === "savings" && ext === ".pdf") {

@@ -21,6 +21,7 @@ type HouseholdSettingsResponse = {
     displayName: string;
     parserProfileId?: string;
     parserMapping?: Record<string, unknown>;
+    salaryDepositFinancialAccountId?: string | null;
   }>;
 };
 
@@ -65,7 +66,7 @@ function buildBelongsToGroups(accountOwners: Array<{ id: string; label: string }
   ];
 }
 
-type EmployerDraft = { id?: string; displayName: string; parserProfileId: string };
+type EmployerDraft = { id?: string; displayName: string; parserProfileId: string; salaryDepositAccountId: string };
 
 type HouseholdProfileResponse = {
   profile: {
@@ -105,7 +106,6 @@ type ProfileDraft = {
   email: string;
   phone: string;
   avatarIconKey: string;
-  salaryAccountId: string;
   employers: EmployerDraft[];
 };
 
@@ -148,8 +148,7 @@ function normalizeProfileDraft(payload: HouseholdProfileResponse): ProfileDraft 
     email: p.email ?? "",
     phone: (p.phoneNumber ?? "").trim(),
     avatarIconKey: (p.avatarKey ?? PROFILE_ICON_KEYS[0]).trim() || PROFILE_ICON_KEYS[0],
-    salaryAccountId: "",
-    employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+    employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf", salaryDepositAccountId: "" }]
   };
 }
 
@@ -194,8 +193,7 @@ export function SettingsPage() {
     email: "",
     phone: "",
     avatarIconKey: PROFILE_ICON_KEYS[0],
-    salaryAccountId: "",
-    employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+    employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf", salaryDepositAccountId: "" }]
   });
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -278,15 +276,15 @@ export function SettingsPage() {
       const base = normalizeProfileDraft(response);
       setProfileDraft({
         ...base,
-        salaryAccountId: settings.salaryDepositFinancialAccountId ?? "",
         employers:
           settings.employers.length > 0
             ? settings.employers.map((e) => ({
                 id: e.id,
                 displayName: e.displayName,
-                parserProfileId: e.parserProfileId ?? "ibm_pay_contributions_pdf"
+                parserProfileId: e.parserProfileId ?? "ibm_pay_contributions_pdf",
+                salaryDepositAccountId: e.salaryDepositFinancialAccountId ?? ""
               }))
-            : [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+            : [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf", salaryDepositAccountId: "" }]
       });
     } catch (e: unknown) {
       setProfileError(e instanceof Error ? e.message : "Could not load profile");
@@ -565,7 +563,7 @@ export function SettingsPage() {
     setProfileSuccess(null);
     try {
       const iconKey = profileDraft.avatarIconKey.trim() || PROFILE_ICON_KEYS[0];
-      await apiJson<HouseholdProfileResponse>("/household/profile", {
+        await apiJson<HouseholdProfileResponse>("/household/profile", {
         method: "PATCH",
         body: JSON.stringify({
           firstName: profileDraft.firstName.trim(),
@@ -573,13 +571,19 @@ export function SettingsPage() {
           email: profileDraft.email.trim() || null,
           phoneNumber: profileDraft.phone.trim() || null,
           avatarKey: iconKey,
-          salaryDepositFinancialAccountId: profileDraft.salaryAccountId === "" ? null : profileDraft.salaryAccountId,
+          salaryDepositFinancialAccountId:
+            profileDraft.employers[0]?.salaryDepositAccountId &&
+            profileDraft.employers[0].salaryDepositAccountId !== ""
+              ? profileDraft.employers[0].salaryDepositAccountId
+              : null,
           employers: profileDraft.employers
             .map((e) => ({
               id: e.id,
               displayName: e.displayName.trim(),
               parserProfileId: e.parserProfileId,
-              parserMapping: {} as Record<string, unknown>
+              parserMapping: {} as Record<string, unknown>,
+              salaryDepositFinancialAccountId:
+                e.salaryDepositAccountId === "" ? null : e.salaryDepositAccountId
             }))
             .filter((e) => e.displayName.length > 0)
         })
@@ -845,8 +849,12 @@ export function SettingsPage() {
                     <label className="settings-field" style={{ flex: "1 1 12rem" }}>
                       Salary deposit account (optional)
                       <select
-                        value={profileDraft.salaryAccountId}
-                        onChange={(e) => setProfileDraft((prev) => ({ ...prev, salaryAccountId: e.target.value }))}
+                        value={row.salaryDepositAccountId}
+                        onChange={(e) => {
+                          const next = [...profileDraft.employers];
+                          next[idx] = { ...next[idx], salaryDepositAccountId: e.target.value };
+                          setProfileDraft((prev) => ({ ...prev, employers: next }));
+                        }}
                         disabled={savingProfile}
                       >
                         <option value="">— Not set —</option>
@@ -898,7 +906,10 @@ export function SettingsPage() {
                     onClick={() =>
                       setProfileDraft((prev) => ({
                         ...prev,
-                        employers: [...prev.employers, { displayName: "", parserProfileId: "ibm_pay_contributions_pdf" }]
+                        employers: [
+                          ...prev.employers,
+                          { displayName: "", parserProfileId: "ibm_pay_contributions_pdf", salaryDepositAccountId: "" }
+                        ]
                       }))
                     }
                   >

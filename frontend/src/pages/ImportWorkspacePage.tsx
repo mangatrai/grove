@@ -25,7 +25,12 @@ type ImportFileRow = {
   owner_person_profile_id: string | null;
 };
 
-type HouseholdEmployer = { id: string; displayName: string; parserProfileId?: string };
+type HouseholdEmployer = {
+  id: string;
+  displayName: string;
+  parserProfileId?: string;
+  salaryDepositFinancialAccountId?: string | null;
+};
 
 type FinancialAccount = {
   id: string;

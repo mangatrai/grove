@@ -74,6 +74,19 @@ describe("inferParserProfile", () => {
     expect(inferParserProfile(boaSalaryChecking, "eStmt_2026-01.pdf", income)).toBe("boa_estatement_pdf");
   });
 
+  it("matches per-employer salary deposit account when legacy household salary id is unset", () => {
+    const income = {
+      salaryDepositAccountId: null,
+      employers: [
+        { id: "a", parserProfileId: IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID, salaryDepositFinancialAccountId: "acc-a" },
+        { id: "b", parserProfileId: "deloitte_payslip_pdf", salaryDepositFinancialAccountId: "acc-b" }
+      ]
+    };
+    expect(
+      inferParserProfile({ id: "acc-b", type: "checking", institution: "Bank of America" }, "download.pdf", income)
+    ).toBe("deloitte_payslip_pdf");
+  });
+
   it("does not use salary deposit inference without employers (falls through to institution PDF rules)", () => {
     const income = { salaryDepositAccountId: "acc-salary", employers: [] };
     expect(inferParserProfile(boaSalaryChecking, "download.pdf", income)).toBe("boa_estatement_pdf");

@@ -355,18 +355,40 @@ export async function patchCurrentUserProfile(
       if (!isParserProfileId(pid)) {
         return { ok: false, code: "NOT_FOUND" };
       }
+      const sal = e.salaryDepositFinancialAccountId;
+      if (sal != null && !(await accountBelongsToHousehold(sal, householdId))) {
+        return { ok: false, code: "NOT_FOUND" };
+      }
     }
-    const normalized: EmployerStub[] = input.employers.map((e) => ({
-      id: e.id?.trim() ? e.id : randomUUID(),
-      displayName: e.displayName.trim(),
-      parserProfileId: e.parserProfileId ?? "ibm_pay_contributions_pdf",
-      parserMapping: e.parserMapping ?? {}
-    }));
+    const normalized: EmployerStub[] = input.employers.map((e) => {
+      const pid = e.parserProfileId ?? "ibm_pay_contributions_pdf";
+      const stub: EmployerStub = {
+        id: e.id?.trim() ? e.id : randomUUID(),
+        displayName: e.displayName.trim(),
+        parserProfileId: pid,
+        parserMapping: e.parserMapping ?? {}
+      };
+      if (e.salaryDepositFinancialAccountId !== undefined) {
+        stub.salaryDepositFinancialAccountId = e.salaryDepositFinancialAccountId;
+      }
+      return stub;
+    });
     const parsed = employersPayloadSchema.safeParse(normalized);
     if (!parsed.success) {
       return { ok: false, code: "NOT_FOUND" };
     }
     await qExec(`UPDATE person_profile SET employers_json = ? WHERE household_id = ? AND linked_user_id = ?`, JSON.stringify(parsed.data), householdId, userId);
+    if (input.salaryDepositFinancialAccountId === undefined) {
+      const first = parsed.data[0];
+      if (first !== undefined && Object.prototype.hasOwnProperty.call(first, "salaryDepositFinancialAccountId")) {
+        await qExec(
+          `UPDATE person_profile SET salary_deposit_financial_account_id = ? WHERE household_id = ? AND linked_user_id = ?`,
+          first.salaryDepositFinancialAccountId ?? null,
+          householdId,
+          userId
+        );
+      }
+    }
   }
 
   const nextPhone = input.phoneNumber !== undefined ? input.phoneNumber : existing.phone_number;
