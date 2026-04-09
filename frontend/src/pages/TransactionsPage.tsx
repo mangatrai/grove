@@ -45,6 +45,13 @@ type ResolutionDetailItem = {
   };
 };
 
+type TxClassificationMeta = {
+  source: string;
+  ruleId: string | null;
+  confidence: number;
+  reason: string;
+} | null;
+
 type TxRow = {
   id: string;
   txnDate: string;
@@ -63,6 +70,8 @@ type TxRow = {
   categoryName: string | null;
   ownerScope: "household" | "person";
   ownerPersonProfileId: string | null;
+  /** Rules / manual classification audit from import canonicalize. */
+  classificationMeta: TxClassificationMeta;
   reviewReasons?: string[];
   openReviewItems?: OpenReviewItem[];
   importSessionId?: string | null;
@@ -184,11 +193,46 @@ function formatResolutionTypeLabel(t: string): string {
   }
 }
 
-function prettyClassificationSource(source?: "household" | "builtin" | "none" | "db" | "default"): string | null {
+function prettyClassificationSource(
+  source?: "household" | "builtin" | "none" | "db" | "default" | "manual" | string
+): string | null {
   if (!source) return null;
+  if (source === "manual") return "Manual entry";
   if (source === "household" || source === "db") return "Household rule";
   if (source === "builtin" || source === "default") return "Built-in rule";
-  return "Uncategorized";
+  if (source === "none") return "No rule match";
+  return null;
+}
+
+function CategoryClassificationHint({ meta }: { meta: TxClassificationMeta }) {
+  if (!meta) {
+    return null;
+  }
+  const label = prettyClassificationSource(meta.source);
+  const conf = formatConfidencePct(meta.confidence);
+  const bits = [label, conf].filter(Boolean);
+  const title = [bits.join(" · "), meta.reason?.trim() ? meta.reason : ""].filter(Boolean).join("\n");
+  if (bits.length === 0 && !meta.reason?.trim()) {
+    return null;
+  }
+  return (
+    <div className="transactions-page__classify-hint muted" style={{ fontSize: "0.78rem", marginTop: "0.2rem", lineHeight: 1.35 }}>
+      <span title={title || undefined}>
+        {bits.length > 0 ? <span>{bits.join(" · ")}</span> : null}
+        {meta.reason?.trim() ? (
+          <span style={{ display: "block", marginTop: bits.length > 0 ? "0.1rem" : 0 }}>
+            {meta.reason.length > 120 ? `${meta.reason.slice(0, 117)}…` : meta.reason}
+          </span>
+        ) : null}
+      </span>
+      {meta.source === "household" && meta.ruleId ? (
+        <span style={{ display: "block", marginTop: "0.15rem" }}>
+          <Link to="/categories/rules">Household rules</Link>
+          <span className="muted"> · id {meta.ruleId.slice(0, 8)}…</span>
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 function formatConfidencePct(confidence?: number): string | null {
@@ -1532,6 +1576,7 @@ export function TransactionsPage() {
                                 onChange={(v) => void updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId)}
                                 ariaLabel={`Category for ${desc}`}
                               />
+                              <CategoryClassificationHint meta={t.classificationMeta ?? null} />
                             </td>
                           </tr>
                           {needsReviewTab && expanded ? (

@@ -12,6 +12,33 @@ import {
 /** Resolution rows included in ledger `openReviewItems` are only non-resolved statuses. */
 export type OpenReviewItemStatus = "open" | "in_review";
 
+/** Parsed `transaction_canonical.classification_meta` JSON from rules at canonicalize time. */
+export type ClassificationExplainMeta = {
+  source: string;
+  ruleId: string | null;
+  confidence: number;
+  reason: string;
+};
+
+function parseClassificationMetaJson(raw: unknown): ClassificationExplainMeta | null {
+  if (raw == null || String(raw).trim() === "") {
+    return null;
+  }
+  try {
+    const o = JSON.parse(String(raw)) as Record<string, unknown>;
+    const source = typeof o.source === "string" ? o.source : "";
+    const ruleId = o.ruleId == null ? null : String(o.ruleId);
+    const confidence = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? o.confidence : 0;
+    const reason = typeof o.reason === "string" ? o.reason : "";
+    if (!source && !reason && ruleId == null) {
+      return null;
+    }
+    return { source: source || "unknown", ruleId, confidence, reason };
+  } catch {
+    return null;
+  }
+}
+
 export interface CanonicalTransactionRow {
   id: string;
   txnDate: string;
@@ -30,6 +57,8 @@ export interface CanonicalTransactionRow {
   categoryName: string | null;
   ownerScope: "household" | "person";
   ownerPersonProfileId: string | null;
+  /** Rules/builtin/manual classification audit from canonicalize (null if absent or unparseable). */
+  classificationMeta: ClassificationExplainMeta | null;
   /** Populated when listing with `needsReviewOnly` — why the row appears under Needs review. */
   reviewReasons?: string[];
   /** Open resolution items for this row (same link rules as the review queue); for bulk `/resolution/*` and per-row PATCH. */
@@ -287,6 +316,7 @@ function mapRow(
     category_name: string | null;
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
+    classification_meta?: unknown;
     open_review_items_blob?: string | null;
     import_session_id?: string | null;
   },
@@ -309,7 +339,8 @@ function mapRow(
     categoryId: r.category_id,
     categoryName: r.category_name,
     ownerScope: r.owner_scope,
-    ownerPersonProfileId: r.owner_person_profile_id
+    ownerPersonProfileId: r.owner_person_profile_id,
+    classificationMeta: parseClassificationMetaJson(r.classification_meta)
   };
   if (opts?.includeReviewReasons) {
     const openItems = parseOpenReviewItems(r.open_review_items_blob ?? null);
@@ -338,7 +369,8 @@ function txSelectSql(includeReviewMeta: boolean): string {
        tc.category_id AS category_id,
        c.name AS category_name,
        tc.owner_scope AS owner_scope,
-       tc.owner_person_profile_id AS owner_person_profile_id`;
+       tc.owner_person_profile_id AS owner_person_profile_id,
+       tc.classification_meta AS classification_meta`;
   if (!includeReviewMeta) {
     return base;
   }

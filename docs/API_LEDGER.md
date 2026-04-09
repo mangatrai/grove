@@ -51,6 +51,12 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
       "accountMask": "1001",
       "categoryId": "uuid-or-null",
       "categoryName": "Groceries",
+      "classificationMeta": {
+        "source": "household",
+        "ruleId": "uuid-or-null",
+        "confidence": 0.85,
+        "reason": "Matched contains household rule pattern \"…\"."
+      },
       "sourceRef": "raw:…",
       "createdAt": "…",
       "reviewReasons": ["Uncategorized", "Open review: category"],
@@ -62,6 +68,7 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
 ```
 
 - **`categoryId` / `categoryName`** — from `LEFT JOIN category` on `transaction_canonical.category_id`. Both `null` when uncategorized.
+- **`classificationMeta`** — parsed from `transaction_canonical.classification_meta` JSON set at **canonicalize** (import) or **manual** entry: **`source`** (`household` \| `builtin` \| `none` \| `manual`), **`ruleId`** (when a rule matched), **`confidence`** [0,1], **`reason`** (human-readable). **`null`** when absent or unparseable.
 - **`reviewReasons`** — present only when **`needsReview=true`**; human-readable strings explaining why the row matches the needs-review predicate (e.g. **Uncategorized**, **Status: …**, **Open review: …**).
 - **`openReviewItems`** — present only when **`needsReview=true`**; open / in_review resolution rows tied to this transaction (**`id`**, **`type`**, **`status`**: **`open`** or **`in_review`**), for **`POST /resolution/bulk`**, **`POST /resolution/bulk-apply-category`**, and **`PATCH /resolution/:id`** (same link rules as **`GET /resolution`**).
 - **`importSessionId`** — present only when **`needsReview=true`**; import session id when the row’s **`source_ref`** links to **`transaction_raw`** → **`import_file`**, otherwise **`null`** (manual rows, etc.).

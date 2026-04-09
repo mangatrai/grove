@@ -2122,7 +2122,36 @@ describe("categories and ledger category field (Epic 5.1)", () => {
       const t = res.body.transactions[0];
       expect(t).toHaveProperty("categoryId");
       expect(t).toHaveProperty("categoryName");
+      expect(t).toHaveProperty("classificationMeta");
     }
+  });
+
+  it("GET /transactions includes classificationMeta with source manual for POST /transactions rows", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const created = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        accountId: SEED_BOA_CHECKING,
+        txnDate: "2020-06-15",
+        amount: -3.5,
+        merchant: "classification-meta-probe",
+        categoryId: "30000000-0000-0000-0000-000000000004"
+      });
+    expect(created.status).toBe(201);
+    const list = await request(app)
+      .get("/transactions?search=classification-meta-probe&limit=10")
+      .set("authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    expect(list.body.transactions.length).toBeGreaterThanOrEqual(1);
+    const row = list.body.transactions.find(
+      (x: { merchant?: string }) => x.merchant === "classification-meta-probe"
+    );
+    expect(row?.classificationMeta?.source).toBe("manual");
   });
 
   it("updates transaction category via PATCH", async () => {
@@ -3168,6 +3197,44 @@ describe("household settings", () => {
     expect(after.status).toBe(200);
     expect(after.body.salaryDepositFinancialAccountId).toBeNull();
     expect(after.body.employers).toEqual([]);
+  });
+
+  it("PATCH profile: per-employer salary deposit accounts persist independently in employers_json", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const checking = SEED_BOA_CHECKING;
+    const chase = SEED_CHASE_CC;
+
+    const p = await request(app)
+      .patch("/household/profile")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        employers: [
+          {
+            displayName: "IBM",
+            parserProfileId: "ibm_pay_contributions_pdf",
+            parserMapping: {},
+            salaryDepositFinancialAccountId: checking
+          },
+          {
+            displayName: "Deloitte",
+            parserProfileId: "deloitte_payslip_pdf",
+            parserMapping: {},
+            salaryDepositFinancialAccountId: chase
+          }
+        ]
+      });
+    expect(p.status).toBe(200);
+
+    const settings = await request(app).get("/household/settings").set("authorization", `Bearer ${token}`);
+    expect(settings.status).toBe(200);
+    expect(settings.body.salaryDepositFinancialAccountId).toBe(checking);
+    expect(settings.body.employers).toHaveLength(2);
+    expect(settings.body.employers[0].salaryDepositFinancialAccountId).toBe(checking);
+    expect(settings.body.employers[1].salaryDepositFinancialAccountId).toBe(chase);
   });
 });
 
