@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-09
 
+### CR-061 — Import balance snapshots: persist on parse + prefer in balance sheet
+- **Type:** CR / DB / API / DOC
+- **What:** Migration **`0006`** partial unique index on import snapshots; bank parse upserts **`source = import`** `account_balance_snapshot` rows when **`statementBalances.ending`** and **`asOfEnd`** (`YYYY-MM-DD`) are present; **`GET /reports/balance-sheet`** resolves **manual → persisted import → confidence_summary hint**.
+- **Why:** Normalized balances for net worth history and stable re-parse behavior.
+- **Files:** [`0006_account_balance_import_unique.sql`](backend/db/migrations_pg/0006_account_balance_import_unique.sql), [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`import-parser.service.ts`](backend/src/modules/imports/import-parser.service.ts), [`app.test.ts`](backend/tests/app.test.ts), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md).
+
 ### UX-060 — Payslips list: Belongs-to label (replaces “View scope”)
 - **Type:** UX / copy
 - **What:** Payslip list filter uses the **Belongs-to** label and hint text aligned with **Transactions**; placeholder **All household activity**. No API or query changes.

@@ -19,7 +19,8 @@
 **Resolution (per account):**
 
 1. Latest **manual** `account_balance_snapshot` with `as_of_date <= asOf` wins.
-2. Otherwise, the latest **parsed** `import_file` for that account whose `confidence_summary.statementBalances` includes a usable **ending** balance, with `asOfEnd` (when present) not after `asOf`.
+2. Otherwise, the latest **`source = import`** row in `account_balance_snapshot` for that account with `as_of_date <= asOf` (written when bank parsers persist statement-ending balances; partial unique index on `(financial_account_id, as_of_date)` for import rows).
+3. Otherwise, the latest **parsed** `import_file` for that account whose `confidence_summary.statementBalances` includes a usable **ending** balance, with `asOfEnd` (when present) not after `asOf` (legacy read path for files not yet snapshotted).
 
 ## `POST /reports/balance-sheet/manual`
 
