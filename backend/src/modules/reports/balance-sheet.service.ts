@@ -28,6 +28,24 @@ export type BalanceSheetResult = {
   };
 };
 
+export type BalanceSheetHistoryInterval = "month" | "week" | "day";
+
+export type BalanceSheetHistoryPoint = {
+  asOf: string;
+  totals: {
+    assets: number | null;
+    liabilities: number | null;
+    netWorth: number | null;
+  };
+};
+
+export type BalanceSheetHistoryResult = {
+  from: string;
+  to: string;
+  interval: BalanceSheetHistoryInterval;
+  points: BalanceSheetHistoryPoint[];
+};
+
 type ConfidenceSummary = {
   statementBalances?: {
     ending?: number | null;
@@ -391,4 +409,89 @@ export async function patchManualBalanceSnapshot(
     await qExec(`UPDATE account_balance_snapshot SET currency = ?, updated_at = NOW() WHERE id = ?`, patch.currency, row.id);
   }
   return { id: row.id };
+}
+
+const HISTORY_MAX_POINTS = 120;
+
+function addUtcDays(isoDate: string, days: number): string {
+  const d = new Date(`${isoDate}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function compareIsoDate(a: string, b: string): number {
+  if (a < b) {
+    return -1;
+  }
+  if (a > b) {
+    return 1;
+  }
+  return 0;
+}
+
+function generateHistorySampleDates(
+  from: string,
+  to: string,
+  interval: BalanceSheetHistoryInterval
+): string[] {
+  if (compareIsoDate(from, to) > 0) {
+    return [];
+  }
+  if (interval === "day") {
+    const out: string[] = [];
+    let cur = from;
+    while (compareIsoDate(cur, to) <= 0) {
+      out.push(cur);
+      cur = addUtcDays(cur, 1);
+    }
+    return out;
+  }
+  if (interval === "week") {
+    const out: string[] = [];
+    let cur = from;
+    while (compareIsoDate(cur, to) <= 0) {
+      out.push(cur);
+      cur = addUtcDays(cur, 7);
+    }
+    return out;
+  }
+  const out: string[] = [];
+  let y = Number(from.slice(0, 4));
+  let m = Number(from.slice(5, 7)) - 1;
+  const toY = Number(to.slice(0, 4));
+  const toM = Number(to.slice(5, 7)) - 1;
+  while (y < toY || (y === toY && m <= toM)) {
+    const last = new Date(Date.UTC(y, m + 1, 0));
+    const iso = last.toISOString().slice(0, 10);
+    if (compareIsoDate(iso, from) >= 0 && compareIsoDate(iso, to) <= 0) {
+      out.push(iso);
+    }
+    m += 1;
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
+  }
+  return out;
+}
+
+export async function getBalanceSheetHistory(
+  householdId: string,
+  from: string,
+  to: string,
+  interval: BalanceSheetHistoryInterval
+): Promise<BalanceSheetHistoryResult> {
+  const dates = generateHistorySampleDates(from, to, interval);
+  if (dates.length > HISTORY_MAX_POINTS) {
+    throw new Error("BALANCE_HISTORY_TOO_MANY_POINTS");
+  }
+  const points: BalanceSheetHistoryPoint[] = [];
+  for (const asOf of dates) {
+    const sheet = await getBalanceSheet(householdId, asOf);
+    points.push({
+      asOf,
+      totals: { ...sheet.totals }
+    });
+  }
+  return { from, to, interval, points };
 }

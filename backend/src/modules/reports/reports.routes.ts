@@ -5,6 +5,7 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
   getBalanceSheet,
+  getBalanceSheetHistory,
   patchManualBalanceSnapshot,
   upsertManualBalanceSnapshot
 } from "./balance-sheet.service.js";
@@ -75,6 +76,12 @@ const balanceSheetQuerySchema = z.object({
   asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
 });
 
+const balanceSheetHistoryQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  interval: z.enum(["month", "week", "day"]).optional().default("month")
+});
+
 const manualBalancePostSchema = z
   .object({
     financialAccountId: z.string().uuid(),
@@ -104,6 +111,34 @@ reportsRouter.get("/balance-sheet", async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const data = await getBalanceSheet(householdId, asOf);
   res.status(200).json(data);
+});
+
+reportsRouter.get("/balance-sheet/history", async (req: AuthenticatedRequest, res) => {
+  const parsed = balanceSheetHistoryQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid query", issues: parsed.error.flatten() });
+    return;
+  }
+  const { from, to, interval } = parsed.data;
+  if (from > to) {
+    res.status(400).json({ message: "from must be on or before to" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  try {
+    const data = await getBalanceSheetHistory(householdId, from, to, interval);
+    res.status(200).json(data);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg === "BALANCE_HISTORY_TOO_MANY_POINTS") {
+      res.status(400).json({
+        message: "Too many sample points for this range and interval (max 120). Narrow the range or use a coarser interval.",
+        code: "BALANCE_HISTORY_TOO_MANY_POINTS"
+      });
+      return;
+    }
+    throw e;
+  }
 });
 
 reportsRouter.post("/balance-sheet/manual", async (req: AuthenticatedRequest, res) => {

@@ -3412,4 +3412,38 @@ describe("balance sheet (reports)", () => {
       await sqlStmt(`DELETE FROM account_balance_snapshot WHERE id = ?`).run(snapId);
     }
   });
+
+  it("GET balance-sheet/history returns monthly points", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/balance-sheet/history?from=2026-01-01&to=2026-03-31&interval=month")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.interval).toBe("month");
+    expect(Array.isArray(res.body.points)).toBe(true);
+    expect(res.body.points.length).toBeGreaterThanOrEqual(1);
+    const first = res.body.points[0];
+    expect(first).toHaveProperty("asOf");
+    expect(first).toHaveProperty("totals");
+    expect(first.totals).toHaveProperty("netWorth");
+  });
+
+  it("GET balance-sheet/history rejects too many day samples", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/balance-sheet/history?from=2025-01-01&to=2025-12-31&interval=day")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("BALANCE_HISTORY_TOO_MANY_POINTS");
+  });
 });
