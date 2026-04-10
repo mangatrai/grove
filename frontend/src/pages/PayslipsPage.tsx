@@ -155,17 +155,20 @@ export function PayslipsPage() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-          <h2 style={{ margin: 0 }}>View scope</h2>
+        <label className="field" style={{ display: "block", marginBottom: 0 }}>
+          <span>Belongs-to</span>
           <HierarchicalSearchPicker
             value={ownerFilter}
             onChange={(v) => setOwnerFilter(v)}
             groups={belongsToGroups}
-            placeholder="Whole household"
+            placeholder="All household activity"
             ariaLabel="Filter payslips by belongs-to"
             clearable
           />
-        </div>
+        </label>
+        <p className="muted" style={{ marginTop: "0.65rem", marginBottom: 0, fontSize: "0.9rem" }}>
+          Household: shared payslips only. Member: that person’s payslips. Clear the filter to include everyone.
+        </p>
       </div>
 
       {!loading && data && data.items.length > 0 ? (

@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-09
 
+### UX-060 — Payslips list: Belongs-to label (replaces “View scope”)
+- **Type:** UX / copy
+- **What:** Payslip list filter uses the **Belongs-to** label and hint text aligned with **Transactions**; placeholder **All household activity**. No API or query changes.
+- **Why:** “View scope” did not match household vs member semantics; consistent wording across ledger and payslip screens.
+- **Files:** [`PayslipsPage.tsx`](frontend/src/pages/PayslipsPage.tsx), [`USER_GUIDE.md`](docs/USER_GUIDE.md).
+
 ### FIX-059 — Profile: persist per-employer salary deposit account + restore inference (replaces reverted WIP)
 - **Type:** FIX / API / UX
 - **What:** **`employers_json`** stores optional **`salaryDepositFinancialAccountId`** per employer; **`PATCH /household/profile`** validates accounts and syncs legacy **`person_profile.salary_deposit_financial_account_id`** from the first employer when the top-level field is omitted. **Settings → Profile** binds salary account **per employer row** (was incorrectly sharing one `select` across rows). **`inferParserProfile`** treats a checking account as the payslip target when it matches **any** employer’s salary account, not only the legacy column.

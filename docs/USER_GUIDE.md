@@ -68,6 +68,8 @@ Today, for **posted** transactions, the product focuses on **category** (and bel
 
 If your deployment uses payslip import: configure **employer** and deposit account linkage in Settings / profile flows as guided by the UI, then upload payslip PDFs through the payslip workflow. Parsed summaries are separate from normal bank **canonical** transactions; see [`PAYSLIP_V1.md`](PAYSLIP_V1.md) for product scope and limitations.
 
+On the **Payslips** list, use **Belongs-to** (same idea as Transactions) to narrow rows to household-attributed payslips, a single member, or clear the filter to see all.
+
 ## Where to read more
 
 | Topic | Document |
