@@ -232,18 +232,36 @@ export function PayslipManualPage() {
       <form className="card" style={{ marginTop: "1rem" }} onSubmit={onSubmit}>
         <h2 style={{ marginTop: 0 }}>Pay stub</h2>
 
-        {needsEmployerPick ? (
-          <label className="field">
-            <span>Employer</span>
-            <select value={employerId} onChange={(ev) => setEmployerId(ev.target.value)} required aria-required>
-              <option value="">Select employer…</option>
-              {employers.map((em) => (
-                <option key={em.id} value={em.id}>
-                  {em.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
+        {hasEmployers ? (
+          <div
+            className="row payslip-manual__scope-row"
+            style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap", marginBottom: "1rem" }}
+          >
+            {needsEmployerPick ? (
+              <label className="field" style={{ flex: "1 1 14rem", marginBottom: 0, minWidth: "min(100%, 14rem)" }}>
+                <span>Employer</span>
+                <select value={employerId} onChange={(ev) => setEmployerId(ev.target.value)} required aria-required>
+                  <option value="">Select employer…</option>
+                  {employers.map((em) => (
+                    <option key={em.id} value={em.id}>
+                      {em.displayName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <label className="field" style={{ flex: "1 1 14rem", marginBottom: 0, minWidth: "min(100%, 14rem)" }}>
+              <span>Belongs to</span>
+              <HierarchicalSearchPicker
+                value={belongsTo}
+                onChange={(v) => setBelongsTo(v)}
+                groups={belongsToGroups}
+                placeholder="All household activity"
+                ariaLabel="Belongs to scope"
+                clearable
+              />
+            </label>
+          </div>
         ) : null}
 
         {!hasEmployers ? (
@@ -264,6 +282,20 @@ export function PayslipManualPage() {
               </select>
             </label>
           </details>
+        ) : null}
+
+        {!hasEmployers ? (
+          <label className="field" style={{ marginBottom: "1rem" }}>
+            <span>Belongs to</span>
+            <HierarchicalSearchPicker
+              value={belongsTo}
+              onChange={(v) => setBelongsTo(v)}
+              groups={belongsToGroups}
+              placeholder="All household activity"
+              ariaLabel="Belongs to scope"
+              clearable
+            />
+          </label>
         ) : null}
 
         <h3 style={{ marginTop: "1rem", marginBottom: "0.5rem", fontSize: "1rem" }}>Pay period</h3>
@@ -327,7 +359,7 @@ export function PayslipManualPage() {
           <table className="ledger-table payslip-manual__table">
             <thead>
               <tr>
-                <th scope="col">Metric</th>
+                <th scope="col">Description</th>
                 <th scope="col">Current</th>
                 <th scope="col">YTD</th>
               </tr>
@@ -462,18 +494,6 @@ export function PayslipManualPage() {
               </tr>
             </tbody>
           </table>
-        </div>
-
-        <div style={{ marginTop: "1.25rem", borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: "1rem" }}>
-          <h3 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Belongs to</h3>
-          <HierarchicalSearchPicker
-            value={belongsTo}
-            onChange={(v) => setBelongsTo(v)}
-            groups={belongsToGroups}
-            placeholder="All household activity"
-            ariaLabel="Belongs to scope"
-            clearable
-          />
         </div>
 
         {submitError ? <p className="error">{submitError}</p> : null}

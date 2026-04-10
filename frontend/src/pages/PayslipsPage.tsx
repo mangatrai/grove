@@ -13,7 +13,6 @@ type ListResponse = {
   items: PayslipSnapshotDetail[];
 };
 
-type EmployerRow = { id: string; displayName: string };
 type OwnerProfileOption = { id: string; label: string };
 type HouseholdMemberResponse = { id: string; fullName?: string; firstName?: string; lastName?: string };
 type HouseholdMembersPayload = { members: HouseholdMemberResponse[] };
@@ -33,25 +32,9 @@ function formatMoney(n: number | null): string {
   return `$${n.toFixed(2)}`;
 }
 
-function periodLabel(r: PayslipSnapshotDetail): string {
-  const a = r.payPeriodStart;
-  const b = r.payPeriodEnd;
-  if (a && b) {
-    return `${a} → ${b}`;
-  }
-  if (a) {
-    return a;
-  }
-  if (b) {
-    return b;
-  }
-  return "—";
-}
-
 export function PayslipsPage() {
   const token = useAuthToken();
   const [data, setData] = useState<ListResponse | null>(null);
-  const [employers, setEmployers] = useState<EmployerRow[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -68,12 +51,8 @@ export function PayslipsPage() {
         params.set("ownerPersonProfileId", id);
       }
     }
-    const [res, hs] = await Promise.all([
-      apiJson<ListResponse>(`/payslips?${params.toString()}`),
-      apiJson<{ employers: EmployerRow[] }>("/household/settings").catch(() => ({ employers: [] as EmployerRow[] }))
-    ]);
+    const res = await apiJson<ListResponse>(`/payslips?${params.toString()}`);
     setData(res);
-    setEmployers(hs.employers ?? []);
   }, [ownerFilter]);
 
   const loadOwners = useCallback(async () => {
@@ -193,38 +172,20 @@ export function PayslipsPage() {
             <table className="ledger-table">
               <thead>
                 <tr>
-                  <th>Pay period</th>
-                  <th>Pay date</th>
+                  <th>Pay period start</th>
+                  <th>Pay period end</th>
                   <th>Gross (current)</th>
                   <th>Net (current)</th>
-                  <th>Employer</th>
-                  <th>File</th>
-                  <th>Uploaded</th>
-                  <th>Parser</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {data.items.map((r) => (
                   <tr key={r.id}>
-                    <td>
-                      <Link to={`/payslips/${r.id}`}>{periodLabel(r)}</Link>
-                    </td>
-                    <td>{r.payDate ?? "—"}</td>
+                    <td>{r.payPeriodStart ?? "—"}</td>
+                    <td>{r.payPeriodEnd ?? "—"}</td>
                     <td>{formatMoney(r.grossPayCurrent)}</td>
                     <td>{formatMoney(r.netPayCurrent)}</td>
-                    <td>
-                      {r.employerId
-                        ? employers.find((e) => e.id === r.employerId)?.displayName ?? r.employerId.slice(0, 8) + "…"
-                        : "—"}
-                    </td>
-                    <td style={{ maxWidth: "14rem", wordBreak: "break-word" }}>
-                      <Link to={`/payslips/${r.id}`}>{r.fileName}</Link>
-                    </td>
-                    <td style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>{r.createdAt}</td>
-                    <td>
-                      <code style={{ fontSize: "0.8rem" }}>{r.parserProfileId}</code>
-                    </td>
                     <td>
                       <Link to={`/payslips/${r.id}`}>View</Link>
                     </td>

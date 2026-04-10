@@ -1182,8 +1182,8 @@ export function ImportWorkspacePage() {
   }
 
   return (
-    <div>
-      <div className="card">
+    <div className="import-workspace-page">
+      <div className="card import-workspace__control-band">
         <h1>Import session</h1>
         <p className="muted">
           Session <code>{sessionId}</code>{" "}

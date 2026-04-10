@@ -1,6 +1,6 @@
 import { MultiSelect } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useBlocker } from "react-router-dom";
 import {
   CartesianGrid,
   Legend,
@@ -195,6 +195,15 @@ export function NetWorthPage() {
   const [bulkWorking, setBulkWorking] = useState(false);
   const [bulkSummary, setBulkSummary] = useState<string | null>(null);
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+
+  const [editBaseline, setEditBaseline] = useState<{ amount: string; asOf: string } | null>(null);
+  const editDirty = Boolean(
+    editingId &&
+      editBaseline &&
+      (editAmount.trim() !== editBaseline.amount.trim() || editAsOf !== editBaseline.asOf)
+  );
+
+  const navBlocker = useBlocker(editDirty);
 
   const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
     () => [
@@ -429,16 +438,18 @@ export function NetWorthPage() {
     setRowSaveError(null);
     const stored = row.balance;
     const display = signedDisplayBalance(row);
-    setEditAmount(
-      stored == null ? "" : String(display ?? "")
-    );
-    setEditAsOf(row.balanceAsOf ?? tableAsOf);
+    const amt = stored == null ? "" : String(display ?? "");
+    const asOf = row.balanceAsOf ?? tableAsOf;
+    setEditAmount(amt);
+    setEditAsOf(asOf);
+    setEditBaseline({ amount: amt, asOf });
   }, [tableAsOf]);
 
   const cancelEdit = useCallback(() => {
     setEditingId(null);
     setEditAmount("");
     setEditAsOf("");
+    setEditBaseline(null);
     setRowSaveError(null);
   }, []);
 
@@ -526,6 +537,17 @@ export function NetWorthPage() {
     }
   };
 
+  useEffect(() => {
+    if (!editDirty) {
+      return;
+    }
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [editDirty]);
+
   if (!token) {
     return <Navigate to="/" replace />;
   }
@@ -533,7 +555,7 @@ export function NetWorthPage() {
   const palette = ["#7c3aed", "#db2777", "#ea580c", "#ca8a04", "#0891b2", "#4f46e5", "#be123c", "#0d9488"];
 
   return (
-    <div className="payslips-page">
+    <div className="net-worth-page">
       <div className="card">
         <h1>Net worth</h1>
         <p className="muted" style={{ marginBottom: 0 }}>
@@ -769,16 +791,26 @@ export function NetWorthPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0 }}>Balance sheet</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Table as-of drives the snapshot; edit a row to post a manual balance for that account.
+          Snapshot date selects which balances to load; use the pencil on a row to post or change a manual balance for that
+          account.
         </p>
-        <div className="row" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-          <label className="field" style={{ marginBottom: 0 }}>
-            <span>Table as of</span>
+        <div style={{ marginBottom: "0.75rem" }}>
+          <label className="field" style={{ marginBottom: 0, maxWidth: "12rem" }}>
+            <span>Snapshot date</span>
             <input type="date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
           </label>
-          <div className="row" style={{ alignItems: "flex-end", gap: "0.5rem", flexWrap: "wrap" }}>
+          <p className="muted" style={{ marginTop: "0.35rem", marginBottom: 0, fontSize: "0.85rem", maxWidth: "36rem" }}>
+            One date for this table request (the API snapshot). Each row can still show its own stored as-of.
+          </p>
+        </div>
+        <details className="net-worth-page__bulk-asof" style={{ marginBottom: "0.75rem" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9rem" }}>Re-date all manual balances</summary>
+          <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.35rem", marginBottom: 0, maxWidth: "36rem" }}>
+            Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
+          </p>
+          <div className="row" style={{ alignItems: "flex-end", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
             <label className="field" style={{ marginBottom: 0 }}>
-              <span>Bulk set as-of</span>
+              <span>New as-of date</span>
               <input type="date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
             </label>
             <button
@@ -790,7 +822,7 @@ export function NetWorthPage() {
               {bulkWorking ? "Applying…" : "Apply to all rows"}
             </button>
           </div>
-        </div>
+        </details>
         {bulkSummary ? <p className="muted">{bulkSummary}</p> : null}
         {loadError ? <p className="error">{loadError}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
@@ -876,8 +908,22 @@ export function NetWorthPage() {
                       <td>{r.balanceAsOf ?? "—"}</td>
                       <td>
                         {!isEditing ? (
-                          <button type="button" className="secondary" onClick={() => startEdit(r)}>
-                            Edit
+                          <button
+                            type="button"
+                            className="net-worth-page__edit-icon"
+                            onClick={() => startEdit(r)}
+                            aria-label="Edit balance"
+                            title="Edit balance"
+                          >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+                              <path
+                                d="M4 20.5a.5.5 0 0 1-.5-.5v-3.5a.5.5 0 0 1 .15-.35L15.3 4.2a1.5 1.5 0 0 1 2.1 0l2.4 2.4a1.5 1.5 0 0 1 0 2.1L8.65 19.35a.5.5 0 0 1-.35.15H4Z"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                strokeLinejoin="round"
+                              />
+                              <path d="M13 6l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            </svg>
                           </button>
                         ) : null}
                       </td>
@@ -899,6 +945,23 @@ export function NetWorthPage() {
         closeOnClickOutside={false}
         onClose={() => setBulkConfirmOpen(false)}
         onConfirm={runBulkAsOf}
+      />
+
+      <ConfirmDialog
+        opened={navBlocker.state === "blocked"}
+        title="Discard unsaved edits?"
+        message="You have unsaved balance changes. Leave without saving?"
+        confirmLabel="Discard and leave"
+        cancelLabel="Stay"
+        danger
+        closeOnClickOutside={false}
+        onClose={() => {
+          navBlocker.reset?.();
+        }}
+        onConfirm={() => {
+          cancelEdit();
+          navBlocker.proceed?.();
+        }}
       />
     </div>
   );

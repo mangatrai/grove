@@ -1088,7 +1088,7 @@ export function TransactionsPage() {
         ) : null}
       </div>
 
-      <div className="transactions-toolbar card">
+      <div className="transactions-toolbar card transactions-page__control-band">
         <div className="transactions-toolbar__tabs" role="tablist" aria-label="Transaction scope">
           <button
             type="button"
