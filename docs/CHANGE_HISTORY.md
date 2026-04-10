@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-10
+
+### CR-064 — Net worth v2 UI + balance sheet API filters + manual payslip fields
+- **Type:** CR / API / UX / DOC / TEST
+- **What:** **`GET /reports/balance-sheet`** and **`/history`** accept optional **`ownerScope`** / **`ownerPersonProfileId`** (belongs-to). **`/history`** accepts **`accountIds`** (comma-separated, max 8) and returns optional **`accounts`** slices per point. **Net worth** page: period presets, merged start/end summary, single signed balance table, inline edit + bulk as-of, belongs-to filter, chart account overlays, transaction drill-downs (including **`fileId`** deep link). **Manual payslip** form: Current/YTD grid, pre/post tax and employee taxes YTD, template under Advanced when no employers. **Transactions** honors **`fileId`** query param when loading the ledger.
+- **Why:** One place to understand net worth, optional member-scoped views, and full manual payslip parity with API fields.
+- **Files:** [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`reports.routes.ts`](backend/src/modules/reports/reports.routes.ts), [`app.test.ts`](backend/tests/app.test.ts), [`payslip-upload.test.ts`](backend/tests/payslip-upload.test.ts), [`ibm-payslip-pdf.ts`](backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts), [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`TransactionsPage.tsx`](frontend/src/pages/TransactionsPage.tsx), [`PayslipManualPage.tsx`](frontend/src/pages/PayslipManualPage.tsx), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`openapi.yaml`](openapi/openapi.yaml), [`USER_GUIDE.md`](docs/USER_GUIDE.md).
+
 ## 2026-04-09
 
 ### DOC-063 — Operator docs: net worth in user guide + API index + CLAUDE reports/schema

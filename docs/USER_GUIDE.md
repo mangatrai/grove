@@ -12,9 +12,11 @@ After sign-in you land on **Home**, with cash summaries and shortcuts into the l
 
 Open **Net worth** from the sidebar for **assets vs liabilities** (non–payslip accounts).
 
-- **Trend:** chart of total assets, liabilities, and net over a date range; sampling matches the same balance rules as the snapshot (manual balances win, then balances saved from statement imports, then read-only hints from parsed files where applicable).
-- **Snapshot (as of):** pick a single date to see per-account balances and totals.
-- **Manual balances:** add or update a balance for an account on a specific date when you do not rely on imports alone. Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlog notes in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
+- **Trend:** choose a **period** (last 3 / 6 / 12 months, year-to-date, or custom dates) and an **interval** (month-end, weekly, or daily samples). The chart shows total assets, liabilities, and net; you can **overlay** a few accounts on the same chart. **Starting / ending** totals summarize the first and last sample in range. **Belongs to** optionally limits the sheet to household-owned accounts or one member’s accounts.
+- **Balance sheet:** one table for all accounts. **Liabilities** are shown as **negative** balances so they read consistently with net worth. **Table as of** picks the snapshot date; use **Edit** on a row to post a manual balance (or **Bulk set as-of** to re-date manual snapshots). Account names link to **Transactions** for the balance as-of day; when a balance came from an import, an extra link opens transactions for that **import file**.
+- **Reload** retries the trend and table if something failed to load.
+
+Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlog notes in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
 
 ## Home (dashboard)
 
