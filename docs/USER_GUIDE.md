@@ -12,9 +12,9 @@ After sign-in you land on **Home**, with cash summaries and shortcuts into the l
 
 Open **Net worth** from the sidebar for **assets vs liabilities** (non–payslip accounts).
 
-- **Trend:** choose a **period** (last 3 / 6 / 12 months, year-to-date, or custom dates) and an **interval** (month-end, weekly, or daily samples). The chart shows total assets, liabilities, and net; you can **overlay** a few accounts on the same chart. **Starting / ending** totals summarize the first and last sample in range. **Belongs to** optionally limits the sheet to household-owned accounts or one member’s accounts.
+- **Trend:** choose a **period** (last 3 / 6 / 12 months, year-to-date, or custom dates) and an **interval** (month-end, weekly, or daily samples). Each chart point uses the same balance rules as the table below: **manual balance** first, then a balance saved from an **import**, then a **statement** hint when nothing else exists. The chart shows total assets, liabilities, and net; you can **overlay** a few accounts on the same chart. The **period summary** table lists the **first** and **last** sample dates on the chart (same endpoints as the line); **Ledger** opens **Transactions** for that calendar day only. **Belongs to** optionally limits the sheet to household-owned accounts or one member’s accounts.
 - **Balance sheet:** one table for all accounts. **Liabilities** are shown as **negative** balances so they read consistently with net worth. **Table as of** picks the snapshot date; use **Edit** on a row to post a manual balance (or **Bulk set as-of** to re-date manual snapshots). Account names link to **Transactions** for the balance as-of day; when a balance came from an import, an extra link opens transactions for that **import file**.
-- **Reload** retries the trend and table if something failed to load.
+- **Retry load** appears only if the trend or balance sheet failed to load; it refetches both.
 
 Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlog notes in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
 

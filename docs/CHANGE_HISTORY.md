@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-10
 
+### UX-065 — Net worth + manual payslip layout polish
+- **Type:** UX / DOC
+- **What:** **Net worth** — trend controls grouped; **period summary** as a **ledger-table** with **Ledger** links (first/last sample = chart endpoints); **Reload** removed from the toolbar and replaced by **Retry load** when a fetch fails. **Manual payslip** — pay period and **Current / YTD** amounts in aligned **ledger-table** rows instead of a wide grid.
+- **Why:** Easier scanning on large screens; clearer relationship between chart samples and ledger drill-downs; less redundant chrome.
+- **Files:** [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`PayslipManualPage.tsx`](frontend/src/pages/PayslipManualPage.tsx), [`index.css`](frontend/src/index.css), [`USER_GUIDE.md`](docs/USER_GUIDE.md).
+
 ### CR-064 — Net worth v2 UI + balance sheet API filters + manual payslip fields
 - **Type:** CR / API / UX / DOC / TEST
 - **What:** **`GET /reports/balance-sheet`** and **`/history`** accept optional **`ownerScope`** / **`ownerPersonProfileId`** (belongs-to). **`/history`** accepts **`accountIds`** (comma-separated, max 8) and returns optional **`accounts`** slices per point. **Net worth** page: period presets, merged start/end summary, single signed balance table, inline edit + bulk as-of, belongs-to filter, chart account overlays, transaction drill-downs (including **`fileId`** deep link). **Manual payslip** form: Current/YTD grid, pre/post tax and employee taxes YTD, template under Advanced when no employers. **Transactions** honors **`fileId`** query param when loading the ledger.
