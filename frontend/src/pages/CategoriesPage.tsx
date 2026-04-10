@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type CategoryRow = {
   id: string;
@@ -64,6 +65,7 @@ export function CategoriesPage() {
   const [editName, setEditName] = useState("");
   const [editParentId, setEditParentId] = useState<string>("");
   const [editSaving, setEditSaving] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const canEditBuiltIns = authRole === "owner" || authRole === "admin";
 
@@ -206,8 +208,13 @@ export function CategoriesPage() {
     }
   }
 
-  async function onDelete(id: string) {
-    if (!window.confirm("Delete this category? It must have no subcategories and no transaction rows.")) {
+  function requestDeleteCategory(id: string) {
+    setDeleteConfirmId(id);
+  }
+
+  const confirmDeleteCategory = useCallback(async () => {
+    const id = deleteConfirmId;
+    if (!id) {
       return;
     }
     setError(null);
@@ -219,8 +226,9 @@ export function CategoriesPage() {
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not delete");
+      throw err;
     }
-  }
+  }, [deleteConfirmId, load]);
 
   const showEditForRow = (row: HierarchyRow): boolean => {
     const c = row.kind === "parent" ? row.category : row.category;
@@ -415,7 +423,7 @@ export function CategoriesPage() {
                               </button>
                             ) : null}
                             {c.householdScoped ? (
-                              <button type="button" className="secondary" onClick={() => void onDelete(c.id)}>
+                              <button type="button" className="secondary" onClick={() => requestDeleteCategory(c.id)}>
                                 Delete
                               </button>
                             ) : (
@@ -441,7 +449,7 @@ export function CategoriesPage() {
                             </button>
                           ) : null}
                           {c.householdScoped ? (
-                            <button type="button" className="secondary" onClick={() => void onDelete(c.id)}>
+                            <button type="button" className="secondary" onClick={() => requestDeleteCategory(c.id)}>
                               Delete
                             </button>
                           ) : (
@@ -457,6 +465,17 @@ export function CategoriesPage() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        opened={deleteConfirmId !== null}
+        title="Delete category?"
+        message="Delete this category? It must have no subcategories and no transaction rows."
+        confirmLabel="Delete"
+        danger
+        closeOnClickOutside={false}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={confirmDeleteCategory}
+      />
     </div>
   );
 }

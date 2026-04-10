@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
@@ -322,6 +323,9 @@ export function TransactionsPage() {
   const [resolutionQueueSummary, setResolutionQueueSummary] = useState<{
     openDuplicateAmbiguityNotOnLedger?: number;
   } | null>(null);
+  const [ruleFromLedgerConfirm, setRuleFromLedgerConfirm] = useState<{ txnId: string; categoryId: string } | null>(
+    null
+  );
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -470,6 +474,27 @@ export function TransactionsPage() {
       /* ignore */
     }
   }, []);
+
+  const handleCreateRuleFromLedger = useCallback(async () => {
+    const p = ruleFromLedgerConfirm;
+    if (!p) {
+      return;
+    }
+    try {
+      await apiJson("/categories/rules/from-ledger", {
+        method: "POST",
+        body: JSON.stringify({
+          transactionId: p.txnId,
+          categoryId: p.categoryId,
+          matchType: "contains",
+          scope: "contains"
+        })
+      });
+    } catch (ruleErr: unknown) {
+      setError(ruleErr instanceof Error ? ruleErr.message : "Could not create rule from description");
+      throw ruleErr;
+    }
+  }, [ruleFromLedgerConfirm]);
 
   useEffect(() => {
     if (!token) {
@@ -1711,28 +1736,7 @@ export function TransactionsPage() {
                                                         });
                                                         forgetReviewDetail(t.id);
                                                         await load();
-                                                        const makeRule = window.confirm(
-                                                          "Create a household rule so similar descriptions map to this category? Uses a contains match on normalized text."
-                                                        );
-                                                        if (makeRule) {
-                                                          try {
-                                                            await apiJson("/categories/rules/from-ledger", {
-                                                              method: "POST",
-                                                              body: JSON.stringify({
-                                                                transactionId: t.id,
-                                                                categoryId,
-                                                                matchType: "contains",
-                                                                scope: "contains"
-                                                              })
-                                                            });
-                                                          } catch (ruleErr: unknown) {
-                                                            setError(
-                                                              ruleErr instanceof Error
-                                                                ? ruleErr.message
-                                                                : "Could not create rule from description"
-                                                            );
-                                                          }
-                                                        }
+                                                        setRuleFromLedgerConfirm({ txnId: t.id, categoryId });
                                                       } catch (e: unknown) {
                                                         setError(e instanceof Error ? e.message : "Failed to set category");
                                                       } finally {
@@ -1907,6 +1911,17 @@ export function TransactionsPage() {
           </div>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        opened={ruleFromLedgerConfirm !== null}
+        title="Create classification rule?"
+        message="Create a household rule so similar descriptions map to this category? Uses a contains match on normalized text."
+        confirmLabel="Create rule"
+        cancelLabel="Not now"
+        closeOnClickOutside={false}
+        onClose={() => setRuleFromLedgerConfirm(null)}
+        onConfirm={handleCreateRuleFromLedger}
+      />
     </div>
   );
 }

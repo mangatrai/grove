@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import {
@@ -240,6 +241,8 @@ type MatcherPreviewRow = {
 
 type CategoryLabelRow = { id: string; name: string; parentId: string | null };
 
+type ImportConfirmAction = { kind: "undo" } | { kind: "finalize" } | { kind: "removeFile"; fileId: string };
+
 function categoryLabelForPreview(cat: CategoryLabelRow, all: CategoryLabelRow[]): string {
   if (!cat.parentId) {
     return cat.name;
@@ -298,6 +301,7 @@ export function ImportWorkspacePage() {
   const [matcherPreviewLoading, setMatcherPreviewLoading] = useState(false);
   const [copySessionMsg, setCopySessionMsg] = useState<string | null>(null);
   const [removingFileId, setRemovingFileId] = useState<string | null>(null);
+  const [importConfirmAction, setImportConfirmAction] = useState<ImportConfirmAction | null>(null);
 
   const load = useCallback(async () => {
     if (!sessionId) {
@@ -370,66 +374,99 @@ export function ImportWorkspacePage() {
     }
   }, [sessionId]);
 
-  const undoLedgerPost = useCallback(async () => {
-    if (!sessionId) {
+  const openUndoConfirm = useCallback(() => {
+    if (!sessionId || (sessionSummary?.totals.canonicalRows ?? 0) === 0) {
       return;
     }
-    const posted = sessionSummary?.totals.canonicalRows ?? 0;
-    if (posted === 0) {
-      return;
-    }
-    const ok = window.confirm(
-      "Remove all transactions this import posted to the ledger? Parsed file rows stay so you can run import again. After the session is finalized, this rollback is no longer available."
-    );
-    if (!ok) {
-      return;
-    }
-    setError(null);
-    setMessage(null);
-    setUndoBusy(true);
-    try {
-      const out = await apiJson<{ deletedCanonicalRows: number; deletedResolutionItems: number }>(
-        `/imports/sessions/${sessionId}/undo-import`,
-        { method: "POST", body: "{}" }
-      );
-      setLastImportSummary(null);
-      setMessage(
-        `Removed ${out.deletedCanonicalRows} ledger row(s) and ${out.deletedResolutionItems} review item(s) tied to this import. You can run import again.`
-      );
-      await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Undo failed");
-    } finally {
-      setUndoBusy(false);
-    }
-  }, [sessionId, sessionSummary?.totals.canonicalRows, load]);
+    setImportConfirmAction({ kind: "undo" });
+  }, [sessionId, sessionSummary?.totals.canonicalRows]);
 
-  const finalizeSession = useCallback(async () => {
+  const openFinalizeConfirm = useCallback(() => {
     if (!sessionId) {
       return;
     }
-    const ok = window.confirm(
-      "Finalize this import session? After finalizing, the session is locked: you cannot undo ledger posting for this import, and this cannot be reversed from the app."
-    );
-    if (!ok) {
+    setImportConfirmAction({ kind: "finalize" });
+  }, [sessionId]);
+
+  const handleImportConfirm = useCallback(async () => {
+    if (!sessionId) {
       return;
     }
+    const a = importConfirmAction;
+    if (!a) {
+      return;
+    }
+
+    if (a.kind === "undo") {
+      setError(null);
+      setMessage(null);
+      setUndoBusy(true);
+      try {
+        const out = await apiJson<{ deletedCanonicalRows: number; deletedResolutionItems: number }>(
+          `/imports/sessions/${sessionId}/undo-import`,
+          { method: "POST", body: "{}" }
+        );
+        setLastImportSummary(null);
+        setMessage(
+          `Removed ${out.deletedCanonicalRows} ledger row(s) and ${out.deletedResolutionItems} review item(s) tied to this import. You can run import again.`
+        );
+        await load();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Undo failed");
+        throw err;
+      } finally {
+        setUndoBusy(false);
+      }
+      return;
+    }
+
+    if (a.kind === "finalize") {
+      setError(null);
+      setMessage(null);
+      setFinalizeBusy(true);
+      try {
+        await apiJson<{ sessionId: string; status: string }>(
+          `/imports/sessions/${sessionId}/status`,
+          { method: "PATCH", body: JSON.stringify({ status: "finalized" }) }
+        );
+        setMessage("Session finalized. This import session is now locked.");
+        await load();
+      } catch (err) {
+        setError(messageFromApiError(err));
+        throw err;
+      } finally {
+        setFinalizeBusy(false);
+      }
+      return;
+    }
+
+    const fileId = a.fileId;
+    setRemovingFileId(fileId);
     setError(null);
-    setMessage(null);
-    setFinalizeBusy(true);
     try {
-      await apiJson<{ sessionId: string; status: string }>(
-        `/imports/sessions/${sessionId}/status`,
-        { method: "PATCH", body: JSON.stringify({ status: "finalized" }) }
-      );
-      setMessage("Session finalized. This import session is now locked.");
+      const res = await apiFetch(`/imports/sessions/${sessionId}/files/${fileId}`, { method: "DELETE" });
+      const text = await res.text();
+      if (!res.ok) {
+        let msg = text || res.statusText;
+        try {
+          const j = JSON.parse(text) as { message?: string };
+          if (typeof j.message === "string" && j.message.length > 0) {
+            msg = j.message;
+          }
+        } catch {
+          /* use raw */
+        }
+        throw new Error(msg);
+      }
+      setMessage("File removed from session.");
       await load();
     } catch (err) {
-      setError(messageFromApiError(err));
+      setError(err instanceof Error ? err.message : "Could not remove file");
+      throw err;
     } finally {
-      setFinalizeBusy(false);
+      setRemovingFileId(null);
     }
-  }, [sessionId, load]);
+  }, [sessionId, importConfirmAction, load]);
 
   const runReconcilePayslipAsync = useCallback(
     async (force: boolean) => {
@@ -747,43 +784,14 @@ export function ImportWorkspacePage() {
     [drafts, persistBinding, files, accounts, householdEmployers, incomeInference]
   );
 
-  const removeFileFromSession = useCallback(
-    async (fileId: string) => {
+  const openRemoveFileConfirm = useCallback(
+    (fileId: string) => {
       if (!sessionId) {
         return;
       }
-      const ok = window.confirm(
-        "Remove this file from the session? Staged data for this file (including parsed rows or payslip snapshot if any) will be deleted."
-      );
-      if (!ok) {
-        return;
-      }
-      setRemovingFileId(fileId);
-      setError(null);
-      try {
-        const res = await apiFetch(`/imports/sessions/${sessionId}/files/${fileId}`, { method: "DELETE" });
-        const text = await res.text();
-        if (!res.ok) {
-          let msg = text || res.statusText;
-          try {
-            const j = JSON.parse(text) as { message?: string };
-            if (typeof j.message === "string" && j.message.length > 0) {
-              msg = j.message;
-            }
-          } catch {
-            /* use raw */
-          }
-          throw new Error(msg);
-        }
-        setMessage("File removed from session.");
-        await load();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not remove file");
-      } finally {
-        setRemovingFileId(null);
-      }
+      setImportConfirmAction({ kind: "removeFile", fileId });
     },
-    [sessionId, load]
+    [sessionId]
   );
 
   const onBelongsToChange = useCallback(
@@ -1369,7 +1377,7 @@ export function ImportWorkspacePage() {
                             className="secondary"
                             style={{ fontSize: "0.85rem" }}
                             disabled={removingFileId === f.id}
-                            onClick={() => void removeFileFromSession(f.id)}
+                            onClick={() => openRemoveFileConfirm(f.id)}
                           >
                             {removingFileId === f.id ? "Removing…" : "Remove from session"}
                           </button>
@@ -1730,7 +1738,7 @@ export function ImportWorkspacePage() {
                     ? "Nothing from this import is in the ledger yet"
                     : undefined
                 }
-                onClick={() => void undoLedgerPost()}
+                onClick={openUndoConfirm}
               >
                 {undoBusy ? "Working…" : "Remove posted transactions from this import"}
               </button>
@@ -1747,7 +1755,7 @@ export function ImportWorkspacePage() {
               <button
                 type="button"
                 disabled={finalizeBusy || undoBusy || pipelineBusy}
-                onClick={() => void finalizeSession()}
+                onClick={openFinalizeConfirm}
               >
                 {finalizeBusy ? "Working…" : "Finalize session"}
               </button>
@@ -1755,6 +1763,41 @@ export function ImportWorkspacePage() {
           </div>
         </>
       ) : null}
+
+      <ConfirmDialog
+        opened={importConfirmAction !== null}
+        title={
+          importConfirmAction?.kind === "undo"
+            ? "Remove posted transactions?"
+            : importConfirmAction?.kind === "finalize"
+              ? "Finalize import session?"
+              : importConfirmAction?.kind === "removeFile"
+                ? "Remove file from session?"
+                : ""
+        }
+        message={
+          importConfirmAction?.kind === "undo"
+            ? "Remove all transactions this import posted to the ledger? Parsed file rows stay so you can run import again. After the session is finalized, this rollback is no longer available."
+            : importConfirmAction?.kind === "finalize"
+              ? "After finalizing, the session is locked: you cannot undo ledger posting for this import, and this cannot be reversed from the app."
+              : importConfirmAction?.kind === "removeFile"
+                ? "Staged data for this file (including parsed rows or payslip snapshot if any) will be deleted."
+                : ""
+        }
+        confirmLabel={
+          importConfirmAction?.kind === "undo"
+            ? "Remove from ledger"
+            : importConfirmAction?.kind === "finalize"
+              ? "Finalize session"
+              : importConfirmAction?.kind === "removeFile"
+                ? "Remove file"
+                : "Confirm"
+        }
+        danger
+        closeOnClickOutside={false}
+        onClose={() => setImportConfirmAction(null)}
+        onConfirm={handleImportConfirm}
+      />
     </div>
   );
 }

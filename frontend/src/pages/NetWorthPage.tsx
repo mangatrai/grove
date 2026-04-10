@@ -13,6 +13,7 @@ import {
 } from "recharts";
 
 import { apiJson, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 
 type BalanceSheetAccountRow = {
@@ -193,6 +194,7 @@ export function NetWorthPage() {
   const [bulkAsOfDraft, setBulkAsOfDraft] = useState(() => tableAsOf);
   const [bulkWorking, setBulkWorking] = useState(false);
   const [bulkSummary, setBulkSummary] = useState<string | null>(null);
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
 
   const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
     () => [
@@ -480,14 +482,8 @@ export function NetWorthPage() {
     [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, loadHistoryImmediate, loadSheet]
   );
 
-  const applyBulkAsOf = useCallback(async () => {
+  const runBulkAsOf = useCallback(async () => {
     if (!bulkAsOfDraft || !data) {
-      return;
-    }
-    const ok = window.confirm(
-      `Set manual balance as-of date to ${bulkAsOfDraft} for every row that has a balance? New snapshots use the same amounts as shown.`
-    );
-    if (!ok) {
       return;
     }
     setBulkWorking(true);
@@ -741,7 +737,12 @@ export function NetWorthPage() {
               <span>Bulk set as-of</span>
               <input type="date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
             </label>
-            <button type="button" className="secondary" disabled={bulkWorking || allTableRows.length === 0} onClick={() => void applyBulkAsOf()}>
+            <button
+              type="button"
+              className="secondary"
+              disabled={bulkWorking || allTableRows.length === 0}
+              onClick={() => setBulkConfirmOpen(true)}
+            >
               {bulkWorking ? "Applying…" : "Apply to all rows"}
             </button>
           </div>
@@ -845,6 +846,16 @@ export function NetWorthPage() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        opened={bulkConfirmOpen}
+        title="Apply as-of date to all rows?"
+        message={`Set manual balance as-of date to ${bulkAsOfDraft} for every row that has a balance? New snapshots use the same amounts as shown.`}
+        confirmLabel="Apply to all"
+        closeOnClickOutside={false}
+        onClose={() => setBulkConfirmOpen(false)}
+        onConfirm={runBulkAsOf}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   buildRulesCsvLines,
   categoryPathForCsv,
@@ -100,6 +101,11 @@ const emptyGlobalForm = {
   enabled: true
 };
 
+type RuleConfirmAction =
+  | { kind: "household"; id: string }
+  | { kind: "householdAll" }
+  | { kind: "builtin"; id: string };
+
 export function CategoryRulesPage() {
   const token = useAuthToken();
   const [categories, setCategories] = useState<CategoryRow[]>([]);
@@ -118,6 +124,7 @@ export function CategoryRulesPage() {
   const [ruleFilter, setRuleFilter] = useState("");
   const [testDesc, setTestDesc] = useState("");
   const [testAmount, setTestAmount] = useState("-10");
+  const [ruleConfirm, setRuleConfirm] = useState<RuleConfirmAction | null>(null);
   const [testResult, setTestResult] = useState<unknown>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [recatMsg, setRecatMsg] = useState<string | null>(null);
@@ -306,47 +313,72 @@ export function CategoryRulesPage() {
     }
   }
 
-  async function deleteHouseholdRule(id: string) {
-    if (!window.confirm("Delete this household rule? This cannot be undone.")) {
-      return;
-    }
-    setError(null);
-    try {
-      await apiFetch(`/categories/rules/${id}`, { method: "DELETE" });
-      setEditingId(null);
-      setEditDraft(null);
-      await load();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Delete failed");
-    }
+  function requestDeleteHouseholdRule(id: string) {
+    setRuleConfirm({ kind: "household", id });
   }
 
-  async function deleteAllHouseholdRules() {
+  function requestDeleteAllHouseholdRules() {
     if (rules.length === 0) {
       return;
     }
-    if (
-      !window.confirm(
-        `Delete all ${rules.length} household rule(s)? Built-in (global) rules are not affected. This cannot be undone.`
-      )
-    ) {
+    setRuleConfirm({ kind: "householdAll" });
+  }
+
+  const handleRuleConfirm = useCallback(async () => {
+    if (!ruleConfirm) {
+      return;
+    }
+    if (ruleConfirm.kind === "household") {
+      const id = ruleConfirm.id;
+      setError(null);
+      try {
+        await apiFetch(`/categories/rules/${id}`, { method: "DELETE" });
+        setEditingId(null);
+        setEditDraft(null);
+        await load();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Delete failed");
+        throw err;
+      }
+      return;
+    }
+    if (ruleConfirm.kind === "householdAll") {
+      setError(null);
+      setRecatMsg(null);
+      setSaving(true);
+      try {
+        const res = await apiJson<{ deleted: number }>("/categories/rules/household", { method: "DELETE" });
+        setRecatMsg(`Deleted ${res.deleted} household rule(s).`);
+        setEditingId(null);
+        setEditDraft(null);
+        await load();
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : "Delete all failed");
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    const id = ruleConfirm.id;
+    if (!canEditGlobals) {
       return;
     }
     setError(null);
-    setRecatMsg(null);
-    setSaving(true);
     try {
-      const res = await apiJson<{ deleted: number }>("/categories/rules/household", { method: "DELETE" });
-      setRecatMsg(`Deleted ${res.deleted} household rule(s).`);
-      setEditingId(null);
-      setEditDraft(null);
+      const res = await apiFetch(`/categories/rules/builtin/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || res.statusText);
+      }
+      setEditingBuiltinId(null);
+      setEditBuiltinDraft(null);
       await load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Delete all failed");
-    } finally {
-      setSaving(false);
+      setError(err instanceof Error ? err.message : "Delete failed");
+      throw err;
     }
-  }
+  }, [ruleConfirm, canEditGlobals, load]);
 
   function startEdit(r: CategoryRule) {
     setEditingId(r.id);
@@ -456,23 +488,11 @@ export function CategoryRulesPage() {
     }
   }
 
-  async function deleteBuiltinRule(id: string) {
-    if (!canEditGlobals || !window.confirm("Delete this built-in rule? This affects all households on this server.")) {
+  function requestDeleteBuiltinRule(id: string) {
+    if (!canEditGlobals) {
       return;
     }
-    setError(null);
-    try {
-      const res = await apiFetch(`/categories/rules/builtin/${id}`, { method: "DELETE" });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(t || res.statusText);
-      }
-      setEditingBuiltinId(null);
-      setEditBuiltinDraft(null);
-      await load();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Delete failed");
-    }
+    setRuleConfirm({ kind: "builtin", id });
   }
 
   function startEditBuiltin(r: BuiltinRuleRow) {
@@ -865,7 +885,7 @@ export function CategoryRulesPage() {
           <button
             type="button"
             className="secondary"
-            onClick={() => void deleteAllHouseholdRules()}
+            onClick={requestDeleteAllHouseholdRules}
             disabled={loading || saving || rules.length === 0}
             title="Remove every household rule so you can re-import a CSV without duplicates"
           >
@@ -1199,7 +1219,7 @@ export function CategoryRulesPage() {
                                       <button
                                         type="button"
                                         className="secondary"
-                                        onClick={() => void deleteBuiltinRule(b.id)}
+                                        onClick={() => requestDeleteBuiltinRule(b.id)}
                                       >
                                         Delete
                                       </button>
@@ -1606,7 +1626,7 @@ export function CategoryRulesPage() {
                                     <button
                                       type="button"
                                       className="secondary"
-                                      onClick={() => void deleteHouseholdRule(r.id)}
+                                      onClick={() => requestDeleteHouseholdRule(r.id)}
                                     >
                                       Delete
                                     </button>
@@ -1619,7 +1639,7 @@ export function CategoryRulesPage() {
                                     <button
                                       type="button"
                                       className="secondary"
-                                      onClick={() => void deleteHouseholdRule(r.id)}
+                                      onClick={() => requestDeleteHouseholdRule(r.id)}
                                     >
                                       Delete
                                     </button>
@@ -1639,6 +1659,33 @@ export function CategoryRulesPage() {
         ) : null}
         </div>
       </div>
+
+      <ConfirmDialog
+        opened={ruleConfirm !== null}
+        title={
+          ruleConfirm?.kind === "household"
+            ? "Delete household rule?"
+            : ruleConfirm?.kind === "householdAll"
+              ? "Delete all household rules?"
+              : ruleConfirm?.kind === "builtin"
+                ? "Delete built-in rule?"
+                : ""
+        }
+        message={
+          ruleConfirm?.kind === "household"
+            ? "Delete this household rule? This cannot be undone."
+            : ruleConfirm?.kind === "householdAll"
+              ? `Delete all ${rules.length} household rule(s)? Built-in (global) rules are not affected. This cannot be undone.`
+              : ruleConfirm?.kind === "builtin"
+                ? "Delete this built-in rule? This affects all households on this server."
+                : ""
+        }
+        confirmLabel="Delete"
+        danger
+        closeOnClickOutside={false}
+        onClose={() => setRuleConfirm(null)}
+        onConfirm={handleRuleConfirm}
+      />
     </div>
   );
 }
