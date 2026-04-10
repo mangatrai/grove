@@ -69,7 +69,8 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 
 ## 5. UI
 
-- **Shipped (v1 summary):** list, detail, upload, **`POST /payslips/manual`** (typed entry, synthetic checksum), **PATCH** summary edits, and **income charts** on **`/payslips`** (**CR-031**, **CR-036**, **CR-051**, **CR-056**).
+- **Shipped (v1 summary):** list, detail, upload, **`POST /payslips/manual`** (typed entry, synthetic checksum), and **income charts** on **`/payslips`** (**CR-031**, **CR-036**, **CR-051**, **CR-056**).
+- **API vs UI:** **`PATCH /payslips/:id`** accepts summary-field updates for integrations and future work; the **detail route** (`/payslips/:payslipId`) is **read-only** in the app today — there is no full in-browser editor for parsed or manual stubs yet. Broader payslip UI (line-item grids, richer editing) tracks **Epic 3 — 3.3b+** in [`docs/archive/MVP_BACKLOG.md`](archive/MVP_BACKLOG.md).
 - **Later:** line-item grids, salary vs commission split, richer tax analytics.
 
 ---

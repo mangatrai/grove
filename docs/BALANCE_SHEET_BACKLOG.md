@@ -9,20 +9,22 @@ Household **assets vs liabilities** view, separate from the transaction ledger. 
 - **UI:** Sidebar **Net worth** — totals + asset/liability tables + manual entry form.
 - **Import snapshots (CR-061):** Bank parse persists **`source = import`** `account_balance_snapshot` rows when statement period end is known; balance sheet API prefers them over **`confidence_summary`** alone.
 - **History (CR-062):** **`GET /reports/balance-sheet/history`** + **Net worth → Trend** chart (assets, liabilities, net over sampled dates).
+- **Filters + overlays (CR-064):** **`GET /reports/balance-sheet`** and **`/history`** accept optional **`ownerScope`** / **`ownerPersonProfileId`** (belongs-to). **`/history`** accepts **`accountIds`** (comma-separated, max 8) and returns optional **`accounts`** slices per point for **per-account overlay lines** on the trend chart. Net worth UI: period presets, belongs-to filter, chart account overlays, period summary table, transaction drill-downs.
+- **UX polish (UX-065):** Trend control grouping; period summary as **`ledger-table`**; **Retry load** on fetch failure; layout/copy updates — see [`docs/CHANGE_HISTORY.md`](CHANGE_HISTORY.md) **CR-064** / **UX-065**.
 
 ## Deferred
 
-1. **Per-account trend lines** on the net worth chart (history API currently returns **totals** only; extend with optional `includeAccounts` if needed).
-2. **Full “balances over time”** — multi–time-slice comparison, statement-period alignment beyond sampled `asOf` lists.
-3. **Household vs member subtotals** on this page (accounts already have owner scope; filtering not in v1 UI).
+1. **Richer “balances over time” UX** — multi–time-slice comparison views, statement-period alignment beyond sampled **`asOf`** lists (the chart already samples up to **120** points from existing resolution logic).
+2. **Denser or persisted history** — optional product work if the team wants smoother series independent of import/parse events (no separate time-series store today; history is computed on read).
+3. **Household vs member subtotals** on the net worth page (totals row is household-scoped; belongs-to **filters** which accounts appear, but subtotal breakdown rows are not shipped).
 
 ### Original story list (for reference)
 
 1. **Assets vs liabilities layout** — **partially shipped** (type-based classification: checking/savings/investment vs credit_card/loan/mortgage).
 2. **Balances over time** — **partially shipped** via **`/balance-sheet/history`** + trend chart; deeper comparison UX still deferred.
-3. **Charts** — **shipped** (totals trend); per-account chart lines deferred.
+3. **Charts** — **shipped** (totals trend + optional per-account overlays via **`accountIds`**).
 4. **Editable balances** — **shipped** via manual POST/PATCH; import remains read-only hints.
-5. **Household vs member** — **deferred** for this page.
+5. **Household vs member** — **filtering shipped** (**CR-064**); **subtotals** still deferred.
 
 **BoA statement balances** are stored in `import_file.confidence_summary.statementBalances` on parse and are **also** persisted to `account_balance_snapshot` when `asOfEnd` is a usable date, so net worth does not depend only on JSON in the long run.
 

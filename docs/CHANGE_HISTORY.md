@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-10
 
+### UX-066 — Net worth balance edit UX + payslip list trim + backlog alignment
+- **Type:** UX / DOC
+- **What:** **Net worth** page wrapper **`net-worth-page`**; balance sheet **Snapshot date** copy; bulk re-date in **details**; **pencil** icon for row edit; **`useBlocker`** + **`beforeunload`** when unsaved balance edits; **Saved stubs** table columns reduced (period start/end, gross, net, View). **Manual payslip:** Employer + Belongs-to on one row; amounts table header **Description**. **Import / Transactions:** **`import-workspace-page`** / **`transactions-page__control-band`** spacing hooks. **`BALANCE_SHEET_BACKLOG.md`** updated for **CR-064**/**UX-065**; **`PAYSLIP_V1.md`** clarifies **PATCH** vs read-only detail UI.
+- **Why:** Less redundant navigation and clearer snapshot semantics; safer navigation away from dirty edits; accurate backlog story.
+- **Files:** [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`PayslipsPage.tsx`](frontend/src/pages/PayslipsPage.tsx), [`PayslipManualPage.tsx`](frontend/src/pages/PayslipManualPage.tsx), [`ImportWorkspacePage.tsx`](frontend/src/pages/ImportWorkspacePage.tsx), [`TransactionsPage.tsx`](frontend/src/pages/TransactionsPage.tsx), [`index.css`](frontend/src/index.css), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md), [`PAYSLIP_V1.md`](docs/PAYSLIP_V1.md).
+
 ### UX-065 — Net worth + manual payslip layout polish
 - **Type:** UX / DOC
 - **What:** **Net worth** — trend controls grouped; **period summary** as a **ledger-table** with **Ledger** links (first/last sample = chart endpoints); **Reload** removed from the toolbar and replaced by **Retry load** when a fetch fails. **Manual payslip** — pay period and **Current / YTD** amounts in aligned **ledger-table** rows instead of a wide grid.
