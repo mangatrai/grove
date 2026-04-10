@@ -283,12 +283,12 @@ paths:
   /reports/balance-sheet:
     get:
       tags: [reports]
-      summary: Balance sheet / net worth snapshot (assets vs liabilities)
+      summary: Balance sheet / net worth snapshot (optional ownerScope filters by account belongs-to)
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/history:
     get:
       tags: [reports]
-      summary: Balance sheet totals over time (sampled as-of dates; max 120 points)
+      summary: Balance sheet totals over time (optional ownerScope; optional accountIds for per-point account slices; max 120 samples)
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual:
     post:

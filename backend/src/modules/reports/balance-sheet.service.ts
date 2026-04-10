@@ -30,6 +30,19 @@ export type BalanceSheetResult = {
 
 export type BalanceSheetHistoryInterval = "month" | "week" | "day";
 
+/** Optional filter: restrict to accounts with matching belongs-to (household vs person). */
+export type BalanceSheetQueryOptions = {
+  ownerScope?: "household" | "person";
+  ownerPersonProfileId?: string | null;
+};
+
+export type BalanceSheetHistoryAccountSlice = {
+  financialAccountId: string;
+  side: BalanceSheetSide;
+  balance: number | null;
+  balanceAsOf: string | null;
+};
+
 export type BalanceSheetHistoryPoint = {
   asOf: string;
   totals: {
@@ -37,6 +50,8 @@ export type BalanceSheetHistoryPoint = {
     liabilities: number | null;
     netWorth: number | null;
   };
+  /** Present when `accountIds` was requested on history API (subset of accounts). */
+  accounts?: BalanceSheetHistoryAccountSlice[];
 };
 
 export type BalanceSheetHistoryResult = {
@@ -45,6 +60,8 @@ export type BalanceSheetHistoryResult = {
   interval: BalanceSheetHistoryInterval;
   points: BalanceSheetHistoryPoint[];
 };
+
+const MAX_HISTORY_ACCOUNT_IDS = 8;
 
 type ConfidenceSummary = {
   statementBalances?: {
@@ -61,6 +78,25 @@ function accountSide(type: string): BalanceSheetSide | null {
     return "liability";
   }
   return null;
+}
+
+/** SQL fragment + params for `financial_account` belongs-to filter. */
+function financialAccountOwnerFragment(
+  options: BalanceSheetQueryOptions | undefined
+): { fragment: string; params: unknown[] } {
+  if (!options?.ownerScope) {
+    return { fragment: "", params: [] };
+  }
+  if (options.ownerScope === "household") {
+    return { fragment: " AND owner_scope = 'household'", params: [] };
+  }
+  if (options.ownerScope === "person" && options.ownerPersonProfileId) {
+    return {
+      fragment: " AND owner_scope = 'person' AND owner_person_profile_id = ?",
+      params: [options.ownerPersonProfileId]
+    };
+  }
+  return { fragment: "", params: [] };
 }
 
 function parseConfidenceSummary(raw: string | null): ConfidenceSummary | null {
@@ -170,14 +206,20 @@ async function latestImportBalanceHint(
   return null;
 }
 
-export async function getBalanceSheet(householdId: string, asOf: string): Promise<BalanceSheetResult> {
+export async function getBalanceSheet(
+  householdId: string,
+  asOf: string,
+  options?: BalanceSheetQueryOptions
+): Promise<BalanceSheetResult> {
+  const own = financialAccountOwnerFragment(options);
   const accounts = await qAll<Record<string, unknown>>(
     `SELECT id, institution, account_mask, type, currency
        FROM financial_account
       WHERE household_id = ?
-        AND type <> 'payslip'
+        AND type <> 'payslip'${own.fragment}
       ORDER BY institution, type, id`,
-    householdId
+    householdId,
+    ...own.params
   );
 
   const assets: BalanceSheetAccountRow[] = [];
@@ -479,19 +521,50 @@ export async function getBalanceSheetHistory(
   householdId: string,
   from: string,
   to: string,
-  interval: BalanceSheetHistoryInterval
+  interval: BalanceSheetHistoryInterval,
+  options?: BalanceSheetQueryOptions & { accountIds?: string[] }
 ): Promise<BalanceSheetHistoryResult> {
   const dates = generateHistorySampleDates(from, to, interval);
   if (dates.length > HISTORY_MAX_POINTS) {
     throw new Error("BALANCE_HISTORY_TOO_MANY_POINTS");
   }
+  const cappedAccountIds = (options?.accountIds ?? []).slice(0, MAX_HISTORY_ACCOUNT_IDS);
+  const accountIdSet = cappedAccountIds.length > 0 ? new Set(cappedAccountIds) : null;
+  const balanceOpts: BalanceSheetQueryOptions | undefined = options
+    ? { ownerScope: options.ownerScope, ownerPersonProfileId: options.ownerPersonProfileId }
+    : undefined;
   const points: BalanceSheetHistoryPoint[] = [];
   for (const asOf of dates) {
-    const sheet = await getBalanceSheet(householdId, asOf);
-    points.push({
+    const sheet = await getBalanceSheet(householdId, asOf, balanceOpts);
+    const point: BalanceSheetHistoryPoint = {
       asOf,
       totals: { ...sheet.totals }
-    });
+    };
+    if (accountIdSet) {
+      const slices: BalanceSheetHistoryAccountSlice[] = [];
+      for (const r of sheet.assets) {
+        if (accountIdSet.has(r.financialAccountId)) {
+          slices.push({
+            financialAccountId: r.financialAccountId,
+            side: r.side,
+            balance: r.balance,
+            balanceAsOf: r.balanceAsOf
+          });
+        }
+      }
+      for (const r of sheet.liabilities) {
+        if (accountIdSet.has(r.financialAccountId)) {
+          slices.push({
+            financialAccountId: r.financialAccountId,
+            side: r.side,
+            balance: r.balance,
+            balanceAsOf: r.balanceAsOf
+          });
+        }
+      }
+      point.accounts = slices;
+    }
+    points.push(point);
   }
   return { from, to, interval, points };
 }

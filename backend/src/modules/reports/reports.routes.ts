@@ -72,15 +72,60 @@ const querySchema = z
     }
   });
 
-const balanceSheetQuerySchema = z.object({
-  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional()
-});
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const balanceSheetHistoryQuerySchema = z.object({
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  interval: z.enum(["month", "week", "day"]).optional().default("month")
-});
+const balanceSheetQuerySchema = z
+  .object({
+    asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    ownerScope: z.enum(["household", "person"]).optional(),
+    ownerPersonProfileId: z.string().uuid().optional()
+  })
+  .superRefine((q, ctx) => {
+    if (q.ownerScope === "person" && !q.ownerPersonProfileId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ownerPersonProfileId is required when ownerScope=person"
+      });
+    }
+  });
+
+const balanceSheetHistoryQuerySchema = z
+  .object({
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    interval: z.enum(["month", "week", "day"]).optional().default("month"),
+    ownerScope: z.enum(["household", "person"]).optional(),
+    ownerPersonProfileId: z.string().uuid().optional(),
+    accountIds: z.string().optional()
+  })
+  .superRefine((q, ctx) => {
+    if (q.ownerScope === "person" && !q.ownerPersonProfileId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "ownerPersonProfileId is required when ownerScope=person"
+      });
+    }
+    if (q.accountIds?.trim()) {
+      const parts = q.accountIds
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (parts.length > 8) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "At most 8 accountIds allowed"
+        });
+      }
+      for (const id of parts) {
+        if (!uuidRe.test(id)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Invalid account id in accountIds: ${id}`
+          });
+        }
+      }
+    }
+  });
 
 const manualBalancePostSchema = z
   .object({
@@ -109,7 +154,14 @@ reportsRouter.get("/balance-sheet", async (req: AuthenticatedRequest, res) => {
   }
   const asOf = parsed.data.asOf ?? new Date().toISOString().slice(0, 10);
   const householdId = req.authUser!.householdId;
-  const data = await getBalanceSheet(householdId, asOf);
+  const opts =
+    parsed.data.ownerScope != null
+      ? {
+          ownerScope: parsed.data.ownerScope,
+          ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null
+        }
+      : undefined;
+  const data = await getBalanceSheet(householdId, asOf, opts);
   res.status(200).json(data);
 });
 
@@ -119,14 +171,36 @@ reportsRouter.get("/balance-sheet/history", async (req: AuthenticatedRequest, re
     res.status(400).json({ message: "Invalid query", issues: parsed.error.flatten() });
     return;
   }
-  const { from, to, interval } = parsed.data;
+  const { from, to, interval, accountIds: accountIdsRaw } = parsed.data;
   if (from > to) {
     res.status(400).json({ message: "from must be on or before to" });
     return;
   }
+  const accountIds =
+    accountIdsRaw?.trim() === ""
+      ? undefined
+      : accountIdsRaw
+          ?.split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
   const householdId = req.authUser!.householdId;
+  const historyOpts = {
+    ...(parsed.data.ownerScope != null
+      ? {
+          ownerScope: parsed.data.ownerScope,
+          ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null
+        }
+      : {}),
+    ...(accountIds && accountIds.length > 0 ? { accountIds } : {})
+  };
   try {
-    const data = await getBalanceSheetHistory(householdId, from, to, interval);
+    const data = await getBalanceSheetHistory(
+      householdId,
+      from,
+      to,
+      interval,
+      Object.keys(historyOpts).length > 0 ? historyOpts : undefined
+    );
     res.status(200).json(data);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

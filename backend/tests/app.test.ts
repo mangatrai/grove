@@ -3446,4 +3446,38 @@ describe("balance sheet (reports)", () => {
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("BALANCE_HISTORY_TOO_MANY_POINTS");
   });
+
+  it("GET balance-sheet rejects ownerScope=person without ownerPersonProfileId", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get("/reports/balance-sheet?asOf=2026-06-30&ownerScope=person")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("GET balance-sheet/history includes accounts when accountIds provided", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app)
+      .get(
+        `/reports/balance-sheet/history?from=2026-01-01&to=2026-03-31&interval=month&accountIds=${SEED_BOA_CHECKING}`
+      )
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.points.length).toBeGreaterThan(0);
+    const p0 = res.body.points[0];
+    expect(Array.isArray(p0.accounts)).toBe(true);
+    expect(p0.accounts.some((a: { financialAccountId: string }) => a.financialAccountId === SEED_BOA_CHECKING)).toBe(
+      true
+    );
+  });
 });
