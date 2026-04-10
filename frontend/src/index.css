@@ -1045,6 +1045,11 @@ table.ledger-table thead th {
   border-bottom: 1px solid #dde2e8;
 }
 
+table.ledger-table.payslip-manual__table th,
+table.ledger-table.payslip-manual__table td {
+  vertical-align: middle;
+}
+
 .button-primary {
   padding: 0.42rem 0.85rem;
   font-size: 0.85rem;

@@ -1,4 +1,3 @@
-import { SimpleGrid } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
@@ -35,44 +34,6 @@ function parseOptionalNumber(raw: string): number | null {
 function parseOptionalDate(raw: string): string | null {
   const t = raw.trim();
   return t === "" ? null : t;
-}
-
-function MetricPairRow(props: {
-  label: string;
-  currentValue: string;
-  ytdValue: string;
-  onCurrent: (v: string) => void;
-  onYtd: (v: string) => void;
-  currentAria: string;
-  ytdAria: string;
-}) {
-  return (
-    <div className="row" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap", marginTop: "0.35rem" }}>
-      <div style={{ minWidth: "11rem", fontWeight: 500, alignSelf: "center" }}>{props.label}</div>
-      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" style={{ flex: "1 1 16rem" }}>
-        <label className="field" style={{ marginBottom: 0 }}>
-          <span>Current</span>
-          <input
-            inputMode="decimal"
-            value={props.currentValue}
-            onChange={(ev) => props.onCurrent(ev.target.value)}
-            placeholder="0.00"
-            aria-label={props.currentAria}
-          />
-        </label>
-        <label className="field" style={{ marginBottom: 0 }}>
-          <span>YTD</span>
-          <input
-            inputMode="decimal"
-            value={props.ytdValue}
-            onChange={(ev) => props.onYtd(ev.target.value)}
-            placeholder="0.00"
-            aria-label={props.ytdAria}
-          />
-        </label>
-      </SimpleGrid>
-    </div>
-  );
 }
 
 export function PayslipManualPage() {
@@ -306,74 +267,202 @@ export function PayslipManualPage() {
         ) : null}
 
         <h3 style={{ marginTop: "1rem", marginBottom: "0.5rem", fontSize: "1rem" }}>Pay period</h3>
-        <div className="row" style={{ gap: "1rem", flexWrap: "wrap" }}>
-          <label className="field" style={{ flex: "1 1 10rem" }}>
-            <span>Pay period start</span>
-            <input type="date" value={payPeriodStart} onChange={(ev) => setPayPeriodStart(ev.target.value)} />
-          </label>
-          <label className="field" style={{ flex: "1 1 10rem" }}>
-            <span>Pay period end</span>
-            <input type="date" value={payPeriodEnd} onChange={(ev) => setPayPeriodEnd(ev.target.value)} />
-          </label>
-          <label className="field" style={{ flex: "1 1 10rem" }}>
-            <span>Pay date</span>
-            <input type="date" value={payDate} onChange={(ev) => setPayDate(ev.target.value)} />
-          </label>
+        <div style={{ overflowX: "auto" }}>
+          <table className="ledger-table payslip-manual__table">
+            <thead>
+              <tr>
+                <th scope="col" style={{ width: "33%" }}>
+                  Pay period start
+                </th>
+                <th scope="col" style={{ width: "33%" }}>
+                  Pay period end
+                </th>
+                <th scope="col" style={{ width: "34%" }}>
+                  Pay date
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <input
+                    id="payslip-pay-period-start"
+                    type="date"
+                    value={payPeriodStart}
+                    onChange={(ev) => setPayPeriodStart(ev.target.value)}
+                    aria-label="Pay period start"
+                    style={{ width: "100%", maxWidth: "12rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    id="payslip-pay-period-end"
+                    type="date"
+                    value={payPeriodEnd}
+                    onChange={(ev) => setPayPeriodEnd(ev.target.value)}
+                    aria-label="Pay period end"
+                    style={{ width: "100%", maxWidth: "12rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    id="payslip-pay-date"
+                    type="date"
+                    value={payDate}
+                    onChange={(ev) => setPayDate(ev.target.value)}
+                    aria-label="Pay date"
+                    style={{ width: "100%", maxWidth: "12rem" }}
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
-        <h3 style={{ marginTop: "1.25rem", marginBottom: "0.35rem", fontSize: "1rem" }}>Earnings</h3>
-        <MetricPairRow
-          label="Gross pay"
-          currentValue={grossPayCurrent}
-          ytdValue={grossPayYtd}
-          onCurrent={setGrossPayCurrent}
-          onYtd={setGrossPayYtd}
-          currentAria="Gross pay current"
-          ytdAria="Gross pay YTD"
-        />
-        <MetricPairRow
-          label="Net pay"
-          currentValue={netPayCurrent}
-          ytdValue={netPayYtd}
-          onCurrent={setNetPayCurrent}
-          onYtd={setNetPayYtd}
-          currentAria="Net pay current"
-          ytdAria="Net pay YTD"
-        />
-
-        <h3 style={{ marginTop: "1.25rem", marginBottom: "0.35rem", fontSize: "1rem" }}>Taxes & deductions</h3>
-        <MetricPairRow
-          label="Employee taxes"
-          currentValue={employeeTaxesCurrent}
-          ytdValue={employeeTaxesYtd}
-          onCurrent={setEmployeeTaxesCurrent}
-          onYtd={setEmployeeTaxesYtd}
-          currentAria="Employee taxes current"
-          ytdAria="Employee taxes YTD"
-        />
-        <MetricPairRow
-          label="Pre-tax deductions"
-          currentValue={preTaxCurrent}
-          ytdValue={preTaxYtd}
-          onCurrent={setPreTaxCurrent}
-          onYtd={setPreTaxYtd}
-          currentAria="Pre-tax deductions current"
-          ytdAria="Pre-tax deductions YTD"
-        />
-        <MetricPairRow
-          label="Post-tax deductions"
-          currentValue={postTaxCurrent}
-          ytdValue={postTaxYtd}
-          onCurrent={setPostTaxCurrent}
-          onYtd={setPostTaxYtd}
-          currentAria="Post-tax deductions current"
-          ytdAria="Post-tax deductions YTD"
-        />
-
-        <label className="field" style={{ marginTop: "0.75rem", maxWidth: "24rem" }}>
-          <span>Hours / days (current period)</span>
-          <input value={hoursOrDaysCurrent} onChange={(ev) => setHoursOrDaysCurrent(ev.target.value)} />
-        </label>
+        <h3 style={{ marginTop: "1.25rem", marginBottom: "0.5rem", fontSize: "1rem" }}>Earnings, taxes & deductions</h3>
+        <p className="muted" style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.9rem" }}>
+          Enter amounts for this pay period (Current) and year-to-date (YTD) where applicable.
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table className="ledger-table payslip-manual__table">
+            <thead>
+              <tr>
+                <th scope="col">Metric</th>
+                <th scope="col">Current</th>
+                <th scope="col">YTD</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Gross pay</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={grossPayCurrent}
+                    onChange={(ev) => setGrossPayCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Gross pay current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={grossPayYtd}
+                    onChange={(ev) => setGrossPayYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Gross pay YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Net pay</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={netPayCurrent}
+                    onChange={(ev) => setNetPayCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Net pay current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={netPayYtd}
+                    onChange={(ev) => setNetPayYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Net pay YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Employee taxes</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={employeeTaxesCurrent}
+                    onChange={(ev) => setEmployeeTaxesCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Employee taxes current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={employeeTaxesYtd}
+                    onChange={(ev) => setEmployeeTaxesYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Employee taxes YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Pre-tax deductions</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={preTaxCurrent}
+                    onChange={(ev) => setPreTaxCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Pre-tax deductions current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={preTaxYtd}
+                    onChange={(ev) => setPreTaxYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Pre-tax deductions YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Post-tax deductions</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={postTaxCurrent}
+                    onChange={(ev) => setPostTaxCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Post-tax deductions current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={postTaxYtd}
+                    onChange={(ev) => setPostTaxYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Post-tax deductions YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Hours / days</th>
+                <td>
+                  <input
+                    value={hoursOrDaysCurrent}
+                    onChange={(ev) => setHoursOrDaysCurrent(ev.target.value)}
+                    aria-label="Hours or days for current period"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td className="muted">—</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <div style={{ marginTop: "1.25rem", borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: "1rem" }}>
           <h3 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Belongs to</h3>
