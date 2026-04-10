@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 
 import { apiJson, useAuthToken } from "../api";
 
@@ -35,6 +45,26 @@ type AccountOption = {
   account_mask?: string | null;
 };
 
+type BalanceSheetHistoryResponse = {
+  from: string;
+  to: string;
+  interval: "month" | "week" | "day";
+  points: Array<{
+    asOf: string;
+    totals: {
+      assets: number | null;
+      liabilities: number | null;
+      netWorth: number | null;
+    };
+  }>;
+};
+
+function defaultHistoryRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - 12, to.getUTCDate()));
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) };
+}
+
 function formatMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) {
     return "—";
@@ -55,12 +85,28 @@ export function NetWorthPage() {
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
 
+  const [histRange, setHistRange] = useState(defaultHistoryRange);
+  const [histInterval, setHistInterval] = useState<"month" | "week" | "day">("month");
+  const [historyData, setHistoryData] = useState<BalanceSheetHistoryResponse | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   const load = useCallback(async () => {
     const res = await apiJson<BalanceSheetResponse>(
       `/reports/balance-sheet?asOf=${encodeURIComponent(asOf)}`
     );
     setData(res);
   }, [asOf]);
+
+  const loadHistory = useCallback(async () => {
+    const qs = new URLSearchParams({
+      from: histRange.from,
+      to: histRange.to,
+      interval: histInterval
+    });
+    const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+    setHistoryData(res);
+  }, [histRange.from, histRange.to, histInterval]);
 
   useEffect(() => {
     if (!token) {
@@ -95,6 +141,20 @@ export function NetWorthPage() {
       .finally(() => setLoading(false));
   }, [token, load]);
 
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+    setHistoryLoading(true);
+    setHistoryError(null);
+    void loadHistory()
+      .catch((e: unknown) => {
+        setHistoryError(e instanceof Error ? e.message : "Failed to load history");
+        setHistoryData(null);
+      })
+      .finally(() => setHistoryLoading(false));
+  }, [token, loadHistory]);
+
   const onSubmitManual = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
@@ -117,17 +177,29 @@ export function NetWorthPage() {
         });
         setManualAmount("");
         await load();
+        await loadHistory().catch(() => undefined);
       } catch (err: unknown) {
         setManualError(err instanceof Error ? err.message : "Could not save balance");
       } finally {
         setManualSubmitting(false);
       }
     },
-    [accounts, load, manualAccountId, manualAmount, manualAsOf]
+    [accounts, load, loadHistory, manualAccountId, manualAmount, manualAsOf]
   );
 
   const assetRows = useMemo(() => data?.assets ?? [], [data?.assets]);
   const liabilityRows = useMemo(() => data?.liabilities ?? [], [data?.liabilities]);
+
+  const chartRows = useMemo(
+    () =>
+      (historyData?.points ?? []).map((p) => ({
+        asOf: p.asOf,
+        assets: p.totals.assets ?? undefined,
+        liabilities: p.totals.liabilities ?? undefined,
+        netWorth: p.totals.netWorth ?? undefined
+      })),
+    [historyData?.points]
+  );
 
   if (!token) {
     return <Navigate to="/" replace />;
@@ -144,6 +216,101 @@ export function NetWorthPage() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
+        <h2 style={{ marginTop: 0 }}>Trend</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Sampled totals over time (same rules as the snapshot below: manual → import snapshot → statement hint).
+        </p>
+        <div className="row" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+          <label className="field" style={{ marginBottom: 0 }}>
+            <span>From</span>
+            <input
+              type="date"
+              value={histRange.from}
+              onChange={(ev) => setHistRange((r) => ({ ...r, from: ev.target.value }))}
+            />
+          </label>
+          <label className="field" style={{ marginBottom: 0 }}>
+            <span>To</span>
+            <input
+              type="date"
+              value={histRange.to}
+              onChange={(ev) => setHistRange((r) => ({ ...r, to: ev.target.value }))}
+            />
+          </label>
+          <label className="field" style={{ marginBottom: 0 }}>
+            <span>Interval</span>
+            <select value={histInterval} onChange={(ev) => setHistInterval(ev.target.value as "month" | "week" | "day")}>
+              <option value="month">Month-end</option>
+              <option value="week">Every 7 days</option>
+              <option value="day">Daily (max 120 points)</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setHistRange(defaultHistoryRange())}
+          >
+            Last 12 months
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void loadHistory().catch(() => undefined)}
+            disabled={historyLoading}
+          >
+            Refresh chart
+          </button>
+        </div>
+        {historyError ? <p className="error">{historyError}</p> : null}
+        {historyLoading ? <p className="muted">Loading chart…</p> : null}
+        {!historyLoading && chartRows.length > 0 ? (
+          <div style={{ width: "100%", height: 320 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
+                <XAxis dataKey="asOf" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={52} />
+                <YAxis
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(v: number) =>
+                    `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                  }
+                />
+                <Tooltip
+                  formatter={(value: number | undefined) =>
+                    value == null || !Number.isFinite(value) ? "—" : formatMoney(value)
+                  }
+                />
+                <Legend />
+                <Line type="monotone" dataKey="assets" name="Assets" stroke="#2563eb" dot={false} strokeWidth={2} connectNulls />
+                <Line
+                  type="monotone"
+                  dataKey="liabilities"
+                  name="Liabilities"
+                  stroke="#dc2626"
+                  dot={false}
+                  strokeWidth={2}
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="netWorth"
+                  name="Net worth"
+                  stroke="#059669"
+                  dot={false}
+                  strokeWidth={2}
+                  connectNulls
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : null}
+        {!historyLoading && chartRows.length === 0 && !historyError ? (
+          <p className="muted">No history points in this range (add manual or import balances to see a line).</p>
+        ) : null}
+      </div>
+
+      <div className="card" style={{ marginTop: "1rem" }}>
+        <h2 style={{ marginTop: 0 }}>Snapshot (as of)</h2>
         <div className="row" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap" }}>
           <label className="field" style={{ marginBottom: 0 }}>
             <span>As of</span>
