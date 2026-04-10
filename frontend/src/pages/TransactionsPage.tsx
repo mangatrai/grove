@@ -255,6 +255,7 @@ export function TransactionsPage() {
   const token = useAuthToken();
   const [searchParams, setSearchParams] = useSearchParams();
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
+  const fileFilter = searchParams.get("fileId")?.trim() || null;
   const categoryFilter = searchParams.get("categoryId")?.trim() || null;
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
@@ -368,6 +369,9 @@ export function TransactionsPage() {
     if (sessionFilter) {
       qs.set("sessionId", sessionFilter);
     }
+    if (fileFilter) {
+      qs.set("fileId", fileFilter);
+    }
     if (categoryFilter) {
       qs.set("categoryId", categoryFilter);
     }
@@ -440,6 +444,7 @@ export function TransactionsPage() {
     }
   }, [
     sessionFilter,
+    fileFilter,
     categoryFilter,
     uncategorizedOnly,
     needsReviewTab,
@@ -485,6 +490,7 @@ export function TransactionsPage() {
     needsReviewTab,
     resolutionTypesKey,
     sessionFilter,
+    fileFilter,
     categoryFilter,
     uncategorizedOnly,
     searchFromUrl,
@@ -506,6 +512,7 @@ export function TransactionsPage() {
     needsReviewTab,
     resolutionTypesKey,
     sessionFilter,
+    fileFilter,
     categoryFilter,
     uncategorizedOnly,
     searchFromUrl,
@@ -880,6 +887,7 @@ export function TransactionsPage() {
       dateFrom ||
       dateTo ||
       accountFilter ||
+      fileFilter ||
       ownerScopeFilter ||
       ownerPersonProfileFilter ||
       needsReviewTab ||
