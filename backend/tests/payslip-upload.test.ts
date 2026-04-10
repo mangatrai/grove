@@ -229,6 +229,31 @@ describe("POST /payslips/manual", () => {
       .send({ payPeriodStart: "2026-01-01" });
     expect(res.status).toBe(400);
   });
+
+  it("accepts pre/post tax deductions and employee taxes YTD on manual create", async () => {
+    const token = await loginToken();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        payDate: "2026-03-01",
+        netPayCurrent: 900,
+        parserProfileId: "ibm_pay_contributions_pdf",
+        preTaxDeductionsCurrent: 100,
+        preTaxDeductionsYtd: 300,
+        postTaxDeductionsCurrent: 20,
+        postTaxDeductionsYtd: 60,
+        employeeTaxesYtd: 4000
+      });
+
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    expect(snap.preTaxDeductionsCurrent).toBe(100);
+    expect(snap.preTaxDeductionsYtd).toBe(300);
+    expect(snap.postTaxDeductionsCurrent).toBe(20);
+    expect(snap.postTaxDeductionsYtd).toBe(60);
+    expect(snap.employeeTaxesYtd).toBe(4000);
+  });
 });
 
 describe("GET /payslips/:id", () => {

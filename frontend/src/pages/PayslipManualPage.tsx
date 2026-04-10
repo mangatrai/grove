@@ -1,3 +1,4 @@
+import { SimpleGrid } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
@@ -36,6 +37,44 @@ function parseOptionalDate(raw: string): string | null {
   return t === "" ? null : t;
 }
 
+function MetricPairRow(props: {
+  label: string;
+  currentValue: string;
+  ytdValue: string;
+  onCurrent: (v: string) => void;
+  onYtd: (v: string) => void;
+  currentAria: string;
+  ytdAria: string;
+}) {
+  return (
+    <div className="row" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap", marginTop: "0.35rem" }}>
+      <div style={{ minWidth: "11rem", fontWeight: 500, alignSelf: "center" }}>{props.label}</div>
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" style={{ flex: "1 1 16rem" }}>
+        <label className="field" style={{ marginBottom: 0 }}>
+          <span>Current</span>
+          <input
+            inputMode="decimal"
+            value={props.currentValue}
+            onChange={(ev) => props.onCurrent(ev.target.value)}
+            placeholder="0.00"
+            aria-label={props.currentAria}
+          />
+        </label>
+        <label className="field" style={{ marginBottom: 0 }}>
+          <span>YTD</span>
+          <input
+            inputMode="decimal"
+            value={props.ytdValue}
+            onChange={(ev) => props.onYtd(ev.target.value)}
+            placeholder="0.00"
+            aria-label={props.ytdAria}
+          />
+        </label>
+      </SimpleGrid>
+    </div>
+  );
+}
+
 export function PayslipManualPage() {
   const token = useAuthToken();
   const navigate = useNavigate();
@@ -52,6 +91,11 @@ export function PayslipManualPage() {
   const [grossPayYtd, setGrossPayYtd] = useState("");
   const [netPayYtd, setNetPayYtd] = useState("");
   const [employeeTaxesCurrent, setEmployeeTaxesCurrent] = useState("");
+  const [employeeTaxesYtd, setEmployeeTaxesYtd] = useState("");
+  const [preTaxCurrent, setPreTaxCurrent] = useState("");
+  const [preTaxYtd, setPreTaxYtd] = useState("");
+  const [postTaxCurrent, setPostTaxCurrent] = useState("");
+  const [postTaxYtd, setPostTaxYtd] = useState("");
   const [hoursOrDaysCurrent, setHoursOrDaysCurrent] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -117,6 +161,7 @@ export function PayslipManualPage() {
   );
 
   const needsEmployerPick = employers.length > 1;
+  const hasEmployers = employers.length > 0;
 
   const onSubmit = useCallback(
     async (e: FormEvent) => {
@@ -150,6 +195,11 @@ export function PayslipManualPage() {
         grossPayYtd: parseOptionalNumber(grossPayYtd),
         netPayYtd: parseOptionalNumber(netPayYtd),
         employeeTaxesCurrent: parseOptionalNumber(employeeTaxesCurrent),
+        employeeTaxesYtd: parseOptionalNumber(employeeTaxesYtd),
+        preTaxDeductionsCurrent: parseOptionalNumber(preTaxCurrent),
+        preTaxDeductionsYtd: parseOptionalNumber(preTaxYtd),
+        postTaxDeductionsCurrent: parseOptionalNumber(postTaxCurrent),
+        postTaxDeductionsYtd: parseOptionalNumber(postTaxYtd),
         hoursOrDaysCurrent: hoursOrDaysCurrent.trim() === "" ? null : hoursOrDaysCurrent.trim(),
         ownerScope,
         ownerPersonProfileId: ownerScope === "person" ? ownerPersonProfileId : null
@@ -158,7 +208,7 @@ export function PayslipManualPage() {
       if (needsEmployerPick) {
         body.employerId = employerId.trim();
       }
-      if (employers.length === 0) {
+      if (!hasEmployers) {
         body.parserProfileId = parserProfileId;
       }
 
@@ -178,10 +228,12 @@ export function PayslipManualPage() {
     [
       belongsTo,
       employeeTaxesCurrent,
+      employeeTaxesYtd,
       employerId,
       employers.length,
       grossPayCurrent,
       grossPayYtd,
+      hasEmployers,
       hoursOrDaysCurrent,
       navigate,
       needsEmployerPick,
@@ -190,7 +242,11 @@ export function PayslipManualPage() {
       parserProfileId,
       payDate,
       payPeriodEnd,
-      payPeriodStart
+      payPeriodStart,
+      postTaxCurrent,
+      postTaxYtd,
+      preTaxCurrent,
+      preTaxYtd
     ]
   );
 
@@ -206,23 +262,19 @@ export function PayslipManualPage() {
         </p>
         <h1 style={{ marginTop: "0.25rem" }}>Add payslip manually</h1>
         <p className="muted" style={{ marginBottom: 0 }}>
-          Creates a snapshot without PDF parsing — same fields as upload/import. File name is shown as{" "}
-          <strong>Manual entry</strong>.
+          Creates a snapshot without PDF parsing — the same fields as after an upload. The file name is shown as{" "}
+          <strong>Manual entry</strong>. When you have employers in Settings → Profile, the app uses their template; no PDF is
+          read for manual entry.
         </p>
       </div>
 
       <form className="card" style={{ marginTop: "1rem" }} onSubmit={onSubmit}>
-        <h2 style={{ marginTop: 0 }}>Stub</h2>
+        <h2 style={{ marginTop: 0 }}>Pay stub</h2>
 
         {needsEmployerPick ? (
           <label className="field">
             <span>Employer</span>
-            <select
-              value={employerId}
-              onChange={(ev) => setEmployerId(ev.target.value)}
-              required
-              aria-required
-            >
+            <select value={employerId} onChange={(ev) => setEmployerId(ev.target.value)} required aria-required>
               <option value="">Select employer…</option>
               {employers.map((em) => (
                 <option key={em.id} value={em.id}>
@@ -233,22 +285,27 @@ export function PayslipManualPage() {
           </label>
         ) : null}
 
-        {employers.length === 0 ? (
-          <label className="field">
-            <span>Payslip format</span>
-            <select value={parserProfileId} onChange={(ev) => setParserProfileId(ev.target.value)}>
-              {PARSER_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <span className="muted" style={{ fontSize: "0.85rem" }}>
-              Add employers under Settings → Profile to tie a stub to a specific employer.
-            </span>
-          </label>
+        {!hasEmployers ? (
+          <details style={{ marginBottom: "1rem" }}>
+            <summary style={{ cursor: "pointer", fontWeight: 600 }}>Advanced: statement template</summary>
+            <p className="muted" style={{ marginTop: "0.5rem", marginBottom: "0.75rem", fontSize: "0.9rem" }}>
+              Only used for metadata and compatibility with your household setup — nothing is parsed from a file here. Add
+              employers under Settings → Profile to pick a template automatically.
+            </p>
+            <label className="field">
+              <span>Template</span>
+              <select value={parserProfileId} onChange={(ev) => setParserProfileId(ev.target.value)}>
+                {PARSER_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </details>
         ) : null}
 
+        <h3 style={{ marginTop: "1rem", marginBottom: "0.5rem", fontSize: "1rem" }}>Pay period</h3>
         <div className="row" style={{ gap: "1rem", flexWrap: "wrap" }}>
           <label className="field" style={{ flex: "1 1 10rem" }}>
             <span>Pay period start</span>
@@ -264,70 +321,67 @@ export function PayslipManualPage() {
           </label>
         </div>
 
-        <div className="row" style={{ gap: "1rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
-          <label className="field" style={{ flex: "1 1 8rem" }}>
-            <span>Gross (current)</span>
-            <input
-              inputMode="decimal"
-              value={grossPayCurrent}
-              onChange={(ev) => setGrossPayCurrent(ev.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-          <label className="field" style={{ flex: "1 1 8rem" }}>
-            <span>Net (current)</span>
-            <input
-              inputMode="decimal"
-              value={netPayCurrent}
-              onChange={(ev) => setNetPayCurrent(ev.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-          <label className="field" style={{ flex: "1 1 8rem" }}>
-            <span>Employee taxes (current)</span>
-            <input
-              inputMode="decimal"
-              value={employeeTaxesCurrent}
-              onChange={(ev) => setEmployeeTaxesCurrent(ev.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-        </div>
+        <h3 style={{ marginTop: "1.25rem", marginBottom: "0.35rem", fontSize: "1rem" }}>Earnings</h3>
+        <MetricPairRow
+          label="Gross pay"
+          currentValue={grossPayCurrent}
+          ytdValue={grossPayYtd}
+          onCurrent={setGrossPayCurrent}
+          onYtd={setGrossPayYtd}
+          currentAria="Gross pay current"
+          ytdAria="Gross pay YTD"
+        />
+        <MetricPairRow
+          label="Net pay"
+          currentValue={netPayCurrent}
+          ytdValue={netPayYtd}
+          onCurrent={setNetPayCurrent}
+          onYtd={setNetPayYtd}
+          currentAria="Net pay current"
+          ytdAria="Net pay YTD"
+        />
 
-        <div className="row" style={{ gap: "1rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
-          <label className="field" style={{ flex: "1 1 8rem" }}>
-            <span>Gross YTD</span>
-            <input
-              inputMode="decimal"
-              value={grossPayYtd}
-              onChange={(ev) => setGrossPayYtd(ev.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-          <label className="field" style={{ flex: "1 1 8rem" }}>
-            <span>Net YTD</span>
-            <input
-              inputMode="decimal"
-              value={netPayYtd}
-              onChange={(ev) => setNetPayYtd(ev.target.value)}
-              placeholder="0.00"
-            />
-          </label>
-          <label className="field" style={{ flex: "1 1 8rem" }}>
-            <span>Hours / days</span>
-            <input value={hoursOrDaysCurrent} onChange={(ev) => setHoursOrDaysCurrent(ev.target.value)} />
-          </label>
-        </div>
+        <h3 style={{ marginTop: "1.25rem", marginBottom: "0.35rem", fontSize: "1rem" }}>Taxes & deductions</h3>
+        <MetricPairRow
+          label="Employee taxes"
+          currentValue={employeeTaxesCurrent}
+          ytdValue={employeeTaxesYtd}
+          onCurrent={setEmployeeTaxesCurrent}
+          onYtd={setEmployeeTaxesYtd}
+          currentAria="Employee taxes current"
+          ytdAria="Employee taxes YTD"
+        />
+        <MetricPairRow
+          label="Pre-tax deductions"
+          currentValue={preTaxCurrent}
+          ytdValue={preTaxYtd}
+          onCurrent={setPreTaxCurrent}
+          onYtd={setPreTaxYtd}
+          currentAria="Pre-tax deductions current"
+          ytdAria="Pre-tax deductions YTD"
+        />
+        <MetricPairRow
+          label="Post-tax deductions"
+          currentValue={postTaxCurrent}
+          ytdValue={postTaxYtd}
+          onCurrent={setPostTaxCurrent}
+          onYtd={setPostTaxYtd}
+          currentAria="Post-tax deductions current"
+          ytdAria="Post-tax deductions YTD"
+        />
 
-        <div style={{ marginTop: "1rem" }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-            <h3 style={{ margin: 0, fontSize: "1rem" }}>Belongs to</h3>
-          </div>
+        <label className="field" style={{ marginTop: "0.75rem", maxWidth: "24rem" }}>
+          <span>Hours / days (current period)</span>
+          <input value={hoursOrDaysCurrent} onChange={(ev) => setHoursOrDaysCurrent(ev.target.value)} />
+        </label>
+
+        <div style={{ marginTop: "1.25rem", borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: "1rem" }}>
+          <h3 style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>Belongs to</h3>
           <HierarchicalSearchPicker
             value={belongsTo}
             onChange={(v) => setBelongsTo(v)}
             groups={belongsToGroups}
-            placeholder="Whole household"
+            placeholder="All household activity"
             ariaLabel="Belongs to scope"
             clearable
           />
