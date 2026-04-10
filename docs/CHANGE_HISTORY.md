@@ -20,6 +20,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-09
 
+### DOC-063 — Operator docs: net worth in user guide + API index + CLAUDE reports/schema
+- **Type:** DOC
+- **What:** [`USER_GUIDE.md`](docs/USER_GUIDE.md) **Net worth** section; [`API_INDEX.md`](docs/API_INDEX.md) links [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md); [`CLAUDE.md`](CLAUDE.md) **`reports/`** module row and **`account_balance_snapshot`** in schema highlights.
+- **Why:** Keep day-to-day and contributor docs aligned with shipped net worth / history / import snapshots.
+
 ### CR-062 — Net worth trend chart + GET /reports/balance-sheet/history
 - **Type:** CR / API / UX / DOC
 - **What:** **`GET /reports/balance-sheet/history`** with **`from`**, **`to`**, **`interval`** (`month` \| `week` \| `day`); samples up to **120** `asOf` dates using existing **`getBalanceSheet`** resolution. **Net worth** page **Trend** card (Recharts: assets, liabilities, net).

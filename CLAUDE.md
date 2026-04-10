@@ -77,7 +77,7 @@ household-finance-app/
 | `canonical/` | `canonical-ingest.service.ts` | **Single write path**: dedupe (fingerprint), classification (rules), transfer detection → `transaction_canonical` |
 | `ledger/` | `ledger.service.ts`, `ledger.routes.ts` | List/filter canonical transactions, manual entry, category updates |
 | `resolution/` | `resolution.service.ts` | Unresolved items queue (unknown_category, duplicate_ambiguity, transfer_ambiguity) |
-| `reports/` | `cash-summary.service.ts` | Monthly cash flow reports with date/account filters |
+| `reports/` | `cash-summary.service.ts`, `balance-sheet.service.ts`, `reports.routes.ts` | Cash flow KPIs (`/reports/cash-summary`); net worth snapshot + history (`/reports/balance-sheet`, `/reports/balance-sheet/history`); manual balance POST/PATCH |
 | `export/` | `export-household-bundle.service.ts`, `export-job.service.ts` | ZIP export of all household data, async job tracking |
 | `health/` | routes only | `GET /health` liveness endpoint |
 
@@ -115,6 +115,7 @@ category                          -- Global defaults + household custom
 category_rule                     -- Regex pattern, category_id, amount_scope, priority
 resolution_item                   -- Unresolved queue: type, target_id, status
 payslip_snapshot                  -- Net, gross, taxes, deductions per pay period
+account_balance_snapshot          -- Manual + import-sourced balances per account/date (net worth)
 export_job                        -- Async export tracking
 ```
 

@@ -8,6 +8,14 @@ Use the email and password for your account. On a fresh install from the default
 
 After sign-in you land on **Home**, with cash summaries and shortcuts into the ledger.
 
+## Net worth
+
+Open **Net worth** from the sidebar for **assets vs liabilities** (non–payslip accounts).
+
+- **Trend:** chart of total assets, liabilities, and net over a date range; sampling matches the same balance rules as the snapshot (manual balances win, then balances saved from statement imports, then read-only hints from parsed files where applicable).
+- **Snapshot (as of):** pick a single date to see per-account balances and totals.
+- **Manual balances:** add or update a balance for an account on a specific date when you do not rely on imports alone. Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlog notes in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
+
 ## Home (dashboard)
 
 - Review **cash KPIs**, period comparisons, and optional **safe-to-spend** / savings hints when you have set a monthly savings target in Settings.
@@ -74,6 +82,7 @@ On the **Payslips** list, use **Belongs-to** (same idea as Transactions) to narr
 
 | Topic | Document |
 |--------|-----------|
+| Net worth / balance sheet API | [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md) |
 | Environment variables | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) |
 | Logging | [`LOGGING.md`](LOGGING.md) |
 | API routes (machine-readable) | [`openapi/openapi.yaml`](../openapi/openapi.yaml) |
