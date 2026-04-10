@@ -174,54 +174,6 @@ function isMoneyOnlyLine(line: string): number | null {
   return m ? parseMoneyToken(m[1]!) : null;
 }
 
-/**
- * IBM PDF text often puts the label on one line and Current / YTD amounts on the following lines
- * (one dollar amount per line).
- */
-function currentYtdAfterLineIndex(
-  lines: string[],
-  labelLineIdx: number
-): { current: number | null; ytd: number | null } {
-  if (labelLineIdx === -1) {
-    return { current: null, ytd: null };
-  }
-  const labelLine = lines[labelLineIdx]!;
-  /** Same-line layout (fixture / some PDFs): `Gross Pay    1,234.56    9,876.54` */
-  const onLabel = parseCurrentYtdPair(labelLine);
-  if (onLabel.current !== null || onLabel.ytd !== null) {
-    return onLabel;
-  }
-  const vals: number[] = [];
-  for (let i = labelLineIdx + 1; i < Math.min(labelLineIdx + 15, lines.length) && vals.length < 2; i++) {
-    const t = lines[i]!.trim();
-    if (!t) {
-      continue;
-    }
-    if (/^(current|ytd|amount)$/i.test(t)) {
-      continue;
-    }
-    const only = isMoneyOnlyLine(lines[i]!);
-    if (only !== null) {
-      vals.push(only);
-      continue;
-    }
-    const pair = parseCurrentYtdPair(lines[i]!);
-    if (pair.current !== null || pair.ytd !== null) {
-      return pair;
-    }
-    if (vals.length) {
-      break;
-    }
-  }
-  if (vals.length >= 2) {
-    return { current: vals[0]!, ytd: vals[1]! };
-  }
-  if (vals.length === 1) {
-    return { current: vals[0]!, ytd: null };
-  }
-  return { current: null, ytd: null };
-}
-
 function firstLineIndexMatching(lines: string[], patterns: RegExp[]): number {
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i]!.trim();
