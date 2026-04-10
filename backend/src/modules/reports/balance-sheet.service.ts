@@ -90,6 +90,34 @@ async function latestManualSnapshot(
   };
 }
 
+async function latestImportSnapshotFromTable(
+  householdId: string,
+  financialAccountId: string,
+  asOf: string
+): Promise<{ amount: number; asOfDate: string | null; importFileId: string | null } | null> {
+  const row = await qGet<Record<string, unknown>>(
+    `SELECT amount, as_of_date::text AS as_of_date, import_file_id
+       FROM account_balance_snapshot
+      WHERE household_id = ?
+        AND financial_account_id = ?
+        AND source = 'import'
+        AND as_of_date <= ?::date
+      ORDER BY as_of_date DESC, updated_at DESC
+      LIMIT 1`,
+    householdId,
+    financialAccountId,
+    asOf
+  );
+  if (!row) {
+    return null;
+  }
+  return {
+    amount: Number(row.amount),
+    asOfDate: row.as_of_date == null ? null : String(row.as_of_date).slice(0, 10),
+    importFileId: row.import_file_id == null ? null : String(row.import_file_id)
+  };
+}
+
 async function latestImportBalanceHint(
   financialAccountId: string,
   asOf: string
@@ -162,12 +190,20 @@ export async function getBalanceSheet(householdId: string, asOf: string): Promis
       balanceSource = "manual";
       importFileId = manual.importFileId;
     } else {
-      const imp = await latestImportBalanceHint(id, asOf);
-      if (imp) {
-        balance = imp.amount;
-        balanceAsOf = imp.asOfDate;
+      const fromTable = await latestImportSnapshotFromTable(householdId, id, asOf);
+      if (fromTable) {
+        balance = fromTable.amount;
+        balanceAsOf = fromTable.asOfDate;
         balanceSource = "import";
-        importFileId = imp.importFileId;
+        importFileId = fromTable.importFileId;
+      } else {
+        const imp = await latestImportBalanceHint(id, asOf);
+        if (imp) {
+          balance = imp.amount;
+          balanceAsOf = imp.asOfDate;
+          balanceSource = "import";
+          importFileId = imp.importFileId;
+        }
       }
     }
 

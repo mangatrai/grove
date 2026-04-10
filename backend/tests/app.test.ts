@@ -3381,4 +3381,35 @@ describe("balance sheet (reports)", () => {
     expect(row.balanceSource).toBe("manual");
     expect(typeof get.body.totals.netWorth).toBe("number");
   });
+
+  it("GET balance-sheet uses persisted import snapshot when present", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const snapId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO account_balance_snapshot (id, household_id, financial_account_id, as_of_date, amount, currency, source, import_file_id)
+       VALUES (?, ?, ?, ?::date, ?, ?, 'import', NULL)`
+    ).run(snapId, householdId, SEED_MARCUS_SAVINGS, "2025-12-31", 7777.5, "USD");
+
+    try {
+      const get = await request(app)
+        .get("/reports/balance-sheet?asOf=2026-06-30")
+        .set("authorization", `Bearer ${token}`);
+      expect(get.status).toBe(200);
+      const row = get.body.assets.find(
+        (a: { financialAccountId: string }) => a.financialAccountId === SEED_MARCUS_SAVINGS
+      );
+      expect(row).toBeDefined();
+      expect(row.balance).toBe(7777.5);
+      expect(row.balanceSource).toBe("import");
+      expect(row.balanceAsOf).toBe("2025-12-31");
+    } finally {
+      await sqlStmt(`DELETE FROM account_balance_snapshot WHERE id = ?`).run(snapId);
+    }
+  });
 });
