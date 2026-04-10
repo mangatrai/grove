@@ -2,6 +2,20 @@
 
 **Auth:** Bearer JWT (same as other household APIs).
 
+## `GET /reports/balance-sheet/history`
+
+**Query**
+
+| Param | Required | Description |
+|--------|----------|-------------|
+| `from` | Yes | Start date `YYYY-MM-DD` (inclusive). |
+| `to` | Yes | End date `YYYY-MM-DD` (inclusive). |
+| `interval` | No | `month` (default), `week`, or `day`. Controls sample dates between `from` and `to`. |
+
+**Behavior:** Builds a list of sample `asOf` dates (month-end dates per calendar month for `interval=month`; every 7 days from `from` for `week`; every day for `day`). For each date, applies the same per-account resolution as **`GET /reports/balance-sheet`**. At most **120** sample points; otherwise **`400`** with code **`BALANCE_HISTORY_TOO_MANY_POINTS`**.
+
+**Response:** JSON with **`from`**, **`to`**, **`interval`**, and **`points`**: array of `{ asOf, totals: { assets, liabilities, netWorth } }` (same `totals` null semantics as the snapshot endpoint).
+
 ## `GET /reports/balance-sheet`
 
 **Query**

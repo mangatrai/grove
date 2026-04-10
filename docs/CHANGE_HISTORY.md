@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-09
 
+### CR-062 — Net worth trend chart + GET /reports/balance-sheet/history
+- **Type:** CR / API / UX / DOC
+- **What:** **`GET /reports/balance-sheet/history`** with **`from`**, **`to`**, **`interval`** (`month` \| `week` \| `day`); samples up to **120** `asOf` dates using existing **`getBalanceSheet`** resolution. **Net worth** page **Trend** card (Recharts: assets, liabilities, net).
+- **Why:** Ship charts/history from balance sheet backlog without new balance semantics.
+- **Files:** [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`reports.routes.ts`](backend/src/modules/reports/reports.routes.ts), [`app.test.ts`](backend/tests/app.test.ts), [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md), [`openapi.yaml`](openapi/openapi.yaml).
+
 ### CR-061 — Import balance snapshots: persist on parse + prefer in balance sheet
 - **Type:** CR / DB / API / DOC
 - **What:** Migration **`0006`** partial unique index on import snapshots; bank parse upserts **`source = import`** `account_balance_snapshot` rows when **`statementBalances.ending`** and **`asOfEnd`** (`YYYY-MM-DD`) are present; **`GET /reports/balance-sheet`** resolves **manual → persisted import → confidence_summary hint**.

@@ -8,18 +8,19 @@ Household **assets vs liabilities** view, separate from the transaction ledger. 
 - **Data:** `account_balance_snapshot` (PG migrations **`0005`**, **`0006`** import uniqueness; SQLite mirrors in `backend/db/migrations/`). Successful bank parses with `statementBalances.ending` + `asOfEnd` upsert **`source = import`** rows.
 - **UI:** Sidebar **Net worth** — totals + asset/liability tables + manual entry form.
 - **Import snapshots (CR-061):** Bank parse persists **`source = import`** `account_balance_snapshot` rows when statement period end is known; balance sheet API prefers them over **`confidence_summary`** alone.
+- **History (CR-062):** **`GET /reports/balance-sheet/history`** + **Net worth → Trend** chart (assets, liabilities, net over sampled dates).
 
 ## Deferred
 
-1. **Charts / history UX** — line or area series of assets, liabilities, and net over time; per-account trends (see original Epic 7 intent).
-2. **Full “balances over time”** — multi–time-slice comparison, statement-period alignment beyond a single `asOf`.
+1. **Per-account trend lines** on the net worth chart (history API currently returns **totals** only; extend with optional `includeAccounts` if needed).
+2. **Full “balances over time”** — multi–time-slice comparison, statement-period alignment beyond sampled `asOf` lists.
 3. **Household vs member subtotals** on this page (accounts already have owner scope; filtering not in v1 UI).
 
 ### Original story list (for reference)
 
 1. **Assets vs liabilities layout** — **partially shipped** (type-based classification: checking/savings/investment vs credit_card/loan/mortgage).
-2. **Balances over time** — **deferred** (manual date per snapshot only; no history chart).
-3. **Charts** — **deferred**.
+2. **Balances over time** — **partially shipped** via **`/balance-sheet/history`** + trend chart; deeper comparison UX still deferred.
+3. **Charts** — **shipped** (totals trend); per-account chart lines deferred.
 4. **Editable balances** — **shipped** via manual POST/PATCH; import remains read-only hints.
 5. **Household vs member** — **deferred** for this page.
 

@@ -285,6 +285,11 @@ paths:
       tags: [reports]
       summary: Balance sheet / net worth snapshot (assets vs liabilities)
       security: [{ bearerAuth: [] }]
+  /reports/balance-sheet/history:
+    get:
+      tags: [reports]
+      summary: Balance sheet totals over time (sampled as-of dates; max 120 points)
+      security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual:
     post:
       tags: [reports]
