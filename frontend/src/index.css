@@ -1045,6 +1045,14 @@ table.ledger-table thead th {
   border-bottom: 1px solid #dde2e8;
 }
 
+.net-worth__control-band {
+  margin-bottom: 0;
+}
+
+.net-worth__overlay-band {
+  max-width: 520px;
+}
+
 table.ledger-table.payslip-manual__table th,
 table.ledger-table.payslip-manual__table td {
   vertical-align: middle;

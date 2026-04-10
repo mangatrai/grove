@@ -537,8 +537,10 @@ export function NetWorthPage() {
       <div className="card">
         <h1>Net worth</h1>
         <p className="muted" style={{ marginBottom: 0 }}>
-          Assets and liabilities from connected accounts. Manual balances override import hints for the same account. Balances
-          below show liabilities as negative for net-worth clarity.{" "}
+          Trend and balance sheet use the same rules per account: <strong>manual balance</strong> wins, then a balance saved from
+          an import, then a read-only hint from a parsed statement when nothing else exists. The chart samples those totals
+          across the dates you choose. The balance sheet table below shows <strong>liabilities as negative</strong> so net worth
+          reads clearly.{" "}
           <Link to="/settings?tab=accounts">Manage accounts</Link>.
         </p>
       </div>
@@ -546,10 +548,9 @@ export function NetWorthPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <h2 style={{ marginTop: 0 }}>Trend</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Sampled totals over the selected period (manual → import snapshot → statement hint). Chart updates when you change
-          settings.
+          Chart updates automatically when you change period, interval, or belongs-to.
         </p>
-        <div className="row" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+        <div className="row net-worth__control-band" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap" }}>
           <label className="field" style={{ marginBottom: 0 }}>
             <span>Period</span>
             <select value={periodPreset} onChange={(ev) => onPresetChange(ev.target.value as PeriodPreset)}>
@@ -591,14 +592,12 @@ export function NetWorthPage() {
               clearable
             />
           </label>
-          <button type="button" className="secondary" onClick={() => void reloadAll()} disabled={loading || historyLoading}>
-            Reload
-          </button>
         </div>
 
-        <div style={{ maxWidth: 520, marginBottom: "0.75rem" }}>
+        <div className="net-worth__overlay-band" style={{ marginTop: "0.75rem" }}>
           <MultiSelect
             label="Overlay accounts on chart"
+            description="Optional — adds lines for the accounts you pick (up to 8)."
             placeholder="Pick up to 8 accounts"
             data={multiSelectData}
             value={chartAccountIds}
@@ -609,43 +608,88 @@ export function NetWorthPage() {
           />
         </div>
 
-        {periodSummary ? (
-          <div
-            className="row"
-            style={{ gap: "1.5rem", flexWrap: "wrap", marginBottom: "0.75rem", alignItems: "flex-start" }}
-          >
-            <div>
-              <div className="muted" style={{ fontSize: "0.8rem" }}>
-                Period ({periodSummary.startLabel} → {periodSummary.endLabel})
-              </div>
-              <div style={{ marginTop: "0.35rem" }}>
-                <strong>Starting</strong> — assets {formatMoney(periodSummary.start.assets)}, liabilities{" "}
-                {formatMoney(periodSummary.start.liabilities)}, net {formatMoney(periodSummary.start.net)}
-              </div>
-              <div>
-                <strong>Ending</strong> — assets {formatMoney(periodSummary.end.assets)}, liabilities{" "}
-                {formatMoney(periodSummary.end.liabilities)}, net {formatMoney(periodSummary.end.net)}
-              </div>
-              {periodSummary.delta ? (
-                <div className="muted" style={{ marginTop: "0.25rem", fontSize: "0.9rem" }}>
-                  Change — assets {formatMoney(periodSummary.delta.assets)}, liabilities {formatMoney(periodSummary.delta.liabilities)}, net{" "}
-                  {formatMoney(periodSummary.delta.net)}
-                </div>
-              ) : null}
-              <div style={{ marginTop: "0.5rem" }}>
-                <Link to={transactionsHref({ dateFrom: periodSummary.startLabel, dateTo: periodSummary.startLabel })}>
-                  Transactions on first sample date
-                </Link>
-                {" · "}
-                <Link to={transactionsHref({ dateFrom: periodSummary.endLabel, dateTo: periodSummary.endLabel })}>
-                  Transactions on last sample date
-                </Link>
-              </div>
+        {(loadError || historyError) ? (
+          <div className="net-worth__retry-band" style={{ marginTop: "0.75rem" }}>
+            {historyError ? <p className="error" style={{ marginTop: 0 }}>{historyError}</p> : null}
+            <div className="row" style={{ alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+              <button type="button" className="secondary" onClick={() => void reloadAll()} disabled={loading || historyLoading}>
+                {loading || historyLoading ? "Loading…" : "Retry load"}
+              </button>
+              <span className="muted" style={{ fontSize: "0.9rem" }}>
+                Refetches the balance sheet and trend chart.
+              </span>
             </div>
           </div>
         ) : null}
 
-        {historyError ? <p className="error">{historyError}</p> : null}
+        {periodSummary ? (
+          <div style={{ marginTop: "1rem" }}>
+            <h3 style={{ marginTop: 0, marginBottom: "0.35rem", fontSize: "1rem" }}>Period summary</h3>
+            <p className="muted" style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.85rem" }}>
+              First and last rows match the endpoints of the chart below. Ledger opens transactions for that calendar day only.
+            </p>
+            <div style={{ overflowX: "auto" }}>
+              <table className="ledger-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Sample</th>
+                    <th scope="col">Assets</th>
+                    <th scope="col">Liabilities</th>
+                    <th scope="col">Net worth</th>
+                    <th scope="col">Ledger</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">
+                      First ({periodSummary.startLabel})
+                    </th>
+                    <td>{formatMoney(periodSummary.start.assets)}</td>
+                    <td>{formatMoney(periodSummary.start.liabilities)}</td>
+                    <td>{formatMoney(periodSummary.start.net)}</td>
+                    <td>
+                      <Link
+                        to={transactionsHref({
+                          dateFrom: periodSummary.startLabel,
+                          dateTo: periodSummary.startLabel
+                        })}
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                  <tr>
+                    <th scope="row">
+                      Last ({periodSummary.endLabel})
+                    </th>
+                    <td>{formatMoney(periodSummary.end.assets)}</td>
+                    <td>{formatMoney(periodSummary.end.liabilities)}</td>
+                    <td>{formatMoney(periodSummary.end.net)}</td>
+                    <td>
+                      <Link
+                        to={transactionsHref({
+                          dateFrom: periodSummary.endLabel,
+                          dateTo: periodSummary.endLabel
+                        })}
+                      >
+                        View
+                      </Link>
+                    </td>
+                  </tr>
+                  {periodSummary.delta ? (
+                    <tr>
+                      <th scope="row">Change (last − first)</th>
+                      <td>{formatMoney(periodSummary.delta.assets)}</td>
+                      <td>{formatMoney(periodSummary.delta.liabilities)}</td>
+                      <td>{formatMoney(periodSummary.delta.net)}</td>
+                      <td className="muted">—</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
         {historyLoading ? <p className="muted">Loading chart…</p> : null}
         {!historyLoading && chartRows.length > 0 ? (
           <div style={{ width: "100%", height: 340 }}>
