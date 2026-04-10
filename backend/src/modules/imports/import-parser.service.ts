@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
-import { qAll, qExec } from "../../db/query.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 
 import { getSessionForHousehold, type ServiceResult } from "./import-session.service.js";
 import { resolveParserAdapter } from "./parsers/parser-registry.js";
@@ -28,6 +28,7 @@ import {
   requireEmployerForPayslipImport
 } from "../payslip/payslip-employer-resolve.service.js";
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
+import { upsertImportBalanceSnapshotFromStatement } from "../reports/balance-sheet.service.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "../payslip/payslip.types.js";
 import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
@@ -520,6 +521,34 @@ export async function parseSessionImportFiles(
         }),
         file.id
       );
+
+      const sb = extracted.statementBalances;
+      if (file.financial_account_id && sb != null && sb.ending != null && Number.isFinite(Number(sb.ending))) {
+        const rawEnd = sb.asOfEnd?.trim() ? String(sb.asOfEnd).slice(0, 10) : "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(rawEnd)) {
+          const acct = await qGet<{ currency: string }>(
+            `SELECT currency FROM financial_account WHERE id = ? AND household_id = ? LIMIT 1`,
+            file.financial_account_id,
+            householdId
+          );
+          if (acct) {
+            const snap = await upsertImportBalanceSnapshotFromStatement(householdId, {
+              financialAccountId: file.financial_account_id,
+              importFileId: file.id,
+              asOfDate: rawEnd,
+              amount: Number(sb.ending),
+              currency: String(acct.currency ?? "USD")
+            });
+            if (!snap.ok) {
+              log.warn("[Import parse] could not persist statement balance snapshot", {
+                importFileId: file.id,
+                financialAccountId: file.financial_account_id,
+                code: snap.ok ? undefined : snap.code
+              });
+            }
+          }
+        }
+      }
     } catch {
       await qExec(
         `UPDATE import_file

@@ -266,6 +266,75 @@ export async function upsertManualBalanceSnapshot(
   return { id };
 }
 
+export type UpsertImportBalanceResult =
+  | { ok: true }
+  | { ok: false; code: "ACCOUNT_NOT_FOUND" | "PAYSLIP_ACCOUNT_NOT_ALLOWED" };
+
+/**
+ * Persists statement-ending balance from bank parse into `account_balance_snapshot` (`source = import`).
+ * Call only when `asOfDate` is a valid `YYYY-MM-DD` (statement period end).
+ */
+export async function upsertImportBalanceSnapshotFromStatement(
+  householdId: string,
+  input: {
+    financialAccountId: string;
+    importFileId: string;
+    asOfDate: string;
+    amount: number;
+    currency: string;
+  }
+): Promise<UpsertImportBalanceResult> {
+  const acc = await qGet<{ type: string; household_id: string }>(
+    `SELECT type, household_id FROM financial_account WHERE id = ? LIMIT 1`,
+    input.financialAccountId
+  );
+  if (!acc || acc.household_id !== householdId) {
+    return { ok: false, code: "ACCOUNT_NOT_FOUND" };
+  }
+  if (acc.type === "payslip") {
+    return { ok: false, code: "PAYSLIP_ACCOUNT_NOT_ALLOWED" };
+  }
+
+  const existing = await qGet<{ id: string }>(
+    `SELECT id FROM account_balance_snapshot
+      WHERE household_id = ?
+        AND financial_account_id = ?
+        AND source = 'import'
+        AND as_of_date = ?::date
+      LIMIT 1`,
+    householdId,
+    input.financialAccountId,
+    input.asOfDate
+  );
+
+  if (existing) {
+    await qExec(
+      `UPDATE account_balance_snapshot
+          SET amount = ?, currency = ?, import_file_id = ?, updated_at = NOW()
+        WHERE id = ?`,
+      input.amount,
+      input.currency,
+      input.importFileId,
+      existing.id
+    );
+  } else {
+    const id = crypto.randomUUID();
+    await qExec(
+      `INSERT INTO account_balance_snapshot (
+         id, household_id, financial_account_id, as_of_date, amount, currency, source, import_file_id, updated_at
+       ) VALUES (?, ?, ?, ?::date, ?, ?, 'import', ?, NOW())`,
+      id,
+      householdId,
+      input.financialAccountId,
+      input.asOfDate,
+      input.amount,
+      input.currency,
+      input.importFileId
+    );
+  }
+  return { ok: true };
+}
+
 export async function patchManualBalanceSnapshot(
   householdId: string,
   snapshotId: string,
