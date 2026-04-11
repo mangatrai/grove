@@ -325,6 +325,10 @@ export function ImportWorkspacePage() {
   // Institution catalog for the inline create-account form (lazy-loaded when form opens)
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
+  // Inline "Add institution" input row (shown below the picker when user wants a custom name)
+  const [addingInstitution, setAddingInstitution] = useState(false);
+  const [newInstitutionName, setNewInstitutionName] = useState("");
+  const [savingInstitution, setSavingInstitution] = useState(false);
 
   const institutionPickerGroups = useMemo((): HierarchicalPickerGroup[] => {
     const catalogItems = institutionCatalogList.map((label) => ({ value: label, label, searchText: label }));
@@ -1584,7 +1588,7 @@ export function ImportWorkspacePage() {
                             {ofxCreateAccountFileId === f.id ? (
                               <div style={{ marginTop: "0.5rem", padding: "0.6rem", background: "var(--surface-raised, #f5f5f5)", borderRadius: 4, border: "1px solid var(--border)" }}>
                                 <p style={{ margin: "0 0 0.4rem", fontWeight: 500, fontSize: "0.88rem" }}>New account</p>
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem 0.6rem", alignItems: "flex-end" }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto", gap: "0.4rem 0.6rem", alignItems: "end" }}>
                                   <div>
                                     <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Type</label>
                                     <select value={newAcctType} onChange={(e) => setNewAcctType(e.target.value)}>
@@ -1606,24 +1610,6 @@ export function ImportWorkspacePage() {
                                       ariaLabel="Institution for new account"
                                       clearable
                                     />
-                                    <button
-                                      type="button"
-                                      className="secondary"
-                                      style={{ fontSize: "0.78rem", marginTop: "0.25rem", padding: "0 0.4rem" }}
-                                      onClick={() => {
-                                        const name = window.prompt("Institution name (saved for your household):");
-                                        if (!name?.trim()) return;
-                                        void apiJson("/imports/institutions/custom", {
-                                          method: "POST",
-                                          body: JSON.stringify({ displayName: name.trim() })
-                                        }).then(() => {
-                                          void loadInstitutions();
-                                          setNewAcctInstitution(name.trim());
-                                        }).catch(() => {/* ignore */});
-                                      }}
-                                    >
-                                      Add institution…
-                                    </button>
                                   </div>
                                   <div>
                                     <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Last 4</label>
@@ -1652,10 +1638,70 @@ export function ImportWorkspacePage() {
                                   <button type="button" disabled={creatingAccount} onClick={() => void createAccountForOfxFile(f.id)}>
                                     {creatingAccount ? "Saving…" : "Save"}
                                   </button>
-                                  <button type="button" className="secondary" onClick={() => setOfxCreateAccountFileId(null)}>
+                                  <button type="button" className="secondary" onClick={() => { setOfxCreateAccountFileId(null); setAddingInstitution(false); setNewInstitutionName(""); }}>
                                     Cancel
                                   </button>
                                 </div>
+                                {/* Inline add-institution row — shown instead of window.prompt */}
+                                {addingInstitution ? (
+                                  <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginTop: "0.4rem" }}>
+                                    <input
+                                      autoFocus
+                                      value={newInstitutionName}
+                                      onChange={(e) => setNewInstitutionName(e.target.value)}
+                                      placeholder="Institution name"
+                                      style={{ flex: "1 1 12rem" }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          e.preventDefault();
+                                          void (async () => {
+                                            if (!newInstitutionName.trim()) return;
+                                            setSavingInstitution(true);
+                                            try {
+                                              await apiJson("/imports/institutions/custom", { method: "POST", body: JSON.stringify({ displayName: newInstitutionName.trim() }) });
+                                              await loadInstitutions();
+                                              setNewAcctInstitution(newInstitutionName.trim());
+                                              setAddingInstitution(false);
+                                              setNewInstitutionName("");
+                                            } finally {
+                                              setSavingInstitution(false);
+                                            }
+                                          })();
+                                        }
+                                        if (e.key === "Escape") { setAddingInstitution(false); setNewInstitutionName(""); }
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={savingInstitution || !newInstitutionName.trim()}
+                                      onClick={() => void (async () => {
+                                        if (!newInstitutionName.trim()) return;
+                                        setSavingInstitution(true);
+                                        try {
+                                          await apiJson("/imports/institutions/custom", { method: "POST", body: JSON.stringify({ displayName: newInstitutionName.trim() }) });
+                                          await loadInstitutions();
+                                          setNewAcctInstitution(newInstitutionName.trim());
+                                          setAddingInstitution(false);
+                                          setNewInstitutionName("");
+                                        } finally {
+                                          setSavingInstitution(false);
+                                        }
+                                      })()}
+                                    >
+                                      {savingInstitution ? "Saving…" : "Add"}
+                                    </button>
+                                    <button type="button" className="secondary" onClick={() => { setAddingInstitution(false); setNewInstitutionName(""); }}>Cancel</button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="secondary"
+                                    style={{ fontSize: "0.78rem", marginTop: "0.3rem", padding: "0.1rem 0.5rem" }}
+                                    onClick={() => { setAddingInstitution(true); setNewInstitutionName(""); }}
+                                  >
+                                    Add institution…
+                                  </button>
+                                )}
                               </div>
                             ) : null}
                           </div>
