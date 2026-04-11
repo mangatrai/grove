@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import type { MatchedDeposit, PayslipSnapshotDetail } from "../payslip/types";
 
 export type { PayslipSnapshotDetail };
@@ -47,10 +47,12 @@ function periodLabel(r: PayslipSnapshotDetail): string {
 export function PayslipDetailPage() {
   const token = useAuthToken();
   const { payslipId } = useParams<{ payslipId: string }>();
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<PayslipSnapshotDetail | null>(null);
   const [employers, setEmployers] = useState<EmployerRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     if (!payslipId) {
@@ -87,6 +89,38 @@ export function PayslipDetailPage() {
     return <Navigate to="/" replace />;
   }
 
+  const deletePayslip = useCallback(async () => {
+    if (!payslipId) {
+      return;
+    }
+    if (!window.confirm("Delete this payslip permanently? This cannot be undone.")) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/payslips/${encodeURIComponent(payslipId)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = text || res.statusText;
+        try {
+          const j = JSON.parse(text) as { message?: string };
+          if (j.message) {
+            msg = j.message;
+          }
+        } catch {
+          /* use raw */
+        }
+        setError(msg);
+        return;
+      }
+      navigate("/payslips", { replace: true });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }, [payslipId, navigate]);
+
   if (!payslipId) {
     return <Navigate to="/payslips" replace />;
   }
@@ -97,7 +131,18 @@ export function PayslipDetailPage() {
         <p style={{ marginTop: 0 }}>
           <Link to="/payslips">← Payslips</Link>
         </p>
-        <h1 style={{ marginTop: "0.25rem" }}>Payslip detail</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
+          <h1 style={{ marginTop: "0.25rem", marginBottom: 0 }}>Payslip detail</h1>
+          <button
+            type="button"
+            className="secondary"
+            style={{ fontSize: "0.85rem", alignSelf: "center" }}
+            disabled={deleting || loading}
+            onClick={() => void deletePayslip()}
+          >
+            {deleting ? "Deleting…" : "Delete payslip"}
+          </button>
+        </div>
         <p className="muted">Read-only summary from the stored snapshot (not merged into the bank ledger).</p>
       </div>
 

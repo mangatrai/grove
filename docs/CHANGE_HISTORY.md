@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-11
+
+### CR-071 — OFX/QFX/QBO parser + streamlined import confirm flow + payslip delete
+- **Type:** CR / Backend / UX
+- **What:** Three related changes.
+  1. **OFX/QFX/QBO parser (`ofx_transactions` profile):** New parser `backend/src/modules/imports/profiles/ofx-parser.ts` handles both OFX 1.x (SGML-like unclosed leaf tags) and OFX 2.x (proper XML, via cheerio). Parses: FITID → `reference_id` (stronger dedup than fingerprint), DTPOSTED → ISO date, TRNAMT → amount (signed decimal), NAME + MEMO → description. Also extracts account header: ACCTID, ACCTTYPE, BANKID, FI/ORG. Profile ID `ofx_transactions` added to `PARSER_PROFILE_IDS`. Handles `.ofx`, `.qfx`, `.qbo` extensions.
+  2. **Streamlined OFX import flow:** When an OFX/QFX/QBO file is uploaded, `persistSessionFiles` auto-detects the extension, sets `parser_profile_id = 'ofx_transactions'`, reads the account header, and stores it in `confidence_summary`. New service `ofx-account-match.service.ts` matches ACCTID last-4 against `financial_account.account_mask`. New endpoints: `GET /imports/sessions/:id/files/:fileId/ofx-suggestion` (returns matched account or null + account info), `POST /imports/sessions/:id/ofx-confirm` (bind + parse + canonicalize in one call). Frontend shows a dedicated **OFX / QFX / QBO — confirm account & import** card for any unbound OFX files: account picker pre-populated with suggestion, belongs-to picker, inline **Create account** form when no match, **Confirm & import** button. Non-OFX files keep the existing bind → Run import flow.
+  3. **Payslip delete:** `DELETE /payslips/:id` backend endpoint. `deletePayslipSnapshotForHousehold` in `payslip.service.ts`. Delete button in `PayslipsPage` (list row) and `PayslipDetailPage` (header, navigates back on success). Uses `window.confirm` for confirmation.
+- **Why:** OFX is a widely-supported open standard (QFX = OFX + Quicken header, QBO = OFX + QuickBooks header — one parser handles all three). FITID from OFX gives stronger deduplication than fingerprint alone. Streamlined import flow reduces required steps from Upload → Bind → Parse → Canonicalize → Undo → Finalize to Upload → Confirm → (Undo →) Finalize. Payslip delete was missing — no way to remove erroneous imports.
+- **Future backlog:** CSV auto-detection from column headers (analogous to OFX auto-detection from extension) — not implemented in this CR; CSV stays with manual profile selection.
+- **Files:** `ofx-parser.ts` (new), `ofx-account-match.service.ts` (new), `profile-ids.ts`, `import-parser.service.ts`, `import-session.service.ts`, `imports.routes.ts`, `payslip.service.ts`, `payslip.routes.ts`, `ImportWorkspacePage.tsx`, `PayslipsPage.tsx`, `PayslipDetailPage.tsx`.
+
 ## 2026-04-10
 
 ### CR-070 — Trash (soft delete) + remove transfer_ambiguity from Needs Review

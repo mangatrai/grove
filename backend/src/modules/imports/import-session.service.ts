@@ -10,6 +10,7 @@ import {
   isValidSessionTransition,
   sessionAcceptsFileUploads
 } from "./import-session.state-machine.js";
+import { extractOfxAccountInfo, type OfxAccountInfo } from "./profiles/ofx-parser.js";
 
 export interface ImportSessionRow {
   id: string;
@@ -125,6 +126,15 @@ export interface PersistedImportFile {
   fileName: string;
   checksum: string;
   status: "queued";
+  /** Populated for OFX/QFX/QBO uploads only. */
+  ofxMeta?: OfxAccountInfo;
+}
+
+const OFX_EXTENSIONS = new Set([".ofx", ".qfx", ".qbo"]);
+
+function isOfxFileName(name: string): boolean {
+  const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+  return OFX_EXTENSIONS.has(ext);
 }
 
 export interface SkippedImportFile {
@@ -188,16 +198,34 @@ export async function persistSessionFiles(
 
     fs.writeFileSync(storedPath, file.buffer);
 
+    // Auto-detect OFX/QFX/QBO: set parser profile and extract account metadata.
+    let autoProfileId: string | null = null;
+    let ofxMeta: OfxAccountInfo | undefined;
+    let confidenceSummary = "{}";
+
+    if (isOfxFileName(file.originalname)) {
+      autoProfileId = "ofx_transactions";
+      try {
+        ofxMeta = extractOfxAccountInfo(file.buffer);
+        confidenceSummary = JSON.stringify({ stage: "header_read", ofxMeta });
+      } catch {
+        // Non-fatal: OFX header extraction failure still allows upload.
+        confidenceSummary = JSON.stringify({ stage: "header_read_failed" });
+      }
+    }
+
     try {
       await qExec(
         `INSERT INTO import_file (
        id, session_id, file_name, checksum, parser_profile_id, status,
        confidence_summary, stored_path, file_size, mime_type, uploaded_at
-     ) VALUES (?, ?, ?, ?, NULL, 'queued', '{}', ?, ?, ?, CURRENT_TIMESTAMP)`,
+     ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         fileId,
         sessionId,
         file.originalname,
         checksum,
+        autoProfileId,
+        confidenceSummary,
         storedPath,
         file.size,
         file.mimetype || "application/octet-stream"
@@ -211,12 +239,16 @@ export async function persistSessionFiles(
       throw err;
     }
 
-    created.push({
+    const persistedFile: PersistedImportFile = {
       id: fileId,
       fileName: file.originalname,
       checksum,
       status: "queued"
-    });
+    };
+    if (ofxMeta) {
+      persistedFile.ofxMeta = ofxMeta;
+    }
+    created.push(persistedFile);
   }
 
   await qExec(`UPDATE import_session SET status = 'processing' WHERE id = ?`, sessionId);

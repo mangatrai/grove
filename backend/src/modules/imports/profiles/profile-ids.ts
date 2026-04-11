@@ -14,7 +14,9 @@ export const PARSER_PROFILE_IDS = [
   /** Deloitte Pay Statement PDF — v1 uses same Current/YTD summary heuristics as IBM where text matches */
   "deloitte_payslip_pdf",
   /** Registered for onboarding; parse not implemented yet — use IBM or wait for ADP adapter */
-  "adp_payslip_pdf"
+  "adp_payslip_pdf",
+  /** CR-071: OFX / QFX / QBO bank statement import */
+  "ofx_transactions"
 ] as const;
 
 export type ParserProfileId = (typeof PARSER_PROFILE_IDS)[number];

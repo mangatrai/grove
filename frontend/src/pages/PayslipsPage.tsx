@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
 import type { PayslipSnapshotDetail } from "../payslip/types";
@@ -39,6 +39,7 @@ export function PayslipsPage() {
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: "200", offset: "0" });
@@ -84,6 +85,38 @@ export function PayslipsPage() {
     }
     setOwnerProfiles(mapped);
   }, [token]);
+
+  const deletePayslip = useCallback(
+    async (id: string) => {
+      if (!window.confirm("Delete this payslip permanently? This cannot be undone.")) {
+        return;
+      }
+      setDeletingId(id);
+      try {
+        const res = await apiFetch(`/payslips/${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const text = await res.text();
+          let msg = text || res.statusText;
+          try {
+            const j = JSON.parse(text) as { message?: string };
+            if (j.message) {
+              msg = j.message;
+            }
+          } catch {
+            /* use raw */
+          }
+          setLoadError(msg);
+          return;
+        }
+        await load();
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "Delete failed");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [load]
+  );
 
   const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
     () => [
@@ -188,6 +221,16 @@ export function PayslipsPage() {
                     <td>{formatMoney(r.netPayCurrent)}</td>
                     <td>
                       <Link to={`/payslips/${r.id}`}>View</Link>
+                      {" · "}
+                      <button
+                        type="button"
+                        className="secondary"
+                        style={{ fontSize: "0.85rem" }}
+                        disabled={deletingId === r.id}
+                        onClick={() => void deletePayslip(r.id)}
+                      >
+                        {deletingId === r.id ? "Deleting…" : "Delete"}
+                      </button>
                     </td>
                   </tr>
                 ))}

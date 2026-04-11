@@ -14,6 +14,7 @@ import {
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
 import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
 import {
+  deletePayslipSnapshotForHousehold,
   findMatchedDeposits,
   getPayslipSnapshotForHousehold,
   insertManualPayslipSnapshot,
@@ -359,4 +360,19 @@ payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
   res.json({ snapshot: updated });
+});
+
+payslipRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+  const params = idParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid payslip id", issues: params.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const deleted = await deletePayslipSnapshotForHousehold(householdId, params.data.id);
+  if (!deleted) {
+    res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.status(204).send();
 });

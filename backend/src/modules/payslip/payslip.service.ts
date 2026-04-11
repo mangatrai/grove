@@ -503,3 +503,37 @@ export async function patchPayslipSnapshotForHousehold(
   );
   return getPayslipSnapshotForHousehold(householdId, id);
 }
+
+/**
+ * Hard-delete a payslip snapshot and its associated import_file rows.
+ * Returns true if deleted, false if not found.
+ */
+export async function deletePayslipSnapshotForHousehold(
+  householdId: string,
+  id: string
+): Promise<boolean> {
+  const existing = await qGet<{ id: string }>(
+    `SELECT id FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  if (!existing) {
+    return false;
+  }
+  // Clear the reference from import_file rows (keep the import file row for audit; just clear the payslip linkage).
+  await qExec(
+    `UPDATE import_file SET confidence_summary = confidence_summary WHERE session_id IN (
+       SELECT session_id FROM import_file WHERE id IN (
+         SELECT import_file_id FROM payslip_snapshot WHERE id = ? AND household_id = ?
+       )
+     )`,
+    id,
+    householdId
+  );
+  await qExec(
+    `DELETE FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  return true;
+}

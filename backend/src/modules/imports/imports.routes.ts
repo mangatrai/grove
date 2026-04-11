@@ -35,6 +35,7 @@ import { createHouseholdCustomInstitution, listHouseholdCustomInstitutions } fro
 import { listUsInstitutionLabels } from "./institution-catalog.js";
 import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-file-delete.service.js";
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
+import { suggestAccountForOfx } from "./ofx-account-match.service.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
@@ -493,4 +494,115 @@ importsRouter.post("/sessions/:sessionId/undo-import", async (req: Authenticated
   }
 
   res.status(200).json(result.data);
+});
+
+/**
+ * OFX/QFX/QBO account suggestion:
+ * GET /imports/sessions/:sessionId/files/:fileId/ofx-suggestion
+ * Returns account match suggestion based on OFX header metadata stored in confidence_summary.
+ */
+importsRouter.get("/sessions/:sessionId/files/:fileId/ofx-suggestion", async (req: AuthenticatedRequest, res) => {
+  const file = await qGet<{ confidence_summary: string | null }>(
+    `SELECT f.confidence_summary
+       FROM import_file f
+       JOIN import_session s ON s.id = f.session_id
+       WHERE f.id = ? AND f.session_id = ? AND s.household_id = ?`,
+    req.params.fileId,
+    req.params.sessionId,
+    req.authUser!.householdId
+  );
+  if (!file) {
+    res.status(404).json({ message: "Import file not found" });
+    return;
+  }
+
+  type OfxMetaSnippet = { acctId?: string; acctType?: string; institution?: string };
+  let ofxMeta: OfxMetaSnippet | null = null;
+  try {
+    const cs = JSON.parse(file.confidence_summary ?? "{}") as { ofxMeta?: OfxMetaSnippet };
+    ofxMeta = cs.ofxMeta ?? null;
+  } catch {
+    // malformed JSON — treat as no meta
+  }
+
+  const suggestion = await suggestAccountForOfx(
+    req.authUser!.householdId,
+    ofxMeta?.acctId ?? null,
+    ofxMeta?.acctType ?? null,
+    ofxMeta?.institution ?? null
+  );
+
+  res.status(200).json(suggestion);
+});
+
+const ofxConfirmSchema = z.object({
+  fileId: z.string().uuid(),
+  financialAccountId: z.string().uuid(),
+  ownerScope: z.enum(["household", "person"]).optional().default("household"),
+  ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional()
+});
+
+/**
+ * OFX/QFX/QBO one-shot import confirm (CR-071):
+ * POST /imports/sessions/:sessionId/ofx-confirm
+ * Binds the file, runs parse, then canonicalizes. Returns canonicalize result.
+ */
+importsRouter.post("/sessions/:sessionId/ofx-confirm", async (req: AuthenticatedRequest, res) => {
+  const parsed = ofxConfirmSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+
+  const { fileId, financialAccountId, ownerScope, ownerPersonProfileId } = parsed.data;
+  const sessionId = req.params.sessionId;
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+
+  // Bind the file to the account.
+  const bindResult = await updateImportFileBinding(sessionId, fileId, householdId, userId, {
+    financialAccountId,
+    parserProfileId: "ofx_transactions",
+    ownerScope,
+    ownerPersonProfileId: ownerScope === "person" ? (ownerPersonProfileId ?? null) : null
+  });
+  if (!bindResult.ok) {
+    res.status(mapBindingFailureToStatus(bindResult)).json({
+      message: bindResult.message,
+      code: bindResult.code
+    });
+    return;
+  }
+
+  // Parse all bound files in the session.
+  const parseResult = await parseSessionImportFiles(sessionId, householdId, userId, {});
+  if (!parseResult.ok) {
+    res.status(mapParseFailureToStatus(parseResult)).json({
+      message: parseResult.message,
+      code: parseResult.code,
+      ...(parseResult.skippedFiles?.length ? { skippedFiles: parseResult.skippedFiles } : {})
+    });
+    return;
+  }
+
+  // Canonicalize.
+  const canonResult = await canonicalizeImportSession(sessionId, householdId);
+  if (!canonResult.ok) {
+    if (canonResult.code === "NOT_FOUND") {
+      res.status(404).json({ message: canonResult.message, code: canonResult.code });
+      return;
+    }
+    if (canonResult.code === "NO_RAW_ROWS") {
+      res.status(409).json({ message: canonResult.message, code: canonResult.code });
+      return;
+    }
+    res.status(500).json({ message: "Unexpected canonicalize error" });
+    return;
+  }
+
+  res.status(200).json({
+    parsedFiles: parseResult.data.parsedFiles,
+    parsedRows: parseResult.data.parsedRows,
+    ...canonResult.data
+  });
 });

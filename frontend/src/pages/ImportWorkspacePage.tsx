@@ -14,6 +14,15 @@ import {
 import { friendlyParserLabel } from "../import/profileLabels";
 
 const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
+const OFX_PARSER_ID = "ofx_transactions";
+
+type OfxSuggestion = {
+  matchedAccountId: string | null;
+  matchedAccountLabel: string | null;
+  acctIdLast4: string | null;
+  normalizedAcctType: string | null;
+  institution: string | null;
+};
 
 type ImportFileRow = {
   id: string;
@@ -303,6 +312,19 @@ export function ImportWorkspacePage() {
   const [removingFileId, setRemovingFileId] = useState<string | null>(null);
   const [importConfirmAction, setImportConfirmAction] = useState<ImportConfirmAction | null>(null);
 
+  // OFX/QFX/QBO confirm flow
+  const [ofxSuggestions, setOfxSuggestions] = useState<Record<string, OfxSuggestion | null>>({});
+  const [ofxDrafts, setOfxDrafts] = useState<Record<string, { accountId: string; ownerScope: "household" | "person"; ownerPersonProfileId: string }>>({});
+  const [ofxConfirming, setOfxConfirming] = useState<Set<string>>(new Set());
+  // Create-account inline form for OFX files with no account match
+  const [ofxCreateAccountFileId, setOfxCreateAccountFileId] = useState<string | null>(null);
+  const [newAcctType, setNewAcctType] = useState("");
+  const [newAcctInstitution, setNewAcctInstitution] = useState("");
+  const [newAcctMask, setNewAcctMask] = useState("");
+  const [newAcctScope, setNewAcctScope] = useState<"household" | "person">("household");
+  const [newAcctPersonId, setNewAcctPersonId] = useState("");
+  const [creatingAccount, setCreatingAccount] = useState(false);
+
   const load = useCallback(async () => {
     if (!sessionId) {
       return;
@@ -371,6 +393,40 @@ export function ImportWorkspacePage() {
       setSessionSummary(sum);
     } catch {
       setSessionSummary(null);
+    }
+
+    // Fetch OFX account suggestions for any OFX/QFX/QBO files.
+    const ofxFiles = detail.files.filter((f) => f.parser_profile_id === OFX_PARSER_ID);
+    if (ofxFiles.length > 0) {
+      const suggestMap: Record<string, OfxSuggestion | null> = {};
+      await Promise.all(
+        ofxFiles.map(async (f) => {
+          try {
+            const s = await apiJson<OfxSuggestion>(
+              `/imports/sessions/${sessionId}/files/${f.id}/ofx-suggestion`
+            );
+            suggestMap[f.id] = s;
+          } catch {
+            suggestMap[f.id] = null;
+          }
+        })
+      );
+      setOfxSuggestions((prev) => ({ ...prev, ...suggestMap }));
+      // Pre-populate OFX drafts with matched account id if not already set.
+      setOfxDrafts((prev) => {
+        const next = { ...prev };
+        for (const f of ofxFiles) {
+          if (!next[f.id]) {
+            const sug = suggestMap[f.id];
+            next[f.id] = {
+              accountId: f.financial_account_id ?? sug?.matchedAccountId ?? "",
+              ownerScope: f.owner_scope ?? "household",
+              ownerPersonProfileId: f.owner_person_profile_id ?? ""
+            };
+          }
+        }
+        return next;
+      });
     }
   }, [sessionId]);
 
@@ -1057,6 +1113,86 @@ export function ImportWorkspacePage() {
     }
   }
 
+  async function confirmOfxFile(fileId: string) {
+    if (!sessionId) {
+      return;
+    }
+    const draft = ofxDrafts[fileId];
+    if (!draft?.accountId) {
+      setError("Choose an account before confirming.");
+      return;
+    }
+    setOfxConfirming((prev) => new Set([...prev, fileId]));
+    setError(null);
+    setMessage(null);
+    try {
+      const body: Record<string, unknown> = {
+        fileId,
+        financialAccountId: draft.accountId,
+        ownerScope: draft.ownerScope,
+        ownerPersonProfileId: draft.ownerScope === "person" ? draft.ownerPersonProfileId || null : null
+      };
+      const out = await apiJson<{ parsedFiles: number; parsedRows: number; inserted: number; duplicates: number; nearDuplicates: number; skipped: number }>(
+        `/imports/sessions/${sessionId}/ofx-confirm`,
+        { method: "POST", body: JSON.stringify(body) }
+      );
+      const nd = out.nearDuplicates ?? 0;
+      setMessage(
+        `OFX import done: parsed ${out.parsedRows} row(s), posted ${out.inserted}, duplicates ${out.duplicates}${nd > 0 ? `, near-duplicates flagged ${nd}` : ""}.`
+      );
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Confirm failed");
+    } finally {
+      setOfxConfirming((prev) => {
+        const next = new Set(prev);
+        next.delete(fileId);
+        return next;
+      });
+    }
+  }
+
+  async function createAccountForOfxFile(fileId: string) {
+    if (!newAcctType || !newAcctInstitution) {
+      setError("Account type and institution are required.");
+      return;
+    }
+    if (newAcctScope === "person" && !newAcctPersonId) {
+      setError("Select a person for this account.");
+      return;
+    }
+    setCreatingAccount(true);
+    setError(null);
+    try {
+      const body: Record<string, unknown> = {
+        type: newAcctType,
+        institution: newAcctInstitution,
+        accountMask: newAcctMask || null,
+        ownerScope: newAcctScope,
+        ownerPersonProfileId: newAcctScope === "person" ? newAcctPersonId || null : null
+      };
+      const result = await apiJson<{ id: string }>("/imports/accounts", {
+        method: "POST",
+        body: JSON.stringify(body)
+      });
+      // Refresh accounts and pre-select the new one.
+      const accRes = await apiJson<{ accounts: FinancialAccount[] }>("/imports/accounts");
+      setAccounts(accRes.accounts);
+      setOfxDrafts((prev) => ({
+        ...prev,
+        [fileId]: {
+          ...prev[fileId]!,
+          accountId: result.id
+        }
+      }));
+      setOfxCreateAccountFileId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create account");
+    } finally {
+      setCreatingAccount(false);
+    }
+  }
+
   async function loadMatcherPreview() {
     if (!sessionId) {
       return;
@@ -1263,14 +1399,16 @@ export function ImportWorkspacePage() {
         {canUploadMore ? (
           <>
             <p className="muted">
-              CSV, XLSX, and PDF are supported. Files upload as soon as you pick them. If a file was already added to
-              this session, it&apos;s skipped and everything else still uploads.
+              CSV, XLSX, PDF, and OFX/QFX/QBO are supported. Files upload as soon as you pick them. OFX/QFX/QBO files
+              are detected automatically and use a streamlined confirm flow. If a file was already added to this session,
+              it&apos;s skipped and everything else still uploads.
             </p>
             <input
               ref={fileInputRef}
               name="files"
               type="file"
               multiple
+              accept=".csv,.xlsx,.xls,.pdf,.ofx,.qfx,.qbo"
               disabled={uploading}
               onClick={() => {
                 setError(null);
@@ -1307,6 +1445,167 @@ export function ImportWorkspacePage() {
           </>
         )}
       </div>
+
+      {/* OFX / QFX / QBO streamlined confirm — shown when the session has OFX files awaiting binding */}
+      {files.filter((f) => f.parser_profile_id === OFX_PARSER_ID && !f.financial_account_id).length > 0 ? (
+        <div className="card">
+          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>OFX / QFX / QBO — confirm account & import</h2>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Each statement file needs an account. We matched account numbers from the file where possible. Select
+            the account, confirm who it belongs to, then hit <strong>Confirm &amp; import</strong>.
+          </p>
+          {files
+            .filter((f) => f.parser_profile_id === OFX_PARSER_ID && !f.financial_account_id)
+            .map((f) => {
+              const sug = ofxSuggestions[f.id];
+              const draft = ofxDrafts[f.id] ?? { accountId: "", ownerScope: "household" as const, ownerPersonProfileId: "" };
+              const isConfirming = ofxConfirming.has(f.id);
+              const isCreating = ofxCreateAccountFileId === f.id;
+              const belongsToValue: BelongsToChoice =
+                draft.ownerScope === "person" && draft.ownerPersonProfileId
+                  ? (`person:${draft.ownerPersonProfileId}` as BelongsToChoice)
+                  : "household";
+
+              return (
+                <div key={f.id} style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem", marginTop: "0.75rem" }}>
+                  <p style={{ margin: "0 0 0.5rem", fontWeight: 500 }}>{f.file_name}</p>
+                  {sug ? (
+                    <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.9rem" }}>
+                      Detected:{" "}
+                      {sug.institution ? <strong>{sug.institution}</strong> : null}
+                      {sug.normalizedAcctType ? ` · ${sug.normalizedAcctType}` : null}
+                      {sug.acctIdLast4 ? ` · ...${sug.acctIdLast4}` : null}
+                      {sug.matchedAccountId ? (
+                        <span className="success"> — matched to {sug.matchedAccountLabel}</span>
+                      ) : (
+                        <span className="muted"> — no matching account found</span>
+                      )}
+                    </p>
+                  ) : null}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
+                    <div>
+                      <label className="muted" style={{ display: "block", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+                        Account
+                      </label>
+                      <HierarchicalSearchPicker
+                        value={draft.accountId || null}
+                        onChange={(v) =>
+                          setOfxDrafts((prev) => ({ ...prev, [f.id]: { ...draft, accountId: v ?? "" } }))
+                        }
+                        groups={buildAccountGroups(accounts.filter((a) => a.type !== "payslip"))}
+                        placeholder="Choose account"
+                        ariaLabel={`Account for ${f.file_name}`}
+                        clearable
+                      />
+                      {!draft.accountId ? (
+                        <button
+                          type="button"
+                          className="secondary"
+                          style={{ marginTop: "0.4rem", fontSize: "0.84rem" }}
+                          onClick={() => {
+                            setNewAcctType(sug?.normalizedAcctType ?? "checking");
+                            setNewAcctInstitution(sug?.institution ?? "");
+                            setNewAcctMask(sug?.acctIdLast4 ?? "");
+                            setNewAcctScope("household");
+                            setNewAcctPersonId("");
+                            setOfxCreateAccountFileId(f.id);
+                          }}
+                        >
+                          Create new account
+                        </button>
+                      ) : null}
+                    </div>
+                    <div>
+                      <label className="muted" style={{ display: "block", fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+                        Belongs-to
+                      </label>
+                      <HierarchicalSearchPicker
+                        value={belongsToValue}
+                        onChange={(v) => {
+                          const p = parseBelongsToChoice(v ?? "household");
+                          setOfxDrafts((prev) => ({
+                            ...prev,
+                            [f.id]: { ...draft, ownerScope: p.ownerScope, ownerPersonProfileId: p.ownerPersonProfileId ?? "" }
+                          }));
+                        }}
+                        groups={buildBelongsToGroups(ownerProfiles)}
+                        placeholder="Belongs-to"
+                        ariaLabel={`Belongs-to for ${f.file_name}`}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!draft.accountId || isConfirming}
+                      onClick={() => void confirmOfxFile(f.id)}
+                      title={!draft.accountId ? "Choose an account first" : undefined}
+                    >
+                      {isConfirming ? "Importing…" : "Confirm & import"}
+                    </button>
+                  </div>
+
+                  {/* Inline create-account form */}
+                  {isCreating ? (
+                    <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: "var(--surface)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                      <p style={{ margin: "0 0 0.5rem", fontWeight: 500, fontSize: "0.9rem" }}>Create account</p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "flex-end" }}>
+                        <div>
+                          <label className="muted" style={{ display: "block", fontSize: "0.82rem" }}>Type</label>
+                          <select value={newAcctType} onChange={(e) => setNewAcctType(e.target.value)}>
+                            <option value="">—</option>
+                            <option value="checking">Checking</option>
+                            <option value="savings">Savings</option>
+                            <option value="credit_card">Credit card</option>
+                            <option value="loan">Loan</option>
+                            <option value="investment">Investment</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="muted" style={{ display: "block", fontSize: "0.82rem" }}>Institution</label>
+                          <input
+                            value={newAcctInstitution}
+                            onChange={(e) => setNewAcctInstitution(e.target.value)}
+                            placeholder="e.g. Bank of America"
+                            style={{ width: "14rem" }}
+                          />
+                        </div>
+                        <div>
+                          <label className="muted" style={{ display: "block", fontSize: "0.82rem" }}>Last 4 digits</label>
+                          <input
+                            value={newAcctMask}
+                            onChange={(e) => setNewAcctMask(e.target.value.slice(-4))}
+                            placeholder="1234"
+                            maxLength={4}
+                            style={{ width: "5rem" }}
+                          />
+                        </div>
+                        <div>
+                          <label className="muted" style={{ display: "block", fontSize: "0.82rem" }}>Belongs-to</label>
+                          <HierarchicalSearchPicker
+                            value={newAcctScope === "person" && newAcctPersonId ? (`person:${newAcctPersonId}` as BelongsToChoice) : "household"}
+                            onChange={(v) => {
+                              const p = parseBelongsToChoice(v ?? "household");
+                              setNewAcctScope(p.ownerScope);
+                              setNewAcctPersonId(p.ownerPersonProfileId ?? "");
+                            }}
+                            groups={buildBelongsToGroups(ownerProfiles)}
+                            placeholder="Belongs-to"
+                            ariaLabel="New account belongs-to"
+                          />
+                        </div>
+                        <button type="button" disabled={creatingAccount} onClick={() => void createAccountForOfxFile(f.id)}>
+                          {creatingAccount ? "Saving…" : "Save account"}
+                        </button>
+                        <button type="button" className="secondary" onClick={() => setOfxCreateAccountFileId(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+        </div>
+      ) : null}
 
       <div className="card">
         <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Files & account</h2>
