@@ -79,7 +79,6 @@ type TxRow = {
 };
 
 const LEDGER_RESOLUTION_TYPES = [
-  "unknown_category",
   "duplicate_ambiguity",
   "transfer_ambiguity",
   "reconciliation_mismatch"
@@ -88,7 +87,6 @@ const LEDGER_RESOLUTION_TYPES = [
 type LedgerResolutionType = (typeof LEDGER_RESOLUTION_TYPES)[number];
 
 const RESOLUTION_TYPE_LABELS: Record<LedgerResolutionType, string> = {
-  unknown_category: "Unknown category",
   duplicate_ambiguity: "Near-duplicate",
   transfer_ambiguity: "Transfer ambiguity",
   reconciliation_mismatch: "Reconciliation"
@@ -561,37 +559,12 @@ export function TransactionsPage() {
 
   const selectedCount = selectedTxnIds.size;
 
-  const unknownCategoryResolutionIdsInSelection = useMemo(() => {
-    if (!data) {
-      return [];
-    }
-    const out: string[] = [];
-    for (const t of data.transactions) {
-      if (!selectedTxnIds.has(t.id)) {
-        continue;
-      }
-      for (const item of t.openReviewItems ?? []) {
-        if (item.type === "unknown_category") {
-          out.push(item.id);
-        }
-      }
-    }
-    return [...new Set(out)];
-  }, [data, selectedTxnIds]);
-  const nonUnknownOpenResolutionCountInSelection = useMemo(() => {
-    if (!data) {
-      return 0;
-    }
+  const openFlagCountInSelection = useMemo(() => {
+    if (!data) return 0;
     let count = 0;
     for (const t of data.transactions) {
-      if (!selectedTxnIds.has(t.id)) {
-        continue;
-      }
-      for (const item of t.openReviewItems ?? []) {
-        if (item.type !== "unknown_category") {
-          count += 1;
-        }
-      }
+      if (!selectedTxnIds.has(t.id)) continue;
+      count += (t.openReviewItems ?? []).length;
     }
     return count;
   }, [data, selectedTxnIds]);
@@ -626,63 +599,31 @@ export function TransactionsPage() {
   }
 
   function collectOpenResolutionIdsFromSelection(): string[] {
-    if (!data) {
-      return [];
-    }
+    if (!data) return [];
     const out: string[] = [];
     for (const t of data.transactions) {
-      if (!selectedTxnIds.has(t.id)) {
-        continue;
-      }
-      for (const item of t.openReviewItems ?? []) {
-        out.push(item.id);
-      }
+      if (!selectedTxnIds.has(t.id)) continue;
+      for (const item of t.openReviewItems ?? []) out.push(item.id);
     }
     return [...new Set(out)];
   }
 
-  function collectUnknownCategoryResolutionIds(): string[] {
-    if (!data) {
-      return [];
-    }
-    const out: string[] = [];
-    for (const t of data.transactions) {
-      if (!selectedTxnIds.has(t.id)) {
-        continue;
-      }
-      for (const item of t.openReviewItems ?? []) {
-        if (item.type === "unknown_category") {
-          out.push(item.id);
-        }
-      }
-    }
-    return [...new Set(out)];
-  }
-
-  async function bulkApplyCategory() {
-    const ids = collectUnknownCategoryResolutionIds();
-    if (ids.length === 0) {
-      setError(
-        "No open “Unknown category” items in your selection. Rows can stay on Needs review for transfer, duplicate, or other flags even when a category is set — filter Review types to “Unknown category” or pick different rows."
-      );
-      return;
-    }
+  async function bulkAssignCategory() {
     if (!bulkCategoryId) {
       setError("Choose a category.");
       return;
     }
+    const ids = data ? [...selectedTxnIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (ids.length === 0) return;
     setError(null);
     setSavingBulk(true);
     try {
-      const res = await apiJson<{ updated: { id: string }[]; errors: { id: string; code: string }[] }>(
-        "/resolution/bulk-apply-category",
-        {
-          method: "POST",
-          body: JSON.stringify({ ids, categoryId: bulkCategoryId })
-        }
+      const res = await apiJson<{ updated: number; skipped: number }>(
+        "/transactions/bulk-category",
+        { method: "POST", body: JSON.stringify({ ids, categoryId: bulkCategoryId }) }
       );
-      if (res.errors.length > 0) {
-        setError(`Applied to ${res.updated.length}; ${res.errors.length} row(s) could not be updated.`);
+      if (res.skipped > 0) {
+        setError(`Applied to ${res.updated}; ${res.skipped} row(s) could not be updated.`);
       }
       setSelectedTxnIds(new Set());
       setBulkCategoryId("");
@@ -697,57 +638,10 @@ export function TransactionsPage() {
     }
   }
 
-  async function bulkApplyCategoryAndResolve() {
-    const ids = collectUnknownCategoryResolutionIds();
-    if (ids.length === 0) {
-      setError(
-        "No open “Unknown category” items in your selection. Filter Review types to “Unknown category” or pick different rows."
-      );
-      return;
-    }
-    if (!bulkCategoryId) {
-      setError("Choose a category.");
-      return;
-    }
-    setError(null);
-    setSavingBulk(true);
-    try {
-      const applyRes = await apiJson<{ updated: { id: string }[]; errors: { id: string; code: string }[] }>(
-        "/resolution/bulk-apply-category",
-        {
-          method: "POST",
-          body: JSON.stringify({ ids, categoryId: bulkCategoryId })
-        }
-      );
-      const resolveRes = await apiJson<{ updated: { id: string; status: string }[]; errors: { id: string; code: string }[] }>(
-        "/resolution/bulk",
-        {
-          method: "POST",
-          body: JSON.stringify({ ids, status: "resolved" })
-        }
-      );
-      if (applyRes.errors.length > 0 || resolveRes.errors.length > 0) {
-        setError(
-          `Category+resolve completed with partial errors: apply ${applyRes.errors.length}, resolve ${resolveRes.errors.length}.`
-        );
-      }
-      setSelectedTxnIds(new Set());
-      setBulkCategoryId("");
-      reviewDetailLoadedRef.current.clear();
-      setReviewDetailByTxn({});
-      setReviewDetailErr({});
-      await load();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Bulk category + resolve failed");
-    } finally {
-      setSavingBulk(false);
-    }
-  }
-
-  async function bulkUpdateResolutionStatus(status: "open" | "in_review" | "resolved") {
+  async function bulkResolveFlags() {
     const ids = collectOpenResolutionIdsFromSelection();
     if (ids.length === 0) {
-      setError("Selected rows have no open review items to update.");
+      setError("Selected rows have no open review flags to resolve.");
       return;
     }
     setError(null);
@@ -755,15 +649,10 @@ export function TransactionsPage() {
     try {
       const res = await apiJson<{ updated: { id: string; status: string }[]; errors: { id: string; code: string }[] }>(
         "/resolution/bulk",
-        {
-          method: "POST",
-          body: JSON.stringify({ ids, status })
-        }
+        { method: "POST", body: JSON.stringify({ ids, status: "resolved" }) }
       );
       if (res.errors.length > 0) {
-        setError(
-          `Updated ${res.updated.length} item(s); ${res.errors.length} could not be changed (${res.errors.map((e) => e.code).join(", ")})`
-        );
+        setError(`Resolved ${res.updated.length}; ${res.errors.length} could not be changed.`);
       }
       setSelectedTxnIds(new Set());
       reviewDetailLoadedRef.current.clear();
@@ -771,7 +660,7 @@ export function TransactionsPage() {
       setReviewDetailErr({});
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Bulk update failed");
+      setError(e instanceof Error ? e.message : "Bulk resolve failed");
     } finally {
       setSavingBulk(false);
     }
@@ -1126,10 +1015,7 @@ export function TransactionsPage() {
               />
             </label>
             <p className="muted transactions-toolbar__review-hint">
-              Empty = all needs-review rows.{" "}
-              <button type="button" className="link-button" onClick={() => setResolutionTypesInUrl(["unknown_category"])}>
-                Unknown category only
-              </button>
+              Empty = all needs-review rows (uncategorized + open flags).
             </p>
           </div>
         ) : null}
@@ -1378,86 +1264,35 @@ export function TransactionsPage() {
           <div className="transactions-bulk-bar row" role="status" aria-live="polite">
             <span className="muted">
               {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
-              {unknownCategoryResolutionIdsInSelection.length === 0 ? (
-                <>
-                  {" "}
-                  — none have an open “Unknown category” item (bulk category disabled).
-                </>
-              ) : (
-                <>
-                  {" "}
-                  — {unknownCategoryResolutionIdsInSelection.length} open “Unknown category” item
-                  {unknownCategoryResolutionIdsInSelection.length === 1 ? "" : "s"} for bulk apply.
-                </>
-              )}
             </span>
-            {nonUnknownOpenResolutionCountInSelection > 0 ? (
-              <span className="muted" style={{ marginLeft: "0.25rem" }}>
-                {nonUnknownOpenResolutionCountInSelection} other review item
-                {nonUnknownOpenResolutionCountInSelection === 1 ? "" : "s"} also selected.
-              </span>
-            ) : null}
-            <button
-              type="button"
-              className="secondary"
-              disabled={savingBulk}
-              onClick={() => void bulkUpdateResolutionStatus("in_review")}
-            >
-              In review
-            </button>
-            <button type="button" disabled={savingBulk} onClick={() => void bulkUpdateResolutionStatus("resolved")}>
-              Resolve
-            </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={savingBulk}
-              onClick={() => void bulkUpdateResolutionStatus("open")}
-            >
-              Reopen
-            </button>
-            <div
-              style={{
-                marginBottom: 0,
-                marginLeft: "0.25rem",
-                minWidth: "12rem",
-                maxWidth: "20rem",
-                opacity: unknownCategoryResolutionIdsInSelection.length === 0 ? 0.55 : 1
-              }}
-            >
-              <span className="muted" style={{ display: "block", marginBottom: "0.2rem" }}>
-                Category (unknown-category items)
-              </span>
+            <div style={{ marginBottom: 0, minWidth: "12rem", maxWidth: "20rem" }}>
               <LedgerCategoryPicker
                 categories={categories}
                 value={bulkCategoryId || null}
-                disabled={savingBulk || unknownCategoryResolutionIdsInSelection.length === 0}
+                disabled={savingBulk}
                 onChange={(id) => setBulkCategoryId(id ?? "")}
                 onCategoryCreated={() => void refreshCategories()}
-                ariaLabel="Bulk category for unknown-category resolution items"
+                ariaLabel="Bulk category"
               />
             </div>
             <button
               type="button"
-              disabled={savingBulk || !bulkCategoryId || unknownCategoryResolutionIdsInSelection.length === 0}
-              onClick={() => void bulkApplyCategory()}
-              title={
-                unknownCategoryResolutionIdsInSelection.length === 0
-                  ? "Select rows that still have an open Unknown category review item, or filter to Unknown category."
-                  : undefined
-              }
+              disabled={savingBulk || !bulkCategoryId}
+              onClick={() => void bulkAssignCategory()}
             >
               Apply category
             </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={savingBulk || !bulkCategoryId || unknownCategoryResolutionIdsInSelection.length === 0}
-              onClick={() => void bulkApplyCategoryAndResolve()}
-              title="Applies category to unknown-category items in selection and marks those review items resolved."
-            >
-              Apply + resolve
-            </button>
+            {openFlagCountInSelection > 0 ? (
+              <button
+                type="button"
+                className="secondary"
+                disabled={savingBulk}
+                onClick={() => void bulkResolveFlags()}
+                title="Mark open transfer / near-duplicate review flags as resolved for selected rows"
+              >
+                Resolve flags ({openFlagCountInSelection})
+              </button>
+            ) : null}
           </div>
         ) : null}
         {error ? <p className="error">{error}</p> : null}
