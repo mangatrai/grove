@@ -298,6 +298,7 @@ Fixtures: real (redacted) bank exports in `backend/tests/fixtures/`.
 | `docs/RUNBOOK.md` | Dev/prod setup walkthrough |
 | `docs/ARCHITECTURE.md` | System design: ingestion, dedupe, transfer detection |
 | `docs/PRODUCTION_SETUP.md` | Self-hosting, backup, ops |
+| `docs/HOSTING_OPTIONS_AND_HOME_LAB.md` | $0 opex / free-tier cloud / home lab / backup context (maintainer) |
 | `docs/ENVIRONMENT_VARIABLES.md` | Full env reference |
 | `docs/USER_GUIDE.md` | End-user features |
 | `docs/API_INDEX.md` | All API routes summary |

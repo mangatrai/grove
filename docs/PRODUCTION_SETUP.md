@@ -1,5 +1,7 @@
 # Production database setup
 
+**See also:** [`HOSTING_OPTIONS_AND_HOME_LAB.md`](HOSTING_OPTIONS_AND_HOME_LAB.md) — maintainer notes on **$0 opex**, **free-tier** hosts (e.g. Koyeb, OCI), **home lab** hardware, and **Postgres backup** patterns (local disk + cloud, retention, encryption).
+
 ## Migrations
 
 Schema is applied in order from `backend/db/migrations/` via `scripts/db.mjs` (tracked in `schema_migrations`).
