@@ -1,6 +1,19 @@
 import crypto from "node:crypto";
 
 import { qAll, qExec, qGet } from "../../db/query.js";
+
+export type MatchedDeposit = {
+  id: string;
+  txnDate: string;
+  amount: number;
+  direction: string;
+  merchant: string | null;
+  memo: string | null;
+  accountId: string;
+  institution: string;
+  accountType: string;
+  accountMask: string | null;
+};
 import type { ParsedPayslipSummary, PayslipHybridColumns } from "./payslip.types.js";
 
 export type PayslipSnapshotRow = {
@@ -354,6 +367,89 @@ export type PayslipSnapshotPatchInput = {
   netPayYtd?: number | null;
   hoursOrDaysCurrent?: string | null;
 };
+
+/**
+ * Find bank transactions that likely represent the net pay deposit for a payslip.
+ *
+ * Looks for credit transactions within ±3 days of `payDate` whose amount is within
+ * 1% (or $0.50, whichever is larger) of `netPayCurrent`. If the payslip is
+ * person-scoped and that person has a salary deposit account configured, the search
+ * is restricted to that account; otherwise all household accounts are searched.
+ *
+ * Returns up to 5 candidates, closest amount match first.
+ */
+export async function findMatchedDeposits(
+  householdId: string,
+  payDate: string | null,
+  netPayCurrent: number | null,
+  ownerPersonProfileId: string | null
+): Promise<MatchedDeposit[]> {
+  if (!payDate || netPayCurrent == null) {
+    return [];
+  }
+
+  let salaryAccountId: string | null = null;
+  if (ownerPersonProfileId) {
+    const profile = await qGet<{ salaryDepositFinancialAccountId: string | null }>(
+      `SELECT salary_deposit_financial_account_id AS "salaryDepositFinancialAccountId"
+         FROM person_profile
+        WHERE id = ? AND household_id = ?
+        LIMIT 1`,
+      ownerPersonProfileId,
+      householdId
+    );
+    salaryAccountId = profile?.salaryDepositFinancialAccountId ?? null;
+  }
+
+  const accountFilter = salaryAccountId ? ` AND tc.account_id = ?` : "";
+  const accountParam: unknown[] = salaryAccountId ? [salaryAccountId] : [];
+
+  type DepositRow = {
+    id: string;
+    txn_date: string;
+    amount: string | number;
+    direction: string;
+    merchant: string | null;
+    memo: string | null;
+    account_id: string;
+    institution: string;
+    account_type: string;
+    account_mask: string | null;
+  };
+
+  const rows = await qAll<DepositRow>(
+    `SELECT tc.id, tc.txn_date, tc.amount, tc.direction, tc.merchant, tc.memo,
+            tc.account_id, fa.institution, fa.type AS account_type, fa.account_mask
+       FROM transaction_canonical tc
+       JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
+      WHERE tc.household_id = ?
+        AND tc.direction = 'credit'
+        AND tc.txn_date::date BETWEEN ?::date - INTERVAL '3 days' AND ?::date + INTERVAL '3 days'
+        AND ABS(CAST(tc.amount AS DOUBLE PRECISION) - ?) <= GREATEST(ABS(?) * 0.01, 0.50)${accountFilter}
+      ORDER BY ABS(CAST(tc.amount AS DOUBLE PRECISION) - ?) ASC, tc.txn_date ASC
+      LIMIT 5`,
+    householdId,
+    payDate,
+    payDate,
+    netPayCurrent,
+    netPayCurrent,
+    ...accountParam,
+    netPayCurrent
+  );
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    txnDate: String(r.txn_date),
+    amount: Number(r.amount),
+    direction: String(r.direction),
+    merchant: r.merchant == null ? null : String(r.merchant),
+    memo: r.memo == null ? null : String(r.memo),
+    accountId: String(r.account_id),
+    institution: String(r.institution),
+    accountType: String(r.account_type),
+    accountMask: r.account_mask == null ? null : String(r.account_mask)
+  }));
+}
 
 export async function patchPayslipSnapshotForHousehold(
   householdId: string,
