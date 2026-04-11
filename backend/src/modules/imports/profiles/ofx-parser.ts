@@ -75,21 +75,51 @@ function isOfx2(content: string): boolean {
 // OFX 1.x parser (SGML-like)
 // ---------------------------------------------------------------------------
 
+/**
+ * Detect account type from the OFX container element name.
+ * Credit card accounts use <CCACCTFROM>; bank accounts use <BANKACCTFROM> with an explicit <ACCTTYPE>.
+ */
+function containerToAcctType(containerTag: string, explicit: string | null): string | null {
+  if (explicit) {
+    return explicit;
+  }
+  if (/CCACCT/i.test(containerTag)) {
+    return "credit_card";
+  }
+  return null;
+}
+
+/** Normalise an OFX institution ORG field.  Short vendor/internal codes (e.g. "B1", "10898") are suppressed. */
+function normalizeOrg(org: string | null): string | null {
+  if (!org) {
+    return null;
+  }
+  const t = org.trim();
+  // Pure numeric FIDs, or very short opaque codes, are not human-readable institution names.
+  if (/^\d+$/.test(t) || t.length <= 3) {
+    return null;
+  }
+  return t;
+}
+
 function parseOfx1(content: string): OfxParseResult {
   // Normalise line endings
   const body = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
   // ---- Account info -------------------------------------------------------
-  const acctFromRe = /<(?:BANKACCTFROM|CCACCTFROM)>([\s\S]*?)<\/(?:BANKACCTFROM|CCACCTFROM)>/i;
-  const acctBlock = body.match(acctFromRe)?.[1] ?? body;
+  const acctFromRe = /<(BANKACCTFROM|CCACCTFROM)>([\s\S]*?)<\/(?:BANKACCTFROM|CCACCTFROM)>/i;
+  const acctFromMatch = body.match(acctFromRe);
+  const containerTag = acctFromMatch?.[1] ?? "";
+  const acctBlock = acctFromMatch?.[2] ?? body;
 
   const acctId = extractLeaf(acctBlock, "ACCTID");
-  const acctType = extractLeaf(acctBlock, "ACCTTYPE");
+  const explicitAcctType = extractLeaf(acctBlock, "ACCTTYPE");
+  const acctType = containerToAcctType(containerTag, explicitAcctType);
   const bankId = extractLeaf(acctBlock, "BANKID");
   const currency = extractLeaf(body, "CURDEF");
 
   const fiMatch = body.match(/<FI>([\s\S]*?)<\/FI>/i);
-  const institution = fiMatch ? extractLeaf(fiMatch[1]!, "ORG") : null;
+  const institution = fiMatch ? normalizeOrg(extractLeaf(fiMatch[1]!, "ORG")) : null;
 
   // ---- Transactions --------------------------------------------------------
   const rows: NormalizedRawPayload[] = [];
@@ -145,12 +175,17 @@ function parseOfx1(content: string): OfxParseResult {
 function parseOfx2(content: string): OfxParseResult {
   const $ = cheerio.load(content, { xmlMode: true });
 
-  const acctFrom = $("bankacctfrom, ccacctfrom").first();
+  const ccAcctFrom = $("ccacctfrom").first();
+  const bankAcctFrom = $("bankacctfrom").first();
+  const isCreditCard = ccAcctFrom.length > 0;
+  const acctFrom = isCreditCard ? ccAcctFrom : bankAcctFrom;
+
   const acctId = acctFrom.find("acctid").first().text().trim() || null;
-  const acctType = acctFrom.find("accttype").first().text().trim() || null;
+  const explicitAcctType = acctFrom.find("accttype").first().text().trim() || null;
+  const acctType = isCreditCard ? "credit_card" : (explicitAcctType || null);
   const bankId = acctFrom.find("bankid").first().text().trim() || null;
   const currency = $("curdef").first().text().trim() || null;
-  const institution = $("fi org").first().text().trim() || null;
+  const institution = normalizeOrg($("fi org").first().text().trim() || null);
 
   const rows: NormalizedRawPayload[] = [];
 

@@ -41,7 +41,16 @@ export async function suggestAccountForOfx(
   acctType: string | null,
   institution: string | null
 ): Promise<OfxAccountSuggestion> {
-  const last4 = acctId ? acctId.replace(/\s/g, "").slice(-4) : null;
+  // Extract last 4 digits from the ACCTID.
+  // Handles formats like "1114758420-4883" (Chase: take the part after the last dash)
+  // and plain account numbers like "000012345678" (take trailing 4 digits).
+  function extractLast4(id: string): string | null {
+    const clean = id.replace(/\s/g, "");
+    const dashPart = clean.includes("-") ? clean.split("-").pop() ?? "" : clean;
+    const digits = dashPart.replace(/\D/g, "");
+    return digits.length >= 4 ? digits.slice(-4) : (clean.length >= 4 ? clean.slice(-4) : null);
+  }
+  const last4 = acctId ? extractLast4(acctId) : null;
   const normalizedAcctType = normalizeOfxAcctType(acctType);
 
   const suggestion: OfxAccountSuggestion = {
