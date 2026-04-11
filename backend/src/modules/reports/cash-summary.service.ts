@@ -463,17 +463,10 @@ function ownershipFilterClause(
 }
 
 function transferReportingExclusionClause(tcAlias = "tc"): string {
-  // Exclude canonical rows that are known transfers (either matched by transfer_group_id,
-  // or queued as transfer ambiguities in the resolution queue).
-  return ` AND ${tcAlias}.transfer_group_id IS NULL
-           AND NOT EXISTS (
-             SELECT 1
-             FROM resolution_item ri
-             WHERE ri.household_id = ${tcAlias}.household_id
-               AND ri.type = 'transfer_ambiguity'
-               AND ri.status IN ('open', 'in_review')
-               AND ri.target_id = ${tcAlias}.id
-           )`;
+  // Exclude confirmed transfer pairs (auto-linked by canonicalize at high confidence).
+  // Suspected-transfer ambiguity flags are no longer used to hide rows — both sides of
+  // an internal transfer net to zero in whole-household reporting anyway.
+  return ` AND ${tcAlias}.transfer_group_id IS NULL`;
 }
 
 async function aggregateForRange(

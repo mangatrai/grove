@@ -101,18 +101,20 @@ export interface LedgerListFilters {
   resolutionTypes?: string[];
   ownerScope?: "household" | "person";
   ownerPersonProfileId?: string;
+  /** When true, return only trashed rows (status = 'trashed'). Default behaviour excludes them. */
+  trashOnly?: boolean;
 }
 
-/** Rows that belong in the “Needs review” tab (PRD §13). */
+/** Rows that belong in the “Needs review” tab. */
 const NEEDS_REVIEW_PREDICATE = `(
   tc.category_id IS NULL
-  OR tc.status != 'posted'
+  OR tc.status NOT IN ('posted', 'trashed')
   OR EXISTS (
     SELECT 1 FROM resolution_item ri
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
       AND (
-        (ri.type IN ('transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+        (ri.type = 'reconciliation_mismatch' AND ri.target_id = tc.id)
         OR (
           ri.type = 'duplicate_ambiguity'
           AND tc.source_ref IS NOT NULL
@@ -128,7 +130,7 @@ const OPEN_REVIEW_ITEMS_SUBQUERY = `(
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
       AND (
-        (ri.type IN ('transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+        (ri.type = 'reconciliation_mismatch' AND ri.target_id = tc.id)
         OR (
           ri.type = 'duplicate_ambiguity'
           AND tc.source_ref IS NOT NULL
@@ -191,8 +193,6 @@ function buildReviewReasons(
   for (const t of types) {
     if (t === "duplicate_ambiguity") {
       set.add("Open review: near-duplicate");
-    } else if (t === "transfer_ambiguity") {
-      set.add("Open review: transfer");
     } else if (t === "reconciliation_mismatch") {
       set.add("Open review: reconciliation");
     }
@@ -204,11 +204,19 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
   sql: string;
   params: unknown[];
 }> {
-  if (!filters) {
-    return { sql: "", params: [] };
-  }
   const parts: string[] = [];
   const params: unknown[] = [];
+
+  // Always enforce status scope — default hides trashed rows from every view.
+  if (filters?.trashOnly) {
+    parts.push("tc.status = 'trashed'");
+  } else {
+    parts.push("tc.status != 'trashed'");
+  }
+
+  if (!filters) {
+    return { sql: ` AND ${parts.join(" AND ")}`, params };
+  }
   if (filters.needsReviewOnly) {
     parts.push(NEEDS_REVIEW_PREDICATE);
   }
@@ -268,7 +276,7 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
         AND ri.status IN ('open', 'in_review')
         AND ri.type IN (${ph})
         AND (
-          (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+          (ri.type = 'reconciliation_mismatch' AND ri.target_id = tc.id)
           OR (
             ri.type = 'duplicate_ambiguity'
             AND tc.source_ref IS NOT NULL
@@ -645,4 +653,127 @@ export async function createManualCanonicalTransaction(
   }
 
   return { ok: true, id };
+}
+
+// ---------------------------------------------------------------------------
+// Trash / restore / hard-delete
+// ---------------------------------------------------------------------------
+
+async function closeResolutionItemsForCanonical(householdId: string, canonicalId: string): Promise<void> {
+  // Close items where target_id is the canonical id directly (reconciliation_mismatch).
+  await qExec(
+    `UPDATE resolution_item SET status = 'resolved'
+     WHERE household_id = ? AND target_id = ? AND status != 'resolved'`,
+    householdId,
+    canonicalId
+  );
+  // Close duplicate_ambiguity items linked via source_ref = 'raw:' || target_id.
+  await qExec(
+    `UPDATE resolution_item SET status = 'resolved'
+     WHERE household_id = ? AND type = 'duplicate_ambiguity' AND status != 'resolved'
+       AND EXISTS (
+         SELECT 1 FROM transaction_canonical tc
+         WHERE tc.id = ? AND tc.source_ref = ('raw:' || resolution_item.target_id)
+       )`,
+    householdId,
+    canonicalId
+  );
+}
+
+export async function trashTransaction(
+  householdId: string,
+  id: string
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "ALREADY_TRASHED" }> {
+  const row = await qGet<{ status: string }>(
+    `SELECT status FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+  if (row.status === "trashed") return { ok: false, code: "ALREADY_TRASHED" };
+  await qExec(
+    `UPDATE transaction_canonical SET status = 'trashed' WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  await closeResolutionItemsForCanonical(householdId, id);
+  return { ok: true };
+}
+
+export async function restoreTransaction(
+  householdId: string,
+  id: string
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "NOT_TRASHED" }> {
+  const row = await qGet<{ status: string }>(
+    `SELECT status FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+  if (row.status !== "trashed") return { ok: false, code: "NOT_TRASHED" };
+  await qExec(
+    `UPDATE transaction_canonical SET status = 'posted' WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  return { ok: true };
+}
+
+export async function hardDeleteTransaction(
+  householdId: string,
+  id: string
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "NOT_TRASHED" }> {
+  const row = await qGet<{ status: string }>(
+    `SELECT status FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+  if (row.status !== "trashed") return { ok: false, code: "NOT_TRASHED" };
+  await closeResolutionItemsForCanonical(householdId, id);
+  await qExec(
+    `DELETE FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  return { ok: true };
+}
+
+export async function bulkTrashTransactions(
+  householdId: string,
+  ids: string[]
+): Promise<{ trashed: number; skipped: number }> {
+  let trashed = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    const r = await trashTransaction(householdId, id);
+    if (r.ok) trashed++; else skipped++;
+  }
+  return { trashed, skipped };
+}
+
+export async function bulkRestoreTransactions(
+  householdId: string,
+  ids: string[]
+): Promise<{ restored: number; skipped: number }> {
+  let restored = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    const r = await restoreTransaction(householdId, id);
+    if (r.ok) restored++; else skipped++;
+  }
+  return { restored, skipped };
+}
+
+export async function bulkHardDeleteTransactions(
+  householdId: string,
+  ids: string[]
+): Promise<{ deleted: number; skipped: number }> {
+  let deleted = 0;
+  let skipped = 0;
+  for (const id of ids) {
+    const r = await hardDeleteTransaction(householdId, id);
+    if (r.ok) deleted++; else skipped++;
+  }
+  return { deleted, skipped };
 }
