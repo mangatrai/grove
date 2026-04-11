@@ -80,7 +80,6 @@ type TxRow = {
 
 const LEDGER_RESOLUTION_TYPES = [
   "duplicate_ambiguity",
-  "transfer_ambiguity",
   "reconciliation_mismatch"
 ] as const;
 
@@ -88,7 +87,6 @@ type LedgerResolutionType = (typeof LEDGER_RESOLUTION_TYPES)[number];
 
 const RESOLUTION_TYPE_LABELS: Record<LedgerResolutionType, string> = {
   duplicate_ambiguity: "Near-duplicate",
-  transfer_ambiguity: "Transfer ambiguity",
   reconciliation_mismatch: "Reconciliation"
 };
 
@@ -183,8 +181,6 @@ function formatResolutionTypeLabel(t: string): string {
       return "Near-duplicate / ambiguous match";
     case "unknown_category":
       return "Unknown category";
-    case "transfer_ambiguity":
-      return "Transfer ambiguity";
     case "reconciliation_mismatch":
       return "Reconciliation mismatch";
     default:
@@ -258,6 +254,7 @@ export function TransactionsPage() {
   const categoryFilter = searchParams.get("categoryId")?.trim() || null;
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
+  const trashTab = searchParams.get("trash") === "true";
   const resolutionTypes = useMemo((): LedgerResolutionType[] => {
     const seen = new Set<LedgerResolutionType>();
     for (const r of searchParams.getAll("resolutionType")) {
@@ -324,6 +321,8 @@ export function TransactionsPage() {
   const [ruleFromLedgerConfirm, setRuleFromLedgerConfirm] = useState<{ txnId: string; categoryId: string } | null>(
     null
   );
+  const [selectedTrashIds, setSelectedTrashIds] = useState<Set<string>>(() => new Set());
+  const [savingTrash, setSavingTrash] = useState(false);
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -382,6 +381,9 @@ export function TransactionsPage() {
     }
     if (needsReviewTab) {
       qs.set("needsReview", "true");
+    }
+    if (trashTab) {
+      qs.set("trash", "true");
     }
     for (const rt of resolutionTypes) {
       qs.append("resolutionType", rt);
@@ -450,6 +452,7 @@ export function TransactionsPage() {
     categoryFilter,
     uncategorizedOnly,
     needsReviewTab,
+    trashTab,
     resolutionTypesKey,
     searchFromUrl,
     dateFrom,
@@ -666,6 +669,102 @@ export function TransactionsPage() {
     }
   }
 
+  async function trashSingle(id: string) {
+    setError(null);
+    try {
+      await apiJson(`/transactions/${id}`, { method: "PATCH", body: JSON.stringify({ status: "trashed" }) });
+      forgetReviewDetail(id);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Move to trash failed");
+    }
+  }
+
+  async function bulkTrashSelected() {
+    const ids = data ? [...selectedTxnIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (!ids.length) return;
+    setError(null);
+    setSavingBulk(true);
+    try {
+      await apiJson<{ trashed: number; skipped: number }>(
+        "/transactions/bulk-trash",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      );
+      setSelectedTxnIds(new Set());
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk trash failed");
+    } finally {
+      setSavingBulk(false);
+    }
+  }
+
+  async function bulkRestoreSelected() {
+    const ids = data ? [...selectedTrashIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (!ids.length) return;
+    setError(null);
+    setSavingTrash(true);
+    try {
+      await apiJson<{ restored: number; skipped: number }>(
+        "/transactions/bulk-restore",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      );
+      setSelectedTrashIds(new Set());
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Restore failed");
+    } finally {
+      setSavingTrash(false);
+    }
+  }
+
+  async function bulkHardDeleteSelected() {
+    const ids = data ? [...selectedTrashIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (!ids.length) return;
+    setError(null);
+    setSavingTrash(true);
+    try {
+      await apiJson<{ deleted: number; skipped: number }>(
+        "/transactions/bulk-delete",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      );
+      setSelectedTrashIds(new Set());
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setSavingTrash(false);
+    }
+  }
+
+  async function hardDeleteSingle(id: string) {
+    setError(null);
+    setSavingTrash(true);
+    try {
+      await apiJson(`/transactions/${id}`, { method: "DELETE" });
+      setSelectedTrashIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Delete permanently failed");
+    } finally {
+      setSavingTrash(false);
+    }
+  }
+
+  async function restoreSingle(id: string) {
+    setError(null);
+    setSavingTrash(true);
+    try {
+      await apiJson(`/transactions/${id}`, { method: "PATCH", body: JSON.stringify({ status: "posted" }) });
+      setSelectedTrashIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Restore failed");
+    } finally {
+      setSavingTrash(false);
+    }
+  }
+
   function forgetReviewDetail(txnId: string) {
     reviewDetailLoadedRef.current.delete(txnId);
     setReviewDetailByTxn((d) => {
@@ -837,16 +936,16 @@ export function TransactionsPage() {
     });
   }
 
-  function setTab(review: boolean) {
+  function setTab(tab: "all" | "review" | "trash") {
     mergeParams((n) => {
       n.set("offset", "0");
-      if (review) {
-        n.set("needsReview", "true");
-      } else {
-        n.delete("needsReview");
-        n.delete("resolutionType");
-      }
+      n.delete("needsReview");
+      n.delete("resolutionType");
+      n.delete("trash");
+      if (tab === "review") n.set("needsReview", "true");
+      if (tab === "trash") n.set("trash", "true");
     });
+    setSelectedTrashIds(new Set());
   }
 
   function clearFilters() {
@@ -982,9 +1081,9 @@ export function TransactionsPage() {
           <button
             type="button"
             role="tab"
-            aria-selected={!needsReviewTab}
-            className={`transactions-toolbar__tab${!needsReviewTab ? " transactions-toolbar__tab--active" : ""}`}
-            onClick={() => setTab(false)}
+            aria-selected={!needsReviewTab && !trashTab}
+            className={`transactions-toolbar__tab${!needsReviewTab && !trashTab ? " transactions-toolbar__tab--active" : ""}`}
+            onClick={() => setTab("all")}
           >
             All
           </button>
@@ -993,9 +1092,18 @@ export function TransactionsPage() {
             role="tab"
             aria-selected={needsReviewTab}
             className={`transactions-toolbar__tab${needsReviewTab ? " transactions-toolbar__tab--active" : ""}`}
-            onClick={() => setTab(true)}
+            onClick={() => setTab("review")}
           >
             Needs review
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={trashTab}
+            className={`transactions-toolbar__tab${trashTab ? " transactions-toolbar__tab--active" : ""}`}
+            onClick={() => setTab("trash")}
+          >
+            Trash
           </button>
         </div>
         {needsReviewTab ? (
@@ -1288,11 +1396,43 @@ export function TransactionsPage() {
                 className="secondary"
                 disabled={savingBulk}
                 onClick={() => void bulkResolveFlags()}
-                title="Mark open transfer / near-duplicate review flags as resolved for selected rows"
+                title="Mark open near-duplicate / reconciliation flags as resolved for selected rows"
               >
                 Resolve flags ({openFlagCountInSelection})
               </button>
             ) : null}
+            <button
+              type="button"
+              className="secondary"
+              disabled={savingBulk}
+              onClick={() => void bulkTrashSelected()}
+              title="Move selected rows to Trash"
+            >
+              Move to trash
+            </button>
+          </div>
+        ) : null}
+        {trashTab && selectedTrashIds.size > 0 ? (
+          <div className="transactions-bulk-bar row" role="status" aria-live="polite">
+            <span className="muted">
+              {selectedTrashIds.size} row{selectedTrashIds.size === 1 ? "" : "s"} selected
+            </span>
+            <button
+              type="button"
+              disabled={savingTrash}
+              onClick={() => void bulkRestoreSelected()}
+            >
+              Restore ({selectedTrashIds.size})
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={savingTrash}
+              onClick={() => void bulkHardDeleteSelected()}
+              title="Permanently delete selected rows — cannot be undone"
+            >
+              Delete permanently ({selectedTrashIds.size})
+            </button>
           </div>
         ) : null}
         {error ? <p className="error">{error}</p> : null}
@@ -1318,9 +1458,11 @@ export function TransactionsPage() {
                   ? "No posted rows for this session yet. Either parse/canonicalize has not finished, or all lines were flagged (duplicates / review queue)."
                   : hasLedgerFilters
                     ? "No rows match these filters."
-                    : needsReviewTab
-                      ? "Nothing needs review right now."
-                      : "No transactions yet. Use New import in the header, then run import from the workspace, or add a row with + Add transaction."}
+                    : trashTab
+                      ? "Trash is empty."
+                      : needsReviewTab
+                        ? "Nothing needs review right now."
+                        : "No transactions yet. Use New import in the header, then run import from the workspace, or add a row with + Add transaction."}
               </p>
             ) : (
               <div style={{ overflowX: "auto" }}>
@@ -1338,6 +1480,21 @@ export function TransactionsPage() {
                             aria-label="Select all rows on this page"
                           />
                         </th>
+                      ) : trashTab ? (
+                        <th style={{ width: "2.5rem" }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(data?.transactions.length) && data!.transactions.every((t) => selectedTrashIds.has(t.id))}
+                            onChange={() => {
+                              if (!data?.transactions.length) return;
+                              const allSel = data.transactions.every((t) => selectedTrashIds.has(t.id));
+                              setSelectedTrashIds(allSel ? new Set() : new Set(data.transactions.map((t) => t.id)));
+                            }}
+                            disabled={savingTrash}
+                            title="Select all rows on this page"
+                            aria-label="Select all rows on this page"
+                          />
+                        </th>
                       ) : null}
                       {needsReviewTab ? (
                         <th className="transactions-page__expand-th" scope="col">
@@ -1350,8 +1507,9 @@ export function TransactionsPage() {
                       <th>Description</th>
                       {needsReviewTab ? <th>Why</th> : null}
                       {needsReviewTab ? <th>Session</th> : null}
-                      <th>Belongs-to</th>
+                      {!trashTab ? <th>Belongs-to</th> : null}
                       <th>Category</th>
+                      <th style={{ width: "1px", whiteSpace: "nowrap" }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1367,7 +1525,7 @@ export function TransactionsPage() {
                       const detailItems = reviewDetailByTxn[t.id];
                       const detailLoading = reviewDetailLoadingIds.has(t.id);
                       const detailError = reviewDetailErr[t.id];
-                      const colSpan = needsReviewTab ? 10 : 8;
+                      const colSpan = needsReviewTab ? 11 : trashTab ? 7 : 9;
                       return (
                         <Fragment key={t.id}>
                           <tr>
@@ -1378,6 +1536,20 @@ export function TransactionsPage() {
                                   checked={selectedTxnIds.has(t.id)}
                                   onChange={() => toggleTxnSelected(t.id)}
                                   disabled={savingBulk}
+                                  aria-label={`Select row ${desc}`}
+                                />
+                              </td>
+                            ) : trashTab ? (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedTrashIds.has(t.id)}
+                                  onChange={() => setSelectedTrashIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
+                                    return next;
+                                  })}
+                                  disabled={savingTrash}
                                   aria-label={`Select row ${desc}`}
                                 />
                               </td>
@@ -1419,32 +1591,74 @@ export function TransactionsPage() {
                                 )}
                               </td>
                             ) : null}
-                            <td style={{ minWidth: "12rem" }}>
-                              <HierarchicalSearchPicker
-                                value={t.ownerScope === "household" ? "household" : (`person:${t.ownerPersonProfileId ?? ""}` as const)}
-                                onChange={(v) => {
-                                  const parsed = parseBelongsToFilterValue(v ?? "household");
-                                  if (parsed.ownerScope === "household") {
-                                    void updateCategory(t.id, t.categoryId, "household", null);
-                                  } else if (parsed.ownerPersonProfileId) {
-                                    void updateCategory(t.id, t.categoryId, "person", parsed.ownerPersonProfileId);
-                                  }
-                                }}
-                                groups={belongsToGroups}
-                                placeholder="Belongs-to"
-                                ariaLabel={`Belongs-to for ${desc}`}
-                                disabled={savingId === t.id || savingBulk}
-                              />
-                            </td>
+                            {!trashTab ? (
+                              <td style={{ minWidth: "12rem" }}>
+                                <HierarchicalSearchPicker
+                                  value={t.ownerScope === "household" ? "household" : (`person:${t.ownerPersonProfileId ?? ""}` as const)}
+                                  onChange={(v) => {
+                                    const parsed = parseBelongsToFilterValue(v ?? "household");
+                                    if (parsed.ownerScope === "household") {
+                                      void updateCategory(t.id, t.categoryId, "household", null);
+                                    } else if (parsed.ownerPersonProfileId) {
+                                      void updateCategory(t.id, t.categoryId, "person", parsed.ownerPersonProfileId);
+                                    }
+                                  }}
+                                  groups={belongsToGroups}
+                                  placeholder="Belongs-to"
+                                  ariaLabel={`Belongs-to for ${desc}`}
+                                  disabled={savingId === t.id || savingBulk}
+                                />
+                              </td>
+                            ) : null}
                             <td>
-                              <LedgerCategoryPicker
-                                categories={categories}
-                                value={t.categoryId}
-                                disabled={savingId === t.id || savingBulk}
-                                onChange={(v) => void updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId)}
-                                ariaLabel={`Category for ${desc}`}
-                              />
-                              <CategoryClassificationHint meta={t.classificationMeta ?? null} />
+                              {trashTab ? (
+                                <span className="muted" style={{ fontSize: "0.9rem" }}>{t.categoryName ?? "—"}</span>
+                              ) : (
+                                <>
+                                  <LedgerCategoryPicker
+                                    categories={categories}
+                                    value={t.categoryId}
+                                    disabled={savingId === t.id || savingBulk}
+                                    onChange={(v) => void updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId)}
+                                    ariaLabel={`Category for ${desc}`}
+                                  />
+                                  <CategoryClassificationHint meta={t.classificationMeta ?? null} />
+                                </>
+                              )}
+                            </td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              {trashTab ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    disabled={savingTrash}
+                                    onClick={() => void restoreSingle(t.id)}
+                                    style={{ marginRight: "0.35rem" }}
+                                  >
+                                    Restore
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="secondary"
+                                    disabled={savingTrash}
+                                    onClick={() => void hardDeleteSingle(t.id)}
+                                    title="Permanently delete — cannot be undone"
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  disabled={savingId === t.id || savingBulk}
+                                  onClick={() => void trashSingle(t.id)}
+                                  title="Move to Trash"
+                                  style={{ fontSize: "0.8rem" }}
+                                >
+                                  Trash
+                                </button>
+                              )}
                             </td>
                           </tr>
                           {needsReviewTab && expanded ? (
@@ -1596,6 +1810,15 @@ export function TransactionsPage() {
                                                     Reopen
                                                   </button>
                                                 )}
+                                                <button
+                                                  type="button"
+                                                  className="secondary"
+                                                  disabled={busy}
+                                                  onClick={() => void trashSingle(t.id)}
+                                                  title="Move this transaction to Trash"
+                                                >
+                                                  Move to trash
+                                                </button>
                                               </div>
                                             </div>
                                           </div>
