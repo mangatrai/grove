@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import type { MatchedDeposit, PayslipSnapshotDetail } from "../payslip/types";
 
 export type { PayslipSnapshotDetail };
@@ -53,6 +54,7 @@ export function PayslipDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   const load = useCallback(async () => {
     if (!payslipId) {
@@ -91,9 +93,6 @@ export function PayslipDetailPage() {
 
   const deletePayslip = useCallback(async () => {
     if (!payslipId) {
-      return;
-    }
-    if (!window.confirm("Delete this payslip permanently? This cannot be undone.")) {
       return;
     }
     setDeleting(true);
@@ -138,7 +137,7 @@ export function PayslipDetailPage() {
             className="secondary"
             style={{ fontSize: "0.85rem", alignSelf: "center" }}
             disabled={deleting || loading}
-            onClick={() => void deletePayslip()}
+            onClick={() => setDeleteConfirm(true)}
           >
             {deleting ? "Deleting…" : "Delete payslip"}
           </button>
@@ -312,6 +311,16 @@ export function PayslipDetailPage() {
           </div>
         </>
       ) : null}
+
+      <ConfirmDialog
+        opened={deleteConfirm}
+        title="Delete payslip"
+        message="Delete this payslip permanently? This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onClose={() => setDeleteConfirm(false)}
+        onConfirm={() => deletePayslip()}
+      />
     </div>
   );
 }

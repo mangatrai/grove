@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
 import type { PayslipSnapshotDetail } from "../payslip/types";
@@ -40,6 +41,7 @@ export function PayslipsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ limit: "200", offset: "0" });
@@ -88,9 +90,6 @@ export function PayslipsPage() {
 
   const deletePayslip = useCallback(
     async (id: string) => {
-      if (!window.confirm("Delete this payslip permanently? This cannot be undone.")) {
-        return;
-      }
       setDeletingId(id);
       try {
         const res = await apiFetch(`/payslips/${id}`, { method: "DELETE" });
@@ -227,7 +226,7 @@ export function PayslipsPage() {
                         className="secondary"
                         style={{ fontSize: "0.85rem" }}
                         disabled={deletingId === r.id}
-                        onClick={() => void deletePayslip(r.id)}
+                        onClick={() => setDeleteConfirmId(r.id)}
                       >
                         {deletingId === r.id ? "Deleting…" : "Delete"}
                       </button>
@@ -239,6 +238,16 @@ export function PayslipsPage() {
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        opened={deleteConfirmId !== null}
+        title="Delete payslip"
+        message="Delete this payslip permanently? This cannot be undone."
+        confirmLabel="Delete"
+        danger
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={() => deletePayslip(deleteConfirmId!)}
+      />
     </div>
   );
 }
