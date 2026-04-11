@@ -322,6 +322,28 @@ export function ImportWorkspacePage() {
   const [newAcctScope, setNewAcctScope] = useState<"household" | "person">("household");
   const [newAcctPersonId, setNewAcctPersonId] = useState("");
   const [creatingAccount, setCreatingAccount] = useState(false);
+  // Institution catalog for the inline create-account form (lazy-loaded when form opens)
+  const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([]);
+  const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
+
+  const institutionPickerGroups = useMemo((): HierarchicalPickerGroup[] => {
+    const catalogItems = institutionCatalogList.map((label) => ({ value: label, label, searchText: label }));
+    const customItems = institutionCustom.map((c) => ({ value: c.displayName, label: c.displayName, searchText: c.displayName }));
+    return [
+      { group: "Suggested", items: catalogItems },
+      ...(customItems.length > 0 ? [{ group: "Your household", items: customItems }] : [])
+    ];
+  }, [institutionCatalogList, institutionCustom]);
+
+  const loadInstitutions = useCallback(async () => {
+    try {
+      const r = await apiJson<{ catalog: string[]; custom: Array<{ id: string; displayName: string }> }>("/imports/institutions");
+      setInstitutionCatalogList(r.catalog);
+      setInstitutionCustom(r.custom);
+    } catch {
+      /* non-fatal — picker stays empty */
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!sessionId) {
@@ -638,6 +660,13 @@ export function ImportWorkspacePage() {
       cancelled = true;
     };
   }, [showAdvanced, token]);
+
+  // Lazy-load institution catalog when the inline create-account form opens.
+  useEffect(() => {
+    if (ofxCreateAccountFileId && institutionCatalogList.length === 0) {
+      void loadInstitutions();
+    }
+  }, [ofxCreateAccountFileId, institutionCatalogList.length, loadInstitutions]);
 
   useEffect(() => {
     if (!token || !sessionId) {
@@ -1569,12 +1598,32 @@ export function ImportWorkspacePage() {
                                   </div>
                                   <div>
                                     <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Institution</label>
-                                    <input
-                                      value={newAcctInstitution}
-                                      onChange={(e) => setNewAcctInstitution(e.target.value)}
-                                      placeholder="e.g. Chase"
-                                      style={{ width: "11rem" }}
+                                    <HierarchicalSearchPicker
+                                      value={newAcctInstitution || null}
+                                      onChange={(v) => setNewAcctInstitution(v ?? "")}
+                                      groups={institutionPickerGroups}
+                                      placeholder="Choose institution"
+                                      ariaLabel="Institution for new account"
+                                      clearable
                                     />
+                                    <button
+                                      type="button"
+                                      className="secondary"
+                                      style={{ fontSize: "0.78rem", marginTop: "0.25rem", padding: "0 0.4rem" }}
+                                      onClick={() => {
+                                        const name = window.prompt("Institution name (saved for your household):");
+                                        if (!name?.trim()) return;
+                                        void apiJson("/imports/institutions/custom", {
+                                          method: "POST",
+                                          body: JSON.stringify({ displayName: name.trim() })
+                                        }).then(() => {
+                                          void loadInstitutions();
+                                          setNewAcctInstitution(name.trim());
+                                        }).catch(() => {/* ignore */});
+                                      }}
+                                    >
+                                      Add institution…
+                                    </button>
                                   </div>
                                   <div>
                                     <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Last 4</label>
