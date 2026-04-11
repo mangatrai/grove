@@ -71,7 +71,8 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 
 - **Shipped (v1 summary):** list, detail, upload, **`POST /payslips/manual`** (typed entry, synthetic checksum), and **income charts** on **`/payslips`** (**CR-031**, **CR-036**, **CR-051**, **CR-056**).
 - **API vs UI:** **`PATCH /payslips/:id`** accepts summary-field updates for integrations and future work; the **detail route** (`/payslips/:payslipId`) is **read-only** in the app today — there is no full in-browser editor for parsed or manual stubs yet. Broader payslip UI (line-item grids, richer editing) tracks **Epic 3 — 3.3b+** in [`docs/archive/MVP_BACKLOG.md`](archive/MVP_BACKLOG.md).
-- **Later:** line-item grids, salary vs commission split, richer tax analytics.
+- **Bank deposit match (CR-068, shipped):** `GET /payslips/:id` returns `matchedDeposits` — up to 5 `credit` transactions within ±3 days of `pay_date` whose amount is within 1% (min $0.50) of `net_pay_current`. Restricted to `salary_deposit_financial_account_id` on `person_profile` when set; otherwise all household accounts. Detail page shows a **Bank deposit** card with matched rows and **View** link into `/transactions`.
+- **Later:** line-item grids, salary vs commission split, richer tax analytics, full in-browser edit of parsed stubs.
 
 ---
 
@@ -103,7 +104,7 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 |--------|-------------|
 | **3.3a — v1** | Summary buckets + period + YTD where extracted; dedicated storage; tests. |
 | **3.3b** | List + detail + charts; read-only. |
-| **3.3c+** | Line-item / tax detail in UI; ADP (non-stub); reconciliation UX to bank deposit; optional OCR for scanned PDFs. |
+| **3.3c+** | Line-item / tax detail in UI; ADP (non-stub); optional OCR for scanned PDFs. Deposit match shipped (**CR-068**). |
 | **Manual entry (shipped)** | [§7](#7-manual-payslip-entry-shipped) — **`POST /payslips/manual`**, **`/payslips/new`**. |
 
 ---
@@ -116,7 +117,7 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 
 **UI:** **`/payslips/new`** — form → **`201`** → redirect to **`/payslips/:payslipId`**. List page links **Add manually**.
 
-**Explicitly out of scope:** full line-item grids in this flow; auto-link to bank deposits.
+**Explicitly out of scope:** full line-item grids in this flow. (Bank deposit matching shipped in **CR-068** on the detail page; manual payslips are included when `pay_date` + `net_pay_current` are provided.)
 
 ---
 

@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-10
 
+### CR-068 — Payslip detail: bank deposit match section
+- **Type:** CR
+- **What:** `GET /payslips/:id` now appends a `matchedDeposits` array to the response. The backend (`payslip.service.ts: findMatchedDeposits`) searches `transaction_canonical` for `credit` rows within ±3 days of `pay_date` whose `amount` is within 1% (min $0.50) of `net_pay_current`. If the payslip is person-scoped and that person has a `salary_deposit_financial_account_id` configured on their `person_profile`, the search is restricted to that account; otherwise all household accounts are searched. Up to 5 candidates are returned, closest amount match first. `PayslipDetailPage.tsx` shows a new **Bank deposit** card (between Period and Amounts) with a table of matched transactions and a **View** link that opens `/transactions` pre-filtered to the account and ±3-day window; if no match is found a muted "No matching deposit found" note is shown. The card is suppressed entirely when `pay_date` or `net_pay_current` is null.
+- **Why:** Close the loop between employer-reported net pay and the actual deposit in the bank ledger — the most requested payslip feature after manual entry shipped. No schema changes required; uses existing `salary_deposit_financial_account_id` on `person_profile`.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts` (new `MatchedDeposit` type + `findMatchedDeposits`), `backend/src/modules/payslip/payslip.routes.ts` (`GET /:id` enrichment), `frontend/src/payslip/types.ts` (`MatchedDeposit` type + `matchedDeposits` field), `frontend/src/pages/PayslipDetailPage.tsx` (Bank deposit card).
+
 ### FIX-067 — Net worth: remove useBlocker under BrowserRouter (blank page)
 - **Type:** FIX / UX
 - **What:** **`useBlocker`** only works with a **data router** (`createBrowserRouter` + `RouterProvider`). This app uses **`BrowserRouter`**, so the hook threw on `/net-worth` and the page rendered blank. Removed the in-app navigation blocker dialog; **`beforeunload`** remains for tab close/refresh when a row edit is dirty; added a short on-page hint when edits are unsaved.
