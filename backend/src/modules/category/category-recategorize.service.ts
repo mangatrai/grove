@@ -1,4 +1,4 @@
-import { qAll, qExec } from "../../db/query.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 import { normalizeDescriptionForFingerprint } from "../canonical/transaction-fingerprint.js";
 import { classifyWithRules, type ClassificationResult } from "./category-rules.js";
 import { listEnabledDbRulesForClassification } from "./category-rules.service.js";
@@ -50,6 +50,19 @@ export async function recategorizeHouseholdTransactions(
         r.id,
         householdId
       );
+      // Close any lingering unknown_category resolution items from old imports.
+      const hasOld = await qGet<{ ok: number }>(
+        `SELECT 1 AS ok FROM resolution_item WHERE household_id = ? AND type = 'unknown_category' AND target_id = ? AND status != 'resolved' LIMIT 1`,
+        householdId,
+        r.id
+      );
+      if (hasOld) {
+        await qExec(
+          `UPDATE resolution_item SET status = 'resolved' WHERE household_id = ? AND type = 'unknown_category' AND target_id = ? AND status != 'resolved'`,
+          householdId,
+          r.id
+        );
+      }
       updated += 1;
     }
   }

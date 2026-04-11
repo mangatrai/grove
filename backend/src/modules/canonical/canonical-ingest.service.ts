@@ -440,26 +440,7 @@ export async function canonicalizeImportSession(
           pendingNearRows.splice(pi, 1);
         }
       }
-      if (categoryId === null) {
-        await qExec(
-          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'unknown_category', ?, ?, 'open')`,
-          crypto.randomUUID(),
-          householdId,
-          canonicalId,
-          JSON.stringify({
-            kind: "unknown_category",
-            message:
-              "No default keyword rule matched this description; assign a category from the ledger or review queue.",
-            classification: {
-              source: classification.source,
-              ruleId: classification.ruleId,
-              confidence: classification.confidence,
-              reason: classification.reason
-            }
-          })
-        );
-      }
+      // Uncategorized rows appear in Needs Review via category_id IS NULL — no resolution_item needed.
     } catch (err: unknown) {
       if (isPgUniqueViolation(err)) {
         duplicates += 1;
