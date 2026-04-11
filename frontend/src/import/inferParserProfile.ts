@@ -125,6 +125,11 @@ export function inferParserProfile(
     }
   }
 
+  // OFX / QFX / QBO — profile is always ofx_transactions regardless of account type or institution.
+  if (ext === ".ofx" || ext === ".qfx" || ext === ".qbo") {
+    return "ofx_transactions";
+  }
+
   if (inst === "marcus" && t === "savings" && ext === ".pdf") {
     return "marcus_online_savings_pdf";
   }

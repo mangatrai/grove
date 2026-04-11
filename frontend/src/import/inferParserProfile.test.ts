@@ -91,4 +91,22 @@ describe("inferParserProfile", () => {
     const income = { salaryDepositAccountId: "acc-salary", employers: [] };
     expect(inferParserProfile(boaSalaryChecking, "download.pdf", income)).toBe("boa_estatement_pdf");
   });
+
+  // OFX / QFX / QBO — CR-071
+  it("returns ofx_transactions for .ofx extension regardless of account type", () => {
+    expect(inferParserProfile({ type: "checking", institution: "Chase" }, "transactions.ofx")).toBe("ofx_transactions");
+    expect(inferParserProfile({ type: "savings", institution: "Marcus" }, "export.ofx")).toBe("ofx_transactions");
+  });
+
+  it("returns ofx_transactions for .qfx extension (Chase / Quicken)", () => {
+    expect(inferParserProfile({ type: "credit_card", institution: "Chase" }, "Chase4883.qfx")).toBe("ofx_transactions");
+  });
+
+  it("returns ofx_transactions for .qbo extension (QuickBooks)", () => {
+    expect(inferParserProfile({ type: "checking", institution: "Bank of America" }, "export.qbo")).toBe("ofx_transactions");
+  });
+
+  it("returns ofx_transactions even when account type is unknown", () => {
+    expect(inferParserProfile({ type: "", institution: "" }, "file.qfx")).toBe("ofx_transactions");
+  });
 });
