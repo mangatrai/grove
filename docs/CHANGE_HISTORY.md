@@ -20,6 +20,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-11
 
+### UX-073 — Replace all window.confirm/window.prompt with in-app dialogs
+- **Type:** UX / FIX
+- **What:** `window.confirm` in `PayslipsPage` and `PayslipDetailPage` (payslip delete) replaced with `ConfirmDialog` (already used throughout the rest of the app). `window.prompt` in `ImportWorkspacePage` for "Add institution…" replaced with an inline input row: click "Add institution…" → text input + Add/Cancel buttons appear; Enter submits, Escape cancels; new name saved via `POST /imports/institutions/custom`, catalog reloaded, value auto-selected. Inline create-account form layout also fixed from `flex+alignItems:flex-end` (staggered when Institution column was taller) to CSS grid so all labels/inputs align on the same baseline.
+- **Why:** `window.confirm`/`window.prompt` show browser-native "localhost:3000 says" dialogs — visually inconsistent with the rest of the app. `ConfirmDialog` was already the app standard for confirmations; it just wasn't wired to payslip delete or institution add.
+- **Files:** `PayslipsPage.tsx`, `PayslipDetailPage.tsx`, `ImportWorkspacePage.tsx`.
+
 ### FIX-072 — OFX import: Run Import disabled after account selection + institution text box
 - **Type:** FIX / UX
 - **What:** Two bugs in the CR-071 OFX import flow.
