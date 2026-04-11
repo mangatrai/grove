@@ -1,6 +1,6 @@
 import { MultiSelect } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link, Navigate, useBlocker } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import {
   CartesianGrid,
   Legend,
@@ -202,8 +202,6 @@ export function NetWorthPage() {
       editBaseline &&
       (editAmount.trim() !== editBaseline.amount.trim() || editAsOf !== editBaseline.asOf)
   );
-
-  const navBlocker = useBlocker(editDirty);
 
   const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
     () => [
@@ -852,6 +850,12 @@ export function NetWorthPage() {
 
         {!loading && data ? (
           <div style={{ overflowX: "auto" }}>
+            {editDirty ? (
+              <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.5rem", maxWidth: "40rem" }}>
+                Unsaved balance changes — use <strong>Save</strong> or <strong>Cancel</strong> before leaving this page. Closing
+                or refreshing the tab may show a browser warning.
+              </p>
+            ) : null}
             <table className="ledger-table">
               <thead>
                 <tr>
@@ -946,23 +950,6 @@ export function NetWorthPage() {
         closeOnClickOutside={false}
         onClose={() => setBulkConfirmOpen(false)}
         onConfirm={runBulkAsOf}
-      />
-
-      <ConfirmDialog
-        opened={navBlocker.state === "blocked"}
-        title="Discard unsaved edits?"
-        message="You have unsaved balance changes. Leave without saving?"
-        confirmLabel="Discard and leave"
-        cancelLabel="Stay"
-        danger
-        closeOnClickOutside={false}
-        onClose={() => {
-          navBlocker.reset?.();
-        }}
-        onConfirm={() => {
-          cancelEdit();
-          navBlocker.proceed?.();
-        }}
       />
     </div>
   );
