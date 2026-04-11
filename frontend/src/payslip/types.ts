@@ -1,3 +1,16 @@
+export type MatchedDeposit = {
+  id: string;
+  txnDate: string;
+  amount: number;
+  direction: string;
+  merchant: string | null;
+  memo: string | null;
+  accountId: string;
+  institution: string;
+  accountType: string;
+  accountMask: string | null;
+};
+
 /** Mirrors `PayslipSnapshotRow` from the API (list + detail). */
 export type PayslipSnapshotDetail = {
   id: string;
@@ -25,4 +38,6 @@ export type PayslipSnapshotDetail = {
   hoursOrDaysCurrent: string | null;
   rawExtractJson: Record<string, unknown>;
   createdAt: string;
+  /** Bank transactions that likely represent the net pay deposit for this payslip. */
+  matchedDeposits?: MatchedDeposit[];
 };

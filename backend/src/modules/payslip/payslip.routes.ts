@@ -14,6 +14,7 @@ import {
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
 import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
 import {
+  findMatchedDeposits,
   getPayslipSnapshotForHousehold,
   insertManualPayslipSnapshot,
   insertPayslipSnapshot,
@@ -331,7 +332,13 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
     return;
   }
-  res.json(snapshot);
+  const matchedDeposits = await findMatchedDeposits(
+    householdId,
+    snapshot.payDate,
+    snapshot.netPayCurrent,
+    snapshot.ownerPersonProfileId
+  );
+  res.json({ ...snapshot, matchedDeposits });
 });
 
 payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {

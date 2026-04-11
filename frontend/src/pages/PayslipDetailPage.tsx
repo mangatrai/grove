@@ -2,11 +2,25 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
-import type { PayslipSnapshotDetail } from "../payslip/types";
+import type { MatchedDeposit, PayslipSnapshotDetail } from "../payslip/types";
 
 export type { PayslipSnapshotDetail };
 
 type EmployerRow = { id: string; displayName: string };
+
+function accountLabel(d: MatchedDeposit): string {
+  return d.accountMask ? `${d.institution} ···${d.accountMask}` : d.institution;
+}
+
+function depositWindowLink(accountId: string, payDate: string): string {
+  const center = new Date(`${payDate}T00:00:00`);
+  const fmt = (dt: Date) => dt.toISOString().slice(0, 10);
+  const minus3 = new Date(center);
+  minus3.setDate(center.getDate() - 3);
+  const plus3 = new Date(center);
+  plus3.setDate(center.getDate() + 3);
+  return `/transactions?accountId=${encodeURIComponent(accountId)}&dateFrom=${encodeURIComponent(fmt(minus3))}&dateTo=${encodeURIComponent(fmt(plus3))}`;
+}
 
 function formatMoney(n: number | null): string {
   if (n == null || !Number.isFinite(n)) {
@@ -150,6 +164,46 @@ export function PayslipDetailPage() {
               <dd>{detail.hoursOrDaysCurrent ?? "—"}</dd>
             </dl>
           </div>
+
+          {detail.payDate != null && detail.netPayCurrent != null ? (
+            <div className="card" style={{ marginTop: "1rem" }}>
+              <h2 style={{ marginTop: 0 }}>Bank deposit</h2>
+              {detail.matchedDeposits && detail.matchedDeposits.length > 0 ? (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="ledger-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Account</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.matchedDeposits.map((d) => (
+                        <tr key={d.id}>
+                          <td style={{ whiteSpace: "nowrap" }}>{d.txnDate}</td>
+                          <td>{d.merchant ?? d.memo ?? "—"}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{formatMoney(d.amount)}</td>
+                          <td style={{ whiteSpace: "nowrap" }}>{accountLabel(d)}</td>
+                          <td>
+                            <Link to={depositWindowLink(d.accountId, detail.payDate!)} style={{ fontSize: "0.85rem" }}>
+                              View
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  No matching deposit found near {detail.payDate} for {formatMoney(detail.netPayCurrent)}.
+                </p>
+              )}
+            </div>
+          ) : null}
 
           <div className="card" style={{ marginTop: "1rem" }}>
             <h2 style={{ marginTop: 0 }}>Amounts</h2>
