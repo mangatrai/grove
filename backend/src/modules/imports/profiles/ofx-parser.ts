@@ -173,7 +173,8 @@ function parseOfx1(content: string): OfxParseResult {
 // ---------------------------------------------------------------------------
 
 function parseOfx2(content: string): OfxParseResult {
-  const $ = cheerio.load(content, { xmlMode: true });
+  // lowerCaseTags ensures case-insensitive tag matching (real OFX 2.x / QBO files use uppercase tags).
+  const $ = cheerio.load(content, { lowerCaseTags: true, lowerCaseAttributeNames: true });
 
   const ccAcctFrom = $("ccacctfrom").first();
   const bankAcctFrom = $("bankacctfrom").first();
