@@ -110,7 +110,7 @@ financial_account                 -- Accounts (checking, savings, credit card)
 import_session                    -- Session lifecycle: created → processing → review → finalized
 import_file                       -- Uploaded files, parser_profile_id, financial_account_id
 transaction_raw                   -- Parser output, provenance (linked to import_file)
-transaction_canonical             -- Posted ledger rows; fingerprint, classification_meta, transfer_group_id
+transaction_canonical             -- Ledger rows; status: 'posted' | 'trashed' (soft-deleted) | 'pending' | 'duplicate'; fingerprint, classification_meta, transfer_group_id
 category                          -- Global defaults + household custom
 category_rule                     -- Regex pattern, category_id, amount_scope, priority
 resolution_item                   -- Unresolved queue: type, target_id, status
@@ -119,7 +119,7 @@ account_balance_snapshot          -- Manual + import-sourced balances per accoun
 export_job                        -- Async export tracking
 ```
 
-Active migrations live in `backend/src/db/migrations_pg/`. `0001_baseline.sql` is the squashed full schema. The `migrations/` directory contains legacy SQLite files (stale, pending cleanup — do not use).
+Active migrations live in `backend/src/db/migrations_pg/`. `0001_baseline.sql` is the squashed full schema; subsequent numbered files are additive. Latest: `0007_transaction_canonical_trashed_status.sql` (adds `'trashed'` to status check constraint). The `migrations/` directory contains legacy SQLite files (stale, pending cleanup — do not use).
 
 ---
 
