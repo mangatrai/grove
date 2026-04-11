@@ -20,6 +20,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-11
 
+### FIX-072 — OFX import: Run Import disabled after account selection + institution text box
+- **Type:** FIX / UX
+- **What:** Two bugs in the CR-071 OFX import flow.
+  1. **Run Import stays disabled after account selection:** `inferParserProfile` did not handle `.ofx` / `.qfx` / `.qbo` extensions, so `onAccountChange` inferred `null`, set `profileId: ""`, and skipped `persistBinding`. The server-side `financial_account_id` was never saved, so `allFilesBound` remained false and "Run import" stayed disabled. Fix: added OFX extension check at the top of `inferParserProfile` (before institution checks) returning `"ofx_transactions"`. Now `onAccountChange` calls `persistBinding` correctly for OFX files — same path as CSV/PDF.
+  2. **Institution field was a free-text input:** The inline create-account form inside the OFX file table row used a plain `<input>` for institution. This let users type anything, producing inconsistent names ("Chase", "chase", "CHASE"). Fix: replaced with `HierarchicalSearchPicker` loaded lazily from `GET /imports/institutions` (same catalog as Settings → Accounts). "Add institution…" button calls `POST /imports/institutions/custom` and refreshes the picker. Catalog loads once when the form first opens (`ofxCreateAccountFileId` state transitions from null).
+- **Why:** "Run Import" being disabled after following the new-account creation flow was a blocking regression. Free-text institution entry was creating naming inconsistencies across the household — same issue that motivated the picker in Settings.
+- **Tests added:** `frontend/src/import/inferParserProfile.test.ts` — 4 new cases for `.ofx` / `.qfx` / `.qbo` extension inference. `backend/tests/ofx-parser.test.ts` — new test file covering OFX 1.x credit card (Chase QFX style), OFX 1.x checking, and OFX 2.x XML: transaction count, FITID → `reference_id`, date conversion, signed amounts, description join, account type detection, institution suppression for short/numeric ORG codes.
+- **Files:** `frontend/src/import/inferParserProfile.ts`, `frontend/src/pages/ImportWorkspacePage.tsx`, `frontend/src/import/inferParserProfile.test.ts`, `backend/tests/ofx-parser.test.ts`.
+
+### DOC-068 — Hosting / home lab / $0 opex context
+- **Type:** DOC
+- **What:** New [`HOSTING_OPTIONS_AND_HOME_LAB.md`](HOSTING_OPTIONS_AND_HOME_LAB.md) — maintainer constraints (opex/capex), Pi vs cloud free tiers, Koyeb/OCI/AWS pointers, backup pattern (pg_dump, encryption, local + off-site, retention), hardware ≤ ~$100 notes; cross-links from [`CLAUDE.md`](../CLAUDE.md) and [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md).
+- **Why:** Preserve hosting and backup discussion so future deploy decisions stay aligned.
+
 ### CR-071 — OFX/QFX/QBO parser + streamlined import confirm flow + payslip delete
 - **Type:** CR / Backend / UX
 - **What:** Three related changes.
