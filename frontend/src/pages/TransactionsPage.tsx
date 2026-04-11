@@ -383,7 +383,7 @@ export function TransactionsPage() {
       qs.set("needsReview", "true");
     }
     if (trashTab) {
-      qs.set("trash", "true");
+      qs.set("trashOnly", "true");
     }
     for (const rt of resolutionTypes) {
       qs.append("resolutionType", rt);
