@@ -1454,17 +1454,10 @@ export function TransactionsPage() {
                                   {detailLoading ? <p className="muted">Loading review context…</p> : null}
                                   {detailError ? <p className="error">{detailError}</p> : null}
                                   {!detailLoading && !detailError && detailItems && detailItems.length === 0 ? (
-                                    <div className="muted" style={{ fontSize: "0.9rem", lineHeight: 1.45 }}>
-                                      <p style={{ margin: "0 0 0.5rem" }}>
-                                        No <strong>open</strong> review ticket for this row. The Needs review tab also
-                                        lists uncategorized transactions and non-posted rows, so you can still see this
-                                        line here even when there is nothing to expand.
-                                      </p>
-                                      <p style={{ margin: 0 }}>
-                                        Assign a category in the row above, or re-open a resolved item from the
-                                        resolution queue if you cleared it without categorizing.
-                                      </p>
-                                    </div>
+                                    <p className="muted" style={{ fontSize: "0.9rem", margin: 0 }}>
+                                      This row is here because it has no category. Assign one using the picker
+                                      in the row above to move it out of Needs review.
+                                    </p>
                                   ) : null}
                                   {!detailLoading && !detailError && detailItems && detailItems.length > 0
                                     ? detailItems.map((it) => {
@@ -1583,18 +1576,6 @@ export function TransactionsPage() {
                                                 </div>
                                               ) : null}
                                               <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
-                                                {it.status !== "in_review" ? (
-                                                  <button
-                                                    type="button"
-                                                    className="secondary"
-                                                    disabled={busy || savingResolutionItemId === it.id}
-                                                    onClick={() =>
-                                                      void patchResolutionItemStatus(t.id, it.id, "in_review")
-                                                    }
-                                                  >
-                                                    In review
-                                                  </button>
-                                                ) : null}
                                                 {it.status !== "resolved" ? (
                                                   <button
                                                     type="button"
@@ -1603,7 +1584,7 @@ export function TransactionsPage() {
                                                       void patchResolutionItemStatus(t.id, it.id, "resolved")
                                                     }
                                                   >
-                                                    Resolve
+                                                    Resolve flag
                                                   </button>
                                                 ) : (
                                                   <button
