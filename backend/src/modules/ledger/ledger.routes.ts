@@ -6,17 +6,22 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
+  bulkHardDeleteTransactions,
+  bulkRestoreTransactions,
+  bulkTrashTransactions,
   bulkUpdateCategory,
   createManualCanonicalTransaction,
+  hardDeleteTransaction,
   listCanonicalTransactions,
   listCanonicalTransactionsForImportSession,
+  restoreTransaction,
+  trashTransaction,
   updateCanonicalTransactionCategory,
   type LedgerListFilters
 } from "./ledger.service.js";
 
 const LEDGER_RESOLUTION_TYPES = [
   "duplicate_ambiguity",
-  "transfer_ambiguity",
   "reconciliation_mismatch"
 ] as const;
 
@@ -57,7 +62,11 @@ const querySchema = z.object({
   dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   ownerScope: z.enum(["household", "person"]).optional(),
-  ownerPersonProfileId: z.string().uuid().optional()
+  ownerPersonProfileId: z.string().uuid().optional(),
+  trashOnly: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((v) => v === "true")
 });
 
 const postManualSchema = z.object({
@@ -95,7 +104,8 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     dateFrom,
     dateTo,
     ownerScope,
-    ownerPersonProfileId
+    ownerPersonProfileId,
+    trashOnly
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
@@ -121,36 +131,22 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
   const amin = amountMin !== undefined && Number.isFinite(amountMin) ? amountMin : undefined;
   const amax = amountMax !== undefined && Number.isFinite(amountMax) ? amountMax : undefined;
 
-  const filters: LedgerListFilters | undefined =
-    categoryId ||
-    uncategorizedOnly ||
-    needsReview ||
-    (resolutionType?.length ?? 0) > 0 ||
-    (search !== undefined && search.trim() !== "") ||
-    amin !== undefined ||
-    amax !== undefined ||
-    dateFrom ||
-    dateTo ||
-    fileId ||
-    accountId ||
-    ownerScope ||
-    ownerPersonProfileId
-      ? {
-          categoryId: categoryId ?? undefined,
-          uncategorizedOnly: uncategorizedOnly || undefined,
-          needsReviewOnly: needsReview || undefined,
-          resolutionTypes: resolutionType?.length ? resolutionType : undefined,
-          search: search?.trim() || undefined,
-          amountMin: amin,
-          amountMax: amax,
-          dateFrom: dateFrom ?? undefined,
-          dateTo: dateTo ?? undefined,
-          fileId: fileId ?? undefined,
-          accountId: accountId ?? undefined,
-          ownerScope: ownerScope ?? undefined,
-          ownerPersonProfileId: ownerPersonProfileId ?? undefined
-        }
-      : undefined;
+  const filters: LedgerListFilters = {
+    categoryId: categoryId ?? undefined,
+    uncategorizedOnly: uncategorizedOnly || undefined,
+    needsReviewOnly: needsReview || undefined,
+    resolutionTypes: resolutionType?.length ? resolutionType : undefined,
+    search: search?.trim() || undefined,
+    amountMin: amin,
+    amountMax: amax,
+    dateFrom: dateFrom ?? undefined,
+    dateTo: dateTo ?? undefined,
+    fileId: fileId ?? undefined,
+    accountId: accountId ?? undefined,
+    ownerScope: ownerScope ?? undefined,
+    ownerPersonProfileId: ownerPersonProfileId ?? undefined,
+    trashOnly: trashOnly || undefined
+  };
 
   if (sessionId) {
     const result = await listCanonicalTransactionsForImportSession(householdId, sessionId, limit, offset, filters);
@@ -231,9 +227,10 @@ ledgerRouter.post("/bulk-category", async (req: AuthenticatedRequest, res) => {
 });
 
 const patchCategorySchema = z.object({
-  categoryId: z.union([z.string().uuid(), z.null()]),
+  categoryId: z.union([z.string().uuid(), z.null()]).optional(),
   ownerScope: z.enum(["household", "person"]).optional(),
-  ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional()
+  ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
+  status: z.enum(["trashed", "posted"]).optional()
 });
 
 const txnIdParamSchema = z.object({
@@ -263,6 +260,34 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   }
 
   const householdId = req.authUser!.householdId;
+
+  // Status-only change: trash or restore.
+  if (parsed.data.status && parsed.data.categoryId === undefined && !parsed.data.ownerScope) {
+    if (parsed.data.status === "trashed") {
+      const out = await trashTransaction(householdId, req.params.id);
+      if (!out.ok) {
+        res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
+        return;
+      }
+      res.status(200).json({ status: "trashed" });
+      return;
+    }
+    if (parsed.data.status === "posted") {
+      const out = await restoreTransaction(householdId, req.params.id);
+      if (!out.ok) {
+        res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
+        return;
+      }
+      res.status(200).json({ status: "posted" });
+      return;
+    }
+  }
+
+  if (parsed.data.categoryId === undefined) {
+    res.status(400).json({ message: "Provide categoryId or status" });
+    return;
+  }
+
   if (parsed.data.ownerScope === "person") {
     const ownerId = parsed.data.ownerPersonProfileId ?? null;
     if (!ownerId) {
@@ -295,4 +320,56 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   }
 
   res.status(200).json(out.data);
+});
+
+ledgerRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+  const parsed = txnIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid transaction id" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await hardDeleteTransaction(householdId, parsed.data.id);
+  if (!out.ok) {
+    res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
+    return;
+  }
+  res.status(204).send();
+});
+
+const bulkIdsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(500)
+});
+
+ledgerRouter.post("/bulk-trash", async (req: AuthenticatedRequest, res) => {
+  const parsed = bulkIdsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await bulkTrashTransactions(householdId, parsed.data.ids);
+  res.json(result);
+});
+
+ledgerRouter.post("/bulk-restore", async (req: AuthenticatedRequest, res) => {
+  const parsed = bulkIdsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await bulkRestoreTransactions(householdId, parsed.data.ids);
+  res.json(result);
+});
+
+ledgerRouter.post("/bulk-delete", async (req: AuthenticatedRequest, res) => {
+  const parsed = bulkIdsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await bulkHardDeleteTransactions(householdId, parsed.data.ids);
+  res.json(result);
 });
