@@ -112,7 +112,7 @@ const NEEDS_REVIEW_PREDICATE = `(
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
       AND (
-        (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+        (ri.type IN ('transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
         OR (
           ri.type = 'duplicate_ambiguity'
           AND tc.source_ref IS NOT NULL
@@ -128,7 +128,7 @@ const OPEN_REVIEW_ITEMS_SUBQUERY = `(
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
       AND (
-        (ri.type IN ('unknown_category', 'transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
+        (ri.type IN ('transfer_ambiguity', 'reconciliation_mismatch') AND ri.target_id = tc.id)
         OR (
           ri.type = 'duplicate_ambiguity'
           AND tc.source_ref IS NOT NULL
@@ -189,18 +189,13 @@ function buildReviewReasons(
   }
   const types = new Set(openItems.map((i) => i.type));
   for (const t of types) {
-    if (t === "unknown_category") {
-      set.add("Open review: category");
-    } else if (t === "duplicate_ambiguity") {
-      set.add("Open review: duplicate / near-duplicate");
+    if (t === "duplicate_ambiguity") {
+      set.add("Open review: near-duplicate");
     } else if (t === "transfer_ambiguity") {
       set.add("Open review: transfer");
     } else if (t === "reconciliation_mismatch") {
       set.add("Open review: reconciliation");
     }
-  }
-  if (categoryId !== null && [...types].some((t) => t !== "unknown_category")) {
-    set.add("Category already set — still here for other open review items");
   }
   return [...set];
 }
@@ -535,6 +530,31 @@ export async function updateCanonicalTransactionCategory(
   };
 }
 
+/**
+ * Set the same category on a batch of transactions. Skips rows not found in the household.
+ * Also closes any lingering unknown_category resolution items for backward compatibility.
+ */
+export async function bulkUpdateCategory(
+  householdId: string,
+  transactionIds: string[],
+  categoryId: string
+): Promise<{ updated: number; skipped: number }> {
+  if (!(await categoryUsableByHousehold(categoryId, householdId))) {
+    return { updated: 0, skipped: transactionIds.length };
+  }
+  let updated = 0;
+  let skipped = 0;
+  for (const id of transactionIds) {
+    const result = await updateCanonicalTransactionCategory(householdId, id, categoryId);
+    if (result.ok) {
+      updated++;
+    } else {
+      skipped++;
+    }
+  }
+  return { updated, skipped };
+}
+
 export type CreateManualTransactionResult =
   | { ok: true; id: string }
   | {
@@ -544,7 +564,7 @@ export type CreateManualTransactionResult =
 
 /**
  * Insert a single posted canonical row from the UI (manual entry). Uses the same fingerprint contract as import.
- * When `categoryId` is null, creates an `unknown_category` resolution item (same attention path as ingest).
+ * When `categoryId` is null the row appears in Needs Review via category_id IS NULL.
  */
 export async function createManualCanonicalTransaction(
   householdId: string,
@@ -615,22 +635,7 @@ export async function createManualCanonicalTransaction(
           classificationMeta
         ] as never[]
       );
-      if (input.categoryId === null) {
-        await tx.unsafe(
-          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES ($1, $2, 'unknown_category', $3, $4, 'open')`,
-          [
-            crypto.randomUUID(),
-            householdId,
-            id,
-            JSON.stringify({
-              kind: "unknown_category",
-              message: "Manual entry — assign a category from Transactions or the review queue.",
-              classification: { source: "manual" as const }
-            })
-          ] as never[]
-        );
-      }
+      // Uncategorized manual entries appear in Needs Review via category_id IS NULL.
     });
   } catch (err: unknown) {
     if (isPgUniqueViolation(err)) {

@@ -6,6 +6,7 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
+  bulkUpdateCategory,
   createManualCanonicalTransaction,
   listCanonicalTransactions,
   listCanonicalTransactionsForImportSession,
@@ -14,7 +15,6 @@ import {
 } from "./ledger.service.js";
 
 const LEDGER_RESOLUTION_TYPES = [
-  "unknown_category",
   "duplicate_ambiguity",
   "transfer_ambiguity",
   "reconciliation_mismatch"
@@ -212,6 +212,22 @@ ledgerRouter.post("/", async (req: AuthenticatedRequest, res) => {
   }
 
   res.status(500).json({ message: "Unexpected create transaction outcome" });
+});
+
+const bulkCategorySchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200),
+  categoryId: z.string().uuid()
+});
+
+ledgerRouter.post("/bulk-category", async (req: AuthenticatedRequest, res) => {
+  const parsed = bulkCategorySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await bulkUpdateCategory(householdId, parsed.data.ids, parsed.data.categoryId);
+  res.json(result);
 });
 
 const patchCategorySchema = z.object({
