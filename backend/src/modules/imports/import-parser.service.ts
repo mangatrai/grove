@@ -181,6 +181,15 @@ async function extractByProfileWithDiagnostics(
     const parsed = parseBoaEStatementFromTextDetailed(text);
     return { rows: parsed.rows, statementBalances: parsed.statementBalances };
   }
+  if (profileId === "ofx_transactions") {
+    const parsed = parseOfxBuffer(buffer);
+    const { ledgerBalance, ledgerBalanceDate } = parsed.accountInfo;
+    const statementBalances: BoaStatementBalances | null =
+      ledgerBalance !== null && ledgerBalanceDate
+        ? { currency: "USD", beginning: null, ending: ledgerBalance, asOfStart: null, asOfEnd: ledgerBalanceDate, source: "ofx_transactions" }
+        : null;
+    return { rows: parsed.rows, statementBalances };
+  }
   const extracted = await extractByProfile(profileId, buffer, fileName, request);
   if (!Array.isArray(extracted)) {
     return extracted;

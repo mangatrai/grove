@@ -25,6 +25,10 @@ export interface OfxAccountInfo {
   institution: string | null;
   /** Currency code, e.g. "USD". */
   currency: string | null;
+  /** LEDGERBAL BALAMT — ending/ledger balance from the statement, or null if not present. */
+  ledgerBalance: number | null;
+  /** LEDGERBAL DTASOF — ISO date of the ledger balance, or null if not present/parseable. */
+  ledgerBalanceDate: string | null;
 }
 
 export interface OfxParseResult {
@@ -121,6 +125,16 @@ function parseOfx1(content: string): OfxParseResult {
   const fiMatch = body.match(/<FI>([\s\S]*?)<\/FI>/i);
   const institution = fiMatch ? normalizeOrg(extractLeaf(fiMatch[1]!, "ORG")) : null;
 
+  // ---- Ledger balance -------------------------------------------------------
+  // Slice from <LEDGERBAL> onward so extractLeaf finds BALAMT/DTASOF in the right block.
+  const ledgerBalIdx = body.search(/<LEDGERBAL>/i);
+  const ledgerBalSection = ledgerBalIdx >= 0 ? body.slice(ledgerBalIdx) : "";
+  const ledgerBalAmtStr = ledgerBalSection ? extractLeaf(ledgerBalSection, "BALAMT") : null;
+  const ledgerBalDateStr = ledgerBalSection ? extractLeaf(ledgerBalSection, "DTASOF") : null;
+  const ledgerBalance = ledgerBalAmtStr !== null ? parseFloat(ledgerBalAmtStr) : NaN;
+  const ledgerBalanceParsed = Number.isFinite(ledgerBalance) ? ledgerBalance : null;
+  const ledgerBalanceDate = ledgerBalDateStr ? ofxDateToIso(ledgerBalDateStr) : null;
+
   // ---- Transactions --------------------------------------------------------
   const rows: NormalizedRawPayload[] = [];
   const txnRe = /<STMTTRN>([\s\S]*?)<\/STMTTRN>/gi;
@@ -164,7 +178,7 @@ function parseOfx1(content: string): OfxParseResult {
 
   return {
     rows,
-    accountInfo: { acctId, acctType, bankId, institution, currency }
+    accountInfo: { acctId, acctType, bankId, institution, currency, ledgerBalance: ledgerBalanceParsed, ledgerBalanceDate }
   };
 }
 
@@ -187,6 +201,12 @@ function parseOfx2(content: string): OfxParseResult {
   const bankId = acctFrom.find("bankid").first().text().trim() || null;
   const currency = $("curdef").first().text().trim() || null;
   const institution = normalizeOrg($("fi org").first().text().trim() || null);
+
+  const ledgerBalAmtStr2 = $("ledgerbal balamt").first().text().trim();
+  const ledgerBalDateStr2 = $("ledgerbal dtasof").first().text().trim();
+  const ledgerBalRaw = ledgerBalAmtStr2 ? parseFloat(ledgerBalAmtStr2) : NaN;
+  const ledgerBalance2 = Number.isFinite(ledgerBalRaw) ? ledgerBalRaw : null;
+  const ledgerBalanceDate2 = ledgerBalDateStr2 ? ofxDateToIso(ledgerBalDateStr2) : null;
 
   const rows: NormalizedRawPayload[] = [];
 
@@ -233,7 +253,9 @@ function parseOfx2(content: string): OfxParseResult {
       acctType: acctType || null,
       bankId: bankId || null,
       institution: institution || null,
-      currency: currency || null
+      currency: currency || null,
+      ledgerBalance: ledgerBalance2,
+      ledgerBalanceDate: ledgerBalanceDate2
     }
   };
 }

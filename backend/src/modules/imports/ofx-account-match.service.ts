@@ -15,6 +15,10 @@ export interface OfxAccountSuggestion {
   normalizedAcctType: string | null;
   /** Institution name from OFX FI/ORG. */
   institution: string | null;
+  /** LEDGERBAL BALAMT — statement ending balance, or null if not present. */
+  ledgerBalance: number | null;
+  /** LEDGERBAL DTASOF — ISO date of the ledger balance, or null if not present. */
+  ledgerBalanceDate: string | null;
 }
 
 /** Map OFX ACCTTYPE to our financial_account.type enum values. */
@@ -39,7 +43,9 @@ export async function suggestAccountForOfx(
   householdId: string,
   acctId: string | null,
   acctType: string | null,
-  institution: string | null
+  institution: string | null,
+  ledgerBalance: number | null = null,
+  ledgerBalanceDate: string | null = null
 ): Promise<OfxAccountSuggestion> {
   // Extract last 4 digits from the ACCTID.
   // Handles formats like "1114758420-4883" (Chase: take the part after the last dash)
@@ -58,7 +64,9 @@ export async function suggestAccountForOfx(
     matchedAccountLabel: null,
     acctIdLast4: last4,
     normalizedAcctType,
-    institution: institution?.trim() || null
+    institution: institution?.trim() || null,
+    ledgerBalance,
+    ledgerBalanceDate
   };
 
   if (!last4) {

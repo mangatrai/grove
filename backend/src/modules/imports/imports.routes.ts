@@ -516,7 +516,7 @@ importsRouter.get("/sessions/:sessionId/files/:fileId/ofx-suggestion", async (re
     return;
   }
 
-  type OfxMetaSnippet = { acctId?: string; acctType?: string; institution?: string };
+  type OfxMetaSnippet = { acctId?: string; acctType?: string; institution?: string; ledgerBalance?: number | null; ledgerBalanceDate?: string | null };
   let ofxMeta: OfxMetaSnippet | null = null;
   try {
     const cs = JSON.parse(file.confidence_summary ?? "{}") as { ofxMeta?: OfxMetaSnippet };
@@ -529,7 +529,9 @@ importsRouter.get("/sessions/:sessionId/files/:fileId/ofx-suggestion", async (re
     req.authUser!.householdId,
     ofxMeta?.acctId ?? null,
     ofxMeta?.acctType ?? null,
-    ofxMeta?.institution ?? null
+    ofxMeta?.institution ?? null,
+    typeof ofxMeta?.ledgerBalance === "number" ? ofxMeta.ledgerBalance : null,
+    ofxMeta?.ledgerBalanceDate ?? null
   );
 
   res.status(200).json(suggestion);

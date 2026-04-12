@@ -371,6 +371,8 @@ export async function canonicalizeImportSession(
   const seenFingerprintsThisRun = new Set<string>();
   /** Fingerprints already queued in `ops` but not yet inserted (dedupe within same import run). */
   const fingerprintsAwaitingInsert = new Set<string>();
+  /** reference_ids (FITID) already queued or inserted this run — avoids redundant DB check per row. */
+  const seenReferenceIdsThisRun = new Set<string>();
   /** Same-session rows queued before DB insert — used so near-duplicate detection matches deferred canonicalize. */
   const pendingNearRows: Array<{
     accountId: string;
@@ -387,6 +389,7 @@ export async function canonicalizeImportSession(
     normDesc: string;
     rounded: number;
     fingerprint: string;
+    referenceId: string | null;
     classification: ClassificationResult;
     merchant: string;
     memo: string | null;
@@ -396,7 +399,7 @@ export async function canonicalizeImportSession(
   const ops: PendingCanonInsert[] = [];
 
   async function insertCanonicalRow(p: PendingCanonInsert): Promise<void> {
-    const { row, parsed, normDate, rounded, fingerprint, classification, merchant, memo, direction, diag } = p;
+    const { row, parsed, normDate, rounded, fingerprint, referenceId, classification, merchant, memo, direction, diag } = p;
     const categoryId = classification.categoryId;
     const classificationMeta = JSON.stringify({
       source: classification.source,
@@ -412,9 +415,9 @@ export async function canonicalizeImportSession(
       await qExec(
         `INSERT INTO transaction_canonical (
        id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
-       merchant, memo, transfer_group_id, fingerprint, source_ref, status, classification_meta,
+       merchant, memo, transfer_group_id, fingerprint, reference_id, source_ref, status, classification_meta,
        owner_scope, owner_person_profile_id
-     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 'posted', ?, ?, ?)`,
+     ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 'posted', ?, ?, ?)`,
         canonicalId,
         householdId,
         accountId,
@@ -425,6 +428,7 @@ export async function canonicalizeImportSession(
         merchant,
         memo,
         fingerprint,
+        referenceId ?? null,
         `raw:${row.raw_id}`,
         classificationMeta,
         row.owner_scope ?? "household",
@@ -434,6 +438,7 @@ export async function canonicalizeImportSession(
       diag.inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
       seenFingerprintsThisRun.add(fingerprint);
+      if (referenceId) seenReferenceIdsThisRun.add(`${accountId}:${referenceId}`);
       {
         const pi = pendingNearRows.findIndex((r) => r.fingerprint === fingerprint);
         if (pi >= 0) {
@@ -496,6 +501,29 @@ export async function canonicalizeImportSession(
       skipped += 1;
       diag.invalidAmount += 1;
       continue;
+    }
+
+    // FITID / reference_id check — stronger than fingerprint for OFX imports.
+    // Check this first so re-importing the same OFX file is always a no-op even
+    // if description normalisation has changed.
+    const referenceId: string | null = (parsed as { reference_id?: string | null }).reference_id?.trim() || null;
+    if (referenceId) {
+      const refKey = `${accountId}:${referenceId}`;
+      if (seenReferenceIdsThisRun.has(refKey)) {
+        duplicates += 1;
+        diag.duplicateFingerprint += 1;
+        continue;
+      }
+      const existsRef = await qGet<{ ok: number }>(
+        `SELECT 1 AS ok FROM transaction_canonical WHERE account_id = ? AND reference_id = ?`,
+        accountId,
+        referenceId
+      );
+      if (existsRef) {
+        duplicates += 1;
+        diag.duplicateFingerprint += 1;
+        continue;
+      }
     }
 
     const fingerprint = computeTransactionFingerprint({

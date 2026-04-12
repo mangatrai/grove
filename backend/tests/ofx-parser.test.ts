@@ -145,6 +145,76 @@ const OFX2_CHECKING = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 // ---------------------------------------------------------------------------
+// OFX 1.x checking with LEDGERBAL block
+// ---------------------------------------------------------------------------
+const OFX1_WITH_LEDGERBAL = `
+OFXHEADER:100
+DATA:OFXSGML
+
+<OFX>
+<BANKMSGSRSV1>
+<STMTTRNRS>
+<STMTRS>
+<CURDEF>USD</CURDEF>
+<BANKACCTFROM>
+<BANKID>021000021</BANKID>
+<ACCTID>000099887766</ACCTID>
+<ACCTTYPE>CHECKING</ACCTTYPE>
+</BANKACCTFROM>
+<BANKTRANLIST>
+<STMTTRN>
+<TRNTYPE>DEBIT</TRNTYPE>
+<DTPOSTED>20260301</DTPOSTED>
+<TRNAMT>-50.00</TRNAMT>
+<FITID>LEDBAL001</FITID>
+<NAME>GAS STATION</NAME>
+</STMTTRN>
+</BANKTRANLIST>
+<LEDGERBAL>
+<BALAMT>3241.55</BALAMT>
+<DTASOF>20260310</DTASOF>
+</LEDGERBAL>
+</STMTRS>
+</STMTTRNRS>
+</BANKMSGSRSV1>
+</OFX>
+`;
+
+// ---------------------------------------------------------------------------
+// OFX 2.x XML with LEDGERBAL block
+// ---------------------------------------------------------------------------
+const OFX2_WITH_LEDGERBAL = `<?xml version="1.0" encoding="UTF-8"?>
+<?OFX OFXHEADER="200" VERSION="220" SECURITY="NONE"?>
+<OFX>
+  <BANKMSGSRSV1>
+    <STMTTRNRS>
+      <STMTRS>
+        <CURDEF>USD</CURDEF>
+        <BANKACCTFROM>
+          <BANKID>026009593</BANKID>
+          <ACCTID>5544</ACCTID>
+          <ACCTTYPE>SAVINGS</ACCTTYPE>
+        </BANKACCTFROM>
+        <BANKTRANLIST>
+          <STMTTRN>
+            <TRNTYPE>CREDIT</TRNTYPE>
+            <DTPOSTED>20260315</DTPOSTED>
+            <TRNAMT>100.00</TRNAMT>
+            <FITID>XML_LEDBAL_001</FITID>
+            <NAME>INTEREST</NAME>
+          </STMTTRN>
+        </BANKTRANLIST>
+        <LEDGERBAL>
+          <BALAMT>12500.00</BALAMT>
+          <DTASOF>20260315</DTASOF>
+        </LEDGERBAL>
+      </STMTRS>
+    </STMTTRNRS>
+  </BANKMSGSRSV1>
+</OFX>
+`;
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -256,5 +326,46 @@ describe("OFX 2.x XML parser", () => {
   it("joins NAME and MEMO with em-dash in XML", () => {
     const { rows } = parseOfxBuffer(buf);
     expect(rows[0]!.description).toBe("ELECTRIC BILL — March utility");
+  });
+});
+
+describe("OFX 1.x LEDGERBAL parsing", () => {
+  const buf = Buffer.from(OFX1_WITH_LEDGERBAL, "utf-8");
+
+  it("parses BALAMT as ledgerBalance", () => {
+    const { accountInfo } = parseOfxBuffer(buf);
+    expect(accountInfo.ledgerBalance).toBe(3241.55);
+  });
+
+  it("converts DTASOF to ISO ledgerBalanceDate", () => {
+    const { accountInfo } = parseOfxBuffer(buf);
+    expect(accountInfo.ledgerBalanceDate).toBe("2026-03-10");
+  });
+
+  it("still parses transactions correctly when LEDGERBAL present", () => {
+    const { rows } = parseOfxBuffer(buf);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.reference_id).toBe("LEDBAL001");
+  });
+});
+
+describe("OFX 2.x LEDGERBAL parsing", () => {
+  const buf = Buffer.from(OFX2_WITH_LEDGERBAL, "utf-8");
+
+  it("parses BALAMT as ledgerBalance in XML mode", () => {
+    const { accountInfo } = parseOfxBuffer(buf);
+    expect(accountInfo.ledgerBalance).toBe(12500.0);
+  });
+
+  it("converts DTASOF to ISO ledgerBalanceDate in XML mode", () => {
+    const { accountInfo } = parseOfxBuffer(buf);
+    expect(accountInfo.ledgerBalanceDate).toBe("2026-03-15");
+  });
+
+  it("returns null ledgerBalance when LEDGERBAL absent", () => {
+    const bufNoLedger = Buffer.from(OFX2_CHECKING, "utf-8");
+    const { accountInfo } = parseOfxBuffer(bufNoLedger);
+    expect(accountInfo.ledgerBalance).toBeNull();
+    expect(accountInfo.ledgerBalanceDate).toBeNull();
   });
 });
