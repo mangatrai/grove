@@ -642,6 +642,7 @@ export async function canonicalizeImportSession(
       normDesc,
       rounded,
       fingerprint,
+      referenceId,
       classification,
       merchant,
       memo,

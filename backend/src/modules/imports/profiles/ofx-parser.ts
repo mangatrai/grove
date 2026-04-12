@@ -188,7 +188,8 @@ function parseOfx1(content: string): OfxParseResult {
 
 function parseOfx2(content: string): OfxParseResult {
   // lowerCaseTags ensures case-insensitive tag matching (real OFX 2.x / QBO files use uppercase tags).
-  const $ = cheerio.load(content, { lowerCaseTags: true, lowerCaseAttributeNames: true });
+  // cheerio default mode lowercases all tags, so lowercase selectors match OFX uppercase tags.
+  const $ = cheerio.load(content);
 
   const ccAcctFrom = $("ccacctfrom").first();
   const bankAcctFrom = $("bankacctfrom").first();
