@@ -1106,27 +1106,6 @@ export function TransactionsPage() {
             Trash
           </button>
         </div>
-        {needsReviewTab ? (
-          <div className="transactions-toolbar__review-row">
-            <label className="transactions-toolbar__field transactions-toolbar__field--grow">
-              <span className="transactions-toolbar__label">Review types</span>
-              <MultiSelect
-                placeholder="All types"
-                aria-label="Filter by open review item types"
-                data={resolutionTypeMultiData}
-                value={resolutionTypes}
-                onChange={(v) => setResolutionTypesInUrl(v as LedgerResolutionType[])}
-                clearable
-                searchable={false}
-                size="sm"
-                className="transactions-toolbar__resolution-multiselect"
-              />
-            </label>
-            <p className="muted transactions-toolbar__review-hint">
-              Empty = all needs-review rows (uncategorized + open flags).
-            </p>
-          </div>
-        ) : null}
         {needsReviewTab && (resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger ?? 0) > 0 ? (
           <div
             className="transactions-toolbar__orphan-banner"
@@ -1144,6 +1123,22 @@ export function TransactionsPage() {
           </div>
         ) : null}
         <div className="transactions-toolbar__row">
+          {needsReviewTab ? (
+            <label className="transactions-toolbar__field transactions-toolbar__field--grow">
+              <span className="transactions-toolbar__label">Review type</span>
+              <MultiSelect
+                placeholder="All types"
+                aria-label="Filter by open review item types"
+                data={resolutionTypeMultiData}
+                value={resolutionTypes}
+                onChange={(v) => setResolutionTypesInUrl(v as LedgerResolutionType[])}
+                clearable
+                searchable={false}
+                size="sm"
+                className="transactions-toolbar__resolution-multiselect"
+              />
+            </label>
+          ) : null}
           <label className="transactions-toolbar__field">
             <span className="transactions-toolbar__label">Search</span>
             <input
@@ -1622,7 +1617,7 @@ export function TransactionsPage() {
                                     onChange={(v) => void updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId)}
                                     ariaLabel={`Category for ${desc}`}
                                   />
-                                  <CategoryClassificationHint meta={t.classificationMeta ?? null} />
+                                  {needsReviewTab ? <CategoryClassificationHint meta={t.classificationMeta ?? null} /> : null}
                                 </>
                               )}
                             </td>
