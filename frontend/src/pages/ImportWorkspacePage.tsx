@@ -22,6 +22,8 @@ type OfxSuggestion = {
   acctIdLast4: string | null;
   normalizedAcctType: string | null;
   institution: string | null;
+  ledgerBalance: number | null;
+  ledgerBalanceDate: string | null;
 };
 
 type ImportFileRow = {
@@ -1552,18 +1554,30 @@ export function ImportWorkspacePage() {
                         }
                         if (bound) {
                           return (
-                            <p className="muted" style={{ margin: "0.3rem 0 0", fontSize: "0.82rem" }}>
-                              {sug.acctIdLast4 ? `OFX account: ...${sug.acctIdLast4}` : "OFX"}
-                              {sug.normalizedAcctType ? ` · ${sug.normalizedAcctType}` : ""}
-                              {sug.matchedAccountId ? (
-                                <span className="success"> ✓ matched</span>
+                            <div style={{ marginTop: "0.3rem" }}>
+                              <p className="muted" style={{ margin: 0, fontSize: "0.82rem" }}>
+                                {sug.acctIdLast4 ? `OFX account: ...${sug.acctIdLast4}` : "OFX"}
+                                {sug.normalizedAcctType ? ` · ${sug.normalizedAcctType}` : ""}
+                                {sug.matchedAccountId ? (
+                                  <span className="success"> ✓ matched</span>
+                                ) : null}
+                              </p>
+                              {sug.ledgerBalance !== null && sug.ledgerBalanceDate ? (
+                                <p className="muted" style={{ margin: "0.1rem 0 0", fontSize: "0.82rem" }}>
+                                  Balance as of {sug.ledgerBalanceDate}: <strong>${sug.ledgerBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> (from OFX ledger balance — auto-saved to net worth)
+                                </p>
                               ) : null}
-                            </p>
+                            </div>
                           );
                         }
                         // No account selected yet — show "no match" hint and create option.
                         return (
                           <div style={{ marginTop: "0.35rem" }}>
+                            {sug.ledgerBalance !== null && sug.ledgerBalanceDate ? (
+                              <p className="muted" style={{ margin: "0 0 0.2rem", fontSize: "0.82rem" }}>
+                                Balance as of {sug.ledgerBalanceDate}: <strong>${sug.ledgerBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> (from OFX — will auto-save to net worth once account is bound)
+                              </p>
+                            ) : null}
                             <p className="muted" style={{ margin: "0 0 0.3rem", fontSize: "0.82rem" }}>
                               {sug.acctIdLast4
                                 ? `No account found for ...${sug.acctIdLast4}${sug.normalizedAcctType ? ` (${sug.normalizedAcctType})` : ""}.`

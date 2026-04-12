@@ -20,6 +20,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-11
 
+### CR-074 — FITID dedup + OFX ledger balance auto-snapshot
+- **Type:** CR / Backend / UX
+- **What:** Two related improvements to the OFX import pipeline.
+  1. **FITID-based deduplication:** Added `reference_id TEXT` column to `transaction_canonical` (migration `0008`) with a partial unique index `(account_id, reference_id) WHERE reference_id IS NOT NULL`. During canonical ingest, if the raw payload carries a `reference_id` (FITID from OFX), a FITID check runs *before* the fingerprint check: if the same `(account_id, reference_id)` already exists in `transaction_canonical`, the row is counted as a duplicate and skipped. A `seenReferenceIdsThisRun` set catches within-batch duplicates. Non-OFX rows (no FITID) are unaffected — the partial index allows unlimited `NULL` reference_ids.
+  2. **OFX LEDGERBAL auto-snapshot:** Both OFX 1.x and OFX 2.x parsers now extract `<LEDGERBAL><BALAMT>` and `<LEDGERBAL><DTASOF>`. These fields are stored in `confidence_summary.ofxMeta` at upload time and returned via `GET /imports/sessions/:id/files/:fileId/ofx-suggestion` alongside the account match. During parse (`POST /imports/sessions/:id/parse`), if the OFX file has a non-null ledger balance with a valid ISO date, `upsertImportBalanceSnapshotFromStatement` is called to persist a balance snapshot (source = `ofx_transactions`) — same pathway as BoA CSV/e-statement balance capture. Frontend shows balance info in the OFX account hint: "Balance as of YYYY-MM-DD: $X,XXX.XX (from OFX ledger balance — auto-saved to net worth)".
+- **Why:** Without FITID dedup, re-importing an OFX file after minor description edits could insert duplicates (fingerprint = SHA256 of normalised description). FITID is the authoritative dedup key for OFX files. LEDGERBAL is a free balance anchor in every Chase QFX tested — parsing it avoids a manual net-worth entry after each statement import.
+- **Files:** `backend/db/migrations_pg/0008_canonical_reference_id.sql` (new), `canonical-ingest.service.ts`, `ofx-parser.ts`, `ofx-account-match.service.ts`, `import-parser.service.ts`, `imports.routes.ts`, `boa-checking-savings-csv.ts` (source union extended), `ImportWorkspacePage.tsx`.
+- **Tests added:** `backend/tests/ofx-parser.test.ts` — 6 new tests for OFX 1.x and 2.x LEDGERBAL parsing (balance value, date conversion, null when absent).
+
 ### UX-073 — Replace all window.confirm/window.prompt with in-app dialogs
 - **Type:** UX / FIX
 - **What:** `window.confirm` in `PayslipsPage` and `PayslipDetailPage` (payslip delete) replaced with `ConfirmDialog` (already used throughout the rest of the app). `window.prompt` in `ImportWorkspacePage` for "Add institution…" replaced with an inline input row: click "Add institution…" → text input + Add/Cancel buttons appear; Enter submits, Escape cancels; new name saved via `POST /imports/institutions/custom`, catalog reloaded, value auto-selected. Inline create-account form layout also fixed from `flex+alignItems:flex-end` (staggered when Institution column was taller) to CSS grid so all labels/inputs align on the same baseline.
