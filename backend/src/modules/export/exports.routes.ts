@@ -1,13 +1,22 @@
+import path from "node:path";
+
 import { Router } from "express";
+import multer from "multer";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { resolveDataPath } from "../../paths.js";
 import {
   getExportJob,
   queueHouseholdExport,
   readExportFileIfReady,
   scheduleExportJobProcessing
 } from "./export-job.service.js";
+import {
+  getImportJob,
+  queueHouseholdImport,
+  scheduleImportJobProcessing
+} from "./import-household-bundle.service.js";
 
 const EXPORT_WINDOW_MS = 60 * 60 * 1000;
 const EXPORT_MAX_PER_WINDOW = 10;
@@ -25,14 +34,64 @@ function allowHouseholdExport(userId: string): boolean {
   return true;
 }
 
+/** Multer instance for restore ZIP uploads — stored on disk (not in memory, ZIPs can be large). */
+const restoreUpload = multer({
+  dest: resolveDataPath("data/imports-restore-upload"),
+  limits: { fileSize: 500 * 1024 * 1024 } // 500 MB safety cap
+});
+
 export const exportsRouter = Router();
 exportsRouter.use(requireAuth);
 
-/** Reserved: merge / restore from export bundle (ZIP). */
-exportsRouter.post("/household/import", (_req, res) => {
-  res.status(501).json({
-    message:
-      "Import from export bundle is not implemented yet. Download the ZIP from Settings for an offline archive."
+/** Async restore from export bundle ZIP. */
+exportsRouter.post(
+  "/household/import",
+  restoreUpload.single("file"),
+  async (req: AuthenticatedRequest, res) => {
+    const householdId = req.authUser!.householdId;
+    const userId = req.authUser!.userId;
+
+    if (!req.file) {
+      res.status(400).json({ message: "No file uploaded. Send a multipart/form-data request with a 'file' field." });
+      return;
+    }
+
+    const ext = path.extname(req.file.originalname ?? "").toLowerCase();
+    const mime = req.file.mimetype ?? "";
+    if (ext !== ".zip" && mime !== "application/zip" && mime !== "application/x-zip-compressed") {
+      res.status(400).json({ message: "Invalid file type. Only .zip files are accepted." });
+      return;
+    }
+
+    const { jobId } = await queueHouseholdImport(householdId, userId, req.file.path);
+    scheduleImportJobProcessing(jobId, householdId);
+    res.status(202).json({
+      jobId,
+      message: "Restore started. Poll GET /exports/import/:jobId for status."
+    });
+  }
+);
+
+/** Poll status of a restore (import) job. */
+exportsRouter.get("/import/:jobId", async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const jobId = req.params.jobId?.trim();
+  if (!jobId) {
+    res.status(400).json({ message: "Missing job id" });
+    return;
+  }
+  const job = await getImportJob(householdId, jobId);
+  if (!job) {
+    res.status(404).json({ code: "IMPORT_JOB_NOT_FOUND", message: "Import job not found" });
+    return;
+  }
+  res.json({
+    id: job.id,
+    status: job.status,
+    createdAt: job.createdAt,
+    completedAt: job.completedAt,
+    error: job.errorText,
+    stats: job.statsJson ? (JSON.parse(job.statsJson) as Record<string, number>) : null
   });
 });
 

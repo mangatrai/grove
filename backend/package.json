@@ -26,6 +26,7 @@
     "openai": "^4.77.0",
     "pdf-parse": "^1.1.1",
     "postgres": "^3.4.8",
+    "unzipper": "^0.12.3",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
@@ -37,6 +38,7 @@
     "@types/multer": "^2.0.0",
     "@types/node": "^22.8.1",
     "@types/pdf-parse": "^1.1.4",
+    "@types/unzipper": "^0.10.11",
     "@typescript-eslint/eslint-plugin": "^8.8.1",
     "@typescript-eslint/parser": "^8.8.1",
     "eslint": "^9.12.0",
