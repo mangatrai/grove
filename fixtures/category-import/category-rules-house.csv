@@ -53,6 +53,7 @@ household,,,WALMART,contains,debit_only,,Shopping > General merchandise,60,0.80,
 household,,,COSTCO,contains,debit_only,,Shopping > General merchandise,60,0.80,true
 household,,,KROGER,contains,debit_only,,Shopping > Groceries,40,0.98,true
 household,,,HEB,contains,debit_only,,Shopping > Groceries,40,0.98,true
+household,,,APPLE,contains,debit_only,,Shopping > Electronic,40,0.98,true
 
 household,,,UBER,contains,debit_only,,Mobility > Taxi,60,0.90,true
 household,,,LYFT,contains,debit_only,,Mobility > Taxi,60,0.90,true
@@ -81,6 +82,7 @@ household,,,MCDONALDS,contains,debit_only,,Food > Dining out,60,0.95,true
 household,,,STONEBROOK PEDIATRIC,contains,debit_only,,Healthcare > Medical,50,0.95,true
 
 household,,,BRGHTWHL,contains,any,,Education > Childcare,40,0.98,true
+household,,,LEADERSHIP PREP,contains,any,,Education > Tuition,40,0.98,true
 household,,,ATT DES:,contains,debit_only,,Utilities > Mobile phone,40,0.95,true
 household,,,TMOBILE,contains,debit_only,,Utilities > Mobile phone,40,0.96,true
 household,,,ZELLE,contains,credit_only,,Income > Reimbursements,40,0.88,true
@@ -102,6 +104,7 @@ household,,,AUTOPAY PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.
 household,,,AMEX OFFER CREDIT,contains,credit_only,,Income > Refunds,40,0.97,true
 
 household,,,ADVANTAGE FLEX T,contains,debit_only,,Healthcare > Medical,40,0.92,true
+household,,,HEALTH CENTRAL WOMEN,contains,debit_only,,Healthcare > Medical,40,0.92,true
 
 household,,,FIVE BELOW,contains,debit_only,,Shopping > General merchandise,40,0.95,true
 household,,,DELL,contains,debit_only,,Shopping > Electronic,40,0.90,true
