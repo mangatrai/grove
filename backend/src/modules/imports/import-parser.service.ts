@@ -20,6 +20,8 @@ import { parseChaseCardCsv } from "./profiles/chase-card-csv.js";
 import { parseCitiCardCsv } from "./profiles/citi-card-csv.js";
 import { parseMarcusOnlineSavingsPdf } from "./profiles/marcus-online-savings-pdf.js";
 import { parseOfxBuffer } from "./profiles/ofx-parser.js";
+import { parseDiscoverCardCsv } from "./profiles/discover-card-csv.js";
+import { parseWealthfrontInvestmentCsv } from "./profiles/wealthfront-investment-csv.js";
 import type { NormalizedRawPayload } from "./profiles/types.js";
 import { parseAmount } from "./profiles/tabular-helpers.js";
 import type { ParserProfileId } from "./profiles/profile-ids.js";
@@ -154,6 +156,10 @@ async function extractByProfile(
       return await parseMarcusOnlineSavingsPdf(buffer);
     case "ofx_transactions":
       return parseOfxBuffer(buffer).rows;
+    case "discover_card_csv":
+      return parseDiscoverCardCsv(buffer);
+    case "wealthfront_investment_csv":
+      return parseWealthfrontInvestmentCsv(buffer);
     case "ibm_pay_contributions_pdf":
     case "adp_payslip_pdf":
     case "deloitte_payslip_pdf":

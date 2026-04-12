@@ -16,7 +16,11 @@ export const PARSER_PROFILE_IDS = [
   /** Registered for onboarding; parse not implemented yet — use IBM or wait for ADP adapter */
   "adp_payslip_pdf",
   /** CR-071: OFX / QFX / QBO bank statement import */
-  "ofx_transactions"
+  "ofx_transactions",
+  /** CR-076: Discover card activity CSV */
+  "discover_card_csv",
+  /** CR-076: Wealthfront savings / investment account CSV */
+  "wealthfront_investment_csv"
 ] as const;
 
 export type ParserProfileId = (typeof PARSER_PROFILE_IDS)[number];

@@ -1,0 +1,56 @@
+/**
+ * Discover card activity CSV parser (CR-076).
+ *
+ * Columns: Trans. Date, Post Date, Description, Amount, Category
+ * Date format: MM/DD/YYYY
+ * Amount sign: positive = charge (debit), negative = payment/credit.
+ * We negate amounts so charges become negative (canonical convention: debit = negative).
+ */
+
+import { parseCsvWithHeader, parseAmount } from "./tabular-helpers.js";
+import type { NormalizedRawPayload } from "./types.js";
+
+/** Convert MM/DD/YYYY → YYYY-MM-DD. Returns null if not parseable. */
+function mmddyyyyToIso(raw: string): string | null {
+  const m = raw.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) {
+    return null;
+  }
+  return `${m[3]}-${m[1]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}`;
+}
+
+export function parseDiscoverCardCsv(buffer: Buffer): NormalizedRawPayload[] {
+  const rows = parseCsvWithHeader(buffer.toString("utf8"));
+  const out: NormalizedRawPayload[] = [];
+
+  for (const row of rows) {
+    const rawTxnDate = row["Trans. Date"]?.trim() ?? "";
+    const rawPostDate = row["Post Date"]?.trim() ?? "";
+    const description = row["Description"]?.trim() ?? "";
+    const rawAmount = row["Amount"]?.trim() ?? "";
+
+    if (!rawTxnDate || !description || !rawAmount) {
+      continue;
+    }
+    const txnDate = mmddyyyyToIso(rawTxnDate);
+    if (!txnDate) {
+      continue;
+    }
+    const parsed = parseAmount(rawAmount);
+    if (parsed === null) {
+      continue;
+    }
+    // Discover: positive = charge (money leaving) → store as negative.
+    const amount = -parsed;
+
+    out.push({
+      txn_date: txnDate,
+      posting_date: mmddyyyyToIso(rawPostDate) ?? txnDate,
+      description,
+      amount,
+      source_row: row
+    });
+  }
+
+  return out;
+}
