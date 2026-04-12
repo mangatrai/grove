@@ -226,7 +226,9 @@ export function SettingsPage() {
     type: "checking",
     institution: "",
     accountMask: "",
-    belongsTo: "household" as BelongsToChoice
+    belongsTo: "household" as BelongsToChoice,
+    initialBalance: "",
+    initialBalanceDate: new Date().toISOString().slice(0, 10)
   });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
@@ -502,14 +504,22 @@ export function SettingsPage() {
     setAccountError(null);
     setAccountSuccess(null);
     try {
-      const body = {
+      const parsedInitialBalance = accountDraft.initialBalance.trim()
+        ? parseFloat(accountDraft.initialBalance)
+        : null;
+      const body: Record<string, unknown> = {
         type: accountDraft.type,
         institution: accountDraft.institution.trim(),
         accountMask: accountDraft.accountMask.trim() || null,
         ownerScope: belongsTo.ownerScope,
         ownerPersonProfileId: belongsTo.ownerPersonProfileId,
-        defaultParserProfileId: null as string | null
+        defaultParserProfileId: null
       };
+      // Initial balance only sent on creation (not on edit — use Net Worth page to update)
+      if (!accountDraft.id && parsedInitialBalance !== null && Number.isFinite(parsedInitialBalance)) {
+        body.initialBalance = parsedInitialBalance;
+        body.initialBalanceDate = accountDraft.initialBalanceDate || new Date().toISOString().slice(0, 10);
+      }
       if (accountDraft.id) {
         await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
           method: "PATCH",
@@ -526,7 +536,9 @@ export function SettingsPage() {
         type: "checking",
         institution: "",
         accountMask: "",
-        belongsTo: "household"
+        belongsTo: "household",
+        initialBalance: "",
+        initialBalanceDate: new Date().toISOString().slice(0, 10)
       });
     } catch (e: unknown) {
       setAccountError(e instanceof Error ? e.message : "Could not save account");
@@ -1154,6 +1166,7 @@ export function SettingsPage() {
                     <option value="loan">Loan</option>
                     <option value="mortgage">Mortgage</option>
                     <option value="investment">Investment</option>
+                    <option value="retirement">Retirement (401K / IRA / Pension)</option>
                     <option value="payslip">Payslip</option>
                   </select>
                 </label>
@@ -1181,6 +1194,33 @@ export function SettingsPage() {
                   />
                 </label>
               </div>
+              {!accountDraft.id ? (
+                <div className="row" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+                  <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                    Starting balance (optional)
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={accountDraft.initialBalance}
+                      onChange={(e) => setAccountDraft((d) => ({ ...d, initialBalance: e.target.value }))}
+                      disabled={savingAccount}
+                      placeholder="0.00"
+                    />
+                  </label>
+                  <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                    Balance as of
+                    <input
+                      type="date"
+                      value={accountDraft.initialBalanceDate}
+                      onChange={(e) => setAccountDraft((d) => ({ ...d, initialBalanceDate: e.target.value }))}
+                      disabled={savingAccount}
+                    />
+                  </label>
+                  <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.82rem", width: "100%" }}>
+                    Optional starting point for net worth. Overwritten when statements are imported.
+                  </p>
+                </div>
+              ) : null}
               <div className="settings-household-actions">
                 <button type="button" disabled={savingAccount} onClick={() => void saveConnectedAccount()}>
                   {savingAccount ? "Saving…" : accountDraft.id ? "Update account" : "Add account"}
@@ -1196,7 +1236,9 @@ export function SettingsPage() {
                         type: "checking",
                         institution: "",
                         accountMask: "",
-                        belongsTo: "household"
+                        belongsTo: "household",
+                        initialBalance: "",
+                        initialBalanceDate: new Date().toISOString().slice(0, 10)
                       })
                     }
                   >
@@ -1242,7 +1284,9 @@ export function SettingsPage() {
                               belongsTo:
                                 a.owner_scope === "person" && a.owner_person_profile_id
                                   ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
-                                  : "household"
+                                  : "household",
+                              initialBalance: "",
+                              initialBalanceDate: new Date().toISOString().slice(0, 10)
                             })
                           }
                         >

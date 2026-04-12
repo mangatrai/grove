@@ -20,6 +20,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-11
 
+### CR-075 — Settings: initial balance on account create, retirement account type, institution catalog
+- **Type:** CR / Backend / UX
+- **What:** Three related improvements to account setup.
+  1. **Initial balance on account creation:** Settings → Accounts form now shows two optional fields when adding a new account: "Starting balance" (number) and "Balance as of" (date, defaults to today). On save, if a non-zero balance is provided, `upsertManualBalanceSnapshot` is called to create a manual balance snapshot — the same mechanism used by the Net Worth page. Fields are hidden when editing an existing account (existing balance data is managed via Net Worth). Backend: `accountUpsertSchema` extended with `initialBalance: number | null` and `initialBalanceDate: string | null` (YYYY-MM-DD); `POST /imports/accounts` handler calls `upsertManualBalanceSnapshot` after account creation if non-null.
+  2. **Retirement account type:** New `'retirement'` type in `financial_account` (migration `0009`). Covers 401K, IRA, pension accounts. Added to the `accountUpsertSchema` enum and the Settings → Accounts type dropdown as "Retirement (401K / IRA / Pension)".
+  3. **Institution catalog expansion:** Added 8 new institutions (alphabetically sorted) to both `frontend/src/import/institutionCatalog.ts` and `backend/src/modules/imports/institution-catalog.ts`: Betterment, Coinbase, E*TRADE, Fundrise, Robinhood, T. Rowe Price, Vanguard, Wealthfront.
+- **Why:** Users adding investment, retirement, or crypto accounts had no institutions to pick and no account type for retirement accounts. Starting balance lets new accounts contribute to net worth immediately without needing to import a statement first.
+- **Files:** `backend/db/migrations_pg/0009_account_type_retirement.sql` (new), `imports.routes.ts`, `institution-catalog.ts` (backend + frontend), `SettingsPage.tsx`.
+
 ### CR-074 — FITID dedup + OFX ledger balance auto-snapshot
 - **Type:** CR / Backend / UX
 - **What:** Two related improvements to the OFX import pipeline.
