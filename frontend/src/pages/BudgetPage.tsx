@@ -8,6 +8,7 @@ import { apiJson, useAuthToken } from "../api";
 type BudgetSuggestionRow = {
   categoryId: string;
   categoryName: string;
+  parentId: string | null;
   parentName: string | null;
   suggestedAmount: number;
   basis: "last_month" | "three_month_avg";
@@ -39,7 +40,6 @@ type BudgetResult = {
 
 type SuggestResult = {
   month: string;
-  /** Most recent calendar month used as the "last month" anchor. Null if no data found. */
   dataAsOf: string | null;
   suggestions: BudgetSuggestionRow[];
 };
@@ -52,12 +52,21 @@ type CategoryOption = {
   householdScoped: boolean;
 };
 
-// Entries are managed in the parent so initialization from async suggestions is reliable.
-type SetupEntry = {
-  categoryId: string;
-  categoryName: string;
-  parentName: string | null;
-  amount: string; // string for controlled input
+/**
+ * A group of leaf suggestions under one parent, or a single parent-level
+ * entry when all leaves are collapsed into one amount.
+ *
+ * mode "lump_sum"  → one budget entry for the parent category itself.
+ * mode "detailed"  → one budget entry per leaf subcategory.
+ */
+type SetupGroup = {
+  parentId: string;
+  parentName: string;
+  mode: "lump_sum" | "detailed";
+  // lump_sum mode: single amount for the parent category
+  lumpAmount: string;
+  // detailed mode: one entry per leaf category
+  leaves: { categoryId: string; categoryName: string; amount: string }[];
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -87,12 +96,97 @@ function shiftMonth(yyyyMm: string, delta: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function buildCategoryLabel(cat: CategoryOption, byId: Map<string, CategoryOption>): string {
-  if (cat.parentId) {
-    const parent = byId.get(cat.parentId);
-    return parent ? `${parent.name} > ${cat.name}` : cat.name;
+/** Build SetupGroups from suggestions, grouped by parent. */
+function suggestionsToGroups(suggestions: BudgetSuggestionRow[]): SetupGroup[] {
+  const byParent = new Map<string, { parentName: string; rows: BudgetSuggestionRow[] }>();
+  for (const s of suggestions) {
+    const pid = s.parentId ?? s.categoryId; // orphan leaf → its own "group"
+    const pname = s.parentName ?? s.categoryName;
+    if (!byParent.has(pid)) byParent.set(pid, { parentName: pname, rows: [] });
+    byParent.get(pid)!.rows.push(s);
   }
-  return cat.name;
+  const groups: SetupGroup[] = [];
+  for (const [parentId, { parentName, rows }] of byParent) {
+    if (rows.length === 1 && rows[0].parentId === null) {
+      // Single root-level leaf — treat as lump sum with its own ID
+      groups.push({
+        parentId,
+        parentName,
+        mode: "lump_sum",
+        lumpAmount: String(rows[0].suggestedAmount),
+        leaves: [{ categoryId: rows[0].categoryId, categoryName: rows[0].categoryName, amount: String(rows[0].suggestedAmount) }]
+      });
+    } else {
+      // Multiple leaves under one parent — default to lump_sum at parent level
+      const totalSuggested = rows.reduce((s, r) => s + r.suggestedAmount, 0);
+      groups.push({
+        parentId,
+        parentName,
+        mode: "lump_sum",
+        lumpAmount: String(Math.round(totalSuggested * 100) / 100),
+        leaves: rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.categoryName, amount: String(r.suggestedAmount) }))
+      });
+    }
+  }
+  return groups;
+}
+
+/** Convert SetupGroups to the flat entries array saved to the backend. */
+function groupsToEntries(groups: SetupGroup[]): { categoryId: string; amount: number }[] {
+  const out: { categoryId: string; amount: number }[] = [];
+  for (const g of groups) {
+    if (g.mode === "lump_sum") {
+      const amount = parseFloat(g.lumpAmount) || 0;
+      if (amount > 0) out.push({ categoryId: g.parentId, amount });
+    } else {
+      for (const leaf of g.leaves) {
+        const amount = parseFloat(leaf.amount) || 0;
+        if (amount > 0) out.push({ categoryId: leaf.categoryId, amount });
+      }
+    }
+  }
+  return out;
+}
+
+/** Convert existing budget rows (from progress view) back to SetupGroups for editing. */
+function budgetCategoriesToGroups(
+  cats: BudgetCategoryRow[],
+  allCategories: CategoryOption[]
+): SetupGroup[] {
+  const catById = new Map(allCategories.map((c) => [c.id, c]));
+  const parentNames = new Map(allCategories.filter((c) => !c.parentId).map((c) => [c.id, c.name]));
+
+  const groups: SetupGroup[] = [];
+  for (const cat of cats) {
+    const catMeta = catById.get(cat.categoryId);
+    const isParentEntry = !catMeta?.parentId; // no parent in category table = it IS a parent
+    if (isParentEntry) {
+      groups.push({
+        parentId: cat.categoryId,
+        parentName: cat.categoryName,
+        mode: "lump_sum",
+        lumpAmount: String(cat.budgeted),
+        leaves: []
+      });
+    } else {
+      // Leaf entry — find or create its parent group
+      const parentId = catMeta!.parentId!;
+      const existing = groups.find((g) => g.parentId === parentId);
+      const leaf = { categoryId: cat.categoryId, categoryName: cat.categoryName, amount: String(cat.budgeted) };
+      if (existing) {
+        existing.leaves.push(leaf);
+      } else {
+        groups.push({
+          parentId,
+          parentName: parentNames.get(parentId) ?? cat.parentName ?? parentId,
+          mode: "detailed",
+          lumpAmount: "0",
+          leaves: [leaf]
+        });
+      }
+    }
+  }
+  return groups;
 }
 
 // ── Progress bar ─────────────────────────────────────────────────────────────
@@ -102,145 +196,202 @@ function ProgressBar({ percent }: { percent: number }) {
   const color = percent > 100 ? "#dc2626" : percent >= 80 ? "#d97706" : "#16a34a";
   return (
     <div style={{ background: "#e2e8f0", borderRadius: 4, height: 8, overflow: "hidden" }}>
-      <div
+      <div style={{ width: `${clamped}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
+    </div>
+  );
+}
+
+// ── Setup form ────────────────────────────────────────────────────────────────
+
+function AmountInput({
+  value,
+  onChange,
+  style
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
+      <span style={{ color: "var(--color-text-muted)" }}>$</span>
+      <input
+        type="number"
+        min={0}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
         style={{
-          width: `${clamped}%`,
-          height: "100%",
-          background: color,
+          width: 90,
+          textAlign: "right",
+          border: "1px solid var(--color-border)",
           borderRadius: 4,
-          transition: "width 0.3s"
+          padding: "0.2rem 0.4rem",
+          fontSize: 14,
+          ...style
         }}
       />
     </div>
   );
 }
 
-// ── Add-category picker ───────────────────────────────────────────────────────
-
-function AddCategoryRow({
-  allCategories,
-  excludedIds,
-  onAdd
-}: {
+type SetupFormProps = {
+  month: string;
+  groups: SetupGroup[];
   allCategories: CategoryOption[];
-  excludedIds: Set<string>;
-  onAdd: (cat: CategoryOption) => void;
-}) {
-  const byId = new Map(allCategories.map((c) => [c.id, c]));
-  // Only leaf categories (have a parent) that are not already in the budget
-  const available = allCategories
-    .filter((c) => c.parentId !== null && !excludedIds.has(c.id))
-    .sort((a, b) => {
-      const la = buildCategoryLabel(a, byId);
-      const lb = buildCategoryLabel(b, byId);
-      return la.localeCompare(lb);
-    });
+  suggestions: BudgetSuggestionRow[];
+  dataAsOf?: string | null;
+  onGroupsChange: (groups: SetupGroup[]) => void;
+  onSaved: (result: BudgetResult) => void;
+};
 
-  const [selected, setSelected] = useState("");
+function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGroupsChange, onSaved }: SetupFormProps) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const selectRef = useRef<HTMLSelectElement>(null);
+  const [addSelected, setAddSelected] = useState("");
 
-  function handleAdd() {
-    if (!selected) return;
-    const cat = allCategories.find((c) => c.id === selected);
-    if (cat) {
-      onAdd(cat);
-      setSelected("");
+  const suggestionMap = new Map(suggestions.map((s) => [s.categoryId, s]));
+  const catById = new Map(allCategories.map((c) => [c.id, c]));
+
+  // All category IDs already in a group (either as parent or leaf)
+  const usedIds = new Set<string>();
+  for (const g of groups) {
+    usedIds.add(g.parentId);
+    g.leaves.forEach((l) => usedIds.add(l.categoryId));
+  }
+
+  // Total across all groups
+  const total = groups.reduce((sum, g) => {
+    if (g.mode === "lump_sum") return sum + (parseFloat(g.lumpAmount) || 0);
+    return sum + g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  }, 0);
+
+  function setLump(parentId: string, value: string) {
+    onGroupsChange(groups.map((g) => (g.parentId === parentId ? { ...g, lumpAmount: value } : g)));
+  }
+
+  function setLeafAmount(parentId: string, categoryId: string, value: string) {
+    onGroupsChange(
+      groups.map((g) =>
+        g.parentId === parentId
+          ? { ...g, leaves: g.leaves.map((l) => (l.categoryId === categoryId ? { ...l, amount: value } : l)) }
+          : g
+      )
+    );
+  }
+
+  function removeGroup(parentId: string) {
+    onGroupsChange(groups.filter((g) => g.parentId !== parentId));
+  }
+
+  function removeLeaf(parentId: string, categoryId: string) {
+    onGroupsChange(
+      groups
+        .map((g) =>
+          g.parentId === parentId ? { ...g, leaves: g.leaves.filter((l) => l.categoryId !== categoryId) } : g
+        )
+        .filter((g) => g.mode === "lump_sum" || g.leaves.length > 0)
+    );
+  }
+
+  function toggleExpand(g: SetupGroup) {
+    if (g.mode === "lump_sum") {
+      // Expand to detailed: distribute lump sum proportionally across leaves based on suggestions
+      const lumpVal = parseFloat(g.lumpAmount) || 0;
+      const leaves = g.leaves.length > 0 ? g.leaves : buildLeavesForParent(g.parentId);
+      // Re-compute individual amounts from suggestions, scaled to the lump sum
+      const suggTotal = leaves.reduce((s, l) => s + (parseFloat(suggestionMap.get(l.categoryId)?.suggestedAmount?.toString() ?? "0") || 0), 0);
+      const scaledLeaves = leaves.map((l) => {
+        const suggested = parseFloat(suggestionMap.get(l.categoryId)?.suggestedAmount?.toString() ?? "0") || 0;
+        const share = suggTotal > 0 ? (suggested / suggTotal) * lumpVal : lumpVal / Math.max(leaves.length, 1);
+        return { ...l, amount: String(Math.round(share * 100) / 100) };
+      });
+      onGroupsChange(groups.map((gr) => gr.parentId === g.parentId ? { ...gr, mode: "detailed", leaves: scaledLeaves } : gr));
+    } else {
+      // Collapse to lump sum: sum up leaf amounts
+      const sum = g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+      onGroupsChange(groups.map((gr) => gr.parentId === g.parentId ? { ...gr, mode: "lump_sum", lumpAmount: String(Math.round(sum * 100) / 100) } : gr));
     }
   }
 
-  if (available.length === 0) return null;
+  function buildLeavesForParent(parentId: string): { categoryId: string; categoryName: string; amount: string }[] {
+    return allCategories
+      .filter((c) => c.parentId === parentId)
+      .map((c) => ({ categoryId: c.id, categoryName: c.name, amount: String(suggestionMap.get(c.id)?.suggestedAmount ?? 0) }));
+  }
 
-  return (
-    <tr>
-      <td colSpan={4} style={{ paddingTop: "0.75rem" }}>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <select
-            ref={selectRef}
-            value={selected}
-            onChange={(e) => setSelected(e.target.value)}
-            style={{
-              border: "1px solid var(--color-border)",
-              borderRadius: 6,
-              padding: "0.3rem 0.5rem",
-              fontSize: 13,
-              flex: 1,
-              maxWidth: 340,
-              color: selected ? "var(--color-text)" : "var(--color-text-muted)"
-            }}
-          >
-            <option value="">+ Add a category…</option>
-            {available.map((c) => (
-              <option key={c.id} value={c.id}>
-                {buildCategoryLabel(c, byId)}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleAdd}
-            disabled={!selected}
-            style={{
-              background: selected ? "var(--color-accent)" : "var(--color-border)",
-              color: selected ? "#fff" : "var(--color-text-muted)",
-              border: "none",
-              borderRadius: 6,
-              padding: "0.3rem 0.85rem",
-              fontWeight: 600,
-              fontSize: 13,
-              cursor: selected ? "pointer" : "default"
-            }}
-          >
-            Add
-          </button>
-        </div>
-      </td>
-    </tr>
-  );
-}
+  // Available items for "Add" picker: parents not already in a group, or leaves whose parent isn't present
+  const availableToAdd = allCategories
+    .filter((c) => {
+      if (usedIds.has(c.id)) return false;
+      // Show parent categories (those without a parentId in category table)
+      if (!c.parentId) return true;
+      // Show leaf categories only if their parent group isn't already present as a group
+      const parentGroup = groups.find((g) => g.parentId === c.parentId);
+      return !parentGroup;
+    })
+    .sort((a, b) => {
+      const la = a.parentId ? `${catById.get(a.parentId)?.name ?? ""} > ${a.name}` : a.name;
+      const lb = b.parentId ? `${catById.get(b.parentId)?.name ?? ""} > ${b.name}` : b.name;
+      return la.localeCompare(lb);
+    });
 
-// ── Setup form ────────────────────────────────────────────────────────────────
-// Entries state is owned by the parent (BudgetPage) so initialization from async
-// suggestions is reliable — useState initializer only runs once at mount time,
-// so if SetupForm mounted before suggestions arrived it would always start empty.
+  function handleAdd() {
+    if (!addSelected) return;
+    const cat = allCategories.find((c) => c.id === addSelected);
+    if (!cat) return;
+    setAddSelected("");
 
-function SetupForm({
-  month,
-  entries,
-  allCategories,
-  onSetAmount,
-  onRemove,
-  onAdd,
-  suggestions,
-  dataAsOf,
-  onSaved
-}: {
-  month: string;
-  entries: SetupEntry[];
-  allCategories: CategoryOption[];
-  onSetAmount: (categoryId: string, value: string) => void;
-  onRemove: (categoryId: string) => void;
-  onAdd: (cat: CategoryOption) => void;
-  suggestions: BudgetSuggestionRow[];
-  dataAsOf?: string | null;
-  onSaved: (result: BudgetResult) => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const suggestionMap = new Map(suggestions.map((s) => [s.categoryId, s]));
-  const total = entries.reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
-  const excludedIds = new Set(entries.map((e) => e.categoryId));
+    if (!cat.parentId) {
+      // Adding a parent category: default lump sum, populate leaves from suggestions
+      const leaves = buildLeavesForParent(cat.id);
+      const totalSuggested = leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+      onGroupsChange([
+        ...groups,
+        {
+          parentId: cat.id,
+          parentName: cat.name,
+          mode: "lump_sum",
+          lumpAmount: String(Math.round(totalSuggested * 100) / 100),
+          leaves
+        }
+      ]);
+    } else {
+      // Adding a leaf: find or create its parent group in detailed mode
+      const parentCat = catById.get(cat.parentId);
+      const existing = groups.find((g) => g.parentId === cat.parentId);
+      const newLeaf = { categoryId: cat.id, categoryName: cat.name, amount: String(suggestionMap.get(cat.id)?.suggestedAmount ?? 0) };
+      if (existing) {
+        // Inject this leaf and switch to detailed mode so it's visible
+        onGroupsChange(groups.map((g) =>
+          g.parentId === cat.parentId
+            ? { ...g, mode: "detailed", leaves: [...g.leaves.filter((l) => l.categoryId !== cat.id), newLeaf] }
+            : g
+        ));
+      } else {
+        onGroupsChange([
+          ...groups,
+          {
+            parentId: cat.parentId,
+            parentName: parentCat?.name ?? cat.parentId,
+            mode: "detailed",
+            lumpAmount: "0",
+            leaves: [newLeaf]
+          }
+        ]);
+      }
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
     setError(null);
     try {
-      const payload = entries
-        .map((e) => ({ categoryId: e.categoryId, amount: parseFloat(e.amount) || 0 }))
-        .filter((e) => e.amount > 0);
+      const entries = groupsToEntries(groups);
       const result = await apiJson<BudgetResult>(`/budget/${month}`, {
         method: "PUT",
-        body: JSON.stringify({ entries: payload })
+        body: JSON.stringify({ entries })
       });
       onSaved(result);
     } catch (err) {
@@ -250,99 +401,192 @@ function SetupForm({
     }
   }
 
+  const colW = { cat: "40%", ref: "20%", budget: "25%", act: "15%" };
+  const hintStyle: React.CSSProperties = { fontSize: "0.78rem", color: "var(--color-text-muted)" };
+
   return (
     <div>
-      <p style={{ color: "var(--color-text-muted)", marginTop: 0 }}>
+      <p style={{ color: "var(--color-text-muted)", marginTop: 0, fontSize: 14 }}>
         {dataAsOf
-          ? <>Pre-filled from actual spend in <strong>{monthLabel(dataAsOf)}</strong>. Adjust amounts, remove categories you don&apos;t want to budget, then save.</>
-          : <>No prior spend data found. Add categories manually and set your budgets.</>
+          ? <>Pre-filled from actual spend in <strong>{monthLabel(dataAsOf)}</strong>. Expand a row to budget individual sub-categories, or keep the parent total.</>
+          : <>No prior spend data found. Add categories and set your budgets.</>
         }
       </p>
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <colgroup>
+          <col style={{ width: colW.cat }} />
+          <col style={{ width: colW.ref }} />
+          <col style={{ width: colW.budget }} />
+          <col style={{ width: colW.act }} />
+        </colgroup>
         <thead>
           <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "left" }}>
-            <th style={{ padding: "0.5rem 0.75rem 0.5rem 0" }}>Category</th>
-            <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Last month actual</th>
-            <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Your budget</th>
-            <th style={{ padding: "0.5rem 0.25rem", width: 32 }}></th>
+            <th style={{ padding: "0.5rem 0.5rem 0.5rem 0" }}>Category</th>
+            <th style={{ padding: "0.5rem 0.5rem", textAlign: "right", ...hintStyle }}>Last month</th>
+            <th style={{ padding: "0.5rem 0.5rem", textAlign: "right" }}>Your budget</th>
+            <th style={{ padding: "0.5rem 0", width: 56 }}></th>
           </tr>
         </thead>
         <tbody>
-          {entries.map((entry) => {
-            const s = suggestionMap.get(entry.categoryId);
-            return (
-              <tr key={entry.categoryId} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                <td style={{ padding: "0.5rem 0.75rem 0.5rem 0" }}>
-                  <span style={{ fontWeight: 500 }}>{entry.categoryName}</span>
-                  {entry.parentName ? (
-                    <span style={{ color: "var(--color-text-muted)", fontSize: 12, marginLeft: 6 }}>
-                      {entry.parentName}
-                    </span>
-                  ) : null}
-                </td>
-                <td style={{ padding: "0.5rem 0.75rem", textAlign: "right", color: "var(--color-text-muted)", fontSize: 13 }}>
-                  {s ? (
-                    s.basis === "three_month_avg"
-                      ? `${fmtUSD(s.lastMonthActual)} (3mo avg ${fmtUSD(s.threeMonthAvg)})`
-                      : fmtUSD(s.lastMonthActual)
-                  ) : "—"}
-                </td>
-                <td style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                    <span style={{ color: "var(--color-text-muted)" }}>$</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={entry.amount}
-                      onChange={(e) => onSetAmount(entry.categoryId, e.target.value)}
-                      style={{
-                        width: 90,
-                        textAlign: "right",
-                        border: "1px solid var(--color-border)",
-                        borderRadius: 4,
-                        padding: "0.2rem 0.4rem",
-                        fontSize: 14
-                      }}
-                    />
+          {groups.map((g) => {
+            const isDetailed = g.mode === "detailed";
+            // Reference figure: sum of suggestions (or nothing if adding manually)
+            const refTotal = g.leaves.reduce((s, l) => {
+              const sug = suggestionMap.get(l.categoryId);
+              return s + (sug?.lastMonthActual ?? 0);
+            }, 0);
+            const refHasThreeMonthAvg = g.leaves.some((l) => suggestionMap.get(l.categoryId)?.basis === "three_month_avg");
+
+            return [
+              // Parent / group header row
+              <tr
+                key={`group-${g.parentId}`}
+                style={{
+                  borderBottom: isDetailed ? "none" : "1px solid var(--color-border)",
+                  background: isDetailed ? "var(--color-surface-alt, #f8f9fa)" : undefined
+                }}
+              >
+                <td style={{ padding: "0.55rem 0.5rem 0.55rem 0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {/* Expand/collapse toggle — only shown when leaves are available */}
+                    {(isDetailed || g.leaves.length > 0) ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(g)}
+                        title={isDetailed ? "Collapse to total" : "Expand sub-categories"}
+                        style={{
+                          background: "none",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: 4,
+                          cursor: "pointer",
+                          fontSize: 11,
+                          lineHeight: 1,
+                          padding: "0.15rem 0.4rem",
+                          color: "var(--color-text-muted)",
+                          fontWeight: 600
+                        }}
+                      >
+                        {isDetailed ? "▲" : "▼"}
+                      </button>
+                    ) : <span style={{ width: 22, display: "inline-block" }} />}
+                    <span style={{ fontWeight: 600 }}>{g.parentName}</span>
                   </div>
                 </td>
-                <td style={{ padding: "0.25rem" }}>
-                  <button
-                    type="button"
-                    title="Remove"
-                    onClick={() => onRemove(entry.categoryId)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      color: "var(--color-text-muted)",
-                      fontSize: 18,
-                      lineHeight: 1,
-                      padding: "0.1rem 0.35rem",
-                      borderRadius: 4
-                    }}
-                  >
-                    x
-                  </button>
+                <td style={{ padding: "0.55rem 0.5rem", textAlign: "right", ...hintStyle }}>
+                  {refTotal > 0
+                    ? <>{fmtUSD(refTotal)}{refHasThreeMonthAvg ? <span title="Includes 3-month average for some sub-categories"> *</span> : null}</>
+                    : "—"}
                 </td>
-              </tr>
-            );
+                <td style={{ padding: "0.55rem 0.5rem", textAlign: "right" }}>
+                  {isDetailed ? (
+                    <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+                      {fmtUSD(g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0))}
+                    </span>
+                  ) : (
+                    <AmountInput value={g.lumpAmount} onChange={(v) => setLump(g.parentId, v)} />
+                  )}
+                </td>
+                <td style={{ padding: "0.25rem 0", textAlign: "center" }}>
+                  {!isDetailed && (
+                    <button
+                      type="button"
+                      title="Remove"
+                      onClick={() => removeGroup(g.parentId)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", fontSize: 16, padding: "0.1rem 0.3rem" }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </td>
+              </tr>,
+
+              // Sub-category rows when expanded
+              ...(isDetailed ? g.leaves.map((leaf) => {
+                const sug = suggestionMap.get(leaf.categoryId);
+                return (
+                  <tr key={`leaf-${leaf.categoryId}`} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                    <td style={{ padding: "0.4rem 0.5rem 0.4rem 2.25rem", fontSize: 13 }}>
+                      {leaf.categoryName}
+                    </td>
+                    <td style={{ padding: "0.4rem 0.5rem", textAlign: "right", ...hintStyle }}>
+                      {sug
+                        ? sug.basis === "three_month_avg"
+                          ? <>{fmtUSD(sug.lastMonthActual)} <span title="3-month average">(avg {fmtUSD(sug.threeMonthAvg)})</span></>
+                          : fmtUSD(sug.lastMonthActual)
+                        : "—"}
+                    </td>
+                    <td style={{ padding: "0.4rem 0.5rem", textAlign: "right" }}>
+                      <AmountInput value={leaf.amount} onChange={(v) => setLeafAmount(g.parentId, leaf.categoryId, v)} />
+                    </td>
+                    <td style={{ padding: "0.25rem 0", textAlign: "center" }}>
+                      <button
+                        type="button"
+                        title="Remove sub-category"
+                        onClick={() => removeLeaf(g.parentId, leaf.categoryId)}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", fontSize: 16, padding: "0.1rem 0.3rem" }}
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                );
+              }) : [])
+            ];
           })}
-          {/* Add category row */}
-          <AddCategoryRow
-            allCategories={allCategories}
-            excludedIds={excludedIds}
-            onAdd={onAdd}
-          />
         </tbody>
         <tfoot>
           <tr style={{ borderTop: "2px solid var(--color-border)", fontWeight: 600 }}>
-            <td style={{ padding: "0.75rem 0.75rem 0.5rem 0" }}>Total</td>
-            <td></td>
-            <td style={{ padding: "0.75rem 0.75rem 0.5rem", textAlign: "right" }}>{fmtUSD(total)}</td>
-            <td></td>
+            <td style={{ padding: "0.75rem 0.5rem 0.5rem 0" }}>Total</td>
+            <td />
+            <td style={{ padding: "0.75rem 0.5rem 0.5rem", textAlign: "right" }}>{fmtUSD(total)}</td>
+            <td />
+          </tr>
+          <tr>
+            <td colSpan={4} style={{ paddingTop: "0.75rem" }}>
+              {availableToAdd.length > 0 && (
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <select
+                    ref={selectRef}
+                    value={addSelected}
+                    onChange={(e) => setAddSelected(e.target.value)}
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      borderRadius: 6,
+                      padding: "0.3rem 0.5rem",
+                      fontSize: 13,
+                      flex: 1,
+                      maxWidth: 340,
+                      color: addSelected ? "var(--color-text)" : "var(--color-text-muted)"
+                    }}
+                  >
+                    <option value="">+ Add a category…</option>
+                    {availableToAdd.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.parentId ? `${catById.get(c.parentId)?.name ?? ""} › ${c.name}` : c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={handleAdd}
+                    disabled={!addSelected}
+                    style={{
+                      background: addSelected ? "var(--color-accent)" : "var(--color-border)",
+                      color: addSelected ? "#fff" : "var(--color-text-muted)",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "0.3rem 0.85rem",
+                      fontWeight: 600,
+                      fontSize: 13,
+                      cursor: addSelected ? "pointer" : "default"
+                    }}
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
+            </td>
           </tr>
         </tfoot>
       </table>
@@ -353,7 +597,7 @@ function SetupForm({
         <button
           type="button"
           onClick={() => void handleSave()}
-          disabled={saving || entries.length === 0}
+          disabled={saving || groups.length === 0}
           style={{
             background: "var(--color-accent)",
             color: "#fff",
@@ -361,16 +605,14 @@ function SetupForm({
             borderRadius: 6,
             padding: "0.5rem 1.25rem",
             fontWeight: 600,
-            cursor: saving || entries.length === 0 ? "default" : "pointer",
-            opacity: saving || entries.length === 0 ? 0.6 : 1
+            cursor: saving || groups.length === 0 ? "default" : "pointer",
+            opacity: saving || groups.length === 0 ? 0.6 : 1
           }}
         >
           {saving ? "Saving…" : `Save budget for ${monthLabel(month)}`}
         </button>
-        {entries.length === 0 && (
-          <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
-            Add at least one category to save.
-          </span>
+        {groups.length === 0 && (
+          <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>Add at least one category to save.</span>
         )}
       </div>
     </div>
@@ -384,6 +626,15 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
   const monthStart = `${month}-01`;
   const [yr, mo] = month.split("-").map(Number);
   const lastDay = new Date(Date.UTC(yr, mo, 0)).toISOString().slice(0, 10);
+
+  // Group categories by parent for visual grouping
+  const grouped: { parentName: string | null; cats: BudgetCategoryRow[] }[] = [];
+  for (const cat of categories) {
+    const key = cat.parentName ?? null;
+    const existing = grouped.find((g) => g.parentName === key);
+    if (existing) existing.cats.push(cat);
+    else grouped.push({ parentName: key, cats: [cat] });
+  }
 
   return (
     <div>
@@ -402,57 +653,57 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
         ).map(({ label, value, red }) => (
           <div key={label} className="card" style={{ marginBottom: 0, textAlign: "center" }}>
             <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4 }}>{label}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: red ? "#dc2626" : "var(--color-text)" }}>
-              {value}
-            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: red ? "#dc2626" : "var(--color-text)" }}>{value}</div>
           </div>
         ))}
       </div>
 
-      {/* Per-category rows */}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "left" }}>
             <th style={{ padding: "0.5rem 0.75rem 0.5rem 0", minWidth: 140 }}>Category</th>
-            <th style={{ padding: "0.5rem 0.75rem", minWidth: 180 }}>Progress</th>
+            <th style={{ padding: "0.5rem 0.75rem", minWidth: 160 }}>Progress</th>
             <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Spent</th>
             <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Budget</th>
             <th style={{ padding: "0.5rem 0.25rem", textAlign: "right", minWidth: 80 }}>Left / Over</th>
           </tr>
         </thead>
         <tbody>
-          {categories.map((cat) => {
-            const txnUrl = `/transactions?categoryId=${cat.categoryId}&dateFrom=${monthStart}&dateTo=${lastDay}`;
-            const isOver = cat.remaining < 0;
-            return (
-              <tr key={cat.categoryId} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                <td style={{ padding: "0.6rem 0.75rem 0.6rem 0" }}>
-                  <Link to={txnUrl} style={{ fontWeight: 500, textDecoration: "none", color: "var(--color-text)" }}>
-                    {cat.categoryName}
-                  </Link>
-                  {cat.parentName ? (
-                    <div style={{ color: "var(--color-text-muted)", fontSize: 11 }}>{cat.parentName}</div>
-                  ) : null}
-                </td>
-                <td style={{ padding: "0.6rem 0.75rem" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <ProgressBar percent={cat.percentUsed} />
+          {grouped.map(({ parentName, cats }) => {
+            const showParentHeader = cats.length > 1 && parentName !== null;
+            return cats.map((cat, i) => {
+              const txnUrl = `/transactions?categoryId=${cat.categoryId}&dateFrom=${monthStart}&dateTo=${lastDay}`;
+              const isOver = cat.remaining < 0;
+              const isParentEntry = cat.parentName === null; // budgeted at parent level (no parentName)
+              return (
+                <tr key={cat.categoryId} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                  <td style={{ padding: `${i === 0 && showParentHeader ? "0.85rem" : "0.6rem"} 0.75rem 0.6rem ${isParentEntry || !showParentHeader ? "0" : "1.5rem"}` }}>
+                    {i === 0 && showParentHeader && (
+                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: 4 }}>
+                        {parentName}
+                      </div>
+                    )}
+                    <Link to={txnUrl} style={{ fontWeight: 500, textDecoration: "none", color: "var(--color-text)", fontSize: 14 }}>
+                      {cat.categoryName}
+                    </Link>
+                    {isParentEntry && cat.categoryName !== parentName && cat.categoryName && (
+                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 1 }}>all sub-categories</div>
+                    )}
+                  </td>
+                  <td style={{ padding: "0.6rem 0.75rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ flex: 1 }}><ProgressBar percent={cat.percentUsed} /></div>
+                      <span style={{ fontSize: 12, color: "var(--color-text-muted)", width: 42, textAlign: "right" }}>{cat.percentUsed}%</span>
                     </div>
-                    <span style={{ fontSize: 12, color: "var(--color-text-muted)", width: 42, textAlign: "right" }}>
-                      {cat.percentUsed}%
-                    </span>
-                  </div>
-                </td>
-                <td style={{ padding: "0.6rem 0.75rem", textAlign: "right" }}>{fmtUSD(cat.spent)}</td>
-                <td style={{ padding: "0.6rem 0.75rem", textAlign: "right", color: "var(--color-text-muted)" }}>
-                  {fmtUSD(cat.budgeted)}
-                </td>
-                <td style={{ padding: "0.6rem 0.25rem", textAlign: "right", fontWeight: 600, color: isOver ? "#dc2626" : "#16a34a" }}>
-                  {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
-                </td>
-              </tr>
-            );
+                  </td>
+                  <td style={{ padding: "0.6rem 0.75rem", textAlign: "right" }}>{fmtUSD(cat.spent)}</td>
+                  <td style={{ padding: "0.6rem 0.75rem", textAlign: "right", color: "var(--color-text-muted)" }}>{fmtUSD(cat.budgeted)}</td>
+                  <td style={{ padding: "0.6rem 0.25rem", textAlign: "right", fontWeight: 600, color: isOver ? "#dc2626" : "#16a34a" }}>
+                    {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
+                  </td>
+                </tr>
+              );
+            });
           })}
         </tbody>
       </table>
@@ -468,14 +719,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
         <button
           type="button"
           onClick={onEdit}
-          style={{
-            background: "none",
-            border: "1px solid var(--color-border)",
-            borderRadius: 6,
-            padding: "0.4rem 1rem",
-            cursor: "pointer",
-            fontSize: 14
-          }}
+          style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 6, padding: "0.4rem 1rem", cursor: "pointer", fontSize: 14 }}
         >
           Edit budget
         </button>
@@ -523,9 +767,9 @@ export function BudgetPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Entries for the setup form — owned here so they initialize correctly
-  // after the async suggestions call resolves.
-  const [entries, setEntries] = useState<SetupEntry[]>([]);
+  // Groups for the setup/edit form — owned here so initialization from async
+  // suggestions is reliable (useState initializer only runs once at mount).
+  const [groups, setGroups] = useState<SetupGroup[]>([]);
 
   // Load all categories once for the "add category" picker
   useEffect(() => {
@@ -535,7 +779,7 @@ export function BudgetPage() {
         const res = await apiJson<{ categories: CategoryOption[] }>("/categories");
         setAllCategories(res.categories);
       } catch {
-        // non-fatal — add picker just won't show
+        // non-fatal
       }
     })();
   }, [token]);
@@ -546,22 +790,14 @@ export function BudgetPage() {
     setBudget(null);
     setSuggestions(null);
     setDataAsOf(null);
-    setEntries([]);
+    setGroups([]);
     try {
       const result = await apiJson<BudgetResult>(`/budget/${m}`);
       if (!result.exists) {
-        // Fetch suggestions and initialise entries before rendering the form,
-        // so the SetupForm's controlled entries are populated on first render.
         const suggestResult = await apiJson<SuggestResult>(`/budget/suggest?month=${m}`);
-        const initialEntries: SetupEntry[] = suggestResult.suggestions.map((s) => ({
-          categoryId: s.categoryId,
-          categoryName: s.categoryName,
-          parentName: s.parentName,
-          amount: String(s.suggestedAmount)
-        }));
         setSuggestions(suggestResult.suggestions);
         setDataAsOf(suggestResult.dataAsOf);
-        setEntries(initialEntries);
+        setGroups(suggestionsToGroups(suggestResult.suggestions));
       }
       setBudget(result);
       setEditMode(!result.exists);
@@ -579,17 +815,8 @@ export function BudgetPage() {
 
   const handleEdit = useCallback(async () => {
     if (!budget) return;
-    // Populate entries from current budget amounts (not last-month actuals —
-    // the user already made those decisions when they set up the budget).
-    setEntries(
-      budget.categories.map((c) => ({
-        categoryId: c.categoryId,
-        categoryName: c.categoryName,
-        parentName: c.parentName,
-        amount: String(c.budgeted)
-      }))
-    );
-    // Also load suggestions for the "last month actual" reference column
+    setGroups(budgetCategoriesToGroups(budget.categories, allCategories));
+    // Load suggestions for reference column
     if (!suggestions) {
       try {
         const res = await apiJson<SuggestResult>(`/budget/suggest?month=${month}`);
@@ -600,39 +827,17 @@ export function BudgetPage() {
       }
     }
     setEditMode(true);
-  }, [budget, month, suggestions]);
+  }, [budget, month, suggestions, allCategories]);
 
   const handleSaved = useCallback((result: BudgetResult) => {
     setBudget(result);
     setEditMode(false);
-    setEntries([]);
+    setGroups([]);
   }, []);
 
   const handleMonthNav = useCallback((delta: number) => {
     setMonth((m) => shiftMonth(m, delta));
   }, []);
-
-  const handleSetAmount = useCallback((categoryId: string, value: string) => {
-    setEntries((prev) =>
-      prev.map((e) => (e.categoryId === categoryId ? { ...e, amount: value } : e))
-    );
-  }, []);
-
-  const handleRemove = useCallback((categoryId: string) => {
-    setEntries((prev) => prev.filter((e) => e.categoryId !== categoryId));
-  }, []);
-
-  const handleAdd = useCallback(
-    (cat: CategoryOption) => {
-      const byId = new Map(allCategories.map((c) => [c.id, c]));
-      const parentName = cat.parentId ? (byId.get(cat.parentId)?.name ?? null) : null;
-      setEntries((prev) => [
-        ...prev,
-        { categoryId: cat.id, categoryName: cat.name, parentName, amount: "0" }
-      ]);
-    },
-    [allCategories]
-  );
 
   if (!token) return null;
 
@@ -643,23 +848,11 @@ export function BudgetPage() {
   return (
     <div style={{ padding: "1.5rem", maxWidth: 860, margin: "0 auto" }}>
       {/* Page header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "1.5rem",
-          gap: "0.75rem",
-          flexWrap: "wrap"
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem", gap: "0.75rem", flexWrap: "wrap" }}>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Budget</h1>
-
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
           <NavBtn onClick={() => handleMonthNav(-1)} label="&lt;" title="Previous month" />
-          <span style={{ fontWeight: 600, minWidth: 150, textAlign: "center", fontSize: 15 }}>
-            {monthLabel(month)}
-          </span>
+          <span style={{ fontWeight: 600, minWidth: 150, textAlign: "center", fontSize: 15 }}>{monthLabel(month)}</span>
           <NavBtn onClick={() => handleMonthNav(1)} label="&gt;" title="Next month" />
         </div>
       </div>
@@ -670,18 +863,14 @@ export function BudgetPage() {
       {/* Setup: new budget for this month */}
       {!loading && !error && setupReady && (
         <div className="card" style={{ marginBottom: 0 }}>
-          <h2 style={{ marginTop: 0, fontSize: 16, fontWeight: 600 }}>
-            Set up budget — {monthLabel(month)}
-          </h2>
+          <h2 style={{ marginTop: 0, fontSize: 16, fontWeight: 600 }}>Set up budget — {monthLabel(month)}</h2>
           <SetupForm
             month={month}
-            entries={entries}
+            groups={groups}
             allCategories={allCategories}
             suggestions={suggestions}
             dataAsOf={dataAsOf}
-            onSetAmount={handleSetAmount}
-            onRemove={handleRemove}
-            onAdd={handleAdd}
+            onGroupsChange={setGroups}
             onSaved={handleSaved}
           />
         </div>
@@ -690,30 +879,19 @@ export function BudgetPage() {
       {/* Edit: update existing budget */}
       {!loading && !error && editReady && (
         <div className="card" style={{ marginBottom: 0 }}>
-          <h2 style={{ marginTop: 0, fontSize: 16, fontWeight: 600 }}>
-            Edit budget — {monthLabel(month)}
-          </h2>
+          <h2 style={{ marginTop: 0, fontSize: 16, fontWeight: 600 }}>Edit budget — {monthLabel(month)}</h2>
           <SetupForm
             month={month}
-            entries={entries}
+            groups={groups}
             allCategories={allCategories}
             suggestions={suggestions ?? []}
-            onSetAmount={handleSetAmount}
-            onRemove={handleRemove}
-            onAdd={handleAdd}
+            onGroupsChange={setGroups}
             onSaved={handleSaved}
           />
           <button
             type="button"
             onClick={() => setEditMode(false)}
-            style={{
-              marginTop: "0.5rem",
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "var(--color-text-muted)",
-              fontSize: 13
-            }}
+            style={{ marginTop: "0.5rem", background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", fontSize: 13 }}
           >
             Cancel
           </button>
@@ -727,7 +905,7 @@ export function BudgetPage() {
         </div>
       )}
 
-      {/* Waiting for suggestions to load after budget-not-found */}
+      {/* Waiting for suggestions */}
       {!loading && !error && budget !== null && !budget.exists && suggestions === null && (
         <p style={{ color: "var(--color-text-muted)" }}>Loading suggestions…</p>
       )}
