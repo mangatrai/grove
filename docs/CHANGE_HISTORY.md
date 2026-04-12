@@ -20,6 +20,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### FIX-073 — Startup warning when SPA is skipped (`MODE` / missing `frontend/dist`)
+- **Type:** FIX / DX
+- **What:** When **`NODE_ENV=production`** but **`MODE≠PROD`**, log a **warn** that the SPA is not served (common when **`--env-file .env`** overrides the image and `.env` has **`MODE=TEST`**). When **`MODE=PROD`** but **`frontend/dist`** is missing, log a **warn** linking to **Cannot GET /**. [`docs/PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) Compose **`docker run`** example now includes **`-e MODE=PROD`** and explains **`MODE=TEST`** vs SPA.
+- **Files:** `backend/src/server.ts`, `docs/PRODUCTION_SETUP.md`.
+
+### DOC-071 — Docker run: Compose network + `DATABASE_HOST=postgres`
+- **Type:** DOC
+- **What:** Added [`docs/PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) subsection *App container + Postgres from Compose* — **`127.0.0.1` inside a container**, **`--network <project>_default`**, **`DATABASE_HOST=postgres`**, port **5432** vs host **5433**, **`DATABASE_SSL=0`**, **`host.docker.internal`** alternative. [`CLAUDE.md`](../CLAUDE.md) Local Postgres note: host **`npm run dev`** vs container **`docker run`** DB addressing.
+- **Files:** `docs/PRODUCTION_SETUP.md`, `CLAUDE.md`.
+
+### DOC-070 — Production setup: Postgres-only, Docker lifecycle, Koyeb Dockerfile path
+- **Type:** DOC
+- **What:** Rewrote [`docs/PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md): removed stale SQLite / wrong migration paths; documented **image vs `docker run`**, **`--env-file`** / mounted `.env`, **volume** for `data/`, **amd64 buildx** note; **migrations** (auto on app start, ship in image → rebuild on schema change) vs **bootstrap seeds** (once via `npm run db:seed`, not idempotent on repeat); Koyeb **Dockerfile** vs **buildpack** table retained and corrected. Aligned [`docs/RUNBOOK.md`](RUNBOOK.md) §4–5, §7 Koyeb pointer, §10 DB confirmation, §11 with Postgres + **`PRODUCTION_SETUP`** (removed SQLite **`print-db-path`** guidance there). Updated [`CLAUDE.md`](../CLAUDE.md) repo tree (**`Dockerfile`** / **`.dockerignore`**), **Production Deployment** (Docker vs bare Node, migration/seed contract), and documentation index.
+- **Files:** `docs/PRODUCTION_SETUP.md`, `docs/RUNBOOK.md`, `CLAUDE.md`.
+
 ### CR-080 — Exact duplicate transactions surfaced in Needs Review instead of silent drop
 - **Type:** CR / Backend / Frontend
 - **What:** Previously, when a bank export file was re-imported, exact-fingerprint or FITID duplicates were silently skipped — the user had no way to know the file had already been imported. Under CR-080 each exact duplicate is instead inserted into `transaction_canonical` with `status = 'duplicate'` and a linked `resolution_item(type = 'duplicate_ambiguity', kind = 'exact_duplicate')` so it surfaces in the **Needs Review** tab for the user to either:

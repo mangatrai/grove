@@ -1,0 +1,35 @@
+# Dependencies (installed in the image)
+node_modules
+**/node_modules
+
+# Secrets / local env (inject at runtime: Koyeb env, docker run -e, etc.)
+.env
+.env.*
+
+# Build outputs (rebuilt inside Docker)
+backend/dist
+frontend/dist
+
+# Local runtime data (uploads, logs — use volumes or platform storage if needed)
+data
+.runtime
+
+# Git / IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Tests and fixtures (not needed to run the server)
+backend/tests
+frontend/**/*.test.ts
+frontend/**/*.test.tsx
+/fixtures
+/db
+
+# Docs and tooling
+docs
+scripts
+*.md
+openapi
+docker-compose.yml

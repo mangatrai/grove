@@ -58,6 +58,8 @@ household-finance-app/
 ├── db/                     # Fixtures: redacted bank/payslip exports
 ├── fixtures/               # Sample CSV templates (categories, rules)
 ├── docker-compose.yml      # Local Postgres 18 on port 5433
+├── Dockerfile              # Production image: API + built SPA (no Postgres in image)
+├── .dockerignore           # Shrinks build context; keeps `backend/db/migrations_pg` in image
 ├── .env / .env.example     # App configuration
 └── data/                   # Runtime (git-ignored): import staging files
 ```
@@ -257,8 +259,9 @@ npm run lint                 # Both workspaces
 
 ### Local Postgres (Docker)
 ```bash
-docker-compose up -d         # Start Postgres 18 on port 5433
-# Then set MODE=TEST DATABASE_HOST=localhost DATABASE_PORT=5433 ... in .env
+docker compose up -d         # Start Postgres 18 on port 5433
+# Host apps (npm run dev): DATABASE_HOST=127.0.0.1 DATABASE_PORT=5433 DATABASE_SSL=0 in .env
+# App in its own container: same Compose network + DATABASE_HOST=postgres DATABASE_PORT=5432 — see docs/PRODUCTION_SETUP.md
 ```
 
 ---
@@ -282,12 +285,18 @@ Fixtures: real (redacted) bank exports in `backend/tests/fixtures/`.
 
 ## Production Deployment
 
-**Platform:** [Koyeb](https://www.koyeb.com) manages deployment pipelines (CI/CD, hosting). No `.github/workflows/` or other CI config in this repo.
+**Platform:** [Koyeb](https://www.koyeb.com) (or any container host). No `.github/workflows/` or other CI config in this repo.
 
-- Set `MODE=PROD` → backend serves `frontend/dist/` as SPA + handles API at `/`
-- Run `npm run build` then `node backend/dist/server.js`
-- Postgres required; `DATABASE_SSL=1` for managed Postgres
-- See `docs/PRODUCTION_SETUP.md` for full ops guide
+**Runtime contract:** Set **`MODE=PROD`** so Express serves **`frontend/dist/`** as the SPA and mounts JSON API routes at **`/`**. Postgres is **always external** — set **`DATABASE_*`** (+ **`DATABASE_SSL=1`** for typical managed TLS). Migrations under **`backend/db/migrations_pg/`** apply **automatically on first DB connection** at startup; bootstrap data is **not** automatic — see **`docs/PRODUCTION_SETUP.md`** (first-time **`npm run db:seed`**, do not repeat blindly).
+
+**Two ways to ship the same Node process:**
+
+| Path | What to run |
+|------|----------------|
+| **Docker** | Root **`Dockerfile`**: multi-stage **`npm run build`**, **`npm prune --omit=dev`**, **`CMD node backend/dist/server.js`**. Postgres is **not** in the image; pass env at **`docker run`** (**`--env-file`**) or your platform’s env UI. Persist **`data/`** with a volume if imports/exports must survive restarts. |
+| **Bare Node** | **`npm run build`** at repo root, then **`npm run start -w backend`** (or **`node backend/dist/server.js`** with **`NODE_ENV=production`**). |
+
+Full checklist (image vs `docker run`, **`.env`**, Koyeb buildpack vs Dockerfile, migrations vs seeds): **`docs/PRODUCTION_SETUP.md`**. **`docs/RUNBOOK.md`** is the local-from-scratch path.
 
 ---
 
@@ -297,7 +306,8 @@ Fixtures: real (redacted) bank exports in `backend/tests/fixtures/`.
 |---|---|
 | `docs/RUNBOOK.md` | Dev/prod setup walkthrough |
 | `docs/ARCHITECTURE.md` | System design: ingestion, dedupe, transfer detection |
-| `docs/PRODUCTION_SETUP.md` | Self-hosting, backup, ops |
+| `docs/PRODUCTION_SETUP.md` | Docker / Koyeb deploy, env, migrations vs seeds, Postgres ops |
+| `Dockerfile` | Production image (Node 20): API + SPA; external Postgres only |
 | `docs/HOSTING_OPTIONS_AND_HOME_LAB.md` | $0 opex / free-tier cloud / home lab / backup context (maintainer) |
 | `docs/ENVIRONMENT_VARIABLES.md` | Full env reference |
 | `docs/USER_GUIDE.md` | End-user features |
