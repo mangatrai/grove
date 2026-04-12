@@ -172,9 +172,9 @@ export async function getBudgetSuggestions(
        parent.name                                       AS parent_name,
        SUM(CASE
          WHEN tc.txn_date >= ? AND tc.txn_date <= ?
-         THEN tc.amount ELSE 0
+         THEN -tc.amount ELSE 0
        END)                                              AS anchor_month_total,
-       SUM(tc.amount)                                    AS window_total,
+       SUM(-tc.amount)                                   AS window_total,
        COUNT(DISTINCT LEFT(tc.txn_date::text, 7))        AS window_months
      FROM transaction_canonical tc
      LEFT JOIN category c      ON c.id = tc.category_id
@@ -187,7 +187,7 @@ export async function getBudgetSuggestions(
        AND tc.txn_date       >= ?
        AND tc.txn_date       <= ?
      GROUP BY tc.category_id, c.name, parent.name
-     HAVING SUM(tc.amount) > 0
+     HAVING SUM(-tc.amount) > 0
      ORDER BY anchor_month_total DESC, window_total DESC`,
     anchorBounds.start,
     anchorBounds.end,
@@ -265,7 +265,7 @@ export async function getBudgetWithActuals(
       month
     ),
     qAll<ActualRow>(
-      `SELECT category_id, SUM(amount) AS spent
+      `SELECT category_id, SUM(-amount) AS spent
        FROM transaction_canonical
        WHERE household_id = ?
          AND status = 'posted'
