@@ -154,6 +154,16 @@ export function inferParserProfile(
     return "citi_card_csv";
   }
 
+  const instLower = account.institution.toLowerCase();
+
+  if (instLower.includes("discover") && t === "credit_card" && ext === ".csv") {
+    return "discover_card_csv";
+  }
+
+  if (instLower.includes("wealthfront") && (t === "investment" || t === "savings" || t === "retirement") && ext === ".csv") {
+    return "wealthfront_investment_csv";
+  }
+
   return null;
 }
 
