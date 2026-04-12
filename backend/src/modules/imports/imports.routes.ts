@@ -33,6 +33,7 @@ import { parseSessionImportFiles, type ParseFailure, type ParseColumnMapping } f
 import { reconcilePayslipAsyncImportSession } from "./payslip-async-import-reconcile.service.js";
 import { createHouseholdCustomInstitution, listHouseholdCustomInstitutions } from "./household-institutions.service.js";
 import { listUsInstitutionLabels } from "./institution-catalog.js";
+import { upsertManualBalanceSnapshot } from "../reports/balance-sheet.service.js";
 import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-file-delete.service.js";
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
 import { suggestAccountForOfx } from "./ofx-account-match.service.js";
@@ -70,12 +71,15 @@ const fileBindingSchema = z.object({
 });
 
 const accountUpsertSchema = z.object({
-  type: z.enum(["checking", "savings", "credit_card", "loan", "mortgage", "investment", "payslip"]),
+  type: z.enum(["checking", "savings", "credit_card", "loan", "mortgage", "investment", "retirement", "payslip"]),
   institution: z.string().min(1).max(120),
   accountMask: z.union([z.string().max(20), z.null()]).optional(),
   ownerScope: z.enum(["household", "person"]).optional().default("household"),
   ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
-  defaultParserProfileId: z.union([z.string().refine(isParserProfileId, "Unknown parser profile id"), z.null()]).optional()
+  defaultParserProfileId: z.union([z.string().refine(isParserProfileId, "Unknown parser profile id"), z.null()]).optional(),
+  /** Optional starting balance (only used on account creation, ignored on PATCH). */
+  initialBalance: z.number().finite().optional().nullable(),
+  initialBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable()
 });
 
 function mapServiceFailureToStatus(failure: ServiceFailure): number {
@@ -258,6 +262,16 @@ importsRouter.post("/accounts", requireRole(["owner", "admin"]), async (req: Aut
     ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null,
     defaultParserProfileId: parsed.data.defaultParserProfileId ?? null
   });
+  if (parsed.data.initialBalance != null && Number.isFinite(parsed.data.initialBalance)) {
+    const today = new Date().toISOString().slice(0, 10);
+    const asOfDate = parsed.data.initialBalanceDate ?? today;
+    await upsertManualBalanceSnapshot(req.authUser!.householdId, {
+      financialAccountId: created.id,
+      asOfDate,
+      amount: parsed.data.initialBalance,
+      currency: "USD"
+    });
+  }
   res.status(201).json({ id: created.id });
 });
 
