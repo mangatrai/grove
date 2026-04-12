@@ -20,6 +20,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### UX-067 — Budget: hierarchical grouped form + transaction UX polish
+- **Type:** UX / Frontend / Backend
+- **What:**
+  1. **Budget grouped by parent** — Suggestions and edit form now group leaf categories under their parent (Food, Home, Shopping…). Each group defaults to a single "lump sum" input for the parent category. A ▼ button expands to individual sub-category rows with their own inputs; ▲ collapses back and sums amounts. Backend: `parentId` added to `BudgetSuggestionRow`. `getBudgetWithActuals` refactored to handle parent-level entries — spent rolls up all child transactions.
+  2. **Exclude noise categories** — Transfers, Income, and Investments are excluded from budget suggestions (financial-flow categories, not household spending). Still addable manually via the "Add a category" picker.
+  3. **Rule match hint hidden from All tab** — `CategoryClassificationHint` (rule name / confidence) now only renders in the Needs Review tab where it is relevant. On the All tab it cluttered the category column.
+  4. **Review type filter inline** — The "Review types" MultiSelect was in its own row above the filter bar. Moved it as the first field in the main filter row, visible only on the Needs Review tab.
+- **Design:** Each parent group is a single budgeted unit (lump sum) or a set of leaf units (detailed); the two modes are mutually exclusive per group to avoid double-counting. Actuals: parent entry → sum all children's spend; leaf entry → direct lookup. Unbudgeted spend excludes transactions covered by a parent-level entry.
+- **Files:** `budget.service.ts`, `BudgetPage.tsx`, `TransactionsPage.tsx`.
+
 ### CR-079 — Monthly budget per category
 - **Type:** CR / Backend / Frontend
 - **What:** First-class budgeting feature. Per-month, per-category budgets with actual-spend tracking and pre-populated suggestions from last month's activity.
