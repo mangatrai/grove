@@ -20,6 +20,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### CR-080 — Exact duplicate transactions surfaced in Needs Review instead of silent drop
+- **Type:** CR / Backend / Frontend
+- **What:** Previously, when a bank export file was re-imported, exact-fingerprint or FITID duplicates were silently skipped — the user had no way to know the file had already been imported. Under CR-080 each exact duplicate is instead inserted into `transaction_canonical` with `status = 'duplicate'` and a linked `resolution_item(type = 'duplicate_ambiguity', kind = 'exact_duplicate')` so it surfaces in the **Needs Review** tab for the user to either:
+  - **Resolve (keep)** — the resolution flag is closed, canonical promoted to `'posted'` with a fresh fingerprint (the original dedup fingerprint remains on the first import's row so future re-imports still detect it).
+  - **Trash (discard)** — standard trash action sets `status = 'trashed'` and closes all linked flags.
+- **Schema (migration 0012):** The global fingerprint unique index `uq_transaction_canonical_fingerprint` is narrowed to a partial index (`WHERE status NOT IN ('duplicate', 'trashed')`). This allows a `'duplicate'` row to share a fingerprint with the existing `'posted'` row while still preventing accidental double-inserts of live transactions.
+- **Dedup idempotency guard:** A new early check (before FITID/fingerprint comparison) detects if the raw row already has any canonical at `source_ref = 'raw:' || raw_id`. This keeps repeated `canonicalize` calls idempotent — re-canonicalizing a session still returns `duplicates = N` without inserting new rows.
+- **In-session dedup** (same file uploaded twice in one session) still silently continues — only cross-session (DB-persisted) duplicates are surfaced.
+- **Review label:** `status = 'duplicate'` rows show **"Exact duplicate"** in the Needs Review "Why" column. The review-type filter dropdown label changed from "Near-duplicate" to "Duplicate" (covers both exact and near).
+- **Resolve promote logic:** `POST /resolution/bulk` and `PATCH /resolution/:id` — when resolving a `duplicate_ambiguity` item, an UPDATE now promotes any linked `status = 'duplicate'` canonical to `'posted'` (with fingerprint reassignment) before closing the flag.
+- **Files:** `0012_exact_duplicate_review.sql` (new), `canonical-ingest.service.ts`, `resolution.service.ts`, `ledger.service.ts`, `TransactionsPage.tsx`, `backend/tests/app.test.ts`.
+
 ### UX-067 — Budget: hierarchical grouped form + transaction UX polish
 - **Type:** UX / Frontend / Backend
 - **What:**

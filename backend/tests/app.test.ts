@@ -647,6 +647,73 @@ describe("import sessions and file intake", () => {
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
 
+  it("CR-080: exact duplicate from a second import creates status=duplicate canonical and resolution_item", async () => {
+    const token = await loginAndGetToken();
+
+    // Use a unique tag so this test doesn't collide with other runs.
+    const tag = `exactdup-${Date.now()}`;
+    const txnDate = new Date(Date.UTC(2025, 2, 15)).toISOString().slice(0, 10);
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},EXACT DUP COFFEE ${tag},-7.00,ref-exact-${tag}`
+    ].join("\n");
+
+    // --- Import 1: original transaction ---
+    const sess1 = (await request(app).post("/imports/sessions").set("authorization", `Bearer ${token}`).send({ sourceType: "upload" })).body.session.id as string;
+    const up1 = await request(app).post(`/imports/sessions/${sess1}/files`).set("authorization", `Bearer ${token}`).attach("files", Buffer.from(csv), "orig.csv");
+    expect(up1.status).toBe(201);
+    await bindImportFile(token, sess1, up1.body.files[0].id as string, SEED_BOA_CHECKING, "generic_tabular");
+    await request(app).post(`/imports/sessions/${sess1}/parse`).set("authorization", `Bearer ${token}`).send({ mapping: { date: "Date", description: "Description", amount: "Amount", referenceId: "Reference" } });
+    const can1 = await request(app).post(`/imports/sessions/${sess1}/canonicalize`).set("authorization", `Bearer ${token}`).send({});
+    expect(can1.status).toBe(200);
+    expect(can1.body.inserted).toBe(1);
+
+    // --- Import 2: same CSV again ---
+    const sess2 = (await request(app).post("/imports/sessions").set("authorization", `Bearer ${token}`).send({ sourceType: "upload" })).body.session.id as string;
+    const up2 = await request(app).post(`/imports/sessions/${sess2}/files`).set("authorization", `Bearer ${token}`).attach("files", Buffer.from(csv), "dup.csv");
+    expect(up2.status).toBe(201);
+    await bindImportFile(token, sess2, up2.body.files[0].id as string, SEED_BOA_CHECKING, "generic_tabular");
+    await request(app).post(`/imports/sessions/${sess2}/parse`).set("authorization", `Bearer ${token}`).send({ mapping: { date: "Date", description: "Description", amount: "Amount", referenceId: "Reference" } });
+    const can2 = await request(app).post(`/imports/sessions/${sess2}/canonicalize`).set("authorization", `Bearer ${token}`).send({});
+    expect(can2.status).toBe(200);
+    // Duplicate row is now inserted (not silently dropped).
+    expect(can2.body.inserted).toBe(0);
+    expect(can2.body.duplicates).toBe(1);
+
+    // Verify the duplicate canonical exists with status='duplicate'.
+    const dupRow = (await sqlStmt(
+      `SELECT status FROM transaction_canonical WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND status = 'duplicate' AND merchant LIKE ?`
+    ).get(sess2, `%EXACT DUP COFFEE ${tag}%`)) as { status: string } | undefined;
+    expect(dupRow?.status).toBe("duplicate");
+
+    // Verify a resolution_item(duplicate_ambiguity) was created.
+    const riRow = (await sqlStmt(
+      `SELECT ri.id FROM resolution_item ri INNER JOIN transaction_canonical tc ON tc.source_ref = ('raw:' || ri.target_id) WHERE tc.status = 'duplicate' AND tc.household_id = (SELECT household_id FROM import_session WHERE id = ?) AND ri.type = 'duplicate_ambiguity' AND ri.status = 'open' LIMIT 1`
+    ).get(sess2)) as { id: string } | undefined;
+    expect(riRow).toBeTruthy();
+
+    // Verify it appears in Needs Review ledger.
+    const needsReview = await request(app).get("/transactions?needsReview=true&limit=50").set("authorization", `Bearer ${token}`);
+    expect(needsReview.status).toBe(200);
+    const dupInReview = (needsReview.body.transactions as Array<{ status: string; merchant: string }>).find(
+      (t) => t.status === "duplicate" && t.merchant?.includes(`EXACT DUP COFFEE ${tag}`)
+    );
+    expect(dupInReview).toBeTruthy();
+
+    // Resolve the flag — canonical should be promoted to 'posted'.
+    const resolveRes = await request(app)
+      .post("/resolution/bulk")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [riRow!.id], status: "resolved" });
+    expect(resolveRes.status).toBe(200);
+    expect(resolveRes.body.updated.length).toBe(1);
+
+    const afterResolve = (await sqlStmt(
+      `SELECT status FROM transaction_canonical WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND merchant LIKE ? AND status = 'posted' ORDER BY created_at DESC LIMIT 1`
+    ).get(sess2, `%EXACT DUP COFFEE ${tag}%`)) as { status: string } | undefined;
+    expect(afterResolve?.status).toBe("posted");
+  });
+
   it(
     "undo-import removes session canonical rows before finalize and allows re-canonicalize",
     async () => {
