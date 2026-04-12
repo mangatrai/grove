@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { qAll, qExec, qGet, qBegin, sqlBind } from "../../db/query.js";
+import { log } from "../../logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +21,18 @@ export type BudgetSuggestionRow = {
   basis: "last_month" | "three_month_avg";
   lastMonthActual: number;
   threeMonthAvg: number;
+};
+
+export type BudgetSuggestionsResult = {
+  /** The YYYY-MM month the suggestions were requested for. */
+  month: string;
+  /**
+   * The most recent calendar month for which data was found (used as "last month" anchor).
+   * Null when no categorized debit data exists at all.
+   * May be earlier than calendar month-1 when imports lag behind the current date.
+   */
+  dataAsOf: string | null;
+  suggestions: BudgetSuggestionRow[];
 };
 
 /** A single category row in the budget-vs-actual view. */
@@ -78,85 +91,118 @@ function prevMonth(yyyyMm: string): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-/** Return the YYYY-MM for three calendar months before the given month (exclusive start). */
-function threeMonthsBack(yyyyMm: string): string {
+/** Return a YYYY-MM that is `n` calendar months before the given month. */
+function shiftMonthBack(yyyyMm: string, n: number): string {
   const [y, m] = yyyyMm.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1, 1));
-  d.setUTCMonth(d.getUTCMonth() - 3);
+  const d = new Date(Date.UTC(y, m - 1 - n, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 // ── Service functions ─────────────────────────────────────────────────────────
 
 /**
- * Return suggested budget amounts for `month` based on:
- *  - Last calendar month's actual spend per category (basis: "last_month")
- *  - 3-month average for categories with zero last-month spend (basis: "three_month_avg")
+ * Return suggested budget amounts for `month`.
  *
- * Only debit (outflow) transactions are included. Transfer-linked rows are excluded.
- * Only leaf categories that actually had activity in the trailing 3 months are returned.
+ * Rather than anchoring to "calendar month - 1", this function finds the most
+ * recent calendar month that contains categorised debit spend and uses that as
+ * the "last month" anchor.  This handles the common case where imported bank
+ * statements lag several months behind the current date — so a household whose
+ * most recent import covers January 2026 still gets useful suggestions when
+ * setting up an April 2026 budget.
+ *
+ * Suggestion logic per category:
+ *  - If it had spend in the anchor month → basis: "last_month"
+ *  - Else if it had spend in the prior 5 months → basis: "three_month_avg" (6-month window / 6)
+ *
+ * Only debit (outflow) transactions are included. Transfer-linked rows and
+ * uncategorised transactions are excluded.
  */
 export async function getBudgetSuggestions(
   householdId: string,
   month: string
-): Promise<BudgetSuggestionRow[]> {
+): Promise<BudgetSuggestionsResult> {
   assertMonth(month);
 
-  const last = prevMonth(month);
-  const threeBack = threeMonthsBack(month);
+  // ── Step 1: Find the most recent month with categorised debit spend ──────
+  // Cap the lookback to 24 months before `month` to avoid matching arbitrarily
+  // old data (e.g. dev-seed rows dated 1999 or 2099).
+  const cap = shiftMonthBack(month, 1);   // never go future of month-1
+  const floor = shiftMonthBack(month, 24); // never go further back than 2 years
 
-  const lastBounds = monthBounds(last);
-  const threeBounds = monthBounds(threeBack);
-  // 3-month window: from start of (month-3) through end of last month
-  const windowStart = threeBounds.start;
-  const windowEnd = lastBounds.end;
+  const anchorRow = await qGet<{ anchor: string }>(
+    `SELECT LEFT(MAX(txn_date::text), 7) AS anchor
+     FROM transaction_canonical
+     WHERE household_id     = ?
+       AND status           = 'posted'
+       AND direction        = 'debit'
+       AND transfer_group_id IS NULL
+       AND category_id      IS NOT NULL
+       AND txn_date         <= ?
+       AND txn_date         >= ?`,
+    householdId,
+    monthBounds(cap).end,
+    monthBounds(floor).start
+  );
+
+  if (!anchorRow?.anchor) {
+    log.info(`getBudgetSuggestions: no categorised debit data found for household ${householdId} in last 24 months`);
+    return { month, dataAsOf: null, suggestions: [] };
+  }
+
+  const anchor = anchorRow.anchor; // YYYY-MM of the most recent active month
+
+  // ── Step 2: Build 6-month window ending at anchor ─────────────────────────
+  const anchorBounds = monthBounds(anchor);
+  const windowStart = monthBounds(shiftMonthBack(anchor, 5)).start;
+  const windowEnd = anchorBounds.end;
 
   type ActualRow = {
     category_id: string;
     category_name: string;
     parent_name: string | null;
-    last_month_total: string;
-    three_month_total: string;
+    anchor_month_total: string;
+    window_total: string;
+    window_months: string; // count of distinct months with spend (for accurate avg)
   };
 
   const rows = await qAll<ActualRow>(
     `SELECT
        tc.category_id,
-       c.name                                        AS category_name,
-       parent.name                                   AS parent_name,
+       c.name                                            AS category_name,
+       parent.name                                       AS parent_name,
        SUM(CASE
          WHEN tc.txn_date >= ? AND tc.txn_date <= ?
          THEN tc.amount ELSE 0
-       END)                                          AS last_month_total,
-       SUM(tc.amount)                                AS three_month_total
+       END)                                              AS anchor_month_total,
+       SUM(tc.amount)                                    AS window_total,
+       COUNT(DISTINCT LEFT(tc.txn_date::text, 7))        AS window_months
      FROM transaction_canonical tc
      JOIN category c      ON c.id = tc.category_id
      LEFT JOIN category parent ON parent.id = c.parent_id
-     WHERE tc.household_id  = ?
-       AND tc.status        = 'posted'
-       AND tc.direction     = 'debit'
+     WHERE tc.household_id   = ?
+       AND tc.status         = 'posted'
+       AND tc.direction      = 'debit'
        AND tc.transfer_group_id IS NULL
-       AND tc.category_id   IS NOT NULL
-       AND tc.txn_date      >= ?
-       AND tc.txn_date      <= ?
+       AND tc.category_id    IS NOT NULL
+       AND tc.txn_date       >= ?
+       AND tc.txn_date       <= ?
      GROUP BY tc.category_id, c.name, parent.name
      HAVING SUM(tc.amount) > 0
-     ORDER BY last_month_total DESC, three_month_total DESC`,
-    lastBounds.start,
-    lastBounds.end,
+     ORDER BY anchor_month_total DESC, window_total DESC`,
+    anchorBounds.start,
+    anchorBounds.end,
     householdId,
     windowStart,
     windowEnd
   );
 
-  return rows.map((r) => {
-    const lastMonthActual = parseFloat(r.last_month_total) || 0;
-    const threeMonthTotal = parseFloat(r.three_month_total) || 0;
-    const threeMonthAvg = Math.round((threeMonthTotal / 3) * 100) / 100;
-    const basis: BudgetSuggestionRow["basis"] =
-      lastMonthActual > 0 ? "last_month" : "three_month_avg";
-    const suggestedAmount =
-      lastMonthActual > 0 ? Math.round(lastMonthActual * 100) / 100 : threeMonthAvg;
+  const suggestions: BudgetSuggestionRow[] = rows.map((r) => {
+    const anchorActual = parseFloat(r.anchor_month_total) || 0;
+    const windowTotal = parseFloat(r.window_total) || 0;
+    const months = parseInt(r.window_months, 10) || 1;
+    const windowAvg = Math.round((windowTotal / months) * 100) / 100;
+    const basis: BudgetSuggestionRow["basis"] = anchorActual > 0 ? "last_month" : "three_month_avg";
+    const suggestedAmount = anchorActual > 0 ? Math.round(anchorActual * 100) / 100 : windowAvg;
 
     return {
       categoryId: r.category_id,
@@ -164,10 +210,16 @@ export async function getBudgetSuggestions(
       parentName: r.parent_name ?? null,
       suggestedAmount,
       basis,
-      lastMonthActual: Math.round(lastMonthActual * 100) / 100,
-      threeMonthAvg
+      lastMonthActual: Math.round(anchorActual * 100) / 100,
+      threeMonthAvg: windowAvg
     };
   });
+
+  log.info(
+    `getBudgetSuggestions: household ${householdId} month=${month} anchor=${anchor} suggestions=${suggestions.length}`
+  );
+
+  return { month, dataAsOf: anchor, suggestions };
 }
 
 /**

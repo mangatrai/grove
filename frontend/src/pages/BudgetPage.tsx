@@ -39,6 +39,8 @@ type BudgetResult = {
 
 type SuggestResult = {
   month: string;
+  /** Most recent calendar month used as the "last month" anchor. Null if no data found. */
+  dataAsOf: string | null;
   suggestions: BudgetSuggestionRow[];
 };
 
@@ -209,6 +211,7 @@ function SetupForm({
   onRemove,
   onAdd,
   suggestions,
+  dataAsOf,
   onSaved
 }: {
   month: string;
@@ -218,6 +221,7 @@ function SetupForm({
   onRemove: (categoryId: string) => void;
   onAdd: (cat: CategoryOption) => void;
   suggestions: BudgetSuggestionRow[];
+  dataAsOf?: string | null;
   onSaved: (result: BudgetResult) => void;
 }) {
   const [saving, setSaving] = useState(false);
@@ -249,8 +253,10 @@ function SetupForm({
   return (
     <div>
       <p style={{ color: "var(--color-text-muted)", marginTop: 0 }}>
-        Pre-filled from last month&apos;s actual spend. Adjust amounts, remove categories you
-        don&apos;t want to budget, then save.
+        {dataAsOf
+          ? <>Pre-filled from actual spend in <strong>{monthLabel(dataAsOf)}</strong>. Adjust amounts, remove categories you don&apos;t want to budget, then save.</>
+          : <>No prior spend data found. Add categories manually and set your budgets.</>
+        }
       </p>
 
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -513,6 +519,7 @@ export function BudgetPage() {
   const [suggestions, setSuggestions] = useState<BudgetSuggestionRow[] | null>(null);
   const [allCategories, setAllCategories] = useState<CategoryOption[]>([]);
   const [editMode, setEditMode] = useState(false);
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -538,6 +545,7 @@ export function BudgetPage() {
     setError(null);
     setBudget(null);
     setSuggestions(null);
+    setDataAsOf(null);
     setEntries([]);
     try {
       const result = await apiJson<BudgetResult>(`/budget/${m}`);
@@ -552,6 +560,7 @@ export function BudgetPage() {
           amount: String(s.suggestedAmount)
         }));
         setSuggestions(suggestResult.suggestions);
+        setDataAsOf(suggestResult.dataAsOf);
         setEntries(initialEntries);
       }
       setBudget(result);
@@ -585,6 +594,7 @@ export function BudgetPage() {
       try {
         const res = await apiJson<SuggestResult>(`/budget/suggest?month=${month}`);
         setSuggestions(res.suggestions);
+        setDataAsOf(res.dataAsOf);
       } catch {
         // non-fatal — reference column shows "—"
       }
@@ -668,6 +678,7 @@ export function BudgetPage() {
             entries={entries}
             allCategories={allCategories}
             suggestions={suggestions}
+            dataAsOf={dataAsOf}
             onSetAmount={handleSetAmount}
             onRemove={handleRemove}
             onAdd={handleAdd}

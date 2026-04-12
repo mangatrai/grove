@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
+  type BudgetSuggestionsResult,
   getBudgetSuggestions,
   getBudgetWithActuals,
   listBudgetMonths,
@@ -25,8 +26,8 @@ budgetRouter.get("/suggest", async (req: AuthenticatedRequest, res) => {
     return;
   }
   const householdId = req.authUser!.householdId;
-  const suggestions = await getBudgetSuggestions(householdId, result.data);
-  res.json({ month: result.data, suggestions });
+  const result2: BudgetSuggestionsResult = await getBudgetSuggestions(householdId, result.data);
+  res.json(result2);
 });
 
 // ── GET /budget/months ───────────────────────────────────────────────────────
