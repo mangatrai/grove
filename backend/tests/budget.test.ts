@@ -14,6 +14,15 @@ const ACCOUNT_ID = "40000000-0000-0000-0000-000000000001"; // BOA Checking (dev 
 // Leaf categories from bootstrap seed (stable UUIDs)
 const CAT_DINING = "30000000-0000-0000-0000-000000000023"; // Dining out → Food
 const CAT_COFFEE = "30000000-0000-0000-0000-000000000024"; // Coffee → Food
+const CAT_FOOD_PARENT = "30000000-0000-0000-0000-000000000107"; // Food (parent)
+
+// Excluded parent IDs (Transfers / Income / Investments) and one leaf under each
+const CAT_TRANSFERS_PARENT = "30000000-0000-0000-0000-000000000112";
+const CAT_CASH_WITHDRAWAL = "30000000-0000-0000-0000-000000000163"; // Cash withdrawal → Transfers
+const CAT_INVESTMENTS_PARENT = "30000000-0000-0000-0000-000000000105";
+const CAT_STOCKS = "30000000-0000-0000-0000-000000000009"; // Stocks → Investments
+const CAT_INCOME_PARENT = "30000000-0000-0000-0000-000000000001";
+const CAT_SALARY = "30000000-0000-0000-0000-000000000007"; // Salary → Income
 
 async function login(): Promise<string> {
   const res = await request(app)
@@ -128,6 +137,8 @@ describe("GET /budget/suggest", () => {
     const suggestions: Array<{
       categoryId: string;
       categoryName: string;
+      parentId: string | null;
+      parentName: string | null;
       suggestedAmount: number;
       lastMonthActual: number;
     }> = res.body.suggestions;
@@ -143,13 +154,44 @@ describe("GET /budget/suggest", () => {
     const dining = suggestions.find((s) => s.categoryId === CAT_DINING);
     expect(dining).toBeDefined();
     expect(dining!.categoryName).toBe("Dining out");
+    expect(dining!.parentId).toBe(CAT_FOOD_PARENT);
+    expect(dining!.parentName).toBe("Food");
     // 45.50 + 30.00 = 75.50 in anchor month → last_month basis
     expect(dining!.suggestedAmount).toBeCloseTo(75.5, 1);
     expect(dining!.lastMonthActual).toBeCloseTo(75.5, 1);
 
     const coffee = suggestions.find((s) => s.categoryId === CAT_COFFEE);
     expect(coffee).toBeDefined();
+    expect(coffee!.parentId).toBe(CAT_FOOD_PARENT);
     expect(coffee!.suggestedAmount).toBeCloseTo(12.0, 1);
+  });
+
+  it("excludes Transfers, Income, and Investments categories from suggestions", async () => {
+    const token = await login();
+    // Insert debits for one regular category and three excluded ones
+    const id1 = await insertDebit({ txnDate: "2099-02-05", amount: 50.00, categoryId: CAT_DINING });
+    const id2 = await insertDebit({ txnDate: "2099-02-06", amount: 500.00, categoryId: CAT_CASH_WITHDRAWAL }); // Transfers
+    const id3 = await insertDebit({ txnDate: "2099-02-07", amount: 1000.00, categoryId: CAT_STOCKS }); // Investments
+    // CAT_SALARY is typically a credit but test with debit to verify exclusion
+    const id4 = await insertDebit({ txnDate: "2099-02-08", amount: 200.00, categoryId: CAT_SALARY }); // Income
+    insertedIds.push(id1, id2, id3, id4);
+
+    const res = await request(app)
+      .get("/budget/suggest?month=2099-03")
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const catIds = (res.body.suggestions as Array<{ categoryId: string }>).map((s) => s.categoryId);
+
+    // Dining should appear
+    expect(catIds).toContain(CAT_DINING);
+    // Excluded categories must not appear
+    expect(catIds).not.toContain(CAT_CASH_WITHDRAWAL);
+    expect(catIds).not.toContain(CAT_TRANSFERS_PARENT);
+    expect(catIds).not.toContain(CAT_STOCKS);
+    expect(catIds).not.toContain(CAT_INVESTMENTS_PARENT);
+    expect(catIds).not.toContain(CAT_SALARY);
+    expect(catIds).not.toContain(CAT_INCOME_PARENT);
   });
 
   it("dynamic anchor uses most recent data month, not calendar month-1", async () => {
@@ -323,6 +365,36 @@ describe("PUT /budget/:month and GET /budget/:month", () => {
 
     expect(getRes.status).toBe(200);
     expect(getRes.body.summary.unbudgetedSpend).toBeCloseTo(15.0, 1);
+  });
+
+  it("parent-level budget entry rolls up all child category actuals", async () => {
+    const token = await login();
+    const month = "2099-05";
+
+    // Budget the Food PARENT category (not individual leaves)
+    await request(app)
+      .put(`/budget/${month}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ entries: [{ categoryId: CAT_FOOD_PARENT, amount: 300 }] });
+
+    // Insert debits for two leaf children of Food
+    const diningId = await insertDebit({ txnDate: "2099-05-10", amount: 64.00, categoryId: CAT_DINING });
+    const coffeeId = await insertDebit({ txnDate: "2099-05-15", amount: 12.00, categoryId: CAT_COFFEE });
+    insertedIds.push(diningId, coffeeId);
+
+    const getRes = await request(app)
+      .get(`/budget/${month}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(getRes.status).toBe(200);
+    const food = getRes.body.categories.find((c: { categoryId: string }) => c.categoryId === CAT_FOOD_PARENT);
+    expect(food).toBeDefined();
+    // Spent must aggregate both Dining out + Coffee
+    expect(food.spent).toBeCloseTo(76.0, 1);
+    expect(food.remaining).toBeCloseTo(224.0, 1);
+
+    // Coffee and Dining are covered by the parent budget → unbudgetedSpend = 0
+    expect(getRes.body.summary.unbudgetedSpend).toBeCloseTo(0, 1);
   });
 });
 
