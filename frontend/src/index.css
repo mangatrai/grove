@@ -1033,6 +1033,16 @@ button.secondary {
   box-shadow: none;
 }
 
+button.danger {
+  background: #dc2626;
+  color: #fff;
+  border-color: #b91c1c;
+  box-shadow: none;
+}
+button.danger:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
 button:disabled {
   opacity: 0.55;
   cursor: not-allowed;

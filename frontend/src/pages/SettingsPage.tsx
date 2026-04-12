@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { apiFetch, apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
@@ -217,7 +217,13 @@ export function SettingsPage() {
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [exportZipBusy, setExportZipBusy] = useState(false);
+  const [exportZipJobId, setExportZipJobId] = useState<string | null>(null);
   const [exportZipMessage, setExportZipMessage] = useState<string | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const [importSuccess, setImportSuccess] = useState(false);
+  const [importStats, setImportStats] = useState<Record<string, number> | null>(null);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
@@ -334,63 +340,22 @@ export function SettingsPage() {
   }, []);
 
   const runHouseholdZipExport = useCallback(async () => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     setExportZipBusy(true);
     setExportZipMessage(null);
+    setExportZipJobId(null);
     try {
       const { jobId } = await apiJson<{ jobId: string }>("/exports/household", { method: "POST" });
-      const deadline = Date.now() + 60_000;
+      const deadline = Date.now() + 120_000;
       while (Date.now() < deadline) {
         const st = await apiJson<{ status: string; error: string | null }>(`/exports/${jobId}`);
-        if (st.status === "failed") {
-          throw new Error(st.error ?? "Export failed");
-        }
+        if (st.status === "failed") throw new Error(st.error ?? "Export failed");
         if (st.status === "complete") {
-          const maxAttempts = 6;
-          for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            if (attempt > 0) {
-              await new Promise((r) => setTimeout(r, 250));
-            }
-            const res = await apiFetch(`/exports/${jobId}/download`);
-            if (res.ok) {
-              const blob = await res.blob();
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = `household-export-${jobId}.zip`;
-              a.rel = "noopener";
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-              URL.revokeObjectURL(url);
-              setExportZipMessage("Download started.");
-              return;
-            }
-            const t = await res.text();
-            let code: string | undefined;
-            let msg = t || `Download failed (${res.status})`;
-            try {
-              const j = JSON.parse(t) as { code?: string; message?: string };
-              if (typeof j.message === "string" && j.message.trim()) {
-                msg = j.message.trim();
-              }
-              if (typeof j.code === "string") {
-                code = j.code;
-              }
-            } catch {
-              /* plain text body */
-            }
-            const retryable = code === "EXPORT_FILE_MISSING" || code === "EXPORT_NOT_READY";
-            if (!retryable || attempt === maxAttempts - 1) {
-              const suffix = code ? ` (${code})` : "";
-              throw new Error(`${res.status}: ${msg}${suffix}`);
-            }
-          }
+          setExportZipJobId(jobId);
+          setExportZipMessage("Export ready — click the link below to download.");
           return;
         }
-        await new Promise((r) => setTimeout(r, 400));
+        await new Promise((r) => setTimeout(r, 800));
       }
       throw new Error("Export timed out; wait a moment and try again.");
     } catch (e: unknown) {
@@ -399,6 +364,74 @@ export function SettingsPage() {
       setExportZipBusy(false);
     }
   }, [token]);
+
+  const downloadExportZip = useCallback(async (jobId: string) => {
+    try {
+      const res = await apiFetch(`/exports/${jobId}/download`);
+      if (!res.ok) {
+        const txt = await res.text();
+        let msg = `Download failed (${res.status})`;
+        try { msg = (JSON.parse(txt) as { message?: string }).message ?? msg; } catch { /* ignore */ }
+        setExportZipMessage(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `household-export-${jobId}.zip`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      setExportZipMessage(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const runHouseholdRestore = useCallback(async () => {
+    if (!token || !importFile) return;
+    setImportBusy(true);
+    setImportMessage(null);
+    setImportSuccess(false);
+    setImportStats(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const res = await apiFetch("/exports/household/import", { method: "POST", body: formData });
+      if (!res.ok) {
+        const txt = await res.text();
+        let msg = `Upload failed (${res.status})`;
+        try { msg = (JSON.parse(txt) as { message?: string }).message ?? msg; } catch { /* ignore */ }
+        throw new Error(msg);
+      }
+      const { jobId } = (await res.json()) as { jobId: string };
+      setImportMessage("Restoring… this may take a minute.");
+      const deadline = Date.now() + 300_000;
+      while (Date.now() < deadline) {
+        const st = await apiJson<{ status: string; error: string | null; stats: Record<string, number> | null }>(`/exports/import/${jobId}`);
+        if (st.status === "failed") throw new Error(st.error ?? "Restore failed");
+        if (st.status === "complete") {
+          setImportStats(st.stats);
+          setImportSuccess(true);
+          setImportMessage("Restore complete. Signing you out in 3 seconds…");
+          setTimeout(() => {
+            setToken(null);
+            window.location.href = "/";
+          }, 3000);
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      throw new Error("Restore timed out.");
+    } catch (e: unknown) {
+      setImportMessage(e instanceof Error ? e.message : String(e));
+      setImportSuccess(false);
+    } finally {
+      setImportBusy(false);
+    }
+  }, [token, importFile]);
 
   useEffect(() => {
     if (!token) {
@@ -1103,18 +1136,66 @@ export function SettingsPage() {
                 </div>
 
                 <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>
-                  Data export
+                  Export data
                 </h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Download a ZIP archive (JSON inside: manifest + full bundle). Restoring on another host is not implemented
-                  yet; keep the file as a backup.
+                  Download a full ZIP backup — accounts, transactions, net worth history, category rules, payslips, and more.
+                  Use this to migrate to a new host or keep an offline archive.
                 </p>
                 {exportZipMessage ? (
-                  <p className={exportZipMessage === "Download started." ? "success" : "error"}>{exportZipMessage}</p>
+                  <p className={exportZipJobId ? "success" : "error"} style={{ marginBottom: "0.5rem" }}>{exportZipMessage}</p>
+                ) : null}
+                {exportZipJobId ? (
+                  <p style={{ marginTop: 0, marginBottom: "0.75rem" }}>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => void downloadExportZip(exportZipJobId)}
+                    >
+                      Download household-export.zip
+                    </button>
+                  </p>
                 ) : null}
                 <button type="button" className="secondary" disabled={exportZipBusy} onClick={() => void runHouseholdZipExport()}>
-                  {exportZipBusy ? "Preparing export…" : "Download household ZIP"}
+                  {exportZipBusy ? "Preparing export…" : "Start data export"}
                 </button>
+
+                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: "2rem" }}>
+                  Restore from backup
+                </h3>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Upload a ZIP exported from this app to restore all household data on this instance.
+                </p>
+                <p className="error" style={{ marginTop: 0, fontSize: "0.9rem" }}>
+                  Warning: this will permanently replace all current accounts, transactions, rules, and net worth history.
+                  You will be signed out when the restore completes.
+                </p>
+                {importMessage ? (
+                  <p className={importSuccess ? "success" : "error"} style={{ marginBottom: "0.5rem" }}>
+                    {importMessage}
+                  </p>
+                ) : null}
+                {importStats ? (
+                  <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
+                    Restored: {Object.entries(importStats).map(([k, v]) => `${String(v)} ${k}`).join(", ")}
+                  </p>
+                ) : null}
+                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    type="file"
+                    accept=".zip"
+                    disabled={importBusy}
+                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                  />
+                  <button
+                    type="button"
+                    className="danger"
+                    disabled={importBusy || !importFile}
+                    onClick={() => void runHouseholdRestore()}
+                  >
+                    {importBusy ? "Restoring…" : "Restore from backup"}
+                  </button>
+                </div>
 
               </>
             ) : null}
