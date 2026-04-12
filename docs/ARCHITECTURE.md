@@ -75,7 +75,7 @@ Operators may still want to **reclaim disk space** after they trust extracted ro
 3. User maps each file to a target **financial account** (and confirms or selects parser profile when needed).
 4. Per-file **adapter** runs on **parse**; outputs rows persisted as **`transaction_raw`**.
 5. **Canonical ingest** (**canonicalize**) maps raw rows to **`transaction_canonical`** (posted ledger rows), single write path.
-6. Dedupe fingerprint computed; duplicates blocked or routed to **`resolution_item`** queue.
+6. Dedupe fingerprint computed. **Exact duplicates** (fingerprint or FITID matches an existing posted row) are inserted with `status = 'duplicate'` and a `resolution_item(duplicate_ambiguity)` — surfaced in Needs Review for user decision (keep → posted, or trash). Nothing is silently dropped. **Near-duplicates** (same amount, compatible description) get a `resolution_item` but no canonical row.
 7. Classification and transfer matching run with confidence thresholds.
 8. Inbox / Transactions **Needs review** shows unresolved counts and row-level context.
 9. User bulk reviews/fixes categories and resolution statuses; optional **undo-import** while session is `review` rolls back that session’s canonical inserts.
@@ -103,19 +103,27 @@ Editable **memo/description**, **delete** / **bulk delete**, and **bulk recatego
 - `PaystubRecord`
 - `BalanceSnapshot`
 
-## 6. Dedupe Design (Strict)
+## 6. Dedupe Design
 
-### Fingerprint Candidate
-`fingerprint = hash(account_id, txn_date, amount, normalized_description, statement_period)`
+### Fingerprint
+`fingerprint = SHA256(household_id + account_id + txn_date + rounded_amount + normalized_description)`
 
-### Rules
-- Exact fingerprint match in posted set => auto mark duplicate.
-- Near-match (date/window or description variance) => unresolved queue.
-- Never auto-post ambiguous near-duplicates.
+For OFX/QFX imports: **FITID** (`reference_id`) is checked first (stronger dedup key than fingerprint when available).
 
-### Idempotency
-- Reprocessing same file yields zero net new posted transactions.
-- Import sessions and file checksums tracked for replay safety.
+### Rules (CR-080 behaviour)
+- **Exact fingerprint or FITID match in DB** → insert canonical with `status = 'duplicate'`; create `resolution_item(duplicate_ambiguity, kind: 'exact_duplicate')`. Appears in Needs Review.
+  - User resolves → canonical promoted to `status = 'posted'` (fresh fingerprint assigned so dedup key stays on original).
+  - User trashes → `status = 'trashed'`.
+- **Near-match** (same account/date/amount, compatible description) → `resolution_item(duplicate_ambiguity, kind: 'near_duplicate')` only; no canonical row inserted.
+- **Idempotency guard** — early `source_ref` check skips any raw row that already has a canonical, so repeated `canonicalize` calls on the same session are safe.
+- **In-session dedup** (same fingerprint or FITID seen earlier in the same run) — silent skip; covers duplicate rows within a single file.
+
+### Schema note
+`uq_transaction_canonical_fingerprint` is a **partial unique index** (`WHERE status NOT IN ('duplicate', 'trashed')`). This allows a `duplicate`-status row to coexist with the original `posted` row without violating uniqueness. Migration: `0012_exact_duplicate_review.sql`.
+
+### Idempotency summary
+- Re-running canonicalize on an already-canonicalized session → all rows caught by the idempotency guard (returns `duplicates = N`, no new DB rows).
+- Re-importing the same file in a new session → each row from the previous import is detected as an exact duplicate and inserted for user review.
 
 ## 7. Transfer Detection Strategy
 

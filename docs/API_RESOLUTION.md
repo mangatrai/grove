@@ -21,7 +21,7 @@ Lightweight counts for dashboards and the Transactions **Needs review** banner.
 }
 ```
 
-- **`openDuplicateAmbiguityNotOnLedger`** — open **`duplicate_ambiguity`** items whose **`target_id`** (raw row) has **no** matching **`transaction_canonical.source_ref = 'raw:' || target_id`** (near-duplicate skipped at ingest). These do **not** appear on **`GET /transactions?needsReview=true`**; use **`GET /resolution`** or **`/resolution-queue`** in the app (DOC-005).
+- **`openDuplicateAmbiguityNotOnLedger`** — open **`duplicate_ambiguity`** items whose **`target_id`** (raw row) has **no** matching `transaction_canonical.source_ref = 'raw:' || target_id`. These are **near-duplicate** rows (skipped at ingest — no canonical row created). They do **not** appear on **`GET /transactions?needsReview=true`**; access them via **`GET /resolution`**. Note: **exact-duplicate** rows (CR-080) DO have a canonical row (`status = 'duplicate'`) and therefore DO appear on the Needs Review ledger — they are not counted here.
 
 ## `GET /resolution`
 
@@ -74,7 +74,11 @@ Optional query:
 
 **401:** missing or invalid token.
 
-Near-duplicate rows from canonical ingest use **`type: duplicate_ambiguity`** and **`targetId`** referencing the **`transaction_raw`** row that was not posted.
+**`duplicate_ambiguity`** items come from two paths:
+- **Exact duplicate** (CR-080): same fingerprint or FITID as an existing posted row. A canonical row with `status = 'duplicate'` is inserted and linked via `source_ref = 'raw:' || targetId`. Appears in **`GET /transactions?needsReview=true`**. `reasonDetail.kind = 'exact_duplicate'`. Resolving this item promotes the canonical to `status = 'posted'` (fresh fingerprint assigned).
+- **Near-duplicate**: same account/date/amount, similar description. **No canonical row inserted**; the `transaction_raw` row is not posted. `reasonDetail.kind = 'near_duplicate'`. Does **not** appear on the Needs Review ledger (see `openDuplicateAmbiguityNotOnLedger` in `/resolution/summary`).
+
+In both cases `targetId` references the **`transaction_raw`** row.
 
 ## `PATCH /resolution/:id`
 
@@ -99,6 +103,8 @@ Transition rules:
 **400:** invalid payload.
 **404:** item not found for this household.
 **409:** invalid transition (`code: "INVALID_TRANSITION"` with `from`/`to`).
+
+**Side effects on resolve:** when `status` is set to `resolved` and the item type is `duplicate_ambiguity`, the backend also promotes any linked `transaction_canonical` with `status = 'duplicate'` to `status = 'posted'` (with a fresh fingerprint). This applies to both `PATCH /resolution/:id` and `POST /resolution/bulk`.
 
 **Transactions → Needs review** (expand row context) uses this endpoint per open item for **In review**, **Resolve**, **Reopen**. The app route **`/resolution`** redirects to **`/transactions?needsReview=true`**; **`GET /resolution`** remains for API clients and tests.
 

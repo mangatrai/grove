@@ -225,6 +225,13 @@ paths:
     post:
       tags: [imports]
       summary: Canonicalize into ledger
+      description: >
+        Maps transaction_raw rows for the session into transaction_canonical.
+        Returns { inserted, duplicates, skipped, nearDuplicates }.
+        `duplicates` counts rows inserted with status='duplicate' (exact fingerprint/FITID match against
+        existing posted rows from a previous import) plus in-session skips. Exact duplicates surface in
+        GET /transactions?needsReview=true with reviewReason "Exact duplicate".
+        `nearDuplicates` counts rows skipped (not inserted) that have a duplicate_ambiguity resolution_item.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/undo-import:
     post:
@@ -259,11 +266,20 @@ paths:
     post:
       tags: [resolution]
       summary: Bulk update resolution item status
+      description: >
+        Applies one target status to many resolution items (best-effort).
+        Side effect (CR-080): when status='resolved' and item type='duplicate_ambiguity',
+        any linked transaction_canonical with status='duplicate' is promoted to status='posted'
+        (with a fresh fingerprint so the original dedup key is preserved).
       security: [{ bearerAuth: [] }]
   /resolution/{id}:
     patch:
       tags: [resolution]
       summary: Update resolution item status
+      description: >
+        Updates one resolution item status.
+        Side effect (CR-080): when status='resolved' and item type='duplicate_ambiguity',
+        any linked transaction_canonical with status='duplicate' is promoted to status='posted'.
       security: [{ bearerAuth: [] }]
   /resolution/bulk-apply-category:
     post:

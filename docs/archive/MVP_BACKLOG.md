@@ -170,19 +170,18 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 
 **Delivered:**
 - **`transaction-fingerprint.ts`** — deterministic `normalizeAmountForFingerprint`, date/description normalization, `computeTransactionFingerprint`.
-- **Canonical ingest** — exact duplicate via fingerprint + unique index; **near-duplicate** → insert **`resolution_item`** (`type: duplicate_ambiguity`), row not posted; response includes **`nearDuplicates`** (see `docs/API_IMPORT_SESSIONS.md`).
-- **Import UI** — shows **`nearDuplicates`** after canonicalize.
-- **Tests** — unit tests on fingerprint helpers; integration: idempotent second canonicalize; near-duplicate scenario (e.g. Starbucks lines).
-
-**Deferred / next:**
-- Bulk near-duplicate triage beyond **status** (e.g. category rules) when Epic 5 exists; session rollback / undo (Epic 6.3).
+- **Canonical ingest** — near-duplicate → `resolution_item(duplicate_ambiguity)`, row not posted; response includes `nearDuplicates`.
+- **Import UI** — shows `nearDuplicates` after canonicalize.
+- **Tests** — unit tests on fingerprint helpers; integration: idempotent second canonicalize; near-duplicate scenario.
+- **CR-080 (2026-04-12)** — Exact duplicate handling redesigned: fingerprint/FITID match against an existing posted row now inserts a canonical with `status = 'duplicate'` + `resolution_item(duplicate_ambiguity, kind: 'exact_duplicate')` instead of silently skipping. Surfaces in **Needs Review** as "Exact duplicate". Resolving promotes to `posted`; trashing discards. Partial unique index on fingerprint (`WHERE status NOT IN ('duplicate','trashed')`) — migration `0012`. Idempotency guard added (source_ref check before fingerprint check). See `CHANGE_HISTORY.md` CR-080.
 
 - Tasks (original backlog; baseline above covers most):
   - Implement deterministic fingerprinting and duplicate checks. (L) ✅
   - Add near-duplicate detection path to unresolved queue. (M) ✅ (`resolution_item` + `GET /resolution`)
   - Add idempotency tests for re-imported files. (M) ✅
+  - Exact duplicate triage (keep/trash) in Needs Review. ✅ (CR-080)
 - Acceptance:
-  - Re-uploading same file produces zero duplicate posted rows. ✅
+  - ~~Re-uploading same file produces zero duplicate posted rows.~~ **Updated (CR-080):** Re-uploading same file inserts rows as `status='duplicate'` for user triage; no exact duplicate is silently lost.
 
 ---
 

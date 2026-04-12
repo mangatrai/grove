@@ -44,7 +44,7 @@ Open **Account → Settings** from the top bar.
 ### What each step does
 
 - **Parse** reads the staged files and inserts **parsed rows** into the database (`transaction_raw`). It does not compare against your existing ledger yet.
-- **Canonicalize** maps those parsed rows into **ledger transactions** (`transaction_canonical`): it applies **fingerprint dedupe** (exact duplicates are skipped), may create **review queue** items for near-duplicates or unknown categories, and assigns categories where rules or defaults apply.
+- **Canonicalize** maps those parsed rows into **ledger transactions** (`transaction_canonical`): it applies **fingerprint dedupe**, classifies categories, and creates **Needs review** items as needed. Exact fingerprint duplicates from a previous import appear in Needs Review with the label **"Exact duplicate"** so you can decide to keep or trash them — nothing is silently dropped. Near-duplicates (same amount, different description) are flagged similarly. Unknown categories surface as uncategorized items to resolve.
 
 **Important:** Ledger rows are created **as soon as canonicalize succeeds**. Finalizing the import session is about **closing that session** (no more uploads, workflow complete)—it is **not** a separate “commit to ledger” step. While the session is still in **review**, **Undo import** can remove the ledger rows that came from this session’s parsed lines and clear related review items, while keeping the parsed rows so you can canonicalize again.
 
@@ -55,7 +55,7 @@ Open **Account → Settings** from the top bar.
 ## Transactions
 
 - **All:** browse and search posted (and other) ledger rows. Assign or change **categories**, adjust **belongs-to**, and use row actions as needed.
-- **Needs review:** rows that need attention (unknown category, duplicates, transfer ambiguity, reconciliation hints, etc.). Expand a row for context, then **resolve** individually or use **bulk** actions where available.
+- **Needs review:** rows that need attention — **unknown category**, **exact duplicate** (same transaction from a previous import), **near-duplicate** (same amount, similar description), **transfer ambiguity**, **reconciliation hints**, etc. Expand a row to see why it's flagged; use **Resolve** (keep / acknowledge), **Trash** (discard), or **bulk** actions on a selection. Resolving an exact duplicate promotes it to **posted**; trashing removes it from reports.
 
 **Review queue statuses (bulk bar):** **In review** marks selected resolution items as *in progress*; **Resolve** marks them *resolved* (cleared from the open queue); **Reopen** sends them back to *open*. Applying a **category** updates the underlying transaction where the item type allows it (for example unknown-category items). The ledger row already exists; the queue tracks what still needs a human decision.
 

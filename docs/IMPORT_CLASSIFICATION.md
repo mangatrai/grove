@@ -1,6 +1,6 @@
 # Import classification, dedupe, and rules
 
-This document explains **all automated behaviors** when statements are imported (parse → canonicalize). The **Categories → Rules** UI (`/categories/rules`) manages **household** rules and **global built-in** rules (stored in SQLite).
+This document explains **all automated behaviors** when statements are imported (parse → canonicalize). The **Categories → Rules** UI (`/categories/rules`) manages **household** rules and **global built-in** rules (stored in Postgres).
 
 ## 1. Category assignment (`transaction_canonical.category_id`)
 
@@ -28,13 +28,25 @@ If nothing matches, **`category_id` is null** and an **`unknown_category`** reso
 
 **`POST /categories/rules/rule-learning-preview`** with an `import_session` id runs the same **`classifyWithRules`** matcher over **`transaction_raw`** rows for that session. It performs **no writes**: no ledger updates, no rule creation, no category persistence. The UI surfaces this on **`/imports/:sessionId`** as **Classification matcher preview (read-only)** so it sits next to parse/import workflow; use it to tune rules before or after canonicalize.
 
-## 2. Exact duplicate skip
+## 2. Exact duplicate → Needs Review (CR-080)
 
-Same **fingerprint** as an existing posted row (`household_id` + account + date + rounded amount + normalized description) → row is **skipped** (counted as duplicate). See `canonicalizeImportSession` in `backend/src/modules/canonical/canonical-ingest.service.ts`.
+Same **fingerprint** (account + date + rounded amount + normalized description) **or** same **FITID/reference_id** as an existing posted row from a previous import → the row is inserted as **`status = 'duplicate'`** and a **`resolution_item(type: duplicate_ambiguity, kind: 'exact_duplicate')`** is created. It surfaces in **Transactions → Needs review** with the label **"Exact duplicate"**.
+
+User actions:
+- **Resolve (keep):** closes the flag and promotes the canonical to `status = 'posted'` with a fresh fingerprint (the original row retains the dedup fingerprint so future re-imports still detect it).
+- **Trash (discard):** sets `status = 'trashed'` via the standard trash action.
+
+**Idempotency guard:** before the fingerprint/FITID check, canonicalize checks whether the raw row already has any canonical row (`source_ref = 'raw:' || raw_id`). If it does, the row is skipped — repeated `canonicalize` calls on the same session remain a no-op.
+
+**In-session dedup** (same file uploaded twice within one session): still silently skipped. Only cross-session duplicates (matching an existing DB row) are surfaced as exact duplicates.
+
+**Schema:** migration `0012_exact_duplicate_review.sql` narrows `uq_transaction_canonical_fingerprint` to a **partial unique index** (`WHERE status NOT IN ('duplicate', 'trashed')`) so a `duplicate`-status row can share a fingerprint with the original `posted` row.
+
+See `canonicalizeImportSession` in `backend/src/modules/canonical/canonical-ingest.service.ts`.
 
 ## 3. Near-duplicate queue
 
-Same account, date, and amount as an existing row, with a **similar but not identical** normalized description → **`resolution_item`** type **`duplicate_ambiguity`** on the **raw** row (not posted as canonical).
+Same account, date, and amount as an existing row, with a **similar but not identical** normalized description → **`resolution_item(type: duplicate_ambiguity, kind: 'near_duplicate')`** created on the **raw** row; the new row is **not** inserted into `transaction_canonical` (unlike exact duplicates). Near-duplicate rows do **not** appear in the ledger view — they are visible only via `GET /resolution`.
 
 ## 4. Transfer detection
 
