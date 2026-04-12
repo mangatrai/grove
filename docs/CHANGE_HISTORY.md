@@ -20,6 +20,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-11
 
+### CR-076 — New CSV parsers: Discover card + Wealthfront investment
+- **Type:** CR / Backend
+- **What:** Two new bank adapter parsers to cover statement formats from Discover credit card and Wealthfront investment/savings accounts.
+  1. **Discover card CSV (`discover_card_csv`):** Columns `Trans. Date, Post Date, Description, Amount, Category`. Date format MM/DD/YYYY. Sign convention: positive = charge (debit), negative = payment/credit — negated on ingest to match canonical convention. Profile label: "Discover card (CSV)". Inference: `institution.toLowerCase().includes("discover")` + `type === "credit_card"` + `.csv`.
+  2. **Wealthfront investment CSV (`wealthfront_investment_csv`):** Columns `Transaction date, Description, Type, Amount`. Date format M/D/YYYY (single-digit month/day supported). Sign convention already canonical (positive = credit/deposit, negative = debit/withdrawal — no negation). Profile label: "Wealthfront savings / investment (CSV)". Inference: `institution.toLowerCase().includes("wealthfront")` + `type ∈ {investment, savings, retirement}` + `.csv`.
+- **Why:** Real statement files from live accounts in `data/imports/` had no parsers. Both institution names normalise to "other" in the catalog, so inference uses raw institution string matching rather than the catalog normaliser.
+- **Files:** `profiles/discover-card-csv.ts` (new), `profiles/wealthfront-investment-csv.ts` (new), `profiles/profile-ids.ts`, `import-parser.service.ts`, `profileLabels.ts` (frontend), `inferParserProfile.ts` (frontend).
+- **Tests added:** `backend/tests/csv-parsers.test.ts` — 11 tests (5 Discover, 6 Wealthfront) covering row count, amount sign, date conversion, description mapping. `frontend/src/import/inferParserProfile.test.ts` — 5 new inference tests.
+
 ### CR-077 — Household category rules expansion (live statement patterns)
 - **Type:** CR / Data
 - **What:** Appended 14 new rules to `fixtures/category-import/category-rules-house.csv` based on patterns from live statements not covered by the 120 global builtin rules. Rules are grouped by category:
