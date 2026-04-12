@@ -17,8 +17,8 @@ Short answers for support and on-call. Deeper setup: [`RUNBOOK.md`](RUNBOOK.md),
 ## Household data export + restore (ZIP)
 
 ### Export
-- **Settings → Household → Export data** (owner/admin) queues `POST /exports/household`. The job runs async; the UI polls until complete, then shows a **Download** link.
-- The ZIP contains `manifest.json` and `household-bundle.json` (v2). Bundle includes: household settings, app users (with bcrypt password hashes), financial accounts, categories, category rules, transactions, net worth balance snapshots, payslip snapshots, custom institutions, person profiles, household memberships.
+- **Settings → Household → Export data** (owner/admin) queues `POST /exports/household`. The job runs async; the UI polls until complete, then shows a persistent **Download** link.
+- The ZIP contains `manifest.json` + one JSON file per table (`transactions.json`, `accounts.json`, etc.) — **exportVersion 3** (split-file format). Tables included: household settings, app users (with bcrypt password hashes), financial accounts, categories, category rules, transactions, net worth balance snapshots, payslip snapshots, custom institutions, person profiles, household memberships.
 - Exports are **rate-limited** per user (10 per rolling hour).
 - ZIP files are stored in `data/exports/` on the server. There is no automatic cleanup — delete old ZIPs manually if disk space is a concern.
 
@@ -27,8 +27,9 @@ Short answers for support and on-call. Deeper setup: [`RUNBOOK.md`](RUNBOOK.md),
 - The restore is **destructive and irreversible**: all current household data is wiped and replaced from the ZIP.
 - After restore, all users' `token_version` is incremented — every existing JWT is immediately invalidated. The user performing the restore is signed out automatically by the frontend after 3 seconds.
 - `import_file_id` references in `account_balance_snapshot` and `payslip_snapshot` are set to NULL on restore (raw import files are not part of the bundle).
+- **Backward-compatible:** the restore endpoint also accepts v1/v2 ZIPs (single `household-bundle.json`).
 - API: `POST /exports/household/import` (multipart `file` field) → `{ jobId }` → poll `GET /exports/import/:jobId` → `{ status, stats }`.
-- Restore ZIPs are stored in `data/imports-restore/` (server-side temp location).
+- Restore ZIPs are staged in `data/imports-restore-upload/` (multer temp) then moved to `data/imports-restore/` for job processing.
 
 ## Postgres
 

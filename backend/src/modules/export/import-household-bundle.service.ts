@@ -75,16 +75,74 @@ export function scheduleImportJobProcessing(jobId: string, householdId: string):
   });
 }
 
-/** Read and extract both JSON files from the ZIP. */
-async function readZipEntries(zipPath: string): Promise<{ manifest: Record<string, unknown>; bundle: Record<string, unknown> }> {
+type Row = Record<string, unknown>;
+
+/** Parsed ZIP contents, normalised to per-table maps regardless of export version. */
+type ZipContents = {
+  manifest: Record<string, unknown>;
+  /** Keyed by logical table name (matches TableExport.key). */
+  tables: Map<string, Row[]>;
+};
+
+/**
+ * Read the ZIP and return normalised table data.
+ * Supports exportVersion 3 (split files) and versions 1/2 (single household-bundle.json).
+ */
+async function readZipEntries(zipPath: string): Promise<ZipContents> {
   const directory = await unzipper.Open.file(zipPath);
-  const manifestEntry = directory.files.find((f) => f.path === "manifest.json");
-  const bundleEntry = directory.files.find((f) => f.path === "household-bundle.json");
-  if (!manifestEntry) throw new Error("ZIP is missing manifest.json");
-  if (!bundleEntry) throw new Error("ZIP is missing household-bundle.json");
-  const manifest = JSON.parse((await manifestEntry.buffer()).toString("utf-8")) as Record<string, unknown>;
-  const bundle = JSON.parse((await bundleEntry.buffer()).toString("utf-8")) as Record<string, unknown>;
-  return { manifest, bundle };
+
+  const readEntry = async (name: string): Promise<string | null> => {
+    const entry = directory.files.find((f) => f.path === name);
+    if (!entry) return null;
+    return (await entry.buffer()).toString("utf-8");
+  };
+
+  const manifestText = await readEntry("manifest.json");
+  if (!manifestText) throw new Error("ZIP is missing manifest.json");
+  const manifest = JSON.parse(manifestText) as Record<string, unknown>;
+  const version = manifest.exportVersion as number;
+  const tables = new Map<string, Row[]>();
+
+  if (version === 3) {
+    // Split-file format: each table has its own JSON file listed in manifest.tables.
+    const tableIndex = manifest.tables as Record<string, { file: string }> | undefined;
+    if (!tableIndex) throw new Error("manifest.json is missing 'tables' index (expected exportVersion 3 format)");
+    for (const [key, meta] of Object.entries(tableIndex)) {
+      const text = await readEntry(meta.file);
+      if (text == null) throw new Error(`ZIP is missing table file: ${meta.file} (table: ${key})`);
+      tables.set(key, JSON.parse(text) as Row[]);
+    }
+  } else if (version === 1 || version === 2) {
+    // Legacy single-bundle format: map bundle keys → table keys.
+    const bundleText = await readEntry("household-bundle.json");
+    if (!bundleText) throw new Error("ZIP is missing household-bundle.json (expected for exportVersion 1/2)");
+    const bundle = JSON.parse(bundleText) as Record<string, unknown>;
+    const legacyMap: Record<string, string> = {
+      household:                "household",
+      appUsers:                 "users",
+      financialAccounts:        "accounts",
+      categories:               "categories",
+      categoryRulesHousehold:   "category_rules",
+      transactionCanonical:     "transactions",
+      personProfiles:           "person_profiles",
+      householdMemberships:     "memberships",
+      accountBalanceSnapshots:  "balance_snapshots",
+      payslipSnapshots:         "payslips",
+      householdCustomInstitutions: "custom_institutions",
+    };
+    for (const [bundleKey, tableKey] of Object.entries(legacyMap)) {
+      const val = bundle[bundleKey];
+      if (bundleKey === "household") {
+        tables.set(tableKey, val ? [val as Row] : []);
+      } else {
+        tables.set(tableKey, (val as Row[] | undefined) ?? []);
+      }
+    }
+  } else {
+    throw new Error(`Unsupported export version: ${String(version)}. Expected 1, 2, or 3.`);
+  }
+
+  return { manifest, tables };
 }
 
 async function runImportJob(jobId: string, householdId: string): Promise<void> {
@@ -98,15 +156,10 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
   await qExec(`UPDATE import_job SET status = 'running' WHERE id = ?`, jobId);
 
   try {
-    const { manifest, bundle } = await readZipEntries(row.storage_path);
+    const { manifest, tables } = await readZipEntries(row.storage_path);
 
-    const exportVersion = manifest.exportVersion as number;
-    if (exportVersion !== 1 && exportVersion !== 2) {
-      throw new Error(`Unsupported export version: ${String(exportVersion)}. Expected 1 or 2.`);
-    }
-
-    const bundleHouseholdId = bundle.householdId as string;
-    if (!bundleHouseholdId) throw new Error("Bundle is missing householdId");
+    const bundleHouseholdId = manifest.householdId as string;
+    if (!bundleHouseholdId) throw new Error("manifest.json is missing householdId");
 
     /** Replace the source household id with the current instance's id in every column of a row. */
     function remap<T extends Record<string, unknown>>(r: T): T {
@@ -117,21 +170,20 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
       return out as T;
     }
 
-    type Row = Record<string, unknown>;
-    const appUsers = ((bundle.appUsers as Row[] | undefined) ?? []).map(remap);
-    const accounts = ((bundle.financialAccounts as Row[] | undefined) ?? []).map(remap);
+    const appUsers = (tables.get("users") ?? []).map(remap);
+    const accounts = (tables.get("accounts") ?? []).map(remap);
     // Only restore household-specific categories (skip global seed categories)
-    const categories = ((bundle.categories as Row[] | undefined) ?? [])
+    const categories = (tables.get("categories") ?? [])
       .filter((c) => c.household_id != null)
       .map(remap);
-    const rules = ((bundle.categoryRulesHousehold as Row[] | undefined) ?? []).map(remap);
-    const transactions = ((bundle.transactionCanonical as Row[] | undefined) ?? []).map(remap);
-    const profiles = ((bundle.personProfiles as Row[] | undefined) ?? []).map(remap);
-    const memberships = ((bundle.householdMemberships as Row[] | undefined) ?? []).map(remap);
-    const balanceSnapshots = ((bundle.accountBalanceSnapshots as Row[] | undefined) ?? []).map(remap);
-    const payslips = ((bundle.payslipSnapshots as Row[] | undefined) ?? []).map(remap);
-    const customInstitutions = ((bundle.householdCustomInstitutions as Row[] | undefined) ?? []).map(remap);
-    const householdRow = bundle.household as Row | undefined;
+    const rules = (tables.get("category_rules") ?? []).map(remap);
+    const transactions = (tables.get("transactions") ?? []).map(remap);
+    const profiles = (tables.get("person_profiles") ?? []).map(remap);
+    const memberships = (tables.get("memberships") ?? []).map(remap);
+    const balanceSnapshots = (tables.get("balance_snapshots") ?? []).map(remap);
+    const payslips = (tables.get("payslips") ?? []).map(remap);
+    const customInstitutions = (tables.get("custom_institutions") ?? []).map(remap);
+    const householdRow = (tables.get("household") ?? [])[0] ?? undefined;
 
     const stats: ImportStats = {};
 

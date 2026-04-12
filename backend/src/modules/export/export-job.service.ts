@@ -7,7 +7,7 @@ import archiver from "archiver";
 import { qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
-import { buildHouseholdExportBundle } from "./export-household-bundle.service.js";
+import { queryAllExportTables } from "./export-household-bundle.service.js";
 
 const EXPORTS_DIR = resolveDataPath("data/exports");
 
@@ -77,26 +77,36 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
   }
   await qExec(`UPDATE export_job SET status = 'running' WHERE id = ?`, jobId);
   try {
-    const bundle = await buildHouseholdExportBundle(householdId);
-    const meta = bundle as { exportVersion: number; exportedAt: string; householdId: string };
+    const exportedAt = new Date().toISOString();
+    const tables = await queryAllExportTables(householdId);
+
+    // Build manifest with per-table file inventory and row counts.
+    const tableIndex: Record<string, { file: string; rows: number }> = {};
+    for (const t of tables) {
+      tableIndex[t.key] = { file: t.fileName, rows: t.rows.length };
+    }
     const manifest = {
-      exportVersion: meta.exportVersion,
-      exportedAt: meta.exportedAt,
-      householdId: meta.householdId,
-      format: "zip",
-      entries: ["manifest.json", "household-bundle.json"]
+      exportVersion: 3,
+      exportedAt,
+      householdId,
+      format: "zip-split-v3",
+      tables: tableIndex
     };
+
     const output = fs.createWriteStream(row.storage_path);
     const archive = archiver("zip", { zlib: { level: 6 } });
     archive.pipe(output);
     archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
-    archive.append(JSON.stringify(bundle, null, 2), { name: "household-bundle.json" });
+    for (const t of tables) {
+      archive.append(JSON.stringify(t.rows, null, 2), { name: t.fileName });
+    }
     await archive.finalize();
     await qExec(
       `UPDATE export_job SET status = 'complete', completed_at = NOW(), error_text = NULL WHERE id = ?`,
       jobId
     );
-    log.info(`Export job ${jobId} complete for household ${householdId}`);
+    const totalRows = tables.reduce((s, t) => s + t.rows.length, 0);
+    log.info(`Export job ${jobId} complete for household ${householdId}: ${tables.length} files, ${totalRows} total rows`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     await qExec(`UPDATE export_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);

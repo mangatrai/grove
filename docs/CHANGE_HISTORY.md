@@ -20,6 +20,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### CR-078 v2 — Export ZIP: split-file format (one file per table)
+- **Type:** CR / Backend
+- **What:** Redesigned the export ZIP to write each table as its own JSON file instead of a single monolithic `household-bundle.json`. Bumped `exportVersion` to 3.
+  - **Format:** `manifest.json` + one file per table (e.g. `transactions.json`, `accounts.json`, etc.). Manifest includes a `tables` index: `{ [key]: { file, rows } }`.
+  - **Export service:** `queryAllExportTables` returns `TableExport[]`; `runExportJob` iterates and appends each as a named ZIP entry.
+  - **Import service:** `readZipEntries` handles v3 (reads per-table files from manifest index) and v1/v2 backward compat (reads `household-bundle.json`, maps legacy bundle keys → new table keys via `legacyMap`). `runImportJob` updated to use `tables: Map<string, Row[]>` from the new `readZipEntries` return type.
+- **Why:** A single bundle file is impractical for large datasets — a household with years of transactions could have a single file > 50 MB. Split files allow streaming, partial reads, and easier inspection.
+- **Files:** `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`.
+
 ### CR-078 — Full household export + async restore from ZIP backup
 - **Type:** CR / Backend / Frontend
 - **What:** End-to-end backup and restore feature. Fixes the broken export (404 in dev), completes the bundle, and implements a working async restore.
