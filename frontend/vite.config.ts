@@ -25,7 +25,8 @@ export default defineConfig({
       "/resolution": api,
       "/reports": api,
       "/health": api,
-      "/household": api
+      "/household": api,
+      "/exports": api
     }
   }
 });
