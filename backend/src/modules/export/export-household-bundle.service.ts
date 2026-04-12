@@ -29,6 +29,11 @@ export async function queryAllExportTables(householdId: string): Promise<TableEx
     householdId
   );
 
+  // Only export household-custom categories (household_id IS NOT NULL).
+  // Global/builtin categories (household_id IS NULL) are seeded from db/seeds/ on every
+  // fresh instance and must NOT be included here — they would conflict on restore and
+  // are already present on the target instance after db:seed.  An empty categories.json
+  // is expected and correct for households that use only the global seed tree.
   const categories = await qAll(
     `SELECT id, household_id, parent_id, name, is_default
      FROM category WHERE household_id = ?
@@ -36,6 +41,9 @@ export async function queryAllExportTables(householdId: string): Promise<TableEx
     householdId
   );
 
+  // Same reasoning for category rules: global builtin rules (household_id IS NULL) are
+  // seeded and will be present on the target instance.  Only household-specific rules
+  // (created via the UI or CSV import) need to travel with the export.
   const rules = await qAll(
     `SELECT id, household_id, pattern, match_type, category_id, confidence, amount_scope, priority, enabled, created_at, updated_at
      FROM category_rule WHERE household_id = ?`,

@@ -19,6 +19,7 @@ Short answers for support and on-call. Deeper setup: [`RUNBOOK.md`](RUNBOOK.md),
 ### Export
 - **Settings → Household → Export data** (owner/admin) queues `POST /exports/household`. The job runs async; the UI polls until complete, then shows a persistent **Download** link.
 - The ZIP contains `manifest.json` + one JSON file per table (`transactions.json`, `accounts.json`, etc.) — **exportVersion 3** (split-file format). Tables included: household settings, app users (with bcrypt password hashes), financial accounts, categories, category rules, transactions, net worth balance snapshots, payslip snapshots, custom institutions, person profiles, household memberships.
+- **`categories.json` and `category_rules.json` contain only household-custom rows** (those created by the user via the UI or CSV import). Global/builtin categories and rules have `household_id IS NULL` in the DB and are intentionally excluded — they are seeded from `db/seeds/` on every fresh instance and will already be present on the restore target after `db:seed`. An empty `categories.json` is expected and correct for a household that uses only the global seed category tree.
 - Exports are **rate-limited** per user (10 per rolling hour).
 - ZIP files are stored in `data/exports/` on the server. There is no automatic cleanup — delete old ZIPs manually if disk space is a concern.
 
