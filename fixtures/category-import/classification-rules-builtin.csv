@@ -1,0 +1,120 @@
+origin,id,rule_key,pattern,match_type,amount_scope,category_id,category_path,priority,confidence,enabled
+builtin,b0010000-0000-4000-8000-000000000001,income_refunds_refund,refund,contains,credit_only,30000000-0000-0000-0000-000000000013,Income > Refunds,100,0.7,true
+builtin,ecdbb910-2aad-4601-a0c1-52396e06f0d4,custom_bulk_builtin_ok_1775943148502,bulk_builtin_ok_1775943148502,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,100,0.7,true
+builtin,b0010000-0000-4000-8000-000000000002,income_rental_rental_income,rental income,contains,credit_only,30000000-0000-0000-0000-000000000010,Income > Rental income,110,0.7,true
+builtin,b0010000-0000-4000-8000-000000000003,income_interest_interest,interest,contains,credit_only,30000000-0000-0000-0000-000000000011,Income > Interest,120,0.7,true
+builtin,b0010000-0000-4000-8000-000000000004,income_interest_int_pymt,int pymt,contains,credit_only,30000000-0000-0000-0000-000000000011,Income > Interest,120,0.7,true
+builtin,b0010000-0000-4000-8000-000000000005,income_interest_int_payment,int payment,contains,credit_only,30000000-0000-0000-0000-000000000011,Income > Interest,120,0.7,true
+builtin,b0010000-0000-4000-8000-000000000006,income_dividends_dividend,dividend,contains,credit_only,30000000-0000-0000-0000-000000000012,Income > Dividends,130,0.7,true
+builtin,b0010000-0000-4000-8000-000000000007,income_salary_payroll,payroll,contains,credit_only,30000000-0000-0000-0000-000000000007,Income > Salary,140,0.7,true
+builtin,b0010000-0000-4000-8000-000000000008,income_salary_direct_dep,direct dep,contains,credit_only,30000000-0000-0000-0000-000000000007,Income > Salary,140,0.7,true
+builtin,b0010000-0000-4000-8000-000000000009,income_salary_salary,salary,contains,credit_only,30000000-0000-0000-0000-000000000007,Income > Salary,140,0.7,true
+builtin,b0010000-0000-4000-8000-000000000010,income_salary_pay_check,pay check,contains,credit_only,30000000-0000-0000-0000-000000000007,Income > Salary,140,0.7,true
+builtin,b0010000-0000-4000-8000-000000000011,income_salary_paycheck,paycheck,contains,credit_only,30000000-0000-0000-0000-000000000007,Income > Salary,140,0.7,true
+builtin,b0010000-0000-4000-8000-000000000012,income_salary_commission,commission,contains,credit_only,30000000-0000-0000-0000-000000000007,Income > Salary,140,0.7,true
+builtin,b0010000-0000-4000-8000-000000000013,housing_0_mortgage,mortgage,contains,debit_only,30000000-0000-0000-0000-000000000002,Home > Housing,200,0.7,true
+builtin,b0010000-0000-4000-8000-000000000014,housing_1_mtg,mtg,contains,debit_only,30000000-0000-0000-0000-000000000002,Home > Housing,200,0.7,true
+builtin,b0010000-0000-4000-8000-000000000015,housing_2_rent,rent,contains,debit_only,30000000-0000-0000-0000-000000000002,Home > Housing,200,0.7,true
+builtin,b0010000-0000-4000-8000-000000000017,housing_4_hoa,hoa,contains,debit_only,30000000-0000-0000-0000-000000000002,Home > Housing,200,0.7,true
+builtin,b0010000-0000-4000-8000-000000000018,housing_5_landlord,landlord,contains,debit_only,30000000-0000-0000-0000-000000000002,Home > Housing,200,0.7,true
+builtin,b0010000-0000-4000-8000-000000000019,housing_6_lease,lease,contains,debit_only,30000000-0000-0000-0000-000000000002,Home > Housing,200,0.7,true
+builtin,b0010000-0000-4000-8000-000000000020,energy_0_electric,electric,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000021,energy_1_utilities,utilities,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000022,energy_2_utility,utility,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000023,energy_3_internet,internet,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000024,energy_4_gas_bill,gas bill,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000025,energy_5_duke_energy,duke energy,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000026,energy_6_comcast,comcast,contains,debit_only,30000000-0000-0000-0000-000000000118,Utilities > Energy,210,0.7,true
+builtin,b0010000-0000-4000-8000-000000000027,water_0_water_bill,water bill,contains,debit_only,30000000-0000-0000-0000-000000000119,Utilities > City Water,211,0.7,true
+builtin,b0010000-0000-4000-8000-000000000028,water_1_sewer,sewer,contains,debit_only,30000000-0000-0000-0000-000000000119,Utilities > City Water,211,0.7,true
+builtin,b0010000-0000-4000-8000-000000000029,water_2_trash,trash,contains,debit_only,30000000-0000-0000-0000-000000000119,Utilities > City Water,211,0.7,true
+builtin,b0010000-0000-4000-8000-000000000030,mobile_0_verizon,verizon,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
+builtin,b0010000-0000-4000-8000-000000000031,mobile_1_at_t,at&t,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
+builtin,b0010000-0000-4000-8000-000000000032,mobile_2_att,att,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
+builtin,b0010000-0000-4000-8000-000000000033,mobile_3_t_mobile,t-mobile,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
+builtin,b0010000-0000-4000-8000-000000000034,mobile_4_tmobile,tmobile,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
+builtin,b0010000-0000-4000-8000-000000000035,dining_0_restaurant,restaurant,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000036,dining_1_grubhub,grubhub,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000037,dining_2_doordash,doordash,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000038,dining_3_uber_eats,uber eats,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000039,dining_4_chipotle,chipotle,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000040,dining_5_taco_bell,taco bell,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000041,dining_6_mcdonald,mcdonald,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000042,dining_7_panera,panera,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000043,dining_8_panda_express,panda express,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000044,coffee_0_starbucks,starbucks,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000045,coffee_1_dunkin,dunkin,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000046,coffee_2_dutch_bro,dutch bro,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000047,coffee_3_coffee,coffee,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000048,snacks_0_chips,chips,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
+builtin,b0010000-0000-4000-8000-000000000049,snacks_1_candy_bar,candy bar,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
+builtin,b0010000-0000-4000-8000-000000000050,snacks_2_vending,vending,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
+builtin,b0010000-0000-4000-8000-000000000051,snacks_3_snack,snack,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
+builtin,b0010000-0000-4000-8000-000000000052,groceries_0_whole_foods,whole foods,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000053,groceries_1_trader_joe,trader joe,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000054,groceries_2_kroger,kroger,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000055,groceries_3_safeway,safeway,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000056,groceries_4_aldi,aldi,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000057,groceries_5_grocery,grocery,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000058,groceries_6_groceries,groceries,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000059,groceries_7_walmart,walmart,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000060,groceries_8_costco,costco,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000061,groceries_9_target,target,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000062,groceries_10_publix,publix,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000063,transit_0_uber,uber,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000064,transit_1_lyft,lyft,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000065,transit_2_shell,shell,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000066,transit_3_exxon,exxon,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000067,transit_4_chevron,chevron,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000068,transit_5_bp,bp,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000069,transit_6_parking,parking,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000070,transit_7_metro,metro,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000071,transit_8_transit,transit,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000072,transit_9_toll,toll,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000073,auto_maint_0_auto_repair,auto repair,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000074,auto_maint_1_firestone,firestone,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000075,auto_maint_2_pep_boys,pep boys,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000076,auto_maint_3_autozone,autozone,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000077,auto_maint_4_o_reilly,o'reilly,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000078,auto_maint_5_dealership,dealership,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000079,auto_maint_6_jiffy_lube,jiffy lube,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000080,auto_maint_7_tire,tire,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
+builtin,b0010000-0000-4000-8000-000000000081,cc_0_card_payment,card payment,contains,debit_only,30000000-0000-0000-0000-000000000006,Borrowing > Credit card payments,260,0.7,true
+builtin,b0010000-0000-4000-8000-000000000082,cc_1_credit_card,credit card,contains,debit_only,30000000-0000-0000-0000-000000000006,Borrowing > Credit card payments,260,0.7,true
+builtin,b0010000-0000-4000-8000-000000000083,loan_0_loan_pmt,loan pmt,contains,debit_only,30000000-0000-0000-0000-000000000121,Borrowing > Loan payments,261,0.7,true
+builtin,b0010000-0000-4000-8000-000000000084,loan_1_loan_payment,loan payment,contains,debit_only,30000000-0000-0000-0000-000000000121,Borrowing > Loan payments,261,0.7,true
+builtin,b0010000-0000-4000-8000-000000000085,loan_2_auto_loan,auto loan,contains,debit_only,30000000-0000-0000-0000-000000000121,Borrowing > Loan payments,261,0.7,true
+builtin,b0010000-0000-4000-8000-000000000086,loan_3_student_loan,student loan,contains,debit_only,30000000-0000-0000-0000-000000000121,Borrowing > Loan payments,261,0.7,true
+builtin,b0010000-0000-4000-8000-000000000087,loan_4_lending_club,lending club,contains,debit_only,30000000-0000-0000-0000-000000000121,Borrowing > Loan payments,261,0.7,true
+builtin,b0010000-0000-4000-8000-000000000088,medical_0_hospital,hospital,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000089,medical_1_physician,physician,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000090,medical_2_doctor,doctor,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000091,medical_3_urgent_care,urgent care,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000092,medical_4_medical,medical,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000093,medical_5_lab_corp,lab corp,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000094,medical_6_quest_diag,quest diag,contains,debit_only,30000000-0000-0000-0000-000000000020,Healthcare > Medical,270,0.7,true
+builtin,b0010000-0000-4000-8000-000000000095,pharmacy_0_cvs,cvs,contains,debit_only,30000000-0000-0000-0000-000000000021,Healthcare > Pharmacy,280,0.7,true
+builtin,b0010000-0000-4000-8000-000000000096,pharmacy_1_cvs_,cvs#,contains,debit_only,30000000-0000-0000-0000-000000000021,Healthcare > Pharmacy,280,0.7,true
+builtin,b0010000-0000-4000-8000-000000000097,pharmacy_2_walgreens,walgreens,contains,debit_only,30000000-0000-0000-0000-000000000021,Healthcare > Pharmacy,280,0.7,true
+builtin,b0010000-0000-4000-8000-000000000098,pharmacy_3_pharmacy,pharmacy,contains,debit_only,30000000-0000-0000-0000-000000000021,Healthcare > Pharmacy,280,0.7,true
+builtin,b0010000-0000-4000-8000-000000000099,pharmacy_4_rite_aid,rite aid,contains,debit_only,30000000-0000-0000-0000-000000000021,Healthcare > Pharmacy,280,0.7,true
+builtin,b0010000-0000-4000-8000-000000000100,fitness_0_gym,gym,contains,debit_only,30000000-0000-0000-0000-000000000022,Healthcare > Fitness,285,0.7,true
+builtin,b0010000-0000-4000-8000-000000000101,fitness_1_planet_fitness,planet fitness,contains,debit_only,30000000-0000-0000-0000-000000000022,Healthcare > Fitness,285,0.7,true
+builtin,b0010000-0000-4000-8000-000000000102,fitness_2_ymca,ymca,contains,debit_only,30000000-0000-0000-0000-000000000022,Healthcare > Fitness,285,0.7,true
+builtin,b0010000-0000-4000-8000-000000000103,fitness_3_crossfit,crossfit,contains,debit_only,30000000-0000-0000-0000-000000000022,Healthcare > Fitness,285,0.7,true
+builtin,b0010000-0000-4000-8000-000000000104,wellness_0_meditation,meditation,contains,debit_only,30000000-0000-0000-0000-000000000125,Healthcare > Wellness,286,0.7,true
+builtin,b0010000-0000-4000-8000-000000000105,wellness_1_headspace,headspace,contains,debit_only,30000000-0000-0000-0000-000000000125,Healthcare > Wellness,286,0.7,true
+builtin,b0010000-0000-4000-8000-000000000106,wellness_2_calm_com,calm.com,contains,debit_only,30000000-0000-0000-0000-000000000125,Healthcare > Wellness,286,0.7,true
+builtin,b0010000-0000-4000-8000-000000000107,wellness_3_wellness_spa,wellness spa,contains,debit_only,30000000-0000-0000-0000-000000000125,Healthcare > Wellness,286,0.7,true
+builtin,b0010000-0000-4000-8000-000000000108,fed_tax_0_irs,irs,contains,debit_only,30000000-0000-0000-0000-000000000113,Taxes > Federal income tax,290,0.7,true
+builtin,b0010000-0000-4000-8000-000000000109,fed_tax_1_federal_tax,federal tax,contains,debit_only,30000000-0000-0000-0000-000000000113,Taxes > Federal income tax,290,0.7,true
+builtin,b0010000-0000-4000-8000-000000000110,fed_tax_2_us_treasury_tax,us treasury tax,contains,debit_only,30000000-0000-0000-0000-000000000113,Taxes > Federal income tax,290,0.7,true
+builtin,b0010000-0000-4000-8000-000000000111,state_tax_0_state_tax,state tax,contains,debit_only,30000000-0000-0000-0000-000000000130,Taxes > State income tax,291,0.7,true
+builtin,b0010000-0000-4000-8000-000000000112,state_tax_1_franchise_tax,franchise tax,contains,debit_only,30000000-0000-0000-0000-000000000130,Taxes > State income tax,291,0.7,true
+builtin,b0010000-0000-4000-8000-000000000113,state_tax_2_ftb,ftb,contains,debit_only,30000000-0000-0000-0000-000000000130,Taxes > State income tax,291,0.7,true
+builtin,b0010000-0000-4000-8000-000000000114,sales_tax_0,sales tax,contains,debit_only,30000000-0000-0000-0000-000000000114,Taxes > Sales tax,292,0.7,true
+builtin,b0010000-0000-4000-8000-000000000115,fed_refund_0_irs_treas,irs treas,contains,credit_only,30000000-0000-0000-0000-000000000131,Taxes > Federal tax refund,293,0.7,true
+builtin,b0010000-0000-4000-8000-000000000116,fed_refund_1_federal_refund,federal refund,contains,credit_only,30000000-0000-0000-0000-000000000131,Taxes > Federal tax refund,293,0.7,true
+builtin,b0010000-0000-4000-8000-000000000117,fed_refund_2_tax_refund_irs,tax refund irs,contains,credit_only,30000000-0000-0000-0000-000000000131,Taxes > Federal tax refund,293,0.7,true
+builtin,b0010000-0000-4000-8000-000000000118,state_refund_0_state_refund,state refund,contains,credit_only,30000000-0000-0000-0000-000000000132,Taxes > State tax refund,294,0.7,true
+builtin,b0010000-0000-4000-8000-000000000119,state_refund_1_tax_refund_state,tax refund state,contains,credit_only,30000000-0000-0000-0000-000000000132,Taxes > State tax refund,294,0.7,true
