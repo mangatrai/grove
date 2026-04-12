@@ -14,6 +14,7 @@ export type BudgetEntry = {
 export type BudgetSuggestionRow = {
   categoryId: string;
   categoryName: string;
+  parentId: string | null;
   parentName: string | null;
   /** Suggested starting amount for this month's budget. */
   suggestedAmount: number;
@@ -156,9 +157,23 @@ export async function getBudgetSuggestions(
   const windowStart = monthBounds(shiftMonthBack(anchor, 5)).start;
   const windowEnd = anchorBounds.end;
 
+  // Excluded parent category IDs — these are financial-flow categories that
+  // do not belong in a household spending budget:
+  //   Transfers  30000000-0000-0000-0000-000000000112
+  //   Income     30000000-0000-0000-0000-000000000001
+  //   Investments 30000000-0000-0000-0000-000000000105
+  // IS DISTINCT FROM handles NULL correctly (dangling FK rows after restore pass
+  // through and get filtered later by the category_name != null check).
+  const EXCLUDED_PARENTS = [
+    "30000000-0000-0000-0000-000000000112", // Transfers
+    "30000000-0000-0000-0000-000000000001", // Income
+    "30000000-0000-0000-0000-000000000105", // Investments
+  ] as const;
+
   type ActualRow = {
     category_id: string;
     category_name: string;
+    parent_id: string | null;
     parent_name: string | null;
     anchor_month_total: string;
     window_total: string;
@@ -169,6 +184,7 @@ export async function getBudgetSuggestions(
     `SELECT
        tc.category_id,
        c.name                                            AS category_name,
+       parent.id                                         AS parent_id,
        parent.name                                       AS parent_name,
        SUM(CASE
          WHEN tc.txn_date >= ? AND tc.txn_date <= ?
@@ -186,14 +202,22 @@ export async function getBudgetSuggestions(
        AND tc.category_id    IS NOT NULL
        AND tc.txn_date       >= ?
        AND tc.txn_date       <= ?
-     GROUP BY tc.category_id, c.name, parent.name
+       AND c.parent_id  IS DISTINCT FROM ?
+       AND c.parent_id  IS DISTINCT FROM ?
+       AND c.parent_id  IS DISTINCT FROM ?
+       AND c.id         IS DISTINCT FROM ?
+       AND c.id         IS DISTINCT FROM ?
+       AND c.id         IS DISTINCT FROM ?
+     GROUP BY tc.category_id, c.name, parent.id, parent.name
      HAVING SUM(-tc.amount) > 0
      ORDER BY anchor_month_total DESC, window_total DESC`,
     anchorBounds.start,
     anchorBounds.end,
     householdId,
     windowStart,
-    windowEnd
+    windowEnd,
+    ...EXCLUDED_PARENTS,  // c.parent_id IS DISTINCT FROM x3
+    ...EXCLUDED_PARENTS,  // c.id IS DISTINCT FROM x3
   );
 
   const suggestions: BudgetSuggestionRow[] = rows
@@ -212,6 +236,7 @@ export async function getBudgetSuggestions(
       return {
         categoryId: r.category_id,
         categoryName: r.category_name,
+        parentId: r.parent_id ?? null,
         parentName: r.parent_name ?? null,
         suggestedAmount,
         basis,
@@ -244,18 +269,23 @@ export async function getBudgetWithActuals(
     amount: string;
     category_name: string;
     parent_name: string | null;
+    // null when the budget entry itself is for a parent category (no grandparent)
+    category_parent_id: string | null;
   };
 
   type ActualRow = {
     category_id: string;
+    // parent_id of the actual's category — used to roll up spend to parent-level budget entries
+    parent_id: string | null;
     spent: string;
   };
 
   const [budgetRows, actualRows] = await Promise.all([
     qAll<BudgetRow>(
       `SELECT bc.category_id, bc.amount,
-              c.name AS category_name,
-              parent.name AS parent_name
+              c.name     AS category_name,
+              parent.name AS parent_name,
+              c.parent_id AS category_parent_id
        FROM budget_category bc
        JOIN category c ON c.id = bc.category_id
        LEFT JOIN category parent ON parent.id = c.parent_id
@@ -265,15 +295,16 @@ export async function getBudgetWithActuals(
       month
     ),
     qAll<ActualRow>(
-      `SELECT category_id, SUM(-amount) AS spent
-       FROM transaction_canonical
-       WHERE household_id = ?
-         AND status = 'posted'
-         AND direction = 'debit'
-         AND transfer_group_id IS NULL
-         AND txn_date >= ? AND txn_date <= ?
-         AND category_id IS NOT NULL
-       GROUP BY category_id`,
+      `SELECT tc.category_id, c.parent_id, SUM(-tc.amount) AS spent
+       FROM transaction_canonical tc
+       LEFT JOIN category c ON c.id = tc.category_id
+       WHERE tc.household_id = ?
+         AND tc.status = 'posted'
+         AND tc.direction = 'debit'
+         AND tc.transfer_group_id IS NULL
+         AND tc.txn_date >= ? AND tc.txn_date <= ?
+         AND tc.category_id IS NOT NULL
+       GROUP BY tc.category_id, c.parent_id`,
       householdId,
       start,
       end
@@ -281,12 +312,34 @@ export async function getBudgetWithActuals(
   ]);
 
   const exists = budgetRows.length > 0;
-  const actualMap = new Map(actualRows.map((r) => [r.category_id, parseFloat(r.spent) || 0]));
-  const budgetedCategoryIds = new Set(budgetRows.map((r) => r.category_id));
+
+  // Build actuals lookup: leaf category_id → { spent, parentId }
+  const actualByLeaf = new Map(
+    actualRows.map((r) => [r.category_id, { spent: parseFloat(r.spent) || 0, parentId: r.parent_id }])
+  );
+
+  // Which budget entries are parent-level (category_parent_id IS NULL = the entry IS a parent)
+  const budgetedParentIds = new Set(
+    budgetRows.filter((r) => r.category_parent_id === null).map((r) => r.category_id)
+  );
+  const budgetedLeafIds = new Set(
+    budgetRows.filter((r) => r.category_parent_id !== null).map((r) => r.category_id)
+  );
 
   const categories: BudgetCategoryRow[] = budgetRows.map((r) => {
     const budgeted = parseFloat(r.amount) || 0;
-    const spent = actualMap.get(r.category_id) ?? 0;
+    let spent = 0;
+    if (r.category_parent_id !== null) {
+      // Leaf-level budget entry: look up actual directly
+      spent = actualByLeaf.get(r.category_id)?.spent ?? 0;
+    } else {
+      // Parent-level budget entry: sum actuals of all children
+      for (const { spent: s, parentId } of actualByLeaf.values()) {
+        if (parentId === r.category_id) {
+          spent += s;
+        }
+      }
+    }
     const remaining = Math.round((budgeted - spent) * 100) / 100;
     const percentUsed = budgeted > 0 ? Math.round((spent / budgeted) * 1000) / 10 : 0;
     return {
@@ -303,10 +356,12 @@ export async function getBudgetWithActuals(
   const totalBudgeted = categories.reduce((s, c) => s + c.budgeted, 0);
   const totalSpent = categories.reduce((s, c) => s + c.spent, 0);
 
-  // Spend that falls outside the budgeted categories
+  // Unbudgeted: transactions not covered by any budget entry — either directly (leaf) or via parent
   let unbudgetedSpend = 0;
-  for (const [catId, spent] of actualMap) {
-    if (!budgetedCategoryIds.has(catId)) {
+  for (const [catId, { spent, parentId }] of actualByLeaf.entries()) {
+    const coveredByLeaf = budgetedLeafIds.has(catId);
+    const coveredByParent = parentId !== null && budgetedParentIds.has(parentId);
+    if (!coveredByLeaf && !coveredByParent) {
       unbudgetedSpend += spent;
     }
   }
