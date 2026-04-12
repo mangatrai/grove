@@ -464,6 +464,74 @@ export async function canonicalizeImportSession(
     }
   }
 
+  /**
+   * CR-080: Insert a canonical row with status='duplicate' (visible in Needs Review) and a
+   * resolution_item so the user can confirm or trash it.  The partial unique index on
+   * (household_id, fingerprint) excludes 'duplicate' rows so the same fingerprint is allowed.
+   */
+  async function insertExactDuplicateForReview(
+    row: (typeof rawRows)[number],
+    parsed: RawPayloadWithAccount,
+    normDate: string,
+    rounded: number,
+    fingerprint: string,
+    diag: CanonicalFileDiagnostics,
+    existingCanonicalId: string | null
+  ): Promise<void> {
+    const desc = parsed.description.trim();
+    const merchant = desc.length > 120 ? desc.slice(0, 120) : desc;
+    const memo = desc.length > 120 ? desc : null;
+    const direction = rounded >= 0 ? "credit" : ("debit" as "credit" | "debit");
+    const classification = classifyWithRules(
+      normalizeDescriptionForFingerprint(desc),
+      rounded,
+      dbRules
+    );
+    const classificationMeta = JSON.stringify({
+      source: classification.source,
+      ruleId: classification.ruleId,
+      confidence: classification.confidence,
+      reason: classification.reason
+    });
+    const canonicalId = crypto.randomUUID();
+    await qExec(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, reference_id, source_ref, status, classification_meta,
+         owner_scope, owner_person_profile_id
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, 'duplicate', ?, ?, ?)`,
+      canonicalId,
+      householdId,
+      parsed.financial_account_id,
+      classification.categoryId,
+      normDate,
+      rounded,
+      direction,
+      merchant,
+      memo,
+      fingerprint, // same fingerprint allowed by partial unique index (status='duplicate' excluded)
+      `raw:${row.raw_id}`,
+      classificationMeta,
+      row.owner_scope ?? "household",
+      row.owner_scope === "person" ? row.owner_person_profile_id : null
+    );
+    await qExec(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
+      crypto.randomUUID(),
+      householdId,
+      row.raw_id,
+      JSON.stringify({
+        kind: "exact_duplicate",
+        existingCanonicalId,
+        rawId: row.raw_id,
+        message:
+          "Exact duplicate: same account, date, amount, and fingerprint (or FITID) as an existing posted ledger row. Resolve to keep or trash to discard."
+      })
+    );
+    diag.duplicateFingerprint += 1;
+  }
+
   for (const row of rawRows) {
     const diag = ensureFileDiag(row.file_id);
     let parsed: unknown;
@@ -493,6 +561,19 @@ export async function canonicalizeImportSession(
       continue;
     }
 
+    // Idempotency guard: if this raw row already has any canonical row (posted or duplicate),
+    // it was processed in a previous canonicalize call — treat as duplicate and skip.
+    const alreadyCanonicalized = await qGet<{ ok: number }>(
+      `SELECT 1 AS ok FROM transaction_canonical WHERE source_ref = ? AND household_id = ?`,
+      `raw:${row.raw_id}`,
+      householdId
+    );
+    if (alreadyCanonicalized) {
+      duplicates += 1;
+      diag.duplicateFingerprint += 1;
+      continue;
+    }
+
     const normDate = normalizeTxnDateForFingerprint(parsed.txn_date);
     const normDesc = normalizeDescriptionForFingerprint(parsed.description);
     const amount = parsed.amount;
@@ -510,18 +591,28 @@ export async function canonicalizeImportSession(
     if (referenceId) {
       const refKey = `${accountId}:${referenceId}`;
       if (seenReferenceIdsThisRun.has(refKey)) {
+        // Same FITID seen earlier in this run (e.g. file uploaded twice in one session). Skip.
         duplicates += 1;
         diag.duplicateFingerprint += 1;
         continue;
       }
-      const existsRef = await qGet<{ ok: number }>(
-        `SELECT 1 AS ok FROM transaction_canonical WHERE account_id = ? AND reference_id = ?`,
+      const existsRefRow = await qGet<{ id: string }>(
+        `SELECT id FROM transaction_canonical WHERE account_id = ? AND reference_id = ? AND household_id = ?`,
         accountId,
-        referenceId
+        referenceId,
+        householdId
       );
-      if (existsRef) {
+      if (existsRefRow) {
+        // Exact duplicate from a previous import — keep it in Needs Review.
+        const fingerprint = computeTransactionFingerprint({
+          householdId,
+          accountId,
+          txnDate: normDate,
+          amount: rounded,
+          normalizedDescription: normDesc
+        });
+        await insertExactDuplicateForReview(row, parsed, normDate, rounded, fingerprint, diag, existsRefRow.id);
         duplicates += 1;
-        diag.duplicateFingerprint += 1;
         continue;
       }
     }
@@ -534,18 +625,22 @@ export async function canonicalizeImportSession(
       normalizedDescription: normDesc
     });
 
-    const existsFp = await qGet<{ ok: number }>(
-      `SELECT 1 AS ok FROM transaction_canonical WHERE household_id = ? AND fingerprint = ?`,
+    if (seenFingerprintsThisRun.has(fingerprint) || fingerprintsAwaitingInsert.has(fingerprint)) {
+      // Same fingerprint seen in this run only (in-session dedup). Skip silently.
+      duplicates += 1;
+      diag.duplicateFingerprint += 1;
+      continue;
+    }
+
+    const existsFpRow = await qGet<{ id: string }>(
+      `SELECT id FROM transaction_canonical WHERE household_id = ? AND fingerprint = ?`,
       householdId,
       fingerprint
     );
-    if (
-      existsFp ||
-      seenFingerprintsThisRun.has(fingerprint) ||
-      fingerprintsAwaitingInsert.has(fingerprint)
-    ) {
+    if (existsFpRow) {
+      // Exact duplicate from a previous import — keep it in Needs Review.
+      await insertExactDuplicateForReview(row, parsed, normDate, rounded, fingerprint, diag, existsFpRow.id);
       duplicates += 1;
-      diag.duplicateFingerprint += 1;
       continue;
     }
 
