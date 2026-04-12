@@ -328,11 +328,83 @@ paths:
   /exports/household/import:
     post:
       tags: [exports]
-      summary: Import household from export bundle (not implemented)
+      summary: Restore household from export ZIP (async, destructive)
+      description: |
+        `multipart/form-data` with field **`file`** (`.zip` only). Queues **wipe-then-restore** for the
+        authenticated household. Poll **`GET /exports/import/{jobId}`** until `status` is terminal.
+        Successful restore increments **`app_user.token_version`** (all JWTs for that household’s users
+        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 3** (manifest + one JSON
+        per table); v1/v2 monolithic bundles are still accepted. See `docs/API_EXPORTS.md`.
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: ZIP produced by export job download
       responses:
-        "501":
-          description: Not implemented
+        "202":
+          description: Restore job accepted; poll import job status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobId, message]
+                properties:
+                  jobId:
+                    type: string
+                  message:
+                    type: string
+        "400":
+          description: Missing `file` field or not a `.zip`
+        "413":
+          description: File exceeds upload limit (500 MB)
+  /exports/import/{jobId}:
+    get:
+      tags: [exports]
+      summary: Restore (import) job status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job record (status, optional error and per-table stats when complete)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  status:
+                    type: string
+                  createdAt:
+                    type: string
+                  completedAt:
+                    type: string
+                    nullable: true
+                  error:
+                    type: string
+                    nullable: true
+                  stats:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                    nullable: true
+        "400":
+          description: Missing job id
+        "404":
+          description: Import job not found for this household
   /exports/household:
     post:
       tags: [exports]

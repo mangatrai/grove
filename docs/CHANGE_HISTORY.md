@@ -20,6 +20,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### DOC-069 — Docs + OpenAPI parity for household ZIP export / restore
+- **Type:** DOC
+- **What:** Replaced stale OpenAPI **`501`** stub for **`POST /exports/household/import`** with the real multipart restore contract, **`413`**, and **`GET /exports/import/{jobId}`**. Added **`docs/API_EXPORTS.md`** and linked it from **`docs/API_INDEX.md`**. **`docs/USER_GUIDE.md`** (Settings) now mentions backup/restore. **`CLAUDE.md`** export module row + doc table updated. **`docs/archive/MVP_BACKLOG.md`** Story **8.2** marked partial with CR-078 pointer.
+- **Files:** `openapi/openapi.yaml`, `docs/API_EXPORTS.md`, `docs/API_INDEX.md`, `docs/USER_GUIDE.md`, `CLAUDE.md`, `docs/archive/MVP_BACKLOG.md`.
+
 ### CR-078 v2 — Export ZIP: split-file format (one file per table)
 - **Type:** CR / Backend
 - **What:** Redesigned the export ZIP to write each table as its own JSON file instead of a single monolithic `household-bundle.json`. Bumped `exportVersion` to 3.

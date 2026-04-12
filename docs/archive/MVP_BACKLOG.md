@@ -326,12 +326,14 @@ import; overlaps Epic 6 (inbox / resolution UX) for review before posting.
 - Acceptance:
   - User can run free-text merchant/memo search with ranked results and structured filters.
 
-### Story 8.2 - Retention and backup
-- Tasks:
+### Story 8.2 - Retention and backup (🟡 Partial)
+- **Shipped (CR-078 / CR-078 v2):** Household **ZIP export** + **async restore** (`POST /exports/household`, download, `POST /exports/household/import`, poll `GET /exports/import/:jobId`); bundle v3 + legacy v1/v2; operator notes in **`docs/OPERATOR_FAQ.md`**, API in **`docs/API_EXPORTS.md`**.
+- Tasks (remaining):
   - Implement raw file purge worker after checkpoint. (M)
-  - Implement encrypted backup/restore workflow. (L)
+  - Optional: encrypted-at-rest backup workflow beyond app-level ZIP + transport TLS. (L)
 - Acceptance:
-  - Raw PDFs purged by policy; backups can be restored in test.
+  - Raw PDFs purged by policy (still open).
+  - Household bundle can be exported and restored in test (done).
 
 ---
 

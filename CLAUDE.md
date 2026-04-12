@@ -78,7 +78,7 @@ household-finance-app/
 | `ledger/` | `ledger.service.ts`, `ledger.routes.ts` | List/filter canonical transactions, manual entry, category updates |
 | `resolution/` | `resolution.service.ts` | Unresolved items queue (unknown_category, duplicate_ambiguity, transfer_ambiguity) |
 | `reports/` | `cash-summary.service.ts`, `balance-sheet.service.ts`, `reports.routes.ts` | Cash flow KPIs (`/reports/cash-summary`); net worth snapshot + history (`/reports/balance-sheet`, `/reports/balance-sheet/history`); manual balance POST/PATCH |
-| `export/` | `export-household-bundle.service.ts`, `export-job.service.ts` | ZIP export of all household data, async job tracking |
+| `export/` | `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`, `exports.routes.ts` | Async **ZIP export** (`exportVersion` 3: manifest + per-table JSON) and **async restore** (`POST /exports/household/import`, poll `GET /exports/import/:jobId`); wipe-then-restore, JWT invalidation via `token_version` |
 | `health/` | routes only | `GET /health` liveness endpoint |
 
 ---
@@ -302,6 +302,7 @@ Fixtures: real (redacted) bank exports in `backend/tests/fixtures/`.
 | `docs/ENVIRONMENT_VARIABLES.md` | Full env reference |
 | `docs/USER_GUIDE.md` | End-user features |
 | `docs/API_INDEX.md` | All API routes summary |
+| `docs/API_EXPORTS.md` | Export ZIP + restore API |
 | `docs/API_*.md` | Per-domain API guides |
 | `docs/PAYSLIP_V1.md` | Payslip feature spec |
 | `docs/CHANGE_HISTORY.md` | Detailed changelog |
