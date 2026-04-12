@@ -109,4 +109,26 @@ describe("inferParserProfile", () => {
   it("returns ofx_transactions even when account type is unknown", () => {
     expect(inferParserProfile({ type: "", institution: "" }, "file.qfx")).toBe("ofx_transactions");
   });
+
+  // Discover card CSV — CR-076
+  it("returns discover_card_csv for Discover Bank + credit_card + .csv", () => {
+    expect(inferParserProfile({ type: "credit_card", institution: "Discover Bank" }, "Discover-AllAvailable.csv")).toBe("discover_card_csv");
+  });
+
+  it("returns null for Discover non-csv", () => {
+    expect(inferParserProfile({ type: "credit_card", institution: "Discover Bank" }, "export.pdf")).toBeNull();
+  });
+
+  // Wealthfront investment CSV — CR-076
+  it("returns wealthfront_investment_csv for Wealthfront + investment + .csv", () => {
+    expect(inferParserProfile({ type: "investment", institution: "Wealthfront" }, "account.csv")).toBe("wealthfront_investment_csv");
+  });
+
+  it("returns wealthfront_investment_csv for Wealthfront + savings + .csv", () => {
+    expect(inferParserProfile({ type: "savings", institution: "Wealthfront" }, "savings.csv")).toBe("wealthfront_investment_csv");
+  });
+
+  it("returns wealthfront_investment_csv for Wealthfront + retirement + .csv", () => {
+    expect(inferParserProfile({ type: "retirement", institution: "Wealthfront" }, "ira.csv")).toBe("wealthfront_investment_csv");
+  });
 });
