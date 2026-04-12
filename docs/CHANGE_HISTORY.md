@@ -20,6 +20,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-11
 
+### CR-077 — Household category rules expansion (live statement patterns)
+- **Type:** CR / Data
+- **What:** Appended 14 new rules to `fixtures/category-import/category-rules-house.csv` based on patterns from live statements not covered by the 120 global builtin rules. Rules are grouped by category:
+  - **Groceries** (ethnic/specialty chains): `INDIA BAZAAR`, `PATEL BROTHERS`, `SWADESHI PLAZA`, `HARELI FRESH MARKET`, `PY *HARELI`, `TOM THUMB` → Shopping > Groceries
+  - **EV charging**: `TESLA SUPERCHARGER` → Mobility > Fuel (priority 40, high confidence — specific enough)
+  - **Credit card autopay/cashback**: `DIRECTPAY FULL BALANCE` → Transfers > Transfers out (Discover DirectPay); `CASHBACK BONUS REDEMPTION` → Income > Refunds (Discover cashback payout)
+  - **FSA/benefits**: `ADVANTAGE FLEX T` → Healthcare > FSA / Benefits
+  - **Retail**: `FIVE BELOW` → Shopping > General merchandise
+  - **Indian/Asian restaurants**: `GWALIA SWEETS`, `SIMPLY SOUTH`, `ASIAN POT` → Food > Dining out
+- **Skipped (already in house rules):** Wealthfront transfers, Goldman Sachs, FRONTIER, Fyle, NAVIA BENEFIT, PROTECTIVE LIFE, CITYOFLEWISVILLE, Fundrise rows, PRIMROSE SCHOOL
+- **Skipped (covered by global builtins):** kroger, walmart, costco, whole foods, target, starbucks, shell/exxon/chevron, uber/lyft, mcdonald, irs
+- **Files:** `fixtures/category-import/category-rules-house.csv` (88 → 102 data rows, +14 rules with blank separators).
+
 ### CR-075 — Settings: initial balance on account create, retirement account type, institution catalog
 - **Type:** CR / Backend / UX
 - **What:** Three related improvements to account setup.
