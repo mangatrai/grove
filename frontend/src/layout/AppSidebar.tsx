@@ -13,6 +13,7 @@ type AppSidebarProps = {
 
 const NAV = [
   { to: "/", end: true, label: "Home", abbr: "H" },
+  { to: "/budget", end: false, label: "Budget", abbr: "B" },
   { to: "/net-worth", end: false, label: "Net worth", abbr: "N" },
   { to: "/transactions", end: false, label: "Transactions", abbr: "T" },
   { to: "/payslips", end: false, label: "Payslips", abbr: "P" },

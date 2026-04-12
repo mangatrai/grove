@@ -26,7 +26,8 @@ export default defineConfig({
       "/reports": api,
       "/health": api,
       "/household": api,
-      "/exports": api
+      "/exports": api,
+      "/budget": api
     }
   }
 });

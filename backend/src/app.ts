@@ -7,6 +7,7 @@ import express from "express";
 import { env } from "./config/env.js";
 import { log } from "./logger.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { budgetRouter } from "./modules/budget/budget.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
 import { exportsRouter } from "./modules/export/exports.routes.js";
@@ -48,7 +49,8 @@ const API_PATH_PREFIXES = [
   "/resolution",
   "/reports",
   "/payslips",
-  "/exports"
+  "/exports",
+  "/budget"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -71,6 +73,7 @@ export function buildApp() {
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
   app.use("/exports", exportsRouter);
+  app.use("/budget", budgetRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

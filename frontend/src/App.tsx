@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "./auth/RequireAuth";
 import { ShellLayout } from "./layout/ShellLayout";
+import { BudgetPage } from "./pages/BudgetPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
 import { CategoryRulesPage } from "./pages/CategoryRulesPage";
 import { HomeRoute } from "./pages/HomeRoute";
@@ -21,6 +22,7 @@ export function App() {
       <Route element={<ShellLayout />}>
         <Route path="/" element={<HomeRoute />} />
         <Route element={<RequireAuth />}>
+          <Route path="/budget" element={<BudgetPage />} />
           <Route path="/categories/rules" element={<CategoryRulesPage />} />
           <Route path="/categories" element={<CategoriesPage />} />
           <Route path="/net-worth" element={<NetWorthPage />} />

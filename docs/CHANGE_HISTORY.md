@@ -20,6 +20,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### CR-079 — Monthly budget per category
+- **Type:** CR / Backend / Frontend
+- **What:** First-class budgeting feature. Per-month, per-category budgets with actual-spend tracking and pre-populated suggestions from last month's activity.
+  1. **Migration 0011:** `budget_category` table — `(household_id, category_id, month YYYY-MM, amount)` with a unique constraint on `(household_id, category_id, month)` so each category gets at most one budget entry per month. Per-month rows preserve history: changing April's budget never touches March.
+  2. **Budget suggestions (`GET /budget/suggest?month=YYYY-MM`):** Returns active categories (debit spend, no transfer-linked rows, last 3 months) sorted by heaviest last-month spender first. Each row carries `suggestedAmount` (last calendar month actual when > 0, else 3-month average), `basis`, `lastMonthActual`, and `threeMonthAvg`. Pre-populates the setup form so the user has a realistic starting point.
+  3. **Budget view (`GET /budget/:month`):** Returns `exists` flag, summary (totalBudgeted / totalSpent / remaining / unbudgetedSpend), and per-category rows with `budgeted`, `spent`, `remaining`, `percentUsed`. Unbudgeted spend (outflows in categories not in the budget) is surfaced separately.
+  4. **Save budget (`PUT /budget/:month`):** Full replace — deletes all entries for the month and inserts the provided set in a transaction. Returns the saved budget with actuals.
+  5. **History (`GET /budget/months`):** Lists months with budgets (newest first) for future navigation.
+  6. **Frontend `BudgetPage`:** Two modes — setup form (when no budget exists) shows editable table pre-populated from suggestions with last-month actual in a reference column; progress view shows progress bars per category (green < 80%, amber 80–99%, red ≥ 100%), three summary KPI cards, remaining/over amounts, and a drill-through link to Transactions filtered by category + month. Month nav (‹ ›) lets the user browse history.
+  7. **Sidebar:** "Budget" added between Home and Net worth (abbr B).
+  8. **Vite proxy:** `/budget` added.
+- **Design decisions:** Only leaf categories with recent debit activity are suggested (no blank form); transfer-linked transactions excluded from actuals (same policy as cash-summary); global categories can be budgeted (FK to `category.id` regardless of `household_id`); "Edit budget" in progress view re-populates from current budget amounts (not last month's actuals, since the user already made those decisions).
+- **Files:** `0011_budget_category.sql` (new), `backend/src/modules/budget/budget.service.ts` (new), `budget.routes.ts` (new), `app.ts` (+1 router, +1 API prefix), `frontend/src/pages/BudgetPage.tsx` (new), `App.tsx`, `AppSidebar.tsx`, `vite.config.ts`.
+
 ### DOC-069 — Docs + OpenAPI parity for household ZIP export / restore
 - **Type:** DOC
 - **What:** Replaced stale OpenAPI **`501`** stub for **`POST /exports/household/import`** with the real multipart restore contract, **`413`**, and **`GET /exports/import/{jobId}`**. Added **`docs/API_EXPORTS.md`** and linked it from **`docs/API_INDEX.md`**. **`docs/USER_GUIDE.md`** (Settings) now mentions backup/restore. **`CLAUDE.md`** export module row + doc table updated. **`docs/archive/MVP_BACKLOG.md`** Story **8.2** marked partial with CR-078 pointer.
