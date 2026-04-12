@@ -99,7 +99,7 @@ household,,,TESLA SUPERCHARGER,contains,debit_only,,Mobility > Fuel,40,0.98,true
 household,,,DIRECTPAY FULL BALANCE,contains,debit_only,,Transfers > Transfers out,40,0.97,true
 household,,,CASHBACK BONUS REDEMPTION,contains,credit_only,,Income > Refunds,40,0.95,true
 
-household,,,ADVANTAGE FLEX T,contains,debit_only,,Healthcare > FSA / Benefits,40,0.92,true
+household,,,ADVANTAGE FLEX T,contains,debit_only,,Healthcare > Medical,40,0.92,true
 
 household,,,FIVE BELOW,contains,debit_only,,Shopping > General merchandise,40,0.95,true
 
