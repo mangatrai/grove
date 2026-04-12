@@ -29,6 +29,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Files:** `profiles/discover-card-csv.ts` (new), `profiles/wealthfront-investment-csv.ts` (new), `profiles/profile-ids.ts`, `import-parser.service.ts`, `profileLabels.ts` (frontend), `inferParserProfile.ts` (frontend).
 - **Tests added:** `backend/tests/csv-parsers.test.ts` — 11 tests (5 Discover, 6 Wealthfront) covering row count, amount sign, date conversion, description mapping. `frontend/src/import/inferParserProfile.test.ts` — 5 new inference tests.
 
+### CR-077b — Household category rules: second pass from AmEx QFX + Wealthfront CSV
+- **Type:** CR / Data
+- **What:** Second-pass rules from AmEx QFX and Wealthfront CSV, plus a fix to a first-pass mapping error:
+  - **Fix:** `TESLA SUPERCHARGER` reclassified from `Mobility > Fuel` → `Mobility > EV Charging` (that subcategory exists in the DB and is the correct slot)
+  - **AmEx QFX patterns:** `AUTOPAY PAYMENT` credit → Transfers > Transfers in (AmEx card self-payment record); `AMEX OFFER CREDIT` credit → Income > Refunds; `DELL` debit → Shopping > Electronic; `NTTA` debit → Mobility > Public Transit (NTTA = North Texas Tollway Authority — description "NTTA AUTOCHARGE" doesn't contain the word "toll" so the builtin `toll` rule doesn't fire); `STATE FARM` debit → Insurance > Auto (no insurance rules existed)
+  - **Discover CSV pattern:** `H-E-B` debit → Shopping > Groceries (house rule "HEB" doesn't substring-match "H-E-B" due to dashes); `HULU` debit → Entertainment > Streaming (no streaming rules in builtins or house rules)
+  - **Wealthfront CSV patterns:** `(Account ****` credit/debit → Transfers in/out (matches Wealthfront's account-reference format for inter-bank transfers); `GOLDMAN SACHS BANK USA` credit → Transfers > Transfers in (existing rule targets "GOLDMAN SACHS BA DES:P2P" which doesn't match Wealthfront's description format); `Automated Bond Portfolio` debit → Investments > Stocks
+- **Skipped (covered):** `[Month] interest` and `Interest payment` → builtin `interest` → Income > Interest already fires; JPMorgan Chase Bank deposits → covered by "(Account ****" rule above
+- **Files:** `fixtures/category-import/category-rules-house.csv` (+12 new rules, 1 rule updated).
+
 ### CR-077 — Household category rules expansion (live statement patterns)
 - **Type:** CR / Data
 - **What:** Appended 14 new rules to `fixtures/category-import/category-rules-house.csv` based on patterns from live statements not covered by the 120 global builtin rules. Rules are grouped by category:
@@ -38,9 +48,9 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   - **FSA/benefits**: `ADVANTAGE FLEX T` → Healthcare > FSA / Benefits
   - **Retail**: `FIVE BELOW` → Shopping > General merchandise
   - **Indian/Asian restaurants**: `GWALIA SWEETS`, `SIMPLY SOUTH`, `ASIAN POT` → Food > Dining out
-- **Skipped (already in house rules):** Wealthfront transfers, Goldman Sachs, FRONTIER, Fyle, NAVIA BENEFIT, PROTECTIVE LIFE, CITYOFLEWISVILLE, Fundrise rows, PRIMROSE SCHOOL
-- **Skipped (covered by global builtins):** kroger, walmart, costco, whole foods, target, starbucks, shell/exxon/chevron, uber/lyft, mcdonald, irs
-- **Files:** `fixtures/category-import/category-rules-house.csv` (88 → 102 data rows, +14 rules with blank separators).
+- **Skipped (already in house rules):** Wealthfront transfers, Goldman Sachs (DES:P2P form), FRONTIER, Fyle, NAVIA BENEFIT, PROTECTIVE LIFE, CITYOFLEWISVILLE, Fundrise rows, PRIMROSE SCHOOL
+- **Skipped (covered by global builtins):** kroger, walmart, costco, whole foods, target, starbucks, shell/exxon/chevron, uber/lyft, mcdonald, irs, [month] interest → Income > Interest
+- **Files:** `fixtures/category-import/category-rules-house.csv` (+14 rules, first pass).
 
 ### CR-075 — Settings: initial balance on account create, retirement account type, institution catalog
 - **Type:** CR / Backend / UX

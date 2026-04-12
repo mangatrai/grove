@@ -94,15 +94,30 @@ household,,,HARELI FRESH MARKET,contains,debit_only,,Shopping > Groceries,40,0.9
 household,,,PY *HARELI,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,TOM THUMB,contains,debit_only,,Shopping > Groceries,40,0.97,true
 
-household,,,TESLA SUPERCHARGER,contains,debit_only,,Mobility > Fuel,40,0.98,true
+household,,,TESLA SUPERCHARGER,contains,debit_only,,Mobility > EV Charging,40,0.98,true
 
 household,,,DIRECTPAY FULL BALANCE,contains,debit_only,,Transfers > Transfers out,40,0.97,true
 household,,,CASHBACK BONUS REDEMPTION,contains,credit_only,,Income > Refunds,40,0.95,true
+household,,,AUTOPAY PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.97,true
+household,,,AMEX OFFER CREDIT,contains,credit_only,,Income > Refunds,40,0.97,true
 
 household,,,ADVANTAGE FLEX T,contains,debit_only,,Healthcare > Medical,40,0.92,true
 
 household,,,FIVE BELOW,contains,debit_only,,Shopping > General merchandise,40,0.95,true
+household,,,DELL,contains,debit_only,,Shopping > Electronic,40,0.90,true
+
+household,,,H-E-B,contains,debit_only,,Shopping > Groceries,40,0.97,true
+
+household,,,HULU,contains,debit_only,,Entertainment > Streaming,40,0.97,true
+
+household,,,NTTA,contains,debit_only,,Mobility > Public Transit,40,0.97,true
+household,,,STATE FARM,contains,debit_only,,Insurance > Auto,40,0.95,true
 
 household,,,GWALIA SWEETS,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,SIMPLY SOUTH,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,ASIAN POT,contains,debit_only,,Food > Dining out,40,0.95,true
+
+household,,,(Account ****,contains,credit_only,,Transfers > Transfers in,40,0.85,true
+household,,,(Account ****,contains,debit_only,,Transfers > Transfers out,40,0.85,true
+household,,,GOLDMAN SACHS BANK USA,contains,credit_only,,Transfers > Transfers in,40,0.92,true
+household,,,Automated Bond Portfolio,contains,debit_only,,Investments > Stocks,40,0.88,true
