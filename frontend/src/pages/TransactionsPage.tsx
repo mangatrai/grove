@@ -86,7 +86,7 @@ const LEDGER_RESOLUTION_TYPES = [
 type LedgerResolutionType = (typeof LEDGER_RESOLUTION_TYPES)[number];
 
 const RESOLUTION_TYPE_LABELS: Record<LedgerResolutionType, string> = {
-  duplicate_ambiguity: "Near-duplicate",
+  duplicate_ambiguity: "Duplicate",
   reconciliation_mismatch: "Reconciliation"
 };
 
@@ -178,7 +178,7 @@ function formatMoney(amount: number, direction: string): string {
 function formatResolutionTypeLabel(t: string): string {
   switch (t) {
     case "duplicate_ambiguity":
-      return "Near-duplicate / ambiguous match";
+      return "Duplicate / ambiguous match";
     case "unknown_category":
       return "Unknown category";
     case "reconciliation_mismatch":
@@ -1391,7 +1391,7 @@ export function TransactionsPage() {
                 className="secondary"
                 disabled={savingBulk}
                 onClick={() => void bulkResolveFlags()}
-                title="Mark open near-duplicate / reconciliation flags as resolved for selected rows"
+                title="Mark open duplicate / reconciliation flags as resolved for selected rows"
               >
                 Resolve flags ({openFlagCountInSelection})
               </button>
