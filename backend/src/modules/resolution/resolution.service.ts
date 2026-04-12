@@ -385,8 +385,8 @@ export async function updateResolutionStatusForHousehold(
   itemId: string,
   nextStatus: ResolutionStatus
 ): Promise<{ ok: true; data: { id: string; status: ResolutionStatus } } | UpdateResolutionFailure> {
-  const row = await qGet<{ id: string; status: ResolutionStatus }>(
-    `SELECT id, status FROM resolution_item WHERE id = ? AND household_id = ?`,
+  const row = await qGet<{ id: string; status: ResolutionStatus; type: string; targetId: string }>(
+    `SELECT id, status, type, target_id AS "targetId" FROM resolution_item WHERE id = ? AND household_id = ?`,
     itemId,
     householdId
   );
@@ -405,6 +405,21 @@ export async function updateResolutionStatusForHousehold(
   }
 
   await qExec(`UPDATE resolution_item SET status = ? WHERE id = ?`, nextStatus, itemId);
+
+  // CR-080: resolving a duplicate_ambiguity flag on an exact-duplicate canonical row promotes it to 'posted'.
+  // Reassign a unique fingerprint before promoting so the original posted row's dedup fingerprint is preserved
+  // and future re-imports of the same transaction still detect the original (not this newly posted copy).
+  if (nextStatus === "resolved" && row.type === "duplicate_ambiguity") {
+    await qExec(
+      `UPDATE transaction_canonical
+          SET status = 'posted', fingerprint = gen_random_uuid()::text
+       WHERE household_id = ? AND status = 'duplicate'
+         AND source_ref = ('raw:' || ?)`,
+      householdId,
+      row.targetId
+    );
+  }
+
   return { ok: true, data: { id: itemId, status: nextStatus } };
 }
 
@@ -433,8 +448,8 @@ export async function bulkUpdateResolutionStatusForHousehold(
   const errors: BulkUpdateResolutionError[] = [];
 
   for (const itemId of itemIds) {
-    const row = await qGet<{ id: string; status: ResolutionStatus }>(
-      `SELECT id, status FROM resolution_item WHERE id = ? AND household_id = ?`,
+    const row = await qGet<{ id: string; status: ResolutionStatus; type: string; targetId: string }>(
+      `SELECT id, status, type, target_id AS "targetId" FROM resolution_item WHERE id = ? AND household_id = ?`,
       itemId,
       householdId
     );
@@ -454,6 +469,18 @@ export async function bulkUpdateResolutionStatusForHousehold(
     }
     if (row.status !== nextStatus) {
       await qExec(`UPDATE resolution_item SET status = ? WHERE id = ?`, nextStatus, itemId);
+    }
+    // CR-080: resolving a duplicate_ambiguity flag on an exact-duplicate canonical row promotes it to 'posted'.
+    // Reassign a unique fingerprint before promoting so the original posted row's dedup fingerprint is preserved.
+    if (nextStatus === "resolved" && row.type === "duplicate_ambiguity") {
+      await qExec(
+        `UPDATE transaction_canonical
+            SET status = 'posted', fingerprint = gen_random_uuid()::text
+         WHERE household_id = ? AND status = 'duplicate'
+           AND source_ref = ('raw:' || ?)`,
+        householdId,
+        row.targetId
+      );
     }
     updated.push({ id: itemId, status: nextStatus });
   }

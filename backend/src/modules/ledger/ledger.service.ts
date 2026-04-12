@@ -186,12 +186,16 @@ function buildReviewReasons(
   if (categoryId === null) {
     set.add("Uncategorized");
   }
-  if (status !== "posted") {
+  if (status === "duplicate") {
+    // Exact duplicate row inserted for review — status already explains why it's here.
+    set.add("Exact duplicate");
+  } else if (status !== "posted") {
     set.add(`Status: ${status}`);
   }
   const types = new Set(openItems.map((i) => i.type));
   for (const t of types) {
-    if (t === "duplicate_ambiguity") {
+    if (t === "duplicate_ambiguity" && status !== "duplicate") {
+      // Exact duplicate rows already labelled above; only show near-duplicate for other cases.
       set.add("Open review: near-duplicate");
     } else if (t === "reconciliation_mismatch") {
       set.add("Open review: reconciliation");
