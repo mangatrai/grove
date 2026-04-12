@@ -177,7 +177,7 @@ export async function getBudgetSuggestions(
        SUM(tc.amount)                                    AS window_total,
        COUNT(DISTINCT LEFT(tc.txn_date::text, 7))        AS window_months
      FROM transaction_canonical tc
-     JOIN category c      ON c.id = tc.category_id
+     LEFT JOIN category c      ON c.id = tc.category_id
      LEFT JOIN category parent ON parent.id = c.parent_id
      WHERE tc.household_id   = ?
        AND tc.status         = 'posted'
@@ -196,24 +196,29 @@ export async function getBudgetSuggestions(
     windowEnd
   );
 
-  const suggestions: BudgetSuggestionRow[] = rows.map((r) => {
-    const anchorActual = parseFloat(r.anchor_month_total) || 0;
-    const windowTotal = parseFloat(r.window_total) || 0;
-    const months = parseInt(r.window_months, 10) || 1;
-    const windowAvg = Math.round((windowTotal / months) * 100) / 100;
-    const basis: BudgetSuggestionRow["basis"] = anchorActual > 0 ? "last_month" : "three_month_avg";
-    const suggestedAmount = anchorActual > 0 ? Math.round(anchorActual * 100) / 100 : windowAvg;
+  const suggestions: BudgetSuggestionRow[] = rows
+    // Skip rows where the category no longer exists in the category table
+    // (dangling category_id left by a restore that wiped custom categories).
+    // These have a NULL category_name from the LEFT JOIN.
+    .filter((r) => r.category_name != null)
+    .map((r) => {
+      const anchorActual = parseFloat(r.anchor_month_total) || 0;
+      const windowTotal = parseFloat(r.window_total) || 0;
+      const months = parseInt(r.window_months, 10) || 1;
+      const windowAvg = Math.round((windowTotal / months) * 100) / 100;
+      const basis: BudgetSuggestionRow["basis"] = anchorActual > 0 ? "last_month" : "three_month_avg";
+      const suggestedAmount = anchorActual > 0 ? Math.round(anchorActual * 100) / 100 : windowAvg;
 
-    return {
-      categoryId: r.category_id,
-      categoryName: r.category_name,
-      parentName: r.parent_name ?? null,
-      suggestedAmount,
-      basis,
-      lastMonthActual: Math.round(anchorActual * 100) / 100,
-      threeMonthAvg: windowAvg
-    };
-  });
+      return {
+        categoryId: r.category_id,
+        categoryName: r.category_name,
+        parentName: r.parent_name ?? null,
+        suggestedAmount,
+        basis,
+        lastMonthActual: Math.round(anchorActual * 100) / 100,
+        threeMonthAvg: windowAvg
+      };
+    });
 
   log.info(
     `getBudgetSuggestions: household ${householdId} month=${month} anchor=${anchor} suggestions=${suggestions.length}`
