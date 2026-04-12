@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-12
+
+### CR-078 — Full household export + async restore from ZIP backup
+- **Type:** CR / Backend / Frontend
+- **What:** End-to-end backup and restore feature. Fixes the broken export (404 in dev), completes the bundle, and implements a working async restore.
+  1. **Fix 404 (dev):** `/exports` was missing from the Vite dev proxy — added one line to `vite.config.ts`. All dev requests to `/exports/*` now proxy to the backend correctly.
+  2. **Export bundle v2:** Added `password_hash` + `token_version` to `app_user` export (required for restore); added three previously-missing tables: `account_balance_snapshot` (net worth history), `payslip_snapshot` (employer payslips), `household_custom_institution` (custom institutions). Fixed incomplete `SELECT` column lists for `financial_account` (was missing `owner_scope`, `owner_person_profile_id`, `default_parser_profile_id`) and `transaction_canonical` (was missing `reference_id` from CR-074). Bumped `exportVersion` to 2.
+  3. **Async restore (`POST /exports/household/import`):** Replaced 501 stub with a real async restore pipeline. Accepts a multipart `.zip` upload → queues an `import_job` → `setImmediate` fires the restore → wipes current household data (reverse FK order) → restores all tables in FK-safe order with householdId remapping (bundle's householdId → current instance's householdId). `app_user.token_version` is incremented on restore to invalidate all existing JWTs. `import_file_id` FK references in `account_balance_snapshot` and `payslip_snapshot` are set to NULL (import_file rows are not part of the backup). Returns restore stats (row counts per table) on completion.
+  4. **Import job status (`GET /exports/import/:jobId`):** Polling endpoint with `{ status, error, stats }` payload.
+  5. **Frontend Settings:** Export section redesigned — shows a persistent download link when ready (replaces unreliable auto-download). New "Restore from backup" section: file picker + "Restore from backup" (danger) button, live status during polling, stats summary on completion, then auto-signs-out after 3 seconds (token invalidated server-side by version bump).
+  6. **Migration 0010:** `import_job` table (mirrors `export_job` structure + `stats_json` column).
+  7. **FIX:** `canonical-ingest.service.ts` was missing `referenceId` from `PendingCanonInsert` construction (CR-074 oversight). Fixed.
+  8. **FIX:** `ofx-parser.ts` `parseOfx2` was using removed cheerio option `lowerCaseTags`. Replaced with cheerio default mode (which also lowercases tags, preserving all OFX 2.x selectors).
+- **Restore strategy:** Wipe-then-restore. On a fresh instance: export from source → restore on target. Password hashes are restored verbatim (bcrypt is already one-way). All users are forced to re-login after restore (token_version increment).
+- **Backlog:** Add `force_password_reset` flag on app_user for post-restore first-login password change flow.
+- **Files:** `vite.config.ts`, `export-household-bundle.service.ts`, `import-household-bundle.service.ts` (new), `exports.routes.ts`, `backend/db/migrations_pg/0010_import_job.sql` (new), `SettingsPage.tsx`, `index.css` (danger button style), `canonical-ingest.service.ts` (bugfix), `ofx-parser.ts` (bugfix).
+
 ## 2026-04-11
 
 ### CR-076 — New CSV parsers: Discover card + Wealthfront investment
