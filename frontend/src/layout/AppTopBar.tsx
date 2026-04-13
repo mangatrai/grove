@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useMantineColorScheme } from "@mantine/core";
+import {
+  IconSun,
+  IconMoon,
+  IconUpload,
+  IconMenu2,
+} from "@tabler/icons-react";
 
 import { apiJson, setToken, useAuthToken } from "../api";
 
@@ -12,7 +19,7 @@ const AVATAR_KEY_EMOJI: Record<string, string> = {
   home: "🏠",
   wallet: "💳",
   briefcase: "💼",
-  star: "⭐"
+  star: "⭐",
 };
 
 type ProfileResponse = {
@@ -25,14 +32,15 @@ type ProfileResponse = {
 export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   const token = useAuthToken();
   const navigate = useNavigate();
+  const { colorScheme, toggleColorScheme } = useMantineColorScheme();
+  const isDark = colorScheme === "dark";
+
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuLabel, setMenuLabel] = useState("Account");
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
+    if (!menuOpen) return;
     function onDocClick(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
@@ -51,17 +59,14 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
     function loadLabel() {
       void apiJson<ProfileResponse>("/household/profile")
         .then((r) => {
-          if (cancelled) {
-            return;
-          }
-          const firstName = r.profile.fullName.trim().split(/\s+/)[0] ?? "Account";
+          if (cancelled) return;
+          const firstName =
+            r.profile.fullName.trim().split(/\s+/)[0] ?? "Account";
           const emoji = AVATAR_KEY_EMOJI[r.profile.avatarKey ?? ""] ?? "👤";
           setMenuLabel(`${emoji} ${firstName}`);
         })
         .catch(() => {
-          if (!cancelled) {
-            setMenuLabel("Account");
-          }
+          if (!cancelled) setMenuLabel("Account");
         });
     }
     loadLabel();
@@ -71,7 +76,10 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
     window.addEventListener("app:household-profile-updated", onProfileUpdated);
     return () => {
       cancelled = true;
-      window.removeEventListener("app:household-profile-updated", onProfileUpdated);
+      window.removeEventListener(
+        "app:household-profile-updated",
+        onProfileUpdated
+      );
     };
   }, [token]);
 
@@ -88,27 +96,50 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   return (
     <header className="app-topbar">
       <div className="app-topbar__inner">
+        {/* Mobile hamburger */}
         <button
           type="button"
           className="app-topbar__menu-btn"
           aria-label="Open navigation menu"
           onClick={onOpenMobileNav}
         >
-          <span className="nav-burger-lines" aria-hidden>
-            <span />
-            <span />
-            <span />
-          </span>
+          <IconMenu2 size={20} color="#94a3b8" />
         </button>
+
         <div className="app-topbar__spacer" aria-hidden />
+
         <div className="app-topbar__actions">
-          <button type="button" onClick={onNewImport}>
-            Import
+          {/* Dark mode toggle */}
+          <button
+            type="button"
+            className="app-topbar__icon-btn"
+            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+            onClick={() => toggleColorScheme()}
+          >
+            {isDark ? (
+              <IconSun size={18} color="#cbd5e1" />
+            ) : (
+              <IconMoon size={18} color="#cbd5e1" />
+            )}
           </button>
+
+          {/* Import button */}
+          <button
+            type="button"
+            className="app-topbar__import-btn"
+            onClick={onNewImport}
+            aria-label="New import"
+          >
+            <IconUpload size={15} />
+            <span>Import</span>
+          </button>
+
+          {/* User menu */}
           <div className="user-menu" ref={menuRef}>
             <button
               type="button"
-              className="user-menu__trigger secondary"
+              className="user-menu__trigger"
               aria-expanded={menuOpen}
               aria-haspopup="true"
               onClick={(e) => {
@@ -119,11 +150,25 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
               {menuLabel}
             </button>
             {menuOpen ? (
-              <div className="user-menu__dropdown" role="menu" onClick={(e) => e.stopPropagation()}>
-                <Link to="/settings" className="user-menu__item" role="menuitem" onClick={() => setMenuOpen(false)}>
+              <div
+                className="user-menu__dropdown"
+                role="menu"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Link
+                  to="/settings"
+                  className="user-menu__item"
+                  role="menuitem"
+                  onClick={() => setMenuOpen(false)}
+                >
                   Settings
                 </Link>
-                <button type="button" className="user-menu__item user-menu__item--button" role="menuitem" onClick={logout}>
+                <button
+                  type="button"
+                  className="user-menu__item user-menu__item--button"
+                  role="menuitem"
+                  onClick={logout}
+                >
                   Sign out
                 </button>
               </div>
