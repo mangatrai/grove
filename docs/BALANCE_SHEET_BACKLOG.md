@@ -5,7 +5,7 @@ Household **assets vs liabilities** view, separate from the transaction ledger. 
 ## Shipped (minimal v1)
 
 - **API:** [`docs/API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md) — **`asOf`** query; manual snapshots win; then **`source = import`** snapshots from `account_balance_snapshot`; then **`confidence_summary.statementBalances`** on the latest parsed `import_file` (fallback).
-- **Data:** `account_balance_snapshot` (PG migrations **`0005`**, **`0006`** import uniqueness; SQLite mirrors in `backend/db/migrations/`). Successful bank parses with `statementBalances.ending` + `asOfEnd` upsert **`source = import`** rows.
+- **Data:** `account_balance_snapshot` (migrations **`0005`**, **`0006`** import uniqueness under `backend/db/migrations/`). Successful bank parses with `statementBalances.ending` + `asOfEnd` upsert **`source = import`** rows.
 - **UI:** Sidebar **Net worth** — totals + asset/liability tables + manual entry form.
 - **Import snapshots (CR-061):** Bank parse persists **`source = import`** `account_balance_snapshot` rows when statement period end is known; balance sheet API prefers them over **`confidence_summary`** alone.
 - **History (CR-062):** **`GET /reports/balance-sheet/history`** + **Net worth → Trend** chart (assets, liabilities, net over sampled dates).

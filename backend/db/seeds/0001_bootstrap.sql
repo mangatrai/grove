@@ -1,7 +1,7 @@
 -- Bootstrap seed: default household, owner, global category taxonomy, and built-in `category_rule_global` rows.
 -- Merged former `0001_seed_defaults.sql` + `0002_seed_category_rule_global.sql` (single `schema_seeds` file for new installs).
 -- Stable UUIDs align with historical migrations (Income/Taxes/Transfers, insurance, utilities, taxonomy expansions).
--- New installs: run migrations first, then `--seed` (INSERT OR IGNORE). Re-seed: `db:cleanup` + `db:seed` when appropriate.
+-- New installs: run migrations first, then `--seed` (`ON CONFLICT DO NOTHING` on seed rows). Re-seed: `db:cleanup` + `db:seed` when appropriate.
 
 INSERT INTO household (id, name, created_at)
 VALUES ('10000000-0000-0000-0000-000000000001', 'Default Household', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING;

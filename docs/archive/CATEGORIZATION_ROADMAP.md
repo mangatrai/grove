@@ -6,7 +6,7 @@ This complements [`IMPORT_CLASSIFICATION.md`](IMPORT_CLASSIFICATION.md), which d
 
 ## Default category taxonomy (parents and children)
 
-**Source of truth:** `household_id IS NULL` rows in **`category`**. Names and stable ids are defined in [`backend/db/seeds/0001_bootstrap.sql`](../../backend/db/seeds/0001_bootstrap.sql) (archived incremental history under [`migrations_archive/`](../../backend/db/migrations_archive/)). **Display-name sync** was in **`0029_sync_global_category_display_names.sql`** (archived). **Optional** household-scoped install hook was former **`0003`** (comment in bootstrap); global taxonomy covers Loans, Travel, etc.
+**Source of truth:** `household_id IS NULL` rows in **`category`**. Names and stable ids are defined in [`backend/db/seeds/0001_bootstrap.sql`](../../backend/db/seeds/0001_bootstrap.sql). Older incremental migration history may exist only in **git history** (no longer in-tree). **Optional** household-scoped install hook was former **`0003`** (comment in bootstrap); global taxonomy covers Loans, Travel, etc.
 
 Rules assign **leaf** categories only (see `classifyWithRules` in `backend/src/modules/category/category-rules.ts`).
 

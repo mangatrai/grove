@@ -6,11 +6,11 @@ import type { Sql } from "postgres";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const MIGRATIONS_DIR = path.join(__dirname, "..", "..", "db", "migrations_pg");
+const MIGRATIONS_DIR = path.join(__dirname, "..", "..", "db", "migrations");
 const TRACKING_TABLE = "schema_migrations";
 
 /**
- * Applies any `.sql` files under `backend/db/migrations_pg` not yet recorded in `schema_migrations`.
+ * Applies any `.sql` files under `backend/db/migrations` not yet recorded in `schema_migrations`.
  */
 export async function applyPendingPgMigrations(sql: Sql): Promise<number> {
   await sql.unsafe(`

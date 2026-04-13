@@ -17,7 +17,7 @@ The API and **`scripts/db.sh`** use **`DATABASE_*`** only (no SQLite / `DB_PATH`
 
 **Test vs prod:** same variable names; point CI/local at your **test** instance and production (e.g. Koyeb) at **prod**.
 
-Migrations: [`backend/db/migrations_pg/`](../backend/db/migrations_pg/). Seeds: [`backend/db/seeds_pg/`](../backend/db/seeds_pg/) (and `seeds_pg/dev/` for sample accounts). Legacy SQLite artifacts under `backend/db/migrations/` and `seeds/` are **not** applied by the app.
+Migrations: [`backend/db/migrations/`](../backend/db/migrations/). Seeds: [`backend/db/seeds/`](../backend/db/seeds/) (and `seeds/dev/` for sample accounts).
 
 **Reset local data:** `npm run db:cleanup -- --yes` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) (drops `public`, then migrations + **bootstrap seed only**). Add **`--with-dev-seeds`** after `--yes` to also load sample BoA/Chase/Citi/Marcus `financial_account` rows.
 
@@ -54,7 +54,7 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 
 ## Known hardcoded defaults (ops)
 
-- **Seed user row:** [`backend/db/seeds_pg/0001_bootstrap.sql`](../backend/db/seeds_pg/0001_bootstrap.sql) — email and bcrypt hash for the default password (same content as legacy SQLite seed).
+- **Seed user row:** [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) — email and bcrypt hash for the default password.
 - **Tests:** `backend` `npm test` runs **`scripts/prep-test-db.sh`** (resets schema on the configured Postgres) then migrations + seeds + Vitest. **`DATABASE_*`** must be set (see `docker-compose.yml`).
 
 See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset. Operator Q&A: [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md).

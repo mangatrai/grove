@@ -1,4 +1,0 @@
-ALTER TABLE import_file ADD COLUMN stored_path TEXT;
-ALTER TABLE import_file ADD COLUMN file_size INTEGER;
-ALTER TABLE import_file ADD COLUMN mime_type TEXT;
-ALTER TABLE import_file ADD COLUMN uploaded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP;

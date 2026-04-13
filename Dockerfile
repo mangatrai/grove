@@ -3,7 +3,7 @@
 # Household Finance App — production image (API + static SPA, no Postgres).
 #
 # Runtime expects the monorepo layout under /app so paths in backend/dist match
-# repoRoot, frontend/dist, and backend/db/migrations_pg.
+# repoRoot, frontend/dist, and backend/db/migrations.
 #
 # Required env (set in Koyeb / your orchestrator — do not bake secrets into the image):
 #   MODE=PROD

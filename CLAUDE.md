@@ -40,10 +40,9 @@ household-finance-app/
 │   ├── db/
 │   │   ├── query.ts        # SQL helpers: qAll, qGet, qExec, qBegin, sqlBind, getSql
 │   │   ├── postgres.ts     # Postgres client factory
-│   │   ├── migrations/     # Legacy SQLite migrations (stale — pending cleanup)
-│   │   ├── migrations_pg/  # Active Postgres migrations (source of truth)
-│   │   └── seeds/          # Bootstrap seeds (categories, rules) + dev sample data
+│   │   └── apply-pg-migrations.ts  # applies SQL from backend/db/migrations at startup
 │   └── modules/            # 13 domain modules (see below)
+├── backend/db/             # Postgres migrations/*.sql + seeds/*.sql
 ├── backend/tests/          # Vitest integration tests (10 files)
 ├── frontend/src/
 │   ├── App.tsx             # React Router config
@@ -59,7 +58,7 @@ household-finance-app/
 ├── fixtures/               # Sample CSV templates (categories, rules)
 ├── docker-compose.yml      # Local Postgres 18 on port 5433
 ├── Dockerfile              # Production image: API + built SPA (no Postgres in image)
-├── .dockerignore           # Shrinks build context; keeps `backend/db/migrations_pg` in image
+├── .dockerignore           # Shrinks build context; keeps `backend/db/migrations` in image
 ├── .env / .env.example     # App configuration
 └── data/                   # Runtime (git-ignored): import staging files
 ```
@@ -124,7 +123,7 @@ import_job                        -- Async restore tracking (status, stats_json)
 budget_category                   -- Per-month, per-category budget amounts (household_id, category_id, month YYYY-MM, amount)
 ```
 
-Active migrations live in `backend/src/db/migrations_pg/`. `0001_baseline.sql` is the squashed full schema; subsequent numbered files are additive. Latest: `0012_exact_duplicate_review.sql` (partial unique index on fingerprint for `status NOT IN ('duplicate','trashed')`). The `migrations/` directory contains legacy SQLite files (stale, pending cleanup — do not use).
+Active migrations live in **`backend/db/migrations/`**; bootstrap seeds in **`backend/db/seeds/`**. `0001_baseline.sql` is the squashed full schema; subsequent numbered files are additive. Example: `0012_exact_duplicate_review.sql` (partial unique index on fingerprint for `status NOT IN ('duplicate','trashed')`).
 
 ---
 
@@ -290,7 +289,7 @@ Fixtures: real (redacted) bank exports in `backend/tests/fixtures/`.
 
 **Platform:** [Koyeb](https://www.koyeb.com) (or any container host). No `.github/workflows/` or other CI config in this repo.
 
-**Runtime contract:** Set **`MODE=PROD`** so Express serves **`frontend/dist/`** as the SPA and mounts JSON API routes at **`/`**. Postgres is **always external** — set **`DATABASE_*`** (+ **`DATABASE_SSL=1`** for typical managed TLS). Migrations under **`backend/db/migrations_pg/`** apply **automatically on first DB connection** at startup; bootstrap data is **not** automatic — see **`docs/PRODUCTION_SETUP.md`** (first-time **`npm run db:seed`**, do not repeat blindly).
+**Runtime contract:** Set **`MODE=PROD`** so Express serves **`frontend/dist/`** as the SPA and mounts JSON API routes at **`/`**. Postgres is **always external** — set **`DATABASE_*`** (+ **`DATABASE_SSL=1`** for typical managed TLS). Migrations under **`backend/db/migrations/`** apply **automatically on first DB connection** at startup; bootstrap data is **not** automatic — see **`docs/PRODUCTION_SETUP.md`** (first-time **`npm run db:seed`**, do not repeat blindly).
 
 **Two ways to ship the same Node process:**
 

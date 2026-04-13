@@ -1,6 +1,6 @@
 # PostgreSQL (current production database)
 
-**Status:** The app **uses PostgreSQL only** via the **`postgres`** client (porsager). Schema is applied from [`backend/db/migrations_pg/`](../backend/db/migrations_pg/). Bootstrap + dev sample data: [`backend/db/seeds_pg/`](../backend/db/seeds_pg/). Legacy SQLite files under `backend/db/migrations/` and `seeds/` are **historical reference** only.
+**Status:** The app **uses PostgreSQL only** via the **`postgres`** client (porsager). Schema is applied from [`backend/db/migrations/`](../backend/db/migrations/). Bootstrap + dev sample data: [`backend/db/seeds/`](../backend/db/seeds/).
 
 **Full-text search:** `transaction_canonical.search_document` is a **generated `tsvector`** (English) over `merchant` + `memo`, with a **GIN** index — parity with the former SQLite FTS5 + `ledger_search_fts` approach.
 
@@ -25,7 +25,7 @@ const sql = postgres({
 
 | Script / path | Role |
 |----------------|------|
-| [`scripts/db-pg.mjs`](../scripts/db-pg.mjs) | Apply `migrations_pg` + optional `seeds_pg` |
+| [`scripts/db-pg.mjs`](../scripts/db-pg.mjs) | Apply `migrations` + optional `seeds` |
 | [`scripts/preset-pg-test.mjs`](../scripts/preset-pg-test.mjs) | Reset `public` schema for tests |
 | [`scripts/db.sh`](../scripts/db.sh) | Wraps `db-pg.mjs` |
 | [`scripts/prep-test-db.sh`](../scripts/prep-test-db.sh) | Preset + clean import staging dirs |

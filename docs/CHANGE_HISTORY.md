@@ -42,25 +42,30 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-13
 
+### DB-006 — Rename `migrations_pg` / `seeds_pg` to `migrations` / `seeds`
+- **Type:** DB + housekeeping
+- **What:** Dropped the `_pg` suffix now that Postgres is the only database. `backend/scripts/gen-0026-migration.mjs` writes the built-in rules block using Postgres `INSERT ... ON CONFLICT DO NOTHING` into `backend/db/seeds/0001_bootstrap.sql`.
+- **Files:** `backend/db/migrations/`, `backend/db/seeds/`, `backend/src/db/apply-pg-migrations.ts`, `scripts/db-pg.mjs`, `scripts/db.sh`, `backend/scripts/gen-0026-migration.mjs`, `Dockerfile`, `CLAUDE.md`, `backend/db/README.md`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/POSTGRES_CUTOVER.md`, `docs/PRODUCTION_SETUP.md`, `docs/RUNBOOK.md`, and related doc touch-ups.
+
 ### DB-005 — Built-in merchant scopes: selective `debit_only` -> `any`
 - **Type:** DB
 - **What:** Updated refund-prone **merchant** built-ins to **`any`** scope (kept broad/generic and directional finance rules unchanged). Changed keys: `dining_1..8`, `coffee_0..2`, `groceries_0..4`, `groceries_7..10`, `transit_0..6`, `transit_9`. Source-of-truth seed and fixture CSV kept in sync.
-- **Files:** `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/classification-rules-builtin.csv`.
+- **Files:** `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/classification-rules-builtin.csv`.
 
 ### DB-004 — Global category Shopping > Office (`0015` + bootstrap seed)
 - **Type:** DB
 - **What:** Added default leaf **`Office`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000167`**) for work-related spend (memberships, conference fees, supplies). Migration **`0015_category_shopping_office.sql`**, bootstrap seed, fixture categories list, and **`DEFAULT_CATEGORY_IDS.shoppingOffice`** updated.
-- **Files:** `backend/db/migrations_pg/0015_category_shopping_office.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+- **Files:** `backend/db/migrations/0015_category_shopping_office.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
 
 ### DB-003 — Global category Mobility > Parking & Tolls (`0014` + bootstrap seed)
 - **Type:** DB
-- **What:** Added default leaf **`Parking & Tolls`** under **`Mobility`** (`id` **`30000000-0000-0000-0000-000000000166`**). Migration **`0014_category_mobility_parking_tolls.sql`**; **`seeds_pg/0001_bootstrap.sql`**; **`fixtures/category-import/categories.csv`**; **`DEFAULT_CATEGORY_IDS.mobilityParkingAndTolls`**.
-- **Files:** `backend/db/migrations_pg/0014_category_mobility_parking_tolls.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+- **What:** Added default leaf **`Parking & Tolls`** under **`Mobility`** (`id` **`30000000-0000-0000-0000-000000000166`**). Migration **`0014_category_mobility_parking_tolls.sql`**; **`seeds/0001_bootstrap.sql`**; **`fixtures/category-import/categories.csv`**; **`DEFAULT_CATEGORY_IDS.mobilityParkingAndTolls`**.
+- **Files:** `backend/db/migrations/0014_category_mobility_parking_tolls.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
 
 ### DB-002 — Global category Shopping > Software (`0013` + bootstrap seed)
 - **Type:** DB
-- **What:** Added default leaf **`Software`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000165`**) for SaaS / subscription-style spend. Migration **`0013_category_shopping_software.sql`** inserts for existing DBs; **`backend/db/seeds_pg/0001_bootstrap.sql`** includes the row for fresh **`db:seed`**. **`fixtures/category-import/categories.csv`** and **`DEFAULT_CATEGORY_IDS.shoppingSoftware`** in **`category-ids.ts`** updated.
-- **Files:** `backend/db/migrations_pg/0013_category_shopping_software.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+- **What:** Added default leaf **`Software`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000165`**) for SaaS / subscription-style spend. Migration **`0013_category_shopping_software.sql`** inserts for existing DBs; **`backend/db/seeds/0001_bootstrap.sql`** includes the row for fresh **`db:seed`**. **`fixtures/category-import/categories.csv`** and **`DEFAULT_CATEGORY_IDS.shoppingSoftware`** in **`category-ids.ts`** updated.
+- **Files:** `backend/db/migrations/0013_category_shopping_software.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
 
 ### CR-101 — Home page redesign: remove diagonal cut, two-panel split, dark mode contrast
 - **Type:** CR / UX / Frontend
@@ -310,7 +315,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   8. **FIX:** `ofx-parser.ts` `parseOfx2` was using removed cheerio option `lowerCaseTags`. Replaced with cheerio default mode (which also lowercases tags, preserving all OFX 2.x selectors).
 - **Restore strategy:** Wipe-then-restore. On a fresh instance: export from source → restore on target. Password hashes are restored verbatim (bcrypt is already one-way). All users are forced to re-login after restore (token_version increment).
 - **Backlog:** Add `force_password_reset` flag on app_user for post-restore first-login password change flow.
-- **Files:** `vite.config.ts`, `export-household-bundle.service.ts`, `import-household-bundle.service.ts` (new), `exports.routes.ts`, `backend/db/migrations_pg/0010_import_job.sql` (new), `SettingsPage.tsx`, `index.css` (danger button style), `canonical-ingest.service.ts` (bugfix), `ofx-parser.ts` (bugfix).
+- **Files:** `vite.config.ts`, `export-household-bundle.service.ts`, `import-household-bundle.service.ts` (new), `exports.routes.ts`, `backend/db/migrations/0010_import_job.sql` (new), `SettingsPage.tsx`, `index.css` (danger button style), `canonical-ingest.service.ts` (bugfix), `ofx-parser.ts` (bugfix).
 
 ## 2026-04-11
 
@@ -353,7 +358,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   2. **Retirement account type:** New `'retirement'` type in `financial_account` (migration `0009`). Covers 401K, IRA, pension accounts. Added to the `accountUpsertSchema` enum and the Settings → Accounts type dropdown as "Retirement (401K / IRA / Pension)".
   3. **Institution catalog expansion:** Added 8 new institutions (alphabetically sorted) to both `frontend/src/import/institutionCatalog.ts` and `backend/src/modules/imports/institution-catalog.ts`: Betterment, Coinbase, E*TRADE, Fundrise, Robinhood, T. Rowe Price, Vanguard, Wealthfront.
 - **Why:** Users adding investment, retirement, or crypto accounts had no institutions to pick and no account type for retirement accounts. Starting balance lets new accounts contribute to net worth immediately without needing to import a statement first.
-- **Files:** `backend/db/migrations_pg/0009_account_type_retirement.sql` (new), `imports.routes.ts`, `institution-catalog.ts` (backend + frontend), `SettingsPage.tsx`.
+- **Files:** `backend/db/migrations/0009_account_type_retirement.sql` (new), `imports.routes.ts`, `institution-catalog.ts` (backend + frontend), `SettingsPage.tsx`.
 
 ### CR-074 — FITID dedup + OFX ledger balance auto-snapshot
 - **Type:** CR / Backend / UX
@@ -361,7 +366,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   1. **FITID-based deduplication:** Added `reference_id TEXT` column to `transaction_canonical` (migration `0008`) with a partial unique index `(account_id, reference_id) WHERE reference_id IS NOT NULL`. During canonical ingest, if the raw payload carries a `reference_id` (FITID from OFX), a FITID check runs *before* the fingerprint check: if the same `(account_id, reference_id)` already exists in `transaction_canonical`, the row is counted as a duplicate and skipped. A `seenReferenceIdsThisRun` set catches within-batch duplicates. Non-OFX rows (no FITID) are unaffected — the partial index allows unlimited `NULL` reference_ids.
   2. **OFX LEDGERBAL auto-snapshot:** Both OFX 1.x and OFX 2.x parsers now extract `<LEDGERBAL><BALAMT>` and `<LEDGERBAL><DTASOF>`. These fields are stored in `confidence_summary.ofxMeta` at upload time and returned via `GET /imports/sessions/:id/files/:fileId/ofx-suggestion` alongside the account match. During parse (`POST /imports/sessions/:id/parse`), if the OFX file has a non-null ledger balance with a valid ISO date, `upsertImportBalanceSnapshotFromStatement` is called to persist a balance snapshot (source = `ofx_transactions`) — same pathway as BoA CSV/e-statement balance capture. Frontend shows balance info in the OFX account hint: "Balance as of YYYY-MM-DD: $X,XXX.XX (from OFX ledger balance — auto-saved to net worth)".
 - **Why:** Without FITID dedup, re-importing an OFX file after minor description edits could insert duplicates (fingerprint = SHA256 of normalised description). FITID is the authoritative dedup key for OFX files. LEDGERBAL is a free balance anchor in every Chase QFX tested — parsing it avoids a manual net-worth entry after each statement import.
-- **Files:** `backend/db/migrations_pg/0008_canonical_reference_id.sql` (new), `canonical-ingest.service.ts`, `ofx-parser.ts`, `ofx-account-match.service.ts`, `import-parser.service.ts`, `imports.routes.ts`, `boa-checking-savings-csv.ts` (source union extended), `ImportWorkspacePage.tsx`.
+- **Files:** `backend/db/migrations/0008_canonical_reference_id.sql` (new), `canonical-ingest.service.ts`, `ofx-parser.ts`, `ofx-account-match.service.ts`, `import-parser.service.ts`, `imports.routes.ts`, `boa-checking-savings-csv.ts` (source union extended), `ImportWorkspacePage.tsx`.
 - **Tests added:** `backend/tests/ofx-parser.test.ts` — 6 new tests for OFX 1.x and 2.x LEDGERBAL parsing (balance value, date conversion, null when absent).
 
 ### UX-073 — Replace all window.confirm/window.prompt with in-app dialogs
@@ -403,7 +408,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   2. **Transfer ambiguity removed from Needs Review:** `transfer_ambiguity` type removed from `NEEDS_REVIEW_PREDICATE`, `OPEN_REVIEW_ITEMS_SUBQUERY`, `buildReviewReasons`, and the frontend resolution type filter. Transfer flags no longer surface to the user in Needs Review — they were generating false noise since both sides of an internal transfer net to zero in whole-household reporting.
   3. **Cash flow report fix:** `transferReportingExclusionClause` no longer hides rows with *suspected* (open `transfer_ambiguity`) flags — only confirmed transfer pairs (`transfer_group_id IS NOT NULL`) are excluded. Hiding suspected rows was silently dropping real expenses from reports.
 - **Why:** (1) Users needed a way to remove clearly wrong/duplicate transactions without losing history. (2) Transfer ambiguity flags were confusing — they added items to Needs Review that the user couldn't meaningfully act on. (3) The suspected-transfer reporting exclusion was hiding real expenses.
-- **Schema:** `backend/db/migrations_pg/0007_transaction_canonical_trashed_status.sql` — alters CHECK constraint to include `'trashed'`.
+- **Schema:** `backend/db/migrations/0007_transaction_canonical_trashed_status.sql` — alters CHECK constraint to include `'trashed'`.
 - **Files:** `ledger.service.ts` (trash functions + filter), `ledger.routes.ts` (new routes), `cash-summary.service.ts` (fix exclusion clause), `TransactionsPage.tsx` (Trash tab + row actions), migration `0007`.
 
 ### CR-069 — Simplify Needs Review: eliminate unknown_category resolution items
@@ -459,7 +464,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Type:** CR / DB / API / DOC
 - **What:** Migration **`0006`** partial unique index on import snapshots; bank parse upserts **`source = import`** `account_balance_snapshot` rows when **`statementBalances.ending`** and **`asOfEnd`** (`YYYY-MM-DD`) are present; **`GET /reports/balance-sheet`** resolves **manual → persisted import → confidence_summary hint**.
 - **Why:** Normalized balances for net worth history and stable re-parse behavior.
-- **Files:** [`0006_account_balance_import_unique.sql`](backend/db/migrations_pg/0006_account_balance_import_unique.sql), [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`import-parser.service.ts`](backend/src/modules/imports/import-parser.service.ts), [`app.test.ts`](backend/tests/app.test.ts), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md).
+- **Files:** [`0006_account_balance_import_unique.sql`](backend/db/migrations/0006_account_balance_import_unique.sql), [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`import-parser.service.ts`](backend/src/modules/imports/import-parser.service.ts), [`app.test.ts`](backend/tests/app.test.ts), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md).
 
 ### UX-060 — Payslips list: Belongs-to label (replaces “View scope”)
 - **Type:** UX / copy
@@ -483,7 +488,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Type:** CR / DB / API / UX / DOC
 - **What:** Migration **`account_balance_snapshot`**; **`GET /reports/balance-sheet`**, **`POST/PATCH /reports/balance-sheet/manual`**; **Net worth** page and sidebar nav. Manual balances override import **`statementBalances`** hints per account.
 - **Why:** Epic 2 minimal balance sheet — assets vs liabilities with manual entry; charts/history deferred in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
-- **Files:** [`0005_account_balance_snapshot.sql`](backend/db/migrations_pg/0005_account_balance_snapshot.sql), [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`reports.routes.ts`](backend/src/modules/reports/reports.routes.ts), [`app.test.ts`](backend/tests/app.test.ts), [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`App.tsx`](frontend/src/App.tsx), [`AppSidebar.tsx`](frontend/src/layout/AppSidebar.tsx), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md), [`openapi.yaml`](openapi/openapi.yaml).
+- **Files:** [`0005_account_balance_snapshot.sql`](backend/db/migrations/0005_account_balance_snapshot.sql), [`balance-sheet.service.ts`](backend/src/modules/reports/balance-sheet.service.ts), [`reports.routes.ts`](backend/src/modules/reports/reports.routes.ts), [`app.test.ts`](backend/tests/app.test.ts), [`NetWorthPage.tsx`](frontend/src/pages/NetWorthPage.tsx), [`App.tsx`](frontend/src/App.tsx), [`AppSidebar.tsx`](frontend/src/layout/AppSidebar.tsx), [`API_BALANCE_SHEET.md`](docs/API_BALANCE_SHEET.md), [`BALANCE_SHEET_BACKLOG.md`](docs/BALANCE_SHEET_BACKLOG.md), [`openapi.yaml`](openapi/openapi.yaml).
 
 ### CR-056 — Manual payslip: POST /payslips/manual + /payslips/new form
 - **Type:** CR / API / UX / DOC
@@ -520,7 +525,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Type:** CR / DB / API / UX / DOC
 - **What:** Import `deloitte_payslip_pdf` now **queues** `openai_llm_payslip` on `import_file` (requires **`OPENAI_API_KEY`**). Background reconcile via **`POST /imports/sessions/:sessionId/reconcile-payslip-async`** runs vision + JSON-schema + Zod, maps to `payslip_snapshot`, and stores **canonical JSON + hybrid columns**. Added **`PATCH /payslip/:id`** for manual summary edits. UI auto-polls + “Check now” target that endpoint; messages updated. Legacy Unstructured Jobs client modules, Deloitte table parser, and the temporary **`reconcile-unstructured`** alias were removed after cutover.
 - **Why:** Single high-fidelity extractor for Deloitte without Unstructured cost/latency; preserve IBM local parser; enable richer stored payload for future payslip UI.
-- **Files:** `backend/db/migrations_pg/0004_payslip_llm_async_hybrid.sql`, `backend/src/config/env.ts`, `backend/src/modules/imports/payslip-async-import-reconcile.service.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `backend/src/modules/payslip/llm-extract/payslip-canonical-map.ts`, `backend/tests/payslip-canonical-map.test.ts`, `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/API_IMPORT_SESSIONS.md`, `docs/PAYSLIP_V1.md`, `.env.example`.
+- **Files:** `backend/db/migrations/0004_payslip_llm_async_hybrid.sql`, `backend/src/config/env.ts`, `backend/src/modules/imports/payslip-async-import-reconcile.service.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `backend/src/modules/payslip/llm-extract/payslip-canonical-map.ts`, `backend/tests/payslip-canonical-map.test.ts`, `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/API_IMPORT_SESSIONS.md`, `docs/PAYSLIP_V1.md`, `.env.example`.
 
 ## 2026-04-07
 
@@ -528,7 +533,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Type:** CR / FIX / DOC / DB / UX
 - **What:** Deloitte profile switched to **Import-only async** processing through Unstructured Jobs (`POST /jobs`, poll status, download JSON). Added `import_file` job-tracking columns (`unstructured_job_id`, `unstructured_input_file_id`, `unstructured_last_poll_at`) and new reconcile endpoint **`POST /imports/sessions/:sessionId/reconcile-unstructured`** (throttled; `force=true` bypass). Added Deloitte parser that reads Unstructured **`Table.metadata.text_as_html`** first (fallback to `Table.text`) and extracts stable totals (`TOTAL GROSS`, `NET PAY`) plus date hints. Removed local `deloitte-payslip-pdf.ts` (`pdf-parse` + IBM-merge heuristic path) to prevent dead code and false positives. Import UI now reports `unstructuredPending`, auto-polls ~2 minutes for pending Deloitte jobs, and adds “Check Unstructured now”.
 - **Why:** Real Deloitte PDFs had unusable local text extraction and produced incorrect values with local heuristics; Unstructured output is reliable for these stubs while preserving constrained free-tier usage through fixture-based tests and throttled polling.
-- **Files:** `backend/src/modules/imports/unstructured-jobs.service.ts`, `backend/src/modules/imports/unstructured-import-reconcile.service.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/payslip/profiles/deloitte-unstructured-parse.ts`, deleted `backend/src/modules/payslip/profiles/deloitte-payslip-pdf.ts`, `backend/db/migrations_pg/0003_import_file_unstructured.sql` (+ sqlite mirror), `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/PAYSLIP_V1.md`, `docs/API_IMPORT_SESSIONS.md`, `docs/ENVIRONMENT_VARIABLES.md`.
+- **Files:** `backend/src/modules/imports/unstructured-jobs.service.ts`, `backend/src/modules/imports/unstructured-import-reconcile.service.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/payslip/profiles/deloitte-unstructured-parse.ts`, deleted `backend/src/modules/payslip/profiles/deloitte-payslip-pdf.ts`, `backend/db/migrations/0003_import_file_unstructured.sql` (+ sqlite mirror), `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/PAYSLIP_V1.md`, `docs/API_IMPORT_SESSIONS.md`, `docs/ENVIRONMENT_VARIABLES.md`.
 
 ---
 

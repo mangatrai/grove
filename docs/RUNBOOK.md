@@ -46,15 +46,15 @@ Edit `.env`:
 
 **API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run services:start` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
-**Seeded database user:** The first user is inserted only by [`backend/db/seeds_pg/0001_bootstrap.sql`](../backend/db/seeds_pg/0001_bootstrap.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
+**Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 
 ## 5. Database (Postgres: schema + seeds)
 
 **Postgres only** — see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) and [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md). Start local Postgres with **`docker compose up -d`** from the repo root (see [`docker-compose.yml`](../docker-compose.yml)), then set **`DATABASE_*`** in `.env` (port **5433** → server **5432** per compose).
 
-**Migrations:** ordered `*.sql` under [`backend/db/migrations_pg/`](../backend/db/migrations_pg/). The **API applies pending migrations on startup** when it first connects. **`npm run db:*`** / [`scripts/db.sh`](../scripts/db.sh) apply the same files using your `.env` **`DATABASE_*`** (useful before the API runs, or from CI).
+**Migrations:** ordered `*.sql` under [`backend/db/migrations/`](../backend/db/migrations/). The **API applies pending migrations on startup** when it first connects. **`npm run db:*`** / [`scripts/db.sh`](../scripts/db.sh) apply the same files using your `.env` **`DATABASE_*`** (useful before the API runs, or from CI).
 
-**First-time dev setup (includes sample bank accounts under `seeds_pg/dev/`):**
+**First-time dev setup (includes sample bank accounts under `seeds/dev/`):**
 
 ```bash
 npm run setup

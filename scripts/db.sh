@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 usage() {
   echo "Usage: scripts/db.sh --init [--seed] [--dev-seeds]"
-  echo "  Applies backend/db/migrations_pg and optional backend/db/seeds_pg (Postgres)."
+  echo "  Applies backend/db/migrations and optional backend/db/seeds (Postgres)."
   exit 1
 }
 

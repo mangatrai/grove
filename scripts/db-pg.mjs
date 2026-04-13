@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Apply Postgres migrations under backend/db/migrations_pg and optional seeds (backend/db/seeds_pg).
+ * Apply Postgres migrations under backend/db/migrations and optional seeds (backend/db/seeds).
  * Loads repo root .env (same pattern as other scripts). Requires DATABASE_HOST, DATABASE_USER, DATABASE_NAME.
  *
  * Usage: node scripts/db-pg.mjs --init [--seed] [--dev-seeds]
@@ -57,8 +57,8 @@ const ssl =
     ? false
     : "require";
 
-const migrationsDir = path.join(repoRoot, "backend", "db", "migrations_pg");
-const seedsDir = path.join(repoRoot, "backend", "db", "seeds_pg");
+const migrationsDir = path.join(repoRoot, "backend", "db", "migrations");
+const seedsDir = path.join(repoRoot, "backend", "db", "seeds");
 const devSeedsDir = path.join(seedsDir, "dev");
 
 const TRACKING_TABLE = "schema_migrations";

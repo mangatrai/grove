@@ -101,16 +101,16 @@ Place **`-e ...`** after **`--env-file`** so host-oriented values in `.env` (`12
 
 ### Migrations (schema changes)
 
-- **Location:** [`backend/db/migrations_pg/`](../backend/db/migrations_pg/) (`*.sql`, ordered by filename).
+- **Location:** [`backend/db/migrations/`](../backend/db/migrations/) (`*.sql`, ordered by filename).
 - **When they run:** On **every** application startup, the first Postgres connection runs **`applyPendingPgMigrations`** (see [`backend/src/db/query.ts`](../backend/src/db/query.ts)). Only files **not** already recorded in **`schema_migrations`** are applied.
-- **Shipping new migrations:** Add a new `NNNN_description.sql` in the repo, **rebuild the Docker image** (or redeploy whatever artifact embeds `backend/db/migrations_pg/`), then **restart** the app. The new migration runs automatically on next boot. You do **not** run a separate migration CLI in production unless you choose to (e.g. [`scripts/db.sh`](../scripts/db.sh) `--init` only) — the app is the default applier.
+- **Shipping new migrations:** Add a new `NNNN_description.sql` in the repo, **rebuild the Docker image** (or redeploy whatever artifact embeds `backend/db/migrations/`), then **restart** the app. The new migration runs automatically on next boot. You do **not** run a separate migration CLI in production unless you choose to (e.g. [`scripts/db.sh`](../scripts/db.sh) `--init` only) — the app is the default applier.
 
 So for **incremental schema patches**: commit SQL → **new deploy (new image)** → restart container. **Yes, you rebuild the image** whenever the app **or** migration files change, because migrations ship **inside** the image.
 
 ### Seeds (bootstrap data, not auto on every request)
 
-- **Bootstrap (production-style):** [`backend/db/seeds_pg/0001_bootstrap.sql`](../backend/db/seeds_pg/0001_bootstrap.sql) — global categories, built-in rules, bootstrap household, default login user (change password after first login). **Not** applied by `node server.js`; you apply via script when you intend to.
-- **Dev-only sample accounts:** [`backend/db/seeds_pg/dev/`](../backend/db/seeds_pg/dev/) — only with **`--dev-seeds`** (local smoke).
+- **Bootstrap (production-style):** [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) — global categories, built-in rules, bootstrap household, default login user (change password after first login). **Not** applied by `node server.js`; you apply via script when you intend to.
+- **Dev-only sample accounts:** [`backend/db/seeds/dev/`](../backend/db/seeds/dev/) — only with **`--dev-seeds`** (local smoke).
 
 **Brand-new empty database (first install):**
 
@@ -122,7 +122,7 @@ So for **incremental schema patches**: commit SQL → **new deploy (new image)**
    npm run db:seed
    ```
 
-   (equivalent: **`scripts/db.sh --init --seed`** — runs migrations then all `*.sql` under **`seeds_pg/`** except `dev/` unless you add `--dev-seeds`).
+   (equivalent: **`scripts/db.sh --init --seed`** — runs migrations then all `*.sql` under **`seeds/`** except `dev/` unless you add `--dev-seeds`).
 
 4. **Change default credentials** immediately (Settings / password).
 
@@ -131,7 +131,7 @@ So for **incremental schema patches**: commit SQL → **new deploy (new image)**
 **Subsequent releases:**
 
 - **Schema:** new migration files only; applied on next app start.
-- **Reference / taxonomy data:** if you add new **`*.sql`** under **`seeds_pg/`** for production, treat it like a **one-off** or **idempotent** script and run **`scripts/db.sh --init --seed`** from CI or an operator workstation when you intend to apply it — or use a proper migration if the change is schema + data that must be versioned together.
+- **Reference / taxonomy data:** if you add new **`*.sql`** under **`seeds/`** for production, treat it like a **one-off** or **idempotent** script and run **`scripts/db.sh --init --seed`** from CI or an operator workstation when you intend to apply it — or use a proper migration if the change is schema + data that must be versioned together.
 
 **Normal operation:** After first bootstrap, the **database already has** your households, transactions, etc. Deploying a new **app** image does **not** wipe the DB; only **migrations** add/alter schema as needed.
 

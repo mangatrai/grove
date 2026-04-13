@@ -12,4 +12,4 @@ Review output before deleting: many entries are types or helpers marked “used 
 
 ## Historical migrations
 
-Pre-baseline incremental SQL lives in [`backend/db/migrations_archive/`](../backend/db/migrations_archive/) and is not executed by the app.
+Older incremental SQL (pre-baseline) may still appear in **git history**; it is not shipped or executed by the app. Active schema deltas live only under [`backend/db/migrations/`](../backend/db/migrations/).
