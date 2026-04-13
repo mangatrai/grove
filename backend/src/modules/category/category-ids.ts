@@ -33,6 +33,8 @@ export const DEFAULT_CATEGORY_IDS = {
   mobilityTaxi: "30000000-0000-0000-0000-000000000141",
   mobilityFuel: "30000000-0000-0000-0000-000000000154",
   mobilityEvCharging: "30000000-0000-0000-0000-000000000155",
+  /** Mobility > Parking & Tolls */
+  mobilityParkingAndTolls: "30000000-0000-0000-0000-000000000166",
   creditCardPayments: "30000000-0000-0000-0000-000000000006",
   loanPayments: "30000000-0000-0000-0000-000000000121",
   personalLending: "30000000-0000-0000-0000-000000000122",
@@ -58,6 +60,8 @@ export const DEFAULT_CATEGORY_IDS = {
   educationCamps: "30000000-0000-0000-0000-000000000135",
   homeAppliances: "30000000-0000-0000-0000-000000000136",
   shoppingElectronic: "30000000-0000-0000-0000-000000000142",
+  /** Shopping > Software (SaaS / subscriptions — global default category) */
+  shoppingSoftware: "30000000-0000-0000-0000-000000000165",
 
   loansAuto: "30000000-0000-0000-0000-000000000137",
   loansHeloc: "30000000-0000-0000-0000-000000000138",

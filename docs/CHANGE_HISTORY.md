@@ -20,6 +20,27 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-13
 
+### DB-003 — Global category Mobility > Parking & Tolls (`0014` + bootstrap seed)
+- **Type:** DB
+- **What:** Added default leaf **`Parking & Tolls`** under **`Mobility`** (`id` **`30000000-0000-0000-0000-000000000166`**). Migration **`0014_category_mobility_parking_tolls.sql`**; **`seeds_pg/0001_bootstrap.sql`**; **`fixtures/category-import/categories.csv`**; **`DEFAULT_CATEGORY_IDS.mobilityParkingAndTolls`**.
+- **Files:** `backend/db/migrations_pg/0014_category_mobility_parking_tolls.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+
+### DB-002 — Global category Shopping > Software (`0013` + bootstrap seed)
+- **Type:** DB
+- **What:** Added default leaf **`Software`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000165`**) for SaaS / subscription-style spend. Migration **`0013_category_shopping_software.sql`** inserts for existing DBs; **`backend/db/seeds_pg/0001_bootstrap.sql`** includes the row for fresh **`db:seed`**. **`fixtures/category-import/categories.csv`** and **`DEFAULT_CATEGORY_IDS.shoppingSoftware`** in **`category-ids.ts`** updated.
+- **Files:** `backend/db/migrations_pg/0013_category_shopping_software.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+
+### CR-094 — Budget page redesign: "Add a category" placement, icon nav, HelpIcon, CSS var colors
+- **Type:** CR / UX / Frontend
+- **What:** Aesthetic and UX improvements to `BudgetPage.tsx`.
+  1. **"Add a category" placement** — Moved the category picker (select + Add button) from `<tfoot>` *after* the Total row to *before* it. Total row now correctly sits as the last summary row, with "Add a category" appearing above it. This is the correct UX — users add categories, then see the total update.
+  2. **Progress bars use CSS vars** — `ProgressBar` now uses `var(--color-success)`, `var(--color-warning)`, `var(--color-danger)` instead of hard-coded hex (#16a34a, #d97706, #dc2626). Responds correctly to dark mode.
+  3. **KPI summary cards** — Each card gets a color-coded `borderTop` accent: neutral (budgeted), green (remaining) or red (over budget), and red on "Spent" when over budget. Labels use uppercase tracking for cleaner finance aesthetic.
+  4. **Chevron icon nav** — Month navigation `<` / `>` text replaced with `IconChevronLeft` / `IconChevronRight` icon buttons (`@tabler/icons-react`).
+  5. **HelpIcon on page title** — Inline help tooltip added next to "Budget" heading via `<HelpIcon>`. SetupForm description paragraph condensed to one line with a `<HelpIcon>` for full detail.
+  6. **Edit budget button** — Now includes `IconPencil` icon and cleaner inline-flex styling.
+- **Files:** `frontend/src/pages/BudgetPage.tsx`.
+
 ### CR-090 — Design system foundation: emerald + amber palette, dark mode, Inter font, @tabler/icons-react
 - **Type:** CR / UX / Frontend
 - **What:** Established a unified design token layer used by every subsequent Epic 12 phase.

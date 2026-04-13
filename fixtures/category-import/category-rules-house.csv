@@ -51,7 +51,8 @@ household,,,TARGET DEBIT CRD,contains,any,,Shopping > General merchandise,40,0.9
 household,,,AMAZON,contains,debit_only,,Shopping > General merchandise,60,0.80,true
 household,,,AMZN,contains,debit_only,,Shopping > General merchandise,60,0.80,true
 household,,,WALMART,contains,debit_only,,Shopping > General merchandise,60,0.80,true
-household,,,COSTCO,contains,debit_only,,Shopping > General merchandise,60,0.80,true
+household,,,COSTCO,contains,any,,Shopping > General merchandise,60,0.80,true
+household,,,SAMS CLUB,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,KROGER,contains,debit_only,,Shopping > Groceries,40,0.98,true
 household,,,HEB,contains,debit_only,,Shopping > Groceries,40,0.98,true
 household,,,APPLE,contains,debit_only,,Shopping > Electronic,40,0.98,true
@@ -64,6 +65,7 @@ household,,,EXXON,contains,debit_only,,Mobility > Fuel,90,0.75,true
 
 household,,,SOUTHWEST,contains,debit_only,,Travel > Airfare,60,0.90,true
 household,,,DELTA,contains,debit_only,,Travel > Airfare,60,0.90,true
+household,,,AMERICAN,contains,debit_only,,Travel > Airfare,60,0.90,true
 household,,,UNITED AIRLINES,contains,debit_only,,Travel > Airfare,60,0.90,true
 household,,,MARRIOTT,contains,debit_only,,Travel > Hotel,60,0.90,true
 household,,,HILTON,contains,debit_only,,Travel > Hotel,60,0.90,true
@@ -84,7 +86,7 @@ household,,,STONEBROOK PEDIATRIC,contains,debit_only,,Healthcare > Medical,50,0.
 
 household,,,BRGHTWHL,contains,any,,Education > Childcare,40,0.98,true
 household,,,PRIMROSE SCHOOL,contains,any,,Education > Childcare,40,0.98,true
-household,,,LEADERSHIP PREP,contains,any,,Education > Tuition,40,0.98,true
+household,,,LEADERSHIP,contains,any,,Education > Tuition,40,0.98,true
 household,,,ATT DES:,contains,debit_only,,Utilities > Mobile phone,40,0.95,true
 household,,,TMOBILE,contains,debit_only,,Utilities > Mobile phone,40,0.96,true
 household,,,ZELLE,contains,credit_only,,Income > Reimbursements,40,0.88,true
@@ -92,7 +94,7 @@ household,,,FRONTIER,contains,debit_only,,Utilities > Internet,40,0.95,true
 household,,,BKOFAMERICA ATM,contains,debit_only,,Transfers > Cash withdrawal,40,0.98,true
 
 household,,,INDIA BAZAAR,contains,debit_only,,Shopping > Groceries,40,0.97,true
-household,,,PATEL BROTHERS,contains,debit_only,,Shopping > Groceries,40,0.97,true
+household,,,PATEL BROTHERS,contains,any,,Shopping > Groceries,40,0.97,true
 household,,,SWADESHI PLAZA,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,HARELI FRESH MARKET,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,PY *HARELI,contains,debit_only,,Shopping > Groceries,40,0.97,true
@@ -116,7 +118,7 @@ household,,,H-E-B,contains,debit_only,,Shopping > Groceries,40,0.97,true
 
 household,,,HULU,contains,debit_only,,Entertainment > Streaming,40,0.97,true
 
-household,,,NTTA,contains,debit_only,,Mobility > Public Transit,40,0.97,true
+household,,,NTTA,contains,debit_only,,Mobility > Parking & Tolls,40,0.97,true
 household,,,STATE FARM,contains,debit_only,,Insurance > Auto,40,0.95,true
 
 household,,,GWALIA SWEETS,contains,debit_only,,Food > Dining out,40,0.95,true
@@ -132,12 +134,36 @@ household,,,GREAT CLIPS,contains,debit_only,,Shopping > Personal care,40,0.95,tr
 household,,,HANDELS,contains,debit_only,,Food > Snacks,40,0.95,true
 household,,,DESI BITES,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,PERC,contains,debit_only,,Food > Coffee,40,0.82,true
-household,,,AT HOME,contains,debit_only,,Home > Home improvement,40,0.85,true
-household,,,HOMEGOODS,contains,debit_only,,Home > Home improvement,40,0.96,true
-household,,,WORLD MARKET,contains,debit_only,,Home > Home improvement,40,0.92,true
+household,,,AT HOME,contains,any,,Home > Home improvement,40,0.85,true
+household,,,HOMEGOODS,contains,any,,Home > Home improvement,40,0.96,true
+household,,,WORLD MARKET,contains,any,,Home > Home improvement,40,0.92,true
 household,,,A2B,contains,debit_only,,Food > Dining out,40,0.90,true
 household,,,ROMA'S PIZZA,contains,debit_only,,Food > Dining out,40,0.95,true
-household,,,THE HOME DEPOT,contains,debit_only,,Home > Home improvement,40,0.97,true
-household,,,SHERWIN-WILLIAMS,contains,debit_only,,Home > Home improvement,40,0.96,true
+household,,,THE HOME DEPOT,contains,any,,Home > Home improvement,40,0.97,true
+household,,,SHERWIN-WILLIAMS,contains,any,,Home > Home improvement,40,0.96,true
 household,,,BIKANERVALA,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,JUPITER HOUSE,contains,debit_only,,Food > Coffee,40,0.92,true
+
+household,,,ATMOS ENERGY,contains,debit_only,,Utilities > Energy,40,0.96,true
+household,,,CHATGPT,contains,debit_only,,Shopping > Software,40,0.96,true
+household,,,BRAUMS,contains,debit_only,,Shopping > Groceries,40,0.95,true
+household,,,Merchant Offers Credit,contains,credit_only,,Transfers > Transfers in,40,0.92,true
+household,,,DESI DISTRICT,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,THE HUMAN BEAN,contains,debit_only,,Food > Coffee,40,0.95,true
+household,,,CLAUDE,contains,debit_only,,Shopping > Software,40,0.90,true
+household,,,CITY OF FRISCO,contains,debit_only,,Utilities > City Water,40,0.96,true
+household,,,ADT SECURITY,contains,debit_only,,Shopping > Software,40,0.88,true
+household,,,QUELL PEST CONTROL,contains,debit_only,,Home > Maintenance,40,0.94,true
+household,,,CURSOR,contains,debit_only,,Shopping > Software,40,0.96,true
+household,,,OLD NAVY,contains,debit_only,,Shopping > Clothing,40,0.96,true
+household,,,HOT BREADS,contains,debit_only,,Food > Snacks,40,0.95,true
+household,,,ALLSTATE,contains,debit_only,,Insurance > Home,40,0.94,true
+household,,,ALLST,contains,debit_only,,Insurance > Auto,40,0.88,true
+household,,,GEICO,contains,debit_only,,Insurance > Auto,40,0.96,true
+household,,,GRASSCUTTS,contains,debit_only,,Home > Maintenance,40,0.90,true
+household,,,AQUA TOTS,contains,debit_only,,Education > Activities,40,0.94,true
+household,,,ASIAN POT EXPRESS,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,RIVIAN,contains,debit_only,,Mobility > EV Charging,40,0.93,true
+household,,,AUTOPAY,contains,credit_only,,Transfers > Transfers in,40,0.85,true
+household,,,CORNER BAKERY,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,COSERV,contains,debit_only,,Utilities > Energy,40,0.96,true

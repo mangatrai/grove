@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { IconChevronLeft, IconChevronRight, IconPencil } from "@tabler/icons-react";
 
 import { apiJson, useAuthToken } from "../api";
+import { HelpIcon } from "../components/HelpIcon";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -193,9 +195,9 @@ function budgetCategoriesToGroups(
 
 function ProgressBar({ percent }: { percent: number }) {
   const clamped = Math.min(percent, 100);
-  const color = percent > 100 ? "#dc2626" : percent >= 80 ? "#d97706" : "#16a34a";
+  const color = percent > 100 ? "var(--color-danger)" : percent >= 80 ? "var(--color-warning)" : "var(--color-success)";
   return (
-    <div style={{ background: "#e2e8f0", borderRadius: 4, height: 8, overflow: "hidden" }}>
+    <div style={{ background: "var(--color-border)", borderRadius: 4, height: 8, overflow: "hidden" }}>
       <div style={{ width: `${clamped}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
     </div>
   );
@@ -404,14 +406,21 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
   const colW = { cat: "40%", ref: "20%", budget: "25%", act: "15%" };
   const hintStyle: React.CSSProperties = { fontSize: "0.78rem", color: "var(--color-text-muted)" };
 
+  const helpText = dataAsOf
+    ? `Pre-filled from actual spend in ${monthLabel(dataAsOf)}. Expand a row to budget individual sub-categories, or keep the parent total.`
+    : "No prior spend data found. Add categories below and set your budgets manually.";
+
   return (
     <div>
-      <p style={{ color: "var(--color-text-muted)", marginTop: 0, fontSize: 14 }}>
-        {dataAsOf
-          ? <>Pre-filled from actual spend in <strong>{monthLabel(dataAsOf)}</strong>. Expand a row to budget individual sub-categories, or keep the parent total.</>
-          : <>No prior spend data found. Add categories and set your budgets.</>
-        }
-      </p>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.75rem" }}>
+        <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+          {dataAsOf
+            ? <>Pre-filled from <strong>{monthLabel(dataAsOf)}</strong> spend.</>
+            : <>No prior spend — add categories manually.</>
+          }
+        </span>
+        <HelpIcon label={helpText} />
+      </div>
 
       <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
         <colgroup>
@@ -536,14 +545,8 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
           })}
         </tbody>
         <tfoot>
-          <tr style={{ borderTop: "2px solid var(--color-border)", fontWeight: 600 }}>
-            <td style={{ padding: "0.75rem 0.5rem 0.5rem 0" }}>Total</td>
-            <td />
-            <td style={{ padding: "0.75rem 0.5rem 0.5rem", textAlign: "right" }}>{fmtUSD(total)}</td>
-            <td />
-          </tr>
           <tr>
-            <td colSpan={4} style={{ paddingTop: "0.75rem" }}>
+            <td colSpan={4} style={{ paddingTop: "0.75rem", paddingBottom: "0.25rem" }}>
               {availableToAdd.length > 0 && (
                 <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                   <select
@@ -587,6 +590,12 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
                 </div>
               )}
             </td>
+          </tr>
+          <tr style={{ borderTop: "2px solid var(--color-border)", fontWeight: 600 }}>
+            <td style={{ padding: "0.75rem 0.5rem 0.5rem 0" }}>Total</td>
+            <td />
+            <td style={{ padding: "0.75rem 0.5rem 0.5rem", textAlign: "right" }}>{fmtUSD(total)}</td>
+            <td />
           </tr>
         </tfoot>
       </table>
@@ -642,18 +651,18 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
         {(
           [
-            { label: "Budgeted", value: fmtUSD(summary.totalBudgeted), red: false },
-            { label: "Spent", value: fmtUSD(summary.totalSpent), red: false },
+            { label: "Budgeted", value: fmtUSD(summary.totalBudgeted), accent: "var(--color-text-muted)" },
+            { label: "Spent", value: fmtUSD(summary.totalSpent), accent: summary.totalSpent > summary.totalBudgeted ? "var(--color-danger)" : "var(--color-text)" },
             {
               label: summary.remaining >= 0 ? "Remaining" : "Over budget",
               value: fmtUSD(Math.abs(summary.remaining)),
-              red: summary.remaining < 0
+              accent: summary.remaining < 0 ? "var(--color-danger)" : "var(--color-success)"
             }
           ] as const
-        ).map(({ label, value, red }) => (
-          <div key={label} className="card" style={{ marginBottom: 0, textAlign: "center" }}>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4 }}>{label}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: red ? "#dc2626" : "var(--color-text)" }}>{value}</div>
+        ).map(({ label, value, accent }) => (
+          <div key={label} className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${accent}` }}>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{value}</div>
           </div>
         ))}
       </div>
@@ -698,7 +707,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
                   </td>
                   <td style={{ padding: "0.6rem 0.75rem", textAlign: "right" }}>{fmtUSD(cat.spent)}</td>
                   <td style={{ padding: "0.6rem 0.75rem", textAlign: "right", color: "var(--color-text-muted)" }}>{fmtUSD(cat.budgeted)}</td>
-                  <td style={{ padding: "0.6rem 0.25rem", textAlign: "right", fontWeight: 600, color: isOver ? "#dc2626" : "#16a34a" }}>
+                  <td style={{ padding: "0.6rem 0.25rem", textAlign: "right", fontWeight: 600, color: isOver ? "var(--color-danger)" : "var(--color-success)" }}>
                     {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
                   </td>
                 </tr>
@@ -719,8 +728,21 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
         <button
           type="button"
           onClick={onEdit}
-          style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 6, padding: "0.4rem 1rem", cursor: "pointer", fontSize: 14 }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "none",
+            border: "1px solid var(--color-border)",
+            borderRadius: 6,
+            padding: "0.4rem 1rem",
+            cursor: "pointer",
+            fontSize: 14,
+            color: "var(--color-text)",
+            fontWeight: 500
+          }}
         >
+          <IconPencil size={14} />
           Edit budget
         </button>
       </div>
@@ -730,25 +752,26 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
 
 // ── Nav button ────────────────────────────────────────────────────────────────
 
-function NavBtn({ onClick, label, title }: { onClick: () => void; label: string; title: string }) {
+function NavBtn({ onClick, direction, title }: { onClick: () => void; direction: "prev" | "next"; title: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
       style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         background: "var(--color-surface)",
         border: "1px solid var(--color-border)",
         borderRadius: 6,
-        padding: "0.3rem 0.75rem",
+        padding: "0.3rem 0.5rem",
         cursor: "pointer",
-        fontSize: 15,
-        fontWeight: 700,
-        color: "var(--color-text)",
+        color: "var(--color-text-secondary)",
         lineHeight: 1
       }}
     >
-      {label}
+      {direction === "prev" ? <IconChevronLeft size={16} /> : <IconChevronRight size={16} />}
     </button>
   );
 }
@@ -849,11 +872,14 @@ export function BudgetPage() {
     <div style={{ padding: "1.5rem", maxWidth: 860, margin: "0 auto" }}>
       {/* Page header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem", gap: "0.75rem", flexWrap: "wrap" }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Budget</h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <NavBtn onClick={() => handleMonthNav(-1)} label="&lt;" title="Previous month" />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Budget</h1>
+          <HelpIcon label="Set monthly spending targets per category. In setup mode, amounts are pre-filled from recent spend. Switch to Progress to track actuals vs. budget in real time." />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+          <NavBtn onClick={() => handleMonthNav(-1)} direction="prev" title="Previous month" />
           <span style={{ fontWeight: 600, minWidth: 150, textAlign: "center", fontSize: 15 }}>{monthLabel(month)}</span>
-          <NavBtn onClick={() => handleMonthNav(1)} label="&gt;" title="Next month" />
+          <NavBtn onClick={() => handleMonthNav(1)} direction="next" title="Next month" />
         </div>
       </div>
 
