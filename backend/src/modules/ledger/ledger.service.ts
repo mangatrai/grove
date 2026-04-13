@@ -114,7 +114,7 @@ const NEEDS_REVIEW_PREDICATE = `(
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
       AND (
-        (ri.type = 'reconciliation_mismatch' AND ri.target_id = tc.id)
+        (ri.type IN ('reconciliation_mismatch', 'unknown_category', 'transfer_ambiguity') AND ri.target_id = tc.id)
         OR (
           ri.type = 'duplicate_ambiguity'
           AND tc.source_ref IS NOT NULL
@@ -130,7 +130,7 @@ const OPEN_REVIEW_ITEMS_SUBQUERY = `(
     WHERE ri.household_id = tc.household_id
       AND ri.status IN ('open', 'in_review')
       AND (
-        (ri.type = 'reconciliation_mismatch' AND ri.target_id = tc.id)
+        (ri.type IN ('reconciliation_mismatch', 'unknown_category', 'transfer_ambiguity') AND ri.target_id = tc.id)
         OR (
           ri.type = 'duplicate_ambiguity'
           AND tc.source_ref IS NOT NULL
@@ -274,20 +274,26 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
   }
   if (filters.resolutionTypes && filters.resolutionTypes.length > 0) {
     const ph = filters.resolutionTypes.map(() => "?").join(", ");
-    parts.push(`EXISTS (
+    // Exact duplicate rows (status = 'duplicate') are created by fingerprint deduplication and
+    // carry no resolution_item — they are surfaced in Needs Review via status alone. When the
+    // caller filters by duplicate_ambiguity, include them so the "Duplicate" filter shows both
+    // exact duplicates and near-duplicates together.
+    const includeExactDuplicates = filters.resolutionTypes.includes("duplicate_ambiguity");
+    const exactDupClause = includeExactDuplicates ? "tc.status = 'duplicate' OR " : "";
+    parts.push(`(${exactDupClause}EXISTS (
       SELECT 1 FROM resolution_item ri
       WHERE ri.household_id = tc.household_id
         AND ri.status IN ('open', 'in_review')
         AND ri.type IN (${ph})
         AND (
-          (ri.type = 'reconciliation_mismatch' AND ri.target_id = tc.id)
+          (ri.type IN ('reconciliation_mismatch', 'unknown_category', 'transfer_ambiguity') AND ri.target_id = tc.id)
           OR (
             ri.type = 'duplicate_ambiguity'
             AND tc.source_ref IS NOT NULL
             AND tc.source_ref = ('raw:' || ri.target_id)
           )
         )
-    )`);
+    ))`);
     params.push(...filters.resolutionTypes);
   }
   if (filters.search !== undefined && filters.search.trim() !== "") {

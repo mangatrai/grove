@@ -2009,6 +2009,64 @@ describe("transactions command center (Epic 11.2)", () => {
     expect(catOnly.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(true);
   });
 
+  it("CR-096: resolutionType=duplicate_ambiguity includes status=duplicate canonical rows (no resolution_item required)", async () => {
+    // Regression test for CR-096: exact duplicates (status='duplicate') must appear when filtering
+    // by resolutionType=duplicate_ambiguity, even when the source_ref→resolution_item join fails or
+    // the resolution_item has already been closed. The fix adds `tc.status = 'duplicate' OR` to the
+    // SQL predicate so the status alone qualifies the row.
+    const login = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const householdId = (await sqlStmt(
+      `SELECT household_id FROM app_user WHERE email = ?`
+    ).get("owner@example.com")) as { household_id: string };
+
+    // Insert a canonical row with status='duplicate' and NO resolution_item — simulating
+    // the scenario where the RI was already resolved/closed or is absent.
+    const txnId = crypto.randomUUID();
+    const fp = crypto.randomBytes(32).toString("hex");
+    const tag = `cr096-${Date.now()}`;
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+          merchant, memo, transfer_group_id, fingerprint, source_ref, status)
+       VALUES (?, ?, ?, NULL, ?, '2026-01-15', -42, 'debit', ?, NULL, NULL, ?, 'raw:cr096test', 'duplicate')`
+    ).run(
+      txnId,
+      householdId.household_id,
+      SEED_BOA_CHECKING,
+      "30000000-0000-0000-0000-000000000004",
+      tag,
+      fp
+    );
+
+    // 1. Verify the row surfaces under generic needsReview (status NOT IN posted/trashed).
+    const allReview = await request(app)
+      .get(`/transactions?needsReview=true&limit=200&search=${encodeURIComponent(tag)}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(allReview.status).toBe(200);
+    expect(allReview.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(true);
+
+    // 2. Verify the row appears when resolutionType=duplicate_ambiguity (the CR-096 fix).
+    const dupFilter = await request(app)
+      .get(`/transactions?needsReview=true&resolutionType=duplicate_ambiguity&limit=200&search=${encodeURIComponent(tag)}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(dupFilter.status).toBe(200);
+    expect(dupFilter.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(
+      true,
+      "status=duplicate canonical must appear when resolutionType=duplicate_ambiguity even without a resolution_item"
+    );
+
+    // 3. Verify the row does NOT appear when filtering by a non-matching resolutionType.
+    //    reconciliation_mismatch won't match a status=duplicate row (no RI at all in this test).
+    const reconFilter = await request(app)
+      .get(`/transactions?needsReview=true&resolutionType=reconciliation_mismatch&limit=200&search=${encodeURIComponent(tag)}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(reconFilter.status).toBe(200);
+    expect(reconFilter.body.transactions.some((t: { id: string }) => t.id === txnId)).toBe(false);
+  });
+
   it("lists open review items with file/raw context via GET /transactions/:id/open-review", async () => {
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",
@@ -2752,7 +2810,10 @@ describe("cash summary (reports)", () => {
     expect(seg.outflows).toBe(250.5);
   });
 
-  it("excludes transfer_ambiguity rows from cash summary aggregation", async () => {
+  it("excludes confirmed transfer pairs (transfer_group_id) but includes transfer_ambiguity rows from cash summary", async () => {
+    // transfer_ambiguity resolution items are intentionally NOT excluded from cash summary;
+    // both legs of an internal transfer net to zero in household-level reporting anyway.
+    // Only confirmed transfer pairs (transfer_group_id IS NOT NULL) are excluded.
     const login = await request(app).post("/auth/login").send({
       email: "owner@example.com",
       password: "ChangeMe123!"
@@ -2770,12 +2831,16 @@ describe("cash summary (reports)", () => {
 
     const includeId = crypto.randomUUID();
     const ambiguousId = crypto.randomUUID();
+    const confirmedTransferId = crypto.randomUUID();
+    const tGroupId = crypto.randomUUID();
+    // Plain grocery transaction — always included
     await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
          merchant, memo, transfer_group_id, fingerprint, source_ref, status
        ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Groceries', NULL, NULL, ?, ?, 'posted')`
     ).run(includeId, householdId, accountId, asOf, -50, crypto.randomBytes(32).toString("hex"), "test:include");
+    // Suspected-transfer row (transfer_ambiguity RI, no transfer_group_id) — included in cash summary
     await sqlStmt(
       `INSERT INTO transaction_canonical (
          id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
@@ -2789,8 +2854,15 @@ describe("cash summary (reports)", () => {
       crypto.randomUUID(),
       householdId,
       ambiguousId,
-      JSON.stringify({ kind: "transfer_ambiguity", note: "cash summary exclusion regression guard" })
+      JSON.stringify({ kind: "transfer_ambiguity" })
     );
+    // Confirmed transfer row (transfer_group_id IS NOT NULL) — excluded from cash summary
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, NULL, ?, ?, 'debit', 'Confirmed transfer', NULL, ?, ?, ?, 'posted')`
+    ).run(confirmedTransferId, householdId, accountId, asOf, -999, tGroupId, crypto.randomBytes(32).toString("hex"), "test:confirmed");
 
     const res = await request(app)
       .get(`/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&accountId=${accountId}`)
@@ -2798,9 +2870,10 @@ describe("cash summary (reports)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.household.inflows).toBe(0);
-    expect(res.body.household.outflows).toBe(50);
-    expect(res.body.household.net).toBe(-50);
-    expect(res.body.household.transactionCount).toBe(1);
+    // Both the grocery ($50) and the suspected-transfer ($700) are included; confirmed transfer ($999) is excluded.
+    expect(res.body.household.outflows).toBe(750);
+    expect(res.body.household.net).toBe(-750);
+    expect(res.body.household.transactionCount).toBe(2);
   });
 
   it("returns byCategory and monthlyOutflowsByCategory when categoryBreakdown=true", async () => {

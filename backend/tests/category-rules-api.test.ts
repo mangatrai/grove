@@ -172,7 +172,9 @@ describe("category rules API and classification explainability", () => {
     expect(meta.confidence).toBeCloseTo(0.99);
   });
 
-  it("returns explainability metadata for unknown category queue items when available", async () => {
+  it("returns explainability metadata for uncategorized transactions via ledger classificationMeta", async () => {
+    // Uncategorized imports are surfaced in Needs Review via category_id IS NULL (not via unknown_category
+    // resolution items). The classificationMeta.source field carries the explainability data.
     const token = await loginAndGetToken();
     const sessionId = await createSessionWithCsv(
       token,
@@ -185,18 +187,22 @@ describe("category rules API and classification explainability", () => {
       .send({});
     expect(canRes.status).toBe(200);
 
-    const queueRes = await request(app)
-      .get("/resolution?status=all&type=unknown_category")
+    // The transaction appears in the ledger under needsReview (category_id IS NULL).
+    // Use the session filter to scope the search to this import only.
+    const ledgerRes = await request(app)
+      .get(`/transactions?sessionId=${sessionId}&needsReview=true`)
       .set("authorization", `Bearer ${token}`);
-    expect(queueRes.status).toBe(200);
-    const row = (
-      queueRes.body.items as Array<{
-        targetId: string;
-        context?: { raw?: { description?: string | null }; classification?: { source?: string } };
+    expect(ledgerRes.status).toBe(200);
+    const txn = (
+      ledgerRes.body.transactions as Array<{
+        merchant: string | null;
+        categoryId: string | null;
+        classificationMeta: { source: string } | null;
       }>
-    ).find((x) => x.context?.raw?.description?.includes("MYSTERY UNSORTED CHARGE"));
-    expect(row).toBeTruthy();
-    expect(row?.context?.classification?.source).toBe("none");
+    ).find((t) => t.merchant?.includes("MYSTERY UNSORTED CHARGE") || t.merchant?.toUpperCase().includes("MYSTERY"));
+    expect(txn).toBeTruthy();
+    expect(txn?.categoryId).toBeNull();
+    expect(txn?.classificationMeta?.source).toBe("none");
   });
 
   it("creates multiple rules from comma-separated patterns", async () => {

@@ -22,7 +22,9 @@ import {
 
 const LEDGER_RESOLUTION_TYPES = [
   "duplicate_ambiguity",
-  "reconciliation_mismatch"
+  "reconciliation_mismatch",
+  "unknown_category",
+  "transfer_ambiguity"
 ] as const;
 
 const querySchema = z.object({
