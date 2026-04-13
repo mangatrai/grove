@@ -18,6 +18,56 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-13
+
+### CR-090 — Design system foundation: emerald + amber palette, dark mode, Inter font, @tabler/icons-react
+- **Type:** CR / UX / Frontend
+- **What:** Established a unified design token layer used by every subsequent Epic 12 phase.
+  1. **Color palette** — Replaced legacy sky-blue (#0284c7) with **emerald green** primary (#22c55e light / #4ade80 dark mode) + **amber/orange** complement (#f59e0b). Teal was an initial choice but discarded after dark-mode review (too close in hue to the dark navy sidebar, low contrast). Emerald sits at hue ~145° vs navy ~215° — clear separation and vibrant on both dark and light backgrounds.
+  2. **CSS custom properties** — Full redesign of `:root` block. New tokens: `--color-accent`, `--color-accent-bright`, `--color-accent-hover`, `--color-accent-subtle`, `--color-warm`, `--color-warm-dark`, `--color-warm-subtle`, `--color-sidebar-*`, `--color-surface-alt`, `--color-text-secondary`, plus semantic success/warning/danger subtle tokens.
+  3. **Dark mode** — `[data-mantine-color-scheme="dark"]` selector block covers all surfaces, inputs, tables, pickers, toolbars, dropdowns, modals, and the home-page hero. Persisted via `localStorageColorSchemeManager` (key: `hf_color_scheme`).
+  4. **Mantine theme** (`frontend/src/theme.ts` — new) — `primaryColor: 'green'`, `primaryShade: {light:7, dark:4}`, Inter font, `defaultRadius: 'md'`, component defaults (Button sm, ActionIcon subtle, Modal centered+blur, Tooltip withArrow+multiline).
+  5. **Inter font** — Added to Google Fonts preload in `index.html` alongside DM Sans.
+  6. **@tabler/icons-react** — Installed as frontend dependency (natural Mantine companion).
+- **Files:** `frontend/src/index.css`, `frontend/src/theme.ts` (new), `frontend/src/main.tsx`, `frontend/index.html`, `frontend/package.json`.
+
+### CR-091 — Shared UI components: HelpIcon, PageHeader, SectionCard
+- **Type:** CR / UX / Frontend
+- **What:** Three reusable components that enforce design consistency across all pages going forward.
+  - **`HelpIcon`** (`frontend/src/components/HelpIcon.tsx`) — `IconInfoCircle` wrapped in Mantine `Tooltip`. Replaces verbose inline `<p class="muted">` help paragraphs with a compact `ⓘ` icon badge. Usage: `<HelpIcon label="..." />` next to any label or heading.
+  - **`PageHeader`** (`frontend/src/components/PageHeader.tsx`) — Consistent `h1` + optional subtitle + optional `HelpIcon` + right-aligned action slot. Eliminates per-page ad-hoc heading rows.
+  - **`SectionCard`** (`frontend/src/components/SectionCard.tsx`) — Titled `.card` wrapper with optional `HelpIcon` and header action slot. Replaces ad-hoc `<div class="card"> + <h2>` combinations.
+- **Files:** `frontend/src/components/HelpIcon.tsx` (new), `frontend/src/components/PageHeader.tsx` (new), `frontend/src/components/SectionCard.tsx` (new), `frontend/src/index.css` (PageHeader + SectionCard CSS added).
+
+### CR-092 — Home page redesign: simplified auth card + hero pills
+- **Type:** CR / UX / Frontend
+- **What:** Rebuilt the guest landing page auth card and hero section.
+  1. **Auth card** — Removed the 3-tab (Sign In / Sign Up / Forgot Password) Mantine Tabs that felt clunky. Reverted to a single clean sign-in form. Below the form: a compact footer row with `"New here? Request access"` and `"Forgot password?"` as lightweight mailto links — no disabled stub forms, no redundant UI. Proper CR stubs for backend sign-up and password-reset flows are tracked in the backlog (CR-095a, CR-095b).
+  2. **Hero** — Added a fourth bullet ("Budgets & net worth"). Added a feature-pill row at the bottom of the hero (Cash flow · Budgets · Net worth · Payslips · Imports · Categories) in subtle emerald-green on dark background.
+  3. **Dark mode home page** — Explicit `[data-mantine-color-scheme="dark"]` override for `.home-landing` gradient (both sides fully dark). Auth card gets dark-glass treatment (dark navy background, subtle white border) so it stands out clearly against the very dark page background.
+- **Files:** `frontend/src/pages/HomePage.tsx`, `frontend/src/index.css`.
+
+### CR-093 — Navigation redesign: dark navy sidebar with icons, slim dark topbar, dark mode toggle
+- **Type:** CR / UX / Frontend
+- **What:** Full visual overhaul of the app shell navigation.
+  1. **Sidebar** — Background changed from white to dark navy (`#1a2540`). All six nav items now use `@tabler/icons-react` icons (Home → `IconHome`, Budget → `IconChartBar`, Net Worth → `IconScale`, Transactions → `IconReceipt`, Payslips → `IconFileText`, Categories → `IconTag`). Active state: emerald-green left border + emerald text + subtle emerald bg. Hover: semi-transparent white overlay. Settings moved from topbar user-menu only → also pinned as a bottom nav item (`IconSettings`). Collapsed state: icons only (letters removed). Collapse button uses `IconChevronLeft/Right`.
+  2. **Topbar** — Background changed from white to dark navy (matches sidebar top). **Dark mode toggle** added (`IconSun` / `IconMoon`, hooks into `useMantineColorScheme()`). **Import button** restyled: emerald-green filled compact button with `IconUpload` icon. Mobile hamburger replaced with `IconMenu2`. User menu trigger: semi-transparent white pill on dark background. User dropdown: dark-glass treatment (dark navy, subtle borders).
+- **Files:** `frontend/src/layout/AppSidebar.tsx`, `frontend/src/layout/AppTopBar.tsx`, `frontend/src/index.css`.
+
+### Backlog CRs created (from Epic 12 Phase 1–4)
+- **CR-095a** — Backend: User sign-up endpoint + household invitation flow (Medium priority, High complexity)
+- **CR-095b** — Backend: Forgot password / password reset email flow (Low priority, Medium complexity)
+- **CR-097a** — Payslip: Bulk PDF import (multiple files in one session) (Medium, Medium)
+- **CR-097b** — Payslip: YTD analytics dashboard — income trends, tax rate history (Low, Medium)
+- **CR-097c** — Payslip: Employer management from payslip list (currently only in Settings) (Low, Low)
+- **CR-101** — Budget: Rollover unspent budget to next month (Low, Medium)
+- **CR-102** — Dashboard: Spending alerts / push notifications (Low, High)
+- **CR-103** — Transactions: Bulk recategorization (Medium, Low)
+- **CR-104** — Net worth: Goal tracking — target net worth by date (Low, Medium)
+- **CR-105** — Mobile: PWA manifest + install prompt (Low, Low)
+
+---
+
 ## 2026-04-12
 
 ### DOC-081 — Full doc audit: budget API gap, CLAUDE.md stale module table + schema, import summary CR-080 accuracy
