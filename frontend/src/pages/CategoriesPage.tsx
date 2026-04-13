@@ -18,13 +18,6 @@ type HierarchyRow =
   | { kind: "parent"; category: CategoryRow }
   | { kind: "child"; category: CategoryRow; parent: CategoryRow };
 
-function sourceLabel(c: CategoryRow): string {
-  if (c.householdScoped) {
-    return "Added by you";
-  }
-  return c.isDefault ? "Built-in template" : "Built-in";
-}
-
 function SourceBadge({ c }: { c: CategoryRow }) {
   const household = c.householdScoped;
   return (
@@ -440,21 +433,19 @@ export function CategoriesPage() {
                     <tr key={c.id} className="categories-page__row categories-page__row--child">
                       <td>{p.name}</td>
                       <td className="categories-page__category-cell categories-page__category-cell--child">{c.name}</td>
-                      <td className="muted">{sourceLabel(c)}</td>
+                      <td><SourceBadge c={c} /></td>
                       <td>
-                        <span style={{ display: "inline-flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                        <span style={{ display: "inline-flex", gap: "0.35rem" }}>
                           {showEditForRow(row) ? (
-                            <button type="button" className="secondary" onClick={() => openEdit(row)}>
-                              Edit
+                            <button type="button" onClick={() => openEdit(row)} title="Edit" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}>
+                              <IconPencil size={13} />
                             </button>
                           ) : null}
                           {c.householdScoped ? (
-                            <button type="button" className="secondary" onClick={() => requestDeleteCategory(c.id)}>
-                              Delete
+                            <button type="button" onClick={() => requestDeleteCategory(c.id)} title="Delete" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}>
+                              <IconTrash size={13} />
                             </button>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
+                          ) : null}
                         </span>
                       </td>
                     </tr>

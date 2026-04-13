@@ -58,14 +58,14 @@
 /* ─── Design System: Dark mode ──────────────────────────────────────────── */
 [data-mantine-color-scheme="dark"] {
   --color-text: #e2e8f0;
-  --color-text-muted: #94a3b8;
-  --color-text-secondary: #94a3b8;
+  --color-text-muted: #8899b4;
+  --color-text-secondary: #8899b4;
 
-  --color-border: #2d3748;
-  --color-surface: #1a202c;
-  --color-surface-alt: #212838;
-  --color-page-bg: #0f1117;
-  --color-header-bg: #111827;
+  --color-border: #2d3a52;
+  --color-surface: #1a2236;
+  --color-surface-alt: #1f2940;
+  --color-page-bg: #0f1420;
+  --color-header-bg: #111d30;
 
   --color-accent: #4ade80;
   --color-accent-bright: #86efac;
@@ -640,25 +640,40 @@ a {
 .home-landing {
   position: relative;
   min-height: 100vh;
+  background: #f0f4f8;
   overflow: hidden;
-  background: linear-gradient(165deg, #0f172a 0%, #1e3a5f 42%, #e8edf3 42%, #f1f5f9 100%);
 }
 
+/* Left two-thirds: dark navy panel — no diagonal, clean vertical split */
+.home-landing::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 42%;
+  background: linear-gradient(155deg, #091525 0%, #1e3a5f 70%, #153354 100%);
+  z-index: 0;
+}
+
+/* Subtle radial glow on the left panel */
 .home-landing__glow {
   pointer-events: none;
   position: absolute;
-  inset: -20% -10% auto auto;
-  width: min(70vw, 520px);
-  height: min(70vw, 520px);
+  top: -10%;
+  left: 5%;
+  width: min(50vw, 480px);
+  height: min(50vw, 480px);
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, rgba(56, 189, 248, 0.35), transparent 55%);
-  filter: blur(2px);
+  background: radial-gradient(circle at 40% 40%, rgba(20, 184, 166, 0.18), transparent 60%);
+  filter: blur(40px);
+  z-index: 0;
 }
 
 .home-landing__wrap {
   position: relative;
   z-index: 1;
-  max-width: 1080px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 1.5rem 1.25rem 2.5rem;
 }
@@ -772,20 +787,25 @@ a {
 .home-landing__aside {
   width: 100%;
   max-width: 420px;
+  padding-top: 1.5rem;
 }
 
 @media (min-width: 900px) {
   .home-landing__aside {
     justify-self: end;
+    padding-top: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: calc(100vh - 5rem);
   }
 }
 
 .home-landing__card {
   margin-bottom: 0.75rem;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 22px 50px -20px rgba(15, 23, 42, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-  backdrop-filter: blur(8px);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: #fff;
+  box-shadow: 0 8px 32px -8px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(148, 163, 184, 0.12);
 }
 
 .home-landing__card-title {
@@ -887,7 +907,14 @@ a {
 
 @media (max-width: 899px) {
   .home-landing {
-    background: linear-gradient(180deg, #0f172a 0%, #1e3a5f 38%, #e8edf3 38%);
+    background: linear-gradient(180deg, #091525 0%, #1e3a5f 100%);
+  }
+  .home-landing::before {
+    display: none;
+  }
+  .home-landing__card {
+    background: rgba(255, 255, 255, 0.97);
+    box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.35);
   }
 
   .home-landing__aside {
@@ -2456,15 +2483,19 @@ select.ledger-category-select {
 
 /* ─── Dark mode surface overrides ───────────────────────────────────────── */
 
-/* Home page: entirely dark in dark mode — both sides */
+/* Home page dark mode: right panel uses dark surface, left panel slightly lighter navy */
 [data-mantine-color-scheme="dark"] .home-landing {
-  background: linear-gradient(165deg, #0b0f1a 0%, #111827 42%, #0f1117 42%, #080b12 100%);
+  background: #0d1117;
+}
+
+[data-mantine-color-scheme="dark"] .home-landing::before {
+  background: linear-gradient(155deg, #060d18 0%, #111e33 70%, #0a1928 100%);
 }
 
 [data-mantine-color-scheme="dark"] .home-landing__card {
-  background: rgba(26, 37, 64, 0.98);
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
+  background: #161d2e;
+  border-color: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06) inset;
 }
 
 [data-mantine-color-scheme="dark"] .home-landing__auth-links {
@@ -2504,13 +2535,18 @@ select.ledger-category-select {
 
 @media (max-width: 899px) {
   [data-mantine-color-scheme="dark"] .home-landing {
-    background: linear-gradient(180deg, #0b0f1a 0%, #111827 38%, #0f1117 38%);
+    background: linear-gradient(180deg, #060d18 0%, #111e33 100%);
+  }
+  [data-mantine-color-scheme="dark"] .home-landing__card {
+    background: #1a2235;
+    box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.5);
   }
 }
 
 [data-mantine-color-scheme="dark"] .card {
   background: var(--color-surface);
   border-color: var(--color-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
 }
 
 [data-mantine-color-scheme="dark"] th {

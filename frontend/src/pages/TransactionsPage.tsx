@@ -1138,9 +1138,7 @@ export function TransactionsPage() {
               background: "#fffbeb"
             }}
           >
-            <strong>{resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger}</strong> open near-duplicate item(s)
-            are tied to import data only (no ledger row) — they do not appear in this table.{" "}
-            <Link to="/resolution-queue">Open full resolution queue</Link> to triage.
+            <strong>{resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger}</strong> near-duplicate item(s) flagged during import have no matching ledger row — they can be ignored or resolved by re-importing.
           </div>
         ) : null}
         <div className="transactions-toolbar__row">

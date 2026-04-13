@@ -40,6 +40,31 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **What:** Added default leaf **`Software`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000165`**) for SaaS / subscription-style spend. Migration **`0013_category_shopping_software.sql`** inserts for existing DBs; **`backend/db/seeds_pg/0001_bootstrap.sql`** includes the row for fresh **`db:seed`**. **`fixtures/category-import/categories.csv`** and **`DEFAULT_CATEGORY_IDS.shoppingSoftware`** in **`category-ids.ts`** updated.
 - **Files:** `backend/db/migrations_pg/0013_category_shopping_software.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
 
+### CR-101 — Home page redesign: remove diagonal cut, two-panel split, dark mode contrast
+- **Type:** CR / UX / Frontend
+- **What:**
+  1. **Diagonal gradient removed** — the `linear-gradient(165deg, …42%…42%…)` hard-angle cut across the hero caused bullet text (Categories & rules, Budgets & net worth) to land on the light side and become invisible. Replaced with a CSS `::before` pseudo-element that covers the left 58% of the viewport in a solid dark navy gradient — true vertical split, no diagonal.
+  2. **Mobile** — on narrow screens the `::before` panel is hidden; the whole background becomes the navy gradient (hero text always on dark).
+  3. **Auth card** — removed `backdrop-filter: blur` and glass effect; card is now a clean `#fff` with a subtle box-shadow, matching polished SaaS finance app conventions.
+  4. **Dark mode home** — both panels switch to a dark blue-charcoal palette; right panel uses `#161d2e` instead of translucent glass.
+  5. **Dark mode dashboard contrast** — surface variables shifted from near-identical gray to slightly blue-tinted navy (`--color-surface: #1a2236`, `--color-surface-alt: #1f2940`, `--color-border: #2d3a52`) so cards visually separate from the page background. Dark mode card gets a subtle inset glow.
+  6. **Glow orb** — repositioned to left panel only; uses teal radial gradient instead of sky-blue.
+- **Files:** `frontend/src/index.css`.
+
+### UX-001 — Categories page: icon buttons + SourceBadge on subcategory rows
+- **Type:** UX / Frontend
+- **What:**
+  1. **Child row action buttons** — subcategory rows (child rows) previously used text buttons ("Edit" / "Delete" / "—"). Updated to match parent row style: `<IconPencil size={13} />` icon button for edit, `<IconTrash size={13} />` (red-tinted) for delete. Non-editable / non-deletable rows show no button (dash removed).
+  2. **SourceBadge on child rows** — subcategory source column previously rendered raw text ("Built-in template"). Now renders the same `<SourceBadge>` pill badge as parent rows ("Built-in" gray / "Yours" emerald). `sourceLabel()` helper removed as it's no longer used.
+- **Files:** `frontend/src/pages/CategoriesPage.tsx`.
+
+### UX-002 — Remove broken /resolution-queue link; redirect to Needs Review
+- **Type:** UX / Frontend
+- **What:** A banner in the Needs Review tab linked to `/resolution-queue`, which rendered a blank page. The separate resolution queue concept is removed — all transaction review happens in the Transactions page itself. Changes:
+  1. **Banner link removed** — near-duplicate orphan banner no longer links to `/resolution-queue`. Message updated to explain the items exist but can be ignored.
+  2. **Route redirect** — `/resolution-queue` now redirects to `/transactions?needsReview=true` (same as the existing `/resolution` redirect). `ResolutionQueuePage` import removed from `App.tsx`.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/App.tsx`.
+
 ### CR-100 — Import Workspace page redesign: icon buttons, status badges, HelpIcon, hub card rows
 - **Type:** CR / UX / Frontend
 - **What:** Aesthetic overhaul of `ImportWorkspacePage.tsx`.
