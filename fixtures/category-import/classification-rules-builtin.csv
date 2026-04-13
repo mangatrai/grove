@@ -34,43 +34,43 @@ builtin,b0010000-0000-4000-8000-000000000032,mobile_2_att,att,contains,debit_onl
 builtin,b0010000-0000-4000-8000-000000000033,mobile_3_t_mobile,t-mobile,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
 builtin,b0010000-0000-4000-8000-000000000034,mobile_4_tmobile,tmobile,contains,debit_only,30000000-0000-0000-0000-000000000120,Utilities > Mobile phone,212,0.7,true
 builtin,b0010000-0000-4000-8000-000000000035,dining_0_restaurant,restaurant,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000036,dining_1_grubhub,grubhub,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000037,dining_2_doordash,doordash,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000038,dining_3_uber_eats,uber eats,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000039,dining_4_chipotle,chipotle,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000040,dining_5_taco_bell,taco bell,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000041,dining_6_mcdonald,mcdonald,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000042,dining_7_panera,panera,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000043,dining_8_panda_express,panda express,contains,debit_only,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
-builtin,b0010000-0000-4000-8000-000000000044,coffee_0_starbucks,starbucks,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
-builtin,b0010000-0000-4000-8000-000000000045,coffee_1_dunkin,dunkin,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
-builtin,b0010000-0000-4000-8000-000000000046,coffee_2_dutch_bro,dutch bro,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000036,dining_1_grubhub,grubhub,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000037,dining_2_doordash,doordash,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000038,dining_3_uber_eats,uber eats,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000039,dining_4_chipotle,chipotle,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000040,dining_5_taco_bell,taco bell,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000041,dining_6_mcdonald,mcdonald,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000042,dining_7_panera,panera,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000043,dining_8_panda_express,panda express,contains,any,30000000-0000-0000-0000-000000000023,Food > Dining out,220,0.7,true
+builtin,b0010000-0000-4000-8000-000000000044,coffee_0_starbucks,starbucks,contains,any,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000045,coffee_1_dunkin,dunkin,contains,any,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
+builtin,b0010000-0000-4000-8000-000000000046,coffee_2_dutch_bro,dutch bro,contains,any,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
 builtin,b0010000-0000-4000-8000-000000000047,coffee_3_coffee,coffee,contains,debit_only,30000000-0000-0000-0000-000000000024,Food > Coffee,230,0.7,true
 builtin,b0010000-0000-4000-8000-000000000048,snacks_0_chips,chips,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
 builtin,b0010000-0000-4000-8000-000000000049,snacks_1_candy_bar,candy bar,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
 builtin,b0010000-0000-4000-8000-000000000050,snacks_2_vending,vending,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
 builtin,b0010000-0000-4000-8000-000000000051,snacks_3_snack,snack,contains,debit_only,30000000-0000-0000-0000-000000000124,Food > Snacks,231,0.7,true
-builtin,b0010000-0000-4000-8000-000000000052,groceries_0_whole_foods,whole foods,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000053,groceries_1_trader_joe,trader joe,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000054,groceries_2_kroger,kroger,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000055,groceries_3_safeway,safeway,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000056,groceries_4_aldi,aldi,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000052,groceries_0_whole_foods,whole foods,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000053,groceries_1_trader_joe,trader joe,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000054,groceries_2_kroger,kroger,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000055,groceries_3_safeway,safeway,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000056,groceries_4_aldi,aldi,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
 builtin,b0010000-0000-4000-8000-000000000057,groceries_5_grocery,grocery,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
 builtin,b0010000-0000-4000-8000-000000000058,groceries_6_groceries,groceries,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000059,groceries_7_walmart,walmart,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000060,groceries_8_costco,costco,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000061,groceries_9_target,target,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000062,groceries_10_publix,publix,contains,debit_only,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
-builtin,b0010000-0000-4000-8000-000000000063,transit_0_uber,uber,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000064,transit_1_lyft,lyft,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000065,transit_2_shell,shell,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000066,transit_3_exxon,exxon,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000067,transit_4_chevron,chevron,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000068,transit_5_bp,bp,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000069,transit_6_parking,parking,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000059,groceries_7_walmart,walmart,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000060,groceries_8_costco,costco,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000061,groceries_9_target,target,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000062,groceries_10_publix,publix,contains,any,30000000-0000-0000-0000-000000000004,Shopping > Groceries,240,0.7,true
+builtin,b0010000-0000-4000-8000-000000000063,transit_0_uber,uber,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000064,transit_1_lyft,lyft,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000065,transit_2_shell,shell,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000066,transit_3_exxon,exxon,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000067,transit_4_chevron,chevron,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000068,transit_5_bp,bp,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000069,transit_6_parking,parking,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
 builtin,b0010000-0000-4000-8000-000000000070,transit_7_metro,metro,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
 builtin,b0010000-0000-4000-8000-000000000071,transit_8_transit,transit,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
-builtin,b0010000-0000-4000-8000-000000000072,transit_9_toll,toll,contains,debit_only,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
+builtin,b0010000-0000-4000-8000-000000000072,transit_9_toll,toll,contains,any,30000000-0000-0000-0000-000000000005,Mobility > Public Transit,250,0.7,true
 builtin,b0010000-0000-4000-8000-000000000073,auto_maint_0_auto_repair,auto repair,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
 builtin,b0010000-0000-4000-8000-000000000074,auto_maint_1_firestone,firestone,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true
 builtin,b0010000-0000-4000-8000-000000000075,auto_maint_2_pep_boys,pep boys,contains,debit_only,30000000-0000-0000-0000-000000000129,Mobility > Auto Maintenance,251,0.7,true

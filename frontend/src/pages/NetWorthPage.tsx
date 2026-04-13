@@ -1,11 +1,13 @@
 import { MultiSelect } from "@mantine/core";
+import { IconEye, IconPencil } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
+  Area,
+  AreaChart,
   CartesianGrid,
   Legend,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -14,6 +16,7 @@ import {
 
 import { apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 
 type BalanceSheetAccountRow = {
@@ -556,21 +559,18 @@ export function NetWorthPage() {
   return (
     <div className="net-worth-page">
       <div className="card">
-        <h1>Net worth</h1>
-        <p className="muted" style={{ marginBottom: 0 }}>
-          Trend and balance sheet use the same rules per account: <strong>manual balance</strong> wins, then a balance saved from
-          an import, then a read-only hint from a parsed statement when nothing else exists. The chart samples those totals
-          across the dates you choose. The balance sheet table below shows <strong>liabilities as negative</strong> so net worth
-          reads clearly.{" "}
-          <Link to="/settings?tab=accounts">Manage accounts</Link>.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Net worth</h1>
+          <HelpIcon label="Manual balance wins over import balance, which wins over a parsed hint. Liabilities show as negative so net worth reads clearly. Manage accounts in Settings → Accounts." />
+          <Link to="/settings?tab=accounts" style={{ marginLeft: "auto", fontSize: 13 }}>Manage accounts</Link>
+        </div>
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Trend</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Chart updates automatically when you change period, interval, or belongs-to.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Trend</h2>
+          <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to. Overlay specific accounts using the multi-select below." />
+        </div>
         <div className="row net-worth__control-band" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap" }}>
           <label className="field" style={{ marginBottom: 0 }}>
             <span>Period</span>
@@ -645,10 +645,10 @@ export function NetWorthPage() {
 
         {periodSummary ? (
           <div style={{ marginTop: "1rem" }}>
-            <h3 style={{ marginTop: 0, marginBottom: "0.35rem", fontSize: "1rem" }}>Period summary</h3>
-            <p className="muted" style={{ marginTop: 0, marginBottom: "0.5rem", fontSize: "0.85rem" }}>
-              First and last rows match the endpoints of the chart below. Ledger opens transactions for that calendar day only.
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.6rem" }}>
+              <h3 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Period summary</h3>
+              <HelpIcon label="First and last snapshots in the selected range. Ledger icon opens transactions for that calendar day." />
+            </div>
             <div style={{ overflowX: "auto" }}>
               <table className="ledger-table">
                 <thead>
@@ -657,53 +657,47 @@ export function NetWorthPage() {
                     <th scope="col">Assets</th>
                     <th scope="col">Liabilities</th>
                     <th scope="col">Net worth</th>
-                    <th scope="col">Ledger</th>
+                    <th scope="col" aria-label="Ledger" />
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <th scope="row">
-                      First ({periodSummary.startLabel})
-                    </th>
+                    <th scope="row" style={{ fontWeight: 500 }}>Start ({periodSummary.startLabel})</th>
                     <td>{formatMoney(periodSummary.start.assets)}</td>
                     <td>{formatMoney(periodSummary.start.liabilities)}</td>
-                    <td>{formatMoney(periodSummary.start.net)}</td>
+                    <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.start.net)}</td>
                     <td>
                       <Link
-                        to={transactionsHref({
-                          dateFrom: periodSummary.startLabel,
-                          dateTo: periodSummary.startLabel
-                        })}
+                        to={transactionsHref({ dateFrom: periodSummary.startLabel, dateTo: periodSummary.startLabel })}
+                        title="View transactions for this date"
+                        style={{ display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}
                       >
-                        View
+                        <IconEye size={15} />
                       </Link>
                     </td>
                   </tr>
                   <tr>
-                    <th scope="row">
-                      Last ({periodSummary.endLabel})
-                    </th>
+                    <th scope="row" style={{ fontWeight: 500 }}>End ({periodSummary.endLabel})</th>
                     <td>{formatMoney(periodSummary.end.assets)}</td>
                     <td>{formatMoney(periodSummary.end.liabilities)}</td>
-                    <td>{formatMoney(periodSummary.end.net)}</td>
+                    <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.end.net)}</td>
                     <td>
                       <Link
-                        to={transactionsHref({
-                          dateFrom: periodSummary.endLabel,
-                          dateTo: periodSummary.endLabel
-                        })}
+                        to={transactionsHref({ dateFrom: periodSummary.endLabel, dateTo: periodSummary.endLabel })}
+                        title="View transactions for this date"
+                        style={{ display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}
                       >
-                        View
+                        <IconEye size={15} />
                       </Link>
                     </td>
                   </tr>
                   {periodSummary.delta ? (
-                    <tr>
-                      <th scope="row">Change (last − first)</th>
-                      <td>{formatMoney(periodSummary.delta.assets)}</td>
-                      <td>{formatMoney(periodSummary.delta.liabilities)}</td>
-                      <td>{formatMoney(periodSummary.delta.net)}</td>
-                      <td className="muted">—</td>
+                    <tr style={{ borderTop: "2px solid var(--color-border)" }}>
+                      <th scope="row" style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 12 }}>Change</th>
+                      <td style={{ color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.assets)}</td>
+                      <td style={{ color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.liabilities)}</td>
+                      <td style={{ color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 700 }}>{formatMoney(periodSummary.delta.net)}</td>
+                      <td />
                     </tr>
                   ) : null}
                 </tbody>
@@ -713,10 +707,20 @@ export function NetWorthPage() {
         ) : null}
         {historyLoading ? <p className="muted">Loading chart…</p> : null}
         {!historyLoading && chartRows.length > 0 ? (
-          <div style={{ width: "100%", height: 340 }}>
+          <div style={{ width: "100%", height: 340, marginTop: "0.75rem" }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
+              <AreaChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                <defs>
+                  <linearGradient id="nwGradientGreen" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#15803d" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#15803d" stopOpacity={0.02} />
+                  </linearGradient>
+                  <linearGradient id="nwGradientAmber" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.18} />
+                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                 <XAxis dataKey="asOf" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={52} />
                 <YAxis
                   tick={{ fontSize: 11 }}
@@ -736,36 +740,21 @@ export function NetWorthPage() {
                         <div style={{ fontWeight: 600 }}>{asOf}</div>
                         {payload.map((p) => (
                           <div key={String(p.name ?? p.dataKey)}>
-                            {p.name}: {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
+                            <span style={{ color: String(p.color ?? "inherit") }}>{p.name}</span>:{" "}
+                            {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
                           </div>
                         ))}
                         <div style={{ marginTop: "0.35rem" }}>
-                          <Link to={href}>Open transactions for this date</Link>
+                          <Link to={href}>View transactions →</Link>
                         </div>
                       </div>
                     );
                   }}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="assets" name="Assets" stroke="#2563eb" dot={false} strokeWidth={2} connectNulls />
-                <Line
-                  type="monotone"
-                  dataKey="liabilities"
-                  name="Liabilities"
-                  stroke="#dc2626"
-                  dot={false}
-                  strokeWidth={2}
-                  connectNulls
-                />
-                <Line
-                  type="monotone"
-                  dataKey="netWorth"
-                  name="Net worth"
-                  stroke="#059669"
-                  dot={false}
-                  strokeWidth={2}
-                  connectNulls
-                />
+                <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" fill="url(#nwGradientGreen)" strokeWidth={1.5} dot={false} connectNulls />
+                <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" fill="url(#nwGradientAmber)" strokeWidth={1.5} dot={false} connectNulls />
+                <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="#15803d" fill="url(#nwGradientGreen)" strokeWidth={2.5} dot={false} connectNulls />
                 {chartLineKeys.map((id, idx) => (
                   <Line
                     key={id}
@@ -778,7 +767,7 @@ export function NetWorthPage() {
                     connectNulls
                   />
                 ))}
-              </LineChart>
+              </AreaChart>
             </ResponsiveContainer>
           </div>
         ) : null}
@@ -788,19 +777,15 @@ export function NetWorthPage() {
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
-        <h2 style={{ marginTop: 0 }}>Balance sheet</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Snapshot date selects which balances to load; use the pencil on a row to post or change a manual balance for that
-          account.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Balance sheet</h2>
+          <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
+        </div>
         <div style={{ marginBottom: "0.75rem" }}>
           <label className="field" style={{ marginBottom: 0, maxWidth: "12rem" }}>
             <span>Snapshot date</span>
             <input type="date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
           </label>
-          <p className="muted" style={{ marginTop: "0.35rem", marginBottom: 0, fontSize: "0.85rem", maxWidth: "36rem" }}>
-            One date for this table request (the API snapshot). Each row can still show its own stored as-of.
-          </p>
         </div>
         <details className="net-worth-page__bulk-asof" style={{ marginBottom: "0.75rem" }}>
           <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9rem" }}>Re-date all manual balances</summary>
@@ -826,24 +811,18 @@ export function NetWorthPage() {
         {loadError ? <p className="error">{loadError}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && data ? (
-          <div className="row" style={{ gap: "2rem", flexWrap: "wrap", marginBottom: "1rem" }}>
-            <div>
-              <div className="muted" style={{ fontSize: "0.85rem" }}>
-                Total assets
-              </div>
-              <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>{formatMoney(data.totals.assets)}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
+            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: "3px solid var(--color-success)" }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Assets</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-success)" }}>{formatMoney(data.totals.assets)}</div>
             </div>
-            <div>
-              <div className="muted" style={{ fontSize: "0.85rem" }}>
-                Total liabilities
-              </div>
-              <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>{formatMoney(data.totals.liabilities)}</div>
+            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: "3px solid var(--color-warm)" }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Liabilities</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-warm-dark, #d97706)" }}>{formatMoney(data.totals.liabilities)}</div>
             </div>
-            <div>
-              <div className="muted" style={{ fontSize: "0.85rem" }}>
-                Net worth
-              </div>
-              <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>{formatMoney(data.totals.netWorth)}</div>
+            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${(data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}` }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Net worth</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)" }}>{formatMoney(data.totals.netWorth)}</div>
             </div>
           </div>
         ) : null}
@@ -920,15 +899,7 @@ export function NetWorthPage() {
                             aria-label="Edit balance"
                             title="Edit balance"
                           >
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                              <path
-                                d="M4 20.5a.5.5 0 0 1-.5-.5v-3.5a.5.5 0 0 1 .15-.35L15.3 4.2a1.5 1.5 0 0 1 2.1 0l2.4 2.4a1.5 1.5 0 0 1 0 2.1L8.65 19.35a.5.5 0 0 1-.35.15H4Z"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinejoin="round"
-                              />
-                              <path d="M13 6l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            </svg>
+                            <IconPencil size={15} />
                           </button>
                         ) : null}
                       </td>

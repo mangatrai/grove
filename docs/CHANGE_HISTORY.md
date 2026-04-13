@@ -20,6 +20,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-13
 
+### DB-005 — Built-in merchant scopes: selective `debit_only` -> `any`
+- **Type:** DB
+- **What:** Updated refund-prone **merchant** built-ins to **`any`** scope (kept broad/generic and directional finance rules unchanged). Changed keys: `dining_1..8`, `coffee_0..2`, `groceries_0..4`, `groceries_7..10`, `transit_0..6`, `transit_9`. Source-of-truth seed and fixture CSV kept in sync.
+- **Files:** `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/classification-rules-builtin.csv`.
+
+### DB-004 — Global category Shopping > Office (`0015` + bootstrap seed)
+- **Type:** DB
+- **What:** Added default leaf **`Office`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000167`**) for work-related spend (memberships, conference fees, supplies). Migration **`0015_category_shopping_office.sql`**, bootstrap seed, fixture categories list, and **`DEFAULT_CATEGORY_IDS.shoppingOffice`** updated.
+- **Files:** `backend/db/migrations_pg/0015_category_shopping_office.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+
 ### DB-003 — Global category Mobility > Parking & Tolls (`0014` + bootstrap seed)
 - **Type:** DB
 - **What:** Added default leaf **`Parking & Tolls`** under **`Mobility`** (`id` **`30000000-0000-0000-0000-000000000166`**). Migration **`0014_category_mobility_parking_tolls.sql`**; **`seeds_pg/0001_bootstrap.sql`**; **`fixtures/category-import/categories.csv`**; **`DEFAULT_CATEGORY_IDS.mobilityParkingAndTolls`**.
@@ -29,6 +39,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Type:** DB
 - **What:** Added default leaf **`Software`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000165`**) for SaaS / subscription-style spend. Migration **`0013_category_shopping_software.sql`** inserts for existing DBs; **`backend/db/seeds_pg/0001_bootstrap.sql`** includes the row for fresh **`db:seed`**. **`fixtures/category-import/categories.csv`** and **`DEFAULT_CATEGORY_IDS.shoppingSoftware`** in **`category-ids.ts`** updated.
 - **Files:** `backend/db/migrations_pg/0013_category_shopping_software.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
+
+### CR-095 — Net Worth page redesign: AreaChart gradient, stat cards, HelpIcon, icon buttons
+- **Type:** CR / UX / Frontend
+- **What:** Visual overhaul of `NetWorthPage.tsx`.
+  1. **Page header** — Removed the 4-line wall-of-text intro paragraph. Replaced with a compact `<HelpIcon>` tooltip on the "Net worth" h1. "Manage accounts" link moved inline to the header row.
+  2. **AreaChart with gradient** — Upgraded `LineChart` → `AreaChart`. Net worth renders as a bold emerald area with a soft gradient fill. Assets: lighter emerald line+fill. Liabilities: amber/orange with gradient. Account overlay lines remain as `<Line>` over the area chart.
+  3. **Chart colors** — All hardcoded hex replaced: net worth `#059669` → `#15803d` (emerald-700), assets `#2563eb` → `#22c55e` (emerald-500), liabilities `#dc2626` → `#f59e0b` (amber — debts are a caution, not danger). Tooltip now shows color-coded series names.
+  4. **Period summary** — "View" text links replaced with `<IconEye>` icon buttons. Change row color-coded green/red. Verbose description paragraph removed; replaced with `<HelpIcon>`.
+  5. **Balance sheet KPI cards** — Replaced plain inline row with 3 stat cards matching Budget page style (colored `borderTop` accent: green for assets, amber for liabilities, conditional for net worth).
+  6. **Balance sheet heading** — `<HelpIcon>` on h2; verbose description paragraph removed.
+  7. **Edit pencil** — Custom inline SVG replaced with `<IconPencil size={15} />` from @tabler/icons-react.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`.
 
 ### CR-094 — Budget page redesign: "Add a category" placement, icon nav, HelpIcon, CSS var colors
 - **Type:** CR / UX / Frontend

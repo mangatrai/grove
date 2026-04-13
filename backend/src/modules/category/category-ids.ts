@@ -62,6 +62,8 @@ export const DEFAULT_CATEGORY_IDS = {
   shoppingElectronic: "30000000-0000-0000-0000-000000000142",
   /** Shopping > Software (SaaS / subscriptions — global default category) */
   shoppingSoftware: "30000000-0000-0000-0000-000000000165",
+  /** Shopping > Office */
+  shoppingOffice: "30000000-0000-0000-0000-000000000167",
 
   loansAuto: "30000000-0000-0000-0000-000000000137",
   loansHeloc: "30000000-0000-0000-0000-000000000138",
