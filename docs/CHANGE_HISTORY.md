@@ -18,6 +18,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-13 (bank parsers)
+
+### CR-101 — Marcus Online Savings PDF: date normalization, balance snapshot, hardened sign detection
+- **Type:** FIX + CR
+- **What:** Three improvements to `marcus-online-savings-pdf.ts`:
+  1. **Date output is now ISO (YYYY-MM-DD)** — previously emitted `MM/DD/YYYY` into `transaction_raw.txn_date`; canonical ingest normalized it for fingerprinting but the raw table stored the un-normalized form.
+  2. **Ending balance snapshot extraction** — the `Ending Balance` row is now captured and returned as `statementBalances.ending` so `import-parser.service.ts` can persist an `account_balance_snapshot` (same path as BoA and OFX). Previously the row was silently dropped.
+  3. **Sign keyword list expanded** — added `incoming`, `direct deposit`, `ach credit`, `refund`, `outgoing`, `wire out`, `fee` to cover common Marcus savings transaction types. Unknown types still default to debit with an explanatory comment.
+- **Files:** `backend/src/modules/imports/profiles/marcus-online-savings-pdf.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/tests/pdf-parsers.test.ts`.
+
+### CR-102 — Discover card CSV: preserve Discover-supplied Category in source_row
+- **Type:** CR
+- **What:** The Discover export includes a `Category` column (e.g. "Supermarkets", "Payments and Credits"). It is now preserved in `source_row["Category"]` so it is available if category-hint logic is added later. No change to how categories are assigned during classification.
+- **Files:** `backend/src/modules/imports/profiles/discover-card-csv.ts`, `backend/tests/csv-parsers.test.ts`.
+
+### CR-103 — Register stub profiles for Capital One card CSV and Wealthfront PDF
+- **Type:** CR
+- **What:** Added `capital_one_card_csv` and `wealthfront_investment_pdf` to `PARSER_PROFILE_IDS`. Both return `NOT_IMPLEMENTED` from the parser service. Capital One CSV format is TBD; Wealthfront PDF parser needs a sample statement before it can be implemented. These stubs allow accounts to be associated with the profile IDs in the UI without silent failures.
+- **Files:** `backend/src/modules/imports/profiles/profile-ids.ts`, `backend/src/modules/imports/import-parser.service.ts`.
+
+---
+
 ## 2026-04-13
 
 ### DB-005 — Built-in merchant scopes: selective `debit_only` -> `any`
