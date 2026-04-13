@@ -1,84 +1,94 @@
-Parent group,Category
-Income,Income
-Income,Dividends
-Income,Interest
-Income,Refunds
-Income,Rental income
-Income,Salary
-Borrowing,Borrowing
-Borrowing,Credit card payments
-Borrowing,Loan payments
-Borrowing,Personal lending
-Education,Education
-Education,Activities
-Education,Camps
-Education,Childcare
-Education,Tuition
-Food,Food
-Food,Coffee
-Food,Dining out
-Food,Snacks
-Giving,Giving
-Giving,Charity
-Giving,Gifts
-Healthcare,Healthcare
-Healthcare,Fitness
-Healthcare,Medical
-Healthcare,Pharmacy
-Healthcare,Wellness
-Home,Home
-Home,Appliances
-Home,Furniture
-Home,Home improvement
-Home,Housing
-Home,Maintenance
-Home,HOA Fees
-Insurance,Insurance
-Insurance,Auto
-Insurance,Health
-Insurance,Home
-Insurance,Life
-Insurance,Other
-Investments,Investments
-Investments,529 plan
-Investments,Crypto
-Investments,Real estate
-Investments,Stocks
-Loans,Loans
-Loans,Auto
-Loans,Heloc
-Loans,Home
-Loans,Personal
-Mobility,Mobility
-Mobility,Auto Maintenance
-Mobility,Public Transit
-Mobility,Taxi
-Mobility,Fuel
-Mobility,EV Charging
-Shopping,Shopping
-Shopping,Clothing
-Shopping,Electronic
-Shopping,Groceries
-Taxes,Taxes
-Taxes,Federal income tax
-Taxes,Federal tax refund
-Taxes,Sales tax
-Taxes,State income tax
-Taxes,State tax refund
-Transfers,Transfers
-Transfers,Transfers in
-Transfers,Transfers out
-Travel,Travel
-Travel,Airfare
-Travel,Car Rental
-Travel,Hotel
-Utilities,Utilities
-Utilities,City Water
-Utilities,Energy
-Utilities,Mobile phone
-Utilities,Internet
-Investments,IRA
-Shopping,General merchandise
-Taxes,Property tax
-Taxes,Tax prep
-Income,Reimbursements
+Parent group > Category
+Income > Income
+Income > Dividends
+Income > Interest
+Income > Refunds
+Income > Rental income
+Income > Salary
+Borrowing > Borrowing
+Borrowing > Credit card payments
+Borrowing > Loan payments
+Borrowing > Personal lending
+Education > Education
+Education > Activities
+Education > Camps
+Education > Childcare
+Education > Tuition
+Food > Food
+Food > Coffee
+Food > Dining out
+Food > Snacks
+Giving > Giving
+Giving > Charity
+Giving > Gifts
+Healthcare > Healthcare
+Healthcare > Fitness
+Healthcare > Medical
+Healthcare > Pharmacy
+Healthcare > Wellness
+Healthcare > Dental
+Home > Home
+Home > Appliances
+Home > Furniture
+Home > Home improvement
+Home > Housing
+Home > Maintenance
+Home > HOA Fees
+Insurance > Insurance
+Insurance > Auto
+Insurance > Health
+Insurance > Home
+Insurance > Life
+Insurance > Other
+Investments > Investments
+Investments > 529 plan
+Investments > Crypto
+Investments > Real estate
+Investments > Stocks
+Loans > Loans
+Loans > Auto
+Loans > Heloc
+Loans > Home
+Loans > Personal
+Mobility > Mobility
+Mobility > Auto Maintenance
+Mobility > Public Transit
+Mobility > Taxi
+Mobility > Fuel
+Mobility > EV Charging
+Shopping > Shopping
+Shopping > Clothing
+Shopping > Electronic
+Shopping > Groceries
+Shopping > Personal care
+Taxes > Taxes
+Taxes > Federal income tax
+Taxes > Federal tax refund
+Taxes > Sales tax
+Taxes > State income tax
+Taxes > State tax refund
+Transfers > Transfers
+Transfers > Transfers in
+Transfers > Transfers out
+Transfers > Cash withdrawal
+Travel > Travel
+Travel > Airfare
+Travel > Car Rental
+Travel > Hotel
+Travel > Travel documents
+Travel > Cruise
+Entertainment > Entertainment
+Entertainment > Streaming
+Entertainment > Movies
+Banking > Banking
+Banking > Fees
+Utilities > Utilities
+Utilities > City Water
+Utilities > Energy
+Utilities > Mobile phone
+Utilities > Internet
+Investments > IRA
+Shopping > General merchandise
+Taxes > Property tax
+Taxes > Tax prep
+Income > Reimbursements

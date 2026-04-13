@@ -17,7 +17,7 @@ household,,,CAPITAL ONE DES:CRCARDPMT,contains,debit_only,,Transfers > Transfers
 
 household,,,Wealthfront DES:EDI PYMNTS,contains,debit_only,,Transfers > Transfers out,40,0.98,true
 household,,,Wealthfront DES:EDI PYMNTS,contains,credit_only,,Transfers > Transfers in,40,0.98,true
-household,,,Transfer WEALTHFRONT BROKERAGE LLC,contains,credit_only,,Transfers > Transfers in,40,0.98,true
+household,,,Transfer WEALTHFRONT,contains,credit_only,,Transfers > Transfers in,40,0.98,true
 household,,,GOLDMAN SACHS BA DES:TRANSFER,contains,debit_only,,Transfers > Transfers out,40,0.97,true
 household,,,Online Banking transfer,contains,credit_only,,Transfers > Transfers in,40,0.97,true
 household,,,Online Banking transfer,contains,debit_only,,Transfers > Transfers out,40,0.90,true
@@ -25,6 +25,7 @@ household,,,Online transfer to CHK 6335,contains,debit_only,,Transfers > Transfe
 household,,,Mobile transfer to CHK 6335,contains,debit_only,,Transfers > Transfers out,40,0.98,true
 household,,,BKOFAMERICA MOBILE,contains,credit_only,,Transfers > Transfers in,50,0.92,true
 household,,,CYBRID-REMIT2ANY,contains,debit_only,,Transfers > Transfers out,60,0.75,true
+household,,,CONTINENTAL EXC DES,contains,debit_only,,Transfers > Transfers out,60,0.75,true
 
 household,,,FUNDRISEINCOME,contains,debit_only,,Investments > Real estate,40,0.95,true
 household,,,FUNDRISE REAL ES,contains,debit_only,,Investments > Real estate,40,0.95,true
@@ -82,6 +83,7 @@ household,,,MCDONALDS,contains,debit_only,,Food > Dining out,60,0.95,true
 household,,,STONEBROOK PEDIATRIC,contains,debit_only,,Healthcare > Medical,50,0.95,true
 
 household,,,BRGHTWHL,contains,any,,Education > Childcare,40,0.98,true
+household,,,PRIMROSE SCHOOL,contains,any,,Education > Childcare,40,0.98,true
 household,,,LEADERSHIP PREP,contains,any,,Education > Tuition,40,0.98,true
 household,,,ATT DES:,contains,debit_only,,Utilities > Mobile phone,40,0.95,true
 household,,,TMOBILE,contains,debit_only,,Utilities > Mobile phone,40,0.96,true
@@ -103,8 +105,9 @@ household,,,CASHBACK BONUS REDEMPTION,contains,credit_only,,Income > Refunds,40,
 household,,,AUTOPAY PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.97,true
 household,,,AMEX OFFER CREDIT,contains,credit_only,,Income > Refunds,40,0.97,true
 
-household,,,ADVANTAGE FLEX T,contains,debit_only,,Healthcare > Medical,40,0.92,true
-household,,,HEALTH CENTRAL WOMEN,contains,debit_only,,Healthcare > Medical,40,0.92,true
+household,,,ADVANTAGE FLEX T,contains,any,,Healthcare > Medical,40,0.92,true
+household,,,HEALTH CENTRAL WOMEN,contains,any,,Healthcare > Medical,40,0.92,true
+household,,,NAVIA BENEFIT,contains,any,,Healthcare > Medical,40,0.92,true
 
 household,,,FIVE BELOW,contains,debit_only,,Shopping > General merchandise,40,0.95,true
 household,,,DELL,contains,debit_only,,Shopping > Electronic,40,0.90,true
@@ -124,3 +127,17 @@ household,,,(Account ****,contains,credit_only,,Transfers > Transfers in,40,0.85
 household,,,(Account ****,contains,debit_only,,Transfers > Transfers out,40,0.85,true
 household,,,GOLDMAN SACHS BANK USA,contains,credit_only,,Transfers > Transfers in,40,0.92,true
 household,,,Automated Bond Portfolio,contains,debit_only,,Investments > Stocks,40,0.88,true
+
+household,,,GREAT CLIPS,contains,debit_only,,Shopping > Personal care,40,0.95,true
+household,,,HANDELS,contains,debit_only,,Food > Snacks,40,0.95,true
+household,,,DESI BITES,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,PERC,contains,debit_only,,Food > Coffee,40,0.82,true
+household,,,AT HOME,contains,debit_only,,Home > Home improvement,40,0.85,true
+household,,,HOMEGOODS,contains,debit_only,,Home > Home improvement,40,0.96,true
+household,,,WORLD MARKET,contains,debit_only,,Home > Home improvement,40,0.92,true
+household,,,A2B,contains,debit_only,,Food > Dining out,40,0.90,true
+household,,,ROMA'S PIZZA,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,THE HOME DEPOT,contains,debit_only,,Home > Home improvement,40,0.97,true
+household,,,SHERWIN-WILLIAMS,contains,debit_only,,Home > Home improvement,40,0.96,true
+household,,,BIKANERVALA,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,JUPITER HOUSE,contains,debit_only,,Food > Coffee,40,0.92,true
