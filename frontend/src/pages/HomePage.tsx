@@ -1,39 +1,24 @@
 import { FormEvent, useState } from "react";
-import { Tabs, Alert } from "@mantine/core";
-import { IconInfoCircle } from "@tabler/icons-react";
-
 import { apiJson, setToken } from "../api";
 
-type AuthTab = "signin" | "signup" | "forgot";
-
 /**
- * Guest landing at `/` — full-screen split hero + auth card with three tabs:
- * Sign In (functional), Sign Up (stub), Forgot Password (stub).
+ * Guest landing at `/` — full-screen split hero + clean sign-in card.
+ * "Request access" and "Forgot password" are lightweight text links — no
+ * separate tabs or full stub forms (those are backlog CRs).
  */
 export function HomePage() {
-  const [activeTab, setActiveTab] = useState<AuthTab>("signin");
-
-  // Sign-in form state
   const [email, setEmail] = useState(
     () => import.meta.env.VITE_DEV_SIGNIN_EMAIL ?? ""
   );
   const [password, setPassword] = useState(
     () => import.meta.env.VITE_DEV_SIGNIN_PASSWORD ?? ""
   );
-  const [signInError, setSignInError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Sign-up form state
-  const [signUpName, setSignUpName] = useState("");
-  const [signUpEmail, setSignUpEmail] = useState("");
-  const [signUpPassword, setSignUpPassword] = useState("");
-
-  // Forgot form state
-  const [forgotEmail, setForgotEmail] = useState("");
-
-  async function onSignIn(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setSignInError(null);
+    setError(null);
     setLoading(true);
     try {
       const data = await apiJson<{ token: string }>("/auth/login", {
@@ -42,8 +27,10 @@ export function HomePage() {
       });
       setToken(data.token);
     } catch (err) {
-      setSignInError(
-        err instanceof Error ? err.message : "Sign in failed. Check your credentials."
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Sign in failed. Check your credentials."
       );
     } finally {
       setLoading(false);
@@ -74,7 +61,11 @@ export function HomePage() {
           {/* ── Hero ──────────────────────────────────────────────────── */}
           <div className="home-landing__hero">
             <p className="home-landing__eyebrow">Private · self-hosted</p>
-            <h1 className="home-landing__title">Your money,<br />one calm view</h1>
+            <h1 className="home-landing__title">
+              Your money,
+              <br />
+              one calm view
+            </h1>
             <p className="home-landing__lead">
               Track cash flow, categories, and imports in one place — built for
               households that want clarity without shipping data to the cloud.
@@ -110,7 +101,6 @@ export function HomePage() {
               </li>
             </ul>
 
-            {/* Feature pills */}
             <div className="home-landing__pills" aria-hidden>
               {featurePills.map((p) => (
                 <span key={p} className="home-landing__pill">
@@ -123,193 +113,73 @@ export function HomePage() {
           {/* ── Auth card ─────────────────────────────────────────────── */}
           <div className="home-landing__aside">
             <div className="home-landing__card card">
-              <Tabs
-                value={activeTab}
-                onChange={(v) => setActiveTab((v ?? "signin") as AuthTab)}
-                classNames={{
-                  tab: "home-auth-tab",
-                  list: "home-auth-tab-list",
-                  panel: "home-auth-panel",
-                }}
-              >
-                <Tabs.List grow>
-                  <Tabs.Tab value="signin">Sign in</Tabs.Tab>
-                  <Tabs.Tab value="signup">Sign up</Tabs.Tab>
-                  <Tabs.Tab value="forgot">Forgot?</Tabs.Tab>
-                </Tabs.List>
+              <h2 className="home-landing__card-title">Sign in</h2>
+              <p className="home-landing__card-sub muted">
+                Welcome back — enter your credentials to continue.
+              </p>
 
-                {/* ── Sign in ──────────────────────────────────────────── */}
-                <Tabs.Panel value="signin" pt="md">
-                  <form className="home-landing__form" onSubmit={onSignIn}>
-                    <div className="home-landing__field">
-                      <label htmlFor="home-email">Email</label>
-                      <input
-                        id="home-email"
-                        type="email"
-                        autoComplete="username"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        placeholder="you@example.com"
-                        required
-                      />
-                    </div>
-                    <div className="home-landing__field">
-                      <label htmlFor="home-password">Password</label>
-                      <input
-                        id="home-password"
-                        type="password"
-                        autoComplete="current-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                      />
-                    </div>
-                    {signInError && (
-                      <p className="error home-landing__error">{signInError}</p>
-                    )}
-                    <button
-                      type="submit"
-                      className="home-landing__submit"
-                      disabled={loading}
-                    >
-                      {loading ? "Signing in…" : "Sign in"}
-                    </button>
-                  </form>
-                  <p className="home-landing__switch-hint">
-                    New here?{" "}
-                    <button
-                      className="link-button"
-                      type="button"
-                      onClick={() => setActiveTab("signup")}
-                    >
-                      Request access
-                    </button>
-                  </p>
-                </Tabs.Panel>
+              <form className="home-landing__form" onSubmit={onSubmit}>
+                <div className="home-landing__field">
+                  <label htmlFor="home-email">Email</label>
+                  <input
+                    id="home-email"
+                    type="email"
+                    autoComplete="username"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    required
+                  />
+                </div>
+                <div className="home-landing__field">
+                  <label htmlFor="home-password">Password</label>
+                  <input
+                    id="home-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                  />
+                </div>
+                {error && (
+                  <p className="error home-landing__error">{error}</p>
+                )}
+                <button
+                  type="submit"
+                  className="home-landing__submit"
+                  disabled={loading}
+                >
+                  {loading ? "Signing in…" : "Sign in"}
+                </button>
+              </form>
 
-                {/* ── Sign up ──────────────────────────────────────────── */}
-                <Tabs.Panel value="signup" pt="md">
-                  <Alert
-                    icon={<IconInfoCircle size={16} />}
-                    color="teal"
-                    variant="light"
-                    mb="md"
-                    radius="md"
+              {/* Helper links — no full forms; these are backlog CRs */}
+              <div className="home-landing__auth-links">
+                <span className="home-landing__auth-link-item">
+                  New here?{" "}
+                  <a
+                    href="mailto:admin@household.local"
+                    className="home-landing__auth-link"
+                    title="Contact your household admin to be added as a member"
                   >
-                    Registration requires an invitation from your household
-                    admin. Ask them to add you in{" "}
-                    <strong>Settings → Household → Members</strong>.
-                  </Alert>
-                  <form
-                    className="home-landing__form"
-                    onSubmit={(e) => e.preventDefault()}
+                    Request access
+                  </a>
+                </span>
+                <span className="home-landing__auth-link-sep" aria-hidden>
+                  ·
+                </span>
+                <span className="home-landing__auth-link-item">
+                  <a
+                    href="mailto:admin@household.local"
+                    className="home-landing__auth-link"
+                    title="Ask your household admin to reset your password in Settings → Security"
                   >
-                    <div className="home-landing__field">
-                      <label htmlFor="signup-name">Full name</label>
-                      <input
-                        id="signup-name"
-                        type="text"
-                        autoComplete="name"
-                        value={signUpName}
-                        onChange={(e) => setSignUpName(e.target.value)}
-                        placeholder="Your name"
-                        disabled
-                      />
-                    </div>
-                    <div className="home-landing__field">
-                      <label htmlFor="signup-email">Email</label>
-                      <input
-                        id="signup-email"
-                        type="email"
-                        autoComplete="email"
-                        value={signUpEmail}
-                        onChange={(e) => setSignUpEmail(e.target.value)}
-                        placeholder="you@example.com"
-                        disabled
-                      />
-                    </div>
-                    <div className="home-landing__field">
-                      <label htmlFor="signup-password">Password</label>
-                      <input
-                        id="signup-password"
-                        type="password"
-                        autoComplete="new-password"
-                        value={signUpPassword}
-                        onChange={(e) => setSignUpPassword(e.target.value)}
-                        placeholder="••••••••"
-                        disabled
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="home-landing__submit"
-                      disabled
-                    >
-                      Create account
-                    </button>
-                  </form>
-                  <p className="home-landing__switch-hint">
-                    Already have an account?{" "}
-                    <button
-                      className="link-button"
-                      type="button"
-                      onClick={() => setActiveTab("signin")}
-                    >
-                      Sign in
-                    </button>
-                  </p>
-                </Tabs.Panel>
-
-                {/* ── Forgot password ──────────────────────────────────── */}
-                <Tabs.Panel value="forgot" pt="md">
-                  <Alert
-                    icon={<IconInfoCircle size={16} />}
-                    color="amber"
-                    variant="light"
-                    mb="md"
-                    radius="md"
-                  >
-                    Password reset is managed by your household admin. Contact
-                    them to reset your password in{" "}
-                    <strong>Settings → Security</strong>.
-                  </Alert>
-                  <form
-                    className="home-landing__form"
-                    onSubmit={(e) => e.preventDefault()}
-                  >
-                    <div className="home-landing__field">
-                      <label htmlFor="forgot-email">Your email address</label>
-                      <input
-                        id="forgot-email"
-                        type="email"
-                        autoComplete="email"
-                        value={forgotEmail}
-                        onChange={(e) => setForgotEmail(e.target.value)}
-                        placeholder="you@example.com"
-                        disabled
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      className="home-landing__submit"
-                      disabled
-                    >
-                      Send reset link
-                    </button>
-                  </form>
-                  <p className="home-landing__switch-hint">
-                    Remembered it?{" "}
-                    <button
-                      className="link-button"
-                      type="button"
-                      onClick={() => setActiveTab("signin")}
-                    >
-                      Back to sign in
-                    </button>
-                  </p>
-                </Tabs.Panel>
-              </Tabs>
+                    Forgot password?
+                  </a>
+                </span>
+              </div>
             </div>
           </div>
         </div>

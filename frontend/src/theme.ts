@@ -1,25 +1,25 @@
 import { createTheme, type MantineThemeOverride } from "@mantine/core";
 
 export const appTheme: MantineThemeOverride = createTheme({
-  primaryColor: "teal",
-  primaryShade: { light: 6, dark: 4 },
+  primaryColor: "green",
+  primaryShade: { light: 7, dark: 4 },
   defaultRadius: "md",
   fontFamily:
     '"Inter", "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   fontFamilyMonospace: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
 
   colors: {
-    teal: [
-      "#f0fdfa", // 0 — near-white teal tint
-      "#ccfbf1", // 1
-      "#99f6e4", // 2
-      "#5eead4", // 3
-      "#2dd4bf", // 4 — bright teal (dark mode accent)
-      "#14b8a6", // 5 — primary accent light mode
-      "#0d9488", // 6 — default primary
-      "#0f766e", // 7 — dark teal (hover)
-      "#115e59", // 8
-      "#134e4a", // 9 — deepest teal
+    green: [
+      "#f0fdf4", // 0 — near-white green tint
+      "#dcfce7", // 1
+      "#bbf7d0", // 2
+      "#86efac", // 3
+      "#4ade80", // 4 — bright emerald (dark mode accent)
+      "#22c55e", // 5 — vibrant green
+      "#16a34a", // 6 — medium green
+      "#15803d", // 7 — default primary
+      "#166534", // 8
+      "#14532d", // 9 — deepest green
     ],
     amber: [
       "#fffbeb", // 0
