@@ -49,7 +49,7 @@ household,,,COSTCO,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,SAMS,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,KROGER,contains,debit_only,,Shopping > Groceries,40,0.98,true
 household,,,HEB,contains,debit_only,,Shopping > Groceries,40,0.98,true
-household,,,APPLE,contains,debit_only,,Shopping > Electronic,40,0.98,true
+household,,,APPLE,contains,any,,Shopping > Electronic,40,0.98,true
 household,,,UBER,contains,debit_only,,Mobility > Taxi,60,0.90,true
 household,,,LYFT,contains,debit_only,,Mobility > Taxi,60,0.90,true
 household,,,CHEVRON,contains,debit_only,,Mobility > Fuel,90,0.75,true
@@ -130,7 +130,7 @@ household,,,THE HUMAN BEAN,contains,debit_only,,Food > Coffee,40,0.95,true
 household,,,CLAUDE,contains,debit_only,,Shopping > Software,40,0.90,true
 household,,,CITY OF FRISCO,contains,debit_only,,Utilities > City Water,40,0.96,true
 household,,,ADT SECURITY,contains,debit_only,,Shopping > Software,40,0.88,true
-household,,,QUELL PEST CONTROL,contains,debit_only,,Home > Maintenance,40,0.94,true
+household,,,QUELL PEST,contains,debit_only,,Home > Maintenance,40,0.94,true
 household,,,CURSOR,contains,debit_only,,Shopping > Software,40,0.96,true
 household,,,OLD NAVY,contains,any,,Shopping > Clothing,40,0.96,true
 household,,,HOT BREADS,contains,debit_only,,Food > Snacks,40,0.95,true
