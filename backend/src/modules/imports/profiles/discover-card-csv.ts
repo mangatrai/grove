@@ -28,6 +28,7 @@ export function parseDiscoverCardCsv(buffer: Buffer): NormalizedRawPayload[] {
     const rawPostDate = row["Post Date"]?.trim() ?? "";
     const description = row["Description"]?.trim() ?? "";
     const rawAmount = row["Amount"]?.trim() ?? "";
+    const category = row["Category"]?.trim() ?? "";
 
     if (!rawTxnDate || !description || !rawAmount) {
       continue;
@@ -43,12 +44,16 @@ export function parseDiscoverCardCsv(buffer: Buffer): NormalizedRawPayload[] {
     // Discover: positive = charge (money leaving) → store as negative.
     const amount = -parsed;
 
+    const source_row: Record<string, string> = { ...row };
+    if (category) {
+      source_row["Category"] = category;
+    }
     out.push({
       txn_date: txnDate,
       posting_date: mmddyyyyToIso(rawPostDate) ?? txnDate,
       description,
       amount,
-      source_row: row
+      source_row
     });
   }
 

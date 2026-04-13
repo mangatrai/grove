@@ -64,6 +64,12 @@ describe("Discover card CSV parser", () => {
     expect(rows[0]!.description).toBe("INDIA BAZAAR LEWISVILLE TX");
     expect(rows[2]!.description).toBe("DIRECTPAY FULL BALANCE SEE DETAILS");
   });
+
+  it("preserves Discover category in source_row", () => {
+    const rows = parseDiscoverCardCsv(buf);
+    expect(rows[0]!.source_row["Category"]).toBe("Supermarkets");
+    expect(rows[2]!.source_row["Category"]).toBe("Payments and Credits");
+  });
 });
 
 // ---------------------------------------------------------------------------
