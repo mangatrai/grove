@@ -172,18 +172,39 @@ Net Pay    3,200.00    6,400.00
 });
 
 describe("Marcus online savings PDF text parser", () => {
-  it("parses ACCOUNT ACTIVITY rows with debits and interest", () => {
-    const snippet = `
+  const snippet = `
 ACCOUNT ACTIVITY
 Date \tDescription \tCredits \tDebits \tBalance
 02/01/2026 \tBeginning Balance \t$6,253.16
 02/02/2026 \tACH Withdrawal PENNYMAC CASH \t$465.23 \t$5,787.93
 02/28/2026 \tInterest Paid \t$11.49 \t$4,077.55
+02/28/2026 \tEnding Balance \t$4,077.55
 Streamline your savings growth
 `;
-    const rows = parseMarcusOnlineSavingsFromText(snippet);
+
+  it("parses ACCOUNT ACTIVITY rows with debits and interest", () => {
+    const { rows } = parseMarcusOnlineSavingsFromText(snippet);
     expect(rows.length).toBe(2);
     expect(rows[0]!.amount).toBe(-465.23);
     expect(rows[1]!.amount).toBe(11.49);
+  });
+
+  it("outputs ISO dates (YYYY-MM-DD), not MM/DD/YYYY", () => {
+    const { rows } = parseMarcusOnlineSavingsFromText(snippet);
+    expect(rows[0]!.txn_date).toBe("2026-02-02");
+    expect(rows[1]!.txn_date).toBe("2026-02-28");
+  });
+
+  it("extracts ending balance for balance snapshot", () => {
+    const { statementBalances } = parseMarcusOnlineSavingsFromText(snippet);
+    expect(statementBalances).not.toBeNull();
+    expect(statementBalances!.ending).toBe(4077.55);
+    expect(statementBalances!.asOfEnd).toBe("2026-02-28");
+  });
+
+  it("does not emit a row for Ending Balance or Beginning Balance", () => {
+    const { rows } = parseMarcusOnlineSavingsFromText(snippet);
+    const descs = rows.map((r) => r.description);
+    expect(descs.every((d) => !/balance/i.test(d))).toBe(true);
   });
 });

@@ -66,7 +66,8 @@ type ParseFailureCode =
   | "NOT_FOUND"
   | "NO_SUPPORTED_FILES"
   | "INVALID_MAPPING"
-  | "MISSING_FILE_BINDING";
+  | "MISSING_FILE_BINDING"
+  | "NOT_IMPLEMENTED";
 
 export interface ParseFailure {
   ok?: false;
@@ -153,13 +154,17 @@ async function extractByProfile(
       return parseBoaEStatementFromTextDetailed(text).rows;
     }
     case "marcus_online_savings_pdf":
-      return await parseMarcusOnlineSavingsPdf(buffer);
+      return (await parseMarcusOnlineSavingsPdf(buffer)).rows;
     case "ofx_transactions":
       return parseOfxBuffer(buffer).rows;
     case "discover_card_csv":
       return parseDiscoverCardCsv(buffer);
     case "wealthfront_investment_csv":
       return parseWealthfrontInvestmentCsv(buffer);
+    case "wealthfront_investment_pdf":
+      return { ok: false as const, code: "NOT_IMPLEMENTED", message: "Wealthfront PDF parser not yet implemented — use CSV export instead" };
+    case "capital_one_card_csv":
+      return { ok: false as const, code: "NOT_IMPLEMENTED", message: "Capital One CSV parser not yet implemented" };
     case "ibm_pay_contributions_pdf":
     case "adp_payslip_pdf":
     case "deloitte_payslip_pdf":
@@ -185,6 +190,10 @@ async function extractByProfileWithDiagnostics(
   if (profileId === "boa_estatement_pdf") {
     const text = await extractPdfText(buffer);
     const parsed = parseBoaEStatementFromTextDetailed(text);
+    return { rows: parsed.rows, statementBalances: parsed.statementBalances };
+  }
+  if (profileId === "marcus_online_savings_pdf") {
+    const parsed = await parseMarcusOnlineSavingsPdf(buffer);
     return { rows: parsed.rows, statementBalances: parsed.statementBalances };
   }
   if (profileId === "ofx_transactions") {
