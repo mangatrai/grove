@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IconArrowBackUp, IconLock, IconPlayerPlay, IconTrash, IconUpload } from "@tabler/icons-react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import {
@@ -260,6 +262,22 @@ function categoryLabelForPreview(cat: CategoryLabelRow, all: CategoryLabelRow[])
   }
   const p = all.find((x) => x.id === cat.parentId);
   return p ? `${p.name} › ${cat.name}` : cat.name;
+}
+
+function SessionStatusBadge({ status }: { status: string }) {
+  const cfg: Record<string, { label: string; bg: string; color: string }> = {
+    created:     { label: "Created",     bg: "var(--color-surface-alt, #f8fafc)", color: "var(--color-text-muted)" },
+    processing:  { label: "Processing",  bg: "#dbeafe",                           color: "#1d4ed8" },
+    review:      { label: "Review",      bg: "#fef3c7",                           color: "#92400e" },
+    finalized:   { label: "Finalized",   bg: "#dcfce7",                           color: "#15803d" },
+    failed:      { label: "Failed",      bg: "#fee2e2",                           color: "#dc2626" },
+  };
+  const { label, bg, color } = cfg[status] ?? { label: status, bg: "var(--color-surface-alt)", color: "var(--color-text-muted)" };
+  return (
+    <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, background: bg, color }}>
+      {label}
+    </span>
+  );
 }
 
 export function ImportWorkspacePage() {
@@ -1253,70 +1271,50 @@ export function ImportWorkspacePage() {
     return (
       <div>
         <div className="card">
-          <h1>Import</h1>
-          <p className="muted">
-            Start a new session or continue one you already have. Parsed data stays in the database until you finalize the
-            flow or reset the app database — use <strong>Recent sessions</strong> so you don&apos;t lose your place.
-          </p>
-          {error ? <p className="error">{error}</p> : null}
-          <div className="row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "center" }}>
-            <button type="button" disabled={startingSession} onClick={() => void startNewImportSession()}>
-              {startingSession ? "Starting…" : "New import session"}
-            </button>
-            <Link to="/" className="muted">
-              Back to home
-            </Link>
-            <Link to="/categories/rules" className="muted">
-              Classification rules
-            </Link>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Import</h1>
+            <HelpIcon label="Start a new session to upload bank statements, parse them, and post transactions to your ledger. Parsed data stays in the database until you finalize or reset. Use Recent sessions to resume where you left off." />
+            <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 13 }}>
+              <Link to="/" className="muted">Home</Link>
+              <Link to="/categories/rules" className="muted">Classification rules</Link>
+            </div>
           </div>
+          {error ? <p className="error">{error}</p> : null}
+          <button
+            type="button"
+            disabled={startingSession}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0.4rem 1rem", background: "var(--color-accent)", color: "#fff", border: "none", borderRadius: 6, fontWeight: 600, cursor: startingSession ? "not-allowed" : "pointer", opacity: startingSession ? 0.7 : 1 }}
+            onClick={() => void startNewImportSession()}
+          >
+            <IconUpload size={15} />
+            {startingSession ? "Starting…" : "New import session"}
+          </button>
         </div>
 
         <div className="card">
-          <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Recent sessions</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            Open a session to upload files, parse, run import, or run the classification matcher preview. Sessions in{" "}
-            <strong>review</strong> still hold parsed rows and ledger posts you can undo before finalizing.
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+            <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Recent sessions</h2>
+            <HelpIcon label="Open a session to upload files, parse, run import, or run the classification matcher preview. Sessions in Review hold parsed rows and ledger posts you can undo before finalizing." />
+          </div>
           {hubLoading ? <p className="muted">Loading…</p> : null}
           {!hubLoading && recentSessions.length === 0 ? (
             <p className="muted">No sessions yet. Start a new import above.</p>
           ) : null}
           {!hubLoading && recentSessions.length > 0 ? (
-            <div style={{ overflowX: "auto" }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Started</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Files</th>
-                    <th scope="col">Session id</th>
-                    <th scope="col" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentSessions.map((s) => (
-                    <tr key={s.id}>
-                      <td>{s.startedAt?.replace("T", " ").slice(0, 19) ?? "—"}</td>
-                      <td>
-                        <strong>{s.status}</strong>
-                      </td>
-                      <td>{s.fileCount}</td>
-                      <td>
-                        <code style={{ fontSize: "0.78rem" }}>{s.id.slice(0, 8)}…</code>
-                      </td>
-                      <td>
-                        <Link to={`/imports/${s.id}`}>Continue</Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.5rem" }}>
+              {recentSessions.map((s) => (
+                <div key={s.id} style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "0.6rem 0.75rem", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-surface)" }}>
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)", minWidth: 140 }}>{s.startedAt?.replace("T", " ").slice(0, 19) ?? "—"}</div>
+                  <SessionStatusBadge status={s.status} />
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{s.fileCount} file{s.fileCount !== 1 ? "s" : ""}</div>
+                  <code style={{ fontSize: "0.78rem", color: "var(--color-text-muted)", flex: 1 }}>{s.id.slice(0, 8)}…</code>
+                  <Link to={`/imports/${s.id}`} style={{ fontSize: 13, fontWeight: 500 }}>Open</Link>
+                </div>
+              ))}
             </div>
           ) : null}
           <p className="muted" style={{ marginTop: "0.75rem", marginBottom: 0, fontSize: "0.88rem" }}>
-            Deep link: <code>/imports?sessionId=&lt;uuid&gt;</code> opens that session directly (bookmark or paste from{" "}
-            <strong>Copy id</strong> on the session page).
+            Deep link: <code>/imports?sessionId=&lt;uuid&gt;</code> opens that session directly.
           </p>
         </div>
       </div>
@@ -1334,19 +1332,18 @@ export function ImportWorkspacePage() {
   return (
     <div className="import-workspace-page">
       <div className="card import-workspace__control-band">
-        <h1>Import session</h1>
-        <p className="muted">
-          Session <code>{sessionId}</code>{" "}
-          <button type="button" className="secondary" style={{ fontSize: "0.82rem", verticalAlign: "middle" }} onClick={() => void copySessionId()}>
-            Copy id
-          </button>
-          {copySessionMsg ? (
-            <span className="muted" style={{ marginLeft: "0.45rem" }}>
-              {copySessionMsg}
-            </span>
-          ) : null}{" "}
-          — status: <strong>{sessionStatus ?? "—"}</strong>
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: "0.5rem" }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Import session</h1>
+          <HelpIcon label="Upload bank statement files, assign each to an account, then Run import to parse and post transactions to your ledger. Review before finalizing to lock the session." />
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            <SessionStatusBadge status={sessionStatus ?? "—"} />
+            <code style={{ fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{sessionId?.slice(0, 8)}…</code>
+            <button type="button" className="secondary" style={{ fontSize: "0.78rem", padding: "0.15rem 0.5rem" }} onClick={() => void copySessionId()}>
+              Copy id
+            </button>
+            {copySessionMsg ? <span className="muted" style={{ fontSize: 12 }}>{copySessionMsg}</span> : null}
+          </div>
+        </div>
         {error ? <p className="error">{error}</p> : null}
         {message ? <p className="success">{message}</p> : null}
       </div>
@@ -1409,14 +1406,12 @@ export function ImportWorkspacePage() {
       ) : null}
 
       <div className="card">
-        <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Upload files</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Upload files</h2>
+          <HelpIcon label="CSV, XLSX, PDF, and OFX/QFX/QBO are supported. Files upload as soon as you pick them. OFX/QFX/QBO files are detected automatically. Already-added files are skipped." />
+        </div>
         {canUploadMore ? (
           <>
-            <p className="muted">
-              CSV, XLSX, PDF, and OFX/QFX/QBO are supported. Files upload as soon as you pick them. OFX/QFX/QBO files
-              are detected automatically and use a streamlined confirm flow. If a file was already added to this session,
-              it&apos;s skipped and everything else still uploads.
-            </p>
             <input
               ref={fileInputRef}
               name="files"
@@ -1461,11 +1456,10 @@ export function ImportWorkspacePage() {
       </div>
 
       <div className="card">
-        <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Files & account</h2>
-        <p className="muted">
-          Assign each file to an account and confirm the format. Format is inferred automatically unless you use{" "}
-          <strong>Advanced</strong>. Then use <a href="#import-run-import">Run import</a> below.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Files & account</h2>
+          <HelpIcon label="Assign each file to an account and confirm the format. Format is inferred automatically. Then use Run import below." />
+        </div>
         <details className="muted" style={{ marginTop: "0.35rem", fontSize: "0.9rem" }}>
           <summary style={{ cursor: "pointer", userSelect: "none" }}>
             Payslip PDFs, IBM pay stubs, and where results appear
@@ -1526,12 +1520,13 @@ export function ImportWorkspacePage() {
                         <div style={{ marginTop: "0.35rem" }}>
                           <button
                             type="button"
-                            className="secondary"
-                            style={{ fontSize: "0.85rem" }}
+                            title="Remove file from session"
                             disabled={removingFileId === f.id}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.82rem", padding: "0.2rem 0.5rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: removingFileId === f.id ? "not-allowed" : "pointer", color: "var(--color-danger, #dc2626)", opacity: removingFileId === f.id ? 0.6 : 1 }}
                             onClick={() => openRemoveFileConfirm(f.id)}
                           >
-                            {removingFileId === f.id ? "Removing…" : "Remove from session"}
+                            <IconTrash size={12} />
+                            {removingFileId === f.id ? "Removing…" : "Remove"}
                           </button>
                         </div>
                       ) : null}
@@ -1930,12 +1925,10 @@ export function ImportWorkspacePage() {
       ) : null}
 
       <div className="card" id="import-run-import">
-        <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Run import</h2>
-        <p className="muted">
-          One step parses every file and then loads transactions into your ledger (dedupe included). IBM payslip PDFs
-          finish in one step. <strong>Deloitte</strong> PDFs are extracted via OpenAI (background) — wait until they show parsed, then
-          run import again. Use separate steps only if you need to debug.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.75rem" }}>
+          <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Run import</h2>
+          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). IBM payslip PDFs finish in one step. Deloitte PDFs are extracted via OpenAI (background) — wait until they show 'parsed', then run import again." />
+        </div>
         <div className="row">
           <button
             type="button"
@@ -1948,7 +1941,9 @@ export function ImportWorkspacePage() {
                   ? "Choose employer for each payslip file"
                   : undefined
             }
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
+            <IconPlayerPlay size={15} />
             {pipelineBusy ? "Working…" : "Run import"}
           </button>
         </div>
@@ -1987,12 +1982,10 @@ export function ImportWorkspacePage() {
       </div>
 
       <div className="card">
-        <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Classification matcher preview (read-only)</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Dry-run of your current <Link to="/categories/rules">classification rules</Link> on parsed raw rows in{" "}
-          <strong>this</strong> session. This does <strong>not</strong> assign categories, post to the ledger, or create
-          rules — it only shows what would match today. After you change rules, click load again.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.75rem" }}>
+          <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Classification matcher preview</h2>
+          <HelpIcon label="Dry-run of your current classification rules on parsed raw rows in this session. Does not assign categories or post to the ledger — only shows what would match today. After changing rules, click Load again." />
+        </div>
         <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
           <button type="button" className="secondary" disabled={matcherPreviewLoading} onClick={() => void loadMatcherPreview()}>
             {matcherPreviewLoading ? "Loading…" : "Load classification preview"}
@@ -2044,13 +2037,10 @@ export function ImportWorkspacePage() {
       {sessionStatus === "review" ? (
         <>
           <div className="card">
-            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Undo ledger posting</h2>
-            <p className="muted">
-              While the session is in <strong>review</strong> (before <strong>finalized</strong>), you can remove posted
-              transactions from this import from the ledger and run <strong>Run import</strong> again. Parsed rows in the
-              database stay. After you <strong>Finalize session</strong> below, the session is immutable and this action
-              is not available.
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Undo ledger posting</h2>
+              <HelpIcon label="While in Review (before finalized), you can remove posted transactions from this import and run import again. Parsed rows stay. Once finalized, this action is no longer available." />
+            </div>
             <div className="row">
               <button
                 type="button"
@@ -2066,25 +2056,28 @@ export function ImportWorkspacePage() {
                     ? "Nothing from this import is in the ledger yet"
                     : undefined
                 }
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                 onClick={openUndoConfirm}
               >
-                {undoBusy ? "Working…" : "Remove posted transactions from this import"}
+                <IconArrowBackUp size={15} />
+                {undoBusy ? "Working…" : "Undo posting"}
               </button>
             </div>
           </div>
 
           <div className="card import-finalize-session-card">
-            <h2 style={{ fontSize: "1.1rem", marginTop: 0 }}>Finalize session</h2>
-            <p className="muted">
-              When you&apos;re done reviewing, finalize to lock this session. Finalized sessions cannot be changed: you
-              cannot undo ledger posting for this import afterward.
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Finalize session</h2>
+              <HelpIcon label="Finalize to lock this session when you're done reviewing. Finalized sessions cannot be changed — undo is no longer available." />
+            </div>
             <div className="row">
               <button
                 type="button"
                 disabled={finalizeBusy || undoBusy || pipelineBusy}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                 onClick={openFinalizeConfirm}
               >
+                <IconLock size={15} />
                 {finalizeBusy ? "Working…" : "Finalize session"}
               </button>
             </div>

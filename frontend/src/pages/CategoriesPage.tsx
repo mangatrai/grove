@@ -1,8 +1,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpIcon } from "../components/HelpIcon";
 
 type CategoryRow = {
   id: string;
@@ -21,6 +23,25 @@ function sourceLabel(c: CategoryRow): string {
     return "Added by you";
   }
   return c.isDefault ? "Built-in template" : "Built-in";
+}
+
+function SourceBadge({ c }: { c: CategoryRow }) {
+  const household = c.householdScoped;
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: "0.1rem 0.45rem",
+      borderRadius: 4,
+      fontSize: 11,
+      fontWeight: 600,
+      background: household ? "var(--color-accent-subtle, #dcfce7)" : "var(--color-surface-alt, #f8fafc)",
+      color: household ? "var(--color-accent)" : "var(--color-text-muted)",
+      border: `1px solid ${household ? "var(--color-accent-bright, #22c55e)" : "var(--color-border)"}`,
+      whiteSpace: "nowrap"
+    }}>
+      {household ? "Yours" : "Built-in"}
+    </span>
+  );
 }
 
 function compareRootCategories(a: CategoryRow, b: CategoryRow): number {
@@ -245,33 +266,14 @@ export function CategoriesPage() {
   return (
     <div>
       <div className="card">
-        <h1>Categories</h1>
-        <p className="muted">
-          <strong>Primary categorization</strong> happens on{" "}
-          <Link to="/transactions">Transactions</Link> — pick a category on each row (and create new categories inline
-          there). This page is for browsing the full tree, adding parent groups or subcategories, and housekeeping.{" "}
-          <Link to="/categories/rules">Classification rules</Link> automate categorization from text patterns (when
-          imports and the matcher don&apos;t assign a category for you).
-        </p>
-        <p className="muted">
-          <strong>Parent group</strong> (left) is the bucket you roll up into—housing, shopping, healthcare, and so on.{" "}
-          <strong>Category</strong> (right) is the specific line item, often a subcategory under that group. Rows are
-          grouped: each parent appears once, then its subcategories directly underneath so you never see a child before
-          its parent.
-        </p>
-        <p className="muted">
-          <strong>Source</strong> tells you whether a row came from the app&apos;s built-in list or was added for your
-          household. &ldquo;—&rdquo; under parent group means that row <em>is</em> the top-level group (not a subcategory).
-        </p>
-        <p className="muted">
-          Built-in names can be renamed by <strong>owners and admins</strong> (applies to this database). Built-in
-          categories cannot be deleted.
-        </p>
-        <p className="muted">
-          <Link to="/transactions">Back to Transactions</Link>
-          {" · "}
-          <Link to="/categories/rules">Classification rules</Link>
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.5rem" }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Categories</h1>
+          <HelpIcon label="Parent groups are the top-level buckets (Housing, Shopping…). Categories are specific line items underneath. Built-in entries can be renamed by owners/admins but not deleted. Source 'Yours' = added by your household." />
+          <span style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 13 }}>
+            <Link to="/transactions">Transactions</Link>
+            <Link to="/categories/rules">Rules</Link>
+          </span>
+        </div>
 
         {error ? <p className="error">{error}</p> : null}
 
@@ -398,7 +400,7 @@ export function CategoriesPage() {
                 <tr>
                   <th scope="col">Parent group</th>
                   <th scope="col">Category</th>
-                  <th scope="col">Source</th>
+                  <th scope="col"><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>Source <HelpIcon label="Built-in: ships with the app. Yours: added by your household. Built-ins can be renamed by owners/admins." /></span></th>
                   <th scope="col" />
                 </tr>
               </thead>
@@ -414,21 +416,19 @@ export function CategoriesPage() {
                         <td className="categories-page__category-cell categories-page__category-cell--parent">
                           {c.name}
                         </td>
-                        <td className="muted">{sourceLabel(c)}</td>
+                        <td><SourceBadge c={c} /></td>
                         <td>
-                          <span style={{ display: "inline-flex", gap: "0.35rem", flexWrap: "wrap" }}>
+                          <span style={{ display: "inline-flex", gap: "0.35rem" }}>
                             {showEditForRow(row) ? (
-                              <button type="button" className="secondary" onClick={() => openEdit(row)}>
-                                Edit
+                              <button type="button" onClick={() => openEdit(row)} title="Edit" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}>
+                                <IconPencil size={13} />
                               </button>
                             ) : null}
                             {c.householdScoped ? (
-                              <button type="button" className="secondary" onClick={() => requestDeleteCategory(c.id)}>
-                                Delete
+                              <button type="button" onClick={() => requestDeleteCategory(c.id)} title="Delete" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}>
+                                <IconTrash size={13} />
                               </button>
-                            ) : (
-                              <span className="muted">—</span>
-                            )}
+                            ) : null}
                           </span>
                         </td>
                       </tr>

@@ -1,9 +1,11 @@
 import { MultiSelect } from "@mantine/core";
+import { IconArrowBackUp, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
@@ -244,6 +246,31 @@ function formatSignedMoneyRaw(amount: number | null): string {
   const abs = Math.abs(amount);
   const sign = amount >= 0 ? "+" : "−";
   return `${sign}$${abs.toFixed(2)}`;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const cfg: Record<string, { label: string; bg: string; color: string }> = {
+    posted:    { label: "Posted",    bg: "var(--color-accent-subtle, #dcfce7)", color: "var(--color-accent)" },
+    trashed:   { label: "Trashed",   bg: "#fee2e2", color: "#dc2626" },
+    duplicate: { label: "Duplicate", bg: "#fef3c7", color: "#d97706" },
+    pending:   { label: "Pending",   bg: "var(--color-surface-alt, #f8fafc)", color: "var(--color-text-muted)" },
+  };
+  const c = cfg[status] ?? { label: status, bg: "var(--color-surface-alt, #f8fafc)", color: "var(--color-text-muted)" };
+  return (
+    <span style={{
+      display: "inline-block",
+      padding: "0.1rem 0.45rem",
+      borderRadius: 4,
+      fontSize: 11,
+      fontWeight: 600,
+      background: c.bg,
+      color: c.color,
+      letterSpacing: "0.02em",
+      whiteSpace: "nowrap"
+    }}>
+      {c.label}
+    </span>
+  );
 }
 
 export function TransactionsPage() {
@@ -1054,26 +1081,20 @@ export function TransactionsPage() {
   return (
     <div className="transactions-page">
       <div className="card transactions-page__intro">
-        <h1>Transactions</h1>
-        {sessionFilter ? (
-          <p className="muted">
-            Showing only transactions from import session <code>{sessionFilter}</code>.{" "}
-            <Link to={`/imports/${sessionFilter}`}>Import workspace</Link>
-            {" · "}
-            <Link to="/transactions">All household transactions</Link>.
-          </p>
-        ) : (
-          <p className="muted">
-            Posted rows from your household after import → parse → canonicalize. Categories can be set automatically
-            (rules) or here. <strong>Needs review</strong> includes uncategorized rows, non-posted status, and any
-            open review item — including when a category is already set but transfer or duplicate review is still open.
-          </p>
-        )}
-        {fromDashboard && returnTo ? (
-          <p className="muted">
-            <Link to={returnTo}>Back to dashboard context</Link>
-          </p>
-        ) : null}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Transactions</h1>
+          <HelpIcon label="Posted rows from your household ledger. Needs review includes uncategorized rows, non-posted status, or open duplicate/transfer flags. Categories can be set by rules or manually here." />
+          {sessionFilter ? (
+            <span className="muted" style={{ fontSize: 13, marginLeft: 4 }}>
+              Session: <code>{sessionFilter}</code>{" · "}
+              <Link to={`/imports/${sessionFilter}`}>Workspace</Link>{" · "}
+              <Link to="/transactions">All transactions</Link>
+            </span>
+          ) : null}
+          {fromDashboard && returnTo ? (
+            <Link to={returnTo} style={{ fontSize: 13, marginLeft: "auto" }}>← Dashboard</Link>
+          ) : null}
+        </div>
       </div>
 
       <div className="transactions-toolbar card transactions-page__control-band">
@@ -1242,25 +1263,27 @@ export function TransactionsPage() {
             />
           </label>
           <div className="transactions-toolbar__actions">
-            <button type="button" className="button-primary" onClick={openAddModal}>
-              + Add transaction
+            <button
+              type="button"
+              className="button-primary"
+              onClick={openAddModal}
+              style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+            >
+              <IconPlus size={15} />
+              Add transaction
             </button>
           </div>
         </div>
-        <div className="transactions-toolbar__more">
+        <div className="transactions-toolbar__more" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button
             type="button"
             className="transactions-toolbar__more-toggle"
             aria-expanded={moreFiltersOpen}
             onClick={() => setMoreFiltersOpen((o) => !o)}
           >
-            More filters {moreFiltersOpen ? "▴" : "▾"}
+            {moreFiltersOpen ? "Fewer filters ▴" : "More filters ▾"}
           </button>
-          <p className="muted transactions-toolbar__fts-note">
-            Search matches a <strong>substring</strong> in merchant + memo, or the <strong>FTS5</strong> index when
-            present (multi-word queries use token <strong>AND</strong>). Results are sorted by <strong>date</strong>{" "}
-            (newest first). Pagination: <code>limit</code>/<code>offset</code>.
-          </p>
+          <HelpIcon label="Search matches a substring in merchant + memo (multi-word = AND). Results sorted by date, newest first. Use amount min/max for signed amount range filtering." />
         </div>
         {moreFiltersOpen ? (
           <div className="transactions-toolbar__more-panel row">
@@ -1563,7 +1586,12 @@ export function TransactionsPage() {
                             ) : null}
                             <td>{t.txnDate}</td>
                             <td>{accountLabel}</td>
-                            <td style={{ whiteSpace: "nowrap" }}>{formatMoney(t.amount, t.direction)}</td>
+                            <td style={{ whiteSpace: "nowrap" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                                {formatMoney(t.amount, t.direction)}
+                                {t.status !== "posted" ? <StatusBadge status={t.status} /> : null}
+                              </div>
+                            </td>
                             <td>{desc}</td>
                             {needsReviewTab ? (
                               <td className="transactions-page__why-cell">
@@ -1623,35 +1651,35 @@ export function TransactionsPage() {
                             </td>
                             <td style={{ whiteSpace: "nowrap" }}>
                               {trashTab ? (
-                                <>
+                                <div style={{ display: "flex", gap: 4 }}>
                                   <button
                                     type="button"
                                     disabled={savingTrash}
                                     onClick={() => void restoreSingle(t.id)}
-                                    style={{ marginRight: "0.35rem" }}
+                                    title="Restore"
+                                    style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-success)" }}
                                   >
-                                    Restore
+                                    <IconArrowBackUp size={14} />
                                   </button>
                                   <button
                                     type="button"
-                                    className="secondary"
                                     disabled={savingTrash}
                                     onClick={() => void hardDeleteSingle(t.id)}
                                     title="Permanently delete — cannot be undone"
+                                    style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}
                                   >
-                                    Delete
+                                    <IconTrash size={14} />
                                   </button>
-                                </>
+                                </div>
                               ) : (
                                 <button
                                   type="button"
-                                  className="secondary"
                                   disabled={savingId === t.id || savingBulk}
                                   onClick={() => void trashSingle(t.id)}
                                   title="Move to Trash"
-                                  style={{ fontSize: "0.8rem" }}
+                                  style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}
                                 >
-                                  Trash
+                                  <IconTrash size={14} />
                                 </button>
                               )}
                             </td>

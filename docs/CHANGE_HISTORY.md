@@ -40,6 +40,40 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **What:** Added default leaf **`Software`** under **`Shopping`** (`id` **`30000000-0000-0000-0000-000000000165`**) for SaaS / subscription-style spend. Migration **`0013_category_shopping_software.sql`** inserts for existing DBs; **`backend/db/seeds_pg/0001_bootstrap.sql`** includes the row for fresh **`db:seed`**. **`fixtures/category-import/categories.csv`** and **`DEFAULT_CATEGORY_IDS.shoppingSoftware`** in **`category-ids.ts`** updated.
 - **Files:** `backend/db/migrations_pg/0013_category_shopping_software.sql`, `backend/db/seeds_pg/0001_bootstrap.sql`, `fixtures/category-import/categories.csv`, `backend/src/modules/category/category-ids.ts`.
 
+### CR-100 — Import Workspace page redesign: icon buttons, status badges, HelpIcon, hub card rows
+- **Type:** CR / UX / Frontend
+- **What:** Aesthetic overhaul of `ImportWorkspacePage.tsx`.
+  1. **Hub page (no sessionId)** — Page h1 "Import" gets a `<HelpIcon>`. Nav links (Home / Classification rules) moved inline. "New import session" button gains `<IconUpload>`. Recent sessions table replaced with card-based rows — each row shows date, `<SessionStatusBadge>`, file count, truncated session id, and an "Open" link.
+  2. **`SessionStatusBadge` component** — Colored pill badge for session status: Created (muted), Processing (blue), Review (amber), Finalized (emerald), Failed (red).
+  3. **Session workspace header** — Removed the long `<p>` paragraph with session id. Replaced with compact inline row: `<SessionStatusBadge>`, truncated session id code, "Copy id" button. `<HelpIcon>` on h1.
+  4. **Section headings** — Verbose description paragraphs removed from "Upload files", "Files & account", "Run import", "Classification matcher preview", "Undo ledger posting", and "Finalize session". Each replaced with an inline `<HelpIcon>` tooltip.
+  5. **Run import button** — `<IconPlayerPlay size={15} />` added inline.
+  6. **Undo posting button** — `<IconArrowBackUp size={15} />` added inline; label shortened to "Undo posting".
+  7. **Finalize session button** — `<IconLock size={15} />` added inline.
+  8. **Remove file button** — `<IconTrash size={12} />` + compact "Remove" label (red-tinted, replaces "Remove from session" text button).
+- **Files:** `frontend/src/pages/ImportWorkspacePage.tsx`.
+
+### CR-099 — Classification Rules page redesign: badge pills, icon buttons, collapsible sections, HelpIcon
+- **Type:** CR / UX / Frontend
+- **What:** Aesthetic overhaul of `CategoryRulesPage.tsx`.
+  1. **Page header** — Removed the 3-paragraph wall-of-text intro. Replaced with a compact `<HelpIcon>` tooltip on the "Classification rules" h1. Navigation links (Categories / Transactions / Import) moved inline to the header row.
+  2. **`MatchTypeBadge` component** — Renders `CONTAINS` (blue), `PREFIX` (purple), `REGEX` (amber) as colored pill badges in the match type column for both household and built-in rules tables.
+  3. **`AmountScopeBadge` component** — Renders `ANY` (muted gray), `CREDIT` (emerald green), `DEBIT` (red) as colored pill badges in the amount scope column.
+  4. **Icon buttons** — Edit → `<IconPencil size={13} />`, Delete → `<IconTrash size={13} />` (red-tinted) in both household and built-in rule tables. Save/Cancel remain as text buttons (appropriate for inline form context).
+  5. **Collapsible Import/Export section** — Wrapped in `<details><summary>` with a `<HelpIcon>` explaining create-only behavior. Closed by default to reduce visual noise for users who don't need it.
+  6. **Collapsible Search & test + Re-apply section** — Wrapped in `<details><summary>` with a `<HelpIcon>`. Reduces initial page density.
+  7. **Section headings** — All verbose description paragraphs under section h2s removed; replaced with inline `<HelpIcon>` tooltips.
+- **Files:** `frontend/src/pages/CategoryRulesPage.tsx`.
+
+### CR-098 — Categories page redesign: SourceBadge, icon buttons, HelpIcon
+- **Type:** CR / UX / Frontend
+- **What:** Aesthetic overhaul of `CategoriesPage.tsx`.
+  1. **Page header** — Removed the 5-paragraph wall-of-text intro. Replaced with a compact `<HelpIcon>` tooltip on the "Categories" h1. Navigation links moved inline to the header row.
+  2. **`SourceBadge` component** — Replaced plain text (`Built-in` / `Yours (household)`) in the Source column with a colored pill badge. Household-scoped categories render in emerald teal; built-ins render in muted gray. A `<HelpIcon>` added to the Source column header explains the distinction.
+  3. **Icon buttons** — "Edit" and "Delete" text buttons replaced with `<IconPencil size={13} />` and `<IconTrash size={13} />` icon buttons (using `replace_all` to cover both table rows and inline editing state) with appropriate `title` attributes.
+  4. **Inline edit state** — Save and Cancel buttons remain text labels (appropriate for a form-confirmation context).
+- **Files:** `frontend/src/pages/CategoriesPage.tsx`.
+
 ### CR-095 — Net Worth page redesign: AreaChart gradient, stat cards, HelpIcon, icon buttons
 - **Type:** CR / UX / Frontend
 - **What:** Visual overhaul of `NetWorthPage.tsx`.
@@ -51,6 +85,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   6. **Balance sheet heading** — `<HelpIcon>` on h2; verbose description paragraph removed.
   7. **Edit pencil** — Custom inline SVG replaced with `<IconPencil size={15} />` from @tabler/icons-react.
 - **Files:** `frontend/src/pages/NetWorthPage.tsx`.
+
+### CR-097 — Payslips page redesign: KPI cards, card-based list, icon buttons, HelpIcon
+- **Type:** CR / UX / Frontend
+- **What:** Aesthetic overhaul of `PayslipsPage.tsx`.
+  1. **Hero KPI cards** — 4 stat cards at the top when payslips exist: Latest gross, Latest net, YTD gross, YTD net. Each has a colored `borderTop` accent (emerald for gross/net current, muted for YTD). Derived from `data.items[0]` (newest payslip, sorted by backend).
+  2. **Page header** — `<HelpIcon>` replaces the intro paragraph. Two action buttons added: "Import PDF" (links to /imports, outline style) and "Add manually" (emerald filled, `<IconPlus>`).
+  3. **Belongs-to filter** — Compact inline label + `<HelpIcon>` tooltip; verbose explanation paragraph removed.
+  4. **Charts section** — `<HelpIcon>` on "Income & payroll" heading.
+  5. **Payslip list** — Replaced the plain `<table>` with card-based rows. Each row: period start/end + pay date, gross + net in a two-column mini-grid, eye icon (`<IconEye>`) + trash icon (`<IconTrash>`) action buttons. Net pay rendered in emerald green.
+  6. **Empty state** — Updated copy to reference the two add actions.
+- **Files:** `frontend/src/pages/PayslipsPage.tsx`.
+
+### CR-096 — Transactions page: duplicate filter bug fix + aesthetic overhaul
+- **Type:** FIX + CR / UX / Backend + Frontend
+- **Bug fix (backend):** When `resolutionType=duplicate_ambiguity` was selected in Needs Review, exact duplicate rows (`status='duplicate'`) disappeared. Exact duplicates are created by fingerprint deduplication with no `resolution_item` — they surface via `status NOT IN ('posted','trashed')`. The `resolutionTypes` SQL predicate required an `EXISTS` on `resolution_item`, excluding them. **Fix:** when `duplicate_ambiguity` is in `resolutionTypes`, the predicate now also includes `tc.status = 'duplicate'` via an `OR` clause. Both exact and near-duplicates appear when the "Duplicate" filter is active.
+- **Aesthetic changes (frontend):**
+  1. **Page header** — Wall-of-text intro replaced with compact `<HelpIcon>` tooltip. Session/dashboard links moved inline.
+  2. **Status badges** — Non-`posted` transactions now show a colored pill badge next to the amount (`Duplicate` → amber, `Trashed` → red, `Pending` → gray).
+  3. **Icon buttons** — Trash → `<IconTrash>`, Restore → `<IconArrowBackUp>`, Hard-delete → red-tinted `<IconTrash>`.
+  4. **Add transaction button** — `<IconPlus>` added alongside label, emerald primary styling.
+  5. **More filters toggle** — Verbose FTS paragraph replaced with `<HelpIcon>`. Toggle label improved.
+- **Files:** `backend/src/modules/ledger/ledger.service.ts`, `frontend/src/pages/TransactionsPage.tsx`.
 
 ### CR-094 — Budget page redesign: "Add a category" placement, icon nav, HelpIcon, CSS var colors
 - **Type:** CR / UX / Frontend

@@ -1,8 +1,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { HelpIcon } from "../components/HelpIcon";
 import {
   buildRulesCsvLines,
   categoryPathForCsv,
@@ -78,6 +80,36 @@ function amountScopeShort(s: AmountScope): string {
     default:
       return s;
   }
+}
+
+const PILL: { [k: string]: string | number } = {
+  display: "inline-block",
+  padding: "1px 7px",
+  borderRadius: 10,
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: "0.02em",
+  whiteSpace: "nowrap",
+};
+
+function MatchTypeBadge({ type }: { type: MatchType }) {
+  const cfg: Record<MatchType, { label: string; bg: string; color: string }> = {
+    contains: { label: "CONTAINS", bg: "#dbeafe", color: "#1d4ed8" },
+    prefix:   { label: "PREFIX",   bg: "#ede9fe", color: "#7c3aed" },
+    regex:    { label: "REGEX",    bg: "#fef3c7", color: "#92400e" },
+  };
+  const { label, bg, color } = cfg[type] ?? { label: type.toUpperCase(), bg: "var(--color-surface-alt)", color: "var(--color-text-muted)" };
+  return <span style={{ ...PILL, background: bg, color }}>{label}</span>;
+}
+
+function AmountScopeBadge({ scope }: { scope: AmountScope }) {
+  const cfg: Record<AmountScope, { label: string; bg: string; color: string }> = {
+    any:          { label: "ANY",    bg: "var(--color-surface-alt, #f8fafc)", color: "var(--color-text-muted)" },
+    credit_only:  { label: "CREDIT", bg: "#dcfce7", color: "#15803d" },
+    debit_only:   { label: "DEBIT",  bg: "#fee2e2", color: "#dc2626" },
+  };
+  const { label, bg, color } = cfg[scope] ?? { label: scope.toUpperCase(), bg: "var(--color-surface-alt)", color: "var(--color-text-muted)" };
+  return <span style={{ ...PILL, background: bg, color }}>{label}</span>;
 }
 
 const emptyForm = {
@@ -842,36 +874,27 @@ export function CategoryRulesPage() {
     <div>
       <div className="card">
         <div className="category-rules-page__section">
-          <h1 style={{ marginTop: 0 }}>Classification rules</h1>
-          <p className="muted">
-            <strong>Household rules</strong> run first, then <strong>built-in (global) rules</strong> stored in the database
-            (lower priority numbers run first within each group). Only <strong>leaf</strong> categories can be assigned.
-          </p>
-          <p className="muted">
-            Built-in rules apply to <strong>all households</strong> on this server. Owners and admins can edit them;
-            members can view only. Add household rules to override globals for your home.
-          </p>
-          <p className="muted">
-            <Link to="/categories">Back to categories</Link>
-            {" · "}
-            <Link to="/transactions">Transactions</Link>
-            {" · "}
-            <Link to="/imports">Import</Link> — upload, parse, and run the read-only <strong>classification matcher preview</strong> on the
-            session page (recent sessions and <strong>Copy id</strong> live there too).
-          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: "0.5rem" }}>
+            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Classification rules</h1>
+            <HelpIcon label="Household rules run first (lower priority numbers run first within each group), then built-in (global) rules. Only leaf categories can be assigned. Built-in rules apply to all households on this server; owners and admins can edit them." />
+            <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 13 }}>
+              <Link to="/categories">Categories</Link>
+              <Link to="/transactions">Transactions</Link>
+              <Link to="/imports">Import</Link>
+            </div>
+          </div>
         </div>
 
         {error ? <p className="error">{error}</p> : null}
         {recatMsg ? <p className="muted">{recatMsg}</p> : null}
 
         <div className="category-rules-page__section">
-        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Import / export (CSV)</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Export built-in, household, or both in one file (<code>origin</code> column). Import is{" "}
-          <strong>create-only</strong> (existing rule <code>id</code> values are ignored — use{" "}
-          <strong>Delete all household rules</strong> before re-importing a full file if you want a clean slate). Use{" "}
-          <code>category_id</code> or <code>category_path</code> (e.g. <code>Home &gt; HOA Fees</code>).
-        </p>
+        <details>
+        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "1.05rem", padding: "0.25rem 0", userSelect: "none" }}>
+          Import / export (CSV)
+          <HelpIcon label="Export built-in, household, or both in one file (origin column). Import is create-only — use Delete all household rules before re-importing a full file for a clean slate. Use category_id or category_path (e.g. Home › HOA Fees)." />
+        </summary>
+        <div style={{ marginTop: "0.75rem" }}>
         <div className="category-rules-page__export-row">
           <button type="button" className="secondary" onClick={exportRulesCsvAll} disabled={loading}>
             Export all (CSV)
@@ -962,9 +985,16 @@ export function CategoryRulesPage() {
           </div>
         ) : null}
         </div>
+        </details>
+        </div>
 
         <div className="category-rules-page__section">
-        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Search &amp; test</h2>
+        <details>
+        <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "1.05rem", padding: "0.25rem 0", userSelect: "none" }}>
+          Search &amp; test
+          <HelpIcon label="Filter rules by keyword. Test a bank description + amount against all rules to see which category it would be assigned." />
+        </summary>
+        <div style={{ marginTop: "0.75rem" }}>
         <div className="category-rules-page__row" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
           <label className="category-rules-page__field" style={{ minWidth: "12rem", flex: "1 1 12rem" }}>
             Filter rules
@@ -1021,13 +1051,14 @@ export function CategoryRulesPage() {
           </button>
         </div>
         </div>
+        </details>
+        </div>
 
         <div className="category-rules-page__section">
-        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Built-in (global) rules</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Grouped by target category and amount scope. These rules apply to <strong>every household</strong> on this server;
-          only installation default leaves are valid targets (see add form below).
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Built-in (global) rules</h2>
+          <HelpIcon label="These rules apply to every household on this server. Grouped by target category and amount scope. Only installation default leaf categories are valid targets. Owners and admins can edit." />
+        </div>
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && filteredBuiltin.length === 0 ? <p className="muted">No built-in rules match filter.</p> : null}
         {!loading && filteredBuiltin.length > 0 ? (
@@ -1126,7 +1157,7 @@ export function CategoryRulesPage() {
                                     <option value="regex">regex</option>
                                   </select>
                                 ) : (
-                                  b.matchType
+                                  <MatchTypeBadge type={b.matchType} />
                                 )}
                               </td>
                               <td>
@@ -1144,7 +1175,7 @@ export function CategoryRulesPage() {
                                     <option value="debit_only">debit only</option>
                                   </select>
                                 ) : (
-                                  amountScopeShort(b.amountScope)
+                                  <AmountScopeBadge scope={b.amountScope} />
                                 )}
                               </td>
                               <td>
@@ -1218,15 +1249,21 @@ export function CategoryRulesPage() {
                                       </button>
                                       <button
                                         type="button"
-                                        className="secondary"
+                                        title="Delete rule"
+                                        style={{ display: "inline-flex", alignItems: "center", padding: "0.2rem 0.4rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: "pointer", color: "var(--color-danger, #dc2626)" }}
                                         onClick={() => requestDeleteBuiltinRule(b.id)}
                                       >
-                                        Delete
+                                        <IconTrash size={13} />
                                       </button>
                                     </span>
                                   ) : (
-                                    <button type="button" className="secondary" onClick={() => startEditBuiltin(b)}>
-                                      Edit
+                                    <button
+                                      type="button"
+                                      title="Edit rule"
+                                      style={{ display: "inline-flex", alignItems: "center", padding: "0.2rem 0.4rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: "pointer", color: "var(--color-text-muted)" }}
+                                      onClick={() => startEditBuiltin(b)}
+                                    >
+                                      <IconPencil size={13} />
                                     </button>
                                   )
                                 ) : (
@@ -1247,15 +1284,14 @@ export function CategoryRulesPage() {
 
         {canEditGlobals ? (
           <>
-            <h3 style={{ fontSize: "1rem", marginTop: "1rem" }}>Add built-in rule</h3>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: "1rem", marginBottom: "0.5rem" }}>
+              <h3 style={{ fontSize: "1rem", margin: 0 }}>Add built-in rule</h3>
+              <HelpIcon label="Applies to all households on this server. Category must be an installation default leaf — for custom categories, use a household rule instead." />
+            </div>
             <form
               onSubmit={(e) => void onCreateGlobal(e)}
               className="category-rules-page__form category-rules-page__form--builtin"
             >
-              <p className="muted category-rules-page__form-span" style={{ margin: 0 }}>
-                Applies to <strong>all households</strong> on this server. Category must be an installation default leaf —
-                for categories you created under Categories, add a <strong>household</strong> rule instead.
-              </p>
               <label className="category-rules-page__field">
                 Rule key (optional)
                 <input
@@ -1355,11 +1391,10 @@ export function CategoryRulesPage() {
         </div>
 
         <div className="category-rules-page__section">
-        <h2 style={{ fontSize: "1.05rem", marginTop: 0 }}>Add household rules</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Household rules run <strong>before</strong> built-ins and can target any assignable leaf for your home, including
-          categories you added. They <strong>override</strong> global rules when both match.
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Add household rules</h2>
+          <HelpIcon label="Household rules run before built-ins and can target any assignable leaf category, including ones you created. They override global rules when both match." />
+        </div>
         <form onSubmit={(e) => void onCreate(e)} className="category-rules-page__form">
           <label className="category-rules-page__field" style={{ gridColumn: "1 / -1" }}>
             Pattern(s) — one per line or comma-separated (regex with commas: one pattern per line)
@@ -1449,10 +1484,10 @@ export function CategoryRulesPage() {
           </p>
         ) : null}
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>Your household rules</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Grouped by target category and amount scope (same layout as built-in rules).
-        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: "1.5rem", marginBottom: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.05rem", margin: 0 }}>Your household rules</h2>
+          <HelpIcon label="Grouped by target category and amount scope. Household rules run before built-in rules for every transaction import." />
+        </div>
         {!loading && filteredHousehold.length === 0 ? <p className="muted">No household rules match filter.</p> : null}
         {!loading && filteredHousehold.length > 0 ? (
           <div>
@@ -1536,7 +1571,7 @@ export function CategoryRulesPage() {
                                     <option value="regex">regex</option>
                                   </select>
                                 ) : (
-                                  r.matchType
+                                  <MatchTypeBadge type={r.matchType} />
                                 )}
                               </td>
                               <td>
@@ -1554,7 +1589,7 @@ export function CategoryRulesPage() {
                                     <option value="debit_only">debit only</option>
                                   </select>
                                 ) : (
-                                  amountScopeShort(r.amountScope ?? "any")
+                                  <AmountScopeBadge scope={r.amountScope ?? "any"} />
                                 )}
                               </td>
                               <td>
@@ -1625,23 +1660,30 @@ export function CategoryRulesPage() {
                                     </button>
                                     <button
                                       type="button"
-                                      className="secondary"
+                                      title="Delete rule"
+                                      style={{ display: "inline-flex", alignItems: "center", padding: "0.2rem 0.4rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: "pointer", color: "var(--color-danger, #dc2626)" }}
                                       onClick={() => requestDeleteHouseholdRule(r.id)}
                                     >
-                                      Delete
+                                      <IconTrash size={13} />
                                     </button>
                                   </span>
                                 ) : (
                                   <span className="category-rules-page__row-actions">
-                                    <button type="button" className="secondary" onClick={() => startEdit(r)}>
-                                      Edit
+                                    <button
+                                      type="button"
+                                      title="Edit rule"
+                                      style={{ display: "inline-flex", alignItems: "center", padding: "0.2rem 0.4rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: "pointer", color: "var(--color-text-muted)" }}
+                                      onClick={() => startEdit(r)}
+                                    >
+                                      <IconPencil size={13} />
                                     </button>
                                     <button
                                       type="button"
-                                      className="secondary"
+                                      title="Delete rule"
+                                      style={{ display: "inline-flex", alignItems: "center", padding: "0.2rem 0.4rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: "pointer", color: "var(--color-danger, #dc2626)" }}
                                       onClick={() => requestDeleteHouseholdRule(r.id)}
                                     >
-                                      Delete
+                                      <IconTrash size={13} />
                                     </button>
                                   </span>
                                 )}
