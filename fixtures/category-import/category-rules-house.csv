@@ -3,18 +3,17 @@ household,,,FID BKG SVC LLC DES:MONEYLINE ID:ZXXXXX,contains,debit_only,,Investm
 household,,,FID BKG SVC LLC DES:MONEYLINE ID:XXXXX904,contains,debit_only,,Investments > 529 plan,40,0.98,true
 household,,,FID BKG SVC LLC DES:MONEYLINE ID:XXXXX9787,contains,debit_only,,Investments > IRA,40,0.98,true
 household,,,UNITEDWHOLESALE,contains,debit_only,,Loans > Home,40,0.97,true
+household,,,Bilt for UWM,contains,debit_only,,Loans > Home,40,0.97,true
 household,,,Online scheduled payment to CSL 0664,contains,debit_only,,Loans > Auto,40,0.98,true
 household,,,MANGAT RAI DES:ACH XFER,contains,debit_only,,Loans > Auto,40,0.95,true
 household,,,KEEP THE CHANGE,contains,debit_only,,Transfers > Transfers out,40,0.95,true
 household,,,KEEPTHECHANGE,contains,credit_only,,Transfers > Transfers in,40,0.95,true
-
 household,,,APPLECARD GSBANK,contains,debit_only,,Transfers > Transfers out,40,0.97,true
 household,,,CITI AUTOPAY,contains,debit_only,,Transfers > Transfers out,40,0.96,true
 household,,,CHASE CREDIT CRD,contains,debit_only,,Transfers > Transfers out,40,0.96,true
 household,,,DISCOVER DES:E-PAYMENT,contains,debit_only,,Transfers > Transfers out,40,0.96,true
 household,,,AMERICAN EXPRESS DES:ACH PMT,contains,debit_only,,Transfers > Transfers out,40,0.96,true
 household,,,CAPITAL ONE DES:CRCARDPMT,contains,debit_only,,Transfers > Transfers out,40,0.96,true
-
 household,,,Wealthfront DES:EDI PYMNTS,contains,debit_only,,Transfers > Transfers out,40,0.98,true
 household,,,Wealthfront DES:EDI PYMNTS,contains,credit_only,,Transfers > Transfers in,40,0.98,true
 household,,,Transfer WEALTHFRONT,contains,credit_only,,Transfers > Transfers in,40,0.98,true
@@ -26,18 +25,14 @@ household,,,Mobile transfer to CHK 6335,contains,debit_only,,Transfers > Transfe
 household,,,BKOFAMERICA MOBILE,contains,credit_only,,Transfers > Transfers in,50,0.92,true
 household,,,CYBRID-REMIT2ANY,contains,debit_only,,Transfers > Transfers out,60,0.75,true
 household,,,CONTINENTAL EXC DES,contains,debit_only,,Transfers > Transfers out,60,0.75,true
-
 household,,,FUNDRISEINCOME,contains,debit_only,,Investments > Real estate,40,0.95,true
 household,,,FUNDRISE REAL ES,contains,debit_only,,Investments > Real estate,40,0.95,true
 household,,,DataStax Inc-OSV,contains,credit_only,,Income > Salary,50,0.93,true
-
 household,,,PL*InsightAssoci,contains,debit_only,,Home > HOA Fees,40,0.98,true
 household,,,PL*PAYLEASE,contains,debit_only,,Home > HOA Fees,40,0.98,true
 household,,,DIVINE AUDIO VIS,contains,debit_only,,Home > Home improvement,60,0.82,true
-
 household,,,CITYOFLEWISVILLE DES:UTIL BILL,contains,debit_only,,Utilities > City Water,40,0.98,true
 household,,,PROTECTIVE LIFE DES:E-PAYMENTS,contains,debit_only,,Insurance > Life,40,0.98,true
-
 household,,,Fyle DES:Fyle,contains,credit_only,,Income > Reimbursements,40,0.98,true
 household,,,NAVIA BENEFIT SO DES:FLEXIBLE B,contains,credit_only,,Income > Reimbursements,40,0.98,true
 household,,,IBM Corporation DES:PAYMENTS,contains,credit_only,,Income > Reimbursements,40,0.98,true
@@ -46,23 +41,20 @@ household,,,APPLE CASH DES:BANK XFER,contains,credit_only,,Income > Reimbursemen
 household,,,PAYPAL DES:TRANSFER,contains,credit_only,,Income > Reimbursements,40,0.90,true
 household,,,GOLDMAN SACHS BA DES:P2P,contains,credit_only,,Income > Reimbursements,50,0.80,true
 household,,,CINC OUTGOING,contains,credit_only,,Income > Dividends,50,0.95,true
-
 household,,,TARGET DEBIT CRD,contains,any,,Shopping > General merchandise,40,0.96,true
 household,,,AMAZON,contains,debit_only,,Shopping > General merchandise,60,0.80,true
 household,,,AMZN,contains,debit_only,,Shopping > General merchandise,60,0.80,true
 household,,,WALMART,contains,debit_only,,Shopping > General merchandise,60,0.80,true
 household,,,COSTCO,contains,any,,Shopping > General merchandise,60,0.80,true
-household,,,SAMS CLUB,contains,any,,Shopping > General merchandise,60,0.80,true
+household,,,SAMS,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,KROGER,contains,debit_only,,Shopping > Groceries,40,0.98,true
 household,,,HEB,contains,debit_only,,Shopping > Groceries,40,0.98,true
 household,,,APPLE,contains,debit_only,,Shopping > Electronic,40,0.98,true
-
 household,,,UBER,contains,debit_only,,Mobility > Taxi,60,0.90,true
 household,,,LYFT,contains,debit_only,,Mobility > Taxi,60,0.90,true
 household,,,CHEVRON,contains,debit_only,,Mobility > Fuel,90,0.75,true
 household,,,SHELL,contains,debit_only,,Mobility > Fuel,90,0.75,true
 household,,,EXXON,contains,debit_only,,Mobility > Fuel,90,0.75,true
-
 household,,,SOUTHWEST,contains,debit_only,,Travel > Airfare,60,0.90,true
 household,,,DELTA,contains,debit_only,,Travel > Airfare,60,0.90,true
 household,,,AMERICAN,contains,debit_only,,Travel > Airfare,60,0.90,true
@@ -70,7 +62,6 @@ household,,,UNITED AIRLINES,contains,debit_only,,Travel > Airfare,60,0.90,true
 household,,,MARRIOTT,contains,debit_only,,Travel > Hotel,60,0.90,true
 household,,,HILTON,contains,debit_only,,Travel > Hotel,60,0.90,true
 household,,,HYATT,contains,debit_only,,Travel > Hotel,60,0.90,true
-
 household,,,IRS DES:USATAXPYMT,contains,debit_only,,Taxes > Federal income tax,40,0.98,true
 household,,,IRS,contains,credit_only,,Taxes > Federal tax refund,90,0.85,true
 household,,,TURBOTAX,contains,debit_only,,Taxes > Tax prep,40,0.90,true
@@ -78,12 +69,10 @@ household,,,COLLIN COUNTY,contains,debit_only,,Taxes > Property tax,40,0.97,true
 household,,,DENTON COUNTY,contains,debit_only,,Taxes > Property tax,40,0.97,true
 household,,,COUNTY TAX,contains,debit_only,,Taxes > Property tax,90,0.75,true
 household,,,FEDERAL WITHHOLDING,contains,debit_only,,Taxes > Federal income tax,40,0.95,true
-
 household,,,STARBUCKS,contains,debit_only,,Food > Coffee,60,0.95,true
 household,,,CHICK-FIL-A,contains,debit_only,,Food > Dining out,60,0.95,true
 household,,,MCDONALDS,contains,debit_only,,Food > Dining out,60,0.95,true
 household,,,STONEBROOK PEDIATRIC,contains,debit_only,,Healthcare > Medical,50,0.95,true
-
 household,,,BRGHTWHL,contains,any,,Education > Childcare,40,0.98,true
 household,,,PRIMROSE SCHOOL,contains,any,,Education > Childcare,40,0.98,true
 household,,,LEADERSHIP,contains,any,,Education > Tuition,40,0.98,true
@@ -92,44 +81,33 @@ household,,,TMOBILE,contains,debit_only,,Utilities > Mobile phone,40,0.96,true
 household,,,ZELLE,contains,credit_only,,Income > Reimbursements,40,0.88,true
 household,,,FRONTIER,contains,debit_only,,Utilities > Internet,40,0.95,true
 household,,,BKOFAMERICA ATM,contains,debit_only,,Transfers > Cash withdrawal,40,0.98,true
-
 household,,,INDIA BAZAAR,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,PATEL BROTHERS,contains,any,,Shopping > Groceries,40,0.97,true
 household,,,SWADESHI PLAZA,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,HARELI FRESH MARKET,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,PY *HARELI,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,TOM THUMB,contains,debit_only,,Shopping > Groceries,40,0.97,true
-
 household,,,TESLA SUPERCHARGER,contains,debit_only,,Mobility > EV Charging,40,0.98,true
-
 household,,,DIRECTPAY FULL BALANCE,contains,debit_only,,Transfers > Transfers out,40,0.97,true
 household,,,CASHBACK BONUS REDEMPTION,contains,credit_only,,Income > Refunds,40,0.95,true
 household,,,AUTOPAY PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.97,true
 household,,,AMEX OFFER CREDIT,contains,credit_only,,Income > Refunds,40,0.97,true
-
 household,,,ADVANTAGE FLEX T,contains,any,,Healthcare > Medical,40,0.92,true
 household,,,HEALTH CENTRAL WOMEN,contains,any,,Healthcare > Medical,40,0.92,true
 household,,,NAVIA BENEFIT,contains,any,,Healthcare > Medical,40,0.92,true
-
 household,,,FIVE BELOW,contains,debit_only,,Shopping > General merchandise,40,0.95,true
 household,,,DELL,contains,debit_only,,Shopping > Electronic,40,0.90,true
-
 household,,,H-E-B,contains,debit_only,,Shopping > Groceries,40,0.97,true
-
 household,,,HULU,contains,debit_only,,Entertainment > Streaming,40,0.97,true
-
 household,,,NTTA,contains,debit_only,,Mobility > Parking & Tolls,40,0.97,true
 household,,,STATE FARM,contains,debit_only,,Insurance > Auto,40,0.95,true
-
 household,,,GWALIA SWEETS,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,SIMPLY SOUTH,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,ASIAN POT,contains,debit_only,,Food > Dining out,40,0.95,true
-
 household,,,(Account ****,contains,credit_only,,Transfers > Transfers in,40,0.85,true
 household,,,(Account ****,contains,debit_only,,Transfers > Transfers out,40,0.85,true
 household,,,GOLDMAN SACHS BANK USA,contains,credit_only,,Transfers > Transfers in,40,0.92,true
 household,,,Automated Bond Portfolio,contains,debit_only,,Investments > Stocks,40,0.88,true
-
 household,,,GREAT CLIPS,contains,debit_only,,Shopping > Personal care,40,0.95,true
 household,,,HANDELS,contains,debit_only,,Food > Snacks,40,0.95,true
 household,,,DESI BITES,contains,debit_only,,Food > Dining out,40,0.95,true
@@ -143,7 +121,6 @@ household,,,THE HOME DEPOT,contains,any,,Home > Home improvement,40,0.97,true
 household,,,SHERWIN-WILLIAMS,contains,any,,Home > Home improvement,40,0.96,true
 household,,,BIKANERVALA,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,JUPITER HOUSE,contains,debit_only,,Food > Coffee,40,0.92,true
-
 household,,,ATMOS ENERGY,contains,debit_only,,Utilities > Energy,40,0.96,true
 household,,,CHATGPT,contains,debit_only,,Shopping > Software,40,0.96,true
 household,,,BRAUMS,contains,debit_only,,Shopping > Groceries,40,0.95,true
@@ -155,15 +132,19 @@ household,,,CITY OF FRISCO,contains,debit_only,,Utilities > City Water,40,0.96,t
 household,,,ADT SECURITY,contains,debit_only,,Shopping > Software,40,0.88,true
 household,,,QUELL PEST CONTROL,contains,debit_only,,Home > Maintenance,40,0.94,true
 household,,,CURSOR,contains,debit_only,,Shopping > Software,40,0.96,true
-household,,,OLD NAVY,contains,debit_only,,Shopping > Clothing,40,0.96,true
+household,,,OLD NAVY,contains,any,,Shopping > Clothing,40,0.96,true
 household,,,HOT BREADS,contains,debit_only,,Food > Snacks,40,0.95,true
 household,,,ALLSTATE,contains,debit_only,,Insurance > Home,40,0.94,true
 household,,,ALLST,contains,debit_only,,Insurance > Auto,40,0.88,true
 household,,,GEICO,contains,debit_only,,Insurance > Auto,40,0.96,true
 household,,,GRASSCUTTS,contains,debit_only,,Home > Maintenance,40,0.90,true
+household,,,WEEDEX,contains,debit_only,,Home > Maintenance,40,0.90,true
 household,,,AQUA TOTS,contains,debit_only,,Education > Activities,40,0.94,true
 household,,,ASIAN POT EXPRESS,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,RIVIAN,contains,debit_only,,Mobility > EV Charging,40,0.93,true
 household,,,AUTOPAY,contains,credit_only,,Transfers > Transfers in,40,0.85,true
+household,,,AUTOMATIC PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.85,true
 household,,,CORNER BAKERY,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,COSERV,contains,debit_only,,Utilities > Energy,40,0.96,true
+household,,,TST*,contains,debit_only,,Food > Dining out,40,0.95,true
+household,,,SQ *,contains,debit_only,,Food > Dining out,40,0.95,true
