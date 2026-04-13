@@ -81,6 +81,7 @@ household-finance-app/
 | `resolution/` | `resolution.service.ts` | Unresolved items queue (unknown_category, duplicate_ambiguity, transfer_ambiguity) |
 | `reports/` | `cash-summary.service.ts`, `balance-sheet.service.ts`, `reports.routes.ts` | Cash flow KPIs (`/reports/cash-summary`); net worth snapshot + history (`/reports/balance-sheet`, `/reports/balance-sheet/history`); manual balance POST/PATCH |
 | `export/` | `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`, `exports.routes.ts` | Async **ZIP export** (`exportVersion` 3: manifest + per-table JSON) and **async restore** (`POST /exports/household/import`, poll `GET /exports/import/:jobId`); wipe-then-restore, JWT invalidation via `token_version` |
+| `budget/` | `budget.service.ts`, `budget.routes.ts` | Monthly per-category budgets; suggestions from recent spend; actuals vs budgeted with parent-level rollup (`/budget/suggest`, `/budget/months`, `/budget/:month` GET/PUT) |
 | `health/` | routes only | `GET /health` liveness endpoint |
 
 ---
@@ -119,9 +120,11 @@ resolution_item                   -- Unresolved queue: type, target_id, status
 payslip_snapshot                  -- Net, gross, taxes, deductions per pay period
 account_balance_snapshot          -- Manual + import-sourced balances per account/date (net worth)
 export_job                        -- Async export tracking
+import_job                        -- Async restore tracking (status, stats_json)
+budget_category                   -- Per-month, per-category budget amounts (household_id, category_id, month YYYY-MM, amount)
 ```
 
-Active migrations live in `backend/src/db/migrations_pg/`. `0001_baseline.sql` is the squashed full schema; subsequent numbered files are additive. Latest: `0007_transaction_canonical_trashed_status.sql` (adds `'trashed'` to status check constraint). The `migrations/` directory contains legacy SQLite files (stale, pending cleanup — do not use).
+Active migrations live in `backend/src/db/migrations_pg/`. `0001_baseline.sql` is the squashed full schema; subsequent numbered files are additive. Latest: `0012_exact_duplicate_review.sql` (partial unique index on fingerprint for `status NOT IN ('duplicate','trashed')`). The `migrations/` directory contains legacy SQLite files (stale, pending cleanup — do not use).
 
 ---
 

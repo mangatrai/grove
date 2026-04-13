@@ -19,6 +19,7 @@ tags:
   - name: reports
   - name: payslips
   - name: exports
+  - name: budget
 paths:
   /health:
     get:
@@ -446,6 +447,157 @@ paths:
       tags: [exports]
       summary: Export job status
       security: [{ bearerAuth: [] }]
+  /budget/suggest:
+    get:
+      tags: [budget]
+      summary: Budget suggestions for a month (pre-populated from recent spend)
+      description: >-
+        Returns suggested budget amounts for each category based on the most recent
+        calendar month with categorised debit activity (anchor month). Categories
+        excluded: Transfers, Income, Investments. Results sorted by anchor-month spend
+        descending. `dataAsOf` is the YYYY-MM anchor used; null when no data in 24-month window.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+          description: YYYY-MM month to generate suggestions for
+      responses:
+        "200":
+          description: Suggestions (may be empty when no data)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  month: { type: string }
+                  dataAsOf: { type: string, nullable: true }
+                  suggestions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        categoryId: { type: string }
+                        categoryName: { type: string }
+                        parentId: { type: string, nullable: true }
+                        parentName: { type: string, nullable: true }
+                        suggestedAmount: { type: number }
+                        basis: { type: string, enum: [last_month, three_month_avg] }
+                        lastMonthActual: { type: number }
+                        threeMonthAvg: { type: number }
+        "400":
+          description: month param missing or invalid format
+  /budget/months:
+    get:
+      tags: [budget]
+      summary: List months that have at least one budget entry (newest first)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Month list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  months:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        month: { type: string }
+                        totalBudgeted: { type: number }
+  /budget/{month}:
+    get:
+      tags: [budget]
+      summary: Budget + actual spend for the given month
+      description: >-
+        Returns the saved budget for the month combined with actual debit spend.
+        `exists: false` when no budget entries have been saved; UI shows setup form.
+        Entries may be leaf-level or parent-level (parent-level entries roll up all child actuals).
+        `summary.unbudgetedSpend` captures outflows not covered by any budget entry.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+      responses:
+        "200":
+          description: Budget with actuals
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  month: { type: string }
+                  exists: { type: boolean }
+                  summary:
+                    type: object
+                    properties:
+                      totalBudgeted: { type: number }
+                      totalSpent: { type: number }
+                      remaining: { type: number }
+                      unbudgetedSpend: { type: number }
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        categoryId: { type: string }
+                        categoryName: { type: string }
+                        parentName: { type: string, nullable: true }
+                        budgeted: { type: number }
+                        spent: { type: number }
+                        remaining: { type: number }
+                        percentUsed: { type: number }
+        "400":
+          description: month path param not YYYY-MM
+    put:
+      tags: [budget]
+      summary: Replace entire budget for the month
+      description: >-
+        Full replace — deletes all existing entries for the month and inserts the provided set
+        in a transaction. Passing an empty entries array clears the budget for that month.
+        Returns the saved budget with actuals (same shape as GET /budget/:month).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: month
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{4}-\d{2}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [entries]
+              properties:
+                entries:
+                  type: array
+                  items:
+                    type: object
+                    required: [categoryId, amount]
+                    properties:
+                      categoryId:
+                        type: string
+                        format: uuid
+                      amount:
+                        type: number
+                        minimum: 0
+      responses:
+        "200":
+          description: Saved budget with actuals (same shape as GET /budget/:month)
+        "400":
+          description: Invalid month param or invalid body
 components:
   securitySchemes:
     bearerAuth:

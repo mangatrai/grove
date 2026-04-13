@@ -83,15 +83,15 @@ Files include: `id`, `file_name`, `checksum`, `status`, `file_size`, `mime_type`
 
 ### `GET /imports/sessions/:sessionId/summary`
 
-Session processing summary (Epic 6): per uploaded file, parsed vs posted counts, near-duplicate flags, open review
-items, and a derived “not posted (exact duplicate or skipped)” bucket. All per-file numbers come from one response
+Session processing summary (Epic 6): per uploaded file, parsed vs posted counts, duplicate flags, open review
+items, and a derived “skipped” bucket. All per-file numbers come from one response
 (no per-file follow-up calls).
 
 - **`rawRowCount`** — rows in **`transaction_raw`** for that file.
-- **`canonicalRowCount`** — posted ledger rows linked from that file’s raw rows (`source_ref = 'raw:' || transaction_raw.id`).
-- **`nearDuplicatesFlagged`** — count of **`resolution_item`** rows with `type: duplicate_ambiguity` whose **`target_id`** is a **`transaction_raw.id`** belonging to that file (near-duplicate ingest).
-- **`openItemsNeedingReview`** — open or in-review items for that file: the above near-duplicate items, plus **`unknown_category`**, **`transfer_ambiguity`**, or **`reconciliation_mismatch`** on **`transaction_canonical`** rows sourced from that file’s raw rows.
-- **`notPostedExactDuplicateOrSkipped`** — `max(0, rawRowCount - canonicalRowCount - nearDuplicatesFlagged)` — lines that did not post and were not recorded as a near-duplicate (typically exact fingerprint duplicates or skipped/invalid rows during canonicalize).
+- **`canonicalRowCount`** — canonical rows of any status linked from that file’s raw rows (`source_ref = ‘raw:’ || transaction_raw.id`). Includes **`status = ‘duplicate’`** rows created by CR-080 exact-duplicate detection (they appear in Needs Review and may be promoted to `’posted’` on resolve).
+- **`nearDuplicatesFlagged`** — count of **`resolution_item`** rows with `type: duplicate_ambiguity` whose **`target_id`** is a **`transaction_raw.id`** belonging to that file. Covers both **exact duplicates** (CR-080: canonical row inserted with `status = ‘duplicate’`) and **near-duplicates** (no canonical row inserted, raw row skipped).
+- **`openItemsNeedingReview`** — open or in-review items for that file: the above duplicate items, plus **`unknown_category`**, **`transfer_ambiguity`**, or **`reconciliation_mismatch`** on **`transaction_canonical`** rows sourced from that file’s raw rows.
+- **`notPostedExactDuplicateOrSkipped`** — `max(0, rawRowCount - canonicalRowCount - nearDuplicatesFlagged)` — lines that are accounted for by neither a canonical row nor a duplicate flag. After CR-080, exact fingerprint duplicates are counted in both `canonicalRowCount` and `nearDuplicatesFlagged` so they cancel out here. This bucket now captures only truly skipped/invalid rows (e.g. in-session checksum duplicates that were never persisted as raw rows, rows that failed parse, etc.).
 
 **200:**
 

@@ -20,6 +20,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-12
 
+### DOC-081 — Full doc audit: budget API gap, CLAUDE.md stale module table + schema, import summary CR-080 accuracy
+- **Type:** DOC
+- **What:** Comprehensive audit of all documentation against shipped CRs (git log back 70+ commits). Gaps found and fixed:
+  1. **`openapi/openapi.yaml`** — `budget` tag and all four `/budget/*` paths (`GET /budget/suggest`, `GET /budget/months`, `GET /budget/:month`, `PUT /budget/:month`) were entirely absent. Added with full request/response schemas.
+  2. **`docs/API_BUDGET.md`** — File did not exist. Created new API guide covering suggestions, month list, budget GET, budget PUT, parent-level rollup semantics, and schema.
+  3. **`docs/API_INDEX.md`** — `API_BUDGET.md` link was missing. Added.
+  4. **`CLAUDE.md` module table** — `budget/` module row was absent (14th module). Added with key files and responsibility summary.
+  5. **`CLAUDE.md` schema highlights** — `budget_category` and `import_job` tables were not listed; latest migration pointer was stale (`0007` — now `0012`). All corrected.
+  6. **`docs/API_IMPORT_SESSIONS.md`** — `nearDuplicatesFlagged` and `notPostedExactDuplicateOrSkipped` descriptions were stale after CR-080. Updated: `canonicalRowCount` now explicitly includes `status='duplicate'` rows; `nearDuplicatesFlagged` now covers both exact and near duplicates; `notPostedExactDuplicateOrSkipped` formula note updated (exact duplicates cancel in the formula after CR-080).
+- **Files:** `openapi/openapi.yaml`, `docs/API_BUDGET.md` (new), `docs/API_INDEX.md`, `CLAUDE.md`, `docs/API_IMPORT_SESSIONS.md`.
+
 ### FIX-073 — Startup warning when SPA is skipped (`MODE` / missing `frontend/dist`)
 - **Type:** FIX / DX
 - **What:** When **`NODE_ENV=production`** but **`MODE≠PROD`**, log a **warn** that the SPA is not served (common when **`--env-file .env`** overrides the image and `.env` has **`MODE=TEST`**). When **`MODE=PROD`** but **`frontend/dist`** is missing, log a **warn** linking to **Cannot GET /**. [`docs/PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) Compose **`docker run`** example now includes **`-e MODE=PROD`** and explains **`MODE=TEST`** vs SPA.
