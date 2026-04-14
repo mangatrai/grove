@@ -4,7 +4,10 @@ import { Link, Navigate } from "react-router-dom";
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
+  LabelList,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -348,6 +351,34 @@ export function NetWorthPage() {
     return [...a, ...l];
   }, [data?.assets, data?.liabilities]);
 
+  const topAssets = useMemo(
+    () =>
+      [...(data?.assets ?? [])]
+        .filter((r) => r.balance != null)
+        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))
+        .slice(0, 5)
+        .map((r) => ({
+          id: r.financialAccountId,
+          name: `${r.institution}${r.accountMask ? ` · ${r.accountMask}` : ""}`,
+          balance: r.balance ?? 0
+        })),
+    [data?.assets]
+  );
+
+  const topLiabilities = useMemo(
+    () =>
+      [...(data?.liabilities ?? [])]
+        .filter((r) => r.balance != null)
+        .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))
+        .slice(0, 5)
+        .map((r) => ({
+          id: r.financialAccountId,
+          name: `${r.institution}${r.accountMask ? ` · ${r.accountMask}` : ""}`,
+          balance: r.balance ?? 0
+        })),
+    [data?.liabilities]
+  );
+
   useEffect(() => {
     setBulkAsOfDraft(tableAsOf);
   }, [tableAsOf]);
@@ -683,6 +714,61 @@ export function NetWorthPage() {
         {!historyLoading && chartRows.length === 0 && !historyError ? (
           <p className="muted">No history points in this range (add manual or import balances to see a line).</p>
         ) : null}
+
+        {!loading && (topAssets.length > 0 || topLiabilities.length > 0) ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
+            {topAssets.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Assets</div>
+                <ResponsiveContainer width="100%" height={topAssets.length * 34 + 8}>
+                  <BarChart layout="vertical" data={topAssets} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
+                    <XAxis type="number" hide domain={[0, "dataMax"]} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={130}
+                      tick={{ fontSize: 11, fill: "var(--color-text)" }}
+                      tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v}
+                    />
+                    <Bar dataKey="balance" fill="#22c55e" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                      <LabelList
+                        dataKey="balance"
+                        position="right"
+                        formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                        style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : null}
+            {topLiabilities.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Liabilities</div>
+                <ResponsiveContainer width="100%" height={topLiabilities.length * 34 + 8}>
+                  <BarChart layout="vertical" data={topLiabilities} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
+                    <XAxis type="number" hide domain={[0, "dataMax"]} />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={130}
+                      tick={{ fontSize: 11, fill: "var(--color-text)" }}
+                      tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v}
+                    />
+                    <Bar dataKey="balance" fill="#f59e0b" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                      <LabelList
+                        dataKey="balance"
+                        position="right"
+                        formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                        style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="card" style={{ marginTop: "1rem" }}>
@@ -732,51 +818,6 @@ export function NetWorthPage() {
             <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${(data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}` }}>
               <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Net worth</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)" }}>{formatMoney(data.totals.netWorth)}</div>
-            </div>
-          </div>
-        ) : null}
-
-        {!loading && data && allTableRows.length > 0 ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Top Assets</div>
-              <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                {[...data.assets]
-                  .filter((r) => r.balance != null)
-                  .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))
-                  .slice(0, 5)
-                  .map((r, i) => (
-                    <li key={r.financialAccountId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.25rem 0", borderBottom: "1px solid var(--color-border)", fontSize: "0.875rem" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                        <span style={{ color: "var(--color-text-muted)", fontSize: 11, minWidth: "1rem" }}>{i + 1}</span>
-                        <Link to={transactionsHref({ accountId: r.financialAccountId })} style={{ color: "inherit" }}>
-                          {r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}
-                        </Link>
-                      </span>
-                      <span style={{ fontWeight: 600, color: "var(--color-success)" }}>{formatMoney(r.balance)}</span>
-                    </li>
-                  ))}
-              </ol>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Top Liabilities</div>
-              <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
-                {[...data.liabilities]
-                  .filter((r) => r.balance != null)
-                  .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))
-                  .slice(0, 5)
-                  .map((r, i) => (
-                    <li key={r.financialAccountId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.25rem 0", borderBottom: "1px solid var(--color-border)", fontSize: "0.875rem" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                        <span style={{ color: "var(--color-text-muted)", fontSize: 11, minWidth: "1rem" }}>{i + 1}</span>
-                        <Link to={transactionsHref({ accountId: r.financialAccountId })} style={{ color: "inherit" }}>
-                          {r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}
-                        </Link>
-                      </span>
-                      <span style={{ fontWeight: 600, color: "var(--color-warm-dark, #d97706)" }}>{formatMoney(r.balance)}</span>
-                    </li>
-                  ))}
-              </ol>
             </div>
           </div>
         ) : null}
