@@ -93,7 +93,7 @@ const balanceSheetHistoryQuerySchema = z
   .object({
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-    interval: z.enum(["month", "week", "day"]).optional().default("month"),
+    interval: z.enum(["month", "quarter", "week", "day"]).optional().default("month"),
     ownerScope: z.enum(["household", "person"]).optional(),
     ownerPersonProfileId: z.string().uuid().optional(),
     accountIds: z.string().optional()

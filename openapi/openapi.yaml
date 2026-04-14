@@ -375,7 +375,7 @@ paths:
   /reports/balance-sheet/history:
     get:
       tags: [reports]
-      summary: Balance sheet totals over time (optional ownerScope; optional accountIds for per-point account slices; max 120 samples)
+      summary: Balance sheet totals over time (interval=month|quarter|week|day; optional ownerScope; optional accountIds for per-point account slices; max 120 samples)
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual:
     post:

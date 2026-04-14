@@ -18,6 +18,40 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-14 (net worth UX + balance resolution fix)
+
+### FIX-007 — Net worth: balance resolution — most-recent wins (manual or import)
+- **Type:** FIX
+- **What:** The balance resolution order previously hard-coded **manual > import** regardless of date. If a manual snapshot existed from March 30 and an import snapshot existed from April 5 on the same account, the March 30 value was shown. Fixed: both manual and import snapshots are fetched concurrently; the one with the **more recent `as_of_date`** is used. Tie-break favours manual (explicit user entry). The legacy import-file-hint fallback is unchanged (only triggers when no `account_balance_snapshot` row exists at all).
+- **Files:** `backend/src/modules/reports/balance-sheet.service.ts`.
+
+### UX-013 — Net worth: remove overlay accounts from trend chart
+- **Type:** UX
+- **What:** Removed the "Overlay accounts on chart" MultiSelect from the Trend section. The feature added per-account line overlays but had rendering bugs and low utility given the Balance Sheet table below already shows per-account detail.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`.
+
+### UX-014 — Net worth: default period changed to Last 3 months
+- **Type:** UX
+- **What:** Trend chart and custom range now default to **Last 3 months** (was Last 12 months). Reduces initial data load and focuses on recent activity.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`.
+
+### UX-015 — Net worth: "Belongs to" filter aligned with Transactions page
+- **Type:** UX
+- **What:** Removed the spurious "Scope > All accounts" group from the `HierarchicalSearchPicker` dropdown. The picker's existing `clearable` prop already handles the "all accounts" state. Group labels now match TransactionsPage: `Household` / `Members`.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`.
+
+### UX-016 — Net worth: more Period and Interval options + Period Summary "Date" label
+- **Type:** UX
+- **What:** Added **Last 2 years** (`2y`) and **Last 3 years** (`3y`) period presets. Added **Quarter-end** interval option (generates March 31, June 30, Sept 30, Dec 31 sample dates). Renamed "Sample" column in the Period Summary table to "Date". Updated backend to accept and generate `quarter` interval points.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/reports/reports.routes.ts`.
+
+### UX-017 — Net worth: Top 5 Assets + Top 5 Liabilities panels
+- **Type:** UX
+- **What:** Added ranked quick-view panels between the summary cards and the full account table. Each panel shows up to 5 accounts sorted by balance magnitude, with a clickable link to the account's transactions. Assets highlighted green, liabilities amber. Only renders when balance data exists.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`.
+
+---
+
 ## 2026-04-13 (net worth, member management, security)
 
 ### FIX-003 — Net worth: retirement accounts excluded from balance sheet

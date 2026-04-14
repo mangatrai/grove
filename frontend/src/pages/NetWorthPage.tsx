@@ -1,4 +1,3 @@
-import { MultiSelect } from "@mantine/core";
 import { IconEye, IconPencil } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
@@ -7,7 +6,6 @@ import {
   AreaChart,
   CartesianGrid,
   Legend,
-  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -73,11 +71,10 @@ type BalanceSheetHistoryResponse = {
   }>;
 };
 
-type PeriodPreset = "3m" | "6m" | "12m" | "ytd" | "custom";
+type PeriodPreset = "3m" | "6m" | "12m" | "2y" | "3y" | "ytd" | "custom";
 
 type BelongsToFilter = "" | "household" | `person:${string}`;
 
-const MAX_CHART_ACCOUNTS = 8;
 const HISTORY_DEBOUNCE_MS = 280;
 
 function todayIso(): string {
@@ -93,7 +90,7 @@ function rangeForPreset(preset: PeriodPreset, custom: { from: string; to: string
   if (preset === "ytd") {
     return { from: `${to.getUTCFullYear()}-01-01`, to: toStr };
   }
-  const months = preset === "3m" ? 3 : preset === "6m" ? 6 : 12;
+  const months = preset === "3m" ? 3 : preset === "6m" ? 6 : preset === "2y" ? 24 : preset === "3y" ? 36 : 12;
   const from = new Date(Date.UTC(to.getUTCFullYear(), to.getUTCMonth() - months, to.getUTCDate()));
   return { from: from.toISOString().slice(0, 10), to: toStr };
 }
@@ -166,10 +163,10 @@ export function NetWorthPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("12m");
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("3m");
   const [customFrom, setCustomFrom] = useState(() => {
     const t = new Date();
-    const from = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 12, t.getUTCDate()));
+    const from = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 3, t.getUTCDate()));
     return from.toISOString().slice(0, 10);
   });
   const [customTo, setCustomTo] = useState(() => todayIso());
@@ -181,12 +178,10 @@ export function NetWorthPage() {
     return rangeForPreset(periodPreset, null);
   }, [periodPreset, customFrom, customTo]);
 
-  const [histInterval, setHistInterval] = useState<"month" | "week" | "day">("month");
+  const [histInterval, setHistInterval] = useState<"month" | "quarter" | "week" | "day">("month");
   const [historyData, setHistoryData] = useState<BalanceSheetHistoryResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-
-  const [chartAccountIds, setChartAccountIds] = useState<string[]>([]);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -209,26 +204,8 @@ export function NetWorthPage() {
   const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
     () => [
       {
-        group: "Scope",
-        items: [
-          {
-            value: "",
-            label: "All accounts",
-            displayLabel: "All accounts",
-            searchText: "all accounts household"
-          }
-        ]
-      },
-      {
         group: "Household",
-        items: [
-          {
-            value: "household",
-            label: "Household-owned accounts",
-            displayLabel: "Household-owned",
-            searchText: "household"
-          }
-        ]
+        items: [{ value: "household", label: "Household", searchText: "household" }]
       },
       {
         group: "Members",
@@ -257,12 +234,9 @@ export function NetWorthPage() {
       interval: histInterval
     });
     appendOwnerQuery(qs, belongsTo);
-    if (chartAccountIds.length > 0) {
-      qs.set("accountIds", chartAccountIds.slice(0, MAX_CHART_ACCOUNTS).join(","));
-    }
     const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
     setHistoryData(res);
-  }, [histRange.from, histRange.to, histInterval, belongsTo, chartAccountIds]);
+  }, [histRange.from, histRange.to, histInterval, belongsTo]);
 
   useEffect(() => {
     if (!token) {
@@ -332,47 +306,16 @@ export function NetWorthPage() {
     return () => window.clearTimeout(t);
   }, [token, loadHistoryImmediate]);
 
-  const chartRows = useMemo(() => {
-    const accountLabel = (id: string) => {
-      const a = accounts.find((x) => x.id === id);
-      return a ? `${a.institution}${a.account_mask ? ` · ${a.account_mask}` : ""}` : id.slice(0, 8);
-    };
-
-    return (historyData?.points ?? []).map((p) => {
-      const row: Record<string, string | number | undefined> = {
+  const chartRows = useMemo(
+    () =>
+      (historyData?.points ?? []).map((p) => ({
         asOf: p.asOf,
         assets: p.totals.assets ?? undefined,
         liabilities: p.totals.liabilities ?? undefined,
         netWorth: p.totals.netWorth ?? undefined
-      };
-      if (p.accounts?.length) {
-        for (const slice of p.accounts) {
-          const signed =
-            slice.balance == null
-              ? undefined
-              : slice.side === "liability"
-                ? -slice.balance
-                : slice.balance;
-          row[`acc_${slice.financialAccountId}`] = signed;
-          row[`acc_${slice.financialAccountId}_label`] = accountLabel(slice.financialAccountId);
-        }
-      }
-      return row;
-    });
-  }, [historyData?.points, accounts]);
-
-  const chartLineKeys = useMemo(() => {
-    if (!chartAccountIds.length || !historyData?.points?.length) {
-      return [];
-    }
-    const keys = new Set<string>();
-    for (const p of historyData.points) {
-      for (const a of p.accounts ?? []) {
-        keys.add(`acc_${a.financialAccountId}`);
-      }
-    }
-    return chartAccountIds.filter((id) => keys.has(`acc_${id}`));
-  }, [chartAccountIds, historyData?.points]);
+      })),
+    [historyData?.points]
+  );
 
   const periodSummary = useMemo(() => {
     const pts = historyData?.points ?? [];
@@ -404,15 +347,6 @@ export function NetWorthPage() {
     const l = data?.liabilities ?? [];
     return [...a, ...l];
   }, [data?.assets, data?.liabilities]);
-
-  const multiSelectData = useMemo(
-    () =>
-      allTableRows.map((r) => ({
-        value: r.financialAccountId,
-        label: `${r.institution}${r.accountMask ? ` · ${r.accountMask}` : ""} (${r.type})`
-      })),
-    [allTableRows]
-  );
 
   useEffect(() => {
     setBulkAsOfDraft(tableAsOf);
@@ -554,14 +488,12 @@ export function NetWorthPage() {
     return <Navigate to="/" replace />;
   }
 
-  const palette = ["#7c3aed", "#db2777", "#ea580c", "#ca8a04", "#0891b2", "#4f46e5", "#be123c", "#0d9488"];
-
   return (
     <div className="net-worth-page">
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Net worth</h1>
-          <HelpIcon label="Manual balance wins over import balance, which wins over a parsed hint. Liabilities show as negative so net worth reads clearly. Manage accounts in Settings → Accounts." />
+          <HelpIcon label="Balances show the most recent known value — manual entry or import, whichever is more current. Liabilities show as negative so net worth reads clearly. Manage accounts in Settings → Accounts." />
           <Link to="/settings?tab=accounts" style={{ marginLeft: "auto", fontSize: 13 }}>Manage accounts</Link>
         </div>
       </div>
@@ -569,7 +501,7 @@ export function NetWorthPage() {
       <div className="card" style={{ marginTop: "1rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Trend</h2>
-          <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to. Overlay specific accounts using the multi-select below." />
+          <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
         </div>
         <div className="row net-worth__control-band" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap" }}>
           <label className="field" style={{ marginBottom: 0 }}>
@@ -578,6 +510,8 @@ export function NetWorthPage() {
               <option value="3m">Last 3 months</option>
               <option value="6m">Last 6 months</option>
               <option value="12m">Last 12 months</option>
+              <option value="2y">Last 2 years</option>
+              <option value="3y">Last 3 years</option>
               <option value="ytd">Year to date</option>
               <option value="custom">Custom</option>
             </select>
@@ -596,8 +530,9 @@ export function NetWorthPage() {
           ) : null}
           <label className="field" style={{ marginBottom: 0 }}>
             <span>Interval</span>
-            <select value={histInterval} onChange={(ev) => setHistInterval(ev.target.value as "month" | "week" | "day")}>
+            <select value={histInterval} onChange={(ev) => setHistInterval(ev.target.value as "month" | "quarter" | "week" | "day")}>
               <option value="month">Month-end</option>
+              <option value="quarter">Quarter-end</option>
               <option value="week">Every 7 days</option>
               <option value="day">Daily (max 120 points)</option>
             </select>
@@ -613,20 +548,6 @@ export function NetWorthPage() {
               clearable
             />
           </label>
-        </div>
-
-        <div className="net-worth__overlay-band" style={{ marginTop: "0.75rem" }}>
-          <MultiSelect
-            label="Overlay accounts on chart"
-            description="Optional — adds lines for the accounts you pick (up to 8)."
-            placeholder="Pick up to 8 accounts"
-            data={multiSelectData}
-            value={chartAccountIds}
-            onChange={(v) => setChartAccountIds(v.slice(0, MAX_CHART_ACCOUNTS))}
-            searchable
-            clearable
-            maxValues={MAX_CHART_ACCOUNTS}
-          />
         </div>
 
         {(loadError || historyError) ? (
@@ -647,13 +568,13 @@ export function NetWorthPage() {
           <div style={{ marginTop: "1rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.6rem" }}>
               <h3 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Period summary</h3>
-              <HelpIcon label="First and last snapshots in the selected range. Ledger icon opens transactions for that calendar day." />
+              <HelpIcon label="Start and end snapshots in the selected range. The eye icon opens transactions for that date." />
             </div>
             <div style={{ overflowX: "auto" }}>
               <table className="ledger-table">
                 <thead>
                   <tr>
-                    <th scope="col">Sample</th>
+                    <th scope="col">Date</th>
                     <th scope="col">Assets</th>
                     <th scope="col">Liabilities</th>
                     <th scope="col">Net worth</th>
@@ -755,18 +676,6 @@ export function NetWorthPage() {
                 <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" fill="url(#nwGradientGreen)" strokeWidth={1.5} dot={false} connectNulls />
                 <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" fill="url(#nwGradientAmber)" strokeWidth={1.5} dot={false} connectNulls />
                 <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="#15803d" fill="url(#nwGradientGreen)" strokeWidth={2.5} dot={false} connectNulls />
-                {chartLineKeys.map((id, idx) => (
-                  <Line
-                    key={id}
-                    type="monotone"
-                    dataKey={`acc_${id}`}
-                    name={multiSelectData.find((m) => m.value === id)?.label ?? id}
-                    stroke={palette[idx % palette.length]!}
-                    dot={false}
-                    strokeWidth={1.5}
-                    connectNulls
-                  />
-                ))}
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -823,6 +732,51 @@ export function NetWorthPage() {
             <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${(data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}` }}>
               <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Net worth</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)" }}>{formatMoney(data.totals.netWorth)}</div>
+            </div>
+          </div>
+        ) : null}
+
+        {!loading && data && allTableRows.length > 0 ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Top Assets</div>
+              <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                {[...data.assets]
+                  .filter((r) => r.balance != null)
+                  .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))
+                  .slice(0, 5)
+                  .map((r, i) => (
+                    <li key={r.financialAccountId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.25rem 0", borderBottom: "1px solid var(--color-border)", fontSize: "0.875rem" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                        <span style={{ color: "var(--color-text-muted)", fontSize: 11, minWidth: "1rem" }}>{i + 1}</span>
+                        <Link to={transactionsHref({ accountId: r.financialAccountId })} style={{ color: "inherit" }}>
+                          {r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}
+                        </Link>
+                      </span>
+                      <span style={{ fontWeight: 600, color: "var(--color-success)" }}>{formatMoney(r.balance)}</span>
+                    </li>
+                  ))}
+              </ol>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: "0.4rem" }}>Top Liabilities</div>
+              <ol style={{ margin: 0, padding: 0, listStyle: "none" }}>
+                {[...data.liabilities]
+                  .filter((r) => r.balance != null)
+                  .sort((a, b) => (b.balance ?? 0) - (a.balance ?? 0))
+                  .slice(0, 5)
+                  .map((r, i) => (
+                    <li key={r.financialAccountId} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.25rem 0", borderBottom: "1px solid var(--color-border)", fontSize: "0.875rem" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                        <span style={{ color: "var(--color-text-muted)", fontSize: 11, minWidth: "1rem" }}>{i + 1}</span>
+                        <Link to={transactionsHref({ accountId: r.financialAccountId })} style={{ color: "inherit" }}>
+                          {r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}
+                        </Link>
+                      </span>
+                      <span style={{ fontWeight: 600, color: "var(--color-warm-dark, #d97706)" }}>{formatMoney(r.balance)}</span>
+                    </li>
+                  ))}
+              </ol>
             </div>
           </div>
         ) : null}

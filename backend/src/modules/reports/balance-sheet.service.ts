@@ -28,7 +28,7 @@ export type BalanceSheetResult = {
   };
 };
 
-export type BalanceSheetHistoryInterval = "month" | "week" | "day";
+export type BalanceSheetHistoryInterval = "month" | "quarter" | "week" | "day";
 
 /** Optional filter: restrict to accounts with matching belongs-to (household vs person). */
 export type BalanceSheetQueryOptions = {
@@ -238,32 +238,47 @@ export async function getBalanceSheet(
       continue;
     }
 
-    const manual = await latestManualSnapshot(householdId, id, asOf);
+    const [manual, fromTable] = await Promise.all([
+      latestManualSnapshot(householdId, id, asOf),
+      latestImportSnapshotFromTable(householdId, id, asOf)
+    ]);
     let balance: number | null = null;
     let balanceAsOf: string | null = null;
     let balanceSource: "manual" | "import" | null = null;
     let importFileId: string | null = null;
 
-    if (manual) {
-      balance = manual.amount;
-      balanceAsOf = manual.asOfDate;
-      balanceSource = "manual";
-      importFileId = manual.importFileId;
-    } else {
-      const fromTable = await latestImportSnapshotFromTable(householdId, id, asOf);
-      if (fromTable) {
+    // Pick the most recent snapshot; tie-break in favour of manual (explicit user entry).
+    if (manual && fromTable) {
+      const pickManual = manual.asOfDate >= (fromTable.asOfDate ?? "");
+      if (pickManual) {
+        balance = manual.amount;
+        balanceAsOf = manual.asOfDate;
+        balanceSource = "manual";
+        importFileId = manual.importFileId;
+      } else {
         balance = fromTable.amount;
         balanceAsOf = fromTable.asOfDate;
         balanceSource = "import";
         importFileId = fromTable.importFileId;
-      } else {
-        const imp = await latestImportBalanceHint(id, asOf);
-        if (imp) {
-          balance = imp.amount;
-          balanceAsOf = imp.asOfDate;
-          balanceSource = "import";
-          importFileId = imp.importFileId;
-        }
+      }
+    } else if (manual) {
+      balance = manual.amount;
+      balanceAsOf = manual.asOfDate;
+      balanceSource = "manual";
+      importFileId = manual.importFileId;
+    } else if (fromTable) {
+      balance = fromTable.amount;
+      balanceAsOf = fromTable.asOfDate;
+      balanceSource = "import";
+      importFileId = fromTable.importFileId;
+    } else {
+      // Fallback: import-file confidence hint (legacy read path).
+      const imp = await latestImportBalanceHint(id, asOf);
+      if (imp) {
+        balance = imp.amount;
+        balanceAsOf = imp.asOfDate;
+        balanceSource = "import";
+        importFileId = imp.importFileId;
       }
     }
 
@@ -497,6 +512,27 @@ function generateHistorySampleDates(
     }
     return out;
   }
+  // Quarter-end: March 31, June 30, September 30, December 31.
+  if (interval === "quarter") {
+    const out: string[] = [];
+    let y = Number(from.slice(0, 4));
+    const toY = Number(to.slice(0, 4));
+    const toM = Number(to.slice(5, 7)) - 1;
+    for (; y <= toY; y += 1) {
+      for (const qEndMonth of [2, 5, 8, 11]) {
+        if (y === toY && qEndMonth > toM) {
+          break;
+        }
+        const last = new Date(Date.UTC(y, qEndMonth + 1, 0));
+        const iso = last.toISOString().slice(0, 10);
+        if (compareIsoDate(iso, from) >= 0 && compareIsoDate(iso, to) <= 0) {
+          out.push(iso);
+        }
+      }
+    }
+    return out;
+  }
+
   const out: string[] = [];
   let y = Number(from.slice(0, 4));
   let m = Number(from.slice(5, 7)) - 1;
