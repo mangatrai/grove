@@ -22,7 +22,7 @@ Set **`LOG_FILE`** in the repo root `.env` to a path such as `.runtime/logs/api.
 
 ## Capturing logs to files (dev)
 
-`npm run services:start` runs backend and frontend in the background and appends their stdout/stderr to **`.runtime/logs/backend.log`** and **`.runtime/logs/frontend.log`**. Tail, for example:
+`npm run start:dev` (same as `npm run services:start`) runs backend and frontend in the background and appends their stdout/stderr to **`.runtime/logs/backend.log`** and **`.runtime/logs/frontend.log`**. Tail, for example:
 
 ```bash
 tail -f .runtime/logs/backend.log

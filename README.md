@@ -1,6 +1,6 @@
 # Household Finance App
 
-Self-hosted household finance: import bank and card activity, categorize with rules, resolve exceptions, and view cash summaries on a private stack you control. Data stays on your infrastructure (SQLite by default).
+Self-hosted household finance: import bank and card activity, categorize with rules, resolve exceptions, and view cash summaries on a private stack you control. Data stays on your infrastructure (**Postgres**).
 
 **Monorepo:** `backend/` (Node.js + Express API), `frontend/` (Vite + React).
 
@@ -17,27 +17,34 @@ Self-hosted household finance: import bank and card activity, categorize with ru
 | **Release / change log** | [`docs/CHANGE_HISTORY.md`](docs/CHANGE_HISTORY.md) |
 | **Dead code / optional features audit** | [`docs/DEAD_CODE.md`](docs/DEAD_CODE.md) |
 
+## One-command workflows (local dev)
+
+| Goal | Command |
+|------|---------|
+| **1. First-time machine setup** — install packages, create runtime dirs, apply migrations + bootstrap seed + dev sample accounts | `npm run setup` |
+| **2. Start API + frontend together** (background, logs under `.runtime/logs/`) | `npm run start:dev` (same as `npm run services:start`) |
+| **3. Database only** — migrations + seeds (no `npm install`) | `npm run db:seed` (minimal seed) or `npm run db:seed:dev` (+ sample accounts) |
+| **4. Wipe database** — drop/recreate `public` schema, re-run migrations + seeds | `npm run db:cleanup` or `npm run db:reset` (same). Optional: `npm run db:reset:dev` to reseed with dev accounts |
+| **5. Stop API + frontend** | `npm run stop:dev` (same as `npm run services:stop`) |
+
+`npm run setup` creates `.env` from `.env.example` if `.env` is missing. Edit **`JWT_SECRET`** and **`DATABASE_*`** (see [`.env.example`](.env.example)). For local Docker Postgres: `docker compose up -d` before setup if the DB is not already running.
+
 ## Quick start (development)
 
-1. **Prerequisites:** Node.js **20.x** (see `engines` in root `package.json`), **npm**.
+1. **Prerequisites:** Node.js **20.x** (see `engines` in root `package.json`), **npm**, and a **Postgres** instance (see [`docker-compose.yml`](docker-compose.yml) for local port **5433**).
 
-2. **Environment:** copy `.env.example` to `.env`. Set a strong **`JWT_SECRET`**. Use **`MODE=TEST`** for the default dev SQLite file, or **`MODE=PROD`** for a separate file on the same machine. See `.env.example` for ports (`PORT`, `FRONTEND_PORT`).
-
-3. **Install and database:** from the repo root:
+2. **One-shot setup** (from repo root):
 
    ```bash
-   npm install
    npm run setup
    ```
 
-   `setup` installs dependencies, creates `data/`, and applies migrations plus seeds **including** sample bank accounts for local smoke tests.
+   This runs `npm install`, prepares `data/` and `.runtime/`, then applies migrations and seeds **including** dev sample bank accounts. For **bootstrap-only** seed (no sample accounts), use `npm run db:seed` after a clean DB — see [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
-   For **minimal** seed (default household + owner + global categories, **no** sample accounts): after a clean DB, use `npm run db:seed` — details in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
-
-4. **Run the app:**
+3. **Run the app:**
 
    ```bash
-   npm run services:start
+   npm run start:dev
    ```
 
    - UI: `http://127.0.0.1:3000` (or `FRONTEND_PORT`)
@@ -46,9 +53,9 @@ Self-hosted household finance: import bank and card activity, categorize with ru
 
    Interactive alternative: `npm run dev` (API) and `npm run dev:frontend` in two terminals.
 
-5. **Stop:** `npm run services:stop` (stops wrapper processes and clears listeners on the dev ports).
+4. **Stop:** `npm run stop:dev`
 
-6. **Reset database:** stop services, then `npm run db:cleanup` and `npm run db:seed` (or `npm run setup`). Resolve the active DB path with `node scripts/print-db-path.mjs`.
+5. **Reset database:** stop services, then `npm run db:cleanup` and `npm run db:seed` (or `npm run setup` for a full reinstall path). Connection settings are in `.env` (`DATABASE_*`).
 
 ## Quality checks
 

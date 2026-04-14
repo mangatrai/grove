@@ -19,7 +19,7 @@ The API and **`scripts/db.sh`** use **`DATABASE_*`** only (no SQLite / `DB_PATH`
 
 Migrations: [`backend/db/migrations/`](../backend/db/migrations/). Seeds: [`backend/db/seeds/`](../backend/db/seeds/) (and `seeds/dev/` for sample accounts).
 
-**Reset local data:** `npm run db:cleanup -- --yes` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) (drops `public`, then migrations + **bootstrap seed only**). Add **`--with-dev-seeds`** after `--yes` to also load sample BoA/Chase/Citi/Marcus `financial_account` rows.
+**Reset local data:** `npm run db:cleanup` or `npm run db:reset` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes` (drops `public`, then migrations + **bootstrap seed only**). Use **`npm run db:reset:dev`** to also load sample BoA/Chase/Citi/Marcus `financial_account` rows.
 
 See [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md) and [`RUNBOOK.md`](RUNBOOK.md).
 
@@ -27,7 +27,7 @@ See [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md) and [`RUNBOOK.md`](RUNBOOK.md).
 
 **Logging (backend):** Set **`LOG_LEVEL`** and optional **`LOG_FILE`** in the repo root `.env` (see [`docs/LOGGING.md`](LOGGING.md)). Application code under `backend/src` should use [`logger`](../backend/src/logger.ts) only; ESLint blocks direct `console.*` outside `logger.ts`. Third-party libraries may still print to stderr.
 
-**Where output goes:** [`scripts/services.sh`](../scripts/services.sh) redirects **stdout/stderr** to [`.runtime/logs/`](../.runtime/logs/) when you run **`npm run services:start`** (backend → **`backend.log`**, frontend → **`frontend.log`**). It does not parse log levels—filtering is done inside the Node process for lines that go through `log.*`. Stop with **`npm run services:stop`**, status with **`npm run services:status`**.
+**Where output goes:** [`scripts/services.sh`](../scripts/services.sh) redirects **stdout/stderr** to [`.runtime/logs/`](../.runtime/logs/) when you run **`npm run start:dev`** (same as `npm run services:start`; backend → **`backend.log`**, frontend → **`frontend.log`**). It does not parse log levels—filtering is done inside the Node process for lines that go through `log.*`. Stop with **`npm run stop:dev`** (or **`npm run services:stop`**), status with **`npm run services:status`**.
 
 On macOS with launchd or Linux with systemd, logs go to the configured log path or `journalctl`.
 

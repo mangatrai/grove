@@ -162,3 +162,5 @@ household,,,OFFICE DEPOT,contains,debit_only,,Shopping > Office,40,0.96,true
 household,,,STAPLES,contains,debit_only,,Shopping > Office,40,0.96,true
 household,,,FEDEx Office,contains,debit_only,,Shopping > Office,40,0.95,true
 household,,,FEDEX OFFICE,contains,debit_only,,Shopping > Office,40,0.95,true
+household,,,ACH,contains,debit_only,,Transfers > Transfers out,40,0.95,true
+household,,,ACH,contains,credit_only,,Transfers > Transfers in,40,0.95,true

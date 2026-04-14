@@ -29,7 +29,7 @@ npm run dev:frontend
 ```
 
 Run the backend in another terminal (`npm run dev` or `npm run dev:backend`), or use
-`npm run services:start` to start backend + frontend in the background (see root README).
+`npm run start:dev` to start backend + frontend in the background (see root README).
 
 ## Build
 

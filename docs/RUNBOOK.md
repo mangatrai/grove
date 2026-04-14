@@ -2,6 +2,18 @@
 
 Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Database layout and baseline notes: [`backend/db/README.md`](../backend/db/README.md). **Operator FAQ** (import sessions, recategorize scope, exports, Postgres probe): [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md). **Postgres cutover** roadmap: [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md).
 
+## One-command map (local)
+
+| Goal | Command |
+|------|---------|
+| First-time setup (install + dirs + migrations + bootstrap + dev sample accounts) | `npm run setup` |
+| Start API + UI together (background) | `npm run start:dev` (alias: `npm run services:start`) |
+| Migrations + seeds only (no `npm install`) | `npm run db:seed` or `npm run db:seed:dev` |
+| Wipe DB and reapply migrations + seeds | `npm run db:cleanup` or `npm run db:reset` (add `--with-dev-seeds` via `npm run db:reset:dev`) |
+| Stop API + UI | `npm run stop:dev` (alias: `npm run services:stop`) |
+
+`setup` creates `.env` from `.env.example` if `.env` is missing. Aligns with [`docs/archive/MVP_BACKLOG.md`](archive/MVP_BACKLOG.md) (“fresh machine setup”) and [`docs/archive/IMPLEMENTATION_PLAN_90_DAYS.md`](archive/IMPLEMENTATION_PLAN_90_DAYS.md) (standardized local operations).
+
 ## 1. Prerequisites
 
 - **Node.js** — Current LTS (v20+ recommended).
@@ -44,7 +56,7 @@ Edit `.env`:
 | `OPENAI_*` | Used for **Deloitte payslip LLM import** when configured; not used for transaction categorization (rules-only). See [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md). |
 | `LOG_LEVEL` | (Optional) Backend verbosity: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). See [`LOGGING.md`](LOGGING.md). |
 
-**API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run services:start` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
+**API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run start:dev` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
 **Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 
@@ -85,8 +97,10 @@ npm run db:seed:dev
 **Option A — background services (logs under `.runtime/logs/`):**
 
 ```bash
-npm run services:start
+npm run start:dev
 ```
+
+(Same as `npm run services:start`.)
 
 **Option B — two terminals:**
 
@@ -130,18 +144,16 @@ npm test
 **Stop the API before cleanup** so connections are not held against objects you are about to drop.
 
 ```bash
-npm run services:stop
+npm run stop:dev
 ```
 
-**`npm run db:cleanup`** runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes`: it **drops and recreates** the Postgres `public` schema using **`DATABASE_*`** from the repo root `.env` (see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)), then applies migrations and **bootstrap seed only** (default household, owner user, global categories — no sample bank accounts).
+**`npm run db:cleanup`** (same as **`npm run db:reset`**) runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes`: it **drops and recreates** the Postgres `public` schema using **`DATABASE_*`** from the repo root `.env` (see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md)), then applies migrations and **bootstrap seed only** (default household, owner user, global categories — no sample bank accounts).
 
-- **Sample dev accounts** (BoA / Citi / Chase / Marcus):  
-  `npm run db:cleanup -- --yes --with-dev-seeds`  
-  (equivalent to also running `npm run db:seed:dev` after a bootstrap-only cleanup.)
+- **Sample dev accounts** (BoA / Citi / Chase / Marcus) after wipe: **`npm run db:reset:dev`** (cleanup + migrations + bootstrap + dev seeds).
 
 **`npm run db:seed`** runs migrations + bootstrap only. **`npm run db:seed:dev`** adds the dev `financial_account` rows without dropping the schema.
 
-Then start the API again (`npm run services:start` or `npm run dev:backend`). Clear site storage or sign out if you had an old JWT.
+Then start the API again (`npm run start:dev` or `npm run dev:backend`). Clear site storage or sign out if you had an old JWT.
 
 ## 10. Validation and troubleshooting
 
