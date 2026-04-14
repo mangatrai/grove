@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-14 (transactions UX: pagination + clear filters; net worth: remove misleading eye icons)
+
+### UX-018 — Transactions: improved pagination + "Clear all filters" button
+- **Type:** UX
+- **What:**
+  1. Pagination bar now shows "Showing 1–100 of 905 transaction(s). Page 1 of 10." instead of the raw offset/limit debug text.
+  2. Added a "Per page" selector (25 / 50 / 100 / 200) next to Prev/Next so users can control page size.
+  3. Added a "Clear all filters" button in the filter toolbar (visible only when any filter is active) — one-click reset to default view, same as the existing link in the active-filters paragraph.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`.
+
+### UX-019 — Net worth: remove misleading "View transactions" links from Trend card
+- **Type:** UX
+- **What:** The Period Summary table had eye-icon links and the Trend chart tooltip had a "View transactions →" link, both navigating to Transactions filtered by that date. These were misleading: net worth balances come from `account_balance_snapshot` (manual entries + import-sourced snapshots), not from the transaction ledger. There is no guarantee any transaction exists for a given balance date, so the links could lead to empty results and imply a relationship that does not exist. Both removed. The per-account drill-down links in the Balance Sheet table below (linking to an account's import file) are intentional and remain.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`.
+
 ## 2026-04-14 (net worth UX + balance resolution fix)
 
 ### FIX-007 — Net worth: balance resolution — most-recent wins (manual or import)

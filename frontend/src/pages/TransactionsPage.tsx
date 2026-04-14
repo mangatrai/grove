@@ -1261,6 +1261,16 @@ export function TransactionsPage() {
             />
           </label>
           <div className="transactions-toolbar__actions">
+            {hasLedgerFilters ? (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => clearFilters()}
+                title="Reset to default view"
+              >
+                Clear all filters
+              </button>
+            ) : null}
             <button
               type="button"
               className="button-primary"
@@ -1455,19 +1465,38 @@ export function TransactionsPage() {
         {loading ? <p className="muted">Loading…</p> : null}
         {!loading && data ? (
           <>
-            <p className="muted">
-              Showing <strong>{data.transactions.length}</strong> of <strong>{data.total}</strong> transaction(s)
-              {data.sessionId ? " for this import" : ""}.
-            </p>
-            <p className="muted">
-              Page offset <code>{pageOffset}</code>, limit <code>{pageLimit}</code>.{" "}
-              <button type="button" disabled={!canPageBack} onClick={() => updatePaging(pageOffset - pageLimit)}>
-                Previous
-              </button>{" "}
-              <button type="button" disabled={!canPageForward} onClick={() => updatePaging(pageOffset + pageLimit)}>
-                Next
-              </button>
-            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+              <span className="muted" style={{ fontSize: "0.9rem" }}>
+                {data.total > 0 ? (
+                  <>
+                    Showing <strong>{pageOffset + 1}–{pageOffset + data.transactions.length}</strong> of{" "}
+                    <strong>{data.total}</strong> transaction(s){data.sessionId ? " for this import" : ""}.
+                    {" "}Page <strong>{Math.floor(pageOffset / pageLimit) + 1}</strong> of{" "}
+                    <strong>{Math.ceil(data.total / pageLimit)}</strong>.
+                  </>
+                ) : (
+                  <>0 transaction(s){data.sessionId ? " for this import" : ""}.</>
+                )}
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                <button type="button" disabled={!canPageBack} onClick={() => updatePaging(pageOffset - pageLimit)}>
+                  ← Previous
+                </button>
+                <button type="button" disabled={!canPageForward} onClick={() => updatePaging(pageOffset + pageLimit)}>
+                  Next →
+                </button>
+              </span>
+              <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.85rem" }}>
+                <span className="muted">Per page:</span>
+                <select
+                  value={pageLimit}
+                  onChange={(e) => mergeParams((n) => { n.set("limit", e.target.value); n.set("offset", "0"); })}
+                  style={{ fontSize: "0.85rem" }}
+                >
+                  {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </label>
+            </div>
             {data.transactions.length === 0 ? (
               <p className="muted">
                 {sessionFilter

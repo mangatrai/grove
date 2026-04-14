@@ -1,4 +1,4 @@
-import { IconEye, IconPencil } from "@tabler/icons-react";
+import { IconPencil } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
@@ -599,7 +599,7 @@ export function NetWorthPage() {
           <div style={{ marginTop: "1rem" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.6rem" }}>
               <h3 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Period summary</h3>
-              <HelpIcon label="Start and end snapshots in the selected range. The eye icon opens transactions for that date." />
+              <HelpIcon label="Start and end snapshots in the selected range." />
             </div>
             <div style={{ overflowX: "auto" }}>
               <table className="ledger-table">
@@ -609,7 +609,6 @@ export function NetWorthPage() {
                     <th scope="col">Assets</th>
                     <th scope="col">Liabilities</th>
                     <th scope="col">Net worth</th>
-                    <th scope="col" aria-label="Ledger" />
                   </tr>
                 </thead>
                 <tbody>
@@ -618,30 +617,12 @@ export function NetWorthPage() {
                     <td>{formatMoney(periodSummary.start.assets)}</td>
                     <td>{formatMoney(periodSummary.start.liabilities)}</td>
                     <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.start.net)}</td>
-                    <td>
-                      <Link
-                        to={transactionsHref({ dateFrom: periodSummary.startLabel, dateTo: periodSummary.startLabel })}
-                        title="View transactions for this date"
-                        style={{ display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}
-                      >
-                        <IconEye size={15} />
-                      </Link>
-                    </td>
                   </tr>
                   <tr>
                     <th scope="row" style={{ fontWeight: 500 }}>End ({periodSummary.endLabel})</th>
                     <td>{formatMoney(periodSummary.end.assets)}</td>
                     <td>{formatMoney(periodSummary.end.liabilities)}</td>
                     <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.end.net)}</td>
-                    <td>
-                      <Link
-                        to={transactionsHref({ dateFrom: periodSummary.endLabel, dateTo: periodSummary.endLabel })}
-                        title="View transactions for this date"
-                        style={{ display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}
-                      >
-                        <IconEye size={15} />
-                      </Link>
-                    </td>
                   </tr>
                   {periodSummary.delta ? (
                     <tr style={{ borderTop: "2px solid var(--color-border)" }}>
@@ -649,7 +630,6 @@ export function NetWorthPage() {
                       <td style={{ color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.assets)}</td>
                       <td style={{ color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.liabilities)}</td>
                       <td style={{ color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 700 }}>{formatMoney(periodSummary.delta.net)}</td>
-                      <td />
                     </tr>
                   ) : null}
                 </tbody>
@@ -686,7 +666,6 @@ export function NetWorthPage() {
                       return null;
                     }
                     const asOf = String(label ?? "");
-                    const href = transactionsHref({ dateFrom: asOf, dateTo: asOf });
                     return (
                       <div className="card" style={{ padding: "0.5rem 0.75rem", fontSize: "0.85rem" }}>
                         <div style={{ fontWeight: 600 }}>{asOf}</div>
@@ -696,9 +675,6 @@ export function NetWorthPage() {
                             {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
                           </div>
                         ))}
-                        <div style={{ marginTop: "0.35rem" }}>
-                          <Link to={href}>View transactions →</Link>
-                        </div>
                       </div>
                     );
                   }}
