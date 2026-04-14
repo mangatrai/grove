@@ -203,6 +203,26 @@ Zod `.safeParse()` on request bodies. On failure: 400 + `{ errors: z.issues }`.
 
 ---
 
+## Mandatory Per-Change Checklist
+
+These are non-negotiable — apply to **every** code change, no exceptions:
+
+### 1. Docs (same commit as code)
+- **`docs/CHANGE_HISTORY.md`** — always add an entry (CR-, FIX-, UX-, DB- prefix). What changed, why, which files. This is the primary audit trail.
+- **Affected API docs** (`docs/API_*.md`) — update when request/response shape, behaviour, or error codes change.
+- **`openapi/openapi.yaml`** — add/update paths for every new or modified HTTP endpoint. No new route ships without an OpenAPI entry.
+
+### 2. Commits
+- **Create a commit** at the end of every work session (or logical unit). Never leave working changes uncommitted when the user's request is complete.
+- **Sliced commits**: one commit per logical concern (parser fix, feature, doc update). Use the project's `feat(scope/ID):` / `fix(scope/ID):` convention.
+- **Each commit must include** the doc changes for that code (CHANGE_HISTORY + affected API docs + openapi.yaml), not in a separate later commit.
+
+### 3. Tests
+- Run `npm run test` (or `-w backend` / `-w frontend`) after every change. Do not commit if tests fail.
+- Add tests for new parser profiles, service logic, and API behaviour changes.
+
+---
+
 ## Environment Variables (`.env`)
 
 ```bash
@@ -230,25 +250,30 @@ VITE_PROXY_API=              # Defaults to http://127.0.0.1:4000
 ## Development Commands
 
 ```bash
-# Initial setup (once)
-npm run setup                # npm install + db init + seed + dev-seeds
+# Initial setup (once) — npm install + dirs + migrations + bootstrap + dev sample accounts
+npm run setup                # Creates .env from .env.example if missing
 
-# Daily dev
+# Run API + frontend together (background; logs in .runtime/logs/)
+npm run start:dev            # alias: npm run services:start
+npm run stop:dev             # alias: npm run services:stop
+npm run services:status
+
+# Daily dev (foreground, two terminals if you prefer)
 npm run dev                  # Backend (tsx watch, port 4000)
 npm run dev:frontend         # Frontend (Vite HMR, port 3000)
-npm run services:start       # Both in background (PIDs in .runtime/pids/)
-npm run services:stop
 
 # Testing
 npm test                     # All tests (backend + frontend)
 npm run test -w backend      # Backend integration tests only (single-worker, Postgres)
 npm run test -w frontend     # Frontend unit tests only
 
-# Database
+# Database (Postgres via DATABASE_* in .env)
 npm run db:init              # Apply migrations only
-npm run db:seed              # Apply migrations + bootstrap seeds
-npm run db:seed:dev          # + dev sample accounts/transactions
-npm run db:cleanup           # Wipe DB (prompts confirmation)
+npm run db:seed              # Migrations + bootstrap seeds
+npm run db:seed:dev          # + dev sample financial_account rows
+npm run db:cleanup           # Drop/recreate public schema + migrations + bootstrap (same as db:reset)
+npm run db:reset             # Same as db:cleanup
+npm run db:reset:dev         # Cleanup + dev seeds
 
 # Build
 npm run build                # Both workspaces → dist/

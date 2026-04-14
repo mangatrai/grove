@@ -94,6 +94,10 @@ paths:
       tags: [household]
       summary: Update member
       security: [{ bearerAuth: [] }]
+    delete:
+      tags: [household]
+      summary: Remove member (admin). Deletes household_membership + person_profile. Returns 409 HAS_LOGIN_ACCOUNT when member has a linked login.
+      security: [{ bearerAuth: [] }]
   /categories:
     get:
       tags: [categories]
@@ -148,6 +152,41 @@ paths:
         Same as household bulk but amountScope per row; category must be a default global leaf.
         Response 200 with created rules and per-row errors.
       security: [{ bearerAuth: [] }]
+  /categories/rules/builtin:
+    post:
+      tags: [categories]
+      summary: Create single global built-in category rule (owner or admin)
+      security: [{ bearerAuth: [] }]
+  /categories/rules/builtin/{ruleId}:
+    patch:
+      tags: [categories]
+      summary: Update built-in global rule (owner or admin)
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [categories]
+      summary: Delete built-in global rule (owner or admin)
+      security: [{ bearerAuth: [] }]
+  /categories/rules/test:
+    post:
+      tags: [categories]
+      summary: Test a rule pattern against sample descriptions (dry-run; no DB changes)
+      security: [{ bearerAuth: [] }]
+  /categories/rules/recategorize:
+    post:
+      tags: [categories]
+      summary: Re-run classification rules against existing canonical transactions
+      description: Reclassifies posted transactions that have Unknown or no category using the current rule set.
+      security: [{ bearerAuth: [] }]
+  /categories/rules/from-ledger:
+    post:
+      tags: [categories]
+      summary: Create a rule from a ledger transaction (merchant → category shortcut)
+      security: [{ bearerAuth: [] }]
+  /categories/rules/rule-learning-preview:
+    post:
+      tags: [categories]
+      summary: Preview what rule auto-learning would create from recent category edits
+      security: [{ bearerAuth: [] }]
   /categories/rules/{ruleId}:
     patch:
       tags: [categories]
@@ -188,6 +227,10 @@ paths:
       summary: Add household custom institution name
       security: [{ bearerAuth: [] }]
   /imports/sessions:
+    get:
+      tags: [imports]
+      summary: List import sessions (newest first)
+      security: [{ bearerAuth: [] }]
     post:
       tags: [imports]
       summary: Create import session
@@ -216,6 +259,29 @@ paths:
     patch:
       tags: [imports]
       summary: Bind file to account and parser
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [imports]
+      summary: Remove a staged file from the session
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/files/{fileId}/ofx-suggestion:
+    get:
+      tags: [imports]
+      summary: Pre-flight OFX account suggestion from statement header (institution, account type, acctId)
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/ofx-confirm:
+    post:
+      tags: [imports]
+      summary: Confirm OFX account suggestion and bind file to auto-created or matched account
+      security: [{ bearerAuth: [] }]
+  /imports/sessions/{sessionId}/reconcile-payslip-async:
+    post:
+      tags: [imports]
+      summary: Poll and reconcile pending async LLM payslip extractions (Deloitte PDF)
+      description: >-
+        Checks files in the session with status=processing and payslip_async_provider set.
+        Triggers OpenAI vision extraction if not yet started or retries pending extractions.
+        Returns { reconciled, stillPending, failed }.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/parse:
     post:
@@ -301,6 +367,10 @@ paths:
     get:
       tags: [reports]
       summary: Balance sheet / net worth snapshot (optional ownerScope filters by account belongs-to)
+      description: >-
+        Assets: checking, savings, investment, retirement. Liabilities: credit_card, loan, mortgage.
+        Liability balances stored as positive magnitudes (what you owe); netWorth = assetSum − liabilitySum.
+        Statement-ending balances auto-persisted from bank parsers (OFX, BoA CSV/PDF, Marcus PDF, Wealthfront PDF).
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/history:
     get:
@@ -340,7 +410,15 @@ paths:
   /payslips/{id}:
     get:
       tags: [payslips]
-      summary: Payslip detail
+      summary: Payslip detail (includes matchedDeposits — linked canonical transactions within ±3 days / 1% of net pay on salary deposit account)
+      security: [{ bearerAuth: [] }]
+    patch:
+      tags: [payslips]
+      summary: Update payslip fields (owner assignment, employer, notes)
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [payslips]
+      summary: Delete payslip snapshot
       security: [{ bearerAuth: [] }]
   /exports/household/import:
     post:

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
@@ -204,6 +205,7 @@ export function SettingsPage() {
   const [membersError, setMembersError] = useState<string | null>(null);
   const [membersSuccess, setMembersSuccess] = useState<string | null>(null);
   const [savingMemberIndex, setSavingMemberIndex] = useState<number | null>(null);
+  const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [passwordDraft, setPasswordDraft] = useState({
     currentPassword: "",
     newPassword: "",
@@ -649,18 +651,17 @@ export function SettingsPage() {
     }
   }
 
-  async function removeHouseholdMember(memberId: string) {
-    if (!token || !memberId) return;
-    if (!window.confirm("Remove this household member? This cannot be undone.")) return;
+  async function confirmRemoveHouseholdMember() {
+    if (!token || !removeMemberConfirm) return;
     setMembersError(null);
     setMembersSuccess(null);
-    try {
-      await apiFetch(`/household/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
-      setMembersSuccess("Member removed.");
-      await loadMembers();
-    } catch (e: unknown) {
-      setMembersError(e instanceof Error ? e.message : "Could not remove member");
+    const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { message?: string };
+      throw new Error(body.message ?? `Could not remove member (${res.status})`);
     }
+    setMembersSuccess("Member removed.");
+    await loadMembers();
   }
 
   async function saveHouseholdMembers() {
@@ -1085,7 +1086,7 @@ export function SettingsPage() {
                         className="secondary"
                         style={{ alignSelf: "flex-end", color: "var(--color-danger, #c0392b)" }}
                         disabled={savingMemberIndex !== null}
-                        onClick={() => void removeHouseholdMember(member.id!)}
+                        onClick={() => setRemoveMemberConfirm(member.id!)}
                         title="Remove this household member"
                       >
                         Remove
@@ -1475,6 +1476,15 @@ export function SettingsPage() {
           </div>
         ) : null}
       </div>
+      <ConfirmDialog
+        opened={removeMemberConfirm !== null}
+        title="Remove household member"
+        message="This member will be permanently removed. This cannot be undone."
+        confirmLabel="Remove"
+        danger
+        onClose={() => setRemoveMemberConfirm(null)}
+        onConfirm={() => confirmRemoveHouseholdMember()}
+      />
     </div>
   );
 }
