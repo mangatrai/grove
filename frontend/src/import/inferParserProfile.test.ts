@@ -131,4 +131,20 @@ describe("inferParserProfile", () => {
   it("returns wealthfront_investment_csv for Wealthfront + retirement + .csv", () => {
     expect(inferParserProfile({ type: "retirement", institution: "Wealthfront" }, "ira.csv")).toBe("wealthfront_investment_csv");
   });
+
+  it("returns wealthfront_investment_csv for Wealthfront + checking + .csv (Cash Account)", () => {
+    expect(inferParserProfile({ type: "checking", institution: "Wealthfront" }, "transactions.csv")).toBe("wealthfront_investment_csv");
+  });
+
+  it("returns wealthfront_investment_pdf for Wealthfront + checking + .pdf", () => {
+    expect(inferParserProfile({ type: "checking", institution: "Wealthfront" }, "statement.pdf")).toBe("wealthfront_investment_pdf");
+  });
+
+  it("returns wealthfront_investment_pdf for Wealthfront + savings + .pdf", () => {
+    expect(inferParserProfile({ type: "savings", institution: "Wealthfront" }, "statement.pdf")).toBe("wealthfront_investment_pdf");
+  });
+
+  it("returns null for Wealthfront non-csv/pdf", () => {
+    expect(inferParserProfile({ type: "checking", institution: "Wealthfront" }, "export.ofx")).toBe("ofx_transactions");
+  });
 });

@@ -95,11 +95,24 @@ export async function parseWealthfrontInvestmentPdf(
 export function parseWealthfrontFromText(
   text: string
 ): { rows: NormalizedRawPayload[]; statementBalances: BoaStatementBalances | null } {
-  // --- Ending balance extraction from the header block ---
+  // --- Starting + Ending balance extraction from the header block ---
+  // Use \s+ to tolerate varying whitespace / line-ending styles from pdf-parse output.
+  let beginningBalance: number | null = null;
+  let beginningBalanceDate: string | null = null;
   let endingBalance: number | null = null;
   let endingBalanceDate: string | null = null;
 
-  const endingBalanceMatch = text.match(/([A-Za-z]+ \d{1,2}, \d{4})\nEnding Balance\n\$([\d,]+\.\d{2})/);
+  const startingBalanceMatch = text.match(/([A-Za-z]+ \d{1,2}, \d{4})\s+Starting Balance\s+\$([\d,]+\.\d{2})/);
+  if (startingBalanceMatch) {
+    const parsed = parseAmount(startingBalanceMatch[2]!);
+    const iso = longDateToIso(startingBalanceMatch[1]!);
+    if (parsed !== null && iso) {
+      beginningBalance = parsed;
+      beginningBalanceDate = iso;
+    }
+  }
+
+  const endingBalanceMatch = text.match(/([A-Za-z]+ \d{1,2}, \d{4})\s+Ending Balance\s+\$([\d,]+\.\d{2})/);
   if (endingBalanceMatch) {
     const parsed = parseAmount(endingBalanceMatch[2]!);
     const iso = longDateToIso(endingBalanceMatch[1]!);
@@ -116,7 +129,14 @@ export function parseWealthfrontFromText(
       rows: [],
       statementBalances:
         endingBalance !== null && endingBalanceDate
-          ? { currency: "USD", beginning: null, ending: endingBalance, asOfStart: null, asOfEnd: endingBalanceDate, source: "wealthfront_investment_pdf" }
+          ? {
+              currency: "USD",
+              beginning: beginningBalance,
+              ending: endingBalance,
+              asOfStart: beginningBalanceDate,
+              asOfEnd: endingBalanceDate,
+              source: "wealthfront_investment_pdf"
+            }
           : null
     };
   }
@@ -222,9 +242,9 @@ export function parseWealthfrontFromText(
     endingBalance !== null && endingBalanceDate
       ? {
           currency: "USD",
-          beginning: null,
+          beginning: beginningBalance,
           ending: endingBalance,
-          asOfStart: null,
+          asOfStart: beginningBalanceDate,
           asOfEnd: endingBalanceDate,
           source: "wealthfront_investment_pdf"
         }

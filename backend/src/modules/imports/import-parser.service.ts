@@ -558,17 +558,26 @@ export async function parseSessionImportFiles(
       if (file.financial_account_id && sb != null && sb.ending != null && Number.isFinite(Number(sb.ending))) {
         const rawEnd = sb.asOfEnd?.trim() ? String(sb.asOfEnd).slice(0, 10) : "";
         if (/^\d{4}-\d{2}-\d{2}$/.test(rawEnd)) {
-          const acct = await qGet<{ currency: string }>(
-            `SELECT currency FROM financial_account WHERE id = ? AND household_id = ? LIMIT 1`,
+          const acct = await qGet<{ currency: string; type: string }>(
+            `SELECT currency, type FROM financial_account WHERE id = ? AND household_id = ? LIMIT 1`,
             file.financial_account_id,
             householdId
           );
           if (acct) {
+            let amount = Number(sb.ending);
+            // OFX and some PDF parsers report liability balances as negative values
+            // (e.g. credit card -$500 = you owe $500). The net-worth formula stores
+            // liability magnitudes as positive (netWorth = assetSum − liabilitySum),
+            // so negate here when the stored value would be negative for a liability.
+            const LIABILITY_TYPES = ["credit_card", "loan", "mortgage"];
+            if (LIABILITY_TYPES.includes(String(acct.type)) && amount < 0) {
+              amount = -amount;
+            }
             const snap = await upsertImportBalanceSnapshotFromStatement(householdId, {
               financialAccountId: file.financial_account_id,
               importFileId: file.id,
               asOfDate: rawEnd,
-              amount: Number(sb.ending),
+              amount,
               currency: String(acct.currency ?? "USD")
             });
             if (!snap.ok) {

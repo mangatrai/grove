@@ -13,7 +13,8 @@ const FRIENDLY: Record<string, string> = {
   adp_payslip_pdf: "Employer payslip — ADP (PDF, not parsed yet)",
   ofx_transactions: "OFX / QFX / QBO (auto-detected)",
   discover_card_csv: "Discover card (CSV)",
-  wealthfront_investment_csv: "Wealthfront savings / investment (CSV)"
+  wealthfront_investment_csv: "Wealthfront savings / investment (CSV)",
+  wealthfront_investment_pdf: "Wealthfront savings / investment (PDF)"
 };
 
 export function friendlyParserLabel(profileId: string): string {

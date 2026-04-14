@@ -160,8 +160,12 @@ export function inferParserProfile(
     return "discover_card_csv";
   }
 
-  if (instLower.includes("wealthfront") && (t === "investment" || t === "savings" || t === "retirement") && ext === ".csv") {
+  if (instLower.includes("wealthfront") && (t === "investment" || t === "savings" || t === "checking" || t === "retirement") && ext === ".csv") {
     return "wealthfront_investment_csv";
+  }
+
+  if (instLower.includes("wealthfront") && (t === "investment" || t === "savings" || t === "checking" || t === "retirement") && ext === ".pdf") {
+    return "wealthfront_investment_pdf";
   }
 
   return null;

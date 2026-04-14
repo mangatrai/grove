@@ -18,6 +18,40 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-13 (net worth, member management, security)
+
+### FIX-003 — Net worth: retirement accounts excluded from balance sheet
+- **Type:** FIX
+- **What:** `accountSide()` in `balance-sheet.service.ts` only classified `checking`, `savings`, `investment` as assets. `retirement` fell through to `null` → those accounts were invisible on the Net Worth page. Added `retirement` to the asset branch.
+- **Files:** `backend/src/modules/reports/balance-sheet.service.ts`, `docs/API_BALANCE_SHEET.md`.
+
+### FIX-004 — Net worth: liability account balance sign normalization on import
+- **Type:** FIX
+- **What:** OFX files (and some PDF parsers) report credit-card / loan balances as **negative** values (e.g. `-500.00` = you owe $500). The net-worth formula stores liability magnitudes as **positive** (`netWorth = assetSum − liabilitySum`), so a stored `-500` was _adding_ $500 to net worth instead of subtracting it. Fixed: when persisting a statement balance snapshot for a `credit_card`, `loan`, or `mortgage` account, the value is negated if negative. Applies to any parser that returns `statementBalances`.
+- **Files:** `backend/src/modules/imports/import-parser.service.ts`.
+
+### FIX-005 — Wealthfront PDF: balance regex too strict + starting balance not extracted
+- **Type:** FIX
+- **What:** The ending-balance regex used literal `\n` as separator; if `pdf-parse` emitted different whitespace the match silently failed and no snapshot was persisted. Changed both starting and ending balance regexes to `\s+`. Also added **starting balance** extraction (was always `null` before) so `statementBalances.beginning` / `.asOfStart` are now populated.
+- **Files:** `backend/src/modules/imports/profiles/wealthfront-investment-pdf.ts`.
+
+### FIX-006 — Wealthfront import inference: `checking` account type not matched
+- **Type:** FIX
+- **What:** `inferParserProfile` only matched Wealthfront accounts with type `investment | savings | retirement`. Wealthfront Cash Account is typically set up as `checking` (also the default in the account form), so the auto-match returned `null` → "couldn't match this file". Added `checking` to the CSV condition and added a new Wealthfront PDF inference branch. Updated the stale "stub" comment in `profile-ids.ts`.
+- **Files:** `frontend/src/import/inferParserProfile.ts`, `frontend/src/import/inferParserProfile.test.ts`, `frontend/src/import/profileLabels.ts`, `backend/src/modules/imports/profiles/profile-ids.ts`.
+
+### CR-106 — Member management: remove member (DELETE /household/members/:id + UI)
+- **Type:** CR
+- **What:** Added `DELETE /household/members/:memberId` (owner/admin only). Deletes both `household_membership` and `person_profile` in a transaction. Returns **409 HAS_LOGIN_ACCOUNT** when the member has a linked `app_user`. Frontend: saved member rows now show a **Remove** button (confirm dialog, calls DELETE, refreshes list). Unsaved draft rows get a **Discard** button. Docs updated.
+- **Files:** `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_HOUSEHOLD.md`.
+
+### FIX-007 — 401 interceptor: auto-clear token + redirect to login on session expiry
+- **Type:** FIX
+- **What:** `apiJson` and `apiFetch` now call `setToken(null)` on a **401** response. `RequireAuth` re-renders on token change and redirects to home/login automatically. Previously, expired tokens caused raw error messages ("Missing bearer token") with no recovery.
+- **Files:** `frontend/src/api.ts`.
+
+---
+
 ## 2026-04-13 (developer ergonomics)
 
 ### DX-001 — One-command npm scripts map + setup `.env` bootstrap

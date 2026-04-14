@@ -14,7 +14,7 @@
 **Response:** JSON with:
 
 - **`asOf`** — date used for the view.
-- **`assets`** / **`liabilities`** — arrays of account rows (excludes `payslip` bucket accounts). Each row includes **`financialAccountId`**, **`institution`**, **`accountMask`**, **`type`**, **`currency`**, **`side`** (`asset` \| `liability`), **`balance`**, **`balanceAsOf`**, **`balanceSource`** (`manual` \| `import` \| null), **`importFileId`** (when import-derived).
+- **`assets`** / **`liabilities`** — arrays of account rows (excludes `payslip` bucket accounts). Each row includes **`financialAccountId`**, **`institution`**, **`accountMask`**, **`type`**, **`currency`**, **`side`** (`asset` \| `liability`), **`balance`**, **`balanceAsOf`**, **`balanceSource`** (`manual` \| `import` \| null), **`importFileId`** (when import-derived). Account type classification: **assets** = `checking`, `savings`, `investment`, `retirement`; **liabilities** = `credit_card`, `loan`, `mortgage`. Accounts with other types (e.g. `payslip`) are excluded. **Liability balances** are stored and displayed as **positive magnitudes** (what you owe); net worth = assets − liabilities.
 - **`totals`** — **`assets`**, **`liabilities`**, **`netWorth`** (sums where balances exist; `null` when nothing to sum).
 
 **Resolution (per account):**

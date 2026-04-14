@@ -21,7 +21,7 @@ export const PARSER_PROFILE_IDS = [
   "discover_card_csv",
   /** CR-076: Wealthfront savings / investment account CSV */
   "wealthfront_investment_csv",
-  /** Wealthfront savings / investment account PDF statement — stub, parser not yet implemented */
+  /** CR-105: Wealthfront Cash Account PDF statement parser */
   "wealthfront_investment_pdf",
   /** Capital One card activity CSV — stub, format TBD */
   "capital_one_card_csv"

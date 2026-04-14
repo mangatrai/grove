@@ -49,6 +49,10 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
     headers.set("Authorization", h.Authorization);
   }
   const res = await fetch(path, { ...init, headers });
+  if (res.status === 401) {
+    setToken(null);
+    throw new Error("Session expired. Please sign in again.");
+  }
   if (!res.ok) {
     const errBody = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${errBody}`);
@@ -65,5 +69,9 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  return fetch(path, { ...init, headers });
+  const res = await fetch(path, { ...init, headers });
+  if (res.status === 401) {
+    setToken(null);
+  }
+  return res;
 }

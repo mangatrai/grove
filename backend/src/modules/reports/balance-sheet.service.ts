@@ -71,7 +71,7 @@ type ConfidenceSummary = {
 };
 
 function accountSide(type: string): BalanceSheetSide | null {
-  if (type === "checking" || type === "savings" || type === "investment") {
+  if (type === "checking" || type === "savings" || type === "investment" || type === "retirement") {
     return "asset";
   }
   if (type === "credit_card" || type === "loan" || type === "mortgage") {
