@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { parseBoaCreditCardCsv } from "../src/modules/imports/profiles/boa-credit-card-csv.js";
 import { parseDiscoverCardCsv } from "../src/modules/imports/profiles/discover-card-csv.js";
 import { parseWealthfrontInvestmentCsv } from "../src/modules/imports/profiles/wealthfront-investment-csv.js";
 
@@ -108,5 +109,47 @@ describe("Wealthfront investment CSV parser", () => {
   it("uses txn_date as posting_date (Wealthfront has no separate post date)", () => {
     const rows = parseWealthfrontInvestmentCsv(buf);
     expect(rows[0]!.posting_date).toBe(rows[0]!.txn_date);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BoA credit card CSV tests
+// ---------------------------------------------------------------------------
+
+const BOA_CC_CSV = `Posted Date,Reference Number,Payee,Address,Amount
+11/08/2025,31286000000379455331189,"CASH REWARDS STATEMENT CREDIT","",55.16
+12/01/2025,00123000000512345678901,"AMAZON.COM*AB1CD2EF3","SEATTLE WA",-42.99
+12/15/2025,00456000000987654321012,"WHOLE FOODS MARKET #123","FRISCO TX",-87.50
+`;
+
+describe("BoA credit card CSV parser", () => {
+  const buf = Buffer.from(BOA_CC_CSV, "utf-8");
+
+  it("parses all 3 rows", () => {
+    expect(parseBoaCreditCardCsv(buf)).toHaveLength(3);
+  });
+
+  it("converts MM/DD/YYYY to ISO date", () => {
+    const rows = parseBoaCreditCardCsv(buf);
+    expect(rows[0]!.txn_date).toBe("2025-11-08");
+    expect(rows[1]!.txn_date).toBe("2025-12-01");
+    expect(rows[2]!.txn_date).toBe("2025-12-15");
+  });
+
+  it("uses payee as description", () => {
+    const rows = parseBoaCreditCardCsv(buf);
+    expect(rows[0]!.description).toBe("CASH REWARDS STATEMENT CREDIT");
+    expect(rows[1]!.description).toBe("AMAZON.COM*AB1CD2EF3");
+  });
+
+  it("preserves reference number as reference_id", () => {
+    const rows = parseBoaCreditCardCsv(buf);
+    expect(rows[0]!.reference_id).toBe("31286000000379455331189");
+  });
+
+  it("preserves amount sign (positive = credit, negative = charge)", () => {
+    const rows = parseBoaCreditCardCsv(buf);
+    expect(rows[0]!.amount).toBe(55.16);  // cash rewards credit
+    expect(rows[1]!.amount).toBe(-42.99); // purchase
   });
 });
