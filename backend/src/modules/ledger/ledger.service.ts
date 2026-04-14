@@ -548,6 +548,28 @@ export async function updateCanonicalTransactionCategory(
   };
 }
 
+export async function updateCanonicalTransactionMemo(
+  householdId: string,
+  transactionId: string,
+  memo: string | null
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
+  const exists = await qGet<{ id: string }>(
+    `SELECT id FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    transactionId,
+    householdId
+  );
+  if (!exists) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  await qExec(
+    `UPDATE transaction_canonical SET memo = ? WHERE id = ? AND household_id = ?`,
+    memo,
+    transactionId,
+    householdId
+  );
+  return { ok: true };
+}
+
 /**
  * Set the same category on a batch of transactions. Skips rows not found in the household.
  * Also closes any lingering unknown_category resolution items for backward compatibility.

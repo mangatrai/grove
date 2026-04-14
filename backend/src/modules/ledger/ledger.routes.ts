@@ -17,6 +17,7 @@ import {
   restoreTransaction,
   trashTransaction,
   updateCanonicalTransactionCategory,
+  updateCanonicalTransactionMemo,
   type LedgerListFilters
 } from "./ledger.service.js";
 
@@ -232,7 +233,8 @@ const patchCategorySchema = z.object({
   categoryId: z.union([z.string().uuid(), z.null()]).optional(),
   ownerScope: z.enum(["household", "person"]).optional(),
   ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
-  status: z.enum(["trashed", "posted"]).optional()
+  status: z.enum(["trashed", "posted"]).optional(),
+  memo: z.union([z.string().max(500).trim(), z.null()]).optional()
 });
 
 const txnIdParamSchema = z.object({
@@ -263,6 +265,17 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
 
   const householdId = req.authUser!.householdId;
 
+  // Memo-only update.
+  if (parsed.data.memo !== undefined && parsed.data.status === undefined && parsed.data.categoryId === undefined && !parsed.data.ownerScope) {
+    const out = await updateCanonicalTransactionMemo(householdId, req.params.id, parsed.data.memo);
+    if (!out.ok) {
+      res.status(404).json({ message: "Transaction not found" });
+      return;
+    }
+    res.status(200).json({ memo: parsed.data.memo });
+    return;
+  }
+
   // Status-only change: trash or restore.
   if (parsed.data.status && parsed.data.categoryId === undefined && !parsed.data.ownerScope) {
     if (parsed.data.status === "trashed") {
@@ -286,7 +299,7 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   }
 
   if (parsed.data.categoryId === undefined) {
-    res.status(400).json({ message: "Provide categoryId or status" });
+    res.status(400).json({ message: "Provide categoryId, memo, or status" });
     return;
   }
 

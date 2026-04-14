@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-14 (memo editing on transactions)
+
+### CR-107 — Inline memo editing on transaction rows
+- **Type:** CR
+- **What:** Users can now add or edit a free-text memo on any posted or needs-review transaction directly from the transaction list. The memo line is hidden until the row is hovered (hover-reveal). If a memo is already set it is always visible. Clicking the pencil icon enters inline edit mode — Enter saves, Escape cancels. Trashed rows show memo as read-only (no edit affordance).
+- **Backend:** `PATCH /ledger/:id` extended to accept `{ memo: string | null }` as a memo-only update path. New service function `updateCanonicalTransactionMemo` in `ledger.service.ts`.
+- **Frontend:** `TransactionsPage.tsx` — new `editingMemoId` / `memoDraft` state, `startMemoEdit` / `cancelMemoEdit` / `saveMemo` handlers, description cell redesigned to show merchant as primary + memo as secondary hover-reveal line.
+- **CSS:** New `.transactions-page__memo-line`, `.transactions-page__memo-pencil`, `.transactions-page__memo-edit`, `.transactions-page__memo-input`, `.transactions-page__memo-btn` rules in `index.css`.
+- **Why memo not merchant:** Merchant is the source-parsed description and part of the dedup fingerprint — editing it would diverge from the import source. Memo is a separate annotation field, not in the fingerprint, safe to edit freely.
+- **Files:** `backend/src/modules/ledger/ledger.service.ts`, `backend/src/modules/ledger/ledger.routes.ts`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/index.css`.
+
 ## 2026-04-14 (transactions UX: pagination + clear filters; net worth: remove misleading eye icons)
 
 ### UX-018 — Transactions: improved pagination + "Clear all filters" button

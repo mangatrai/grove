@@ -1602,6 +1602,85 @@ table.ledger-table.payslip-manual__table td {
   gap: 0.5rem;
 }
 
+/* Memo inline editing */
+.transactions-page__memo-line {
+  display: none;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.15rem;
+  font-size: 0.79rem;
+  color: var(--color-text-muted);
+  line-height: 1.3;
+}
+
+tr:hover .transactions-page__memo-line {
+  display: flex;
+}
+
+.transactions-page__memo-line--has-memo {
+  display: flex;
+}
+
+.transactions-page__memo-pencil {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.1rem 0.2rem;
+  color: var(--color-text-muted);
+  opacity: 0.45;
+  line-height: 1;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.transactions-page__memo-pencil:hover {
+  opacity: 1;
+  background: var(--color-surface-alt);
+}
+
+.transactions-page__memo-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.2rem;
+}
+
+.transactions-page__memo-input {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  width: 14rem;
+  min-width: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.transactions-page__memo-input:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -1px;
+  border-color: transparent;
+}
+
+.transactions-page__memo-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.transactions-page__memo-btn:hover {
+  background: var(--color-surface-alt);
+}
+
 .transactions-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2645,6 +2724,10 @@ select.ledger-category-select {
 
 [data-mantine-color-scheme="dark"] .transactions-page__detail-panel {
   border-color: var(--color-border);
+}
+
+[data-mantine-color-scheme="dark"] .transactions-page__memo-input {
+  background: var(--color-surface-alt);
 }
 
 [data-mantine-color-scheme="dark"] .category-rules-page__section {

@@ -1,5 +1,5 @@
 import { MultiSelect } from "@mantine/core";
-import { IconArrowBackUp, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconArrowBackUp, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
@@ -350,6 +350,8 @@ export function TransactionsPage() {
   );
   const [selectedTrashIds, setSelectedTrashIds] = useState<Set<string>>(() => new Set());
   const [savingTrash, setSavingTrash] = useState(false);
+  const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
+  const [memoDraft, setMemoDraft] = useState("");
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -723,6 +725,31 @@ export function TransactionsPage() {
       setError(e instanceof Error ? e.message : "Bulk trash failed");
     } finally {
       setSavingBulk(false);
+    }
+  }
+
+  function startMemoEdit(id: string, currentMemo: string | null) {
+    setEditingMemoId(id);
+    setMemoDraft(currentMemo ?? "");
+  }
+
+  function cancelMemoEdit() {
+    setEditingMemoId(null);
+    setMemoDraft("");
+  }
+
+  async function saveMemo(id: string) {
+    const memo = memoDraft.trim() || null;
+    setEditingMemoId(null);
+    setMemoDraft("");
+    try {
+      await apiJson(`/transactions/${id}`, { method: "PATCH", body: JSON.stringify({ memo }) });
+      setData((prev) => {
+        if (!prev) return prev;
+        return { ...prev, transactions: prev.transactions.map((t) => t.id === id ? { ...t, memo } : t) };
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save memo");
     }
   }
 
@@ -1619,7 +1646,50 @@ export function TransactionsPage() {
                                 {t.status !== "posted" ? <StatusBadge status={t.status} /> : null}
                               </div>
                             </td>
-                            <td>{desc}</td>
+                            <td className="transactions-page__desc-cell">
+                              <span>{t.merchant || "—"}</span>
+                              {trashTab ? (
+                                t.memo ? (
+                                  <div className="transactions-page__memo-line transactions-page__memo-line--has-memo">
+                                    <span style={{ fontStyle: "italic" }}>{t.memo}</span>
+                                  </div>
+                                ) : null
+                              ) : editingMemoId === t.id ? (
+                                <div
+                                  className="transactions-page__memo-edit"
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void saveMemo(t.id);
+                                    if (e.key === "Escape") cancelMemoEdit();
+                                  }}
+                                >
+                                  <input
+                                    type="text"
+                                    value={memoDraft}
+                                    onChange={(e) => setMemoDraft(e.target.value)}
+                                    placeholder="Add memo…"
+                                    autoFocus
+                                    maxLength={500}
+                                    className="transactions-page__memo-input"
+                                  />
+                                  <button type="button" onClick={() => void saveMemo(t.id)} title="Save" className="transactions-page__memo-btn">✓</button>
+                                  <button type="button" onClick={cancelMemoEdit} title="Cancel" className="transactions-page__memo-btn">✕</button>
+                                </div>
+                              ) : (
+                                <div className={`transactions-page__memo-line${t.memo ? " transactions-page__memo-line--has-memo" : ""}`}>
+                                  <span style={{ fontStyle: t.memo ? "italic" : "normal" }}>
+                                    {t.memo ?? "Add memo…"}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => startMemoEdit(t.id, t.memo)}
+                                    title={t.memo ? "Edit memo" : "Add memo"}
+                                    className="transactions-page__memo-pencil"
+                                  >
+                                    <IconPencil size={11} />
+                                  </button>
+                                </div>
+                              )}
+                            </td>
                             {needsReviewTab ? (
                               <td className="transactions-page__why-cell">
                                 <span className="transactions-page__why" title={reasons}>
