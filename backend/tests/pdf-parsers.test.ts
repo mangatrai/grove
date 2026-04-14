@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { parseBoaEStatementFromText } from "../src/modules/imports/profiles/boa-estatement-pdf.js";
 import { parseMarcusOnlineSavingsFromText } from "../src/modules/imports/profiles/marcus-online-savings-pdf.js";
+import { parseWealthfrontFromText } from "../src/modules/imports/profiles/wealthfront-investment-pdf.js";
 import {
   parseCurrentYtdPair,
   parseIbmPayslipFromText,
@@ -206,5 +207,244 @@ Streamline your savings growth
     const { rows } = parseMarcusOnlineSavingsFromText(snippet);
     const descs = rows.map((r) => r.description);
     expect(descs.every((d) => !/balance/i.test(d))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wealthfront Cash Account PDF parser
+// ---------------------------------------------------------------------------
+
+// Representative text from a real February 2026 statement (personal data redacted).
+// Structure mirrors actual pdf-parse output: sections separated by headers, amounts already signed.
+const WEALTHFRONT_FEB_TEXT = `ACCOUNT INFORMATIONTest UserIndividual Cash Account - TOD
+ACCOUNT NUMBERSWealthfront: XXXXXXXX
+Monthly Statement for February 1 - 28, 2026Real Estate Savings Account
+I. HoldingsII. Account Activity
+February 1, 2026
+Starting Balance
+$329,441.04
+February 28, 2026
+Ending Balance
+$210,746.55
+
+II. Account Activity Deposits/Credits to Wealthfront Brokerage Withdrawals/Debits from Wealthfront Brokerage Transfer between Wealthfront and Program Banks
+3
+
+Date
+Method
+Status
+Amount
+2/3/2026
+ACH
+Received
+$200.00
+2/18/2026
+ACH
+Received
+$200.00
+Total
+$400.00
+Date
+Method
+Status
+Amount
+2/27/2026
+ACH
+Disbursed
+-$120,000.00
+Total
+-$120,000.00
+Date
+Method
+Amount
+2/3/2026
+Transfer to Program Banks
+-$200.00
+2/18/2026
+Transfer to Program Banks
+-$200.00
+2/27/2026
+Transfer from Program Banks
+$120,000.00
+INTEREST
+4
+
+Date
+Method
+Amount
+Total
+$119,600.00
+Date
+Interest Period
+Amount
+2/1/2026
+January 2026
+$905.51
+Total
+$905.51
+Balance and Interest Rate Details
+Date
+Amount
+APR
+APY
+1/1/2026
+$349,041.04
+3.20%
+3.25%
+`;
+
+// Representative text from a real March 2026 statement (with RTP/FedNow + footnote mid-row).
+const WEALTHFRONT_MAR_TEXT = `Monthly Statement for March 1 - 31, 2026Real Estate Savings Account
+I. HoldingsII. Account Activity
+March 1, 2026
+Starting Balance
+$210,746.55
+March 31, 2026
+Ending Balance
+$151,949.71
+
+II. Account Activity Deposits/Credits to Wealthfront Brokerage Withdrawals/Debits from Wealthfront Brokerage Transfer between Wealthfront and Program Banks
+4
+
+Date
+Method
+Status
+Amount
+3/3/2026
+ACH
+Received
+$200.00
+3/17/2026
+ACH
+Received
+$200.00
+Total
+$400.00
+Date
+Method
+Status
+Amount
+3/2/2026
+RTP/FedNow
+3
+Disbursed
+-$50,000.00
+3/27/2026
+RTP/FedNow
+Disbursed
+-$10,000.00
+Total
+-$60,000.00
+Date
+Method
+Amount
+3/2/2026
+Transfer from Program Banks
+$50,000.00
+3/3/2026
+Transfer to Program Banks
+-$200.00
+3/17/2026
+Transfer to Program Banks
+-$200.00
+3/27/2026
+Transfer from Program Banks
+$10,000.00
+INTEREST
+5
+
+Date
+Method
+Amount
+3/17/2026
+Transfer to Program Banks
+-$200.00
+3/27/2026
+Transfer from Program Banks
+$10,000.00
+Total
+$59,600.00
+Date
+Interest Period
+Amount
+3/1/2026
+February 2026
+$803.16
+Total
+$803.16
+Balance and Interest Rate Details
+`;
+
+describe("Wealthfront Cash Account PDF parser", () => {
+  describe("February 2026 statement", () => {
+    const { rows, statementBalances } = parseWealthfrontFromText(WEALTHFRONT_FEB_TEXT);
+
+    it("emits 3 transaction rows (2 deposits, 1 withdrawal, 1 interest)", () => {
+      // deposits: 2/3 and 2/18; withdrawal: 2/27; interest: 2/1
+      expect(rows).toHaveLength(4);
+    });
+
+    it("parses deposit amounts as positive", () => {
+      const deposits = rows.filter((r) => r.amount > 0 && r.description.includes("Deposit"));
+      expect(deposits).toHaveLength(2);
+      expect(deposits[0]!.amount).toBe(200.0);
+      expect(deposits[1]!.amount).toBe(200.0);
+    });
+
+    it("parses withdrawal amount as negative", () => {
+      const withdrawals = rows.filter((r) => r.amount < 0);
+      expect(withdrawals).toHaveLength(1);
+      expect(withdrawals[0]!.amount).toBe(-120000.0);
+      expect(withdrawals[0]!.description).toMatch(/withdrawal/i);
+    });
+
+    it("parses interest as positive with period in description", () => {
+      const interest = rows.find((r) => r.description.startsWith("Interest"));
+      expect(interest).toBeDefined();
+      expect(interest!.amount).toBe(905.51);
+      expect(interest!.description).toBe("Interest - January 2026");
+    });
+
+    it("skips program-bank transfer rows", () => {
+      const transfers = rows.filter((r) => r.description.toLowerCase().includes("program bank"));
+      expect(transfers).toHaveLength(0);
+    });
+
+    it("outputs ISO dates", () => {
+      expect(rows[0]!.txn_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(rows.find((r) => r.description.startsWith("Interest"))!.txn_date).toBe("2026-02-01");
+    });
+
+    it("extracts ending balance and date", () => {
+      expect(statementBalances).not.toBeNull();
+      expect(statementBalances!.ending).toBe(210746.55);
+      expect(statementBalances!.asOfEnd).toBe("2026-02-28");
+    });
+  });
+
+  describe("March 2026 statement (RTP/FedNow + footnote mid-row)", () => {
+    const { rows, statementBalances } = parseWealthfrontFromText(WEALTHFRONT_MAR_TEXT);
+
+    it("emits 4 rows (2 deposits, 2 withdrawals, 1 interest)", () => {
+      expect(rows).toHaveLength(5);
+    });
+
+    it("handles RTP/FedNow withdrawal with mid-row footnote", () => {
+      const rtp = rows.filter((r) => r.description.includes("RTP/FedNow"));
+      expect(rtp).toHaveLength(2);
+      expect(rtp[0]!.amount).toBe(-50000.0);
+      expect(rtp[1]!.amount).toBe(-10000.0);
+    });
+
+    it("parses interest correctly (February 2026 period)", () => {
+      const interest = rows.find((r) => r.description.startsWith("Interest"));
+      expect(interest!.amount).toBe(803.16);
+      expect(interest!.description).toBe("Interest - February 2026");
+    });
+
+    it("extracts March ending balance", () => {
+      expect(statementBalances!.ending).toBe(151949.71);
+      expect(statementBalances!.asOfEnd).toBe("2026-03-31");
+    });
   });
 });

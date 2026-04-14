@@ -82,7 +82,7 @@ export function parseMarcusOnlineSavingsFromText(
           ending: endingBalance,
           asOfStart: null,
           asOfEnd: endingBalanceDate,
-          source: "ofx_transactions" as BoaStatementBalances["source"]
+          source: "marcus_online_savings_pdf" as const
         }
       : null;
 

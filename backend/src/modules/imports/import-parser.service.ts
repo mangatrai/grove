@@ -22,6 +22,7 @@ import { parseMarcusOnlineSavingsPdf } from "./profiles/marcus-online-savings-pd
 import { parseOfxBuffer } from "./profiles/ofx-parser.js";
 import { parseDiscoverCardCsv } from "./profiles/discover-card-csv.js";
 import { parseWealthfrontInvestmentCsv } from "./profiles/wealthfront-investment-csv.js";
+import { parseWealthfrontInvestmentPdf } from "./profiles/wealthfront-investment-pdf.js";
 import type { NormalizedRawPayload } from "./profiles/types.js";
 import { parseAmount } from "./profiles/tabular-helpers.js";
 import type { ParserProfileId } from "./profiles/profile-ids.js";
@@ -162,7 +163,7 @@ async function extractByProfile(
     case "wealthfront_investment_csv":
       return parseWealthfrontInvestmentCsv(buffer);
     case "wealthfront_investment_pdf":
-      return { ok: false as const, code: "NOT_IMPLEMENTED", message: "Wealthfront PDF parser not yet implemented — use CSV export instead" };
+      return (await parseWealthfrontInvestmentPdf(buffer)).rows;
     case "capital_one_card_csv":
       return { ok: false as const, code: "NOT_IMPLEMENTED", message: "Capital One CSV parser not yet implemented" };
     case "ibm_pay_contributions_pdf":
@@ -194,6 +195,10 @@ async function extractByProfileWithDiagnostics(
   }
   if (profileId === "marcus_online_savings_pdf") {
     const parsed = await parseMarcusOnlineSavingsPdf(buffer);
+    return { rows: parsed.rows, statementBalances: parsed.statementBalances };
+  }
+  if (profileId === "wealthfront_investment_pdf") {
+    const parsed = await parseWealthfrontInvestmentPdf(buffer);
     return { rows: parsed.rows, statementBalances: parsed.statementBalances };
   }
   if (profileId === "ofx_transactions") {

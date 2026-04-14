@@ -9,7 +9,13 @@ export type BoaStatementBalances = {
   asOfStart: string | null;
   /** ISO date for ending balance "as of" when parsed. */
   asOfEnd: string | null;
-  source: "boa_checking_csv" | "boa_savings_csv" | "boa_estatement_pdf" | "ofx_transactions";
+  source:
+    | "boa_checking_csv"
+    | "boa_savings_csv"
+    | "boa_estatement_pdf"
+    | "ofx_transactions"
+    | "marcus_online_savings_pdf"
+    | "wealthfront_investment_pdf";
 };
 
 function mmddyyyyToIso(s: string): string | null {
