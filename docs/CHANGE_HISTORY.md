@@ -18,6 +18,38 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-13 (developer ergonomics)
+
+### DX-001 — One-command npm scripts map + setup `.env` bootstrap
+- **Type:** DX + docs
+- **What:** Root `package.json` adds **`start:dev`** / **`stop:dev`** (aliases for `services:start` / `services:stop`), **`db:reset`** (alias for `db:cleanup`), **`db:reset:dev`** (cleanup + dev seeds). **`scripts/setup.sh`** copies **`.env.example` → `.env`** when missing and reminds to start Docker Postgres. **`README.md`**, **`docs/RUNBOOK.md`**, **`CLAUDE.md`**, **`ENVIRONMENT_VARIABLES.md`**, **`LOGGING.md`**, **`frontend/README.md`** updated (Postgres quick start; `db:cleanup` no longer documented as `npm run db:cleanup -- --yes`).
+- **Files:** `package.json`, `scripts/setup.sh`, `README.md`, `docs/RUNBOOK.md`, `CLAUDE.md`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/LOGGING.md`, `frontend/README.md`, `docs/CHANGE_HISTORY.md`.
+
+---
+
+## 2026-04-13 (bank parsers, cont.)
+
+### CR-104 — BoA credit card CSV: date ISO output + test coverage
+- **Type:** FIX + CR
+- **What:** `boa-credit-card-csv.ts` was emitting `MM/DD/YYYY` into `txn_date` (same issue as Marcus before CR-101). Fixed to output `YYYY-MM-DD`. Added 5 unit tests covering date conversion, amounts, reference_id, and description.
+- **Files:** `backend/src/modules/imports/profiles/boa-credit-card-csv.ts`, `backend/tests/csv-parsers.test.ts`.
+
+### CR-105 — Wealthfront Cash Account PDF statement parser
+- **Type:** CR (new parser)
+- **What:** Built `wealthfront-investment-pdf.ts` for Wealthfront monthly PDF statements. Parses deposits (ACH Received), withdrawals (ACH/RTP Disbursed), and interest payments. Skips "Transfer between Wealthfront and Program Banks" rows — these are internal FDIC-sweep allocations with no cash-flow meaning. Extracts ending balance → `statementBalances` → auto-persisted as `account_balance_snapshot` (same pipeline as BoA/OFX/Marcus). Wired into `import-parser.service.ts` with full balance-snapshot pass-through. 11 new tests covering both Feb and March 2026 statement patterns (including RTP/FedNow with mid-row footnote).
+- **Files:** `backend/src/modules/imports/profiles/wealthfront-investment-pdf.ts` (new), `backend/src/modules/imports/import-parser.service.ts`, `backend/tests/pdf-parsers.test.ts`.
+
+### FIX-001 — BoaStatementBalances source union expanded; Marcus source corrected
+- **Type:** FIX
+- **What:** `BoaStatementBalances.source` was a narrow union that excluded `marcus_online_savings_pdf` and `wealthfront_investment_pdf`. Extended the union. Marcus was incorrectly using `"ofx_transactions"` as its source value — corrected to `"marcus_online_savings_pdf"`.
+- **Files:** `backend/src/modules/imports/profiles/boa-checking-savings-csv.ts`, `backend/src/modules/imports/profiles/marcus-online-savings-pdf.ts`.
+
+### BACKLOG-001 — Resolution queue: bulk-resolve by description pattern (not yet implemented)
+- **Type:** Backlog
+- **What:** After importing Discover / Wealthfront historical data, the `unknown_category` resolution queue will grow. A "apply this category to all transactions matching this description" action would significantly reduce per-item review work. Proposed: resolution item detail shows a "categorize all N matching" option that fires a new `POST /resolution/bulk-assign` endpoint, creates a category rule, and resolves all matching open items in one step.
+
+---
+
 ## 2026-04-13 (bank parsers)
 
 ### CR-101 — Marcus Online Savings PDF: date normalization, balance snapshot, hardened sign detection
