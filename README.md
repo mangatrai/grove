@@ -2,6 +2,8 @@
 
 Self-hosted household finance: import bank and card activity, categorize with rules, resolve exceptions, and view cash summaries on a private stack you control. Data stays on your infrastructure (**Postgres**).
 
+**Multi-person household:** add family members in Settings → Household, then attribute accounts, transactions, payslips, and net worth snapshots to individuals. Transactions, Net Worth, and Payslip views all filter by member. Multiple login users per household are supported at the database level (see [`RUNBOOK.md`](docs/RUNBOOK.md)).
+
 **Monorepo:** `backend/` (Node.js + Express API), `frontend/` (Vite + React).
 
 ## Documentation

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
+import { IconTrash } from "@tabler/icons-react";
+
 import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
@@ -1080,29 +1082,21 @@ export function SettingsPage() {
                         <option value="other">Other</option>
                       </select>
                     </label>
-                    {member.id ? (
-                      <button
-                        type="button"
-                        className="secondary"
-                        style={{ alignSelf: "flex-end", color: "var(--color-danger, #c0392b)" }}
-                        disabled={savingMemberIndex !== null}
-                        onClick={() => setRemoveMemberConfirm(member.id!)}
-                        title="Remove this household member"
-                      >
-                        Remove
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="secondary"
-                        style={{ alignSelf: "flex-end" }}
-                        disabled={savingMemberIndex !== null}
-                        onClick={() => setMemberDrafts((prev) => prev.filter((_, i) => i !== idx))}
-                        title="Discard unsaved row"
-                      >
-                        Discard
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      title={member.id ? "Remove this household member" : "Discard unsaved row"}
+                      disabled={savingMemberIndex !== null}
+                      style={{ alignSelf: "flex-end", background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}
+                      onClick={() => {
+                        if (member.id) {
+                          setRemoveMemberConfirm(member.id);
+                        } else {
+                          setMemberDrafts((prev) => prev.filter((_, i) => i !== idx));
+                        }
+                      }}
+                    >
+                      <IconTrash size={14} />
+                    </button>
                   </div>
                 ))}
                 <div className="settings-household-actions" style={{ marginBottom: "1rem" }}>

@@ -13,7 +13,7 @@ After sign-in you land on **Home**, with cash summaries and shortcuts into the l
 Open **Net worth** from the sidebar for **assets vs liabilities** (non–payslip accounts).
 
 - **Trend:** choose a **period** (last 3 / 6 / 12 months, year-to-date, or custom dates) and an **interval** (month-end, weekly, or daily samples). Each chart point uses the same balance rules as the table below: **manual balance** first, then a balance saved from an **import**, then a **statement** hint when nothing else exists. The chart shows total assets, liabilities, and net; you can **overlay** a few accounts on the same chart. The **period summary** table lists the **first** and **last** sample dates on the chart (same endpoints as the line); **Ledger** opens **Transactions** for that calendar day only. **Belongs to** optionally limits the sheet to household-owned accounts or one member’s accounts.
-- **Balance sheet:** one table for all accounts. **Liabilities** are shown as **negative** balances so they read consistently with net worth. **Table as of** picks the snapshot date; use **Edit** on a row to post a manual balance (or **Bulk set as-of** to re-date manual snapshots). Account names link to **Transactions** for the balance as-of day; when a balance came from an import, an extra link opens transactions for that **import file**.
+- **Balance sheet:** one table for all accounts. Account type classification: **assets** = checking, savings, investment, **retirement** (401K/IRA/pension); **liabilities** = credit card, loan, mortgage. Accounts of other types (e.g. payslip) are excluded. **Liability balances** are stored as **positive magnitudes** (what you owe); net worth = total assets − total liabilities. When you import a statement (OFX, BoA CSV/PDF, Marcus PDF, Wealthfront PDF) the **statement ending balance** is automatically saved as an import snapshot — it appears on the balance sheet immediately without manual entry. **Table as of** picks the snapshot date; use **Edit** on a row to post a manual balance (or **Bulk set as-of** to re-date manual snapshots). Account names link to **Transactions** for the balance as-of day; when a balance came from an import, an extra link opens transactions for that **import file**.
 - **Retry load** appears only if the trend or balance sheet failed to load; it refetches both.
 
 Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlog notes in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
@@ -29,10 +29,26 @@ Open **Account → Settings** from the top bar.
 
 - **Profile:** name, avatar, visibility, and related preferences.
 - **Password:** change your password (existing sessions are invalidated after a successful change).
-- **Household / finances:** monthly savings target, income and employer setup (used for payslips), and other household-level options.
+- **Household / finances:** monthly savings target, household member roster, income and employer setup (used for payslips), and other household-level options.
 - **Connected accounts:** add or edit **financial accounts** (bank, card, etc.). Pick an institution label, parser profile where applicable, account mask (e.g. last four digits), and **belongs-to** (household vs a specific member) so imports and reports attribute activity correctly.
 - **Custom institutions:** you can add household-specific institution names that complement the built-in list.
 - **Household backup (ZIP):** request an **export** of the household database slice (async job, then download the ZIP). **Restore from backup** uploads that ZIP and replaces household data (**destructive**); after a successful restore you are signed out because existing login tokens are invalidated. Prefer export → restore on a **fresh** instance or when you intentionally want to replace everything in the household. Details for operators: [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md); API: [`API_EXPORTS.md`](API_EXPORTS.md).
+
+### Household members
+
+The **Household** tab lets you maintain a roster of the people who live in and share the household. Each member has a **name**, optional **email**, a **role** (`head` or `member`), and a **relationship** (`self`, `spouse`, `child`, `dependent`, `other`).
+
+**Why this matters:** member profiles drive the **belongs-to** attribution throughout the app. When you add a bank account, a transaction, or a payslip, you can assign it to a specific person rather than the household as a whole. Reports (Transactions, Net Worth, Payslips) can then be filtered by person to show each member's slice.
+
+**Adding a member:** fill in at least a first name, choose a role and relationship, and click **Save household**. Click **Add another row** to stage multiple new members before saving. Each saved member row shows a trash icon — click it to remove that member (a confirmation dialog appears; removal is permanent).
+
+**Removing a member:** uses the trash icon at the right of each saved row. If a member has a login account (they can sign in), removal is blocked — a login account must be deactivated separately by the instance operator.
+
+**Roles:**
+- `head` — household head; has ownership semantics over accounts and income attributed to them.
+- `member` — any other household member.
+
+> **Note on login accounts vs household members:** These are separate concepts. A household _member_ is a person profile used for attribution. A _login user_ (`app_user`) is an account that can authenticate to the app. Currently login users are created by the operator at the database level (see [`RUNBOOK.md`](RUNBOOK.md)); the member management UI manages profiles, not login credentials.
 
 ## Importing statements
 
