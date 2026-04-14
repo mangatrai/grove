@@ -8,6 +8,7 @@ import { employerInputSchema } from "./household.types.js";
 import { ensurePayslipImportBucketAccount } from "../imports/import-file-binding.service.js";
 import {
   createHouseholdMember,
+  deleteHouseholdMember,
   getCurrentUserProfile,
   getHouseholdSettings,
   listHouseholdMembers,
@@ -196,4 +197,23 @@ householdRouter.patch("/members/:memberId", requireRole(["owner", "admin"]), asy
     return;
   }
   res.status(200).json({ member: out.member });
+});
+
+householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid member id", issues: params.error.flatten() });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await deleteHouseholdMember(householdId, params.data.memberId);
+  if (!out.ok) {
+    if (out.code === "HAS_LOGIN_ACCOUNT") {
+      res.status(409).json({ message: "This member has a login account and cannot be removed here.", code: out.code });
+      return;
+    }
+    res.status(404).json({ message: "Member not found", code: out.code });
+    return;
+  }
+  res.status(204).end();
 });

@@ -649,6 +649,20 @@ export function SettingsPage() {
     }
   }
 
+  async function removeHouseholdMember(memberId: string) {
+    if (!token || !memberId) return;
+    if (!window.confirm("Remove this household member? This cannot be undone.")) return;
+    setMembersError(null);
+    setMembersSuccess(null);
+    try {
+      await apiFetch(`/household/members/${encodeURIComponent(memberId)}`, { method: "DELETE" });
+      setMembersSuccess("Member removed.");
+      await loadMembers();
+    } catch (e: unknown) {
+      setMembersError(e instanceof Error ? e.message : "Could not remove member");
+    }
+  }
+
   async function saveHouseholdMembers() {
     if (!token) {
       return;
@@ -1065,6 +1079,29 @@ export function SettingsPage() {
                         <option value="other">Other</option>
                       </select>
                     </label>
+                    {member.id ? (
+                      <button
+                        type="button"
+                        className="secondary"
+                        style={{ alignSelf: "flex-end", color: "var(--color-danger, #c0392b)" }}
+                        disabled={savingMemberIndex !== null}
+                        onClick={() => void removeHouseholdMember(member.id!)}
+                        title="Remove this household member"
+                      >
+                        Remove
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="secondary"
+                        style={{ alignSelf: "flex-end" }}
+                        disabled={savingMemberIndex !== null}
+                        onClick={() => setMemberDrafts((prev) => prev.filter((_, i) => i !== idx))}
+                        title="Discard unsaved row"
+                      >
+                        Discard
+                      </button>
+                    )}
                   </div>
                 ))}
                 <div className="settings-household-actions" style={{ marginBottom: "1rem" }}>

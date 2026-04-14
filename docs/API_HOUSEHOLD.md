@@ -55,3 +55,57 @@ Send **at least one** field.
 **403** — insufficient role.
 
 **503** — migration **`0010`** not applied (`MIGRATION_REQUIRED`).
+
+---
+
+## Member management (`/household/members`)
+
+**Owner/admin only** for all write operations. Members receive **403**.
+
+### `GET /household/members`
+
+Returns all household members (person profiles + membership metadata).
+
+**200:**
+```json
+{
+  "members": [
+    {
+      "id": "uuid",
+      "fullName": "Alex Doe",
+      "firstName": "Alex",
+      "lastName": "Doe",
+      "email": "alex@example.com",
+      "role": "head",
+      "relationship": "self"
+    }
+  ]
+}
+```
+
+### `POST /household/members`
+
+Creates a new household member (`person_profile` + `household_membership`). Does **not** create a login account.
+
+**Body:** `firstName` (required), `lastName`, `email`, `role` (`head` | `member`), `relationship` (`self` | `spouse` | `child` | `dependent` | `other`).
+
+**201:** `{ "member": { … } }`  
+**409** — email already in use (`EMAIL_CONFLICT`).
+
+### `PATCH /household/members/:memberId`
+
+Updates a member's name, email, role, or relationship. At least one field required.
+
+**200:** `{ "member": { … } }`  
+**404** — member not found.  
+**409** — email already in use.
+
+### `DELETE /household/members/:memberId`
+
+Removes a household member. Deletes both the `household_membership` and `person_profile` rows.
+
+**Constraint:** Cannot remove a member who has a linked login account (`linked_user_id` set). Returns **409** with code `HAS_LOGIN_ACCOUNT`.
+
+**204** — deleted.  
+**404** — member not found.  
+**409** — member has a login account (`HAS_LOGIN_ACCOUNT`).

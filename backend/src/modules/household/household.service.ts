@@ -575,3 +575,39 @@ export async function patchHouseholdMember(
   }
   return { ok: true, member: toHouseholdMemberProfile(updated) };
 }
+
+export async function deleteHouseholdMember(
+  householdId: string,
+  memberId: string
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "HAS_LOGIN_ACCOUNT" }> {
+  const existing = await qGet<{ id: string; linked_user_id: string | null }>(
+    `
+  SELECT p.id, p.linked_user_id
+  FROM person_profile p
+  JOIN household_membership m
+    ON m.person_profile_id = p.id
+   AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    memberId
+  );
+  if (!existing) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  if (existing.linked_user_id) {
+    return { ok: false, code: "HAS_LOGIN_ACCOUNT" };
+  }
+  await qBegin(async (tx) => {
+    await tx.unsafe(`DELETE FROM household_membership WHERE household_id = $1 AND person_profile_id = $2`, [
+      householdId,
+      memberId
+    ] as never[]);
+    await tx.unsafe(`DELETE FROM person_profile WHERE household_id = $1 AND id = $2`, [
+      householdId,
+      memberId
+    ] as never[]);
+  });
+  return { ok: true };
+}
