@@ -381,7 +381,15 @@ export function SettingsPage() {
       if (!res.ok) {
         const txt = await res.text();
         let msg = `Download failed (${res.status})`;
-        try { msg = (JSON.parse(txt) as { message?: string }).message ?? msg; } catch { /* ignore */ }
+        try {
+          const body = JSON.parse(txt) as { code?: string; message?: string };
+          if (body.code === "EXPORT_EXPIRED") {
+            msg = "This export has expired (files are kept for 48 hours). Please start a new export.";
+            setExportZipJobId(null);
+          } else {
+            msg = body.message ?? msg;
+          }
+        } catch { /* ignore */ }
         setExportZipMessage(msg);
         return;
       }
@@ -1255,6 +1263,9 @@ export function SettingsPage() {
                 <p className="muted" style={{ marginTop: 0 }}>
                   Download a full ZIP backup — accounts, transactions, net worth history, category rules, payslips, and more.
                   Use this to migrate to a new host or keep an offline archive.
+                </p>
+                <p className="muted" style={{ marginTop: 0, fontSize: "0.875rem" }}>
+                  Export files are available for 48 hours after generation. Please download a local copy before then.
                 </p>
                 {exportZipMessage ? (
                   <p className={exportZipJobId ? "success" : "error"} style={{ marginBottom: "0.5rem" }}>{exportZipMessage}</p>

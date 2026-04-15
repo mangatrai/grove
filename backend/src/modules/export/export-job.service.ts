@@ -4,18 +4,19 @@ import { randomUUID } from "node:crypto";
 
 import archiver from "archiver";
 
-import { qExec, qGet } from "../../db/query.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { queryAllExportTables } from "./export-household-bundle.service.js";
 
 const EXPORTS_DIR = resolveDataPath("data/exports");
+const EXPORT_TTL_HOURS = 48;
 
 export type ExportJobRow = {
   id: string;
   householdId: string;
   requestedByUserId: string;
-  status: "queued" | "running" | "complete" | "failed";
+  status: "queued" | "running" | "complete" | "failed" | "expired";
   storagePath: string | null;
   errorText: string | null;
   createdAt: string;
@@ -118,7 +119,8 @@ export type ExportDownloadFailureCode =
   | "EXPORT_JOB_NOT_FOUND"
   | "EXPORT_NOT_READY"
   | "EXPORT_MISSING_PATH"
-  | "EXPORT_FILE_MISSING";
+  | "EXPORT_FILE_MISSING"
+  | "EXPORT_EXPIRED";
 
 export type ExportDownloadResult =
   | { ok: true; path: string; buffer: Buffer }
@@ -131,6 +133,10 @@ export async function readExportFileIfReady(householdId: string, jobId: string):
       `Export download refused: EXPORT_JOB_NOT_FOUND jobId=${jobId} householdId=${householdId} (job row missing)`
     );
     return { ok: false, code: "EXPORT_JOB_NOT_FOUND", storagePath: null };
+  }
+  if (job.status === "expired") {
+    log.info(`Export download refused: EXPORT_EXPIRED jobId=${jobId} (file purged after ${EXPORT_TTL_HOURS}h TTL)`);
+    return { ok: false, code: "EXPORT_EXPIRED", jobStatus: job.status, storagePath: null };
   }
   if (job.status !== "complete") {
     log.info(
@@ -157,4 +163,40 @@ export async function readExportFileIfReady(householdId: string, jobId: string):
     };
   }
   return { ok: true, path: job.storagePath, buffer: fs.readFileSync(job.storagePath) };
+}
+
+/**
+ * Delete ZIP files and mark export_job rows as 'expired' for all complete exports
+ * older than EXPORT_TTL_HOURS. Safe to call repeatedly.
+ */
+export async function purgeExpiredExports(): Promise<void> {
+  const expired = (await qAll(
+    `SELECT id, storage_path FROM export_job
+      WHERE status = 'complete'
+        AND completed_at < NOW() - INTERVAL '${EXPORT_TTL_HOURS} hours'`
+  )) as { id: string; storage_path: string | null }[];
+
+  if (expired.length === 0) return;
+
+  for (const row of expired) {
+    if (row.storage_path) {
+      try {
+        fs.unlinkSync(row.storage_path);
+      } catch (err: unknown) {
+        // File may already be gone; log but don't block the DB update.
+        log.warn(`Export purge: could not delete file ${row.storage_path}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    await qExec(
+      `UPDATE export_job SET status = 'expired', storage_path = NULL WHERE id = ?`,
+      row.id
+    );
+  }
+  log.info(`Export purge: expired ${expired.length} export job(s) older than ${EXPORT_TTL_HOURS}h`);
+}
+
+/** Run purge on startup and every hour thereafter. */
+export function startExportCleanupSchedule(): void {
+  void purgeExpiredExports();
+  setInterval(() => { void purgeExpiredExports(); }, 60 * 60 * 1000);
 }

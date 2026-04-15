@@ -522,9 +522,11 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "200":
-          description: application/zip
+          description: application/zip download
         "404":
-          description: Job not ready or missing file
+          description: Job not ready, file missing, or job not found
+        "410":
+          description: Export expired — ZIP was auto-deleted after 48-hour retention window (EXPORT_EXPIRED)
   /exports/{jobId}:
     get:
       tags: [exports]

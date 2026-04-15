@@ -10,7 +10,8 @@ import {
   getExportJob,
   queueHouseholdExport,
   readExportFileIfReady,
-  scheduleExportJobProcessing
+  scheduleExportJobProcessing,
+  startExportCleanupSchedule
 } from "./export-job.service.js";
 import {
   getImportJob,
@@ -42,6 +43,8 @@ const restoreUpload = multer({
 
 export const exportsRouter = Router();
 exportsRouter.use(requireAuth);
+
+startExportCleanupSchedule();
 
 /** Async restore from export bundle ZIP. */
 exportsRouter.post(
@@ -120,6 +123,13 @@ exportsRouter.get("/:jobId/download", async (req: AuthenticatedRequest, res) => 
   }
   const file = await readExportFileIfReady(householdId, jobId);
   if (!file.ok) {
+    if (file.code === "EXPORT_EXPIRED") {
+      res.status(410).json({
+        code: file.code,
+        message: `Export file has been deleted (exports are retained for ${48} hours). Start a new export.`
+      });
+      return;
+    }
     const human =
       file.code === "EXPORT_NOT_READY"
         ? "Export not ready yet"

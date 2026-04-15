@@ -35,7 +35,11 @@ Poll **export** job status until `status` indicates completion (exact strings ma
 
 Returns **`application/zip`** when the job finished successfully and the file exists on disk.
 
-**404:** Export not ready, file missing, or job not found (payload may include `code`, `jobStatus`, `storagePath` for diagnostics).
+**200:** `application/zip` stream.
+
+**404:** Export not ready, file missing, or job not found (payload includes `code`, `jobStatus`, `storagePath` for diagnostics).
+
+**410 Gone:** `{ "code": "EXPORT_EXPIRED", "message": "..." }` — the ZIP was automatically deleted after the 48-hour retention window. Start a new export.
 
 ## `POST /exports/household/import`
 

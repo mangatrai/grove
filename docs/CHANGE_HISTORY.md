@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-15 (security hardening continued)
+
+### SEC-003 — Export ZIP 48-hour auto-cleanup
+- **Type:** FIX + CR (security backlog item)
+- **What:** Export ZIP files now expire and are purged after 48 hours.
+  - **Backend:** `purgeExpiredExports()` in `export-job.service.ts` deletes the ZIP file from disk and marks `export_job.status = 'expired'` for all `complete` rows older than 48h. `startExportCleanupSchedule()` runs on server startup and repeats every hour via `setInterval`.
+  - **Migration:** `0017_export_job_expired.sql` — adds `'expired'` to the `status` CHECK constraint on `export_job`.
+  - **Download route:** `GET /exports/:jobId/download` now returns **410 Gone** with `code: EXPORT_EXPIRED` for purged files instead of 404 EXPORT_FILE_MISSING.
+  - **Frontend:** Settings page export section now shows a notice: "Export files are available for 48 hours after generation. Please download a local copy before then." Expired-download error shows a clear message prompting a new export.
+- **Files:** `backend/db/migrations/0017_export_job_expired.sql`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/exports.routes.ts`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
 ## 2026-04-15 (security hardening — public deployment readiness)
 
 ### SEC-001 — Security hardening: 5-piece hardening pass for OCI/internet-facing deployment
