@@ -82,30 +82,41 @@ describe("auth and rbac baseline", () => {
       .send({ monthlySavingsTargetUsd: 100 });
     expect(patchRes.status).toBe(403);
 
-    // RBAC lock-down: members must not be able to trigger import/category/export writes
-    const importSessionRes = await request(app)
-      .post("/imports/sessions")
-      .set("authorization", `Bearer ${token}`)
-      .send({ sourceType: "upload" });
-    expect(importSessionRes.status).toBe(403);
-
+    // Members CAN create categories (member-scoped RBAC, Slice 2)
     const categoryCreateRes = await request(app)
       .post("/categories")
       .set("authorization", `Bearer ${token}`)
-      .send({ name: "Test" });
-    expect(categoryCreateRes.status).toBe(403);
+      .send({ name: "MemberTestCategory" });
+    expect(categoryCreateRes.status).toBe(201);
 
+    // Members CANNOT create category rules (blocked)
     const ruleCreateRes = await request(app)
       .post("/categories/rules")
       .set("authorization", `Bearer ${token}`)
       .send({ pattern: "test", matchType: "contains", categoryId: "00000000-0000-0000-0000-000000000001" });
     expect(ruleCreateRes.status).toBe(403);
 
+    // Members CANNOT create import sessions (still blocked, Slice 3 will open with scoping)
+    const importSessionRes = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    expect(importSessionRes.status).toBe(403);
+
+    // Members CANNOT create accounts when not linked to a person profile
+    const accountCreateRes = await request(app)
+      .post("/imports/accounts")
+      .set("authorization", `Bearer ${token}`)
+      .send({ type: "checking", institution: "Test Bank" });
+    expect(accountCreateRes.status).toBe(403);
+
+    // Members CANNOT start a household export (blocked)
     const exportStartRes = await request(app)
       .post("/exports/household")
       .set("authorization", `Bearer ${token}`);
     expect(exportStartRes.status).toBe(403);
 
+    // Members CANNOT restore from backup (blocked, owner only)
     const restoreRes = await request(app)
       .post("/exports/household/import")
       .set("authorization", `Bearer ${token}`);

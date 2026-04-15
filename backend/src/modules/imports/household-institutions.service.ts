@@ -19,7 +19,8 @@ export async function listHouseholdCustomInstitutions(householdId: string): Prom
 
 export async function createHouseholdCustomInstitution(
   householdId: string,
-  displayName: string
+  displayName: string,
+  createdByUserId: string
 ): Promise<{ ok: true; id: string } | { ok: false; code: "DUPLICATE" | "INVALID" }> {
   const trimmed = displayName.trim();
   if (trimmed.length < 2 || trimmed.length > 120) {
@@ -38,11 +39,12 @@ export async function createHouseholdCustomInstitution(
   const id = randomUUID();
   try {
     await qExec(
-      `INSERT INTO household_custom_institution (id, household_id, display_name)
-     VALUES (?, ?, ?)`,
+      `INSERT INTO household_custom_institution (id, household_id, display_name, created_by_user_id)
+       VALUES (?, ?, ?, ?)`,
       id,
       householdId,
-      trimmed
+      trimmed,
+      createdByUserId
     );
   } catch (e) {
     if (isPgUniqueViolation(e)) {
@@ -51,4 +53,28 @@ export async function createHouseholdCustomInstitution(
     throw e;
   }
   return { ok: true, id };
+}
+
+export async function deleteHouseholdCustomInstitution(
+  householdId: string,
+  institutionId: string,
+  caller: { userId: string; role: string }
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" }> {
+  const row = await qGet<{ created_by_user_id: string | null }>(
+    `SELECT created_by_user_id FROM household_custom_institution WHERE id = ? AND household_id = ?`,
+    institutionId,
+    householdId
+  );
+  if (!row) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  if (caller.role === "member" && row.created_by_user_id !== caller.userId) {
+    return { ok: false, code: "FORBIDDEN" };
+  }
+  await qExec(
+    `DELETE FROM household_custom_institution WHERE id = ? AND household_id = ?`,
+    institutionId,
+    householdId
+  );
+  return { ok: true };
 }

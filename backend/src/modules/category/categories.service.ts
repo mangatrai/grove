@@ -17,6 +17,7 @@ interface CategoryDbRow {
   parentId: string | null;
   householdId: string | null;
   isDefault: number;
+  createdByUserId: string | null;
 }
 
 function mapRowFromDb(r: CategoryDbRow): CategoryRow {
@@ -86,7 +87,8 @@ export async function categoryAssignableForGlobalBuiltin(categoryId: string): Pr
 
 async function getCategoryInternal(id: string): Promise<CategoryDbRow | undefined> {
   return qGet<CategoryDbRow>(
-    `SELECT id, name, parent_id AS "parentId", household_id AS "householdId", is_default AS "isDefault"
+    `SELECT id, name, parent_id AS "parentId", household_id AS "householdId",
+            is_default AS "isDefault", created_by_user_id AS "createdByUserId"
        FROM category WHERE id = ?`,
     id
   );
@@ -114,7 +116,8 @@ export type CreateCategoryFailure = { ok: false; code: "INVALID_NAME" | "INVALID
 export async function createHouseholdCategory(
   householdId: string,
   name: string,
-  parentId: string | null
+  parentId: string | null,
+  createdByUserId: string
 ): Promise<{ ok: true; data: CategoryRow } | CreateCategoryFailure> {
   const trimmed = name.trim();
   if (!trimmed) {
@@ -132,11 +135,12 @@ export async function createHouseholdCategory(
 
   const id = crypto.randomUUID();
   await qExec(
-    `INSERT INTO category (id, household_id, parent_id, name, is_default) VALUES (?, ?, ?, ?, 0)`,
+    `INSERT INTO category (id, household_id, parent_id, name, is_default, created_by_user_id) VALUES (?, ?, ?, ?, 0, ?)`,
     id,
     householdId,
     parentId,
-    trimmed
+    trimmed,
+    createdByUserId
   );
 
   const row = await getCategoryInternal(id);
@@ -211,11 +215,15 @@ export async function updateDefaultCategory(
 export async function updateHouseholdCategory(
   householdId: string,
   categoryId: string,
-  updates: { name?: string; parentId?: string | null }
+  updates: { name?: string; parentId?: string | null },
+  caller: { userId: string; role: string }
 ): Promise<{ ok: true; data: CategoryRow } | UpdateCategoryFailure> {
   const row = await getCategoryInternal(categoryId);
   if (!row || row.householdId !== householdId) {
     return { ok: false, code: row ? "FORBIDDEN" : "NOT_FOUND" };
+  }
+  if (caller.role === "member" && row.createdByUserId !== caller.userId) {
+    return { ok: false, code: "FORBIDDEN" };
   }
 
   const nextName = updates.name !== undefined ? updates.name.trim() : row.name;
@@ -351,11 +359,15 @@ export async function resolveLeafCategoryIdForHousehold(
 
 export async function deleteHouseholdCategory(
   householdId: string,
-  categoryId: string
+  categoryId: string,
+  caller: { userId: string; role: string }
 ): Promise<{ ok: true } | DeleteCategoryFailure> {
   const row = await getCategoryInternal(categoryId);
   if (!row || row.householdId !== householdId) {
     return { ok: false, code: row ? "FORBIDDEN" : "NOT_FOUND" };
+  }
+  if (caller.role === "member" && row.createdByUserId !== caller.userId) {
+    return { ok: false, code: "FORBIDDEN" };
   }
 
   const child = await qGet(`SELECT 1 FROM category WHERE parent_id = ? LIMIT 1`, categoryId);

@@ -3,7 +3,6 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   createHouseholdCategory,
   deleteHouseholdCategory,
@@ -27,14 +26,14 @@ const createBodySchema = z.object({
   parentId: z.union([z.string().uuid(), z.null()]).optional().default(null)
 });
 
-categoriesRouter.post("/", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+categoriesRouter.post("/", async (req: AuthenticatedRequest, res) => {
   const parsed = createBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  const householdId = req.authUser!.householdId;
-  const out = await createHouseholdCategory(householdId, parsed.data.name, parsed.data.parentId ?? null);
+  const { householdId, userId } = req.authUser!;
+  const out = await createHouseholdCategory(householdId, parsed.data.name, parsed.data.parentId ?? null, userId);
   if (!out.ok) {
     if (out.code === "INVALID_NAME") {
       res.status(400).json({ message: "Name is required", code: out.code });
@@ -55,14 +54,13 @@ const patchBodySchema = z.object({
   parentId: z.union([z.string().uuid(), z.null()]).optional()
 });
 
-categoriesRouter.patch("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+categoriesRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   const parsed = patchBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  const householdId = req.authUser!.householdId;
-  const role = req.authUser!.role;
+  const { householdId, userId, role } = req.authUser!;
   const scope = await getCategoryHouseholdId(req.params.id);
   if (scope === undefined) {
     res.status(404).json({ message: "Category not found", code: "NOT_FOUND" });
@@ -75,7 +73,7 @@ categoriesRouter.patch("/:id", requireRole(["owner", "admin"]), async (req: Auth
         ? await updateDefaultCategory(householdId, req.params.id, parsed.data)
         : { ok: false as const, code: "FORBIDDEN" as const }
       : scope === householdId
-        ? await updateHouseholdCategory(householdId, req.params.id, parsed.data)
+        ? await updateHouseholdCategory(householdId, req.params.id, parsed.data, { userId, role })
         : { ok: false as const, code: "NOT_FOUND" as const };
 
   if (!out.ok) {
@@ -118,8 +116,8 @@ categoriesRouter.patch("/:id", requireRole(["owner", "admin"]), async (req: Auth
   res.status(200).json({ category: out.data });
 });
 
-categoriesRouter.delete("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
-  const householdId = req.authUser!.householdId;
+categoriesRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role } = req.authUser!;
   const scope = await getCategoryHouseholdId(req.params.id);
   if (scope === undefined) {
     res.status(404).json({ message: "Category not found", code: "NOT_FOUND" });
@@ -137,7 +135,7 @@ categoriesRouter.delete("/:id", requireRole(["owner", "admin"]), async (req: Aut
     return;
   }
 
-  const out = await deleteHouseholdCategory(householdId, req.params.id);
+  const out = await deleteHouseholdCategory(householdId, req.params.id, { userId, role });
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {
       res.status(404).json({ message: "Category not found", code: out.code });

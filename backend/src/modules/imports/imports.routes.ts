@@ -31,7 +31,7 @@ import {
 import { canonicalizeImportSession } from "../canonical/canonical-ingest.service.js";
 import { parseSessionImportFiles, type ParseFailure, type ParseColumnMapping } from "./import-parser.service.js";
 import { reconcilePayslipAsyncImportSession } from "./payslip-async-import-reconcile.service.js";
-import { createHouseholdCustomInstitution, listHouseholdCustomInstitutions } from "./household-institutions.service.js";
+import { createHouseholdCustomInstitution, deleteHouseholdCustomInstitution, listHouseholdCustomInstitutions } from "./household-institutions.service.js";
 import { listUsInstitutionLabels } from "./institution-catalog.js";
 import { upsertManualBalanceSnapshot } from "../reports/balance-sheet.service.js";
 import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-file-delete.service.js";
@@ -236,41 +236,56 @@ importsRouter.get("/accounts", async (req: AuthenticatedRequest, res) => {
   res.status(200).json({ accounts });
 });
 
-importsRouter.post("/accounts", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/accounts", async (req: AuthenticatedRequest, res) => {
   const parsed = accountUpsertSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  if (parsed.data.ownerScope === "person" && !parsed.data.ownerPersonProfileId) {
-    res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
-    return;
-  }
-  if (parsed.data.ownerPersonProfileId) {
-    const ok = await qGet<{ ok: number }>(
-      `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ?`,
-      parsed.data.ownerPersonProfileId,
-      req.authUser!.householdId
-    );
-    if (!ok) {
-      res.status(400).json({ message: "Owner person profile not found for household" });
+  const { householdId, userId, role, personProfileId } = req.authUser!;
+
+  // Members must own their accounts — scope is always "person" scoped to their profile.
+  let ownerScope = parsed.data.ownerScope;
+  let ownerPersonProfileId = parsed.data.ownerPersonProfileId ?? null;
+  if (role === "member") {
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
       return;
     }
+    ownerScope = "person";
+    ownerPersonProfileId = personProfileId;
+  } else {
+    if (ownerScope === "person" && !ownerPersonProfileId) {
+      res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+      return;
+    }
+    if (ownerPersonProfileId) {
+      const ok = await qGet<{ ok: number }>(
+        `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ?`,
+        ownerPersonProfileId,
+        householdId
+      );
+      if (!ok) {
+        res.status(400).json({ message: "Owner person profile not found for household" });
+        return;
+      }
+    }
   }
+
   const created = await createHouseholdFinancialAccount({
-    householdId: req.authUser!.householdId,
-    ownerUserId: req.authUser!.userId,
+    householdId,
+    ownerUserId: userId,
     type: parsed.data.type,
     institution: parsed.data.institution,
     accountMask: parsed.data.accountMask ?? null,
-    ownerScope: parsed.data.ownerScope,
-    ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null,
+    ownerScope,
+    ownerPersonProfileId,
     defaultParserProfileId: parsed.data.defaultParserProfileId ?? null
   });
   if (parsed.data.initialBalance != null && Number.isFinite(parsed.data.initialBalance)) {
     const today = new Date().toISOString().slice(0, 10);
     const asOfDate = parsed.data.initialBalanceDate ?? today;
-    await upsertManualBalanceSnapshot(req.authUser!.householdId, {
+    await upsertManualBalanceSnapshot(householdId, {
       financialAccountId: created.id,
       asOfDate,
       amount: parsed.data.initialBalance,
@@ -280,7 +295,7 @@ importsRouter.post("/accounts", requireRole(["owner", "admin"]), async (req: Aut
   res.status(201).json({ id: created.id });
 });
 
-importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.patch("/accounts/:accountId", async (req: AuthenticatedRequest, res) => {
   const params = z.object({ accountId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ message: "Invalid account id", issues: params.error.issues });
@@ -291,29 +306,53 @@ importsRouter.patch("/accounts/:accountId", requireRole(["owner", "admin"]), asy
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  if (parsed.data.ownerScope === "person" && !parsed.data.ownerPersonProfileId) {
-    res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
-    return;
-  }
-  if (parsed.data.ownerPersonProfileId) {
-    const personOk = await qGet<{ ok: number }>(
-      `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ?`,
-      parsed.data.ownerPersonProfileId,
-      req.authUser!.householdId
+  const { householdId, userId, role, personProfileId } = req.authUser!;
+
+  // Members may only edit accounts they created.
+  if (role === "member") {
+    const acct = await qGet<{ owner_user_id: string | null }>(
+      `SELECT owner_user_id FROM financial_account WHERE id = ? AND household_id = ?`,
+      params.data.accountId,
+      householdId
     );
-    if (!personOk) {
-      res.status(400).json({ message: "Owner person profile not found for household" });
+    if (!acct) {
+      res.status(404).json({ message: "Financial account not found" });
       return;
     }
+    if (acct.owner_user_id !== userId) {
+      res.status(403).json({ message: "You can only edit accounts you created." });
+      return;
+    }
+  } else {
+    if (parsed.data.ownerScope === "person" && !parsed.data.ownerPersonProfileId) {
+      res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+      return;
+    }
+    if (parsed.data.ownerPersonProfileId) {
+      const personOk = await qGet<{ ok: number }>(
+        `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ?`,
+        parsed.data.ownerPersonProfileId,
+        householdId
+      );
+      if (!personOk) {
+        res.status(400).json({ message: "Owner person profile not found for household" });
+        return;
+      }
+    }
   }
+
+  // Members always keep their account scoped to themselves.
+  const ownerScope = role === "member" ? "person" : parsed.data.ownerScope;
+  const ownerPersonProfileId = role === "member" ? (personProfileId ?? null) : (parsed.data.ownerPersonProfileId ?? null);
+
   const ok = await updateHouseholdFinancialAccount({
     accountId: params.data.accountId,
-    householdId: req.authUser!.householdId,
+    householdId,
     type: parsed.data.type,
     institution: parsed.data.institution,
     accountMask: parsed.data.accountMask ?? null,
-    ownerScope: parsed.data.ownerScope,
-    ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null,
+    ownerScope,
+    ownerPersonProfileId,
     defaultParserProfileId: parsed.data.defaultParserProfileId ?? null
   });
   if (!ok) {
@@ -337,13 +376,17 @@ const customInstitutionBodySchema = z.object({
   displayName: z.string().min(2).max(120)
 });
 
-importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/institutions/custom", async (req: AuthenticatedRequest, res) => {
   const parsed = customInstitutionBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
-  const result = await createHouseholdCustomInstitution(req.authUser!.householdId, parsed.data.displayName);
+  const result = await createHouseholdCustomInstitution(
+    req.authUser!.householdId,
+    parsed.data.displayName,
+    req.authUser!.userId
+  );
   if (!result.ok) {
     if (result.code === "DUPLICATE") {
       res.status(409).json({ message: "That institution name is already saved for your household." });
@@ -353,6 +396,16 @@ importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), asyn
     return;
   }
   res.status(201).json({ id: result.id });
+});
+
+importsRouter.delete("/institutions/custom/:id", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role } = req.authUser!;
+  const result = await deleteHouseholdCustomInstitution(householdId, req.params.id, { userId, role });
+  if (!result.ok) {
+    res.status(result.code === "FORBIDDEN" ? 403 : 404).json({ message: result.code === "FORBIDDEN" ? "You can only delete institutions you added." : "Institution not found." });
+    return;
+  }
+  res.status(204).send();
 });
 
 importsRouter.patch(

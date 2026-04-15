@@ -20,6 +20,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (security hardening continued)
 
+### CR-109 (slice 2) — RBAC redesign: member-scoped category, account, and institution writes
+- **Type:** CR (security/RBAC)
+- **What:** Members can now create/edit/delete their own categories, accounts, and custom institutions. Owner/admin access unchanged.
+  - **Categories:** `createHouseholdCategory` stores `created_by_user_id`. `updateHouseholdCategory` and `deleteHouseholdCategory` accept a `caller` argument and return `FORBIDDEN` when a member attempts to edit/delete a category they did not create. `POST /categories`, `PATCH /categories/:id`, `DELETE /categories/:id` are now open to all authenticated users (no more `requireRole` gate); the service enforces ownership for members.
+  - **Accounts:** `POST /imports/accounts` open to members — scope is forced to `ownerScope=person` / `ownerPersonProfileId=<member's profile>`. Members without a linked profile receive 403. `PATCH /imports/accounts/:id` checks `owner_user_id = userId` for members.
+  - **Custom institutions:** `createHouseholdCustomInstitution` stores `created_by_user_id`. New `deleteHouseholdCustomInstitution` enforces ownership for members. `POST /imports/institutions/custom` open to all authenticated. New `DELETE /imports/institutions/custom/:id` route added (open to all; members can only delete their own).
+- **Tests:** Updated RBAC baseline — asserts 201 on member category create; asserts 403 on member account create (no linked profile); imports/export/restore blocks unchanged.
+- **Files:** `backend/src/modules/category/categories.service.ts`, `backend/src/modules/category/categories.routes.ts`, `backend/src/modules/imports/household-institutions.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/tests/app.test.ts`
+- **Next:** Slice 3 — member-scoped import sessions.
+
 ### CR-109 (slice 1) — RBAC redesign: foundation — member identity, creator columns, no-profile guard
 - **Type:** CR (security/RBAC)
 - **What:** Foundational layer for member-scoped RBAC redesign. Establishes the mechanism by which services know *who* a member is and *what they own*:
