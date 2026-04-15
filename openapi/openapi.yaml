@@ -353,6 +353,31 @@ paths:
       tags: [transactions]
       summary: Open resolution items for a transaction
       security: [{ bearerAuth: [] }]
+  /transactions/bulk-category:
+    post:
+      tags: [transactions]
+      summary: Bulk set category on up to 200 transactions. Members restricted to own transactions (skippedNotOwned).
+      security: [{ bearerAuth: [] }]
+  /transactions/bulk-trash:
+    post:
+      tags: [transactions]
+      summary: Bulk soft-delete (trash) up to 500 transactions. Members restricted to own transactions (skippedNotOwned).
+      security: [{ bearerAuth: [] }]
+  /transactions/bulk-restore:
+    post:
+      tags: [transactions]
+      summary: Bulk restore up to 500 trashed transactions. Members restricted to own transactions (skippedNotOwned).
+      security: [{ bearerAuth: [] }]
+  /transactions/bulk-delete:
+    post:
+      tags: [transactions]
+      summary: Bulk hard-delete up to 500 trashed transactions. Members restricted to own transactions (skippedNotOwned).
+      security: [{ bearerAuth: [] }]
+  /transactions/bulk-reassign-owner:
+    post:
+      tags: [transactions]
+      summary: Reassign all transactions from one person profile to another — owner/admin only.
+      security: [{ bearerAuth: [] }]
   /resolution:
     get:
       tags: [resolution]

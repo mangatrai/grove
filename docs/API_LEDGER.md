@@ -183,3 +183,56 @@ Returns **open** and **in_review** **`resolution_item`** rows linked to this can
 **400:** `:id` is not a valid UUID.  
 **404:** transaction not found for this household.  
 **401:** missing or invalid token.
+
+## `POST /transactions/bulk-category`
+
+Set the category on up to **200** transactions at once.
+
+**Body:** `{ "ids": ["uuid", …], "categoryId": "uuid" }`
+
+**200:** `{ "updated": N, "skipped": N, "skippedNotOwned": N }`
+
+- `skippedNotOwned` — present for members only; IDs that don't belong to the member's profile are silently skipped and counted here.
+
+**400:** invalid body or category not available for this household.
+
+## `POST /transactions/bulk-trash`
+
+Soft-delete (trash) up to **500** transactions. Only `posted` rows are moved to `trashed`; already-trashed rows are skipped.
+
+**Body:** `{ "ids": ["uuid", …] }`
+
+**200:** `{ "trashed": N, "skipped": N, "skippedNotOwned": N }`
+
+## `POST /transactions/bulk-restore`
+
+Restore up to **500** trashed transactions back to `posted`.
+
+**Body:** `{ "ids": ["uuid", …] }`
+
+**200:** `{ "restored": N, "skipped": N, "skippedNotOwned": N }`
+
+## `POST /transactions/bulk-delete`
+
+Hard-delete up to **500** transactions. Rows must be in `trashed` status first; posted rows are skipped.
+
+**Body:** `{ "ids": ["uuid", …] }`
+
+**200:** `{ "deleted": N, "skipped": N, "skippedNotOwned": N }`
+
+**Member restriction (all four bulk ops above):** members without a linked profile receive **403**. Members with a profile only affect rows where `owner_person_profile_id` matches their profile; non-owned IDs are skipped and counted in `skippedNotOwned`.
+
+## `POST /transactions/bulk-reassign-owner`
+
+**Auth:** Bearer JWT. **Role:** `owner` or `admin` only.
+
+Reassign all transactions from one person profile to another within the household. Useful when merging profiles or correcting bulk mis-attribution.
+
+**Body:** `{ "fromPersonProfileId": "uuid", "toPersonProfileId": "uuid" }`
+
+- `from` and `to` must be different.
+
+**200:** `{ "updated": N }`
+
+**400:** invalid body or `from === to`.  
+**403:** caller is not owner or admin.
