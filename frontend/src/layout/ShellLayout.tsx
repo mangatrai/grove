@@ -75,6 +75,19 @@ export function ShellLayout() {
         />
         <div className="app-shell-main">
           <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
+          {forcePasswordChange && userRole === "owner" && pathname.startsWith("/settings") ? (
+            <div style={{
+              background: "#fef3c7",
+              borderBottom: "1px solid #fcd34d",
+              padding: "0.6rem 1.25rem",
+              fontSize: "0.88rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.75rem"
+            }}>
+              <strong>First login:</strong> Your account was created with a temporary password. Please set a permanent password below before using the app.
+            </div>
+          ) : null}
           {forcePasswordChange && userRole !== "owner" ? (
             <div style={{
               background: "#fef3c7",

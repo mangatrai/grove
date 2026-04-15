@@ -20,6 +20,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (security hardening continued)
 
+### UX-SEC-002 — First-login banner for owner forced password change
+- **Type:** UX fix
+- **What:** When an owner account with `force_password_change=true` is hard-redirected to `/settings?tab=security`, they now see an amber banner: "First login: Your account was created with a temporary password. Please set a permanent password below before using the app." Previously the redirect was silent — no explanation for why every click landed on the settings page.
+- **Files:** `frontend/src/layout/ShellLayout.tsx`
+
 ### SEC-003 — Export ZIP 48-hour auto-cleanup
 - **Type:** FIX + CR (security backlog item)
 - **What:** Export ZIP files now expire and are purged after 48 hours.
