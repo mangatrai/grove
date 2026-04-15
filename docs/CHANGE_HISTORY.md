@@ -20,6 +20,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (security hardening continued)
 
+### CR-109 (slice 3) — RBAC redesign: member-scoped import sessions
+- **Type:** CR (security/RBAC)
+- **What:** Members can now create and manage their own import sessions end-to-end. All `requireRole(["owner","admin"])` gates removed from import session routes; ownership enforced in-handler instead.
+  - **Migration `0019`:** Adds `created_by_user_id TEXT REFERENCES app_user(id)` to `import_session`.
+  - **`createImportSession`:** Accepts `createdByUserId`; stored in DB.
+  - **`listImportSessionsForHousehold`:** Accepts optional `creatorUserId` filter; members see only their own sessions, owners/admins see all. Result includes `createdByUserId`.
+  - **`ImportSessionRow`:** Now includes `created_by_user_id`.
+  - **`POST /imports/sessions`:** Open to members. Members without a linked person profile receive 403.
+  - **`GET /imports/sessions`:** Members receive only their own sessions.
+  - **`GET /imports/sessions/:id`, `GET /imports/sessions/:id/summary`:** Members scoped to their own sessions (404 if not theirs).
+  - **`POST /imports/sessions/:id/files`:** Members must own the session.
+  - **`PATCH /imports/sessions/:id/status`:** Members must own the session.
+  - **`PATCH /imports/sessions/:id/files/:fileId`:** Members must own the session AND must bind to a financial account scoped to their person profile (`owner_person_profile_id = personProfileId`).
+  - **`DELETE /imports/sessions/:id/files/:fileId`:** Members must own the session.
+  - **`POST /imports/sessions/:id/parse`, `canonicalize`, `undo-import`, `reconcile-payslip-async`:** Members must own the session.
+  - **`POST /imports/sessions/:id/ofx-confirm`:** Members must own the session and bind to their own account.
+- **Tests:** Updated RBAC baseline comment — 403 on member session create now comes from the profile check (no linked profile) rather than a role gate.
+- **Files:** `backend/db/migrations/0019_import_session_creator.sql`, `backend/src/modules/imports/import-session.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/tests/app.test.ts`
+- **Next:** Slice 4 — member-scoped ledger writes.
+
 ### CR-109 (slice 2) — RBAC redesign: member-scoped category, account, and institution writes
 - **Type:** CR (security/RBAC)
 - **What:** Members can now create/edit/delete their own categories, accounts, and custom institutions. Owner/admin access unchanged.

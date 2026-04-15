@@ -19,6 +19,7 @@ export interface ImportSessionRow {
   status: ImportSessionStatus;
   started_at: string;
   finalized_at: string | null;
+  created_by_user_id: string | null;
 }
 
 export type ServiceErrorCode =
@@ -51,7 +52,7 @@ export async function getSessionForHousehold(
   householdId: string
 ): Promise<ImportSessionRow | null> {
   const row = await qGet<ImportSessionRow>(
-    `SELECT id, household_id, source_type, status, started_at, finalized_at
+    `SELECT id, household_id, source_type, status, started_at, finalized_at, created_by_user_id
        FROM import_session
        WHERE id = ? AND household_id = ?`,
     sessionId,
@@ -62,15 +63,17 @@ export async function getSessionForHousehold(
 
 export async function createImportSession(
   householdId: string,
-  sourceType: "upload" | "watch_folder"
+  sourceType: "upload" | "watch_folder",
+  createdByUserId: string
 ): Promise<{ id: string; status: ImportSessionStatus }> {
   const sessionId = crypto.randomUUID();
   await qExec(
-    `INSERT INTO import_session (id, household_id, source_type, status, started_at)
-     VALUES (?, ?, ?, 'created', CURRENT_TIMESTAMP)`,
+    `INSERT INTO import_session (id, household_id, source_type, status, started_at, created_by_user_id)
+     VALUES (?, ?, ?, 'created', CURRENT_TIMESTAMP, ?)`,
     sessionId,
     householdId,
-    sourceType
+    sourceType,
+    createdByUserId
   );
   return { id: sessionId, status: "created" };
 }
@@ -300,14 +303,17 @@ export type ImportSessionListRow = {
   startedAt: string;
   finalizedAt: string | null;
   fileCount: number;
+  createdByUserId: string | null;
 };
 
 /**
  * Recent import sessions for the household (newest first). Used for resume / wayfinding in the UI.
+ * Pass `creatorUserId` to restrict results to sessions created by that user (member scope).
  */
 export async function listImportSessionsForHousehold(
   householdId: string,
-  limit = 40
+  limit = 40,
+  creatorUserId?: string
 ): Promise<ImportSessionListRow[]> {
   const cap = Math.min(Math.max(limit, 1), 100);
   const rows = await qAll<{
@@ -317,16 +323,26 @@ export async function listImportSessionsForHousehold(
     startedAt: string;
     finalizedAt: string | null;
     fileCount: string;
+    createdByUserId: string | null;
   }>(
-    `SELECT s.id AS id, s.status AS status, s.source_type AS "sourceType", s.started_at AS "startedAt",
+    creatorUserId
+      ? `SELECT s.id AS id, s.status AS status, s.source_type AS "sourceType", s.started_at AS "startedAt",
               s.finalized_at AS "finalizedAt",
-              (SELECT COUNT(*)::text FROM import_file f WHERE f.session_id = s.id) AS "fileCount"
-       FROM import_session s
-       WHERE s.household_id = ?
-       ORDER BY s.started_at DESC
-       LIMIT ?`,
-    householdId,
-    cap
+              (SELECT COUNT(*)::text FROM import_file f WHERE f.session_id = s.id) AS "fileCount",
+              s.created_by_user_id AS "createdByUserId"
+         FROM import_session s
+         WHERE s.household_id = ? AND s.created_by_user_id = ?
+         ORDER BY s.started_at DESC
+         LIMIT ?`
+      : `SELECT s.id AS id, s.status AS status, s.source_type AS "sourceType", s.started_at AS "startedAt",
+              s.finalized_at AS "finalizedAt",
+              (SELECT COUNT(*)::text FROM import_file f WHERE f.session_id = s.id) AS "fileCount",
+              s.created_by_user_id AS "createdByUserId"
+         FROM import_session s
+         WHERE s.household_id = ?
+         ORDER BY s.started_at DESC
+         LIMIT ?`,
+    ...(creatorUserId ? [householdId, creatorUserId, cap] : [householdId, cap])
   );
 
   return rows.map((r) => ({
@@ -335,7 +351,8 @@ export async function listImportSessionsForHousehold(
     sourceType: r.sourceType,
     startedAt: r.startedAt,
     finalizedAt: r.finalizedAt,
-    fileCount: Number(r.fileCount) || 0
+    fileCount: Number(r.fileCount) || 0,
+    createdByUserId: r.createdByUserId ?? null
   }));
 }
 

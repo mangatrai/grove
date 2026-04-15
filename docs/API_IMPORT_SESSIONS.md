@@ -7,6 +7,14 @@ Auth: `Authorization: Bearer <JWT>` (all routes require authentication).
 
 Session rows are scoped by `household_id` from the JWT. Cross-household access returns **404** (not 403) to avoid leaking existence of IDs.
 
+### Role / membership rules (CR-109 Slice 3)
+
+| Role | Import session access |
+|------|----------------------|
+| `owner`, `admin` | Full access — create, read, and manage any session in the household. |
+| `member` (with linked person profile) | Create sessions; read and manage **only sessions they created** (`created_by_user_id`). File binding restricted to accounts owned by their person profile. Returns 403 on other sessions, 404 for GET/summary. |
+| `member` (no linked profile) | 403 on all session write ops. Contact admin to link profile. |
+
 ## Session lifecycle
 
 Valid transitions (single source of truth: `import-session.state-machine.ts`):

@@ -96,7 +96,7 @@ describe("auth and rbac baseline", () => {
       .send({ pattern: "test", matchType: "contains", categoryId: "00000000-0000-0000-0000-000000000001" });
     expect(ruleCreateRes.status).toBe(403);
 
-    // Members CANNOT create import sessions (still blocked, Slice 3 will open with scoping)
+    // Members with no linked person profile CANNOT create import sessions (profile required, CR-109 Slice 3)
     const importSessionRes = await request(app)
       .post("/imports/sessions")
       .set("authorization", `Bearer ${token}`)

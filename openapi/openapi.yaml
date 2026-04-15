@@ -242,38 +242,39 @@ paths:
       security: [{ bearerAuth: [] }]
     post:
       tags: [imports]
-      summary: Create import session (owner or admin)
-      description: Role owner or admin required; members receive 403.
+      summary: Create import session
+      description: Members with a linked person profile may create sessions; members without a profile receive 403. Owners and admins always allowed.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}:
     get:
       tags: [imports]
-      summary: Session detail
+      summary: Session detail — members restricted to own sessions (404 if not theirs)
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/status:
     patch:
       tags: [imports]
-      summary: Transition session status (owner or admin)
-      description: Role owner or admin required; members receive 403.
+      summary: Transition session status — members restricted to own sessions
+      description: Members can only update sessions they created; 403 otherwise.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/summary:
     get:
       tags: [imports]
-      summary: Per-file import summary
+      summary: Per-file import summary — members restricted to own sessions
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/files:
     post:
       tags: [imports]
-      summary: Upload files to session — owner or admin only (multipart field `files`)
+      summary: Upload files to session — members restricted to own sessions (multipart field `files`)
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/files/{fileId}:
     patch:
       tags: [imports]
-      summary: Bind file to account and parser (owner or admin)
+      summary: Bind file to account and parser — members restricted to own sessions and own accounts
+      description: Members must own the session and bind only to accounts where owner_person_profile_id matches their profile.
       security: [{ bearerAuth: [] }]
     delete:
       tags: [imports]
-      summary: Remove a staged file from the session (owner or admin)
+      summary: Remove a staged file from the session — members restricted to own sessions
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/files/{fileId}/ofx-suggestion:
     get:
@@ -283,21 +284,22 @@ paths:
   /imports/sessions/{sessionId}/ofx-confirm:
     post:
       tags: [imports]
-      summary: Confirm OFX account suggestion and bind file to auto-created or matched account
+      summary: Confirm OFX account suggestion — members restricted to own sessions and own accounts
+      description: Members must own the session and the target financial account.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/reconcile-payslip-async:
     post:
       tags: [imports]
-      summary: Poll and reconcile pending async LLM payslip extractions (Deloitte PDF)
+      summary: Poll and reconcile pending async LLM payslip extractions — members restricted to own sessions
       description: >-
         Checks files in the session with status=processing and payslip_async_provider set.
         Triggers OpenAI vision extraction if not yet started or retries pending extractions.
-        Returns { reconciled, stillPending, failed }.
+        Returns { reconciled, stillPending, failed }. Members can only reconcile sessions they created.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/parse:
     post:
       tags: [imports]
-      summary: Parse staged files
+      summary: Parse staged files — members restricted to own sessions
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/canonicalize:
     post:
@@ -314,7 +316,7 @@ paths:
   /imports/sessions/{sessionId}/undo-import:
     post:
       tags: [imports]
-      summary: Roll back session ledger effects
+      summary: Roll back session ledger effects — members restricted to own sessions
       security: [{ bearerAuth: [] }]
   /transactions:
     get:

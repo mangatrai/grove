@@ -5,9 +5,9 @@ import { z } from "zod";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { qGet } from "../../db/query.js";
-import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   createImportSession,
+  getSessionForHousehold,
   listFilesForSession,
   listImportSessionsForHousehold,
   listSessionDetail,
@@ -151,15 +151,22 @@ function mapDeleteImportFileFailureToStatus(failure: DeleteImportFileFailure): n
 export const importsRouter = Router();
 importsRouter.use(requireAuth);
 
-importsRouter.post("/sessions", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions", async (req: AuthenticatedRequest, res) => {
   const parsed = createSessionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
 
-  const householdId = req.authUser!.householdId;
-  const created = await createImportSession(householdId, parsed.data.sourceType);
+  const { householdId, userId, role, personProfileId } = req.authUser!;
+
+  // Members must be linked to a household profile before they can import.
+  if (role === "member" && !personProfileId) {
+    res.status(403).json({ message: "Your account is not linked to a household profile." });
+    return;
+  }
+
+  const created = await createImportSession(householdId, parsed.data.sourceType, userId);
 
   res.status(201).json({
     session: {
@@ -172,14 +179,14 @@ importsRouter.post("/sessions", requireRole(["owner", "admin"]), async (req: Aut
 });
 
 importsRouter.get("/sessions", async (req: AuthenticatedRequest, res) => {
-  const householdId = req.authUser!.householdId;
-  const sessions = await listImportSessionsForHousehold(householdId);
+  const { householdId, userId, role } = req.authUser!;
+  // Members only see their own sessions; owners/admins see all.
+  const sessions = await listImportSessionsForHousehold(householdId, 40, role === "member" ? userId : undefined);
   res.status(200).json({ sessions });
 });
 
 importsRouter.post(
   "/sessions/:sessionId/files",
-  requireRole(["owner", "admin"]),
   upload.array("files"),
   async (req: AuthenticatedRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined;
@@ -188,7 +195,22 @@ importsRouter.post(
       return;
     }
 
-    const result = await persistSessionFiles(req.params.sessionId, req.authUser!.householdId, files);
+    const { householdId, userId, role } = req.authUser!;
+
+    // For members: verify they own this session.
+    if (role === "member") {
+      const session = await getSessionForHousehold(req.params.sessionId, householdId);
+      if (!session) {
+        res.status(404).json({ message: "Import session not found" });
+        return;
+      }
+      if (session.created_by_user_id !== userId) {
+        res.status(403).json({ message: "You can only upload files to your own import sessions." });
+        return;
+      }
+    }
+
+    const result = await persistSessionFiles(req.params.sessionId, householdId, files);
     if (!result.ok) {
       res.status(mapServiceFailureToStatus(result)).json({
         message: result.message,
@@ -203,18 +225,28 @@ importsRouter.post(
   }
 );
 
-importsRouter.patch("/sessions/:sessionId/status", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.patch("/sessions/:sessionId/status", async (req: AuthenticatedRequest, res) => {
   const parsed = sessionStatusSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
 
-  const result = await transitionSessionStatus(
-    req.params.sessionId,
-    req.authUser!.householdId,
-    parsed.data.status
-  );
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only update your own import sessions." });
+      return;
+    }
+  }
+
+  const result = await transitionSessionStatus(req.params.sessionId, householdId, parsed.data.status);
 
   if (!result.ok) {
     res.status(mapServiceFailureToStatus(result)).json({
@@ -410,7 +442,6 @@ importsRouter.delete("/institutions/custom/:id", async (req: AuthenticatedReques
 
 importsRouter.patch(
   "/sessions/:sessionId/files/:fileId",
-  requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
     const parsed = fileBindingSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -418,11 +449,44 @@ importsRouter.patch(
       return;
     }
 
+    const { householdId, userId, role, personProfileId } = req.authUser!;
+
+    if (role === "member") {
+      // Must own the session.
+      const session = await getSessionForHousehold(req.params.sessionId, householdId);
+      if (!session) {
+        res.status(404).json({ message: "Import session not found" });
+        return;
+      }
+      if (session.created_by_user_id !== userId) {
+        res.status(403).json({ message: "You can only modify your own import sessions." });
+        return;
+      }
+      // Must bind to an account they own.
+      if (!personProfileId) {
+        res.status(403).json({ message: "Your account is not linked to a household profile." });
+        return;
+      }
+      const acct = await qGet<{ owner_person_profile_id: string | null }>(
+        `SELECT owner_person_profile_id FROM financial_account WHERE id = ? AND household_id = ?`,
+        parsed.data.financialAccountId,
+        householdId
+      );
+      if (!acct) {
+        res.status(400).json({ message: "Financial account not found", code: "INVALID_ACCOUNT" });
+        return;
+      }
+      if (acct.owner_person_profile_id !== personProfileId) {
+        res.status(403).json({ message: "You can only bind files to your own financial accounts." });
+        return;
+      }
+    }
+
     const result = await updateImportFileBinding(
       req.params.sessionId,
       req.params.fileId,
-      req.authUser!.householdId,
-      req.authUser!.userId,
+      householdId,
+      userId,
       {
         financialAccountId: parsed.data.financialAccountId,
         parserProfileId: parsed.data.parserProfileId,
@@ -444,12 +508,22 @@ importsRouter.patch(
   }
 );
 
-importsRouter.delete("/sessions/:sessionId/files/:fileId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
-  const result = await deleteImportSessionFile(
-    req.params.sessionId,
-    req.params.fileId,
-    req.authUser!.householdId
-  );
+importsRouter.delete("/sessions/:sessionId/files/:fileId", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only modify your own import sessions." });
+      return;
+    }
+  }
+
+  const result = await deleteImportSessionFile(req.params.sessionId, req.params.fileId, householdId);
   if (!result.ok) {
     res.status(mapDeleteImportFileFailureToStatus(result)).json({
       message: result.message,
@@ -461,7 +535,17 @@ importsRouter.delete("/sessions/:sessionId/files/:fileId", requireRole(["owner",
 });
 
 importsRouter.get("/sessions/:sessionId/summary", async (req: AuthenticatedRequest, res) => {
-  const summary = await getImportSessionSummary(req.params.sessionId, req.authUser!.householdId);
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session || session.created_by_user_id !== userId) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+  }
+
+  const summary = await getImportSessionSummary(req.params.sessionId, householdId);
   if (!summary) {
     res.status(404).json({ message: "Import session not found" });
     return;
@@ -470,8 +554,15 @@ importsRouter.get("/sessions/:sessionId/summary", async (req: AuthenticatedReque
 });
 
 importsRouter.get("/sessions/:sessionId", async (req: AuthenticatedRequest, res) => {
-  const session = await listSessionDetail(req.params.sessionId, req.authUser!.householdId);
+  const { householdId, userId, role } = req.authUser!;
+  const session = await listSessionDetail(req.params.sessionId, householdId);
   if (!session) {
+    res.status(404).json({ message: "Import session not found" });
+    return;
+  }
+
+  // Members can only read their own sessions.
+  if (role === "member" && session.created_by_user_id !== userId) {
     res.status(404).json({ message: "Import session not found" });
     return;
   }
@@ -491,17 +582,31 @@ importsRouter.get("/sessions/:sessionId", async (req: AuthenticatedRequest, res)
   });
 });
 
-importsRouter.post("/sessions/:sessionId/parse", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedRequest, res) => {
   const parsed = parseSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
     return;
   }
 
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only parse your own import sessions." });
+      return;
+    }
+  }
+
   const result = await parseSessionImportFiles(
     req.params.sessionId,
-    req.authUser!.householdId,
-    req.authUser!.userId,
+    householdId,
+    userId,
     {
       mapping: parsed.data.mapping as ParseColumnMapping | undefined,
       sheetName: parsed.data.sheetName
@@ -521,12 +626,24 @@ importsRouter.post("/sessions/:sessionId/parse", requireRole(["owner", "admin"])
   res.status(200).json(result.data);
 });
 
-importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only reconcile your own import sessions." });
+      return;
+    }
+  }
+
   const force = req.query.force === "1" || req.query.force === "true";
   try {
-    const data = await reconcilePayslipAsyncImportSession(req.params.sessionId, req.authUser!.householdId, {
-      force
-    });
+    const data = await reconcilePayslipAsyncImportSession(req.params.sessionId, householdId, { force });
     res.status(200).json(data);
   } catch (e) {
     if (e instanceof Error && e.message === "Import session not found") {
@@ -537,8 +654,22 @@ importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", requireRole([
   }
 });
 
-importsRouter.post("/sessions/:sessionId/canonicalize", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
-  const result = await canonicalizeImportSession(req.params.sessionId, req.authUser!.householdId);
+importsRouter.post("/sessions/:sessionId/canonicalize", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only canonicalize your own import sessions." });
+      return;
+    }
+  }
+
+  const result = await canonicalizeImportSession(req.params.sessionId, householdId);
   if (!result.ok) {
     if (result.code === "NOT_FOUND") {
       res.status(404).json({ message: result.message, code: result.code });
@@ -555,8 +686,22 @@ importsRouter.post("/sessions/:sessionId/canonicalize", requireRole(["owner", "a
   res.status(200).json(result.data);
 });
 
-importsRouter.post("/sessions/:sessionId/undo-import", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
-  const result = await rollbackImportSessionLedger(req.params.sessionId, req.authUser!.householdId);
+importsRouter.post("/sessions/:sessionId/undo-import", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(req.params.sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only undo your own import sessions." });
+      return;
+    }
+  }
+
+  const result = await rollbackImportSessionLedger(req.params.sessionId, householdId);
   if (!result.ok) {
     res.status(mapRollbackFailureToStatus(result)).json({
       message: result.message,
@@ -622,7 +767,7 @@ const ofxConfirmSchema = z.object({
  * POST /imports/sessions/:sessionId/ofx-confirm
  * Binds the file, runs parse, then canonicalizes. Returns canonicalize result.
  */
-importsRouter.post("/sessions/:sessionId/ofx-confirm", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/ofx-confirm", async (req: AuthenticatedRequest, res) => {
   const parsed = ofxConfirmSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
@@ -631,8 +776,36 @@ importsRouter.post("/sessions/:sessionId/ofx-confirm", requireRole(["owner", "ad
 
   const { fileId, financialAccountId, ownerScope, ownerPersonProfileId } = parsed.data;
   const sessionId = req.params.sessionId;
-  const householdId = req.authUser!.householdId;
-  const userId = req.authUser!.userId;
+  const { householdId, userId, role, personProfileId } = req.authUser!;
+
+  if (role === "member") {
+    const session = await getSessionForHousehold(sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found" });
+      return;
+    }
+    if (session.created_by_user_id !== userId) {
+      res.status(403).json({ message: "You can only confirm your own import sessions." });
+      return;
+    }
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
+      return;
+    }
+    const acct = await qGet<{ owner_person_profile_id: string | null }>(
+      `SELECT owner_person_profile_id FROM financial_account WHERE id = ? AND household_id = ?`,
+      financialAccountId,
+      householdId
+    );
+    if (!acct) {
+      res.status(400).json({ message: "Financial account not found", code: "INVALID_ACCOUNT" });
+      return;
+    }
+    if (acct.owner_person_profile_id !== personProfileId) {
+      res.status(403).json({ message: "You can only bind files to your own financial accounts." });
+      return;
+    }
+  }
 
   // Bind the file to the account.
   const bindResult = await updateImportFileBinding(sessionId, fileId, householdId, userId, {
