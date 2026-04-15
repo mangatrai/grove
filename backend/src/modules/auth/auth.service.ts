@@ -19,11 +19,14 @@ async function findUserByEmail(email: string): Promise<DbLoginUser | null> {
     email: string;
     password_hash: string;
     token_version: number;
+    person_profile_id: string | null;
   }>(
     `
-  SELECT id, household_id, role, email, password_hash, token_version
-  FROM app_user
-  WHERE lower(email) = lower(?)
+  SELECT u.id, u.household_id, u.role, u.email, u.password_hash, u.token_version,
+         p.id AS person_profile_id
+  FROM app_user u
+  LEFT JOIN person_profile p ON p.linked_user_id = u.id AND p.household_id = u.household_id
+  WHERE lower(u.email) = lower(?)
   LIMIT 1
 `,
     email
@@ -35,6 +38,7 @@ async function findUserByEmail(email: string): Promise<DbLoginUser | null> {
     userId: row.id,
     householdId: row.household_id,
     role: row.role,
+    personProfileId: row.person_profile_id ?? null,
     email: row.email,
     passwordHash: row.password_hash,
     tokenVersion: row.token_version
@@ -83,11 +87,12 @@ export async function verifyToken(token: string): Promise<AuthUser | null> {
       role: Role;
       tokenVersion?: number;
     };
-    const row = await qGet<{ token_version: number }>(
+    const row = await qGet<{ token_version: number; person_profile_id: string | null }>(
       `
-  SELECT token_version
-  FROM app_user
-  WHERE id = ?
+  SELECT u.token_version, p.id AS person_profile_id
+  FROM app_user u
+  LEFT JOIN person_profile p ON p.linked_user_id = u.id AND p.household_id = u.household_id
+  WHERE u.id = ?
   LIMIT 1
 `,
       payload.sub
@@ -102,7 +107,8 @@ export async function verifyToken(token: string): Promise<AuthUser | null> {
     return {
       userId: payload.sub,
       householdId: payload.householdId,
-      role: payload.role
+      role: payload.role,
+      personProfileId: row.person_profile_id ?? null
     };
   } catch {
     return null;

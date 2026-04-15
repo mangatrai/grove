@@ -20,6 +20,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (security hardening continued)
 
+### CR-109 (slice 1) — RBAC redesign: foundation — member identity, creator columns, no-profile guard
+- **Type:** CR (security/RBAC)
+- **What:** Foundational layer for member-scoped RBAC redesign. Establishes the mechanism by which services know *who* a member is and *what they own*:
+  - **Migration `0018`:** Adds `created_by_user_id TEXT REFERENCES app_user(id)` to `category` and `household_custom_institution`. Existing rows are NULL; new rows created by members will carry this. (`financial_account` already has `owner_user_id` for the same purpose.)
+  - **`auth.service.ts`:** `verifyToken` and `findUserByEmail` now JOIN `person_profile` to resolve `personProfileId` (the caller's `person_profile.id`). Returned as `null` if no linked profile exists. Resolved fresh on every request — not stored in JWT.
+  - **`types.ts`:** `AuthUser` gains `personProfileId: string | null`.
+  - **`ShellLayout.tsx`:** Members with `personProfileId === null` (login exists but not linked to any household profile) see a locked screen: "Not part of a household — contact your household admin."
+- **Files:** `backend/db/migrations/0018_rbac_creator_columns.sql`, `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/types.ts`, `frontend/src/layout/ShellLayout.tsx`
+- **Next:** Slice 2 — member-scoped category and institution writes.
+
 ### SEC-004 — RBAC lock-down: imports, categories, rules, and exports restricted to owner/admin
 - **Type:** FIX + CR (security backlog item)
 - **What:** Members previously had broad write access. Now locked:

@@ -18,21 +18,26 @@ export function ShellLayout() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [personProfileId, setPersonProfileId] = useState<string | null | undefined>(undefined);
+  // undefined = not yet loaded; null = loaded but no profile; string = loaded with profile
 
   useEffect(() => {
     if (!token) {
       setForcePasswordChange(false);
       setUserRole(null);
+      setPersonProfileId(undefined);
       return;
     }
-    void apiJson<{ user: { forcePasswordChange?: boolean; role?: string } }>("/auth/me")
+    void apiJson<{ user: { forcePasswordChange?: boolean; role?: string; personProfileId?: string | null } }>("/auth/me")
       .then((r) => {
         setForcePasswordChange(Boolean(r.user.forcePasswordChange));
         setUserRole(r.user.role ?? null);
+        setPersonProfileId(r.user.personProfileId ?? null);
       })
       .catch(() => {
         setForcePasswordChange(false);
         setUserRole(null);
+        setPersonProfileId(null);
       });
   }, [token]);
 
@@ -60,6 +65,35 @@ export function ShellLayout() {
         <main className="app-main">
           <Outlet />
         </main>
+      </div>
+    );
+  }
+
+  // Member with no linked person profile — not yet part of a household.
+  // Show a locked screen; do not render the full shell.
+  if (userRole === "member" && personProfileId === null) {
+    return (
+      <div className="app-frame app-frame--authed">
+        <div className="app-shell">
+          <AppSidebar
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsed((c) => !c)}
+            mobileOpen={mobileNavOpen}
+            onCloseMobile={() => setMobileNavOpen(false)}
+          />
+          <div className="app-shell-main">
+            <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
+            <main className="app-main" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
+              <div style={{ maxWidth: 480, textAlign: "center", padding: "2rem" }}>
+                <h2 style={{ marginBottom: "0.75rem" }}>Not part of a household</h2>
+                <p className="muted">
+                  Your account exists but is not linked to a household profile yet.
+                  Contact your household admin to be added as a member.
+                </p>
+              </div>
+            </main>
+          </div>
+        </div>
       </div>
     );
   }
