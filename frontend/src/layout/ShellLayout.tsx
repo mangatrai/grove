@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
 import { AppSidebar } from "./AppSidebar";
@@ -17,15 +17,23 @@ export function ShellLayout() {
   });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token) {
       setForcePasswordChange(false);
+      setUserRole(null);
       return;
     }
-    void apiJson<{ user: { forcePasswordChange?: boolean } }>("/auth/me")
-      .then((r) => setForcePasswordChange(Boolean(r.user.forcePasswordChange)))
-      .catch(() => setForcePasswordChange(false));
+    void apiJson<{ user: { forcePasswordChange?: boolean; role?: string } }>("/auth/me")
+      .then((r) => {
+        setForcePasswordChange(Boolean(r.user.forcePasswordChange));
+        setUserRole(r.user.role ?? null);
+      })
+      .catch(() => {
+        setForcePasswordChange(false);
+        setUserRole(null);
+      });
   }, [token]);
 
   useEffect(() => {
@@ -67,7 +75,7 @@ export function ShellLayout() {
         />
         <div className="app-shell-main">
           <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
-          {forcePasswordChange ? (
+          {forcePasswordChange && userRole !== "owner" ? (
             <div style={{
               background: "#fef3c7",
               borderBottom: "1px solid #fcd34d",
@@ -77,14 +85,19 @@ export function ShellLayout() {
               alignItems: "center",
               gap: "0.75rem"
             }}>
-              <strong>Action required:</strong> Your password is temporary and must be changed before you continue.{" "}
+              <strong>Action required:</strong> Your password is temporary — please change it.{" "}
               <Link to="/settings?tab=security" style={{ fontWeight: 600 }}>
                 Change password now →
               </Link>
             </div>
           ) : null}
           <main className="app-main">
-            <Outlet />
+            {/* Hard gate: owner with a temporary password must change it before accessing anything else. */}
+            {forcePasswordChange && userRole === "owner" && !pathname.startsWith("/settings") ? (
+              <Navigate to="/settings?tab=security" replace />
+            ) : (
+              <Outlet />
+            )}
           </main>
         </div>
       </div>

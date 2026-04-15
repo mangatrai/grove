@@ -53,6 +53,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Why:** App will be deployed on OCI free tier exposed to the internet. All items were identified in a pre-release security audit.
 - **Files:** `backend/src/app.ts`, `backend/src/server.ts`, `backend/src/config/env.ts`, `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/imports/import-session.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `backend/db/seeds/0001_bootstrap.sql`, `frontend/src/layout/AppTopBar.tsx`, `.env.example`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/CHANGE_HISTORY.md`.
 
+### SEC-002 — Hard gate for owner force-password-change
+- **Type:** FIX
+- **What:** Owner accounts with `force_password_change = true` are now hard-redirected to `/settings?tab=security` on every route until the password is changed. Previously the banner said "must be changed before you continue" but nothing blocked navigation — the gate was purely visual. Member accounts retain the soft banner (redirect on their own time). Admin accounts follow member behavior (soft banner only).
+- **Why:** A freshly seeded OCI/public instance with the default `owner@example.com` / `ChangeMe123!` credentials was fully usable without ever changing the password. The banner alone does not protect against an owner clicking away. Hard gate closes the gap.
+- **Behavior:** `ShellLayout` now reads `role` from `GET /auth/me` alongside `forcePasswordChange`. If `forcePasswordChange && role === 'owner'` and the current path is not `/settings`, a `<Navigate replace>` fires immediately. The Settings page itself is always reachable so the owner can complete the password change.
+- **Files:** `frontend/src/layout/ShellLayout.tsx`, `docs/CHANGE_HISTORY.md`.
+
 ---
 
 ## 2026-04-14 (multi-user onboarding + RBAC audit)
