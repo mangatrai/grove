@@ -8,8 +8,10 @@ import { employerInputSchema } from "./household.types.js";
 import { ensurePayslipImportBucketAccount } from "../imports/import-file-binding.service.js";
 import {
   createHouseholdMember,
+  createLoginForMember,
   deleteHouseholdMember,
   getCurrentUserProfile,
+  getHouseholdMemberDataCount,
   getHouseholdSettings,
   listHouseholdMembers,
   patchCurrentUserProfile,
@@ -134,10 +136,14 @@ const createMemberSchema = z
     phoneNumber: z.string().max(30).nullable().optional(),
     avatarKey: z.string().max(500).nullable().optional(),
     role: roleSchema,
-    relationship: relationshipSchema
+    relationship: relationshipSchema,
+    createLogin: z.boolean().optional().default(false)
   })
   .refine((b) => Boolean(b.fullName?.trim() || b.firstName?.trim()), {
     message: "First name or fullName is required"
+  })
+  .refine((b) => !b.createLogin || Boolean(b.email?.trim()), {
+    message: "Email is required when createLogin is true"
   });
 
 householdRouter.post("/members", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
@@ -152,6 +158,10 @@ householdRouter.post("/members", requireRole(["owner", "admin"]), async (req: Au
   const householdId = req.authUser!.householdId;
   const out = await createHouseholdMember(householdId, parsed.data);
   if (!out.ok) {
+    if (out.code === "EMAIL_REQUIRED") {
+      res.status(400).json({ message: "Email is required to create a login account", code: out.code });
+      return;
+    }
     res.status(409).json({ message: "Email already in use", code: out.code });
     return;
   }
@@ -199,19 +209,50 @@ householdRouter.patch("/members/:memberId", requireRole(["owner", "admin"]), asy
   res.status(200).json({ member: out.member });
 });
 
+householdRouter.get("/members/:memberId/data-count", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid member id" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const counts = await getHouseholdMemberDataCount(householdId, params.data.memberId);
+  res.status(200).json(counts);
+});
+
+householdRouter.post("/members/:memberId/create-login", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid member id" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await createLoginForMember(householdId, params.data.memberId);
+  if (!out.ok) {
+    if (out.code === "NOT_FOUND") { res.status(404).json({ message: "Member not found", code: out.code }); return; }
+    if (out.code === "ALREADY_HAS_LOGIN") { res.status(409).json({ message: "Member already has a login account", code: out.code }); return; }
+    if (out.code === "EMAIL_REQUIRED") { res.status(400).json({ message: "Member must have an email to create a login", code: out.code }); return; }
+    if (out.code === "EMAIL_CONFLICT") { res.status(409).json({ message: "Email already in use by another account", code: out.code }); return; }
+  }
+  res.status(201).json({ message: "Login account created. Default password: ChangeMe123!" });
+});
+
+const deleteMemberBodySchema = z.object({
+  deleteLogin: z.boolean().optional().default(false)
+});
+
 householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ message: "Invalid member id", issues: params.error.flatten() });
     return;
   }
+  const body = deleteMemberBodySchema.safeParse(req.body ?? {});
   const householdId = req.authUser!.householdId;
-  const out = await deleteHouseholdMember(householdId, params.data.memberId);
+  const out = await deleteHouseholdMember(householdId, params.data.memberId, {
+    deleteLogin: body.success ? body.data.deleteLogin : false
+  });
   if (!out.ok) {
-    if (out.code === "HAS_LOGIN_ACCOUNT") {
-      res.status(409).json({ message: "This member has a login account and cannot be removed here.", code: out.code });
-      return;
-    }
     res.status(404).json({ message: "Member not found", code: out.code });
     return;
   }

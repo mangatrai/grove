@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 
 import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
 
@@ -204,6 +205,8 @@ export type CreateMemberInput = {
   avatarKey?: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  /** If true, also create an app_user login account with default password. Email is required. */
+  createLogin?: boolean;
 };
 
 export type PatchMemberInput = {
@@ -448,19 +451,29 @@ export async function listHouseholdMembers(householdId: string): Promise<Househo
   return rows.map(toHouseholdMemberProfile);
 }
 
+const DEFAULT_MEMBER_PASSWORD = "ChangeMe123!";
+
 export async function createHouseholdMember(
   householdId: string,
   input: CreateMemberInput
-): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "EMAIL_CONFLICT" }> {
+): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "EMAIL_CONFLICT" | "EMAIL_REQUIRED" }> {
   const profileId = randomUUID();
   const membershipId = randomUUID();
   const email = input.email ?? null;
   const phoneNumber = input.phoneNumber ?? null;
   const avatarKey = input.avatarKey ?? null;
 
+  if (input.createLogin && !email?.trim()) {
+    return { ok: false, code: "EMAIL_REQUIRED" };
+  }
+
   const fullName =
     input.fullName?.trim() ||
     [input.firstName?.trim() ?? "", input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
+
+  const userId = input.createLogin ? randomUUID() : null;
+  const passwordHash = input.createLogin ? bcrypt.hashSync(DEFAULT_MEMBER_PASSWORD, 10) : null;
+
   try {
     await qBegin(async (tx) => {
       await tx.unsafe(
@@ -473,6 +486,17 @@ export async function createHouseholdMember(
   VALUES ($1, $2, $3, $4, $5)`,
         [membershipId, householdId, profileId, input.role, input.relationship] as never[]
       );
+      if (userId && passwordHash) {
+        await tx.unsafe(
+          `INSERT INTO app_user (id, household_id, email, role, password_hash, force_password_change)
+  VALUES ($1, $2, $3, 'member', $4, true)`,
+          [userId, householdId, email, passwordHash] as never[]
+        );
+        await tx.unsafe(
+          `UPDATE person_profile SET linked_user_id = $1 WHERE id = $2`,
+          [userId, profileId] as never[]
+        );
+      }
     });
   } catch (err: unknown) {
     if (isPgUniqueViolation(err)) {
@@ -576,10 +600,33 @@ export async function patchHouseholdMember(
   return { ok: true, member: toHouseholdMemberProfile(updated) };
 }
 
-export async function deleteHouseholdMember(
+export async function getHouseholdMemberDataCount(
   householdId: string,
   memberId: string
-): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "HAS_LOGIN_ACCOUNT" }> {
+): Promise<{ transactions: number; payslips: number }> {
+  const txRow = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM transaction_canonical
+     WHERE household_id = ? AND owner_scope = 'person' AND owner_person_profile_id = ?`,
+    householdId,
+    memberId
+  );
+  const psRow = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM payslip_snapshot
+     WHERE household_id = ? AND owner_scope = 'person' AND owner_person_profile_id = ?`,
+    householdId,
+    memberId
+  );
+  return {
+    transactions: Number(txRow?.cnt ?? 0),
+    payslips: Number(psRow?.cnt ?? 0)
+  };
+}
+
+export async function deleteHouseholdMember(
+  householdId: string,
+  memberId: string,
+  opts: { deleteLogin?: boolean } = {}
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
   const existing = await qGet<{ id: string; linked_user_id: string | null }>(
     `
   SELECT p.id, p.linked_user_id
@@ -596,10 +643,13 @@ export async function deleteHouseholdMember(
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
-  if (existing.linked_user_id) {
-    return { ok: false, code: "HAS_LOGIN_ACCOUNT" };
-  }
   await qBegin(async (tx) => {
+    if (opts.deleteLogin && existing.linked_user_id) {
+      await tx.unsafe(`DELETE FROM app_user WHERE id = $1 AND household_id = $2`, [
+        existing.linked_user_id,
+        householdId
+      ] as never[]);
+    }
     await tx.unsafe(`DELETE FROM household_membership WHERE household_id = $1 AND person_profile_id = $2`, [
       householdId,
       memberId
@@ -609,5 +659,46 @@ export async function deleteHouseholdMember(
       memberId
     ] as never[]);
   });
+  return { ok: true };
+}
+
+export async function createLoginForMember(
+  householdId: string,
+  memberId: string
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "ALREADY_HAS_LOGIN" | "EMAIL_REQUIRED" | "EMAIL_CONFLICT" }> {
+  const existing = await qGet<{ id: string; linked_user_id: string | null; email: string | null }>(
+    `
+  SELECT p.id, p.linked_user_id, p.email
+  FROM person_profile p
+  JOIN household_membership m ON m.person_profile_id = p.id AND m.household_id = p.household_id
+  WHERE p.household_id = ? AND p.id = ?
+  LIMIT 1
+`,
+    householdId,
+    memberId
+  );
+  if (!existing) return { ok: false, code: "NOT_FOUND" };
+  if (existing.linked_user_id) return { ok: false, code: "ALREADY_HAS_LOGIN" };
+  if (!existing.email?.trim()) return { ok: false, code: "EMAIL_REQUIRED" };
+
+  const userId = randomUUID();
+  const passwordHash = bcrypt.hashSync(DEFAULT_MEMBER_PASSWORD, 10);
+  try {
+    await qBegin(async (tx) => {
+      await tx.unsafe(
+        `INSERT INTO app_user (id, household_id, email, role, password_hash, force_password_change)
+  VALUES ($1, $2, $3, 'member', $4, true)`,
+        [userId, householdId, existing.email, passwordHash] as never[]
+      );
+      await tx.unsafe(`UPDATE person_profile SET linked_user_id = $1 WHERE household_id = $2 AND id = $3`, [
+        userId,
+        householdId,
+        memberId
+      ] as never[]);
+    });
+  } catch (err: unknown) {
+    if (isPgUniqueViolation(err)) return { ok: false, code: "EMAIL_CONFLICT" };
+    throw err;
+  }
   return { ok: true };
 }

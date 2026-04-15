@@ -128,11 +128,19 @@ export async function changePassword(
   await qExec(
     `
   UPDATE app_user
-  SET password_hash = ?, token_version = token_version + 1
+  SET password_hash = ?, token_version = token_version + 1, force_password_change = false
   WHERE id = ?
 `,
     nextHash,
     userId
   );
   return { ok: true };
+}
+
+export async function getForcePasswordChange(userId: string): Promise<boolean> {
+  const row = await qGet<{ force_password_change: boolean }>(
+    `SELECT force_password_change FROM app_user WHERE id = ? LIMIT 1`,
+    userId
+  );
+  return Boolean(row?.force_password_change);
 }

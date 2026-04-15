@@ -18,6 +18,40 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-14 (multi-user onboarding + RBAC audit)
+
+### CR-108 — Multi-user onboarding: login accounts for household members
+- **Type:** CR
+- **What:** Owner/admin can now create a login account when adding a household member, or for existing members later. Password defaults to `ChangeMe123!` and `force_password_change` is set — the member sees a banner on first login directing them to Settings → Security to change it.
+- **Backend:**
+  - Migration `0016_app_user_force_password_change.sql` — adds `force_password_change BOOLEAN NOT NULL DEFAULT false` to `app_user`
+  - `household.service.ts` — `createHouseholdMember` extended with `createLogin?: boolean` (creates `app_user` + links `person_profile.linked_user_id`); new `createLoginForMember` for existing members; new `getHouseholdMemberDataCount`; `deleteHouseholdMember` now accepts `{ deleteLogin }` instead of blocking with `HAS_LOGIN_ACCOUNT`
+  - `auth.service.ts` — `changePassword` clears `force_password_change`; new `getForcePasswordChange` helper
+  - `auth.routes.ts` — `GET /auth/me` now returns `forcePasswordChange: boolean`
+  - `household.routes.ts` — `POST /household/members` accepts `createLogin`; new `POST /household/members/:id/create-login`; new `GET /household/members/:id/data-count`; `DELETE /household/members/:id` accepts `{ deleteLogin }` body
+  - `ledger.service.ts` + `ledger.routes.ts` — `POST /ledger/bulk-reassign-owner` reassigns all transactions from one person profile to another
+- **Frontend:**
+  - `SettingsPage.tsx` — new member rows show "Create login" checkbox with default-password note; existing members show "Has login account" (green) or "No login / Create login" button; delete confirmation warns about assigned transaction/payslip counts and offers "Also delete login account" checkbox
+  - `ShellLayout.tsx` — fetches `GET /auth/me` after login; shows amber banner "Your password is temporary — change it now" if `forcePasswordChange`; banner clears on `app:password-changed` event
+- **Default password:** `ChangeMe123!` — forced change on first login
+- **Files:** `backend/db/migrations/0016_app_user_force_password_change.sql`, `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/ledger/ledger.service.ts`, `backend/src/modules/ledger/ledger.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/layout/ShellLayout.tsx`.
+
+### PRD-006 — RBAC current state audit
+- **Type:** PRD
+- **What:** The `member` role currently has broad write access. Only the following are restricted to `owner`/`admin`:
+  - Household settings, member management (`/household/*`)
+  - Account create/edit (`POST/PATCH /imports/accounts`)
+  - Custom institution create (`POST /imports/institutions/custom`)
+  - Built-in category rule overrides (`/categories/rules/builtin/*`)
+  - Everything else — ledger writes, categories, custom rules, imports, budgets, payslips, exports — is accessible to `member` role.
+- **Decision:** Acceptable for household use where members are trusted family. A role-based lock-down of imports and category management is **backlog** (no CR yet).
+- **Backlog items documented:**
+  1. Lock `POST/DELETE /categories` (custom category CRUD) to owner/admin
+  2. Lock `POST/DELETE /categories/rules` (custom rule CRUD) to owner/admin
+  3. Lock import session create/finalize to owner/admin (members can view but not import)
+  4. Lock export/restore to owner/admin
+  5. Self-service "request access" invite flow from home page (member signs up using email already added by owner)
+
 ## 2026-04-14 (memo editing on transactions)
 
 ### CR-107 — Inline memo editing on transaction rows

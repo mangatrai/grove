@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { changePassword, login } from "./auth.service.js";
+import { changePassword, getForcePasswordChange, login } from "./auth.service.js";
 import type { AuthenticatedRequest } from "./auth.middleware.js";
 import { requireAuth } from "./auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
@@ -32,8 +32,9 @@ authRouter.post("/login", async (req, res) => {
   res.status(200).json({ token });
 });
 
-authRouter.get("/me", requireAuth, (req: AuthenticatedRequest, res) => {
-  res.status(200).json({ user: req.authUser });
+authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res) => {
+  const forcePasswordChange = await getForcePasswordChange(req.authUser!.userId);
+  res.status(200).json({ user: { ...req.authUser, forcePasswordChange } });
 });
 
 authRouter.get("/owner-only", requireAuth, requireRole(["owner", "admin"]), (_req, res) => {

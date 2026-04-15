@@ -119,6 +119,8 @@ type HouseholdMemberDraft = {
   email: string;
   role: string;
   relationship: string;
+  linkedUserId?: string | null;
+  createLogin?: boolean;
 };
 
 type MeResponse = { user: { role: "owner" | "admin" | "member" } };
@@ -165,6 +167,7 @@ function normalizeMembersPayload(payload: HouseholdMembersPayload | HouseholdMem
     firstName: member.firstName ?? member.fullName.trim().split(/\s+/)[0] ?? "",
     lastName: member.lastName ?? member.fullName.trim().split(/\s+/).slice(1).join(" "),
     email: member.email ?? "",
+    linkedUserId: member.linkedUserId,
     role: member.role,
     relationship: member.relationship
   }));
@@ -208,6 +211,9 @@ export function SettingsPage() {
   const [membersSuccess, setMembersSuccess] = useState<string | null>(null);
   const [savingMemberIndex, setSavingMemberIndex] = useState<number | null>(null);
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
+  const [removeMemberDeleteLogin, setRemoveMemberDeleteLogin] = useState(false);
+  const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
+  const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
   const [passwordDraft, setPasswordDraft] = useState({
     currentPassword: "",
     newPassword: "",
@@ -653,17 +659,51 @@ export function SettingsPage() {
     }
   }
 
+  async function openRemoveMemberConfirm(memberId: string) {
+    setRemoveMemberConfirm(memberId);
+    setRemoveMemberDeleteLogin(false);
+    setRemoveMemberDataCount(null);
+    try {
+      const counts = await apiJson<{ transactions: number; payslips: number }>(
+        `/household/members/${encodeURIComponent(memberId)}/data-count`
+      );
+      setRemoveMemberDataCount(counts);
+    } catch {
+      setRemoveMemberDataCount({ transactions: 0, payslips: 0 });
+    }
+  }
+
   async function confirmRemoveHouseholdMember() {
     if (!token || !removeMemberConfirm) return;
     setMembersError(null);
     setMembersSuccess(null);
-    const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, { method: "DELETE" });
+    const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ deleteLogin: removeMemberDeleteLogin })
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { message?: string };
       throw new Error(body.message ?? `Could not remove member (${res.status})`);
     }
+    setRemoveMemberConfirm(null);
+    setRemoveMemberDataCount(null);
     setMembersSuccess("Member removed.");
     await loadMembers();
+  }
+
+  async function createLoginForExistingMember(memberId: string) {
+    setCreatingLoginForId(memberId);
+    setMembersError(null);
+    setMembersSuccess(null);
+    try {
+      await apiJson(`/household/members/${encodeURIComponent(memberId)}/create-login`, { method: "POST" });
+      setMembersSuccess("Login created. Default password: ChangeMe123! — member must change it on first login.");
+      await loadMembers();
+    } catch (e: unknown) {
+      setMembersError(e instanceof Error ? e.message : "Could not create login");
+    } finally {
+      setCreatingLoginForId(null);
+    }
   }
 
   async function saveHouseholdMembers() {
@@ -690,7 +730,8 @@ export function SettingsPage() {
           lastName: row.lastName.trim(),
           email: row.email.trim() || null,
           role: row.role as "head" | "member",
-          relationship: row.relationship as "self" | "spouse" | "child" | "dependent" | "other"
+          relationship: row.relationship as "self" | "spouse" | "child" | "dependent" | "other",
+          ...(row.id ? {} : { createLogin: Boolean(row.createLogin) })
         };
         const path = row.id ? `/household/members/${encodeURIComponent(row.id)}` : "/household/members";
         await apiJson<HouseholdMemberResponse>(path, {
@@ -732,6 +773,7 @@ export function SettingsPage() {
       });
       setSecuritySuccess("Password changed successfully.");
       setPasswordDraft({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      window.dispatchEvent(new CustomEvent("app:password-changed"));
     } catch (e: unknown) {
       setSecurityError(e instanceof Error ? e.message : "Could not change password");
     } finally {
@@ -1004,99 +1046,139 @@ export function SettingsPage() {
                 {memberDrafts.map((member, idx) => (
                   <div
                     key={member.id ?? `draft-${idx}`}
-                    className="row"
-                    style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}
+                    style={{ marginBottom: "0.85rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--color-border)" }}
                   >
-                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                      First name
-                      <input
-                        type="text"
-                        value={member.firstName}
-                        placeholder="Alex"
-                        onChange={(e) => {
-                          const next = [...memberDrafts];
-                          next[idx] = { ...next[idx], firstName: e.target.value };
-                          setMemberDrafts(next);
-                        }}
+                    <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}>
+                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                        First name
+                        <input
+                          type="text"
+                          value={member.firstName}
+                          placeholder="Alex"
+                          onChange={(e) => {
+                            const next = [...memberDrafts];
+                            next[idx] = { ...next[idx], firstName: e.target.value };
+                            setMemberDrafts(next);
+                          }}
+                          disabled={savingMemberIndex !== null}
+                        />
+                      </label>
+                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                        Last name
+                        <input
+                          type="text"
+                          value={member.lastName}
+                          placeholder="Doe"
+                          onChange={(e) => {
+                            const next = [...memberDrafts];
+                            next[idx] = { ...next[idx], lastName: e.target.value };
+                            setMemberDrafts(next);
+                          }}
+                          disabled={savingMemberIndex !== null}
+                        />
+                      </label>
+                      <label className="settings-field" style={{ flex: "1 1 14rem" }}>
+                        Email
+                        <input
+                          type="email"
+                          value={member.email}
+                          placeholder="alex@example.com"
+                          onChange={(e) => {
+                            const next = [...memberDrafts];
+                            next[idx] = { ...next[idx], email: e.target.value };
+                            setMemberDrafts(next);
+                          }}
+                          disabled={savingMemberIndex !== null}
+                        />
+                      </label>
+                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                        Role
+                        <select
+                          value={member.role}
+                          onChange={(e) => {
+                            const next = [...memberDrafts];
+                            next[idx] = { ...next[idx], role: e.target.value };
+                            setMemberDrafts(next);
+                          }}
+                          disabled={savingMemberIndex !== null}
+                        >
+                          <option value="head">Head</option>
+                          <option value="member">Member</option>
+                        </select>
+                      </label>
+                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
+                        Relationship
+                        <select
+                          value={member.relationship}
+                          onChange={(e) => {
+                            const next = [...memberDrafts];
+                            next[idx] = { ...next[idx], relationship: e.target.value };
+                            setMemberDrafts(next);
+                          }}
+                          disabled={savingMemberIndex !== null}
+                        >
+                          <option value="self">Self</option>
+                          <option value="spouse">Spouse</option>
+                          <option value="child">Child</option>
+                          <option value="dependent">Dependent</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        title={member.id ? "Remove this household member" : "Discard unsaved row"}
                         disabled={savingMemberIndex !== null}
-                      />
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                      Last name
-                      <input
-                        type="text"
-                        value={member.lastName}
-                        placeholder="Doe"
-                        onChange={(e) => {
-                          const next = [...memberDrafts];
-                          next[idx] = { ...next[idx], lastName: e.target.value };
-                          setMemberDrafts(next);
+                        style={{ alignSelf: "flex-end", background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}
+                        onClick={() => {
+                          if (member.id) {
+                            void openRemoveMemberConfirm(member.id);
+                          } else {
+                            setMemberDrafts((prev) => prev.filter((_, i) => i !== idx));
+                          }
                         }}
-                        disabled={savingMemberIndex !== null}
-                      />
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 14rem" }}>
-                      Email
-                      <input
-                        type="email"
-                        value={member.email}
-                        placeholder="alex@example.com"
-                        onChange={(e) => {
-                          const next = [...memberDrafts];
-                          next[idx] = { ...next[idx], email: e.target.value };
-                          setMemberDrafts(next);
-                        }}
-                        disabled={savingMemberIndex !== null}
-                      />
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                      Role
-                      <select
-                        value={member.role}
-                        onChange={(e) => {
-                          const next = [...memberDrafts];
-                          next[idx] = { ...next[idx], role: e.target.value };
-                          setMemberDrafts(next);
-                        }}
-                        disabled={savingMemberIndex !== null}
                       >
-                        <option value="head">Head</option>
-                        <option value="member">Member</option>
-                      </select>
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                      Relationship
-                      <select
-                        value={member.relationship}
-                        onChange={(e) => {
-                          const next = [...memberDrafts];
-                          next[idx] = { ...next[idx], relationship: e.target.value };
-                          setMemberDrafts(next);
-                        }}
-                        disabled={savingMemberIndex !== null}
-                      >
-                        <option value="self">Self</option>
-                        <option value="spouse">Spouse</option>
-                        <option value="child">Child</option>
-                        <option value="dependent">Dependent</option>
-                        <option value="other">Other</option>
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      title={member.id ? "Remove this household member" : "Discard unsaved row"}
-                      disabled={savingMemberIndex !== null}
-                      style={{ alignSelf: "flex-end", background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}
-                      onClick={() => {
-                        if (member.id) {
-                          setRemoveMemberConfirm(member.id);
-                        } else {
-                          setMemberDrafts((prev) => prev.filter((_, i) => i !== idx));
-                        }
-                      }}
-                    >
-                      <IconTrash size={14} />
-                    </button>
+                        <IconTrash size={14} />
+                      </button>
+                    </div>
+                    {/* Login status row */}
+                    <div style={{ marginTop: "0.4rem", display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                      {member.id ? (
+                        member.linkedUserId ? (
+                          <span style={{ fontSize: "0.8rem", color: "var(--color-success, #15803d)", fontWeight: 600 }}>
+                            ✓ Has login account
+                          </span>
+                        ) : (
+                          <>
+                            <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                              No login account
+                            </span>
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: "0.78rem", padding: "0.15rem 0.5rem" }}
+                              disabled={creatingLoginForId === member.id}
+                              onClick={() => void createLoginForExistingMember(member.id!)}
+                            >
+                              {creatingLoginForId === member.id ? "Creating…" : "Create login"}
+                            </button>
+                          </>
+                        )
+                      ) : (
+                        <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.82rem", cursor: "pointer", userSelect: "none" }}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(member.createLogin)}
+                            onChange={(e) => {
+                              const next = [...memberDrafts];
+                              next[idx] = { ...next[idx], createLogin: e.target.checked };
+                              setMemberDrafts(next);
+                            }}
+                            disabled={savingMemberIndex !== null}
+                          />
+                          Create login account (default password: <code>ChangeMe123!</code> — must change on first login)
+                        </label>
+                      )}
+                    </div>
                   </div>
                 ))}
                 <div className="settings-household-actions" style={{ marginBottom: "1rem" }}>
@@ -1473,10 +1555,33 @@ export function SettingsPage() {
       <ConfirmDialog
         opened={removeMemberConfirm !== null}
         title="Remove household member"
-        message="This member will be permanently removed. This cannot be undone."
-        confirmLabel="Remove"
+        message={
+          <div style={{ fontSize: "0.9rem" }}>
+            {removeMemberDataCount && (removeMemberDataCount.transactions > 0 || removeMemberDataCount.payslips > 0) ? (
+              <div style={{ padding: "0.6rem 0.75rem", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, marginBottom: "0.75rem" }}>
+                <strong>Warning:</strong> This member has{" "}
+                {removeMemberDataCount.transactions > 0 ? <><strong>{removeMemberDataCount.transactions}</strong> transaction(s)</> : null}
+                {removeMemberDataCount.transactions > 0 && removeMemberDataCount.payslips > 0 ? " and " : null}
+                {removeMemberDataCount.payslips > 0 ? <><strong>{removeMemberDataCount.payslips}</strong> payslip(s)</> : null}
+                {" "}assigned to them. Those records will remain but show no owner. Use <strong>Transactions → Belongs-to</strong> filter to reassign before deleting.
+              </div>
+            ) : null}
+            <p style={{ margin: "0 0 0.75rem" }}>This member will be permanently removed from the household. This cannot be undone.</p>
+            {memberDrafts.find((m) => m.id === removeMemberConfirm)?.linkedUserId ? (
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", userSelect: "none" }}>
+                <input
+                  type="checkbox"
+                  checked={removeMemberDeleteLogin}
+                  onChange={(e) => setRemoveMemberDeleteLogin(e.target.checked)}
+                />
+                Also delete their login account
+              </label>
+            ) : null}
+          </div>
+        }
+        confirmLabel="Remove member"
         danger
-        onClose={() => setRemoveMemberConfirm(null)}
+        onClose={() => { setRemoveMemberConfirm(null); setRemoveMemberDataCount(null); }}
         onConfirm={() => confirmRemoveHouseholdMember()}
       />
     </div>

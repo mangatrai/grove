@@ -809,3 +809,25 @@ export async function bulkHardDeleteTransactions(
   }
   return { deleted, skipped };
 }
+
+export async function bulkReassignOwner(
+  householdId: string,
+  fromPersonProfileId: string,
+  toPersonProfileId: string
+): Promise<{ updated: number }> {
+  await qExec(
+    `UPDATE transaction_canonical
+     SET owner_person_profile_id = ?
+     WHERE household_id = ? AND owner_scope = 'person' AND owner_person_profile_id = ?`,
+    toPersonProfileId,
+    householdId,
+    fromPersonProfileId
+  );
+  const row = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*) AS cnt FROM transaction_canonical
+     WHERE household_id = ? AND owner_scope = 'person' AND owner_person_profile_id = ?`,
+    householdId,
+    toPersonProfileId
+  );
+  return { updated: Number(row?.cnt ?? 0) };
+}

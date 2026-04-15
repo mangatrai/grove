@@ -7,6 +7,7 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
   bulkHardDeleteTransactions,
+  bulkReassignOwner,
   bulkRestoreTransactions,
   bulkTrashTransactions,
   bulkUpdateCategory,
@@ -386,5 +387,25 @@ ledgerRouter.post("/bulk-delete", async (req: AuthenticatedRequest, res) => {
   }
   const householdId = req.authUser!.householdId;
   const result = await bulkHardDeleteTransactions(householdId, parsed.data.ids);
+  res.json(result);
+});
+
+const reassignOwnerSchema = z.object({
+  fromPersonProfileId: z.string().uuid(),
+  toPersonProfileId: z.string().uuid()
+});
+
+ledgerRouter.post("/bulk-reassign-owner", async (req: AuthenticatedRequest, res) => {
+  const parsed = reassignOwnerSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    return;
+  }
+  if (parsed.data.fromPersonProfileId === parsed.data.toPersonProfileId) {
+    res.status(400).json({ message: "from and to must be different" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await bulkReassignOwner(householdId, parsed.data.fromPersonProfileId, parsed.data.toPersonProfileId);
   res.json(result);
 });
