@@ -4,7 +4,15 @@ Authenticated household backup as a **ZIP** (async job), and **destructive** res
 
 ## `POST /exports/household`
 
-**Auth:** Bearer JWT. **Role:** `owner` or `admin` (members receive 403).
+**Auth:** Bearer JWT.
+
+### Role / membership rules (CR-109 Slice 5)
+
+| Role | Export scope |
+|------|-------------|
+| `owner`, `admin` | Full household export — all tables, all users, all transactions. |
+| `member` (with linked profile) | Personal export — transactions/accounts/payslips/balance_snapshots filtered to their `owner_person_profile_id`. Shared reference data (categories, rules, custom institutions) included. Users and household rows omitted for privacy. |
+| `member` (no profile) | 403. |
 
 Queues an **export** job. Response is immediate (**202**); the ZIP is built in the background.
 
@@ -15,9 +23,12 @@ Queues an **export** job. Response is immediate (**202**); the ZIP is built in t
 ```json
 {
   "jobId": "uuid",
+  "scope": "household",
   "message": "Export started. Poll GET /exports/:jobId until status is complete, then GET /exports/:jobId/download for the ZIP."
 }
 ```
+
+- **`scope`** — `"household"` for owner/admin exports; `"member"` for member-scoped exports.
 
 ## `GET /exports/{jobId}`
 
@@ -25,7 +36,9 @@ Queues an **export** job. Response is immediate (**202**); the ZIP is built in t
 
 Poll **export** job status until `status` indicates completion (exact strings match DB / service — typically a terminal state before download).
 
-**200:** `{ "id", "status", "createdAt", "completedAt", "error" }` (shape aligns with `export_job`).
+**200:** `{ "id", "status", "scope", "createdAt", "completedAt", "error" }` (shape aligns with `export_job`).
+
+- **`scope`** — `"household"` or `"member"` depending on how the export was queued.
 
 **404:** `EXPORT_JOB_NOT_FOUND` when the job id does not belong to this household.
 
@@ -77,6 +90,7 @@ Poll **import (restore)** job status.
 - Current exports use **`exportVersion` 3**: `manifest.json` plus **one JSON file per table** (see **CR-078 v2** in [`CHANGE_HISTORY.md`](CHANGE_HISTORY.md)).
 - Restore accepts **v3** and legacy **v1/v2** (`household-bundle.json`).
 - **Categories / rules** in the ZIP are **household** rows only (global built-ins are not duplicated in the bundle).
+- **Member-scoped exports** set `scope: "member"` and `personProfileId` in `manifest.json`. Only the member's own data is included — these bundles are not suitable for full household restore.
 
 ## After restore
 

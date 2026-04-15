@@ -2,6 +2,14 @@
 
 Household-scoped access to `transaction_canonical`: **GET** lists rows with optional filters; **PATCH** updates **category** only; **POST** adds a single **posted** manual row (same fingerprint contract as import).
 
+### Role / membership rules (CR-109 Slice 4)
+
+| Role | Ledger write access |
+|------|---------------------|
+| `owner`, `admin` | Full access — create, update, and delete any transaction in the household. |
+| `member` (with linked profile) | May only write/modify/delete transactions where `owner_person_profile_id` matches their profile. Manual entry restricted to accounts they own. Bulk ops skip non-owned rows and return `skippedNotOwned`. May not reassign ownership (`bulk-reassign-owner` is owner/admin only). |
+| `member` (no profile) | 403 on all write ops. |
+
 ## `GET /transactions`
 
 **Auth:** Bearer JWT (same as `/imports`).

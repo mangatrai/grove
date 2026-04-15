@@ -325,12 +325,20 @@ paths:
       security: [{ bearerAuth: [] }]
     post:
       tags: [transactions]
-      summary: Manual transaction entry
+      summary: Manual transaction entry — members restricted to accounts they own
+      description: Members may only create transactions on accounts where owner_person_profile_id matches their profile.
       security: [{ bearerAuth: [] }]
   /transactions/{transactionId}:
     patch:
       tags: [transactions]
-      summary: Update category / owner on transaction
+      summary: Update category / status / memo — members restricted to own transactions
+      description: >
+        Members may only update transactions they own (owner_person_profile_id).
+        ownerScope/ownerPersonProfileId fields are ignored for member requests (ownership reassignment is owner/admin only).
+      security: [{ bearerAuth: [] }]
+    delete:
+      tags: [transactions]
+      summary: Hard-delete transaction (must be trashed first) — members restricted to own transactions
       security: [{ bearerAuth: [] }]
   /transactions/{transactionId}/open-review:
     get:

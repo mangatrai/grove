@@ -3,6 +3,7 @@ import { IconArrowBackUp, IconLock, IconPlayerPlay, IconTrash, IconUpload } from
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
+import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
@@ -286,6 +287,7 @@ export function ImportWorkspacePage() {
   const [searchParams] = useSearchParams();
   const showAdvanced = searchParams.get("advanced") === "1";
   const token = getToken();
+  const { role: currentRole, personProfileId: currentPersonProfileId } = useCurrentUser();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [sessionStatus, setSessionStatus] = useState<string | null>(null);
@@ -341,6 +343,13 @@ export function ImportWorkspacePage() {
   const [newAcctMask, setNewAcctMask] = useState("");
   const [newAcctScope, setNewAcctScope] = useState<"household" | "person">("household");
   const [newAcctPersonId, setNewAcctPersonId] = useState("");
+  // Default new-account Belongs-To to the member's own profile when identity loads.
+  useEffect(() => {
+    if (currentRole === "member" && currentPersonProfileId) {
+      setNewAcctScope("person");
+      setNewAcctPersonId(currentPersonProfileId);
+    }
+  }, [currentRole, currentPersonProfileId]);
   const [creatingAccount, setCreatingAccount] = useState(false);
   // Institution catalog for the inline create-account form (lazy-loaded when form opens)
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([]);
@@ -385,12 +394,18 @@ export function ImportWorkspacePage() {
       { accountId: string; profileId: string; employerId: string; ownerScope: "household" | "person"; ownerPersonProfileId: string }
     > = {};
     for (const f of detail.files) {
+      // For unbound files, default Belongs-To to the member's own profile.
+      const isMemberWithProfile = currentRole === "member" && !!currentPersonProfileId;
+      const defaultOwnerScope: "household" | "person" =
+        f.owner_person_profile_id ? (f.owner_scope ?? "household") : (isMemberWithProfile ? "person" : "household");
+      const defaultOwnerPersonProfileId =
+        f.owner_person_profile_id ?? (isMemberWithProfile ? currentPersonProfileId : "");
       nextDrafts[f.id] = {
         accountId: f.financial_account_id ?? "",
         profileId: f.parser_profile_id ?? "",
         employerId: f.employer_id ?? "",
-        ownerScope: f.owner_scope ?? "household",
-        ownerPersonProfileId: f.owner_person_profile_id ?? ""
+        ownerScope: defaultOwnerScope,
+        ownerPersonProfileId: defaultOwnerPersonProfileId
       };
     }
     setDrafts(nextDrafts);
@@ -466,13 +481,17 @@ export function ImportWorkspacePage() {
         const sug = suggestMap[f.id];
         if (sug?.matchedAccountId) {
           try {
+            const ofxOwnerScope: "household" | "person" =
+              currentRole === "member" && currentPersonProfileId ? "person" : "household";
+            const ofxOwnerPersonProfileId =
+              currentRole === "member" && currentPersonProfileId ? currentPersonProfileId : null;
             await apiJson(`/imports/sessions/${sessionId}/files/${f.id}`, {
               method: "PATCH",
               body: JSON.stringify({
                 financialAccountId: sug.matchedAccountId,
                 parserProfileId: OFX_PARSER_ID,
-                ownerScope: "household",
-                ownerPersonProfileId: null
+                ownerScope: ofxOwnerScope,
+                ownerPersonProfileId: ofxOwnerPersonProfileId
               })
             });
             // Refresh so the file row shows the bound account.
@@ -487,8 +506,8 @@ export function ImportWorkspacePage() {
                 accountId: sug.matchedAccountId!,
                 profileId: OFX_PARSER_ID,
                 employerId: "",
-                ownerScope: "household",
-                ownerPersonProfileId: ""
+                ownerScope: ofxOwnerScope,
+                ownerPersonProfileId: ofxOwnerPersonProfileId ?? ""
               }
             }));
           } catch {
@@ -497,7 +516,7 @@ export function ImportWorkspacePage() {
         }
       }
     }
-  }, [sessionId]);
+  }, [sessionId, currentRole, currentPersonProfileId]);
 
   const openUndoConfirm = useCallback(() => {
     if (!sessionId || (sessionSummary?.totals.canonicalRows ?? 0) === 0) {

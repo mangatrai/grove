@@ -100,17 +100,27 @@ exportsRouter.get("/import/:jobId", async (req: AuthenticatedRequest, res) => {
   });
 });
 
-exportsRouter.post("/household", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
-  const householdId = req.authUser!.householdId;
-  const userId = req.authUser!.userId;
+exportsRouter.post("/household", async (req: AuthenticatedRequest, res) => {
+  const { householdId, userId, role, personProfileId } = req.authUser!;
+
+  // Members must have a linked person profile to export their data.
+  if (role === "member" && !personProfileId) {
+    res.status(403).json({ message: "Your account is not linked to a household profile." });
+    return;
+  }
+
   if (!allowHouseholdExport(userId)) {
     res.status(429).json({ message: "Too many export requests; try again in about an hour." });
     return;
   }
-  const { jobId } = await queueHouseholdExport(householdId, userId);
+
+  // Members get a personal-data export; owner/admin get the full household export.
+  const scopedProfileId = role === "member" ? personProfileId : null;
+  const { jobId } = await queueHouseholdExport(householdId, userId, scopedProfileId);
   scheduleExportJobProcessing(jobId, householdId);
   res.status(202).json({
     jobId,
+    scope: role === "member" ? "member" : "household",
     message:
       "Export started. Poll GET /exports/:jobId until status is complete, then GET /exports/:jobId/download for the ZIP."
   });
@@ -168,6 +178,7 @@ exportsRouter.get("/:jobId", async (req: AuthenticatedRequest, res) => {
   res.json({
     id: job.id,
     status: job.status,
+    scope: job.personProfileId ? "member" : "household",
     createdAt: job.createdAt,
     completedAt: job.completedAt,
     error: job.errorText

@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { z } from "zod";
 
-import { qGet } from "../../db/query.js";
+import { qAll, qGet } from "../../db/query.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
   bulkHardDeleteTransactions,
@@ -81,6 +82,28 @@ const postManualSchema = z.object({
   memo: z.union([z.string().max(500), z.null()]).optional(),
   categoryId: z.union([z.string().uuid(), z.null()]).optional()
 });
+
+/**
+ * For member-scoped bulk ops: returns ids the member owns and the not-owned count.
+ * Uses Postgres ANY($n) so it's a single round-trip regardless of list size.
+ */
+async function filterOwnedTransactionIds(
+  householdId: string,
+  ids: string[],
+  personProfileId: string
+): Promise<{ owned: string[]; notOwnedCount: number }> {
+  if (ids.length === 0) return { owned: [], notOwnedCount: 0 };
+  const rows = await qAll<{ id: string }>(
+    `SELECT id FROM transaction_canonical
+     WHERE household_id = ? AND id = ANY(?) AND owner_person_profile_id = ?`,
+    householdId,
+    ids,
+    personProfileId
+  );
+  const ownedSet = new Set(rows.map((r) => r.id));
+  const owned = ids.filter((id) => ownedSet.has(id));
+  return { owned, notOwnedCount: ids.length - owned.length };
+}
 
 export const ledgerRouter = Router();
 ledgerRouter.use(requireAuth);
@@ -173,9 +196,25 @@ ledgerRouter.post("/", async (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const householdId = req.authUser!.householdId;
-  const userId = req.authUser!.userId;
+  const { householdId, userId, role, personProfileId } = req.authUser!;
   const body = parsed.data;
+
+  // Members may only create manual transactions on accounts they own.
+  if (role === "member") {
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
+      return;
+    }
+    const acct = await qGet<{ owner_person_profile_id: string | null }>(
+      `SELECT owner_person_profile_id FROM financial_account WHERE id = ? AND household_id = ?`,
+      body.accountId,
+      householdId
+    );
+    if (!acct || acct.owner_person_profile_id !== personProfileId) {
+      res.status(403).json({ message: "You can only add transactions to your own accounts." });
+      return;
+    }
+  }
   const out = await createManualCanonicalTransaction(householdId, userId, {
     accountId: body.accountId,
     txnDate: body.txnDate,
@@ -225,7 +264,17 @@ ledgerRouter.post("/bulk-category", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "member") {
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
+      return;
+    }
+    const { owned, notOwnedCount } = await filterOwnedTransactionIds(householdId, parsed.data.ids, personProfileId);
+    const result = owned.length > 0 ? await bulkUpdateCategory(householdId, owned, parsed.data.categoryId) : { updated: 0, skipped: 0 };
+    res.json({ ...result, skippedNotOwned: notOwnedCount });
+    return;
+  }
   const result = await bulkUpdateCategory(householdId, parsed.data.ids, parsed.data.categoryId);
   res.json(result);
 });
@@ -264,7 +313,24 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+
+  // Members can only modify their own transactions.
+  if (role === "member") {
+    const tx = await qGet<{ owner_person_profile_id: string | null }>(
+      `SELECT owner_person_profile_id FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+      req.params.id,
+      householdId
+    );
+    if (!tx) {
+      res.status(404).json({ message: "Transaction not found" });
+      return;
+    }
+    if (tx.owner_person_profile_id !== personProfileId) {
+      res.status(403).json({ message: "You can only modify your own transactions." });
+      return;
+    }
+  }
 
   // Memo-only update.
   if (parsed.data.memo !== undefined && parsed.data.status === undefined && parsed.data.categoryId === undefined && !parsed.data.ownerScope) {
@@ -304,8 +370,12 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
 
-  if (parsed.data.ownerScope === "person") {
-    const ownerId = parsed.data.ownerPersonProfileId ?? null;
+  // Members cannot reassign ownership — strip ownerScope/ownerPersonProfileId from their requests.
+  const effectiveOwnerScope = role === "member" ? undefined : parsed.data.ownerScope;
+  const effectiveOwnerPersonProfileId = role === "member" ? undefined : parsed.data.ownerPersonProfileId;
+
+  if (effectiveOwnerScope === "person") {
+    const ownerId = effectiveOwnerPersonProfileId ?? null;
     if (!ownerId) {
       res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
       return;
@@ -320,8 +390,8 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     householdId,
     req.params.id,
     parsed.data.categoryId,
-    parsed.data.ownerScope,
-    parsed.data.ownerPersonProfileId
+    effectiveOwnerScope,
+    effectiveOwnerPersonProfileId
   );
   if (!out.ok) {
     if (out.code === "INVALID_CATEGORY") {
@@ -344,7 +414,24 @@ ledgerRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid transaction id" });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+
+  if (role === "member") {
+    const tx = await qGet<{ owner_person_profile_id: string | null }>(
+      `SELECT owner_person_profile_id FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+      parsed.data.id,
+      householdId
+    );
+    if (!tx) {
+      res.status(404).json({ message: "Transaction not found" });
+      return;
+    }
+    if (tx.owner_person_profile_id !== personProfileId) {
+      res.status(403).json({ message: "You can only delete your own transactions." });
+      return;
+    }
+  }
+
   const out = await hardDeleteTransaction(householdId, parsed.data.id);
   if (!out.ok) {
     res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
@@ -363,7 +450,17 @@ ledgerRouter.post("/bulk-trash", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "member") {
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
+      return;
+    }
+    const { owned, notOwnedCount } = await filterOwnedTransactionIds(householdId, parsed.data.ids, personProfileId);
+    const result = owned.length > 0 ? await bulkTrashTransactions(householdId, owned) : { trashed: 0, skipped: 0 };
+    res.json({ ...result, skippedNotOwned: notOwnedCount });
+    return;
+  }
   const result = await bulkTrashTransactions(householdId, parsed.data.ids);
   res.json(result);
 });
@@ -374,7 +471,17 @@ ledgerRouter.post("/bulk-restore", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "member") {
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
+      return;
+    }
+    const { owned, notOwnedCount } = await filterOwnedTransactionIds(householdId, parsed.data.ids, personProfileId);
+    const result = owned.length > 0 ? await bulkRestoreTransactions(householdId, owned) : { restored: 0, skipped: 0 };
+    res.json({ ...result, skippedNotOwned: notOwnedCount });
+    return;
+  }
   const result = await bulkRestoreTransactions(householdId, parsed.data.ids);
   res.json(result);
 });
@@ -385,7 +492,17 @@ ledgerRouter.post("/bulk-delete", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "member") {
+    if (!personProfileId) {
+      res.status(403).json({ message: "Your account is not linked to a household profile." });
+      return;
+    }
+    const { owned, notOwnedCount } = await filterOwnedTransactionIds(householdId, parsed.data.ids, personProfileId);
+    const result = owned.length > 0 ? await bulkHardDeleteTransactions(householdId, owned) : { deleted: 0, skipped: 0 };
+    res.json({ ...result, skippedNotOwned: notOwnedCount });
+    return;
+  }
   const result = await bulkHardDeleteTransactions(householdId, parsed.data.ids);
   res.json(result);
 });
@@ -395,7 +512,7 @@ const reassignOwnerSchema = z.object({
   toPersonProfileId: z.string().uuid()
 });
 
-ledgerRouter.post("/bulk-reassign-owner", async (req: AuthenticatedRequest, res) => {
+ledgerRouter.post("/bulk-reassign-owner", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = reassignOwnerSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });

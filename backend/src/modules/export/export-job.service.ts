@@ -16,6 +16,8 @@ export type ExportJobRow = {
   id: string;
   householdId: string;
   requestedByUserId: string;
+  /** Non-null for member-scoped exports; null for household-wide (owner/admin) exports. */
+  personProfileId: string | null;
   status: "queued" | "running" | "complete" | "failed" | "expired";
   storagePath: string | null;
   errorText: string | null;
@@ -28,6 +30,7 @@ function mapRow(r: Record<string, unknown>): ExportJobRow {
     id: r.id as string,
     householdId: r.household_id as string,
     requestedByUserId: r.requested_by_user_id as string,
+    personProfileId: (r.person_profile_id as string) ?? null,
     status: r.status as ExportJobRow["status"],
     storagePath: (r.storage_path as string) ?? null,
     errorText: (r.error_text as string) ?? null,
@@ -36,24 +39,29 @@ function mapRow(r: Record<string, unknown>): ExportJobRow {
   };
 }
 
-export async function queueHouseholdExport(householdId: string, userId: string): Promise<{ jobId: string }> {
+export async function queueHouseholdExport(
+  householdId: string,
+  userId: string,
+  personProfileId?: string | null
+): Promise<{ jobId: string }> {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
   const jobId = randomUUID();
   const storagePath = path.join(EXPORTS_DIR, `${jobId}.zip`);
   await qExec(
-    `INSERT INTO export_job (id, household_id, requested_by_user_id, status, storage_path)
-     VALUES (?, ?, ?, 'queued', ?)`,
+    `INSERT INTO export_job (id, household_id, requested_by_user_id, status, storage_path, person_profile_id)
+     VALUES (?, ?, ?, 'queued', ?, ?)`,
     jobId,
     householdId,
     userId,
-    storagePath
+    storagePath,
+    personProfileId ?? null
   );
   return { jobId };
 }
 
 export async function getExportJob(householdId: string, jobId: string): Promise<ExportJobRow | null> {
   const r = (await qGet(
-    `SELECT id, household_id, requested_by_user_id, status, storage_path, error_text, created_at, completed_at
+    `SELECT id, household_id, requested_by_user_id, person_profile_id, status, storage_path, error_text, created_at, completed_at
        FROM export_job WHERE id = ? AND household_id = ?`,
     jobId,
     householdId
@@ -68,31 +76,36 @@ export function scheduleExportJobProcessing(jobId: string, householdId: string):
 }
 
 async function runExportJob(jobId: string, householdId: string): Promise<void> {
-  const row = (await qGet<{ storage_path: string }>(
-    `SELECT storage_path FROM export_job WHERE id = ? AND household_id = ?`,
+  const row = (await qGet<{ storage_path: string; person_profile_id: string | null }>(
+    `SELECT storage_path, person_profile_id FROM export_job WHERE id = ? AND household_id = ?`,
     jobId,
     householdId
-  )) as { storage_path: string } | undefined;
+  )) as { storage_path: string; person_profile_id: string | null } | undefined;
   if (!row?.storage_path) {
     return;
   }
+  const personProfileId = row.person_profile_id ?? null;
   await qExec(`UPDATE export_job SET status = 'running' WHERE id = ?`, jobId);
   try {
     const exportedAt = new Date().toISOString();
-    const tables = await queryAllExportTables(householdId);
+    const tables = await queryAllExportTables(householdId, personProfileId);
 
     // Build manifest with per-table file inventory and row counts.
     const tableIndex: Record<string, { file: string; rows: number }> = {};
     for (const t of tables) {
       tableIndex[t.key] = { file: t.fileName, rows: t.rows.length };
     }
-    const manifest = {
+    const manifest: Record<string, unknown> = {
       exportVersion: 3,
       exportedAt,
       householdId,
       format: "zip-split-v3",
       tables: tableIndex
     };
+    if (personProfileId) {
+      manifest["personProfileId"] = personProfileId;
+      manifest["scope"] = "member";
+    }
 
     const output = fs.createWriteStream(row.storage_path);
     const archive = archiver("zip", { zlib: { level: 6 } });

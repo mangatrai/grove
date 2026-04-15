@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
@@ -275,6 +276,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export function TransactionsPage() {
   const token = useAuthToken();
+  const { role: currentRole, personProfileId: currentPersonProfileId } = useCurrentUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
   const fileFilter = searchParams.get("fileId")?.trim() || null;
@@ -356,6 +358,27 @@ export function TransactionsPage() {
   useEffect(() => {
     setSearchDraft(searchFromUrl);
   }, [searchFromUrl]);
+
+  // For members: auto-default Belongs-To in the manual-entry form to their own profile.
+  useEffect(() => {
+    if (currentRole === "member" && currentPersonProfileId) {
+      setAddBelongsTo(`person:${currentPersonProfileId}` as BelongsToFilterValue);
+    }
+  }, [currentRole, currentPersonProfileId]);
+
+  // For members: default the transaction list filter to their own profile on mount
+  // (only when no owner filter is already present in the URL).
+  useEffect(() => {
+    if (currentRole === "member" && currentPersonProfileId) {
+      setSearchParams((prev) => {
+        if (prev.get("ownerPersonProfileId")) return prev;
+        const next = new URLSearchParams(prev);
+        next.set("ownerScope", "person");
+        next.set("ownerPersonProfileId", currentPersonProfileId);
+        return next;
+      }, { replace: true });
+    }
+  }, [currentRole, currentPersonProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!token || !needsReviewTab) {

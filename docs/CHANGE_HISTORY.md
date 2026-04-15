@@ -20,6 +20,30 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (security hardening continued)
 
+### CR-109 (slice 5) — RBAC redesign: member-scoped export + frontend Belongs-To pre-fill
+- **Type:** CR (security/RBAC + UX)
+- **What:**
+  - **Migration `0020`:** Adds `person_profile_id TEXT REFERENCES person_profile(id)` to `export_job`. NULL = household-wide; non-NULL = member-scoped.
+  - **`export-household-bundle.service.ts`:** `queryAllExportTables` accepts optional `personProfileId`. When set, filters transactions/accounts/payslips/balance_snapshots to that profile; includes only the member's `person_profile` row; omits users (security) and household/membership rows.
+  - **`export-job.service.ts`:** `ExportJobRow` gains `personProfileId`; `queueHouseholdExport` accepts optional `personProfileId`; `runExportJob` reads `person_profile_id` from DB and threads it to `queryAllExportTables`. Manifest includes `scope:"member"` and `personProfileId` for member exports.
+  - **`exports.routes.ts`:** `POST /exports/household` now open to members with a linked profile (403 if no profile). Members receive a personal-data ZIP (their transactions/accounts/payslips/balance snapshots + shared reference data). `GET /:jobId` response includes `scope` field. Restore (`POST /household/import`) remains owner-only.
+  - **`UserContext.tsx`:** New React context exposing `{ role, personProfileId }` for child pages. `ShellLayout.tsx` provides it from the existing `/auth/me` state.
+  - **`ImportWorkspacePage.tsx`:** Uses `useCurrentUser()`; file-binding drafts and OFX auto-bind default `ownerScope/ownerPersonProfileId` to the member's profile for unbound files. New-account creation form also defaults to member's profile via `useEffect`.
+  - **`TransactionsPage.tsx`:** Uses `useCurrentUser()`; transaction list URL filter auto-defaults to `ownerPersonProfileId=<personProfileId>` for members on mount (if no filter already set); manual-entry `addBelongsTo` defaults to member's profile.
+- **Files:** `backend/db/migrations/0020_export_job_person_scope.sql`, `backend/src/modules/export/export-household-bundle.service.ts`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/exports.routes.ts`, `frontend/src/UserContext.tsx`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/ImportWorkspacePage.tsx`, `frontend/src/pages/TransactionsPage.tsx`
+
+### CR-109 (slice 4) — RBAC redesign: member-scoped ledger writes
+- **Type:** CR (security/RBAC)
+- **What:** Members can only write/modify transactions they own (`owner_person_profile_id = personProfileId`). All checks are in-route (no service changes).
+  - **`PATCH /transactions/:id`:** Pre-checks transaction ownership for members (404 if not found, 403 if not theirs). Also strips `ownerScope`/`ownerPersonProfileId` from member PATCH requests — members cannot reassign ownership.
+  - **`DELETE /transactions/:id`:** Same ownership pre-check.
+  - **`POST /transactions`** (manual entry): Members may only create transactions on accounts they own (`owner_person_profile_id = personProfileId`).
+  - **`POST /transactions/bulk-category`, `bulk-trash`, `bulk-restore`, `bulk-delete`:** For members, IDs are filtered to owned-only using a single `= ANY($n)` query. Response includes `skippedNotOwned: number` for members when any were filtered out.
+  - **`POST /transactions/bulk-reassign-owner`:** Locked to `requireRole(["owner","admin"])` — household-level admin operation.
+  - Helper `filterOwnedTransactionIds(householdId, ids, personProfileId)` added inline in `ledger.routes.ts`.
+- **Tests:** All 265 passing.
+- **Files:** `backend/src/modules/ledger/ledger.routes.ts`
+
 ### CR-109 (slice 3) — RBAC redesign: member-scoped import sessions
 - **Type:** CR (security/RBAC)
 - **What:** Members can now create and manage their own import sessions end-to-end. All `requireRole(["owner","admin"])` gates removed from import session routes; ownership enforced in-handler instead.

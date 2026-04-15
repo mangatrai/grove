@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
+import { UserContext } from "../UserContext";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopBar } from "./AppTopBar";
 
@@ -99,6 +100,7 @@ export function ShellLayout() {
   }
 
   return (
+    <UserContext.Provider value={{ role: userRole, personProfileId: personProfileId ?? null }}>
     <div className="app-frame app-frame--authed">
       <div className="app-shell">
         <AppSidebar
@@ -149,5 +151,6 @@ export function ShellLayout() {
         </div>
       </div>
     </div>
+    </UserContext.Provider>
   );
 }
