@@ -88,6 +88,13 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   }
 
   function logout() {
+    // Fire-and-forget: tell the server to invalidate the token (increments token_version).
+    // We clear the local token and redirect regardless of the server response so the
+    // user is never stuck on a logout failure.
+    void fetch("/auth/logout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${localStorage.getItem("hf_jwt") ?? ""}` }
+    }).catch(() => {});
     setToken(null);
     setMenuOpen(false);
     navigate("/", { replace: true });

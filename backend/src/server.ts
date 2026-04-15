@@ -9,6 +9,15 @@ import { log } from "./logger.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
 
+// Refuse to start in PROD with the default JWT_SECRET — it's a known string in the repo.
+const DEFAULT_JWT_SECRET = "local-dev-jwt-secret-do-not-use-in-prod-change-me!";
+if (env.MODE === "PROD" && env.JWT_SECRET === DEFAULT_JWT_SECRET) {
+  log.error(
+    "FATAL: JWT_SECRET is set to the default development value. Set a strong random secret (≥ 32 chars) before running in PROD. Generate one with: openssl rand -base64 48"
+  );
+  process.exit(1);
+}
+
 const app = buildApp();
 
 if (process.env.NODE_ENV === "production" && env.MODE !== "PROD") {

@@ -37,7 +37,8 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 | `LOG_LEVEL` | Backend only: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). |
 | `LOG_FILE` | Optional. Repo-relative or absolute path; timestamped lines are appended (tee with stdout/stderr). Empty = disabled. See [`LOGGING.md`](LOGGING.md). |
 | `PORT` | API listen port (default `4000`). |
-| `JWT_SECRET` | JWT signing; min 16 chars in schema (default exists for local dev only). |
+| `JWT_SECRET` | JWT signing; **min 32 chars** (raised from 16). The app **refuses to start in PROD** with the default dev value. Generate: `openssl rand -base64 48`. |
+| `ALLOWED_ORIGIN` | **PROD:** set to your app's public URL (e.g. `https://finance.example.com`) to lock CORS to that origin. Unset in TEST — all origins allowed. If unset in PROD, the API sends no `Allow-Origin` header (browser cross-origin requests blocked). |
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
 | `OPENAI_API_KEY` | API key for OpenAI (**required** for **IBM** and **Deloitte** payslip PDF extraction — upload, import parse, and Deloitte async reconcile). |
 | `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). Used by payslip extraction and any other OpenAI-backed features. |

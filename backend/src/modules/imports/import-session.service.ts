@@ -188,7 +188,8 @@ export async function persistSessionFiles(
     }
 
     const fileId = crypto.randomUUID();
-    const safeName = `${fileId}-${file.originalname}`;
+    // path.basename strips any directory traversal sequences from the client-supplied filename.
+    const safeName = `${fileId}-${path.basename(file.originalname)}`;
     const storedPath = path.join(targetDir, safeName);
 
     if (!ensuredTargetDir) {

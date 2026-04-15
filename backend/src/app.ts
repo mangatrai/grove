@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import express from "express";
+import helmet from "helmet";
 
 import { env } from "./config/env.js";
 import { log } from "./logger.js";
@@ -19,10 +20,17 @@ import { payslipRouter } from "./modules/payslip/payslip.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
 
-/** Allow browser dev (Vite) and other local clients to call the API. */
+/**
+ * CORS: allow the configured origin (or all origins in TEST mode).
+ * Set ALLOWED_ORIGIN in production to your app's public URL, e.g. https://finance.example.com.
+ * In TEST mode the header is left as "*" to keep the dev Vite proxy working.
+ */
 function corsMiddleware(): express.RequestHandler {
   return (req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const origin = env.ALLOWED_ORIGIN ?? (env.MODE === "PROD" ? "" : "*");
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
     res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS, DELETE");
     if (req.method === "OPTIONS") {
@@ -60,8 +68,9 @@ function isApiPath(urlPath: string): boolean {
 export function buildApp() {
   const app = express();
 
+  app.use(helmet());
   app.use(corsMiddleware());
-  app.use(express.json());
+  app.use(express.json({ limit: "50kb" }));
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);
   app.use("/household", householdRouter);

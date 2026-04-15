@@ -35,7 +35,7 @@ const envSchema = z.object({
     .transform((value) => value.toUpperCase())
     .pipe(z.enum(["TEST", "PROD"]))
     .default("TEST"),
-  JWT_SECRET: z.string().min(16, "JWT_SECRET must be at least 16 chars").default("local-dev-jwt-secret-change-me"),
+  JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 chars").default("local-dev-jwt-secret-do-not-use-in-prod-change-me!"),
   DATABASE_HOST: z.string().min(1, "DATABASE_HOST is required"),
   DATABASE_PORT: optionalIntEnv(5432, 1, 65535),
   DATABASE_USER: z.string().min(1, "DATABASE_USER is required"),
@@ -51,6 +51,12 @@ const envSchema = z.object({
   /** Multi-candidate: weaker narrow if best ≥ this and runner-up score is below this ceiling. */
   TRANSFER_DISAMBIG_WEAK_MIN_SCORE: optionalIntEnv(45, 0, 100),
   TRANSFER_DISAMBIG_WEAK_MAX_SECOND_SCORE: optionalIntEnv(25, 0, 100),
+  /**
+   * Restrict CORS to this origin in PROD mode (e.g. https://finance.example.com).
+   * Leave unset in TEST/dev — the API will allow all origins.
+   * If unset in PROD the API sends no Allow-Origin header (browser requests blocked).
+   */
+  ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
   /**

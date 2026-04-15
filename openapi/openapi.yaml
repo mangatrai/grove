@@ -60,7 +60,12 @@ paths:
   /auth/change-password:
     post:
       tags: [auth]
-      summary: Change password for signed-in user
+      summary: Change password for signed-in user. Requires uppercase+lowercase+digit+special char, min 10 chars.
+      security: [{ bearerAuth: [] }]
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Invalidate all existing JWTs for the current user (increments token_version). Returns 204.
       security: [{ bearerAuth: [] }]
   /household/settings:
     get:

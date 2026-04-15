@@ -6,7 +6,9 @@
 INSERT INTO household (id, name, created_at)
 VALUES ('10000000-0000-0000-0000-000000000001', 'Default Household', CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING;
 
-INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope, created_at)
+-- Default password: ChangeMe123! — force_password_change=true ensures the owner is prompted to change it on first login.
+-- IMPORTANT: change this password before exposing the instance to the internet.
+INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope, force_password_change, created_at)
 VALUES
   (
     '20000000-0000-0000-0000-000000000001',
@@ -15,6 +17,7 @@ VALUES
     'owner',
     '$2a$10$Tg2KSaLf8qB4az.7LdyCvuQclHikol6qgE2ZWMJt5/chBWCfMO6eO',
     'all',
+    true,
     CURRENT_TIMESTAMP
   ) ON CONFLICT DO NOTHING;
 

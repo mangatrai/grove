@@ -18,6 +18,43 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-15 (security hardening — public deployment readiness)
+
+### SEC-001 — Security hardening: 5-piece hardening pass for OCI/internet-facing deployment
+- **Type:** FIX + CR
+- **What:** Comprehensive security hardening across auth, transport, file handling, and session management. Addressed issues identified in a pre-release security review. Changes shipped in 5 logical slices:
+
+  **Piece 1 — Pure additions (no user-visible change):**
+  - `helmet()` middleware added to `buildApp()` — sets `X-Frame-Options`, `X-Content-Type-Options`, `HSTS`, `Content-Security-Policy`, `Referrer-Policy`, and other standard security headers.
+  - `express.json({ limit: '50kb' })` — explicit body size cap (was implicit Express default).
+  - `path.basename(file.originalname)` on multer uploads — strips any directory traversal sequences from client-supplied filenames before writing to disk.
+  - File upload size limits: imports 50 MB/file, 20 files max; payslips 25 MB/file, 1 file (previously unlimited — memory DoS vector).
+  - `jwt.sign` now explicitly passes `{ algorithm: 'HS256' }`; `jwt.verify` now passes `{ algorithms: ['HS256'] }` — prevents algorithm confusion attacks.
+  - **Timing oracle fix:** `login()` now always runs `bcrypt.compare` even when the email is not found (compares against a dummy hash). Previously, a missing email returned in ~1ms vs ~80ms for a wrong password, leaking which emails have accounts.
+
+  **Piece 2 — bcrypt async + stronger rounds:**
+  - All `bcrypt.compareSync` / `bcrypt.hashSync` calls replaced with `await bcrypt.compare` / `await bcrypt.hash` — synchronous bcrypt blocked the Node.js event loop for ~80-100ms per call.
+  - Cost factor raised from `10` → `12` (OWASP 2023 recommendation; ~4× more work per hash for new passwords). Existing hashes remain valid — bcrypt reads the cost factor from the stored hash on compare.
+
+  **Piece 3 — Login hardening + seed fix:**
+  - `POST /auth/login` now rate-limited: 12 attempts per 15-minute window per IP via `express-rate-limit`. Returns 429 with descriptive message. Skipped in `MODE=TEST` so integration tests are unaffected.
+  - Password strength enforced on `POST /auth/change-password`: min 10 chars + must include uppercase, lowercase, digit, and special character. Login schema unchanged (allows existing stored passwords to log in; strength only required when choosing a new password).
+  - Bootstrap seed (`0001_bootstrap.sql`): default owner account (`owner@example.com`) now has `force_password_change = true`. Previously the owner was seeded without forced change — a public instance with the default credentials was accessible without any change prompt.
+
+  **Piece 4 — Config hardening:**
+  - `JWT_SECRET` minimum raised from 16 → 32 chars.
+  - Server refuses to start in `PROD` if `JWT_SECRET` equals the default dev value — prevents accidental deployment with a well-known secret.
+  - `ALLOWED_ORIGIN` env var added: when set, CORS header is locked to that origin. Unset in `TEST` (dev proxy keeps working); unset in `PROD` means no `Allow-Origin` header (browser cross-origin requests blocked). `.env.example` updated with guidance. Previously CORS was `Access-Control-Allow-Origin: *` unconditionally.
+
+  **Piece 5 — Server-side logout:**
+  - New `POST /auth/logout` (requires auth): increments `token_version`, immediately invalidating all existing JWTs for that user. Returns 204.
+  - Frontend `AppTopBar.tsx` logout now fires `POST /auth/logout` (fire-and-forget) before clearing localStorage. If the server call fails the user is still logged out locally — no user-visible breakage.
+
+- **Why:** App will be deployed on OCI free tier exposed to the internet. All items were identified in a pre-release security audit.
+- **Files:** `backend/src/app.ts`, `backend/src/server.ts`, `backend/src/config/env.ts`, `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/imports/import-session.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `backend/db/seeds/0001_bootstrap.sql`, `frontend/src/layout/AppTopBar.tsx`, `.env.example`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/CHANGE_HISTORY.md`.
+
+---
+
 ## 2026-04-14 (multi-user onboarding + RBAC audit)
 
 ### CR-108 — Multi-user onboarding: login accounts for household members

@@ -472,7 +472,7 @@ export async function createHouseholdMember(
     [input.firstName?.trim() ?? "", input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
 
   const userId = input.createLogin ? randomUUID() : null;
-  const passwordHash = input.createLogin ? bcrypt.hashSync(DEFAULT_MEMBER_PASSWORD, 10) : null;
+  const passwordHash = input.createLogin ? await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12) : null;
 
   try {
     await qBegin(async (tx) => {
@@ -682,7 +682,7 @@ export async function createLoginForMember(
   if (!existing.email?.trim()) return { ok: false, code: "EMAIL_REQUIRED" };
 
   const userId = randomUUID();
-  const passwordHash = bcrypt.hashSync(DEFAULT_MEMBER_PASSWORD, 10);
+  const passwordHash = await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12);
   try {
     await qBegin(async (tx) => {
       await tx.unsafe(

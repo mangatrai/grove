@@ -46,14 +46,20 @@ export interface LoginPayload {
   password: string;
 }
 
+/**
+ * Dummy hash used for constant-time comparison when the email is not found.
+ * Prevents user enumeration via response-time differences.
+ * Must use the same cost factor (12) as real hashes so compare timing stays consistent.
+ */
+const DUMMY_HASH = "$2a$12$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234";
+
 export async function login(payload: LoginPayload): Promise<string | null> {
   const user = await findUserByEmail(payload.email);
-  if (!user) {
-    return null;
-  }
 
-  const isValid = bcrypt.compareSync(payload.password, user.passwordHash);
-  if (!isValid) {
+  // Always run bcrypt (async) so response time is the same whether the email exists or not.
+  // This prevents timing-based user enumeration.
+  const isValid = await bcrypt.compare(payload.password, user?.passwordHash ?? DUMMY_HASH);
+  if (!user || !isValid) {
     return null;
   }
 
@@ -65,13 +71,13 @@ export async function login(payload: LoginPayload): Promise<string | null> {
       tokenVersion: user.tokenVersion
     },
     env.JWT_SECRET,
-    { expiresIn: "8h" }
+    { expiresIn: "8h", algorithm: "HS256" }
   );
 }
 
 export async function verifyToken(token: string): Promise<AuthUser | null> {
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as {
+    const payload = jwt.verify(token, env.JWT_SECRET, { algorithms: ["HS256"] }) as {
       sub: string;
       householdId: string;
       role: Role;
@@ -120,11 +126,11 @@ export async function changePassword(
   if (!row) {
     return { ok: false, code: "NOT_FOUND" };
   }
-  const matches = bcrypt.compareSync(currentPassword, row.password_hash);
+  const matches = await bcrypt.compare(currentPassword, row.password_hash);
   if (!matches) {
     return { ok: false, code: "INVALID_CURRENT_PASSWORD" };
   }
-  const nextHash = bcrypt.hashSync(newPassword, 10);
+  const nextHash = await bcrypt.hash(newPassword, 12);
   await qExec(
     `
   UPDATE app_user
@@ -135,6 +141,17 @@ export async function changePassword(
     userId
   );
   return { ok: true };
+}
+
+/**
+ * Invalidate all existing JWTs for a user by bumping token_version.
+ * Any token carrying the old version is rejected by verifyToken.
+ */
+export async function logoutUser(userId: string): Promise<void> {
+  await qExec(
+    `UPDATE app_user SET token_version = token_version + 1 WHERE id = ?`,
+    userId
+  );
 }
 
 export async function getForcePasswordChange(userId: string): Promise<boolean> {

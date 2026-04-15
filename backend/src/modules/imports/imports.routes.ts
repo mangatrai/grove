@@ -38,7 +38,11 @@ import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
 import { suggestAccountForOfx } from "./ofx-account-match.service.js";
 
-const upload = multer({ storage: multer.memoryStorage() });
+/** 50 MB per file, max 20 files per upload request. Prevents memory-based DoS. */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024, files: 20 }
+});
 
 const createSessionSchema = z.object({
   sourceType: z.enum(["upload", "watch_folder"]).default("upload")
