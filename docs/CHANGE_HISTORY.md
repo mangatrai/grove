@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-15 (continued)
+
+### SEC-005 — Self-service password reset (owner/admin resets member password)
+- **Type:** CR (security / UX)
+- **What:**
+  - **`household.service.ts`:** `resetMemberPassword(householdId, memberId)` — generates a random 12-char temporary password (3×4 alphanum groups joined by `-`, guaranteed upper+lower+digit+special), hashes it at rounds 12, sets `force_password_change = true`, bumps `token_version` (invalidates existing JWTs). Returns `{ tempPassword }` to the caller.
+  - **`household.routes.ts`:** `POST /household/members/:memberId/reset-password` (owner/admin only). 404 if member not found; 409 if member has no login account.
+  - **`SettingsPage.tsx`:** "Reset password" button next to "✓ Has login account" for each member. Clicking opens a `ConfirmDialog` warning. On confirm, calls the API and shows a modal with the temporary password (monospace, `user-select: all` for easy copy). Member's session is invalidated immediately; they must change the password on next login.
+- **Why:** Operators previously had to use the database directly to reset a forgotten password. This closes the last operator-managed account flow.
+- **Files:** `household.service.ts`, `household.routes.ts`, `SettingsPage.tsx`; docs: `CHANGE_HISTORY.md`, `docs/API_HOUSEHOLD.md`, `openapi/openapi.yaml`
+
 ## 2026-04-15 (security hardening continued)
 
 ### CR-109 (slice 5) — RBAC redesign: member-scoped export + frontend Belongs-To pre-fill

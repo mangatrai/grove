@@ -16,7 +16,8 @@ import {
   listHouseholdMembers,
   patchCurrentUserProfile,
   patchHouseholdMember,
-  patchHouseholdSettings
+  patchHouseholdSettings,
+  resetMemberPassword
 } from "./household.service.js";
 
 export const householdRouter = Router();
@@ -235,6 +236,24 @@ householdRouter.post("/members/:memberId/create-login", requireRole(["owner", "a
     if (out.code === "EMAIL_CONFLICT") { res.status(409).json({ message: "Email already in use by another account", code: out.code }); return; }
   }
   res.status(201).json({ message: "Login account created. Default password: ChangeMe123!" });
+});
+
+householdRouter.post("/members/:memberId/reset-password", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid member id" });
+    return;
+  }
+  const out = await resetMemberPassword(req.authUser!.householdId, params.data.memberId);
+  if (!out.ok) {
+    if (out.code === "NO_LOGIN") {
+      res.status(409).json({ message: "Member does not have a login account", code: out.code });
+      return;
+    }
+    res.status(404).json({ message: "Member not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ tempPassword: out.tempPassword });
 });
 
 const deleteMemberBodySchema = z.object({

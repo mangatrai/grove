@@ -103,6 +103,14 @@ paths:
       tags: [household]
       summary: Remove member (admin). Deletes household_membership + person_profile. Returns 409 HAS_LOGIN_ACCOUNT when member has a linked login.
       security: [{ bearerAuth: [] }]
+  /household/members/{memberId}/reset-password:
+    post:
+      tags: [household]
+      summary: Reset member login password (owner/admin). Generates temp password, sets force_password_change, invalidates existing JWTs.
+      description: >-
+        Returns { tempPassword } once (plaintext, not stored). Member must change on next login.
+        404 if member not found; 409 NO_LOGIN if member has no login account.
+      security: [{ bearerAuth: [] }]
   /categories:
     get:
       tags: [categories]

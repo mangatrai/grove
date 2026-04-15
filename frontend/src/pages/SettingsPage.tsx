@@ -214,6 +214,9 @@ export function SettingsPage() {
   const [removeMemberDeleteLogin, setRemoveMemberDeleteLogin] = useState(false);
   const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
   const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
+  const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
+  const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
+  const [resetPasswordResult, setResetPasswordResult] = useState<{ memberId: string; tempPassword: string } | null>(null);
   const [passwordDraft, setPasswordDraft] = useState({
     currentPassword: "",
     newPassword: "",
@@ -714,6 +717,24 @@ export function SettingsPage() {
     }
   }
 
+  async function confirmResetPassword(memberId: string) {
+    setResetPasswordBusy(true);
+    setMembersError(null);
+    try {
+      const data = await apiJson<{ tempPassword: string }>(
+        `/household/members/${encodeURIComponent(memberId)}/reset-password`,
+        { method: "POST" }
+      );
+      setResetPasswordForId(null);
+      setResetPasswordResult({ memberId, tempPassword: data.tempPassword });
+    } catch (e: unknown) {
+      setMembersError(e instanceof Error ? e.message : "Could not reset password");
+      setResetPasswordForId(null);
+    } finally {
+      setResetPasswordBusy(false);
+    }
+  }
+
   async function saveHouseholdMembers() {
     if (!token) {
       return;
@@ -1152,8 +1173,19 @@ export function SettingsPage() {
                     <div style={{ marginTop: "0.4rem", display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                       {member.id ? (
                         member.linkedUserId ? (
-                          <span style={{ fontSize: "0.8rem", color: "var(--color-success, #15803d)", fontWeight: 600 }}>
-                            ✓ Has login account
+                          <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                            <span style={{ fontSize: "0.8rem", color: "var(--color-success, #15803d)", fontWeight: 600 }}>
+                              ✓ Has login account
+                            </span>
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: "0.78rem", padding: "0.15rem 0.5rem" }}
+                              disabled={resetPasswordBusy}
+                              onClick={() => setResetPasswordForId(member.id!)}
+                            >
+                              Reset password
+                            </button>
                           </span>
                         ) : (
                           <>
@@ -1595,6 +1627,51 @@ export function SettingsPage() {
         onClose={() => { setRemoveMemberConfirm(null); setRemoveMemberDataCount(null); }}
         onConfirm={() => confirmRemoveHouseholdMember()}
       />
+      <ConfirmDialog
+        opened={resetPasswordForId !== null}
+        title="Reset member password"
+        message={
+          <p style={{ fontSize: "0.9rem", margin: 0 }}>
+            This will generate a new temporary password and immediately invalidate their current session.
+            They will be required to change it on next login.
+          </p>
+        }
+        confirmLabel={resetPasswordBusy ? "Resetting…" : "Reset password"}
+        onClose={() => setResetPasswordForId(null)}
+        onConfirm={() => { if (resetPasswordForId) void confirmResetPassword(resetPasswordForId); }}
+      />
+      {resetPasswordResult !== null ? (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center"
+        }}>
+          <div style={{
+            background: "var(--color-surface, #fff)", borderRadius: 10, padding: "1.5rem 2rem",
+            maxWidth: 420, width: "90%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)"
+          }}>
+            <h3 style={{ margin: "0 0 0.75rem", fontSize: "1.05rem" }}>Temporary password</h3>
+            <p style={{ margin: "0 0 1rem", fontSize: "0.9rem", color: "var(--color-text-muted)" }}>
+              Share this with the member. They must change it on first login.
+            </p>
+            <div style={{
+              fontFamily: "monospace", fontSize: "1.2rem", letterSpacing: "0.05em",
+              padding: "0.6rem 1rem", background: "var(--color-bg, #f5f5f5)",
+              border: "1px solid var(--color-border, #ddd)", borderRadius: 6,
+              userSelect: "all", marginBottom: "1.25rem"
+            }}>
+              {resetPasswordResult.tempPassword}
+            </div>
+            <button
+              type="button"
+              onClick={() => setResetPasswordResult(null)}
+              style={{ width: "100%" }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -109,3 +109,18 @@ Removes a household member. Deletes both the `household_membership` and `person_
 **204** — deleted.  
 **404** — member not found.  
 **409** — member has a login account (`HAS_LOGIN_ACCOUNT`).
+
+### `POST /household/members/:memberId/reset-password`
+
+**Auth:** Bearer JWT. **Role:** `owner` or `admin`.
+
+Generates a new random temporary password for a member's login account, stores it (bcrypt rounds 12), sets `force_password_change = true`, and invalidates all existing JWTs for that member (bumps `token_version`). Returns the plaintext temporary password **once** — it is not stored and cannot be retrieved again.
+
+**200:**
+
+```json
+{ "tempPassword": "aB3x-Kp7z-M2wQ" }
+```
+
+**404:** member not found for this household.  
+**409:** `NO_LOGIN` — member does not have a login account (use `POST /household/members/:memberId/create-login` first).

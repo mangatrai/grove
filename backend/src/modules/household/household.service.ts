@@ -702,3 +702,45 @@ export async function createLoginForMember(
   }
   return { ok: true };
 }
+
+/**
+ * Generate a random temporary password: 3 groups of 4 alphanumeric chars joined by '-'.
+ * e.g. "aB3x-Kp7z-M2wQ". Satisfies the strength regex (upper+lower+digit+special via '-').
+ */
+function generateTempPassword(): string {
+  const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const pick = () => Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  let pw: string;
+  do {
+    pw = `${pick()}-${pick()}-${pick()}`;
+  } while (!/[A-Z]/.test(pw) || !/[a-z]/.test(pw) || !/[0-9]/.test(pw));
+  return pw;
+}
+
+export async function resetMemberPassword(
+  householdId: string,
+  memberId: string
+): Promise<{ ok: true; tempPassword: string } | { ok: false; code: "NOT_FOUND" | "NO_LOGIN" }> {
+  const row = await qGet<{ linked_user_id: string | null }>(
+    `SELECT p.linked_user_id
+     FROM person_profile p
+     WHERE p.household_id = ? AND p.id = ?
+     LIMIT 1`,
+    householdId,
+    memberId
+  );
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+  if (!row.linked_user_id) return { ok: false, code: "NO_LOGIN" };
+
+  const tempPassword = generateTempPassword();
+  const passwordHash = await bcrypt.hash(tempPassword, 12);
+  await qExec(
+    `UPDATE app_user
+     SET password_hash = ?, force_password_change = true, token_version = token_version + 1
+     WHERE id = ? AND household_id = ?`,
+    passwordHash,
+    row.linked_user_id,
+    householdId
+  );
+  return { ok: true, tempPassword };
+}
