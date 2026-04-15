@@ -3,8 +3,8 @@ import { apiJson, setToken } from "../api";
 
 /**
  * Guest landing at `/` — full-screen split hero + clean sign-in card.
- * "Request access" and "Forgot password" are lightweight text links — no
- * separate tabs or full stub forms (those are backlog CRs).
+ * "Forgot password" shows an inline tip directing the user to their admin;
+ * the admin resets passwords from Settings → Members → Reset password.
  */
 export function HomePage() {
   const [email, setEmail] = useState(
@@ -15,6 +15,7 @@ export function HomePage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [showForgotTip, setShowForgotTip] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -171,14 +172,28 @@ export function HomePage() {
                   ·
                 </span>
                 <span className="home-landing__auth-link-item">
-                  <a
-                    href="mailto:admin@household.local"
+                  <button
+                    type="button"
                     className="home-landing__auth-link"
-                    title="Ask your household admin to reset your password in Settings → Security"
+                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                    onClick={() => setShowForgotTip((v) => !v)}
                   >
                     Forgot password?
-                  </a>
+                  </button>
                 </span>
+                {showForgotTip ? (
+                  <div style={{
+                    marginTop: "0.6rem", padding: "0.55rem 0.75rem",
+                    background: "var(--color-surface-alt, #f0f4ff)",
+                    border: "1px solid var(--color-border, #c7d2e8)",
+                    borderRadius: 6, fontSize: "0.82rem",
+                    color: "var(--color-text, #1e293b)", lineHeight: 1.5
+                  }}>
+                    Ask your household admin to reset your password.
+                    They can do this from <strong>Settings → Members → Reset password</strong>.
+                    You'll receive a temporary password and will be prompted to change it on first login.
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

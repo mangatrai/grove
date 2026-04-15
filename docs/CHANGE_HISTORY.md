@@ -20,6 +20,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (continued)
 
+### UX-SEC-005 — Login page "Forgot password?" wired to real reset flow
+- **Type:** UX
+- **What:** "Forgot password?" on the login page was a dead `mailto:admin@household.local` stub. Replaced with a toggle button that shows an inline tip: "Ask your household admin to reset your password from Settings → Members → Reset password." Works in conjunction with SEC-005 (reset-password endpoint). `USER_GUIDE.md` updated to document login account management (create/reset password from Settings) and remove stale "operator must manage at DB level" note.
+- **Files:** `HomePage.tsx`, `USER_GUIDE.md`
+
 ### SEC-005 — Self-service password reset (owner/admin resets member password)
 - **Type:** CR (security / UX)
 - **What:**

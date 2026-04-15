@@ -28,7 +28,7 @@ Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlo
 Open **Account → Settings** from the top bar.
 
 - **Profile:** name, avatar, visibility, and related preferences.
-- **Password:** change your password (existing sessions are invalidated after a successful change).
+- **Password:** change your own password (existing sessions are invalidated after a successful change). Owners and admins can also **reset a member's password** from the Household tab — useful when a member forgets theirs.
 - **Household / finances:** monthly savings target, household member roster, income and employer setup (used for payslips), and other household-level options.
 - **Connected accounts:** add or edit **financial accounts** (bank, card, etc.). Pick an institution label, parser profile where applicable, account mask (e.g. last four digits), and **belongs-to** (household vs a specific member) so imports and reports attribute activity correctly.
 - **Custom institutions:** you can add household-specific institution names that complement the built-in list.
@@ -42,13 +42,17 @@ The **Household** tab lets you maintain a roster of the people who live in and s
 
 **Adding a member:** fill in at least a first name, choose a role and relationship, and click **Save household**. Click **Add another row** to stage multiple new members before saving. Each saved member row shows a trash icon — click it to remove that member (a confirmation dialog appears; removal is permanent).
 
-**Removing a member:** uses the trash icon at the right of each saved row. If a member has a login account (they can sign in), removal is blocked — a login account must be deactivated separately by the instance operator.
+**Removing a member:** uses the trash icon at the right of each saved row. A confirmation dialog appears; removal is permanent. If the member has a login account, check **Also delete their login account** to remove it at the same time.
+
+**Login accounts:** Each saved member row shows whether they have a login account ("✓ Has login account"). From this row, owners and admins can:
+- **Create login** — creates a login account with a default temporary password; the member must change it on first login.
+- **Reset password** — generates a new temporary password, immediately invalidates the member's current session, and sets `force_password_change`. Use this when a member forgets their password. Share the temporary password with them out-of-band; they will be prompted to change it on next login. This is also what the **Forgot password?** link on the login page directs users to request.
 
 **Roles:**
 - `head` — household head; has ownership semantics over accounts and income attributed to them.
 - `member` — any other household member.
 
-> **Note on login accounts vs household members:** These are separate concepts. A household _member_ is a person profile used for attribution. A _login user_ (`app_user`) is an account that can authenticate to the app. Currently login users are created by the operator at the database level (see [`RUNBOOK.md`](RUNBOOK.md)); the member management UI manages profiles, not login credentials.
+> **Note on login accounts vs household members:** These are separate concepts. A household _member_ is a person profile used for attribution. A _login user_ is an account that can authenticate to the app. Login accounts are managed from **Settings → Household** — no database access required.
 
 ## Importing statements
 
