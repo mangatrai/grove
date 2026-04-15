@@ -69,7 +69,7 @@ const createBodySchema = z
     { message: "Provide pattern or patterns (multi-line / comma-separated)" }
   );
 
-categoryRulesRouter.post("/", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = createBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -137,7 +137,7 @@ const bulkHouseholdSchema = z.object({
   rules: z.array(bulkHouseholdRowSchema).min(1).max(2000)
 });
 
-categoryRulesRouter.post("/bulk", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/bulk", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = bulkHouseholdSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -254,7 +254,7 @@ const recategorizeSchema = z.object({
   mode: z.enum(["uncategorized_only", "all"]).default("uncategorized_only")
 });
 
-categoryRulesRouter.post("/recategorize", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/recategorize", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = recategorizeSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -276,7 +276,7 @@ const fromLedgerSchema = z.object({
   enabled: z.boolean().optional().default(true)
 });
 
-categoryRulesRouter.post("/from-ledger", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.post("/from-ledger", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = fromLedgerSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -334,7 +334,7 @@ const patchSchema = z
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
-categoryRulesRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.patch("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = patchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -400,13 +400,13 @@ categoryRulesRouter.delete("/builtin/:id", requireRole(["owner", "admin"]), asyn
 });
 
 /** Delete all household rules for the signed-in home (built-in globals unchanged). Must be registered before /:id. */
-categoryRulesRouter.delete("/household", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.delete("/household", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const { deleted } = await deleteAllCategoryRulesForHousehold(householdId);
   res.status(200).json({ deleted });
 });
 
-categoryRulesRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+categoryRulesRouter.delete("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const out = await deleteCategoryRuleForHousehold(householdId, req.params.id);
   if (!out.ok) {

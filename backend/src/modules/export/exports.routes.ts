@@ -5,6 +5,7 @@ import multer from "multer";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import { resolveDataPath } from "../../paths.js";
 import {
   getExportJob,
@@ -46,9 +47,10 @@ exportsRouter.use(requireAuth);
 
 startExportCleanupSchedule();
 
-/** Async restore from export bundle ZIP. */
+/** Async restore from export bundle ZIP. Owner only — wipes and replaces all household data. */
 exportsRouter.post(
   "/household/import",
+  requireRole(["owner"]),
   restoreUpload.single("file"),
   async (req: AuthenticatedRequest, res) => {
     const householdId = req.authUser!.householdId;
@@ -98,7 +100,7 @@ exportsRouter.get("/import/:jobId", async (req: AuthenticatedRequest, res) => {
   });
 });
 
-exportsRouter.post("/household", async (req: AuthenticatedRequest, res) => {
+exportsRouter.post("/household", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const userId = req.authUser!.userId;
   if (!allowHouseholdExport(userId)) {

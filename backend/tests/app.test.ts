@@ -81,6 +81,35 @@ describe("auth and rbac baseline", () => {
       .set("authorization", `Bearer ${token}`)
       .send({ monthlySavingsTargetUsd: 100 });
     expect(patchRes.status).toBe(403);
+
+    // RBAC lock-down: members must not be able to trigger import/category/export writes
+    const importSessionRes = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    expect(importSessionRes.status).toBe(403);
+
+    const categoryCreateRes = await request(app)
+      .post("/categories")
+      .set("authorization", `Bearer ${token}`)
+      .send({ name: "Test" });
+    expect(categoryCreateRes.status).toBe(403);
+
+    const ruleCreateRes = await request(app)
+      .post("/categories/rules")
+      .set("authorization", `Bearer ${token}`)
+      .send({ pattern: "test", matchType: "contains", categoryId: "00000000-0000-0000-0000-000000000001" });
+    expect(ruleCreateRes.status).toBe(403);
+
+    const exportStartRes = await request(app)
+      .post("/exports/household")
+      .set("authorization", `Bearer ${token}`);
+    expect(exportStartRes.status).toBe(403);
+
+    const restoreRes = await request(app)
+      .post("/exports/household/import")
+      .set("authorization", `Bearer ${token}`);
+    expect(restoreRes.status).toBe(403);
   });
 });
 

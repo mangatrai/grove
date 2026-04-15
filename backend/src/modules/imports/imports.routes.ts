@@ -151,7 +151,7 @@ function mapDeleteImportFileFailureToStatus(failure: DeleteImportFileFailure): n
 export const importsRouter = Router();
 importsRouter.use(requireAuth);
 
-importsRouter.post("/sessions", async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = createSessionSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -179,6 +179,7 @@ importsRouter.get("/sessions", async (req: AuthenticatedRequest, res) => {
 
 importsRouter.post(
   "/sessions/:sessionId/files",
+  requireRole(["owner", "admin"]),
   upload.array("files"),
   async (req: AuthenticatedRequest, res) => {
     const files = req.files as Express.Multer.File[] | undefined;
@@ -202,7 +203,7 @@ importsRouter.post(
   }
 );
 
-importsRouter.patch("/sessions/:sessionId/status", async (req: AuthenticatedRequest, res) => {
+importsRouter.patch("/sessions/:sessionId/status", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = sessionStatusSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -356,6 +357,7 @@ importsRouter.post("/institutions/custom", requireRole(["owner", "admin"]), asyn
 
 importsRouter.patch(
   "/sessions/:sessionId/files/:fileId",
+  requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
     const parsed = fileBindingSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
@@ -389,7 +391,7 @@ importsRouter.patch(
   }
 );
 
-importsRouter.delete("/sessions/:sessionId/files/:fileId", async (req: AuthenticatedRequest, res) => {
+importsRouter.delete("/sessions/:sessionId/files/:fileId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const result = await deleteImportSessionFile(
     req.params.sessionId,
     req.params.fileId,
@@ -436,7 +438,7 @@ importsRouter.get("/sessions/:sessionId", async (req: AuthenticatedRequest, res)
   });
 });
 
-importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/parse", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = parseSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -466,7 +468,7 @@ importsRouter.post("/sessions/:sessionId/parse", async (req: AuthenticatedReques
   res.status(200).json(result.data);
 });
 
-importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const force = req.query.force === "1" || req.query.force === "true";
   try {
     const data = await reconcilePayslipAsyncImportSession(req.params.sessionId, req.authUser!.householdId, {
@@ -482,7 +484,7 @@ importsRouter.post("/sessions/:sessionId/reconcile-payslip-async", async (req: A
   }
 });
 
-importsRouter.post("/sessions/:sessionId/canonicalize", async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/canonicalize", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const result = await canonicalizeImportSession(req.params.sessionId, req.authUser!.householdId);
   if (!result.ok) {
     if (result.code === "NOT_FOUND") {
@@ -500,7 +502,7 @@ importsRouter.post("/sessions/:sessionId/canonicalize", async (req: Authenticate
   res.status(200).json(result.data);
 });
 
-importsRouter.post("/sessions/:sessionId/undo-import", async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/undo-import", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const result = await rollbackImportSessionLedger(req.params.sessionId, req.authUser!.householdId);
   if (!result.ok) {
     res.status(mapRollbackFailureToStatus(result)).json({
@@ -567,7 +569,7 @@ const ofxConfirmSchema = z.object({
  * POST /imports/sessions/:sessionId/ofx-confirm
  * Binds the file, runs parse, then canonicalizes. Returns canonicalize result.
  */
-importsRouter.post("/sessions/:sessionId/ofx-confirm", async (req: AuthenticatedRequest, res) => {
+importsRouter.post("/sessions/:sessionId/ofx-confirm", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = ofxConfirmSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });

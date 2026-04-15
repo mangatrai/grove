@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   createHouseholdCategory,
   deleteHouseholdCategory,
@@ -26,7 +27,7 @@ const createBodySchema = z.object({
   parentId: z.union([z.string().uuid(), z.null()]).optional().default(null)
 });
 
-categoriesRouter.post("/", async (req: AuthenticatedRequest, res) => {
+categoriesRouter.post("/", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = createBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -54,7 +55,7 @@ const patchBodySchema = z.object({
   parentId: z.union([z.string().uuid(), z.null()]).optional()
 });
 
-categoriesRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
+categoriesRouter.patch("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = patchBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
@@ -117,7 +118,7 @@ categoriesRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
   res.status(200).json({ category: out.data });
 });
 
-categoriesRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+categoriesRouter.delete("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const scope = await getCategoryHouseholdId(req.params.id);
   if (scope === undefined) {

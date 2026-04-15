@@ -110,17 +110,18 @@ paths:
       security: [{ bearerAuth: [] }]
     post:
       tags: [categories]
-      summary: Create household-owned category
+      summary: Create household-owned category (owner or admin)
+      description: Role owner or admin required; members receive 403.
       security: [{ bearerAuth: [] }]
   /categories/{categoryId}:
     patch:
       tags: [categories]
-      summary: Update category (household row, or built-in for owner or admin)
-      description: Built-in defaults (household_id null) require owner or admin; changes apply to this database.
+      summary: Update category — owner or admin only
+      description: Built-in defaults (household_id null) require owner or admin; household categories also require owner or admin.
       security: [{ bearerAuth: [] }]
     delete:
       tags: [categories]
-      summary: Delete household-owned category (built-in returns 403 BUILTIN_READONLY)
+      summary: Delete household-owned category — owner or admin only (built-in returns 403 BUILTIN_READONLY)
       security: [{ bearerAuth: [] }]
   /categories/rules:
     get:
@@ -129,23 +130,26 @@ paths:
       security: [{ bearerAuth: [] }]
     post:
       tags: [categories]
-      summary: Create category rule
+      summary: Create category rule (owner or admin)
       description: >-
+        Role owner or admin required; members receive 403.
         Body may include amountScope (any, credit_only, debit_only); defaults to any.
         Matches multi-pattern field `patterns` for batch of rules sharing the same scope.
       security: [{ bearerAuth: [] }]
   /categories/rules/household:
     delete:
       tags: [categories]
-      summary: Delete all household category rules
+      summary: Delete all household category rules (owner or admin)
       description: >-
+        Role owner or admin required; members receive 403.
         Removes every row in category_rule for this household. Does not affect built-in global rules.
       security: [{ bearerAuth: [] }]
   /categories/rules/bulk:
     post:
       tags: [categories]
-      summary: Bulk create household category rules
+      summary: Bulk create household category rules (owner or admin)
       description: >-
+        Role owner or admin required; members receive 403.
         Best-effort batch create. Each rule needs pattern, matchType, and categoryId or categoryPath.
         Optional amountScope per row (defaults to any). Response 200 with created rules and per-row errors.
       security: [{ bearerAuth: [] }]
@@ -179,13 +183,13 @@ paths:
   /categories/rules/recategorize:
     post:
       tags: [categories]
-      summary: Re-run classification rules against existing canonical transactions
-      description: Reclassifies posted transactions that have Unknown or no category using the current rule set.
+      summary: Re-run classification rules against existing canonical transactions (owner or admin)
+      description: Reclassifies posted transactions that have Unknown or no category using the current rule set. Role owner or admin required.
       security: [{ bearerAuth: [] }]
   /categories/rules/from-ledger:
     post:
       tags: [categories]
-      summary: Create a rule from a ledger transaction (merchant → category shortcut)
+      summary: Create a rule from a ledger transaction — owner or admin only
       security: [{ bearerAuth: [] }]
   /categories/rules/rule-learning-preview:
     post:
@@ -195,12 +199,12 @@ paths:
   /categories/rules/{ruleId}:
     patch:
       tags: [categories]
-      summary: Update rule
+      summary: Update rule (owner or admin)
       security: [{ bearerAuth: [] }]
     delete:
       tags: [categories]
-      summary: Delete household category rule
-      description: Permanently removes a household rule (built-in rules use /categories/rules/builtin/{id}).
+      summary: Delete household category rule (owner or admin)
+      description: Permanently removes a household rule (built-in rules use /categories/rules/builtin/{id}). Role owner or admin required.
       security: [{ bearerAuth: [] }]
   /imports/accounts:
     get:
@@ -238,7 +242,8 @@ paths:
       security: [{ bearerAuth: [] }]
     post:
       tags: [imports]
-      summary: Create import session
+      summary: Create import session (owner or admin)
+      description: Role owner or admin required; members receive 403.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}:
     get:
@@ -248,7 +253,8 @@ paths:
   /imports/sessions/{sessionId}/status:
     patch:
       tags: [imports]
-      summary: Transition session status
+      summary: Transition session status (owner or admin)
+      description: Role owner or admin required; members receive 403.
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/summary:
     get:
@@ -258,16 +264,16 @@ paths:
   /imports/sessions/{sessionId}/files:
     post:
       tags: [imports]
-      summary: Upload files to session (multipart field `files`)
+      summary: Upload files to session — owner or admin only (multipart field `files`)
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/files/{fileId}:
     patch:
       tags: [imports]
-      summary: Bind file to account and parser
+      summary: Bind file to account and parser (owner or admin)
       security: [{ bearerAuth: [] }]
     delete:
       tags: [imports]
-      summary: Remove a staged file from the session
+      summary: Remove a staged file from the session (owner or admin)
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/files/{fileId}/ofx-suggestion:
     get:

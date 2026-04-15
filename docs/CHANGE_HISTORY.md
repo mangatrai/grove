@@ -20,6 +20,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## 2026-04-15 (security hardening continued)
 
+### SEC-004 — RBAC lock-down: imports, categories, rules, and exports restricted to owner/admin
+- **Type:** FIX + CR (security backlog item)
+- **What:** Members previously had broad write access. Now locked:
+  - **Imports** (`imports.routes.ts`): all write ops (POST /sessions, file upload, file bind, file delete, status transition, parse, canonicalize, undo-import, ofx-confirm, reconcile-payslip) → `owner|admin`
+  - **Categories** (`categories.routes.ts`): POST, PATCH /:id, DELETE /:id → `owner|admin`
+  - **Category rules** (`category-rules.routes.ts`): POST, POST /bulk, PATCH /:id, DELETE /:id, DELETE /household, POST /recategorize, POST /from-ledger → `owner|admin`
+  - **Exports** (`exports.routes.ts`): POST /household (start export) → `owner|admin`; POST /household/import (restore, wipes all data) → `owner` only
+  - Read-only routes, `POST /categories/rules/test`, and `POST /categories/rules/rule-learning-preview` remain open to all authenticated users
+  - Ledger writes (categorize, trash, manual entry) remain open — household members need to triage transactions
+- **Tests:** Extended `app.test.ts` RBAC baseline to assert 403 on import session create, category create, rule create, export start, and restore
+- **Files:** `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/category/categories.routes.ts`, `backend/src/modules/category/category-rules.routes.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/tests/app.test.ts`
+
 ### UX-SEC-002 — First-login banner for owner forced password change
 - **Type:** UX fix
 - **What:** When an owner account with `force_password_change=true` is hard-redirected to `/settings?tab=security`, they now see an amber banner: "First login: Your account was created with a temporary password. Please set a permanent password below before using the app." Previously the redirect was silent — no explanation for why every click landed on the settings page.

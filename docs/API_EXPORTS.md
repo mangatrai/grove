@@ -4,7 +4,7 @@ Authenticated household backup as a **ZIP** (async job), and **destructive** res
 
 ## `POST /exports/household`
 
-**Auth:** Bearer JWT.
+**Auth:** Bearer JWT. **Role:** `owner` or `admin` (members receive 403).
 
 Queues an **export** job. Response is immediate (**202**); the ZIP is built in the background.
 
@@ -43,7 +43,7 @@ Returns **`application/zip`** when the job finished successfully and the file ex
 
 ## `POST /exports/household/import`
 
-**Auth:** Bearer JWT.
+**Auth:** Bearer JWT. **Role:** `owner` only (admins and members receive 403). Restore wipes all household data — owner-only by design.
 
 **Content-Type:** `multipart/form-data` with a single field **`file`** — must be a **`.zip`** export bundle (from download above or a compatible older bundle).
 
