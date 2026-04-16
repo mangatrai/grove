@@ -405,8 +405,78 @@ paths:
   /resolution/bulk-apply-category:
     post:
       tags: [resolution]
-      summary: Bulk apply category to unknown-category items
+      summary: Bulk apply category to unknown-category items (by explicit item IDs)
       security: [{ bearerAuth: [] }]
+  /resolution/pattern-preview:
+    post:
+      tags: [resolution]
+      summary: Preview count of open unknown-category items matching a description pattern
+      description: >
+        Returns the count of open unknown_category resolution items whose linked transaction
+        description contains descriptionPattern (case-insensitive). Also returns up to 5 example descriptions.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [descriptionPattern]
+              properties:
+                descriptionPattern:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+      responses:
+        '200':
+          description: Match preview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched:
+                    type: integer
+                  descriptions:
+                    type: array
+                    items:
+                      type: string
+  /resolution/bulk-apply-by-pattern:
+    post:
+      tags: [resolution]
+      summary: Apply category to all open unknown-category items matching a description pattern
+      description: >
+        Finds all open unknown_category resolution items whose linked transaction description
+        contains descriptionPattern (case-insensitive), sets categoryId on each transaction,
+        and marks each resolution item resolved.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [descriptionPattern, categoryId]
+              properties:
+                descriptionPattern:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                categoryId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Number of items updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+        '400':
+          description: Invalid category or payload
   /resolution/summary:
     get:
       tags: [resolution]

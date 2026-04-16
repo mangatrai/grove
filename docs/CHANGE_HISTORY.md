@@ -18,6 +18,38 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-15 (dashboard audit + pre-release polish)
+
+### UX-DASH-001 — Dashboard audit: net worth widget, budget progress, inflows table, resolution alert, chart labels
+- **Type:** UX
+- **What:**
+  - **Net worth widget** — Added a compact banner above the KPI grid that pulls from `GET /reports/balance-sheet` and shows assets, liabilities, and net worth with an "as of" date and a link to the full Net Worth page. Only renders when balance data is available.
+  - **Budget progress bar** — Added a color-coded progress bar for the current calendar month's budget (green → amber at 85% → red over budget) with spent/budgeted totals and a "Manage budget →" link. Only renders when a budget exists for the month. Links budget feature to the dashboard for discoverability.
+  - **Inflows by category: pie → table** — The inflows donut pie was replaced with a ranked table. Most households have 1–3 inflow categories (salary, interest); a donut with 2 slices is not useful. The table is sortable by amount and links to the ledger drill-down.
+  - **Resolution alert: all types** — The uncategorized alert previously only fired for `unknown_category`. It now surfaces all open resolution types: uncategorized, transfers needing pairing, and possible duplicates — each with its own "Review" link.
+  - **Chart labels: fixed 6-month scope** — Monthly trend charts (stacked outflows, monthly net) always show the trailing 6 months regardless of the period preset. Labels updated to say "trailing 6 months" and "Always shows the last 6 calendar months regardless of the period filter above" so users aren't confused when KPIs say "Last 7 days" but charts show 6 months.
+- **Files:** `frontend/src/pages/DashboardPage.tsx`
+
+### UX-IMPORT-001 — Disable unsupported parser profiles in file-binding UI
+- **Type:** UX
+- **What:** Parser profiles that are registered in the backend but not yet implemented (`capital_one_card_csv`, `adp_payslip_pdf`) were selectable in the file-binding dropdown, causing a server error on parse. Now they appear greyed out with "(not supported)" and a title tooltip explaining why. If a file is already bound to an unsupported profile, the format column shows a red warning instead of "Ready". `formatProfileLabel()` now delegates to `friendlyParserLabel()` so the dropdown shows human-readable labels.
+- **Why:** Prevents a jarring server error. Users should not be able to walk into a wall.
+- **Files:** `frontend/src/import/profileLabels.ts` (added `DISABLED_PROFILES` export), `frontend/src/pages/ImportWorkspacePage.tsx`
+
+### CR-110 — Rule learning wired to category edit in transaction list
+- **Type:** CR
+- **What:** When a user changes a transaction's category in the main ledger (non-review path), a "Create classification rule?" dialog now appears after the save completes (owner/admin only). Accepting calls `POST /categories/rules/from-ledger` with a contains match on the normalized description. Previously this dialog only appeared in the resolution-review expand panel (`unknown_category` flow); the main list picker never triggered it. `closeOnClickOutside` set to `true` so a quick "Not now" is low-friction.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`
+
+### CR-111 (BACKLOG-001) — Bulk resolve unknown-category items by description pattern
+- **Type:** CR
+- **What:**
+  - **Backend service:** `findUnknownCategoryItemsByDescriptionPattern` and `bulkApplyCategoryByDescriptionPattern` in `resolution.service.ts` — find all open `unknown_category` resolution items whose linked transaction description contains a pattern (case-insensitive LIKE), apply category, mark resolved.
+  - **Backend routes:** `POST /resolution/pattern-preview` (returns matched count + up to 5 example descriptions) and `POST /resolution/bulk-apply-by-pattern` (applies the category).
+  - **Frontend:** In the "Needs review" tab of TransactionsPage, a "Resolve all by merchant name…" button expands an inline form: pattern input with live preview count and examples, category picker, Apply button. Replaces 40 one-by-one resolves with 1 action.
+- **Why:** First import with multiple months of statements produces many repetitive `unknown_category` items for the same merchant. One-by-one resolution is unusable at scale.
+- **Files:** `backend/src/modules/resolution/resolution.service.ts`, `backend/src/modules/resolution/resolution.routes.ts`, `frontend/src/pages/TransactionsPage.tsx`; docs: `openapi/openapi.yaml`
+
 ## 2026-04-15 (continued)
 
 ### UX-SEC-005 — Login page "Forgot password?" wired to real reset flow

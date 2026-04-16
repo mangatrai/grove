@@ -14,7 +14,7 @@ import {
   type FinancialAccountLike,
   type IncomeInferenceContext
 } from "../import/inferParserProfile";
-import { friendlyParserLabel } from "../import/profileLabels";
+import { friendlyParserLabel, DISABLED_PROFILES } from "../import/profileLabels";
 
 const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
 const OFX_PARSER_ID = "ofx_transactions";
@@ -107,7 +107,7 @@ function buildAccountGroups(accounts: FinancialAccount[]): HierarchicalPickerGro
 }
 
 function formatProfileLabel(id: string): string {
-  return id.replace(/_/g, " ");
+  return friendlyParserLabel(id);
 }
 
 function accountById(accounts: FinancialAccount[], id: string): FinancialAccount | undefined {
@@ -1521,14 +1521,18 @@ export function ImportWorkspacePage() {
                 const showEmployerSelect =
                   householdEmployers.length > 1 &&
                   (PAYSLIP_PARSER_IDS.has(profileForRow) || isPayslipAccount);
-                const autoLine =
-                  inferred && savedProfile && profilesEquivalent(inferred, savedProfile) ? (
-                    <span className="success">Ready: {friendlyParserLabel(inferred)}</span>
-                  ) : savedProfile ? (
-                    <span>{friendlyParserLabel(savedProfile)}</span>
-                  ) : (
-                    <span className="muted">—</span>
-                  );
+                const disabledProfileReason = profileForRow ? DISABLED_PROFILES[profileForRow] : undefined;
+                const autoLine = disabledProfileReason ? (
+                  <span style={{ color: "var(--color-danger, #dc2626)", fontSize: "0.9rem" }}>
+                    {friendlyParserLabel(profileForRow)} — not supported yet, file will not be imported
+                  </span>
+                ) : inferred && savedProfile && profilesEquivalent(inferred, savedProfile) ? (
+                  <span className="success">Ready: {friendlyParserLabel(inferred)}</span>
+                ) : savedProfile ? (
+                  <span>{friendlyParserLabel(savedProfile)}</span>
+                ) : (
+                  <span className="muted">—</span>
+                );
 
                 return (
                   <tr key={f.id}>
@@ -1771,11 +1775,14 @@ export function ImportWorkspacePage() {
                               onChange={(e) => void onOverrideProfileChange(f.id, e.target.value)}
                             >
                               <option value="">— choose —</option>
-                              {profiles.map((p) => (
-                                <option key={p} value={p}>
-                                  {formatProfileLabel(p)}
-                                </option>
-                              ))}
+                              {profiles.map((p) => {
+                                const disabledReason = DISABLED_PROFILES[p];
+                                return (
+                                  <option key={p} value={p} disabled={!!disabledReason} title={disabledReason}>
+                                    {formatProfileLabel(p)}{disabledReason ? " (not supported)" : ""}
+                                  </option>
+                                );
+                              })}
                             </select>
                           </div>
                         </details>

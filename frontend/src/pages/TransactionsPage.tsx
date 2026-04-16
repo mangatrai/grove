@@ -354,6 +354,12 @@ export function TransactionsPage() {
   const [savingTrash, setSavingTrash] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
+  const [patternResolveOpen, setPatternResolveOpen] = useState(false);
+  const [patternDraft, setPatternDraft] = useState("");
+  const [patternCategoryId, setPatternCategoryId] = useState("");
+  const [patternPreview, setPatternPreview] = useState<{ matched: number; descriptions: string[] } | null>(null);
+  const [patternPreviewLoading, setPatternPreviewLoading] = useState(false);
+  const [patternResolving, setPatternResolving] = useState(false);
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -751,6 +757,46 @@ export function TransactionsPage() {
     }
   }
 
+  async function fetchPatternPreview(pattern: string) {
+    if (!pattern.trim()) {
+      setPatternPreview(null);
+      return;
+    }
+    setPatternPreviewLoading(true);
+    try {
+      const r = await apiJson<{ matched: number; descriptions: string[] }>("/resolution/pattern-preview", {
+        method: "POST",
+        body: JSON.stringify({ descriptionPattern: pattern.trim() })
+      });
+      setPatternPreview(r);
+    } catch {
+      setPatternPreview(null);
+    } finally {
+      setPatternPreviewLoading(false);
+    }
+  }
+
+  async function applyPatternResolve() {
+    if (!patternDraft.trim() || !patternCategoryId) return;
+    setPatternResolving(true);
+    setError(null);
+    try {
+      const r = await apiJson<{ updated: number }>("/resolution/bulk-apply-by-pattern", {
+        method: "POST",
+        body: JSON.stringify({ descriptionPattern: patternDraft.trim(), categoryId: patternCategoryId })
+      });
+      setPatternResolveOpen(false);
+      setPatternDraft("");
+      setPatternCategoryId("");
+      setPatternPreview(null);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk resolve by pattern failed");
+    } finally {
+      setPatternResolving(false);
+    }
+  }
+
   function startMemoEdit(id: string, currentMemo: string | null) {
     setEditingMemoId(id);
     setMemoDraft(currentMemo ?? "");
@@ -926,7 +972,7 @@ export function TransactionsPage() {
     categoryId: string | null,
     ownerScope?: "household" | "person",
     ownerPersonProfileId?: string | null
-  ) {
+  ): Promise<boolean> {
     setSavingId(txnId);
     setError(null);
     try {
@@ -940,8 +986,10 @@ export function TransactionsPage() {
       });
       forgetReviewDetail(txnId);
       await load();
+      return true;
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to update category");
+      return false;
     } finally {
       setSavingId(null);
     }
@@ -1488,6 +1536,101 @@ export function TransactionsPage() {
             </button>
           </div>
         ) : null}
+        {needsReviewTab ? (
+          <div style={{ marginBottom: "0.5rem" }}>
+            {!patternResolveOpen ? (
+              <button
+                type="button"
+                className="secondary"
+                style={{ fontSize: "0.85rem" }}
+                onClick={() => setPatternResolveOpen(true)}
+              >
+                Resolve all by merchant name…
+              </button>
+            ) : (
+              <div
+                style={{
+                  padding: "0.75rem 1rem",
+                  border: "1px solid var(--color-border, #e5e7eb)",
+                  borderRadius: "8px",
+                  background: "var(--color-surface-alt, #f9fafb)"
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: "0.5rem", fontSize: "0.92rem" }}>
+                  Resolve all matching a merchant name
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "flex-start" }}>
+                  <div style={{ flex: "1 1 14rem" }}>
+                    <label style={{ fontSize: "0.82rem", display: "block", marginBottom: "0.2rem" }} htmlFor="pattern-input">
+                      Description contains (case-insensitive)
+                    </label>
+                    <input
+                      id="pattern-input"
+                      type="text"
+                      value={patternDraft}
+                      placeholder="e.g. WHOLEFDS or Amazon"
+                      style={{ width: "100%" }}
+                      onChange={(e) => {
+                        setPatternDraft(e.target.value);
+                        void fetchPatternPreview(e.target.value);
+                      }}
+                    />
+                  </div>
+                  <div style={{ flex: "1 1 14rem" }}>
+                    <label style={{ fontSize: "0.82rem", display: "block", marginBottom: "0.2rem" }}>
+                      Assign category
+                    </label>
+                    <LedgerCategoryPicker
+                      categories={categories}
+                      value={patternCategoryId || null}
+                      disabled={patternResolving}
+                      onChange={(id) => setPatternCategoryId(id ?? "")}
+                      ariaLabel="Pattern resolve category"
+                    />
+                  </div>
+                </div>
+                {patternPreviewLoading ? (
+                  <p className="muted" style={{ margin: "0.4rem 0 0", fontSize: "0.82rem" }}>Checking…</p>
+                ) : patternPreview !== null ? (
+                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.82rem" }}>
+                    {patternPreview.matched === 0 ? (
+                      <span className="muted">No open uncategorized items match this pattern.</span>
+                    ) : (
+                      <>
+                        <strong>{patternPreview.matched}</strong> item{patternPreview.matched === 1 ? "" : "s"} will be resolved.
+                        {patternPreview.descriptions.length > 0 ? (
+                          <span className="muted"> Examples: {patternPreview.descriptions.slice(0, 3).join(", ")}{patternPreview.descriptions.length > 3 ? "…" : ""}</span>
+                        ) : null}
+                      </>
+                    )}
+                  </p>
+                ) : null}
+                <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.6rem" }}>
+                  <button
+                    type="button"
+                    disabled={patternResolving || !patternDraft.trim() || !patternCategoryId || patternPreview?.matched === 0}
+                    onClick={() => void applyPatternResolve()}
+                  >
+                    {patternResolving ? "Resolving…" : "Apply to all"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={patternResolving}
+                    onClick={() => {
+                      setPatternResolveOpen(false);
+                      setPatternDraft("");
+                      setPatternCategoryId("");
+                      setPatternPreview(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
         {trashTab && selectedTrashIds.size > 0 ? (
           <div className="transactions-bulk-bar row" role="status" aria-live="polite">
             <span className="muted">
@@ -1762,7 +1905,12 @@ export function TransactionsPage() {
                                     categories={categories}
                                     value={t.categoryId}
                                     disabled={savingId === t.id || savingBulk}
-                                    onChange={(v) => void updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId)}
+                                    onChange={(v) => void (async () => {
+                                      const ok = await updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId);
+                                      if (ok && v && v !== t.categoryId && (currentRole === "owner" || currentRole === "admin")) {
+                                        setRuleFromLedgerConfirm({ txnId: t.id, categoryId: v });
+                                      }
+                                    })()}
                                     ariaLabel={`Category for ${desc}`}
                                   />
                                   {needsReviewTab ? <CategoryClassificationHint meta={t.classificationMeta ?? null} /> : null}
@@ -2097,10 +2245,10 @@ export function TransactionsPage() {
       <ConfirmDialog
         opened={ruleFromLedgerConfirm !== null}
         title="Create classification rule?"
-        message="Create a household rule so similar descriptions map to this category? Uses a contains match on normalized text."
+        message={`Create a household rule so future transactions with similar descriptions are automatically categorized the same way? Uses a contains match on the normalized description.`}
         confirmLabel="Create rule"
         cancelLabel="Not now"
-        closeOnClickOutside={false}
+        closeOnClickOutside
         onClose={() => setRuleFromLedgerConfirm(null)}
         onConfirm={handleCreateRuleFromLedger}
       />

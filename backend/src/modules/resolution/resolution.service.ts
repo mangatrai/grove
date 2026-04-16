@@ -495,6 +495,59 @@ export interface BulkApplyCategoryError {
 }
 
 /**
+ * Find all open unknown_category resolution items whose linked transaction description
+ * contains `descPattern` (case-insensitive). Used for bulk-resolve-by-pattern preview + apply.
+ */
+export async function findUnknownCategoryItemsByDescriptionPattern(
+  householdId: string,
+  descPattern: string
+): Promise<{ id: string; targetId: string; description: string }[]> {
+  return qAll<{ id: string; targetId: string; description: string }>(
+    `SELECT ri.id, ri.target_id AS "targetId", tc.description
+       FROM resolution_item ri
+       INNER JOIN transaction_canonical tc ON tc.id = ri.target_id
+       WHERE ri.household_id = ?
+         AND ri.type = 'unknown_category'
+         AND ri.status = 'open'
+         AND LOWER(tc.description) LIKE LOWER(?)`,
+    householdId,
+    `%${descPattern.toLowerCase()}%`
+  );
+}
+
+/**
+ * Apply a category to all open unknown_category items matching a description pattern,
+ * and mark those resolution items resolved.
+ */
+export async function bulkApplyCategoryByDescriptionPattern(
+  householdId: string,
+  descPattern: string,
+  categoryId: string
+): Promise<{ ok: false; code: "INVALID_CATEGORY" } | { ok: true; updated: number }> {
+  if (!(await categoryUsableByHousehold(categoryId, householdId))) {
+    return { ok: false, code: "INVALID_CATEGORY" };
+  }
+  const items = await findUnknownCategoryItemsByDescriptionPattern(householdId, descPattern);
+  if (items.length === 0) {
+    return { ok: true, updated: 0 };
+  }
+  for (const item of items) {
+    await qExec(
+      `UPDATE transaction_canonical SET category_id = ? WHERE id = ? AND household_id = ?`,
+      categoryId,
+      item.targetId,
+      householdId
+    );
+    await qExec(
+      `UPDATE resolution_item SET status = 'resolved' WHERE id = ? AND household_id = ?`,
+      item.id,
+      householdId
+    );
+  }
+  return { ok: true, updated: items.length };
+}
+
+/**
  * Set category on posted transactions for `unknown_category` items and mark those items resolved.
  */
 export async function bulkApplyCategoryToUnknownItems(

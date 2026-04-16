@@ -4,10 +4,12 @@ import { z } from "zod";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
+  bulkApplyCategoryByDescriptionPattern,
   bulkApplyCategoryToUnknownItems,
   bulkUpdateResolutionStatusForHousehold,
   countOpenDuplicateAmbiguityNotOnLedger,
   countOpenResolutionItemsByType,
+  findUnknownCategoryItemsByDescriptionPattern,
   listResolutionItemsForHousehold,
   updateResolutionStatusForHousehold,
   type ResolutionItemTypeFilter
@@ -37,6 +39,43 @@ const bulkBodySchema = z.object({
 const bulkApplyCategorySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(200),
   categoryId: z.string().uuid()
+});
+
+const patternPreviewSchema = z.object({
+  descriptionPattern: z.string().min(1).max(200)
+});
+
+const bulkApplyByPatternSchema = z.object({
+  descriptionPattern: z.string().min(1).max(200),
+  categoryId: z.string().uuid()
+});
+
+/** Preview: how many open unknown_category items match the description pattern? */
+resolutionRouter.post("/pattern-preview", async (req: AuthenticatedRequest, res) => {
+  const parsed = patternPreviewSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const items = await findUnknownCategoryItemsByDescriptionPattern(householdId, parsed.data.descriptionPattern);
+  res.status(200).json({ matched: items.length, descriptions: items.slice(0, 5).map((i) => i.description) });
+});
+
+/** Apply a category to all open unknown_category items matching a description pattern. */
+resolutionRouter.post("/bulk-apply-by-pattern", async (req: AuthenticatedRequest, res) => {
+  const parsed = bulkApplyByPatternSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await bulkApplyCategoryByDescriptionPattern(householdId, parsed.data.descriptionPattern, parsed.data.categoryId);
+  if (!out.ok) {
+    res.status(400).json({ message: "Category is not available for this household", code: out.code });
+    return;
+  }
+  res.status(200).json({ updated: out.updated });
 });
 
 resolutionRouter.post("/bulk-apply-category", async (req: AuthenticatedRequest, res) => {

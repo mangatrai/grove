@@ -397,6 +397,20 @@ export function DashboardPage() {
     totalOpen: number;
     openDuplicateAmbiguityNotOnLedger?: number;
   } | null>(null);
+  const [netWorth, setNetWorth] = useState<{
+    assets: number | null;
+    liabilities: number | null;
+    netWorth: number | null;
+    asOf: string;
+  } | null>(null);
+  const [budgetSummary, setBudgetSummary] = useState<{
+    month: string;
+    exists: boolean;
+    totalBudgeted: number;
+    totalSpent: number;
+    remaining: number;
+    unbudgetedSpend: number;
+  } | null>(null);
   const [targetPreviewUsd, setTargetPreviewUsd] = useState(0);
   const [savingTarget, setSavingTarget] = useState(false);
 
@@ -477,6 +491,13 @@ export function DashboardPage() {
     void apiJson<{ openByType: Record<string, number>; totalOpen: number }>("/resolution/summary")
       .then((r) => setResolutionSummary(r))
       .catch(() => setResolutionSummary(null));
+    void apiJson<{ totals: { assets: number | null; liabilities: number | null; netWorth: number | null }; asOf: string }>("/reports/balance-sheet")
+      .then((r) => setNetWorth({ ...r.totals, asOf: r.asOf }))
+      .catch(() => setNetWorth(null));
+    const thisMonth = currentMonthStr();
+    void apiJson<{ month: string; exists: boolean; summary: { totalBudgeted: number; totalSpent: number; remaining: number; unbudgetedSpend: number } }>(`/budget/${thisMonth}`)
+      .then((r) => setBudgetSummary({ month: r.month, exists: r.exists, ...r.summary }))
+      .catch(() => setBudgetSummary(null));
   }, [preset, monthStr, asOf, accountId, ownerScope, ownerPersonProfileId, customAppliedFrom, customAppliedTo]);
 
   useEffect(() => {
@@ -688,32 +709,48 @@ export function DashboardPage() {
           </div>
           <p className="dashboard-scope-bar__hint muted">Applies to all figures and charts on this page.</p>
         </div>
-        {data && resolutionSummary && (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
-          <p
-            className="muted"
+        {data && resolutionSummary && resolutionSummary.totalOpen > 0 ? (
+          <div
             style={{
               padding: "0.65rem 0.85rem",
               borderRadius: "8px",
               border: "1px solid #bae6fd",
               background: "#f0f9ff",
-              marginBottom: "0.75rem"
+              marginBottom: "0.75rem",
+              fontSize: "0.92rem"
             }}
           >
-            <strong>{resolutionSummary.openByType.unknown_category}</strong> uncategorized —{" "}
-            <Link
-              to={`/transactions?${new URLSearchParams({
-                needsReview: "true",
-                resolutionType: "unknown_category",
-                dateFrom: data.range.start,
-                dateTo: data.range.end,
-                ...(accountId ? { accountId } : {}),
-                ...(ownerScope ? { ownerScope } : {}),
-                ...(ownerScope === "person" && ownerPersonProfileId ? { ownerPersonProfileId } : {})
-              }).toString()}`}
-            >
-              Review in Transactions
-            </Link>
-          </p>
+            {(resolutionSummary.openByType.unknown_category ?? 0) > 0 ? (
+              <div>
+                <strong>{resolutionSummary.openByType.unknown_category}</strong> uncategorized —{" "}
+                <Link
+                  to={`/transactions?${new URLSearchParams({
+                    needsReview: "true",
+                    resolutionType: "unknown_category",
+                    dateFrom: data.range.start,
+                    dateTo: data.range.end,
+                    ...(accountId ? { accountId } : {}),
+                    ...(ownerScope ? { ownerScope } : {}),
+                    ...(ownerScope === "person" && ownerPersonProfileId ? { ownerPersonProfileId } : {})
+                  }).toString()}`}
+                >
+                  Review in Transactions
+                </Link>
+              </div>
+            ) : null}
+            {(resolutionSummary.openByType.transfer_ambiguity ?? 0) > 0 ? (
+              <div style={{ marginTop: (resolutionSummary.openByType.unknown_category ?? 0) > 0 ? "0.3rem" : undefined }}>
+                <strong>{resolutionSummary.openByType.transfer_ambiguity}</strong> transfer{resolutionSummary.openByType.transfer_ambiguity === 1 ? "" : "s"} need pairing —{" "}
+                <Link to="/transactions?needsReview=true&resolutionType=transfer_ambiguity">Review transfers</Link>
+              </div>
+            ) : null}
+            {(resolutionSummary.openByType.duplicate_ambiguity ?? 0) > 0 ? (
+              <div style={{ marginTop: (resolutionSummary.openByType.unknown_category ?? 0) > 0 || (resolutionSummary.openByType.transfer_ambiguity ?? 0) > 0 ? "0.3rem" : undefined }}>
+                <strong>{resolutionSummary.openByType.duplicate_ambiguity}</strong> possible duplicate{resolutionSummary.openByType.duplicate_ambiguity === 1 ? "" : "s"} —{" "}
+                <Link to="/transactions?needsReview=true&resolutionType=duplicate_ambiguity">Review duplicates</Link>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         <div className="dashboard-controls dashboard-controls--period">
@@ -827,6 +864,95 @@ export function DashboardPage() {
               <strong>{data.range.label}</strong>
               <span className="muted"> · {data.household.transactionCount} posted transactions</span>
             </p>
+
+            {netWorth !== null && netWorth.netWorth !== null ? (
+              <div
+                style={{
+                  display: "flex",
+                  gap: "1.5rem",
+                  flexWrap: "wrap",
+                  padding: "0.65rem 0.85rem",
+                  borderRadius: "8px",
+                  border: "1px solid var(--color-border, #e5e7eb)",
+                  background: "var(--color-surface-alt, #f9fafb)",
+                  marginBottom: "0.85rem",
+                  alignItems: "center"
+                }}
+              >
+                <div>
+                  <span className="muted" style={{ fontSize: "0.8rem" }}>Net worth</span>
+                  <div style={{ fontWeight: 600, fontSize: "1.1rem" }}>
+                    {netWorth.netWorth >= 0 ? "" : "−"}${Math.abs(netWorth.netWorth).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                {netWorth.assets !== null ? (
+                  <div>
+                    <span className="muted" style={{ fontSize: "0.8rem" }}>Assets</span>
+                    <div style={{ fontSize: "0.95rem" }}>${netWorth.assets.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                ) : null}
+                {netWorth.liabilities !== null ? (
+                  <div>
+                    <span className="muted" style={{ fontSize: "0.8rem" }}>Liabilities</span>
+                    <div style={{ fontSize: "0.95rem" }}>${netWorth.liabilities.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                  </div>
+                ) : null}
+                <div style={{ marginLeft: "auto" }}>
+                  <Link to="/net-worth" style={{ fontSize: "0.85rem" }}>View net worth →</Link>
+                  <div className="muted" style={{ fontSize: "0.75rem" }}>as of {netWorth.asOf}</div>
+                </div>
+              </div>
+            ) : null}
+
+            {budgetSummary !== null && budgetSummary.exists && budgetSummary.totalBudgeted > 0 ? (() => {
+              const pct = Math.min(100, Math.round((budgetSummary.totalSpent / budgetSummary.totalBudgeted) * 100));
+              const over = budgetSummary.totalSpent > budgetSummary.totalBudgeted;
+              return (
+                <div
+                  style={{
+                    padding: "0.65rem 0.85rem",
+                    borderRadius: "8px",
+                    border: `1px solid ${over ? "#fca5a5" : "var(--color-border, #e5e7eb)"}`,
+                    background: over ? "#fff5f5" : "var(--color-surface-alt, #f9fafb)",
+                    marginBottom: "0.85rem"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.35rem" }}>
+                    <span style={{ fontWeight: 600, fontSize: "0.92rem" }}>
+                      {budgetSummary.month} budget
+                      {over ? <span style={{ color: "#dc2626", marginLeft: "0.4rem", fontSize: "0.82rem" }}>over budget</span> : null}
+                    </span>
+                    <Link to="/budget" style={{ fontSize: "0.82rem" }}>Manage budget →</Link>
+                  </div>
+                  <div
+                    style={{
+                      height: "8px",
+                      borderRadius: "4px",
+                      background: "#e5e7eb",
+                      overflow: "hidden",
+                      marginBottom: "0.35rem"
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${pct}%`,
+                        height: "100%",
+                        borderRadius: "4px",
+                        background: over ? "#dc2626" : pct >= 85 ? "#f59e0b" : "#22c55e",
+                        transition: "width 0.3s"
+                      }}
+                    />
+                  </div>
+                  <div className="muted" style={{ fontSize: "0.8rem", display: "flex", gap: "1rem" }}>
+                    <span>${budgetSummary.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} spent</span>
+                    <span>of ${budgetSummary.totalBudgeted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} budgeted ({pct}%)</span>
+                    {budgetSummary.unbudgetedSpend > 0 ? (
+                      <span>+ ${budgetSummary.unbudgetedSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} unbudgeted</span>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            })() : null}
 
             <div className="kpi-grid">
               <div className="kpi-card">
@@ -1044,51 +1170,46 @@ export function DashboardPage() {
                   </div>
                 </div>
                 <div>
-                  <h2 style={{ fontSize: "1.05rem", marginBottom: "0.35rem" }}>Inflows by category</h2>
+                  <h2 style={{ fontSize: "1.05rem", marginBottom: "0.35rem" }}>Top inflow sources</h2>
                   <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                    Credit totals in this period. Click a slice to open transactions for that category.
+                    Credit totals by category in this period. Click to open transactions.
                   </p>
-                  <div className="chart-wrap chart-wrap--pie">
-                    {inflowPieData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={280}>
-                        <PieChart>
-                          <Pie
-                            data={inflowPieData}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={56}
-                            outerRadius={88}
-                            paddingAngle={1}
-                            cursor="pointer"
-                            onClick={(_, index) => {
-                              const slice = inflowPieData[index];
-                              if (!slice || !data) {
-                                return;
-                              }
-                              navigate(
-                                ledgerDrillHref(data.range, {
-                                  accountId: drillOpts.accountId,
-                                  ...(slice.categoryId === null
-                                    ? { uncategorizedOnly: true }
-                                    : { categoryId: slice.categoryId })
-                                })
-                              );
-                            }}
-                          >
-                            {inflowPieData.map((_, i) => (
-                              <Cell key={String(i)} fill={PIE_COLORS[(i + 2) % PIE_COLORS.length]!} />
-                            ))}
-                          </Pie>
-                          <Tooltip formatter={(v: number) => `$${v.toFixed(2)}`} />
-                          <Legend />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <p className="muted">No inflows in this period.</p>
-                    )}
-                  </div>
+                  {inflowPieData.length > 0 ? (
+                    <table className="ledger-table" style={{ marginTop: "0.5rem" }}>
+                      <thead>
+                        <tr>
+                          <th>Category</th>
+                          <th style={{ textAlign: "right" }}>Amount</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inflowPieData
+                          .slice()
+                          .sort((a, b) => b.value - a.value)
+                          .map((row) => (
+                            <tr key={row.categoryId ?? "uncat"}>
+                              <td>{row.name}</td>
+                              <td style={{ textAlign: "right" }}>{formatMoneySigned(row.value)}</td>
+                              <td>
+                                <Link
+                                  to={ledgerDrillHref(data.range, {
+                                    accountId: drillOpts.accountId,
+                                    ...(row.categoryId === null
+                                      ? { uncategorizedOnly: true }
+                                      : { categoryId: row.categoryId })
+                                  })}
+                                >
+                                  View
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="muted">No inflows in this period.</p>
+                  )}
                 </div>
               </div>
             ) : null}
@@ -1162,9 +1283,9 @@ export function DashboardPage() {
 
             {stackBarModel.rows.length > 0 && stackBarModel.keys.length > 0 ? (
               <div className="chart-section">
-                <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>Monthly outflows by category (6 months)</h2>
+                <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>Monthly outflows by category — trailing 6 months</h2>
                 <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                  Stacked debit amounts; top five categories over the window plus &quot;Other&quot; per month.
+                  Always shows the last 6 calendar months regardless of the period filter above. Stacked debit amounts; top five categories plus &quot;Other&quot; per month.
                 </p>
                 <div className="chart-wrap">
                   <ResponsiveContainer width="100%" height={320}>
@@ -1239,11 +1360,9 @@ export function DashboardPage() {
             ) : null}
 
             <div className="chart-section">
-              <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>Monthly net (last 6 months)</h2>
+              <h2 style={{ fontSize: "1.05rem", marginBottom: "0.5rem" }}>Monthly net — trailing 6 months</h2>
               <p className="muted" style={{ fontSize: "0.85rem", marginTop: 0 }}>
-                {preset === "custom"
-                  ? "Each bar is net cashflow for that calendar month (the last month is clipped to your custom range end)."
-                  : "Each bar is net cashflow for that calendar month (through the \"as of\" date in the current month)."}
+                Always shows the last 6 calendar months regardless of the period filter above. Each bar is net cashflow for that month.
               </p>
               <div className="chart-wrap">
                 <ResponsiveContainer width="100%" height={300}>
