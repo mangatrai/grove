@@ -91,7 +91,7 @@ authRouter.post("/change-password", requireAuth, async (req: AuthenticatedReques
   );
   if (!out.ok) {
     if (out.code === "INVALID_CURRENT_PASSWORD") {
-      res.status(401).json({ message: "Current password is incorrect", code: out.code });
+      res.status(400).json({ message: "Current password is incorrect", code: out.code });
       return;
     }
     res.status(404).json({ message: "User not found", code: out.code });

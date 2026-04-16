@@ -262,7 +262,7 @@ describe("auth change password", () => {
         currentPassword: "WrongCurrent123!",
         newPassword
       });
-    expect(badCurrent.status).toBe(401);
+    expect(badCurrent.status).toBe(400);
 
     const changeOk = await request(app)
       .post("/auth/change-password")

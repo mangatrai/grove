@@ -631,7 +631,7 @@ export function ImportWorkspacePage() {
             `Payslip LLM: parsed ${r.completedFiles} Deloitte file(s).${r.stillPending ? " More still in progress." : ""}`
           );
         } else if (r.polledFiles > 0 && r.stillPending) {
-          setMessage("Payslip extraction still running; next automatic check in 2 minutes (or use Check now).");
+          setMessage("Payslip extraction still running; automatic check every 2 minutes.");
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Reconcile failed");
@@ -1113,7 +1113,7 @@ export function ImportWorkspacePage() {
       const up = out.asyncPayslipPending ?? 0;
       if (up > 0) {
         setMessage(
-          `Queued ${up} Deloitte PDF(s) for payslip extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes, or use “Check now”.`
+          `Queued ${up} Deloitte PDF(s) for payslip extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes.`
         );
       } else {
         setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
@@ -1172,7 +1172,7 @@ export function ImportWorkspacePage() {
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
       if ((parseOut.asyncPayslipPending ?? 0) > 0) {
         setMessage(
-          "Deloitte PDF(s) queued for payslip extraction. Wait until files show “parsed”, then run import again (or use Check now)."
+          “Deloitte PDF(s) queued for payslip extraction. Wait until files show \u201cparsed\u201d (automatic check every 2 minutes), then run import again.”
         );
         setPipelineBusy(false);
         await load();
@@ -1235,8 +1235,29 @@ export function ImportWorkspacePage() {
       const accRes = await apiJson<{ accounts: FinancialAccount[] }>("/imports/accounts");
       setAccounts(accRes.accounts);
       setOfxCreateAccountFileId(null);
-      // Trigger onAccountChange so the binding is saved immediately.
-      await onAccountChange(fileId, result.id);
+      // Use the fresh accounts list directly — onAccountChange captures a stale `accounts`
+      // closure and cannot find the just-created account, leaving the binding unset.
+      const freshAccount = accRes.accounts.find((a) => a.id === result.id);
+      const fileForBinding = files.find((f) => f.id === fileId);
+      const inferred = inferParserProfile(freshAccount as FinancialAccountLike | undefined, fileForBinding?.file_name, incomeInference);
+      const ownerScope = drafts[fileId]?.ownerScope ?? "household";
+      const ownerPersonProfileId = drafts[fileId]?.ownerPersonProfileId ?? "";
+      if (inferred) {
+        setDrafts((d) => ({
+          ...d,
+          [fileId]: {
+            accountId: result.id,
+            profileId: inferred,
+            employerId: "",
+            ownerScope,
+            ownerPersonProfileId
+          }
+        }));
+        await persistBinding(fileId, result.id, inferred, null, ownerScope, ownerScope === "person" ? ownerPersonProfileId : null);
+      } else {
+        // Profile could not be inferred — let the user pick it manually.
+        setDrafts((d) => ({ ...d, [fileId]: { ...d[fileId], accountId: result.id, profileId: "" } }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create account");
     } finally {
@@ -1991,16 +2012,7 @@ export function ImportWorkspacePage() {
             <button type="button" className="secondary" disabled={!allFilesReady || pipelineBusy} onClick={() => void runParse()}>
               Parse session
             </button>
-            <button
-              type="button"
-              className="secondary"
-              disabled={!sessionId || pipelineBusy}
-              title="Poll for completed Deloitte payslip extraction (bypasses 2-minute throttle)"
-              onClick={() => void runReconcilePayslipAsync(true)}
-            >
-              Check now (Deloitte payslip)
-            </button>
-            <button type="button" className="secondary" disabled={pipelineBusy} onClick={() => void runCanonicalize()}>
+<button type="button" className="secondary" disabled={pipelineBusy} onClick={() => void runCanonicalize()}>
               Canonicalize (dedupe)
             </button>
           </div>
@@ -2013,8 +2025,19 @@ export function ImportWorkspacePage() {
           <HelpIcon label="Dry-run of your current classification rules on parsed raw rows in this session. Does not assign categories or post to the ledger — only shows what would match today. After changing rules, click Load again." />
         </div>
         <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <button type="button" className="secondary" disabled={matcherPreviewLoading} onClick={() => void loadMatcherPreview()}>
-            {matcherPreviewLoading ? "Loading…" : "Load classification preview"}
+          <button
+            type="button"
+            className="secondary"
+            disabled={matcherPreviewLoading}
+            onClick={() => {
+              if (matcherPreviewRows.length > 0) {
+                setMatcherPreviewRows([]);
+              } else {
+                void loadMatcherPreview();
+              }
+            }}
+          >
+            {matcherPreviewLoading ? "Loading…" : matcherPreviewRows.length > 0 ? "Hide preview" : "Load classification preview"}
           </button>
           {(sessionSummary?.totals.rawRows ?? 0) === 0 ? (
             <span className="muted" style={{ fontSize: "0.88rem" }}>

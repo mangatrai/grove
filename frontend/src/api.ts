@@ -55,7 +55,12 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
   }
   if (!res.ok) {
     const errBody = await res.text();
-    throw new Error(`${res.status} ${res.statusText}: ${errBody}`);
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const parsed = JSON.parse(errBody) as { message?: string };
+      if (parsed.message) message = parsed.message;
+    } catch { /* use status text */ }
+    throw new Error(message);
   }
   return (await res.json()) as T;
 }

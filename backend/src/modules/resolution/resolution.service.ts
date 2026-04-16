@@ -503,13 +503,14 @@ export async function findUnknownCategoryItemsByDescriptionPattern(
   descPattern: string
 ): Promise<{ id: string; targetId: string; description: string }[]> {
   return qAll<{ id: string; targetId: string; description: string }>(
-    `SELECT ri.id, ri.target_id AS "targetId", tc.description
+    `SELECT ri.id, ri.target_id AS "targetId",
+            TRIM(COALESCE(tc.merchant, '') || ' ' || COALESCE(tc.memo, '')) AS description
        FROM resolution_item ri
        INNER JOIN transaction_canonical tc ON tc.id = ri.target_id
        WHERE ri.household_id = ?
          AND ri.type = 'unknown_category'
          AND ri.status = 'open'
-         AND LOWER(tc.description) LIKE LOWER(?)`,
+         AND LOWER(COALESCE(tc.merchant, '') || ' ' || COALESCE(tc.memo, '')) LIKE LOWER(?)`,
     householdId,
     `%${descPattern.toLowerCase()}%`
   );

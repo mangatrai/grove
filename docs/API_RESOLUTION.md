@@ -179,7 +179,7 @@ Canonical ingest creates **`unknown_category`** rows when no default keyword rul
 
 ## `POST /resolution/pattern-preview`
 
-Returns the **count** of open **`unknown_category`** items whose linked transaction **description** contains `descriptionPattern` (case-insensitive). Also returns up to 5 example descriptions for the user to confirm the match is correct before applying.
+Returns the **count** of open **`unknown_category`** items whose linked transaction `merchant + memo` contains `descriptionPattern` (case-insensitive). Also returns up to 5 example descriptions for the user to confirm the match is correct before applying.
 
 **Body:**
 
@@ -213,7 +213,7 @@ Finds **all** open **`unknown_category`** items whose linked transaction descrip
 }
 ```
 
-- `descriptionPattern` — 1–200 chars; matched with LIKE `%pattern%` (case-insensitive).
+- `descriptionPattern` — 1–200 chars; matched with LIKE `%pattern%` (case-insensitive) against the concatenated `merchant || ' ' || memo` of the linked canonical transaction.
 - `categoryId` — must be usable by the household (`GET /categories`).
 
 **200:**
@@ -227,3 +227,5 @@ Finds **all** open **`unknown_category`** items whose linked transaction descrip
 **401:** missing or invalid token.
 
 **UI:** The **Needs Review** tab in Transactions exposes a **"Resolve all by merchant name…"** form that calls `pattern-preview` on each keystroke (debounced) to show a live match count, then calls `bulk-apply-by-pattern` on confirm. This replaces 40+ one-by-one resolves for the same merchant with a single action.
+
+> **Implementation note:** `transaction_canonical` stores `merchant TEXT` and `memo TEXT` (no `description` column). Pattern matching concatenates `COALESCE(merchant,'') || ' ' || COALESCE(memo,'')` case-insensitively.

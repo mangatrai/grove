@@ -18,6 +18,50 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-15 (bug fixes: pattern-preview crash, auth, OFX, UX polish)
+
+### FIX-030 — Pattern-preview backend crash: `tc.description` column does not exist
+- **Type:** FIX (critical — backend crash)
+- **What:** `findUnknownCategoryItemsByDescriptionPattern` in `resolution.service.ts` referenced `tc.description` which is not a column on `transaction_canonical` (table has `merchant` and `memo`). Every call to `POST /resolution/pattern-preview` or `POST /resolution/bulk-apply-by-pattern` raised PostgresError code 42703, crashing the backend and causing all subsequent requests to return 500 until restart. Fixed query to `COALESCE(tc.merchant, '') || ' ' || COALESCE(tc.memo, '')` with TRIM for display.
+- **Files:** `backend/src/modules/resolution/resolution.service.ts`, `backend/tests/app.test.ts`
+
+### FIX-031 — Wrong current password returned 401, treated as "Session expired" by frontend
+- **Type:** FIX
+- **What:** `POST /auth/change-password` returned HTTP 401 for `INVALID_CURRENT_PASSWORD`. `apiJson()` in `frontend/src/api.ts` treats all 401 responses as "Session expired" — it clears the token and throws, logging the user out instead of showing the actual error. Fixed: backend now returns 400 for wrong current password. Also improved `apiJson` error handling to extract the `message` field from JSON error bodies so the UI shows "Current password is incorrect" instead of "400 Bad Request: {raw json}".
+- **Files:** `backend/src/modules/auth/auth.routes.ts`, `frontend/src/api.ts`, `backend/tests/app.test.ts`
+
+### FIX-032 — Post-password-change: "Session expired" instead of clean sign-out
+- **Type:** FIX
+- **What:** After a forced first-login password change (or any self-service change), the server increments `token_version`, invalidating the old JWT immediately. The frontend dispatched `app:password-changed` to clear the `forcePasswordChange` banner, but left the old (now invalid) token in localStorage. The next API call (e.g. navigating away) got a 401, which `apiJson` converted to "Session expired". Fixed: `ShellLayout.tsx` handler for `app:password-changed` now calls `setToken(null)` — clears the token immediately, React re-renders, `RequireAuth` redirects to home/login page. Clean sign-out, no "Session expired" flash.
+- **Files:** `frontend/src/layout/ShellLayout.tsx`
+
+### FIX-033 — OFX new-account creation leaves Run Import disabled
+- **Type:** FIX
+- **What:** After creating a new account from the OFX prompt and clicking "Create account", `onAccountChange(fileId, result.id)` was called to auto-bind the file. But `onAccountChange` is a `useCallback` that captures the `accounts` array in its closure — that array was still the pre-creation list (React state update is async). `accountById(accounts, result.id)` returned undefined → `inferParserProfile` returned null → error "We couldn't match this file…" → binding not saved → Run Import stayed disabled. Fixed: after refreshing the accounts list, the creation handler now uses the fresh array directly to infer the profile and calls `persistBinding` without going through the stale closure.
+- **Files:** `frontend/src/pages/ImportWorkspacePage.tsx`
+
+### FIX-034 — Remove dead "Check now (Deloitte payslip)" button
+- **Type:** FIX / UX
+- **What:** The "Check now (Deloitte payslip)" button in the "Separate steps" details section called `runReconcilePayslipAsync(true)`, which polls the backend for completed Deloitte payslip extraction. This button was dead in practice — the auto-poll useEffect already runs every 2 minutes automatically and on a 2.5s delay after upload. Removed the button. Updated three message strings that referenced "use Check now" to say "automatic check every 2 minutes" instead. The `runReconcilePayslipAsync` function is kept (still used by the auto-poll effect).
+- **Files:** `frontend/src/pages/ImportWorkspacePage.tsx`
+
+### UX-025 — Classification matcher preview: collapse toggle
+- **Type:** UX
+- **What:** The "Load classification preview" button opened the table with no way to dismiss it other than leaving the page. Button label now toggles: shows "Hide preview" when rows are visible, "Load classification preview" when empty. Clicking when rows are visible clears them; clicking when empty loads them. Same button serves both purposes.
+- **Files:** `frontend/src/pages/ImportWorkspacePage.tsx`
+
+### UX-026 — Rule learning dialog: removed from Needs Review category picker path
+- **Type:** UX / CR
+- **What:** After CR-110 wired the "Create classification rule?" dialog to all category changes, it also fired when setting a category via the inline picker in the Needs Review expand panel. This was disruptive during rapid triage — resolving 20 items meant 20 consecutive dialogs. The dialog is now only triggered from the All-tab main category picker. The Needs Review panel picker still resolves the item and reloads the list, but does not pop the rule-learning dialog.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`
+
+### UX-027 — Needs Review toolbar: sticky on scroll
+- **Type:** UX
+- **What:** When the Needs Review table has many rows, the bulk action bar (category picker, Apply, Resolve flags, Move to trash) and the "Resolve all by merchant name" form scrolled off the top of the viewport. Both controls are now wrapped in a `position: sticky; top: 0` container so they remain visible while scrolling the transaction list.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`
+
+---
+
 ## 2026-04-15 (dashboard audit + pre-release polish)
 
 ### UX-DASH-001 — Dashboard audit: net worth widget, budget progress, inflows table, resolution alert, chart labels

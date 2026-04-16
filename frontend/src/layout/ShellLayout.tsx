@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiJson, setToken, useAuthToken } from "../api";
 import { UserContext } from "../UserContext";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopBar } from "./AppTopBar";
@@ -55,7 +55,13 @@ export function ShellLayout() {
   }, [pathname]);
 
   useEffect(() => {
-    const handler = () => setForcePasswordChange(false);
+    const handler = () => {
+      // Password changed → old token is immediately invalidated server-side.
+      // Sign the user out cleanly so they land on the login page rather than
+      // seeing "Session expired" on the next API call.
+      setToken(null);
+      setForcePasswordChange(false);
+    };
     window.addEventListener("app:password-changed", handler);
     return () => window.removeEventListener("app:password-changed", handler);
   }, []);

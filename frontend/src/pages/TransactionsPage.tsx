@@ -1492,51 +1492,52 @@ export function TransactionsPage() {
             . <button type="button" className="link-button" onClick={() => clearFilters()}>Clear filters</button>
           </p>
         ) : null}
-        {needsReviewTab && selectedCount > 0 ? (
-          <div className="transactions-bulk-bar row" role="status" aria-live="polite">
-            <span className="muted">
-              {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
-            </span>
-            <div style={{ marginBottom: 0, minWidth: "12rem", maxWidth: "20rem" }}>
-              <LedgerCategoryPicker
-                categories={categories}
-                value={bulkCategoryId || null}
-                disabled={savingBulk}
-                onChange={(id) => setBulkCategoryId(id ?? "")}
-                onCategoryCreated={() => void refreshCategories()}
-                ariaLabel="Bulk category"
-              />
-            </div>
-            <button
-              type="button"
-              disabled={savingBulk || !bulkCategoryId}
-              onClick={() => void bulkAssignCategory()}
-            >
-              Apply category
-            </button>
-            {openFlagCountInSelection > 0 ? (
-              <button
-                type="button"
-                className="secondary"
-                disabled={savingBulk}
-                onClick={() => void bulkResolveFlags()}
-                title="Mark open duplicate / reconciliation flags as resolved for selected rows"
-              >
-                Resolve flags ({openFlagCountInSelection})
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="secondary"
-              disabled={savingBulk}
-              onClick={() => void bulkTrashSelected()}
-              title="Move selected rows to Trash"
-            >
-              Move to trash
-            </button>
-          </div>
-        ) : null}
         {needsReviewTab ? (
+          <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--color-surface, #fff)", paddingBottom: "0.25rem" }}>
+            {selectedCount > 0 ? (
+              <div className="transactions-bulk-bar row" role="status" aria-live="polite">
+                <span className="muted">
+                  {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
+                </span>
+                <div style={{ marginBottom: 0, minWidth: "12rem", maxWidth: "20rem" }}>
+                  <LedgerCategoryPicker
+                    categories={categories}
+                    value={bulkCategoryId || null}
+                    disabled={savingBulk}
+                    onChange={(id) => setBulkCategoryId(id ?? "")}
+                    onCategoryCreated={() => void refreshCategories()}
+                    ariaLabel="Bulk category"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={savingBulk || !bulkCategoryId}
+                  onClick={() => void bulkAssignCategory()}
+                >
+                  Apply category
+                </button>
+                {openFlagCountInSelection > 0 ? (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={savingBulk}
+                    onClick={() => void bulkResolveFlags()}
+                    title="Mark open duplicate / reconciliation flags as resolved for selected rows"
+                  >
+                    Resolve flags ({openFlagCountInSelection})
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={savingBulk}
+                  onClick={() => void bulkTrashSelected()}
+                  title="Move selected rows to Trash"
+                >
+                  Move to trash
+                </button>
+              </div>
+            ) : null}
           <div style={{ marginBottom: "0.5rem" }}>
             {!patternResolveOpen ? (
               <button
@@ -1629,6 +1630,7 @@ export function TransactionsPage() {
                 </div>
               </div>
             )}
+          </div>
           </div>
         ) : null}
         {trashTab && selectedTrashIds.size > 0 ? (
@@ -2069,7 +2071,9 @@ export function TransactionsPage() {
                                                         });
                                                         forgetReviewDetail(t.id);
                                                         await load();
-                                                        setRuleFromLedgerConfirm({ txnId: t.id, categoryId });
+                                                        // Rule-learning dialog is intentionally omitted here —
+                                                        // Needs Review triage is rapid-fire; the dialog is
+                                                        // surfaced only from the All-tab main category picker.
                                                       } catch (e: unknown) {
                                                         setError(e instanceof Error ? e.message : "Failed to set category");
                                                       } finally {
