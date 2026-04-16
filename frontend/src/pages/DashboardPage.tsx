@@ -410,6 +410,15 @@ export function DashboardPage() {
     totalSpent: number;
     remaining: number;
     unbudgetedSpend: number;
+    categories: Array<{
+      categoryId: string;
+      categoryName: string;
+      parentName: string | null;
+      budgeted: number;
+      spent: number;
+      remaining: number;
+      percentUsed: number;
+    }>;
   } | null>(null);
   const [targetPreviewUsd, setTargetPreviewUsd] = useState(0);
   const [savingTarget, setSavingTarget] = useState(false);
@@ -494,9 +503,15 @@ export function DashboardPage() {
     void apiJson<{ totals: { assets: number | null; liabilities: number | null; netWorth: number | null }; asOf: string }>("/reports/balance-sheet")
       .then((r) => setNetWorth({ ...r.totals, asOf: r.asOf }))
       .catch(() => setNetWorth(null));
-    const thisMonth = currentMonthStr();
-    void apiJson<{ month: string; exists: boolean; summary: { totalBudgeted: number; totalSpent: number; remaining: number; unbudgetedSpend: number } }>(`/budget/${thisMonth}`)
-      .then((r) => setBudgetSummary({ month: r.month, exists: r.exists, ...r.summary }))
+    // When the period filter is "Calendar month", show the budget for that month; otherwise show current month.
+    const budgetMonth = preset === "month" ? monthStr : currentMonthStr();
+    void apiJson<{
+      month: string;
+      exists: boolean;
+      summary: { totalBudgeted: number; totalSpent: number; remaining: number; unbudgetedSpend: number };
+      categories: Array<{ categoryId: string; categoryName: string; parentName: string | null; budgeted: number; spent: number; remaining: number; percentUsed: number }>;
+    }>(`/budget/${budgetMonth}`)
+      .then((r) => setBudgetSummary({ month: r.month, exists: r.exists, ...r.summary, categories: r.categories ?? [] }))
       .catch(() => setBudgetSummary(null));
   }, [preset, monthStr, asOf, accountId, ownerScope, ownerPersonProfileId, customAppliedFrom, customAppliedTo]);
 
@@ -904,52 +919,73 @@ export function DashboardPage() {
               </div>
             ) : null}
 
-            {budgetSummary !== null && budgetSummary.exists && budgetSummary.totalBudgeted > 0 ? (() => {
-              const pct = Math.min(100, Math.round((budgetSummary.totalSpent / budgetSummary.totalBudgeted) * 100));
-              const over = budgetSummary.totalSpent > budgetSummary.totalBudgeted;
+            {budgetSummary !== null ? (() => {
+              if (!budgetSummary.exists || budgetSummary.totalBudgeted <= 0) {
+                return (
+                  <div style={{ padding: "0.65rem 0.85rem", borderRadius: "8px", border: "1px solid var(--color-border, #e5e7eb)", background: "var(--color-surface-alt, #f9fafb)", marginBottom: "0.85rem", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span className="muted" style={{ fontSize: "0.88rem" }}>No budget set for {budgetSummary.month}</span>
+                    <Link to="/budget" style={{ fontSize: "0.82rem" }}>Set up budget →</Link>
+                  </div>
+                );
+              }
+              const totalPct = Math.min(100, Math.round((budgetSummary.totalSpent / budgetSummary.totalBudgeted) * 100));
+              const totalOver = budgetSummary.totalSpent > budgetSummary.totalBudgeted;
+              // Top categories: prioritise over-budget first, then closest to limit
+              const topCats = [...budgetSummary.categories]
+                .filter((c) => c.budgeted > 0)
+                .sort((a, b) => b.percentUsed - a.percentUsed)
+                .slice(0, 6);
               return (
                 <div
                   style={{
-                    padding: "0.65rem 0.85rem",
+                    padding: "0.75rem 0.9rem",
                     borderRadius: "8px",
-                    border: `1px solid ${over ? "#fca5a5" : "var(--color-border, #e5e7eb)"}`,
-                    background: over ? "#fff5f5" : "var(--color-surface-alt, #f9fafb)",
+                    border: `1px solid ${totalOver ? "#fca5a5" : "var(--color-border, #e5e7eb)"}`,
+                    background: totalOver ? "#fff5f5" : "var(--color-surface-alt, #f9fafb)",
                     marginBottom: "0.85rem"
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.35rem" }}>
-                    <span style={{ fontWeight: 600, fontSize: "0.92rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5rem" }}>
+                    <span style={{ fontWeight: 600, fontSize: "0.95rem" }}>
                       {budgetSummary.month} budget
-                      {over ? <span style={{ color: "#dc2626", marginLeft: "0.4rem", fontSize: "0.82rem" }}>over budget</span> : null}
+                      {totalOver ? <span style={{ color: "#dc2626", marginLeft: "0.5rem", fontSize: "0.82rem" }}>over budget</span> : null}
                     </span>
-                    <Link to="/budget" style={{ fontSize: "0.82rem" }}>Manage budget →</Link>
+                    <Link to="/budget" style={{ fontSize: "0.82rem" }}>Manage →</Link>
                   </div>
-                  <div
-                    style={{
-                      height: "8px",
-                      borderRadius: "4px",
-                      background: "#e5e7eb",
-                      overflow: "hidden",
-                      marginBottom: "0.35rem"
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: `${pct}%`,
-                        height: "100%",
-                        borderRadius: "4px",
-                        background: over ? "#dc2626" : pct >= 85 ? "#f59e0b" : "#22c55e",
-                        transition: "width 0.3s"
-                      }}
-                    />
+                  {/* Overall progress bar */}
+                  <div style={{ height: "8px", borderRadius: "4px", background: "#e5e7eb", overflow: "hidden", marginBottom: "0.3rem" }}>
+                    <div style={{ width: `${totalPct}%`, height: "100%", borderRadius: "4px", background: totalOver ? "#dc2626" : totalPct >= 85 ? "#f59e0b" : "#22c55e", transition: "width 0.3s" }} />
                   </div>
-                  <div className="muted" style={{ fontSize: "0.8rem", display: "flex", gap: "1rem" }}>
-                    <span>${budgetSummary.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} spent</span>
-                    <span>of ${budgetSummary.totalBudgeted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} budgeted ({pct}%)</span>
-                    {budgetSummary.unbudgetedSpend > 0 ? (
-                      <span>+ ${budgetSummary.unbudgetedSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} unbudgeted</span>
-                    ) : null}
+                  <div className="muted" style={{ fontSize: "0.8rem", display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: topCats.length > 0 ? "0.75rem" : 0 }}>
+                    <span>${budgetSummary.totalSpent.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} spent</span>
+                    <span>of ${budgetSummary.totalBudgeted.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} ({totalPct}%)</span>
+                    {budgetSummary.remaining > 0 ? <span style={{ color: "#16a34a" }}>${budgetSummary.remaining.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} remaining</span> : null}
+                    {budgetSummary.unbudgetedSpend > 0 ? <span>+${budgetSummary.unbudgetedSpend.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} unbudgeted</span> : null}
                   </div>
+                  {/* Per-category breakdown — top 6 by % used */}
+                  {topCats.length > 0 ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                      {topCats.map((c) => {
+                        const cPct = Math.min(100, c.percentUsed);
+                        const cOver = c.spent > c.budgeted;
+                        const barColor = cOver ? "#dc2626" : cPct >= 85 ? "#f59e0b" : "#3b82f6";
+                        const label = c.parentName ? `${c.parentName} › ${c.categoryName}` : c.categoryName;
+                        return (
+                          <div key={c.categoryId}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginBottom: "0.15rem" }}>
+                              <span style={{ color: cOver ? "#dc2626" : "inherit", fontWeight: cOver ? 600 : undefined }}>{label}</span>
+                              <span className="muted">${c.spent.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} / ${c.budgeted.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                {cOver ? <span style={{ color: "#dc2626", marginLeft: "0.3rem" }}>over</span> : <span style={{ marginLeft: "0.3rem" }}>{cPct.toFixed(0)}%</span>}
+                              </span>
+                            </div>
+                            <div style={{ height: "5px", borderRadius: "3px", background: "#e5e7eb", overflow: "hidden" }}>
+                              <div style={{ width: `${cPct}%`, height: "100%", borderRadius: "3px", background: barColor }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               );
             })() : null}

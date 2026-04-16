@@ -372,10 +372,16 @@ payslipRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payslip id", issues: params.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
-  const deleted = await deletePayslipSnapshotForHousehold(householdId, params.data.id);
-  if (!deleted) {
+  const { householdId, role, personProfileId } = req.authUser!;
+  // Members may only delete payslips assigned to their own person profile.
+  const ownerRestriction = role === "member" ? personProfileId : null;
+  const result = await deletePayslipSnapshotForHousehold(householdId, params.data.id, ownerRestriction);
+  if (result === "not_found") {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  if (result === "forbidden") {
+    res.status(403).json({ message: "Not allowed to delete this payslip", code: "FORBIDDEN" });
     return;
   }
   res.status(204).send();

@@ -506,19 +506,28 @@ export async function patchPayslipSnapshotForHousehold(
 
 /**
  * Hard-delete a payslip snapshot and its associated import_file rows.
- * Returns true if deleted, false if not found.
+ *
+ * If `restrictToOwnerPersonProfileId` is provided (member role), only payslips
+ * whose `owner_person_profile_id` matches are deleted — members cannot delete
+ * payslips belonging to other household members.
  */
 export async function deletePayslipSnapshotForHousehold(
   householdId: string,
-  id: string
-): Promise<boolean> {
-  const existing = await qGet<{ id: string }>(
-    `SELECT id FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
+  id: string,
+  restrictToOwnerPersonProfileId?: string | null
+): Promise<"deleted" | "not_found" | "forbidden"> {
+  const existing = await qGet<{ id: string; owner_person_profile_id: string | null }>(
+    `SELECT id, owner_person_profile_id FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
     id,
     householdId
   );
   if (!existing) {
-    return false;
+    return "not_found";
+  }
+  if (restrictToOwnerPersonProfileId != null) {
+    if (existing.owner_person_profile_id !== restrictToOwnerPersonProfileId) {
+      return "forbidden";
+    }
   }
   // Clear the reference from import_file rows (keep the import file row for audit; just clear the payslip linkage).
   await qExec(
@@ -535,5 +544,5 @@ export async function deletePayslipSnapshotForHousehold(
     id,
     householdId
   );
-  return true;
+  return "deleted";
 }

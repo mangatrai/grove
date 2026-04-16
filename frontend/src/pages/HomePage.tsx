@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { apiJson, setToken } from "../api";
+import { setToken } from "../api";
 
 /**
  * Guest landing at `/` — full-screen split hero + clean sign-in card.
@@ -22,17 +22,27 @@ export function HomePage() {
     setError(null);
     setLoading(true);
     try {
-      const data = await apiJson<{ token: string }>("/auth/login", {
+      // Use raw fetch — apiJson would convert any 401 to "Session expired",
+      // but here 401 means wrong credentials, not an expired session.
+      const res = await fetch("/auth/login", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
+      if (!res.ok) {
+        const body = await res.text();
+        let msg = "Sign in failed. Check your credentials.";
+        try {
+          const parsed = JSON.parse(body) as { message?: string };
+          if (parsed.message) msg = parsed.message;
+        } catch { /* use fallback */ }
+        setError(msg);
+        return;
+      }
+      const data = (await res.json()) as { token: string };
       setToken(data.token);
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Sign in failed. Check your credentials."
-      );
+    } catch {
+      setError("Sign in failed. Check your network connection.");
     } finally {
       setLoading(false);
     }

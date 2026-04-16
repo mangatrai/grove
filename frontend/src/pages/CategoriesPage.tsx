@@ -81,7 +81,8 @@ export function CategoriesPage() {
   const [editSaving, setEditSaving] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const canEditBuiltIns = authRole === "owner" || authRole === "admin";
+  const canManageCategories = authRole === "owner" || authRole === "admin";
+  const canEditBuiltIns = canManageCategories;
 
   const load = useCallback(async () => {
     const res = await apiJson<{ categories: CategoryRow[] }>("/categories");
@@ -247,7 +248,7 @@ export function CategoriesPage() {
   const showEditForRow = (row: HierarchyRow): boolean => {
     const c = row.kind === "parent" ? row.category : row.category;
     if (c.householdScoped) {
-      return true;
+      return canManageCategories;
     }
     return canEditBuiltIns;
   };
@@ -417,7 +418,7 @@ export function CategoriesPage() {
                                 <IconPencil size={13} />
                               </button>
                             ) : null}
-                            {c.householdScoped ? (
+                            {c.householdScoped && canManageCategories ? (
                               <button type="button" onClick={() => requestDeleteCategory(c.id)} title="Delete" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}>
                                 <IconTrash size={13} />
                               </button>

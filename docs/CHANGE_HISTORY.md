@@ -18,6 +18,35 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (RBAC, login UX, dashboard budget widget)
+
+### FIX-036 — Wrong-password shows "Session expired"
+- **Type:** FIX
+- **What:** The login form called `apiJson()` which intercepts every 401 and throws "Session expired. Please sign in again." — including 401 from wrong credentials. Changed `HomePage.tsx` login submit to use raw `fetch` so the 401 from `/auth/login` returns the server's actual "Invalid credentials" message instead.
+- **Files:** `frontend/src/pages/HomePage.tsx`
+
+### FIX-037 — Member can delete other members' payslips
+- **Type:** FIX
+- **What:** `DELETE /payslips/:id` only checked household ownership, not per-person ownership. A member user could delete any payslip in the household. Added `restrictToOwnerPersonProfileId` guard in `deletePayslipSnapshotForHousehold()`: when the caller is a `member`, the payslip's `owner_person_profile_id` must match their own `personProfileId`. Service now returns `"deleted" | "not_found" | "forbidden"`. Route returns 403 for ownership violation, 404 for genuinely missing payslip.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`
+
+### FIX-038 — Members see edit/delete icons on Categories page
+- **Type:** FIX
+- **What:** `showEditForRow()` returned `true` for any `householdScoped` category regardless of role — so members saw the pencil icon and got "Not allowed to delete this category" errors when they clicked trash. Added `canManageCategories` check (`owner` or `admin` only). Both the edit and delete buttons now require `canManageCategories`.
+- **Files:** `frontend/src/pages/CategoriesPage.tsx`
+
+### UX-029 — Dashboard: richer budget widget with per-category breakdown
+- **Type:** UX
+- **What:** Budget widget was a single total progress bar always locked to the current calendar month. Three improvements: (1) When the period filter is set to "Calendar month", the budget widget now shows that month's budget instead of always today's month. (2) Full per-category breakdown: top 6 categories sorted by % used, each with an individual progress bar, colour-coded green/amber/red. Over-budget categories shown in red. (3) When no budget exists for the month, shows a "Set up budget →" CTA instead of nothing.
+- **Files:** `frontend/src/pages/DashboardPage.tsx`
+
+### FIX-039 — Pre-existing unused-var build error in TransactionsPage
+- **Type:** FIX
+- **What:** `const r = await apiJson<...>` at line 835 was declared but never used — TypeScript strict mode rejected the build. Removed the unused binding (`await` directly).
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`
+
+---
+
 ## 2026-04-15 (transfer filter, build fix, backlog)
 
 ### FIX-035 — Build error: Unicode escape in string literal

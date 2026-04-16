@@ -832,7 +832,7 @@ export function TransactionsPage() {
     setPatternResolving(true);
     setError(null);
     try {
-      const r = await apiJson<{ updated: number }>("/resolution/bulk-apply-by-pattern", {
+      await apiJson<{ updated: number }>("/resolution/bulk-apply-by-pattern", {
         method: "POST",
         body: JSON.stringify({ descriptionPattern: patternDraft.trim(), categoryId: patternCategoryId })
       });
