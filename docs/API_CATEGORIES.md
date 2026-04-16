@@ -233,6 +233,39 @@ Delete **all** household rules for the signed-in home. **Built-in** (`category_r
 
 **200:** `{ "deleted": <number> }` — count of rows removed (may be `0` if there were no household rules).
 
+### `POST /categories/rules/from-ledger` (owner / admin)
+
+Create a household classification rule derived from an existing **posted** transaction. The backend reads the transaction's normalized description and constructs a rule pattern automatically.
+
+**Body:**
+
+```json
+{
+  "transactionId": "uuid",
+  "categoryId": "uuid",
+  "matchType": "contains",
+  "scope": "contains",
+  "amountScope": "any",
+  "confidence": 0.9,
+  "priority": 100,
+  "enabled": true
+}
+```
+
+- `transactionId` — must be a posted canonical transaction in the household.
+- `matchType` — `contains` or `prefix`.
+- `scope` — `contains` or `prefix` (redundant with `matchType` in current impl; send the same value for both).
+- `amountScope` — `any` | `credit_only` | `debit_only` (default `any`).
+- `confidence`, `priority`, `enabled` — same semantics as `POST /categories/rules`.
+
+**201:** `{ "rule": { ... } }`
+
+**400:** invalid body or rule conflict.  
+**403:** member role.  
+**404:** transaction not found.
+
+**UI:** After categorizing a transaction in the ledger table or resolving an `unknown_category` item, the app offers a **"Create classification rule?"** dialog (owner/admin only). Accepting calls this endpoint with `matchType: "contains"`. This is the primary low-friction path for building up household rules without visiting the Category Rules page.
+
 ### `POST /categories/rules/builtin` (owner / admin)
 
 Create a global built-in rule. Category must be a **default** leaf (`household_id` NULL) without children.

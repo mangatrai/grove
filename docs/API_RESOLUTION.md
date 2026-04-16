@@ -146,7 +146,7 @@ The Review queue UI uses this for **bulk In review / Resolve / Reopen** on selec
 
 ## `POST /resolution/bulk-apply-category`
 
-For **`unknown_category`** items only: sets **`category_id`** on the linked **`transaction_canonical`** row ( **`target_id`** ) and marks the resolution item **`resolved`**.
+For **`unknown_category`** items only: sets **`category_id`** on the linked **`transaction_canonical`** row ( **`target_id`** ) and marks the resolution item **`resolved`**. Requires an explicit list of resolution item IDs; use `POST /resolution/bulk-apply-by-pattern` to match by description instead.
 
 **Body:**
 
@@ -174,3 +174,56 @@ For **`unknown_category`** items only: sets **`category_id`** on the linked **`t
 **401:** missing or invalid token.
 
 Canonical ingest creates **`unknown_category`** rows when no default keyword rule assigns a category; **`context`** is filled from the posted transaction (and import file when `source_ref` links to `transaction_raw`).
+
+---
+
+## `POST /resolution/pattern-preview`
+
+Returns the **count** of open **`unknown_category`** items whose linked transaction **description** contains `descriptionPattern` (case-insensitive). Also returns up to 5 example descriptions for the user to confirm the match is correct before applying.
+
+**Body:**
+
+```json
+{ "descriptionPattern": "WHOLEFDS" }
+```
+
+**200:**
+
+```json
+{
+  "matched": 12,
+  "descriptions": ["WHOLEFDS MKT #0001", "WHOLEFDS MKT #0002"]
+}
+```
+
+**400:** invalid body.
+
+**401:** missing or invalid token.
+
+## `POST /resolution/bulk-apply-by-pattern`
+
+Finds **all** open **`unknown_category`** items whose linked transaction description contains `descriptionPattern` (case-insensitive), applies `categoryId` to each linked `transaction_canonical` row, and marks each resolution item **`resolved`**. Unlike `bulk-apply-category` this does not require selecting individual item IDs — it resolves all current and future-matching open items in one shot.
+
+**Body:**
+
+```json
+{
+  "descriptionPattern": "WHOLEFDS",
+  "categoryId": "uuid"
+}
+```
+
+- `descriptionPattern` — 1–200 chars; matched with LIKE `%pattern%` (case-insensitive).
+- `categoryId` — must be usable by the household (`GET /categories`).
+
+**200:**
+
+```json
+{ "updated": 12 }
+```
+
+**400:** invalid body or category not available (`code: "INVALID_CATEGORY"`).
+
+**401:** missing or invalid token.
+
+**UI:** The **Needs Review** tab in Transactions exposes a **"Resolve all by merchant name…"** form that calls `pattern-preview` on each keystroke (debounced) to show a live match count, then calls `bulk-apply-by-pattern` on confirm. This replaces 40+ one-by-one resolves for the same merchant with a single action.

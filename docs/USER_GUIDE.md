@@ -20,8 +20,19 @@ Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlo
 
 ## Home (dashboard)
 
-- Review **cash KPIs**, period comparisons, and optional **safe-to-spend** / savings hints when you have set a monthly savings target in Settings.
-- Use filters or drill-downs where the UI offers them to open **Transactions** with the same scope.
+The dashboard gives you a full household snapshot in one view.
+
+- **Net worth widget** — shows current total assets, liabilities, and net worth pulled from the balance sheet, with a link to the full Net Worth page. Only appears once you have at least one account with a balance.
+- **Budget progress bar** — shows this calendar month's spend vs budget (color-coded: green → amber at 85% → red when over). Only appears when a budget exists for the current month. Links to the Budget page.
+- **Cash KPIs** — inflows, outflows, net, safe-to-spend, and savings rate for the selected period, with previous-period and year-over-year comparison chips. Use the period preset to switch between last 30 days, calendar month, YTD, etc.
+- **Safe to spend / savings target** — set a monthly savings target with the slider; safe-to-spend updates live (prorated by days in the selected period). Click **Save target** to persist it.
+- **Uncategorized / review alerts** — if there are open resolution items (unknown categories, transfers needing pairing, or possible duplicates), the dashboard shows a line for each type with a direct "Review" link.
+- **Outflows by category (pie)** — donut chart for the selected period. Click a slice to open Transactions filtered to that category.
+- **Top inflow sources (table)** — ranked inflow totals by category for the period, with View links.
+- **By category (table)** — full parent-level rollup with inflows / outflows / net / transaction count and comparison deltas.
+- **Stacked monthly outflows bar** and **monthly net bar** — always show the trailing 6 calendar months regardless of the period preset above (labeled accordingly).
+- **By account (table)** — per-account breakdown with View links.
+- **Scope filters** — Account and Belongs-to filters at the top apply to all KPIs and charts on the page.
 
 ## Settings
 
@@ -79,6 +90,10 @@ The **Household** tab lets you maintain a roster of the people who live in and s
 
 **Review queue statuses (bulk bar):** **In review** marks selected resolution items as *in progress*; **Resolve** marks them *resolved* (cleared from the open queue); **Reopen** sends them back to *open*. Applying a **category** updates the underlying transaction where the item type allows it (for example unknown-category items). The ledger row already exists; the queue tracks what still needs a human decision.
 
+**Resolve all by merchant name** — when you have many unknown-category items for the same merchant (e.g. 40 rows for "WHOLEFDS"), click **"Resolve all by merchant name…"** in the Needs Review tab to expand an inline form. Type the merchant name or fragment; the app shows a live count of how many items match. Pick a category and click **Apply to all** — all matching open unknown-category items are categorized and resolved in one step. No row selection required.
+
+**Rule learning** — after you change a transaction's category in the ledger table, the app offers to **create a classification rule** from that transaction's description pattern (owner/admin only). Accepting creates a `contains` rule so future imports with similar descriptions are classified automatically, without visiting Category Rules. Tap "Not now" to skip — the category change is saved either way.
+
 **Search:** Use the search field where provided; merchant and memo text may be indexed for full-text search depending on setup.
 
 ### Ledger edits (planned)
@@ -93,6 +108,7 @@ Today, for **posted** transactions, the product focuses on **category** (and bel
 
 - **Categories:** browse the taxonomy, add household-specific subcategories under top-level groups where the product allows it.
 - **Category rules (household):** define patterns (contains, prefix, etc.) that map bank text to a **leaf** category. Rules have priority and optional **money in / out** scope. You can **import** and **export** CSV for bulk edit; sample templates live under [`fixtures/category-import/`](../fixtures/category-import/) in the repo (see that folder’s README for column formats).
+- **Quick rule from transaction:** when you categorize a transaction in the ledger, the app offers to create a rule from that transaction’s description automatically. This is the fastest way to build up household rules — no need to visit Category Rules at all for the common case. The rule uses a `contains` match on the normalized description.
 - **Built-in rules:** global keyword rules ship with the app; household rules are evaluated in an order documented for operators in [`IMPORT_CLASSIFICATION.md`](IMPORT_CLASSIFICATION.md) and related API docs.
 
 ## Payslips
