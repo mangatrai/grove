@@ -229,3 +229,56 @@ Finds **all** open **`unknown_category`** items whose linked transaction descrip
 **UI:** The **Needs Review** tab in Transactions exposes a **"Resolve all by merchant name…"** form that calls `pattern-preview` on each keystroke (debounced) to show a live match count, then calls `bulk-apply-by-pattern` on confirm. This replaces 40+ one-by-one resolves for the same merchant with a single action.
 
 > **Implementation note:** `transaction_canonical` stores `merchant TEXT` and `memo TEXT` (no `description` column). Pattern matching concatenates `COALESCE(merchant,'') || ' ' || COALESCE(memo,'')` case-insensitively.
+
+---
+
+## `POST /resolution/:id/confirm-transfer`
+
+Confirm a **`transfer_ambiguity`** item as a real transfer. Reads `debitId` and `creditId` from the item's reason JSON (set by the `low_pair_score` path in canonical ingest), assigns a shared `transfer_group_id` to both `transaction_canonical` rows, and resolves **all** open `transfer_ambiguity` items whose `target_id` is either leg — so both the debit-side and credit-side review items are cleared in one call.
+
+Use `PATCH /resolution/:id { status: "resolved" }` for the **"not a transfer"** path (coincidental amount match) — that path does **not** set `transfer_group_id`.
+
+**Body:** empty (`{}`)
+
+**200:**
+
+```json
+{ "debitId": "uuid", "creditId": "uuid", "transferGroupId": "uuid" }
+```
+
+**400:** item is not `transfer_ambiguity`, or reason JSON does not contain an unambiguous `debitId` + `creditId` (e.g. multi-candidate ambiguity case — manual selection required).
+
+**404:** item not found for this household.
+
+**401:** missing or invalid token.
+
+**Effect on cash flow:** Once `transfer_group_id` is set on both legs, both transactions are excluded from cash flow KPIs (inflows, outflows, net, savings rate). Money moving between your own accounts no longer double-counts.
+
+---
+
+## `POST /resolution/bulk-confirm-transfers`
+
+Confirm many `transfer_ambiguity` items as real transfers (best-effort). Deduplicates by pair so passing both the debit-side and credit-side item IDs does not create two separate transfer groups.
+
+**Body:**
+
+```json
+{ "ids": ["uuid", "uuid"] }
+```
+
+- `ids` — non-empty array, max 200.
+
+**200:**
+
+```json
+{
+  "confirmed": [{ "itemId": "uuid", "debitId": "uuid", "creditId": "uuid", "transferGroupId": "uuid" }],
+  "errors": [{ "itemId": "uuid", "code": "MISSING_PAIR_IDS", "message": "…" }]
+}
+```
+
+**400:** invalid body.
+
+**401:** missing or invalid token.
+
+**UI:** When the Needs Review tab has transfer_ambiguity items in the selection, the bulk bar shows a **"Confirm transfers (N)"** button that calls this endpoint. A separate **"Not a transfer / dismiss"** button calls `POST /resolution/bulk` with `status: resolved` (no pairing).

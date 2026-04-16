@@ -6,7 +6,9 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   bulkApplyCategoryByDescriptionPattern,
   bulkApplyCategoryToUnknownItems,
+  bulkConfirmTransferPairsForHousehold,
   bulkUpdateResolutionStatusForHousehold,
+  confirmTransferPairForHousehold,
   countOpenDuplicateAmbiguityNotOnLedger,
   countOpenResolutionItemsByType,
   findUnknownCategoryItemsByDescriptionPattern,
@@ -128,6 +130,48 @@ resolutionRouter.get("/", async (req: AuthenticatedRequest, res) => {
 
 const statusSchema = z.object({
   status: z.enum(["open", "in_review", "resolved"])
+});
+
+const bulkConfirmTransfersSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(200)
+});
+
+/**
+ * POST /resolution/bulk-confirm-transfers
+ * Confirm many transfer_ambiguity items as real transfers (best-effort).
+ * Sets transfer_group_id on both legs and resolves both items for each pair.
+ */
+resolutionRouter.post("/bulk-confirm-transfers", async (req: AuthenticatedRequest, res) => {
+  const parsed = bulkConfirmTransfersSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const uniqueIds = [...new Set(parsed.data.ids)];
+  const out = await bulkConfirmTransferPairsForHousehold(householdId, uniqueIds);
+  res.status(200).json(out);
+});
+
+/**
+ * POST /resolution/:id/confirm-transfer
+ * Confirm a single transfer_ambiguity item as a real transfer.
+ * Reads debitId + creditId from the item's reason JSON, sets a shared transfer_group_id
+ * on both canonical rows, and resolves all open transfer_ambiguity items for both legs.
+ * Use PATCH /resolution/:id { status: "resolved" } to dismiss without pairing.
+ */
+resolutionRouter.post("/:id/confirm-transfer", async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const out = await confirmTransferPairForHousehold(householdId, req.params.id);
+  if (!out.ok) {
+    if (out.code === "NOT_FOUND") {
+      res.status(404).json({ message: out.message, code: out.code });
+      return;
+    }
+    res.status(400).json({ message: out.message, code: out.code });
+    return;
+  }
+  res.status(200).json(out.data);
 });
 
 resolutionRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {

@@ -634,6 +634,16 @@ export function TransactionsPage() {
     }
     return count;
   }, [data, selectedTxnIds]);
+
+  const openTransferCountInSelection = useMemo(() => {
+    if (!data) return 0;
+    let count = 0;
+    for (const t of data.transactions) {
+      if (!selectedTxnIds.has(t.id)) continue;
+      count += (t.openReviewItems ?? []).filter((i) => i.type === "transfer_ambiguity").length;
+    }
+    return count;
+  }, [data, selectedTxnIds]);
   const allVisibleSelected = useMemo(
     () =>
       Boolean(data?.transactions.length) &&
@@ -727,6 +737,42 @@ export function TransactionsPage() {
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Bulk resolve failed");
+    } finally {
+      setSavingBulk(false);
+    }
+  }
+
+  async function bulkConfirmTransfers() {
+    const ids: string[] = [];
+    if (!data) return;
+    for (const t of data.transactions) {
+      if (!selectedTxnIds.has(t.id)) continue;
+      for (const item of t.openReviewItems ?? []) {
+        if (item.type === "transfer_ambiguity") ids.push(item.id);
+      }
+    }
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length === 0) {
+      setError("No transfer ambiguity flags found in selected rows.");
+      return;
+    }
+    setError(null);
+    setSavingBulk(true);
+    try {
+      const res = await apiJson<{ confirmed: { itemId: string }[]; errors: { itemId: string; code: string; message: string }[] }>(
+        "/resolution/bulk-confirm-transfers",
+        { method: "POST", body: JSON.stringify({ ids: uniqueIds }) }
+      );
+      if (res.errors.length > 0) {
+        setError(`Paired ${res.confirmed.length} transfer(s); ${res.errors.length} could not be confirmed.`);
+      }
+      setSelectedTxnIds(new Set());
+      reviewDetailLoadedRef.current.clear();
+      setReviewDetailByTxn({});
+      setReviewDetailErr({});
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk confirm transfers failed");
     } finally {
       setSavingBulk(false);
     }
@@ -967,6 +1013,20 @@ export function TransactionsPage() {
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to update review item");
+    } finally {
+      setSavingResolutionItemId(null);
+    }
+  }
+
+  async function confirmTransferItem(txnId: string, itemId: string) {
+    setError(null);
+    setSavingResolutionItemId(itemId);
+    try {
+      await apiJson(`/resolution/${itemId}/confirm-transfer`, { method: "POST", body: "{}" });
+      forgetReviewDetail(txnId);
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to confirm transfer pair");
     } finally {
       setSavingResolutionItemId(null);
     }
@@ -1521,15 +1581,25 @@ export function TransactionsPage() {
                 >
                   Apply category
                 </button>
+                {openTransferCountInSelection > 0 ? (
+                  <button
+                    type="button"
+                    disabled={savingBulk}
+                    onClick={() => void bulkConfirmTransfers()}
+                    title="Confirm selected transfer flags as real transfers — sets transfer_group_id on both legs and excludes them from cash flow"
+                  >
+                    Confirm transfers ({openTransferCountInSelection})
+                  </button>
+                ) : null}
                 {openFlagCountInSelection > 0 ? (
                   <button
                     type="button"
                     className="secondary"
                     disabled={savingBulk}
                     onClick={() => void bulkResolveFlags()}
-                    title="Mark open transfer / duplicate / reconciliation flags as resolved for selected rows"
+                    title="Dismiss flags without pairing — use for coincidental amount matches that are NOT real transfers"
                   >
-                    Resolve flags ({openFlagCountInSelection})
+                    {openTransferCountInSelection > 0 ? `Not a transfer / dismiss (${openFlagCountInSelection})` : `Resolve flags (${openFlagCountInSelection})`}
                   </button>
                 ) : null}
                 <button
@@ -2098,15 +2168,29 @@ export function TransactionsPage() {
                                               ) : null}
                                               <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
                                                 {it.status !== "resolved" ? (
-                                                  <button
-                                                    type="button"
-                                                    disabled={busy || savingResolutionItemId === it.id}
-                                                    onClick={() =>
-                                                      void patchResolutionItemStatus(t.id, it.id, "resolved")
-                                                    }
-                                                  >
-                                                    Resolve flag
-                                                  </button>
+                                                  <>
+                                                    {it.type === "transfer_ambiguity" && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.debitId && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.creditId ? (
+                                                      <button
+                                                        type="button"
+                                                        disabled={busy || savingResolutionItemId === it.id}
+                                                        title="Link both transactions as a transfer pair — excludes them from cash flow reports"
+                                                        onClick={() => void confirmTransferItem(t.id, it.id)}
+                                                      >
+                                                        {savingResolutionItemId === it.id ? "Confirming…" : "Confirm as transfer"}
+                                                      </button>
+                                                    ) : null}
+                                                    <button
+                                                      type="button"
+                                                      className="secondary"
+                                                      disabled={busy || savingResolutionItemId === it.id}
+                                                      title={it.type === "transfer_ambiguity" ? "Dismiss without pairing — use when this is NOT a real transfer" : undefined}
+                                                      onClick={() =>
+                                                        void patchResolutionItemStatus(t.id, it.id, "resolved")
+                                                      }
+                                                    >
+                                                      {it.type === "transfer_ambiguity" ? "Not a transfer" : "Resolve flag"}
+                                                    </button>
+                                                  </>
                                                 ) : (
                                                   <button
                                                     type="button"
