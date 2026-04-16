@@ -74,6 +74,7 @@ household,,,STARBUCKS,contains,debit_only,,Food > Coffee,60,0.95,true
 household,,,CHICK-FIL-A,contains,debit_only,,Food > Dining out,60,0.95,true
 household,,,MCDONALDS,contains,debit_only,,Food > Dining out,60,0.95,true
 household,,,STONEBROOK PEDIATRIC,contains,debit_only,,Healthcare > Dental,50,0.95,true
+household,,,SUNNY KIDS PEDIATRIC,contains,debit_only,,Healthcare > Dental,50,0.95,true
 household,,,LAKE LEWISVILLE PED,contains,debit_only,,Healthcare > Medical,50,0.95,true
 household,,,LABCORP,contains,any,,Healthcare > Medical,50,0.95,true
 household,,,BRGHTWHL,contains,any,,Education > Childcare,40,0.98,true
