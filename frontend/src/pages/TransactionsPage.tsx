@@ -54,6 +54,8 @@ type TxClassificationMeta = {
   ruleId: string | null;
   confidence: number;
   reason: string;
+  /** Bank-supplied category from the source file (e.g. Discover "Category" column). Only present when source === "none". */
+  bankCategory?: string | null;
 } | null;
 
 type TxRow = {
@@ -212,7 +214,8 @@ function CategoryClassificationHint({ meta }: { meta: TxClassificationMeta }) {
   const conf = formatConfidencePct(meta.confidence);
   const bits = [label, conf].filter(Boolean);
   const title = [bits.join(" · "), meta.reason?.trim() ? meta.reason : ""].filter(Boolean).join("\n");
-  if (bits.length === 0 && !meta.reason?.trim()) {
+  const showBankCategory = meta.source === "none" && meta.bankCategory;
+  if (bits.length === 0 && !meta.reason?.trim() && !showBankCategory) {
     return null;
   }
   return (
@@ -225,6 +228,11 @@ function CategoryClassificationHint({ meta }: { meta: TxClassificationMeta }) {
           </span>
         ) : null}
       </span>
+      {showBankCategory ? (
+        <span style={{ display: "block", marginTop: "0.15rem" }}>
+          Bank suggested: <strong>{meta.bankCategory}</strong>
+        </span>
+      ) : null}
       {meta.source === "household" && meta.ruleId ? (
         <span style={{ display: "block", marginTop: "0.15rem" }}>
           <Link to="/categories/rules">Household rules</Link>
@@ -357,6 +365,9 @@ export function TransactionsPage() {
   const [ruleOfferedMerchants, setRuleOfferedMerchants] = useState<Set<string>>(() => new Set());
   const [selectedTrashIds, setSelectedTrashIds] = useState<Set<string>>(() => new Set());
   const [savingTrash, setSavingTrash] = useState(false);
+  const [selectedAllIds, setSelectedAllIds] = useState<Set<string>>(() => new Set());
+  const [bulkAllCategoryId, setBulkAllCategoryId] = useState<string>("");
+  const [savingBulkAll, setSavingBulkAll] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
   const [patternResolveOpen, setPatternResolveOpen] = useState(false);
@@ -575,6 +586,8 @@ export function TransactionsPage() {
 
   useEffect(() => {
     setSelectedTxnIds(new Set());
+    setSelectedAllIds(new Set());
+    setBulkAllCategoryId("");
   }, [
     needsReviewTab,
     resolutionTypesKey,
@@ -671,6 +684,49 @@ export function TransactionsPage() {
       setSelectedTxnIds(new Set());
     } else {
       setSelectedTxnIds(new Set(data.transactions.map((t) => t.id)));
+    }
+  }
+
+  const allVisibleAllSelected = useMemo(
+    () =>
+      Boolean(data?.transactions.length) &&
+      data!.transactions.every((t) => selectedAllIds.has(t.id)),
+    [data, selectedAllIds]
+  );
+
+  function toggleSelectAllTab() {
+    if (!data?.transactions.length) return;
+    if (allVisibleAllSelected) {
+      setSelectedAllIds(new Set());
+    } else {
+      setSelectedAllIds(new Set(data.transactions.map((t) => t.id)));
+    }
+  }
+
+  async function bulkAssignCategoryAll() {
+    if (!bulkAllCategoryId) {
+      setError("Choose a category.");
+      return;
+    }
+    const ids = data ? [...selectedAllIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (ids.length === 0) return;
+    setError(null);
+    setSavingBulkAll(true);
+    try {
+      const res = await apiJson<{ updated: number; skipped: number }>(
+        "/transactions/bulk-category",
+        { method: "POST", body: JSON.stringify({ ids, categoryId: bulkAllCategoryId }) }
+      );
+      if (res.skipped > 0) {
+        setError(`Applied to ${res.updated}; ${res.skipped} row(s) could not be updated.`);
+      }
+      setSelectedAllIds(new Set());
+      setBulkAllCategoryId("");
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk category apply failed");
+    } finally {
+      setSavingBulkAll(false);
     }
   }
 
@@ -1708,6 +1764,38 @@ export function TransactionsPage() {
           </div>
           </div>
         ) : null}
+        {!needsReviewTab && !trashTab && selectedAllIds.size > 0 ? (
+          <div className="transactions-bulk-bar row" role="status" aria-live="polite">
+            <span className="muted">
+              {selectedAllIds.size} row{selectedAllIds.size === 1 ? "" : "s"} selected
+            </span>
+            <div style={{ marginBottom: 0, minWidth: "12rem", maxWidth: "20rem" }}>
+              <LedgerCategoryPicker
+                categories={categories}
+                value={bulkAllCategoryId || null}
+                disabled={savingBulkAll}
+                onChange={(id) => setBulkAllCategoryId(id ?? "")}
+                onCategoryCreated={() => void refreshCategories()}
+                ariaLabel="Bulk category (all tab)"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={savingBulkAll || !bulkAllCategoryId}
+              onClick={() => void bulkAssignCategoryAll()}
+            >
+              Apply category
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={savingBulkAll}
+              onClick={() => { setSelectedAllIds(new Set()); setBulkAllCategoryId(""); }}
+            >
+              Clear selection
+            </button>
+          </div>
+        ) : null}
         {trashTab && selectedTrashIds.size > 0 ? (
           <div className="transactions-bulk-bar row" role="status" aria-live="polite">
             <span className="muted">
@@ -1810,7 +1898,18 @@ export function TransactionsPage() {
                             aria-label="Select all rows on this page"
                           />
                         </th>
-                      ) : null}
+                      ) : (
+                        <th style={{ width: "2.5rem" }}>
+                          <input
+                            type="checkbox"
+                            checked={allVisibleAllSelected}
+                            onChange={() => toggleSelectAllTab()}
+                            disabled={savingBulkAll}
+                            title="Select all rows on this page"
+                            aria-label="Select all rows on this page"
+                          />
+                        </th>
+                      )}
                       {needsReviewTab ? (
                         <th className="transactions-page__expand-th" scope="col">
                           Context
@@ -1840,7 +1939,7 @@ export function TransactionsPage() {
                       const detailItems = reviewDetailByTxn[t.id];
                       const detailLoading = reviewDetailLoadingIds.has(t.id);
                       const detailError = reviewDetailErr[t.id];
-                      const colSpan = needsReviewTab ? 11 : trashTab ? 7 : 9;
+                      const colSpan = needsReviewTab ? 11 : trashTab ? 7 : 10;
                       return (
                         <Fragment key={t.id}>
                           <tr>
@@ -1868,7 +1967,21 @@ export function TransactionsPage() {
                                   aria-label={`Select row ${desc}`}
                                 />
                               </td>
-                            ) : null}
+                            ) : (
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedAllIds.has(t.id)}
+                                  onChange={() => setSelectedAllIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
+                                    return next;
+                                  })}
+                                  disabled={savingBulkAll}
+                                  aria-label={`Select row ${desc}`}
+                                />
+                              </td>
+                            )}
                             {needsReviewTab ? (
                               <td className="transactions-page__expand-cell">
                                 <button

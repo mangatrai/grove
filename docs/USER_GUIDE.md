@@ -96,13 +96,15 @@ The **Household** tab lets you maintain a roster of the people who live in and s
 
 **Search:** Use the search field where provided; merchant and memo text may be indexed for full-text search depending on setup.
 
-### Ledger edits (planned)
+### Ledger edits
 
-Today, for **posted** transactions, the product focuses on **category** (and belongs-to where exposed). The following are **not implemented yet** but are on the product backlog:
+For **posted** transactions you can:
 
-- Edit **description / memo** (and related fields) on finalized ledger rows.
-- **Delete** a single transaction, or **bulk delete** selected rows.
-- **Bulk recategorize** on the **All** tab for rows that are not tied to an open “unknown category” resolution item (the Needs review bulk category flow is aimed at that queue).
+- **Edit memo** — hover over any row to reveal a pencil icon next to the description. Click to enter inline edit mode; Enter saves, Escape cancels. The memo is an annotation field and does not affect the dedup fingerprint. (CR-107)
+- **Delete (single)** — move a row to Trash with the trash icon, then permanently delete it from the Trash tab.
+- **Bulk delete** — select rows on the Trash tab and use “Delete permanently”.
+- **Bulk recategorize (All tab)** — check one or more rows on the All (Ledger) tab to reveal a bulk action bar. Choose a category and click “Apply category” to reassign all selected rows at once. Useful after rule changes or when correcting a batch of miscategorised imports. (CR-113)
+- **Bulk recategorize (Needs Review tab)** — same bulk bar is available on the Needs Review tab, targeted at unknown-category resolution items.
 
 ## Categories and rules
 

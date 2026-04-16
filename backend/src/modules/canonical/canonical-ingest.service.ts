@@ -401,11 +401,13 @@ export async function canonicalizeImportSession(
   async function insertCanonicalRow(p: PendingCanonInsert): Promise<void> {
     const { row, parsed, normDate, rounded, fingerprint, referenceId, classification, merchant, memo, direction, diag } = p;
     const categoryId = classification.categoryId;
+    const bankCategory = (parsed.source_row?.["Category"] ?? "").trim() || null;
     const classificationMeta = JSON.stringify({
       source: classification.source,
       ruleId: classification.ruleId,
       confidence: classification.confidence,
-      reason: classification.reason
+      reason: classification.reason,
+      ...(bankCategory ? { bankCategory } : {})
     });
 
     const canonicalId = crypto.randomUUID();
@@ -487,11 +489,13 @@ export async function canonicalizeImportSession(
       rounded,
       dbRules
     );
+    const bankCategoryDup = (parsed.source_row?.["Category"] ?? "").trim() || null;
     const classificationMeta = JSON.stringify({
       source: classification.source,
       ruleId: classification.ruleId,
       confidence: classification.confidence,
-      reason: classification.reason
+      reason: classification.reason,
+      ...(bankCategoryDup ? { bankCategory: bankCategoryDup } : {})
     });
     const canonicalId = crypto.randomUUID();
     await qExec(

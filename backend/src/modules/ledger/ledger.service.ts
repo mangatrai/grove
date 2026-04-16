@@ -18,6 +18,8 @@ export type ClassificationExplainMeta = {
   ruleId: string | null;
   confidence: number;
   reason: string;
+  /** Bank-supplied category from the source file (e.g. Discover "Category" column). Only present when the bank provided it. */
+  bankCategory?: string | null;
 };
 
 function parseClassificationMetaJson(raw: unknown): ClassificationExplainMeta | null {
@@ -30,10 +32,11 @@ function parseClassificationMetaJson(raw: unknown): ClassificationExplainMeta | 
     const ruleId = o.ruleId == null ? null : String(o.ruleId);
     const confidence = typeof o.confidence === "number" && Number.isFinite(o.confidence) ? o.confidence : 0;
     const reason = typeof o.reason === "string" ? o.reason : "";
+    const bankCategory = typeof o.bankCategory === "string" && o.bankCategory.trim() ? o.bankCategory.trim() : null;
     if (!source && !reason && ruleId == null) {
       return null;
     }
-    return { source: source || "unknown", ruleId, confidence, reason };
+    return { source: source || "unknown", ruleId, confidence, reason, ...(bankCategory ? { bankCategory } : {}) };
   } catch {
     return null;
   }

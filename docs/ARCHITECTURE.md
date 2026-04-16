@@ -87,9 +87,11 @@ Operators may still want to **reclaim disk space** after they trust extracted ro
 
 A future **Summary / net-worth** page (assets vs liabilities, time-slice snapshots, manual balance edits) is specified in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md). Statement-level **beginning/ending balances** from BoA CSV/PDF are stored in `import_file.confidence_summary.statementBalances` after parse as a feeder for that work.
 
-### Planned ledger surface (product backlog)
+### Ledger surface (shipped)
 
-Editable **memo/description**, **delete** / **bulk delete**, and **bulk recategorize** outside the unknown-category resolution flow are **not implemented**; requirements live in [`USER_GUIDE.md`](USER_GUIDE.md) § Ledger edits (planned).
+- **Inline memo edit** (CR-107): hover-reveal pencil on any row; separate annotation field, not in the fingerprint.
+- **Single/bulk delete** via Trash: soft-delete → Trash tab → permanent delete (`POST /ledger/bulk-delete`, `DELETE /ledger/:id`).
+- **Bulk recategorize**: available on both the Needs Review tab (for unknown-category resolution items) and the All (Ledger) tab for any posted rows (CR-113). Reuses `POST /ledger/bulk-category`.
 
 ## 5. Key Domain Model (Conceptual)
 - `Household`

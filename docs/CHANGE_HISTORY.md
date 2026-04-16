@@ -18,6 +18,44 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (bulk recategorize All tab, bank category hint, backlog)
+
+### CR-113 — Bulk recategorize on the All (Ledger) tab
+- **Type:** CR
+- **What:** Users can now select posted transactions on the main "All" tab and bulk-reassign their category — not just on the Needs Review tab. A checkbox column is now visible on all three tabs. Selecting one or more rows on the All tab reveals a bulk action bar with a category picker, "Apply category" button, and "Clear selection" button. The existing `POST /transactions/bulk-category` backend endpoint is reused (it was already accessible but had no All-tab UI). Per-page select-all checkbox works the same as on Needs Review. Selection is cleared automatically on tab switch, page navigation, and filter change.
+- **Why:** Power users re-importing after rule changes, or correcting a batch of miscategorised transactions, had no way to bulk-update from the main ledger view. They had to go through Needs Review which only surfaces unknown-category items.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`
+
+### UX-030 — Bank-supplied category hint in Needs Review expand panel
+- **Type:** UX / CR
+- **What:** For banks that include a category column in their export (currently Discover: "Supermarkets", "Restaurants", "Gas Stations", etc.), the bank-assigned category is now surfaced in the classification hint shown in the Needs Review expand panel when the app could not classify the transaction. Appears as **"Bank suggested: Restaurants"** below the "no rule matched" reason. Only shown when the app's classifier returned `source: "none"` (i.e. no household or builtin rule fired) — avoids showing it when a rule already matched correctly.
+- **Backend:** During canonical ingest (`canonical-ingest.service.ts`), both `insertCanonicalRow` and `insertExactDuplicateForReview` now check `parsed.source_row["Category"]` (non-empty, trimmed). If present, it is stored as `bankCategory` in the `classification_meta` JSON alongside the existing `source/ruleId/confidence/reason` fields. No schema migration needed — `classification_meta` is a free-form JSON column.
+- **Frontend/service:** `ClassificationExplainMeta` in `ledger.service.ts` gains optional `bankCategory?: string | null`. `parseClassificationMetaJson` extracts it. `TxClassificationMeta` in `TransactionsPage.tsx` gains the same field. `CategoryClassificationHint` renders "Bank suggested: X" when `bankCategory` is present.
+- **Why not a mapping:** A direct Discover→app category mapping (e.g. "Supermarkets" → Groceries) is too fragile — the boundary between "Supermarkets" and "General Merchandise" is institution-specific and doesn't generalise. Showing the bank label as informational context lets the user decide without the app making a wrong assumption.
+- **Generality:** The `source_row["Category"]` key is Discover-specific today. Any future bank parser that stores a category hint under the same key will automatically surface it. Other banks that do not provide a category column produce an empty string → stored as null → nothing shown.
+- **Files:** `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/src/modules/ledger/ledger.service.ts`, `frontend/src/pages/TransactionsPage.tsx`
+
+### BACKLOG-003 — Notifications system (roadmap)
+- **Type:** PRD / backlog
+- **What:** The Notifications tab in Settings (`SettingsPage.tsx`) is intentionally kept as a placeholder. Planned use cases:
+  1. **Export ready** — async export ZIP generation can take time on large households; notify the user in-app when the download is ready instead of requiring them to poll the Settings export section.
+  2. **Password change confirmation** — in-app confirmation after a successful password change.
+  3. **Unresolved items alert** — periodic reminder when the resolution queue grows (e.g. "You have 42 uncategorised transactions").
+  4. Additional hooks TBD as the app grows.
+- **Why not yet:** No notification delivery mechanism exists (no email, no WebSocket push). Implementation requires either a polling endpoint or a real-time channel. Scope is medium-to-large; not blocking first release.
+- **Status:** Tab shows "No notification service is configured for the local MVP. This tab is reserved." — intentionally visible so the feature is discoverable.
+
+### BACKLOG-004 — Recurring transaction detection / subscription tracker (roadmap)
+- **Type:** PRD / backlog
+- **What:** Automatically identify transactions that recur at a predictable cadence (monthly, weekly, annual) and surface them as a "Subscriptions" or "Recurring charges" list. Use cases:
+  1. Show all subscriptions in one place — Netflix, Spotify, gym memberships, insurance premiums, auto-loan payments, etc.
+  2. Flag missed auto-pays (expected charge didn't appear this month).
+  3. Highlight subscriptions the user may have forgotten (e.g. a $14.99/mo charge for a service they stopped using).
+- **Detection heuristic ideas:** Group by normalised merchant name; transactions with consistent amount ± 5% on consistent day-of-month ± 5 days over 3+ occurrences = candidate recurring. Flag as recurring in the ledger row (new `is_recurring` column on `transaction_canonical`, or a computed label from a `recurring_pattern` table).
+- **Why not yet:** Requires a batch analysis job (or on-demand scan) across the household's full ledger history. Output is a new UI surface (dedicated page or dashboard widget). Medium-to-large scope; non-blocking for first release.
+
+---
+
 ## 2026-04-16 (RBAC, login UX, dashboard budget widget)
 
 ### FIX-036 — Wrong-password shows "Session expired"
