@@ -1172,7 +1172,7 @@ export function ImportWorkspacePage() {
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
       if ((parseOut.asyncPayslipPending ?? 0) > 0) {
         setMessage(
-          “Deloitte PDF(s) queued for payslip extraction. Wait until files show \u201cparsed\u201d (automatic check every 2 minutes), then run import again.”
+          'Deloitte PDF(s) queued for payslip extraction. Wait until files show “parsed” (automatic check every 2 minutes), then run import again.'
         );
         setPipelineBusy(false);
         await load();

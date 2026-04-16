@@ -82,6 +82,7 @@ type TxRow = {
 };
 
 const LEDGER_RESOLUTION_TYPES = [
+  "transfer_ambiguity",
   "duplicate_ambiguity",
   "reconciliation_mismatch"
 ] as const;
@@ -89,6 +90,7 @@ const LEDGER_RESOLUTION_TYPES = [
 type LedgerResolutionType = (typeof LEDGER_RESOLUTION_TYPES)[number];
 
 const RESOLUTION_TYPE_LABELS: Record<LedgerResolutionType, string> = {
+  transfer_ambiguity: "Transfer",
   duplicate_ambiguity: "Duplicate",
   reconciliation_mismatch: "Reconciliation"
 };
@@ -1525,7 +1527,7 @@ export function TransactionsPage() {
                     className="secondary"
                     disabled={savingBulk}
                     onClick={() => void bulkResolveFlags()}
-                    title="Mark open duplicate / reconciliation flags as resolved for selected rows"
+                    title="Mark open transfer / duplicate / reconciliation flags as resolved for selected rows"
                   >
                     Resolve flags ({openFlagCountInSelection})
                   </button>

@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-15 (transfer filter, build fix, backlog)
+
+### FIX-035 — Build error: Unicode escape in string literal
+- **Type:** FIX
+- **What:** `ImportWorkspacePage.tsx` contained `\u201c` / `\u201d` (curly-quote Unicode escapes) inside a string literal. Babel rejected the file at parse time, breaking the Vite dev server and the login page. Changed to a single-quoted string with straight double quotes.
+- **Files:** `frontend/src/pages/ImportWorkspacePage.tsx`
+
+### UX-028 — Add "Transfer" to Needs Review type filter dropdown
+- **Type:** UX
+- **What:** `transfer_ambiguity` was missing from `LEDGER_RESOLUTION_TYPES` in `TransactionsPage.tsx`, so it never appeared as a filter option in the "Review type" dropdown on the Needs Review tab. Users could not filter the list to show only transfer items, making it impossible to select-all and bulk resolve. Added `transfer_ambiguity → "Transfer"` to the constant and label map. Updated the "Resolve flags" button tooltip to mention transfers. Bulk resolve already worked mechanically (the backend includes transfer_ambiguity items in `openReviewItems` and `POST /resolution/bulk` handles them) — the filter was the only missing piece for efficient triage.
+- **Files:** `frontend/src/pages/TransactionsPage.tsx`
+
+### BACKLOG-002 — Manual transfer pairing (roadmap)
+- **Type:** PRD / backlog
+- **What:** When the transfer auto-matcher scores below the threshold (score 0, threshold 45), it creates a `transfer_ambiguity` review item instead of setting `transfer_group_id` on both sides. Resolving that item clears the review queue but does NOT pair the transactions — they remain as individual posted rows. Money moving between the user's own accounts (e.g. salary checking → high-yield savings via ACH) counts as an outflow on one side and an inflow on the other, distorting cash flow KPIs (inflow total, outflow total, savings rate, safe-to-spend). The correct fix is a "Mark as transfer pair" action in the Needs Review expand panel that accepts a debit ID and credit ID, sets a shared `transfer_group_id` on both `transaction_canonical` rows, and marks both resolution items resolved. The backend pair-score logic should also be extended with the household's actual bank description patterns once known. Until then, users can resolve the review items (clears noise) and optionally lower `TRANSFER_MIN_AUTO_PAIR_SCORE` in `.env` (risky without domain-specific patterns).
+- **Why not yet:** Requires a UI for selecting the two legs of a transfer (debit from one account, credit from another) and a new backend endpoint. Scope is medium — not blocking first release since cash flow is usable with the distortion noted.
+
+---
+
 ## 2026-04-15 (bug fixes: pattern-preview crash, auth, OFX, UX polish)
 
 ### FIX-030 — Pattern-preview backend crash: `tc.description` column does not exist
