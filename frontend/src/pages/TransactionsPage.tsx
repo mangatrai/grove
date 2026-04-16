@@ -350,6 +350,9 @@ export function TransactionsPage() {
   const [ruleFromLedgerConfirm, setRuleFromLedgerConfirm] = useState<{ txnId: string; categoryId: string } | null>(
     null
   );
+  // Tracks which merchant keys have already been offered rule-creation this session.
+  // Prevents the dialog from re-firing for every WHOLEFDS item in a large triage queue.
+  const [ruleOfferedMerchants, setRuleOfferedMerchants] = useState<Set<string>>(() => new Set());
   const [selectedTrashIds, setSelectedTrashIds] = useState<Set<string>>(() => new Set());
   const [savingTrash, setSavingTrash] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
@@ -2071,9 +2074,16 @@ export function TransactionsPage() {
                                                         });
                                                         forgetReviewDetail(t.id);
                                                         await load();
-                                                        // Rule-learning dialog is intentionally omitted here —
-                                                        // Needs Review triage is rapid-fire; the dialog is
-                                                        // surfaced only from the All-tab main category picker.
+                                                        // Offer rule creation once per unique merchant in this session.
+                                                        // If the user already saw the dialog for "WHOLEFDS" and declined
+                                                        // or created a rule, the next 29 WHOLEFDS items won't re-prompt.
+                                                        if (currentRole === "owner" || currentRole === "admin") {
+                                                          const merchantKey = (t.merchant || t.memo || "").toLowerCase().trim();
+                                                          if (merchantKey && !ruleOfferedMerchants.has(merchantKey)) {
+                                                            setRuleOfferedMerchants((prev) => new Set(prev).add(merchantKey));
+                                                            setRuleFromLedgerConfirm({ txnId: t.id, categoryId });
+                                                          }
+                                                        }
                                                       } catch (e: unknown) {
                                                         setError(e instanceof Error ? e.message : "Failed to set category");
                                                       } finally {

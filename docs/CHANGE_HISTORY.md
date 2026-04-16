@@ -50,9 +50,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **What:** The "Load classification preview" button opened the table with no way to dismiss it other than leaving the page. Button label now toggles: shows "Hide preview" when rows are visible, "Load classification preview" when empty. Clicking when rows are visible clears them; clicking when empty loads them. Same button serves both purposes.
 - **Files:** `frontend/src/pages/ImportWorkspacePage.tsx`
 
-### UX-026 — Rule learning dialog: removed from Needs Review category picker path
+### UX-026 — Rule learning dialog: per-merchant dedup in Needs Review
 - **Type:** UX / CR
-- **What:** After CR-110 wired the "Create classification rule?" dialog to all category changes, it also fired when setting a category via the inline picker in the Needs Review expand panel. This was disruptive during rapid triage — resolving 20 items meant 20 consecutive dialogs. The dialog is now only triggered from the All-tab main category picker. The Needs Review panel picker still resolves the item and reloads the list, but does not pop the rule-learning dialog.
+- **What:** After CR-110, the "Create classification rule?" dialog fired on every categorization in the Needs Review expand panel — resolving 30 WHOLEFDS items meant 30 consecutive modal interrupts. The dialog is now deduplicated per merchant key within the triage session. First time a given merchant (e.g. "WHOLEFDS") is categorized → dialog offered, key added to a session-scoped Set. Subsequent items with the same merchant → dialog silently skipped. Each unique merchant still gets one offer. A session with 30 WHOLEFDS + 5 AMAZON + 3 NETFLIX items produces 3 dialogs, not 38.
+- **Why:** The dialog itself is useful — it's the right moment to create a rule. The problem was repetition for the same merchant, not the concept.
 - **Files:** `frontend/src/pages/TransactionsPage.tsx`
 
 ### UX-027 — Needs Review toolbar: sticky on scroll
