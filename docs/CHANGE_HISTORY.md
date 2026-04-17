@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (PRD expansion: AI health, cloud backup, staff timesheet)
+
+### PRD-003 — Three new feature requirements added to PRD (§18, §19, §20)
+- **Type:** PRD
+- **What:** Added three fully specified requirements sections to `docs/archive/FINANCE_APP_PRD.md`:
+  - **§18 / FR-13 — AI Financial Health Dashboard:** On-demand AI analysis on the Home page. User configures AI provider (OpenAI or Anthropic) + API key + personal profile (age, salary, goals, risk tolerance) in a new "Financial Insights" Settings sub-tab. Analysis is generated server-side and cached. Output: health rating, what's good/bad/ugly, expense reduction tips, investment gaps, demographic benchmarks, actionable next steps.
+  - **§19 / FR-14 — Automated Cloud Backup & Restore:** New "Backup & Restore" Settings tab consolidating manual export/restore (moved) and Google Drive scheduled backup. Google OAuth `drive.file` scope. Configurable folder, frequency (daily/weekly/monthly), and retention. Phase 2: OneDrive.
+  - **§20 / FR-15 — Household Staff Timesheet & Expenses:** New `staff` RBAC role. Staff see only "My Timesheet" and "My Expenses" tabs. Admins manage staff profiles, review/approve timesheets and expenses, record payments, and optionally post wages/expenses to the household ledger as categorized transactions. Clock-in/out, manual time entry, OT calculation, mileage reimbursement.
+- **Also updated:** §4 RBAC (added staff role), §13 Phase D Settings (added new sub-tabs), §17 Future Phases (added OneDrive Phase 2 and staff Phase 2 items).
+- **Why:** Requirements gathering session with product owner to shape next phase of development.
+- **Files:** `docs/archive/FINANCE_APP_PRD.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## 2026-04-16 (bulk recategorize All tab, bank category hint, backlog)
 
 ### CR-113 — Bulk recategorize on the All (Ledger) tab
