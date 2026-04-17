@@ -77,6 +77,7 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   const res = await fetch(path, { ...init, headers });
   if (res.status === 401) {
     setToken(null);
+    throw new Error("Session expired. Please sign in again.");
   }
   return res;
 }

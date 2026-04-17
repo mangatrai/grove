@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (apiFetch 401 still leaking raw JSON)
+
+### FIX-027 — `apiFetch` returning raw 401 body instead of throwing on session expiry
+
+- **Type:** FIX
+- **What:** After token expiry, some actions (file upload, delete payslip, delete category/rule, import) were showing `{"message":"Missing bearer token"}` to the user instead of the friendly "Session expired" message.
+- **Root cause:** `apiJson` was correctly fixed to throw `"Session expired. Please sign in again."` on 401. `apiFetch` — used for operations that need the raw `Response` object (multipart uploads, DELETEs) — was only calling `setToken(null)` and then returning the 401 `Response`. Callers hit `if (!res.ok)` → `res.text()` → raw JSON displayed as error string.
+- **Fix:** `apiFetch` now also throws `"Session expired. Please sign in again."` on 401. All callers are already inside try/catch blocks so the throw is handled correctly. `setToken(null)` still fires the listener, redirecting to login.
+- **Files:** `frontend/src/api.ts`
+
+---
+
 ## 2026-04-16 (database architecture review + index audit)
 
 ### DB-007 — Performance index audit: 9 missing indexes added (migration 0021)
