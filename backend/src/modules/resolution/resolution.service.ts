@@ -497,21 +497,22 @@ export interface BulkApplyCategoryError {
 }
 
 /**
- * Find all open unknown_category resolution items whose linked transaction description
- * contains `descPattern` (case-insensitive). Used for bulk-resolve-by-pattern preview + apply.
+ * Find all posted, uncategorized transactions whose description contains `descPattern`
+ * (case-insensitive). Canonical ingest does not create unknown_category resolution items —
+ * uncategorized rows surface in Needs Review via category_id IS NULL — so we query
+ * transaction_canonical directly rather than going through resolution_item.
  */
 export async function findUnknownCategoryItemsByDescriptionPattern(
   householdId: string,
   descPattern: string
 ): Promise<{ id: string; targetId: string; description: string }[]> {
   return qAll<{ id: string; targetId: string; description: string }>(
-    `SELECT ri.id, ri.target_id AS "targetId",
+    `SELECT tc.id AS id, tc.id AS "targetId",
             TRIM(COALESCE(tc.merchant, '') || ' ' || COALESCE(tc.memo, '')) AS description
-       FROM resolution_item ri
-       INNER JOIN transaction_canonical tc ON tc.id = ri.target_id
-       WHERE ri.household_id = ?
-         AND ri.type = 'unknown_category'
-         AND ri.status = 'open'
+       FROM transaction_canonical tc
+       WHERE tc.household_id = ?
+         AND tc.category_id IS NULL
+         AND tc.status = 'posted'
          AND LOWER(COALESCE(tc.merchant, '') || ' ' || COALESCE(tc.memo, '')) LIKE LOWER(?)`,
     householdId,
     `%${descPattern.toLowerCase()}%`
@@ -519,8 +520,8 @@ export async function findUnknownCategoryItemsByDescriptionPattern(
 }
 
 /**
- * Apply a category to all open unknown_category items matching a description pattern,
- * and mark those resolution items resolved.
+ * Apply a category to all posted, uncategorized transactions matching a description pattern.
+ * Also closes any lingering unknown_category resolution items for those rows.
  */
 export async function bulkApplyCategoryByDescriptionPattern(
   householdId: string,
@@ -541,10 +542,12 @@ export async function bulkApplyCategoryByDescriptionPattern(
       item.targetId,
       householdId
     );
+    // Close any lingering unknown_category resolution items for this transaction (best-effort).
     await qExec(
-      `UPDATE resolution_item SET status = 'resolved' WHERE id = ? AND household_id = ?`,
-      item.id,
-      householdId
+      `UPDATE resolution_item SET status = 'resolved'
+       WHERE household_id = ? AND type = 'unknown_category' AND target_id = ? AND status != 'resolved'`,
+      householdId,
+      item.targetId
     );
   }
   return { ok: true, updated: items.length };

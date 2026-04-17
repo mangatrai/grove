@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (bulk resolve by merchant — root cause fix)
+
+### FIX-026 — "Resolve all by merchant name" always returned zero matches
+
+- **Type:** FIX
+- **What:** The pattern preview (`POST /resolution/pattern-preview`) and bulk apply (`POST /resolution/bulk-apply-by-pattern`) always returned 0 matches, even when uncategorized transactions with matching descriptions were visible in Needs Review.
+- **Root cause:** `findUnknownCategoryItemsByDescriptionPattern` queried through `resolution_item` requiring `type = 'unknown_category'` AND `status = 'open'`. But canonical ingest has a comment at line 450 of `canonical-ingest.service.ts` explicitly stating: *"Uncategorized rows appear in Needs Review via `category_id IS NULL` — no `resolution_item` needed."* No `unknown_category` resolution items are ever created, so the join always returned empty.
+- **Fix:** Rewrote both functions to query `transaction_canonical` directly for `category_id IS NULL, status = 'posted'` rows matching the pattern. The bulk apply continues to close any incidentally-existing resolution items as a best-effort cleanup.
+- **Files:** `backend/src/modules/resolution/resolution.service.ts`
+
+---
+
 ## 2026-04-16 (PRD expansion: AI health, cloud backup, staff timesheet)
 
 ### PRD-003 — Three new feature requirements added to PRD (§18, §19, §20)
