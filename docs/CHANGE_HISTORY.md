@@ -787,7 +787,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ### Backlog CRs created (from Epic 12 Phase 1–4)
 - **CR-095a** — Backend: User sign-up endpoint + household invitation flow (Medium priority, High complexity)
-- **CR-095b** — Backend: Forgot password / password reset email flow (Low priority, Medium complexity)
+- **CR-095b** — Self-service forgot password via email reset link (Medium priority, Medium complexity) — see full spec below
 - **CR-097a** — Payslip: Bulk PDF import (multiple files in one session) (Medium, Medium)
 - **CR-097b** — Payslip: YTD analytics dashboard — income trends, tax rate history (Low, Medium)
 - **CR-097c** — Payslip: Employer management from payslip list (currently only in Settings) (Low, Low)
@@ -796,6 +796,43 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **CR-103** — Transactions: Bulk recategorization (Medium, Low)
 - **CR-104** — Net worth: Goal tracking — target net worth by date (Low, Medium)
 - **CR-105** — Mobile: PWA manifest + install prompt (Low, Low)
+
+---
+
+## 2026-04-17 (email infrastructure decision + CR-095b spec)
+
+### CR-106 — Email infrastructure: SMTP abstraction + provider decision
+
+- **Type:** CR (architecture / backlog)
+- **Status:** Decided, not yet implemented. Decision recorded in **`docs/EMAIL_INFRASTRUCTURE.md`**.
+- **What:** Established the email infrastructure approach that will underpin multiple features: self-service password reset (CR-095b), household invites (CR-095a), staff provisioning (PRD §20), timesheet notifications, and budget alerts (CR-102).
+- **Decision:**
+  - Use **nodemailer** with standard SMTP — no vendor SDK in the codebase; provider is swapped by changing env vars.
+  - **Recommended providers:** Resend (free, purpose-built transactional email, best deliverability) as production default; Gmail App Password as the easy personal setup path.
+  - **6 new env vars** (all optional until first email feature ships): `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`.
+  - Email-dependent routes degrade gracefully when SMTP is not configured — admin-reset flow remains available as fallback.
+- **Expected volume:** 10–20 emails/month today; up to ~500/month when Phase 3 ships. Both recommended providers' free tiers comfortably cover this.
+- **Files:** `docs/EMAIL_INFRASTRUCTURE.md` (new)
+
+---
+
+### CR-095b — Self-service forgot password via email reset link (BACKLOG SPEC)
+
+- **Type:** CR (backlog — Medium priority, Medium complexity)
+- **Status:** Not yet implemented. Full spec in **`docs/EMAIL_INFRASTRUCTURE.md`**. Prerequisite: CR-106 (SMTP config).
+- **Problem:** Currently "Forgot password?" shows a tip to ask the household admin. This works for members but not for the owner themselves (no one to ask). Also blocks any future self-managed user onboarding.
+- **Approach:** Standard email-based time-limited token reset (not OAuth, not SMS). Admin-reset flow (Settings → Members) stays in place and is not replaced.
+- **New DB table:** `password_reset_token` — token_hash (SHA-256 of raw token, never stored plain), user_id FK, expires_at (1 hour), used_at. One active token per user; creating new one invalidates prior tokens.
+- **New mailer module:** `backend/src/modules/mailer/` — nodemailer transport, `sendMail()` wrapper (best-effort, returns `{ ok }` not throws), password-reset email template.
+- **New API routes:**
+  - `POST /auth/forgot-password` — unauthenticated; body `{ email }`; always `200` (no user enumeration); rate-limited 3/15min/IP.
+  - `POST /auth/reset-password` — unauthenticated; body `{ token, newPassword }`; validates token (exists, unexpired, unused); sets new password, bumps token_version (invalidates all sessions).
+- **Frontend changes:**
+  - Login page "Forgot password?" shows email input form when SMTP is configured; keeps current admin tip when SMTP is absent.
+  - New `/reset-password?token=...` page — new password + confirm fields; success → login with confirmation message.
+- **Security:** raw token = 32 bytes base64url (43 chars); only SHA-256 hash in DB; single-use; 1-hour expiry; constant-time compare; no enumeration in responses.
+- **Why not OAuth/social login:** OAuth is a parallel auth system (different feature, much higher architectural cost). Email reset is the correct minimal solution for this use case. Social login is a potential Phase 4 consideration only.
+- **Files to create/modify when implemented:** `backend/db/migrations/0023_password_reset_token.sql`, `backend/src/modules/mailer/mailer.service.ts`, `mailer.types.ts`, `templates/password-reset.ts`, `backend/src/modules/auth/auth.routes.ts`, `backend/src/modules/auth/auth.service.ts`, `frontend/src/pages/HomePage.tsx`, new `frontend/src/pages/ResetPasswordPage.tsx`, `docs/ENVIRONMENT_VARIABLES.md`, `openapi/openapi.yaml`
 
 ---
 
