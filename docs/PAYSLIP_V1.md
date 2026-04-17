@@ -18,20 +18,22 @@
 
 ---
 
-## 2. v1 scope — summary first (“Current / YTD” buckets)
+## 2. v1 scope — rich extraction (“Current / YTD” buckets + per-row line items)
 
-For **v1**, we persist **summary-level** compensation buckets (period, pay date, gross, taxes, pre/post-tax deductions, net, YTD where extracted), not a full accounting-grade reconstruction of every PDF table.
+For **v1**, we persist **both** summary-level compensation buckets **and** individual line items for every earnings, deduction, and tax row visible on the PDF.
 
-**Per stub, minimum fields:**
+**Per stub, captured fields:**
 
 - **Pay period** (and pay date when present on the stub).
-- **Current column:** Hours/Days Worked (if present), Gross Pay, Post Tax Deductions, Employee Taxes, Pre Tax Deductions, Net Pay.
-- **YTD** for the same buckets when the extractor provides them.
+- **Current + YTD column buckets:** Gross Pay, Employee Taxes, Pre-Tax Deductions, Post-Tax Deductions, Net Pay, Taxable Earnings, Other Information totals.
+- **Hours/Days Worked** (current and YTD); **Employment Rate** (salary/rate + type: annual, biweekly, hourly).
+- **Per-row line items** grouped by section: `earnings`, `pre_tax_deductions`, `post_tax_deductions`, `tax_deductions`, `other_deductions`, `other_information`, `taxable_earnings`. Each row captures: name, authority, date_raw, hours/days current, rate, amount current + YTD.
 
 **Explicit v1 non-goals:**
 
-- Guaranteed capture of every earnings/deduction line in the PDF (LLM may miss or mis-bucket rows; see [§3](#3-parsing-technical-approach)).
+- Guaranteed 100% accuracy (LLM may misread column alignment; `canonical_extract_json` stored for audit).
 - Posting payslip rows into `transaction_canonical` by default (avoids **double-counting** with bank deposits).
+- Full per-row manual entry in the browser (deferred; see [§7](#7-manual-payslip-entry-shipped)).
 
 ---
 
@@ -61,7 +63,8 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 
 ## 4. Storage (v1)
 
-- **Dedicated payslip snapshot** — relational summary columns plus **`raw_extract_json`**, **`canonical_extract_json`**, and hybrid JSON columns (see migration **`0004`**, **`docs/CHANGE_HISTORY.md`** **CR-051**).
+- **Dedicated payslip snapshot** (`payslip_snapshot`) — relational summary columns plus **`raw_extract_json`**, **`canonical_extract_json`**, and hybrid JSON columns (see migration **`0004`**, **`docs/CHANGE_HISTORY.md`** **CR-051**). Extended in **migration `0022`** (**CR-072**) with 7 new columns: `taxable_earnings_current/ytd`, `other_information_current/ytd`, `hours_or_days_ytd`, `employment_rate`, `employment_rate_type`.
+- **Per-row line items** (`payslip_line_item`) — new table (migration **`0022`**) with `ON DELETE CASCADE` FK to snapshot. Stores one row per earnings/deduction/tax entry, keyed by `section` enum (7 values). Indexed by `(payslip_snapshot_id, section, sort_order)` and `(household_id, section)`. See **CR-072** for full column list.
 - Keyed by **household**, **file checksum**, optional **`import_file_id`**, **`employer_id`**.
 - **Not** merged into `transaction_canonical` unless we add an explicit product decision later.
 
@@ -70,9 +73,11 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 ## 5. UI
 
 - **Shipped (v1 summary):** list, detail, upload, **`POST /payslips/manual`** (typed entry, synthetic checksum), and **income charts** on **`/payslips`** (**CR-031**, **CR-036**, **CR-051**, **CR-056**).
-- **API vs UI:** **`PATCH /payslips/:id`** accepts summary-field updates for integrations and future work; the **detail route** (`/payslips/:payslipId`) is **read-only** in the app today — there is no full in-browser editor for parsed or manual stubs yet. Line-item grids and richer editing are deferred.
+- **Rich detail view (CR-072, shipped):** Period card shows **Hours YTD** inline and **Salary / Rate** row when `employmentRate` is present. Amounts table adds conditional **Taxable Earnings** and **Other Information** rows. New **Line Items** collapsible card below Amounts — one `<details>` accordion per non-empty section (Earnings, Pre-Tax Deductions, Post-Tax Deductions, Tax Deductions, Other Deductions, Other Information, Taxable Earnings); Hours and Rate columns hidden when all rows in a section have null for those fields.
+- **Manual add form (CR-072, shipped):** 7 new optional fields added: Taxable Earnings (current + YTD), Other Information (current + YTD), Hours/Days YTD, Salary/Rate, and Rate Type (Annual / Biweekly / Hourly). Full per-row line item entry (adding individual earnings/deduction rows manually) is a **deferred backlog item** — see §7.
+- **API vs UI:** **`PATCH /payslips/:id`** accepts summary-field updates for integrations and future work; the **detail route** (`/payslips/:payslipId`) is **read-only** in the app today — there is no full in-browser editor for parsed or manual stubs yet.
 - **Bank deposit match (CR-068, shipped):** `GET /payslips/:id` returns `matchedDeposits` — up to 5 `credit` transactions within ±3 days of `pay_date` whose amount is within 1% (min $0.50) of `net_pay_current`. Restricted to `salary_deposit_financial_account_id` on `person_profile` when set; otherwise all household accounts. Detail page shows a **Bank deposit** card with matched rows and **View** link into `/transactions`.
-- **Later:** line-item grids, salary vs commission split, richer tax analytics, full in-browser edit of parsed stubs.
+- **Later:** salary vs commission split charts, richer tax analytics, full in-browser edit of parsed stubs, per-row manual line item entry.
 
 ---
 
@@ -104,7 +109,8 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 |--------|-------------|
 | **3.3a — v1** | Summary buckets + period + YTD where extracted; dedicated storage; tests. |
 | **3.3b** | List + detail + charts; read-only. |
-| **3.3c+** | Line-item / tax detail in UI; ADP (non-stub); optional OCR for scanned PDFs. Deposit match shipped (**CR-068**). |
+| **3.3c** | Per-row line item storage + rich extraction (IBM + Deloitte); line items accordion in detail view; new manual add fields. Shipped (**CR-072**). Deposit match shipped (**CR-068**). |
+| **3.3c+ backlog** | ADP (non-stub); optional OCR for scanned PDFs; full per-row manual line item entry UI; salary vs commission split charts. |
 | **Manual entry (shipped)** | [§7](#7-manual-payslip-entry-shipped) — **`POST /payslips/manual`**, **`/payslips/new`**. |
 
 ---
@@ -117,7 +123,7 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 
 **UI:** **`/payslips/new`** — form → **`201`** → redirect to **`/payslips/:payslipId`**. List page links **Add manually**.
 
-**Explicitly out of scope:** full line-item grids in this flow. (Bank deposit matching shipped in **CR-068** on the detail page; manual payslips are included when `pay_date` + `net_pay_current` are provided.)
+**Explicitly out of scope for manual entry:** per-row line item entry (adding individual earnings/deduction rows manually). The manual form captures all **summary-level** fields including the 7 new CR-072 fields (taxable earnings, other information, hours/days YTD, employment rate/type). Full per-row line item input is a **backlog item** — tracked in **`docs/archive/FINANCE_APP_PRD.md`** and noted in `PayslipManualPage.tsx` source. (Bank deposit matching shipped in **CR-068** on the detail page; manual payslips are included when `pay_date` + `net_pay_current` are provided.)
 
 ---
 

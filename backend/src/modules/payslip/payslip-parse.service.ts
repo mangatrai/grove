@@ -2,13 +2,14 @@ import type { ParserProfileId } from "../imports/profiles/profile-ids.js";
 import { env } from "../../config/env.js";
 import { extractPayslipFromPdf } from "./llm-extract/extract-payslip-llm.js";
 import { mapCanonicalExtractToPersist, validateCanonicalForImport } from "./llm-extract/payslip-canonical-map.js";
-import type { ParsedPayslipSummary, PayslipHybridColumns } from "./payslip.types.js";
+import type { ParsedPayslipSummary, PayslipHybridColumns, LineItemForInsert } from "./payslip.types.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID, IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
 
 export type PayslipPdfParseSuccess = {
   ok: true;
   summary: ParsedPayslipSummary;
   hybrid: PayslipHybridColumns;
+  lineItems: LineItemForInsert[];
   usageTokens?: number | null;
 };
 
@@ -37,8 +38,8 @@ export async function parsePayslipPdfByProfile(
       if (!validation.ok) {
         return { ok: false, reason: "llm_canonical_validation_failed", detail: validation.reasons };
       }
-      const { summary, hybrid } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
-      return { ok: true, summary, hybrid, usageTokens: usage?.total_tokens ?? null };
+      const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
+      return { ok: true, summary, hybrid, lineItems, usageTokens: usage?.total_tokens ?? null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       return { ok: false, reason: "llm_extraction_failed", message };

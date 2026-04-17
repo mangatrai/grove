@@ -525,7 +525,106 @@ paths:
     post:
       tags: [payslips]
       summary: Create payslip from manual summary (synthetic checksum; file name Manual entry)
+      description: |
+        At least one of `payDate`, `grossPayCurrent`, or `netPayCurrent` is required.
+        Line items cannot be added via this route; per-row entry is a backlog feature.
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                employerId:
+                  type: string
+                  nullable: true
+                parserProfileId:
+                  type: string
+                  nullable: true
+                ownerScope:
+                  type: string
+                  enum: [household, person]
+                ownerPersonProfileId:
+                  type: string
+                  nullable: true
+                payPeriodStart:
+                  type: string
+                  nullable: true
+                payPeriodEnd:
+                  type: string
+                  nullable: true
+                payDate:
+                  type: string
+                  nullable: true
+                grossPayCurrent:
+                  type: number
+                  nullable: true
+                grossPayYtd:
+                  type: number
+                  nullable: true
+                employeeTaxesCurrent:
+                  type: number
+                  nullable: true
+                employeeTaxesYtd:
+                  type: number
+                  nullable: true
+                preTaxDeductionsCurrent:
+                  type: number
+                  nullable: true
+                preTaxDeductionsYtd:
+                  type: number
+                  nullable: true
+                postTaxDeductionsCurrent:
+                  type: number
+                  nullable: true
+                postTaxDeductionsYtd:
+                  type: number
+                  nullable: true
+                netPayCurrent:
+                  type: number
+                  nullable: true
+                netPayYtd:
+                  type: number
+                  nullable: true
+                hoursOrDaysCurrent:
+                  type: string
+                  nullable: true
+                hoursOrDaysYtd:
+                  type: string
+                  nullable: true
+                  description: Hours/days worked YTD (CR-072)
+                taxableEarningsCurrent:
+                  type: number
+                  nullable: true
+                  description: Taxable earnings current period (CR-072)
+                taxableEarningsYtd:
+                  type: number
+                  nullable: true
+                  description: Taxable earnings YTD (CR-072)
+                otherInformationCurrent:
+                  type: number
+                  nullable: true
+                  description: Other information section total current period (CR-072)
+                otherInformationYtd:
+                  type: number
+                  nullable: true
+                  description: Other information section total YTD (CR-072)
+                employmentRate:
+                  type: number
+                  nullable: true
+                  description: Salary or hourly rate (CR-072)
+                employmentRateType:
+                  type: string
+                  nullable: true
+                  description: "Rate type: annual, biweekly, or hourly (CR-072)"
+      responses:
+        "201":
+          description: Payslip created; returns snapshot with new id
+        "400":
+          description: Validation error (missing required field combination or invalid body)
+        "409":
+          description: Duplicate checksum — identical manual entry already exists
   /payslips/sniff:
     post:
       tags: [payslips]
@@ -534,15 +633,108 @@ paths:
   /payslips/{id}:
     get:
       tags: [payslips]
-      summary: Payslip detail (includes matchedDeposits — linked canonical transactions within ±3 days / 1% of net pay on salary deposit account)
+      summary: Payslip detail (includes matchedDeposits and lineItems — CR-068, CR-072)
+      description: |
+        Returns the full payslip snapshot plus:
+        - `matchedDeposits`: up to 5 credit transactions within ±3 days / 1% of net pay on salary deposit account (CR-068)
+        - `lineItems`: per-row earnings/deduction/tax items grouped by section (CR-072)
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Payslip detail with line items and matched deposit
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  householdId: { type: string }
+                  fileName: { type: string }
+                  fileChecksum: { type: string }
+                  parserProfileId: { type: string }
+                  employerId: { type: string, nullable: true }
+                  ownerScope: { type: string, enum: [household, person] }
+                  ownerPersonProfileId: { type: string, nullable: true }
+                  importFileId: { type: string, nullable: true }
+                  payPeriodStart: { type: string, nullable: true }
+                  payPeriodEnd: { type: string, nullable: true }
+                  payDate: { type: string, nullable: true }
+                  grossPayCurrent: { type: number, nullable: true }
+                  grossPayYtd: { type: number, nullable: true }
+                  employeeTaxesCurrent: { type: number, nullable: true }
+                  employeeTaxesYtd: { type: number, nullable: true }
+                  preTaxDeductionsCurrent: { type: number, nullable: true }
+                  preTaxDeductionsYtd: { type: number, nullable: true }
+                  postTaxDeductionsCurrent: { type: number, nullable: true }
+                  postTaxDeductionsYtd: { type: number, nullable: true }
+                  netPayCurrent: { type: number, nullable: true }
+                  netPayYtd: { type: number, nullable: true }
+                  hoursOrDaysCurrent: { type: string, nullable: true }
+                  hoursOrDaysYtd: { type: string, nullable: true, description: "Hours/days worked YTD (CR-072)" }
+                  taxableEarningsCurrent: { type: number, nullable: true, description: "Taxable earnings current (CR-072)" }
+                  taxableEarningsYtd: { type: number, nullable: true, description: "Taxable earnings YTD (CR-072)" }
+                  otherInformationCurrent: { type: number, nullable: true, description: "Other information total current (CR-072)" }
+                  otherInformationYtd: { type: number, nullable: true, description: "Other information total YTD (CR-072)" }
+                  employmentRate: { type: number, nullable: true, description: "Salary or rate (CR-072)" }
+                  employmentRateType: { type: string, nullable: true, description: "annual | biweekly | hourly (CR-072)" }
+                  rawExtractJson: { type: object }
+                  createdAt: { type: string }
+                  matchedDeposits:
+                    type: array
+                    description: Credit transactions within ±3 days / 1% of net pay (CR-068)
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        txnDate: { type: string }
+                        amount: { type: number }
+                        direction: { type: string }
+                        merchant: { type: string, nullable: true }
+                        memo: { type: string, nullable: true }
+                        accountId: { type: string }
+                        institution: { type: string }
+                        accountType: { type: string }
+                        accountMask: { type: string, nullable: true }
+                  lineItems:
+                    type: object
+                    description: Per-row line items grouped by section (CR-072)
+                    properties:
+                      earnings:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+                      pre_tax_deductions:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+                      post_tax_deductions:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+                      tax_deductions:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+                      other_deductions:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+                      other_information:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+                      taxable_earnings:
+                        type: array
+                        items: { $ref: '#/components/schemas/PayslipLineItem' }
+        "404":
+          description: Payslip not found or not owned by this household
     patch:
       tags: [payslips]
-      summary: Update payslip fields (owner assignment, employer, notes)
+      summary: Update payslip fields (owner assignment, employer, summary amounts)
       security: [{ bearerAuth: [] }]
     delete:
       tags: [payslips]
-      summary: Delete payslip snapshot
+      summary: Delete payslip snapshot (cascades to line items)
       security: [{ bearerAuth: [] }]
   /exports/household/import:
     post:
@@ -808,3 +1000,28 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  schemas:
+    PayslipLineItem:
+      type: object
+      description: One row from a payslip earnings/deduction/tax section (CR-072)
+      properties:
+        id: { type: string }
+        payslipSnapshotId: { type: string }
+        householdId: { type: string }
+        section:
+          type: string
+          enum: [earnings, pre_tax_deductions, post_tax_deductions, tax_deductions, other_deductions, other_information, taxable_earnings]
+        sortOrder: { type: integer }
+        name: { type: string, nullable: true }
+        authority: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        dateStart: { type: string, nullable: true }
+        dateEnd: { type: string, nullable: true }
+        dateRaw: { type: string, nullable: true }
+        hoursOrDaysCurrent: { type: number, nullable: true }
+        hoursOrDaysYtd: { type: number, nullable: true }
+        rate: { type: number, nullable: true }
+        amountCurrent: { type: number, nullable: true }
+        amountYtd: { type: number, nullable: true }
+        rawSection: { type: string, nullable: true }
+        createdAt: { type: string }

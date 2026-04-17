@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { qAll, qExec, qGet } from "../../db/query.js";
+import { qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 
 export type MatchedDeposit = {
   id: string;
@@ -14,7 +14,15 @@ export type MatchedDeposit = {
   accountType: string;
   accountMask: string | null;
 };
-import type { ParsedPayslipSummary, PayslipHybridColumns } from "./payslip.types.js";
+import type {
+  LineItemForInsert,
+  ParsedPayslipSummary,
+  PayslipHybridColumns,
+  PayslipLineItemRow,
+  PayslipLineItemSection,
+  PayslipLineItemsGrouped
+} from "./payslip.types.js";
+import { PAYSLIP_LINE_ITEM_SECTIONS } from "./payslip.types.js";
 
 export type PayslipSnapshotRow = {
   id: string;
@@ -41,6 +49,13 @@ export type PayslipSnapshotRow = {
   netPayCurrent: number | null;
   netPayYtd: number | null;
   hoursOrDaysCurrent: string | null;
+  hoursOrDaysYtd: string | null;
+  taxableEarningsCurrent: number | null;
+  taxableEarningsYtd: number | null;
+  otherInformationCurrent: number | null;
+  otherInformationYtd: number | null;
+  employmentRate: number | null;
+  employmentRateType: string | null;
   rawExtractJson: Record<string, unknown>;
   canonicalExtractJson: Record<string, unknown>;
   currency: string | null;
@@ -106,6 +121,13 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
     netPayCurrent: r.net_pay_current == null ? null : Number(r.net_pay_current),
     netPayYtd: r.net_pay_ytd == null ? null : Number(r.net_pay_ytd),
     hoursOrDaysCurrent: r.hours_or_days_current == null ? null : String(r.hours_or_days_current),
+    hoursOrDaysYtd: r.hours_or_days_ytd == null ? null : String(r.hours_or_days_ytd),
+    taxableEarningsCurrent: r.taxable_earnings_current == null ? null : Number(r.taxable_earnings_current),
+    taxableEarningsYtd: r.taxable_earnings_ytd == null ? null : Number(r.taxable_earnings_ytd),
+    otherInformationCurrent: r.other_information_current == null ? null : Number(r.other_information_current),
+    otherInformationYtd: r.other_information_ytd == null ? null : Number(r.other_information_ytd),
+    employmentRate: r.employment_rate == null ? null : Number(r.employment_rate),
+    employmentRateType: r.employment_rate_type == null ? null : String(r.employment_rate_type),
     rawExtractJson: parseJsonRecord(r.raw_extract_json, {}),
     canonicalExtractJson: parseJsonRecord(r.canonical_extract_json, {}),
     currency: r.currency == null ? null : String(r.currency),
@@ -126,6 +148,29 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
         ? null
         : parseJsonRecord(r.extraction_metadata_json, {}),
     updatedAt: String(r.updated_at ?? r.created_at),
+    createdAt: String(r.created_at)
+  };
+}
+
+function rowToLineItem(r: Record<string, unknown>): PayslipLineItemRow {
+  return {
+    id: String(r.id),
+    payslipSnapshotId: String(r.payslip_snapshot_id),
+    householdId: String(r.household_id),
+    section: String(r.section) as PayslipLineItemSection,
+    sortOrder: Number(r.sort_order),
+    name: r.name == null ? null : String(r.name),
+    authority: r.authority == null ? null : String(r.authority),
+    description: r.description == null ? null : String(r.description),
+    dateStart: r.date_start == null ? null : String(r.date_start),
+    dateEnd: r.date_end == null ? null : String(r.date_end),
+    dateRaw: r.date_raw == null ? null : String(r.date_raw),
+    hoursOrDaysCurrent: r.hours_or_days_current == null ? null : Number(r.hours_or_days_current),
+    hoursOrDaysYtd: r.hours_or_days_ytd == null ? null : Number(r.hours_or_days_ytd),
+    rate: r.rate == null ? null : Number(r.rate),
+    amountCurrent: r.amount_current == null ? null : Number(r.amount_current),
+    amountYtd: r.amount_ytd == null ? null : Number(r.amount_ytd),
+    rawSection: r.raw_section == null ? null : String(r.raw_section),
     createdAt: String(r.created_at)
   };
 }
@@ -185,9 +230,12 @@ export async function insertManualPayslipSnapshot(
     talentId: null,
     taxProfileJson: null,
     paymentSummaryJson: null,
-    extractionMetadataJson: JSON.stringify({ source: "manual", createdAt: new Date().toISOString() })
+    extractionMetadataJson: JSON.stringify({ source: "manual", createdAt: new Date().toISOString() }),
+    employmentRate: null,
+    employmentRateType: null
   };
 
+  // Manual entry never has line items (no PDF parsed)
   const result = await insertPayslipSnapshot(
     householdId,
     MANUAL_FILE_NAME,
@@ -198,7 +246,8 @@ export async function insertManualPayslipSnapshot(
     input.employerId,
     input.ownerScope,
     input.ownerPersonProfileId,
-    hybrid
+    hybrid,
+    []
   );
 
   if (!result.ok) {
@@ -217,7 +266,8 @@ export async function insertPayslipSnapshot(
   employerId?: string | null,
   ownerScope?: "household" | "person",
   ownerPersonProfileId?: string | null,
-  hybrid?: PayslipHybridColumns | null
+  hybrid?: PayslipHybridColumns | null,
+  lineItems?: LineItemForInsert[]
 ): Promise<
   | { ok: true; snapshot: PayslipSnapshotRow }
   | { ok: false; code: "DUPLICATE_PAYSLIP"; existing: PayslipSnapshotRow }
@@ -231,76 +281,168 @@ export async function insertPayslipSnapshot(
   const rawJson = JSON.stringify(parsed.rawExtractJson ?? {});
   const scope = ownerScope ?? "household";
   const h = hybrid ?? null;
+  const items = lineItems ?? [];
 
-  await qExec(
-    `INSERT INTO payslip_snapshot (
-      id, household_id, file_name, file_checksum, parser_profile_id, import_file_id, employer_id,
-      owner_scope, owner_person_profile_id,
-      pay_period_start, pay_period_end, pay_date,
-      gross_pay_current, gross_pay_ytd,
-      employee_taxes_current, employee_taxes_ytd,
-      pre_tax_deductions_current, pre_tax_deductions_ytd,
-      post_tax_deductions_current, post_tax_deductions_ytd,
-      net_pay_current, net_pay_ytd,
-      hours_or_days_current, raw_extract_json,
-      canonical_extract_json, currency,
-      employer_display_name, employee_display_name, employer_ein_or_fein,
-      employee_id, personnel_number, talent_id,
-      tax_profile_json, payment_summary_json, extraction_metadata_json,
-      updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?,
-      ?, ?,
-      ?, ?,
-      ?, ?,
-      ?, ?,
-      ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()
-    )`,
-    id,
-    householdId,
-    fileName,
-    fileChecksum,
-    parserProfileId,
-    importFileId ?? null,
-    employerId ?? null,
-    scope,
-    scope === "person" ? (ownerPersonProfileId ?? null) : null,
-    parsed.payPeriodStart,
-    parsed.payPeriodEnd,
-    parsed.payDate,
-    parsed.grossPayCurrent,
-    parsed.grossPayYtd,
-    parsed.employeeTaxesCurrent,
-    parsed.employeeTaxesYtd,
-    parsed.preTaxDeductionsCurrent,
-    parsed.preTaxDeductionsYtd,
-    parsed.postTaxDeductionsCurrent,
-    parsed.postTaxDeductionsYtd,
-    parsed.netPayCurrent,
-    parsed.netPayYtd,
-    parsed.hoursOrDaysCurrent,
-    rawJson,
-    h?.canonicalExtractJson ?? "{}",
-    h?.currency ?? null,
-    h?.employerDisplayName ?? null,
-    h?.employeeDisplayName ?? null,
-    h?.employerEinOrFein ?? null,
-    h?.employeeId ?? null,
-    h?.personnelNumber ?? null,
-    h?.talentId ?? null,
-    h?.taxProfileJson ?? null,
-    h?.paymentSummaryJson ?? null,
-    h?.extractionMetadataJson ?? null
+  return qBegin(async (tx) => {
+    const { text: insertText, values: insertValues } = sqlBind(
+      `INSERT INTO payslip_snapshot (
+        id, household_id, file_name, file_checksum, parser_profile_id, import_file_id, employer_id,
+        owner_scope, owner_person_profile_id,
+        pay_period_start, pay_period_end, pay_date,
+        gross_pay_current, gross_pay_ytd,
+        employee_taxes_current, employee_taxes_ytd,
+        pre_tax_deductions_current, pre_tax_deductions_ytd,
+        post_tax_deductions_current, post_tax_deductions_ytd,
+        net_pay_current, net_pay_ytd,
+        hours_or_days_current, hours_or_days_ytd,
+        taxable_earnings_current, taxable_earnings_ytd,
+        other_information_current, other_information_ytd,
+        raw_extract_json,
+        canonical_extract_json, currency,
+        employer_display_name, employee_display_name, employer_ein_or_fein,
+        employee_id, personnel_number, talent_id,
+        tax_profile_json, payment_summary_json, extraction_metadata_json,
+        employment_rate, employment_rate_type,
+        updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?,
+        ?, ?,
+        ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?,
+        NOW()
+      )`,
+      [
+        id,
+        householdId,
+        fileName,
+        fileChecksum,
+        parserProfileId,
+        importFileId ?? null,
+        employerId ?? null,
+        scope,
+        scope === "person" ? (ownerPersonProfileId ?? null) : null,
+        parsed.payPeriodStart,
+        parsed.payPeriodEnd,
+        parsed.payDate,
+        parsed.grossPayCurrent,
+        parsed.grossPayYtd,
+        parsed.employeeTaxesCurrent,
+        parsed.employeeTaxesYtd,
+        parsed.preTaxDeductionsCurrent,
+        parsed.preTaxDeductionsYtd,
+        parsed.postTaxDeductionsCurrent,
+        parsed.postTaxDeductionsYtd,
+        parsed.netPayCurrent,
+        parsed.netPayYtd,
+        parsed.hoursOrDaysCurrent,
+        parsed.hoursOrDaysYtd ?? null,
+        parsed.taxableEarningsCurrent ?? null,
+        parsed.taxableEarningsYtd ?? null,
+        parsed.otherInformationCurrent ?? null,
+        parsed.otherInformationYtd ?? null,
+        rawJson,
+        h?.canonicalExtractJson ?? "{}",
+        h?.currency ?? null,
+        h?.employerDisplayName ?? null,
+        h?.employeeDisplayName ?? null,
+        h?.employerEinOrFein ?? null,
+        h?.employeeId ?? null,
+        h?.personnelNumber ?? null,
+        h?.talentId ?? null,
+        h?.taxProfileJson ?? null,
+        h?.paymentSummaryJson ?? null,
+        h?.extractionMetadataJson ?? null,
+        h?.employmentRate ?? null,
+        h?.employmentRateType ?? null
+      ]
+    );
+    await tx.unsafe(insertText, insertValues as never[]);
+
+    // Insert line items in same transaction; ON DELETE CASCADE handles cleanup on snapshot delete
+    for (const [idx, item] of items.entries()) {
+      const lineItemId = crypto.randomUUID();
+      const { text: liText, values: liValues } = sqlBind(
+        `INSERT INTO payslip_line_item (
+          id, payslip_snapshot_id, household_id, section, sort_order,
+          name, authority, description,
+          date_start, date_end, date_raw,
+          hours_or_days_current, hours_or_days_ytd,
+          rate, amount_current, amount_ytd, raw_section
+        ) VALUES (
+          ?, ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?,
+          ?, ?, ?, ?
+        )`,
+        [
+          lineItemId,
+          id,
+          householdId,
+          item.section,
+          idx,
+          item.name,
+          item.authority,
+          item.description,
+          item.dateStart,
+          item.dateEnd,
+          item.dateRaw,
+          item.hoursOrDaysCurrent,
+          item.hoursOrDaysYtd,
+          item.rate,
+          item.amountCurrent,
+          item.amountYtd,
+          item.rawSection
+        ]
+      );
+      await tx.unsafe(liText, liValues as never[]);
+    }
+
+    const rows = await tx.unsafe(`SELECT * FROM payslip_snapshot WHERE id = $1`, [id]);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      throw new Error("payslip_snapshot insert missing row");
+    }
+    return { ok: true as const, snapshot: rowToSnapshot(row) };
+  });
+}
+
+/**
+ * Query all line items for a payslip, grouped by section.
+ * Returns an empty array for sections with no rows (never undefined).
+ */
+export async function getPayslipLineItems(
+  payslipSnapshotId: string,
+  householdId: string
+): Promise<PayslipLineItemsGrouped> {
+  const rows = await qAll<Record<string, unknown>>(
+    `SELECT * FROM payslip_line_item
+     WHERE payslip_snapshot_id = ? AND household_id = ?
+     ORDER BY section, sort_order`,
+    payslipSnapshotId,
+    householdId
   );
 
-  const row = await qGet<Record<string, unknown>>(`SELECT * FROM payslip_snapshot WHERE id = ?`, id);
-  if (!row) {
-    throw new Error("payslip_snapshot insert missing row");
+  const grouped = Object.fromEntries(
+    PAYSLIP_LINE_ITEM_SECTIONS.map((s) => [s, [] as PayslipLineItemRow[]])
+  ) as PayslipLineItemsGrouped;
+
+  for (const r of rows) {
+    const section = String(r.section) as PayslipLineItemSection;
+    if (section in grouped) {
+      grouped[section].push(rowToLineItem(r));
+    }
   }
-  return { ok: true, snapshot: rowToSnapshot(row) };
+  return grouped;
 }
 
 export async function listPayslipSnapshots(
@@ -366,6 +508,13 @@ export type PayslipSnapshotPatchInput = {
   netPayCurrent?: number | null;
   netPayYtd?: number | null;
   hoursOrDaysCurrent?: string | null;
+  hoursOrDaysYtd?: string | null;
+  taxableEarningsCurrent?: number | null;
+  taxableEarningsYtd?: number | null;
+  otherInformationCurrent?: number | null;
+  otherInformationYtd?: number | null;
+  employmentRate?: number | null;
+  employmentRateType?: string | null;
 };
 
 /**
@@ -491,6 +640,13 @@ export async function patchPayslipSnapshotForHousehold(
   addCol("net_pay_current", patch.netPayCurrent);
   addCol("net_pay_ytd", patch.netPayYtd);
   addCol("hours_or_days_current", patch.hoursOrDaysCurrent);
+  addCol("hours_or_days_ytd", patch.hoursOrDaysYtd);
+  addCol("taxable_earnings_current", patch.taxableEarningsCurrent);
+  addCol("taxable_earnings_ytd", patch.taxableEarningsYtd);
+  addCol("other_information_current", patch.otherInformationCurrent);
+  addCol("other_information_ytd", patch.otherInformationYtd);
+  addCol("employment_rate", patch.employmentRate);
+  addCol("employment_rate_type", patch.employmentRateType);
 
   sets.push("raw_extract_json = ?");
   params.push(JSON.stringify(raw));
@@ -506,6 +662,7 @@ export async function patchPayslipSnapshotForHousehold(
 
 /**
  * Hard-delete a payslip snapshot and its associated import_file rows.
+ * Line items are automatically removed via ON DELETE CASCADE on payslip_line_item.
  *
  * If `restrictToOwnerPersonProfileId` is provided (member role), only payslips
  * whose `owner_person_profile_id` matches are deleted — members cannot delete

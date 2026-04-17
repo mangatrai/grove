@@ -462,7 +462,8 @@ export async function parseSessionImportFiles(
           file.employer_id,
           file.owner_scope === "person" ? "person" : "household",
           file.owner_scope === "person" ? file.owner_person_profile_id : null,
-          parseResult.hybrid
+          parseResult.hybrid,
+          parseResult.lineItems
         );
         if (!ins.ok) {
           await qExec(

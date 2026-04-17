@@ -18,6 +18,36 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (payslip rich extraction + line item storage)
+
+### CR-072 — Payslip rich extraction: per-row line items + 7 new snapshot columns
+
+- **Type:** CR
+- **What:** Expanded payslip data capture to store every structured field visible on IBM and Deloitte PDFs — not just summary buckets. All individual earnings, deduction, and tax rows are now queryable per payslip.
+- **New migration `0022_payslip_line_items.sql`:**
+  - Adds 7 columns to `payslip_snapshot`: `taxable_earnings_current`, `taxable_earnings_ytd`, `other_information_current`, `other_information_ytd`, `hours_or_days_ytd`, `employment_rate`, `employment_rate_type`.
+  - Creates `payslip_line_item` table with `ON DELETE CASCADE` FK to snapshot — stores one row per earnings/deduction/tax line item, grouped by `section` enum: `earnings`, `pre_tax_deductions`, `post_tax_deductions`, `tax_deductions`, `other_deductions`, `other_information`, `taxable_earnings`.
+  - Indexes: `idx_payslip_line_item_snapshot (payslip_snapshot_id, section, sort_order)`, `idx_payslip_line_item_household (household_id, section)`.
+- **Backend changes:**
+  - `payslip.types.ts`: new `PayslipLineItemSection`, `PayslipLineItemRow`, `PayslipLineItemsGrouped`, `LineItemForInsert` types; extended `ParsedPayslipSummary` (5 fields), `PayslipHybridColumns` (2 fields).
+  - `payslip-canonical-map.ts`: added `flattenLineItems()` helper (iterates all 7 section arrays, preserves PDF sort order), new `CanonicalMapResult` return type; populates all 7 new fields from LLM extract.
+  - `payslip-parse.service.ts`: `PayslipPdfParseSuccess` carries `lineItems`; passes through from canonical mapper.
+  - `payslip.service.ts`: `insertPayslipSnapshot` now wraps snapshot + line item INSERTs in `qBegin` transaction (atomic). New `getPayslipLineItems(snapshotId, householdId)` query returns all 7 sections grouped. `PayslipSnapshotPatchInput` extended with 7 new optional fields.
+  - `payslip.routes.ts`: upload path and reconcile path pass `parseResult.lineItems` to insert; `GET /payslips/:id` returns `lineItems` (parallel fetch with `matchedDeposits`); `POST /payslips/manual` Zod schema includes 7 new optional fields.
+  - `payslip-async-import-reconcile.service.ts`, `import-parser.service.ts`: thread `lineItems` through reconcile/import paths.
+  - `extract-payslip-llm.ts`: 8 new prompt lines (4 IBM-specific, 4 Deloitte-specific) clarifying: IBM OTHER INFORMATION section mapping, IBM 401k multi-row capture, IBM ESPP disambiguation (post-tax vs other_information), IBM employment_context rate/hours; Deloitte earnings row classification, Deloitte Flex Spending separate rows, Deloitte YTD-only other deductions, Deloitte biweekly rate type.
+- **API changes:**
+  - `GET /payslips/:id` response gains 7 new scalar fields + `lineItems: { earnings: [...], pre_tax_deductions: [...], ... }` (7 sections, each an array of `PayslipLineItemRow`).
+  - `POST /payslips/manual` body accepts 7 new optional fields: `taxableEarningsCurrent`, `taxableEarningsYtd`, `otherInformationCurrent`, `otherInformationYtd`, `hoursOrDaysYtd`, `employmentRate`, `employmentRateType`.
+- **Frontend changes:**
+  - `frontend/src/payslip/types.ts`: added `PayslipLineItemSection`, `PayslipLineItemRow`, `PayslipLineItemsGrouped`, `SECTION_LABELS`, `SECTION_ORDER`; extended `PayslipSnapshotDetail`.
+  - `PayslipDetailPage.tsx`: Period card shows Hours YTD inline + Salary/Rate row. Amounts table adds conditional Taxable Earnings and Other Information rows. New "Line Items" collapsible card below Amounts — one `<details>` accordion per non-empty section; Hours/Rate columns hidden when all rows are null.
+  - `PayslipManualPage.tsx`: 8 new optional fields (taxable earnings current/YTD, other information current/YTD, hours/days YTD, salary/rate, rate type); backlog comment for full per-row line item entry UI.
+- **Tests:** `payslip-canonical-map.test.ts` — 8 new cases (new field mappings + `flattenLineItems`); `payslip-upload.test.ts` — updated mock with realistic line items/rate/hours, extended GET /:id assertions, extended manual test. All 275 tests pass.
+- **Files:** `backend/db/migrations/0022_payslip_line_items.sql`, `backend/src/modules/payslip/payslip.types.ts`, `payslip-canonical-map.ts`, `payslip-parse.service.ts`, `payslip.service.ts`, `payslip.routes.ts`, `payslip-async-import-reconcile.service.ts`, `import-parser.service.ts`, `extract-payslip-llm.ts`, `frontend/src/payslip/types.ts`, `PayslipDetailPage.tsx`, `PayslipManualPage.tsx`, `payslip-canonical-map.test.ts`, `payslip-upload.test.ts`
+
+---
+
 ## 2026-04-16 (apiFetch 401 still leaking raw JSON)
 
 ### FIX-027 — `apiFetch` returning raw 401 body instead of throwing on session expiry

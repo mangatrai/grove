@@ -35,11 +35,11 @@ function mockLlmExtract(): PayslipLlmExtract {
       pay_date: "2026-01-15"
     },
     employment_context: {
-      rate: null,
-      rate_type: null,
+      rate: 180000,
+      rate_type: "annual",
       cost_center: null,
-      hours_or_days_worked_current: null,
-      hours_or_days_worked_ytd: null
+      hours_or_days_worked_current: 80,
+      hours_or_days_worked_ytd: 160
     },
     summary: {
       currency: "USD",
@@ -47,8 +47,8 @@ function mockLlmExtract(): PayslipLlmExtract {
       gross_pay_ytd: 10000,
       total_earnings_current: null,
       total_earnings_ytd: null,
-      taxable_earnings_current: null,
-      taxable_earnings_ytd: null,
+      taxable_earnings_current: 4200,
+      taxable_earnings_ytd: 8400,
       pre_tax_deductions_current: 100,
       pre_tax_deductions_ytd: 200,
       post_tax_deductions_current: 50,
@@ -63,10 +63,46 @@ function mockLlmExtract(): PayslipLlmExtract {
       net_pay_ytd: 8000
     },
     line_items: {
-      earnings: [],
-      pre_tax_deductions: [],
+      earnings: [
+        {
+          name: "Regular Salary",
+          authority: null,
+          description: null,
+          dates: { start_date: "2026-01-01", end_date: "2026-01-15", raw: null },
+          hours_or_days: { current: 80, ytd: 160 },
+          rate: 9588.75,
+          amount_current: 5000,
+          amount_ytd: 10000,
+          raw_section: "EARNINGS"
+        }
+      ],
+      pre_tax_deductions: [
+        {
+          name: "401k PreTax",
+          authority: null,
+          description: null,
+          dates: { start_date: null, end_date: null, raw: null },
+          hours_or_days: { current: null, ytd: null },
+          rate: null,
+          amount_current: 100,
+          amount_ytd: 200,
+          raw_section: "PRE-TAX DEDUCTION(S)"
+        }
+      ],
       post_tax_deductions: [],
-      tax_deductions: [],
+      tax_deductions: [
+        {
+          name: "Federal Withholding",
+          authority: null,
+          description: null,
+          dates: { start_date: null, end_date: null, raw: null },
+          hours_or_days: { current: null, ytd: null },
+          rate: null,
+          amount_current: 800,
+          amount_ytd: 1600,
+          raw_section: "TAX DEDUCTION(S)"
+        }
+      ],
       other_deductions: [],
       other_information: [],
       taxable_earnings: []
@@ -221,6 +257,34 @@ describe("POST /payslips/manual", () => {
     expect(snap.rawExtractJson).toMatchObject({ source: "manual" });
   });
 
+  it("accepts new extended fields: taxableEarnings, otherInformation, hoursYtd, employmentRate", async () => {
+    const token = await loginToken();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        payDate: "2026-04-15",
+        netPayCurrent: 4350.17,
+        grossPayCurrent: 9588.75,
+        parserProfileId: "ibm_pay_contributions_pdf",
+        hoursOrDaysCurrent: "80",
+        hoursOrDaysYtd: "336",
+        taxableEarningsCurrent: 8000,
+        taxableEarningsYtd: 32000,
+        otherInformationCurrent: 85.91,
+        otherInformationYtd: 2511.34
+      });
+
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    expect(snap.hoursOrDaysCurrent).toBe("80");
+    expect(snap.hoursOrDaysYtd).toBe("336");
+    expect(snap.taxableEarningsCurrent).toBe(8000);
+    expect(snap.taxableEarningsYtd).toBe(32000);
+    expect(snap.otherInformationCurrent).toBe(85.91);
+    expect(snap.otherInformationYtd).toBe(2511.34);
+  });
+
   it("rejects payload with no pay date and no gross/net", async () => {
     const token = await loginToken();
     const res = await request(app)
@@ -307,6 +371,26 @@ describe("GET /payslips/:id", () => {
     expect(one.body.netPayCurrent).toBeDefined();
     expect(one.body.rawExtractJson).toBeDefined();
     expect(typeof one.body.rawExtractJson).toBe("object");
+    // New summary fields
+    expect(one.body.hoursOrDaysCurrent).toBe("80");
+    expect(one.body.hoursOrDaysYtd).toBe("160");
+    expect(one.body.taxableEarningsCurrent).toBe(4200);
+    expect(one.body.taxableEarningsYtd).toBe(8400);
+    expect(one.body.employmentRate).toBe(180000);
+    expect(one.body.employmentRateType).toBe("annual");
+    // Line items — grouped by section
+    expect(one.body.lineItems).toBeDefined();
+    expect(Array.isArray(one.body.lineItems.earnings)).toBe(true);
+    expect(one.body.lineItems.earnings.length).toBe(1);
+    expect(one.body.lineItems.earnings[0].name).toBe("Regular Salary");
+    expect(one.body.lineItems.earnings[0].amountCurrent).toBe(5000);
+    expect(one.body.lineItems.earnings[0].hoursOrDaysCurrent).toBe(80);
+    expect(one.body.lineItems.pre_tax_deductions.length).toBe(1);
+    expect(one.body.lineItems.pre_tax_deductions[0].name).toBe("401k PreTax");
+    expect(one.body.lineItems.tax_deductions.length).toBe(1);
+    expect(one.body.lineItems.tax_deductions[0].name).toBe("Federal Withholding");
+    expect(one.body.lineItems.post_tax_deductions).toEqual([]);
+    expect(one.body.lineItems.other_information).toEqual([]);
   });
 });
 

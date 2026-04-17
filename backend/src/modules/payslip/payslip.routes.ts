@@ -16,6 +16,7 @@ import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
 import {
   deletePayslipSnapshotForHousehold,
   findMatchedDeposits,
+  getPayslipLineItems,
   getPayslipSnapshotForHousehold,
   insertManualPayslipSnapshot,
   insertPayslipSnapshot,
@@ -57,7 +58,14 @@ const payslipPatchSchema = z
     postTaxDeductionsYtd: z.number().nullable().optional(),
     netPayCurrent: z.number().nullable().optional(),
     netPayYtd: z.number().nullable().optional(),
-    hoursOrDaysCurrent: z.string().nullable().optional()
+    hoursOrDaysCurrent: z.string().nullable().optional(),
+    hoursOrDaysYtd: z.string().nullable().optional(),
+    taxableEarningsCurrent: z.number().nullable().optional(),
+    taxableEarningsYtd: z.number().nullable().optional(),
+    otherInformationCurrent: z.number().nullable().optional(),
+    otherInformationYtd: z.number().nullable().optional(),
+    employmentRate: z.number().nullable().optional(),
+    employmentRateType: z.string().max(50).nullable().optional()
   })
   .strict();
 
@@ -200,6 +208,7 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
     payPeriodEnd: body.payPeriodEnd ?? null,
     payDate: body.payDate ?? null,
     hoursOrDaysCurrent: body.hoursOrDaysCurrent ?? null,
+    hoursOrDaysYtd: body.hoursOrDaysYtd ?? null,
     grossPayCurrent: body.grossPayCurrent ?? null,
     grossPayYtd: body.grossPayYtd ?? null,
     employeeTaxesCurrent: body.employeeTaxesCurrent ?? null,
@@ -209,7 +218,11 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
     postTaxDeductionsCurrent: body.postTaxDeductionsCurrent ?? null,
     postTaxDeductionsYtd: body.postTaxDeductionsYtd ?? null,
     netPayCurrent: body.netPayCurrent ?? null,
-    netPayYtd: body.netPayYtd ?? null
+    netPayYtd: body.netPayYtd ?? null,
+    taxableEarningsCurrent: body.taxableEarningsCurrent ?? null,
+    taxableEarningsYtd: body.taxableEarningsYtd ?? null,
+    otherInformationCurrent: body.otherInformationCurrent ?? null,
+    otherInformationYtd: body.otherInformationYtd ?? null
   };
 
   const result = await insertManualPayslipSnapshot(householdId, {
@@ -310,7 +323,8 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
     resolved.employerId,
     undefined,
     undefined,
-    parseResult.hybrid
+    parseResult.hybrid,
+    parseResult.lineItems
   );
 
   if (!result.ok) {
@@ -337,13 +351,11 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
     return;
   }
-  const matchedDeposits = await findMatchedDeposits(
-    householdId,
-    snapshot.payDate,
-    snapshot.netPayCurrent,
-    snapshot.ownerPersonProfileId
-  );
-  res.json({ ...snapshot, matchedDeposits });
+  const [matchedDeposits, lineItems] = await Promise.all([
+    findMatchedDeposits(householdId, snapshot.payDate, snapshot.netPayCurrent, snapshot.ownerPersonProfileId),
+    getPayslipLineItems(snapshot.id, householdId)
+  ]);
+  res.json({ ...snapshot, matchedDeposits, lineItems });
 });
 
 payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {

@@ -1,9 +1,11 @@
-import type { ParsedPayslipSummary, PayslipHybridColumns } from "../payslip.types.js";
+import type { ParsedPayslipSummary, PayslipHybridColumns, LineItemForInsert, PayslipLineItemSection } from "../payslip.types.js";
+import { PAYSLIP_LINE_ITEM_SECTIONS } from "../payslip.types.js";
 import type { PayslipLlmExtract, PayslipLineItem } from "./payslip-llm.schema.js";
 
 export type CanonicalMapResult = {
   summary: ParsedPayslipSummary;
   hybrid: PayslipHybridColumns;
+  lineItems: LineItemForInsert[];
 };
 
 /** Deloitte biweekly default when the model does not report hours on the stub. */
@@ -62,6 +64,37 @@ function approxNetSanityNote(
       delta: Math.round(delta * 100) / 100
     }
   };
+}
+
+/**
+ * Flatten all seven line_items sections from the LLM extract into a flat array
+ * suitable for bulk insert into payslip_line_item.
+ * sort_order is the original array index within each section (preserves PDF row order).
+ */
+function flattenLineItems(lineItemsFromExtract: PayslipLlmExtract["line_items"]): LineItemForInsert[] {
+  const out: LineItemForInsert[] = [];
+  for (const section of PAYSLIP_LINE_ITEM_SECTIONS) {
+    const rows = lineItemsFromExtract[section as keyof typeof lineItemsFromExtract];
+    rows.forEach((row: PayslipLineItem, idx: number) => {
+      out.push({
+        section: section as PayslipLineItemSection,
+        sortOrder: idx,
+        name: row.name ?? null,
+        authority: row.authority ?? null,
+        description: row.description ?? null,
+        dateStart: row.dates?.start_date ?? null,
+        dateEnd: row.dates?.end_date ?? null,
+        dateRaw: row.dates?.raw ?? null,
+        hoursOrDaysCurrent: row.hours_or_days?.current ?? null,
+        hoursOrDaysYtd: row.hours_or_days?.ytd ?? null,
+        rate: row.rate ?? null,
+        amountCurrent: row.amount_current ?? null,
+        amountYtd: row.amount_ytd ?? null,
+        rawSection: row.raw_section ?? null
+      });
+    });
+  }
+  return out;
 }
 
 /**
@@ -143,11 +176,17 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
     hoursDefaultedBiweekly80 = true;
   }
 
+  const hoursOrDaysYtd: string | null =
+    extract.employment_context.hours_or_days_worked_ytd != null
+      ? String(extract.employment_context.hours_or_days_worked_ytd)
+      : null;
+
   const summary: ParsedPayslipSummary = {
     payPeriodStart: extract.pay_period.start_date,
     payPeriodEnd: extract.pay_period.end_date,
     payDate: extract.pay_period.pay_date,
     hoursOrDaysCurrent,
+    hoursOrDaysYtd,
     grossPayCurrent: s.gross_pay_current,
     grossPayYtd: s.gross_pay_ytd,
     employeeTaxesCurrent,
@@ -158,6 +197,10 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
     postTaxDeductionsYtd: postTaxYtd,
     netPayCurrent: s.net_pay_current,
     netPayYtd: s.net_pay_ytd,
+    taxableEarningsCurrent: s.taxable_earnings_current,
+    taxableEarningsYtd: s.taxable_earnings_ytd,
+    otherInformationCurrent: s.other_information_current,
+    otherInformationYtd: s.other_information_ytd,
     rawExtractJson: {
       parser: "openai_llm_payslip",
       documentType: extract.document_type,
@@ -188,10 +231,12 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
     talentId: emp.talent_id,
     taxProfileJson: JSON.stringify(extract.tax_profile),
     paymentSummaryJson: JSON.stringify(extract.payment_information),
-    extractionMetadataJson: JSON.stringify(extract.document_metadata)
+    extractionMetadataJson: JSON.stringify(extract.document_metadata),
+    employmentRate: extract.employment_context.rate,
+    employmentRateType: extract.employment_context.rate_type
   };
 
-  return { summary, hybrid };
+  return { summary, hybrid, lineItems: flattenLineItems(extract.line_items) };
 }
 
 export type CanonicalValidation = { ok: true } | { ok: false; reasons: string[] };

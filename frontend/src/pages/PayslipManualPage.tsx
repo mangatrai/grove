@@ -58,6 +58,13 @@ export function PayslipManualPage() {
   const [postTaxCurrent, setPostTaxCurrent] = useState("");
   const [postTaxYtd, setPostTaxYtd] = useState("");
   const [hoursOrDaysCurrent, setHoursOrDaysCurrent] = useState("");
+  const [hoursOrDaysYtd, setHoursOrDaysYtd] = useState("");
+  const [taxableEarningsCurrent, setTaxableEarningsCurrent] = useState("");
+  const [taxableEarningsYtd, setTaxableEarningsYtd] = useState("");
+  const [otherInformationCurrent, setOtherInformationCurrent] = useState("");
+  const [otherInformationYtd, setOtherInformationYtd] = useState("");
+  const [employmentRate, setEmploymentRate] = useState("");
+  const [employmentRateType, setEmploymentRateType] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -162,6 +169,13 @@ export function PayslipManualPage() {
         postTaxDeductionsCurrent: parseOptionalNumber(postTaxCurrent),
         postTaxDeductionsYtd: parseOptionalNumber(postTaxYtd),
         hoursOrDaysCurrent: hoursOrDaysCurrent.trim() === "" ? null : hoursOrDaysCurrent.trim(),
+        hoursOrDaysYtd: hoursOrDaysYtd.trim() === "" ? null : hoursOrDaysYtd.trim(),
+        taxableEarningsCurrent: parseOptionalNumber(taxableEarningsCurrent),
+        taxableEarningsYtd: parseOptionalNumber(taxableEarningsYtd),
+        otherInformationCurrent: parseOptionalNumber(otherInformationCurrent),
+        otherInformationYtd: parseOptionalNumber(otherInformationYtd),
+        employmentRate: parseOptionalNumber(employmentRate),
+        employmentRateType: employmentRateType.trim() === "" ? null : employmentRateType.trim(),
         ownerScope,
         ownerPersonProfileId: ownerScope === "person" ? ownerPersonProfileId : null
       };
@@ -192,14 +206,19 @@ export function PayslipManualPage() {
       employeeTaxesYtd,
       employerId,
       employers.length,
+      employmentRate,
+      employmentRateType,
       grossPayCurrent,
       grossPayYtd,
       hasEmployers,
       hoursOrDaysCurrent,
+      hoursOrDaysYtd,
       navigate,
       needsEmployerPick,
       netPayCurrent,
       netPayYtd,
+      otherInformationCurrent,
+      otherInformationYtd,
       parserProfileId,
       payDate,
       payPeriodEnd,
@@ -207,7 +226,9 @@ export function PayslipManualPage() {
       postTaxCurrent,
       postTaxYtd,
       preTaxCurrent,
-      preTaxYtd
+      preTaxYtd,
+      taxableEarningsCurrent,
+      taxableEarningsYtd
     ]
   );
 
@@ -490,11 +511,94 @@ export function PayslipManualPage() {
                     style={{ width: "100%", maxWidth: "11rem" }}
                   />
                 </td>
-                <td className="muted">—</td>
+                <td>
+                  <input
+                    value={hoursOrDaysYtd}
+                    onChange={(ev) => setHoursOrDaysYtd(ev.target.value)}
+                    aria-label="Hours or days YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Taxable earnings</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={taxableEarningsCurrent}
+                    onChange={(ev) => setTaxableEarningsCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Taxable earnings current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={taxableEarningsYtd}
+                    onChange={(ev) => setTaxableEarningsYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Taxable earnings YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Other information</th>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={otherInformationCurrent}
+                    onChange={(ev) => setOtherInformationCurrent(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Other information current"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
+                <td>
+                  <input
+                    inputMode="decimal"
+                    value={otherInformationYtd}
+                    onChange={(ev) => setOtherInformationYtd(ev.target.value)}
+                    placeholder="0.00"
+                    aria-label="Other information YTD"
+                    style={{ width: "100%", maxWidth: "11rem" }}
+                  />
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        {/* Salary / rate — separate row below the main table for clarity */}
+        <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+          <label className="field" style={{ flex: "1 1 14rem", marginBottom: 0 }}>
+            <span>Salary / Rate</span>
+            <input
+              inputMode="decimal"
+              value={employmentRate}
+              onChange={(ev) => setEmploymentRate(ev.target.value)}
+              placeholder="e.g. 180000"
+              aria-label="Employment rate or salary"
+              style={{ width: "100%" }}
+            />
+          </label>
+          <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
+            <span>Rate type</span>
+            <select
+              value={employmentRateType}
+              onChange={(ev) => setEmploymentRateType(ev.target.value)}
+              aria-label="Employment rate type"
+            >
+              <option value="">—</option>
+              <option value="annual">Annual</option>
+              <option value="biweekly">Biweekly</option>
+              <option value="hourly">Hourly</option>
+            </select>
+          </label>
+        </div>
+        {/* TODO (backlog): Full per-row line item entry (individual earnings/deduction rows manually)
+            is a deferred UI enhancement. Tracked in CHANGE_HISTORY.md. For now, summary fields only. */}
 
         {submitError ? <p className="error">{submitError}</p> : null}
 

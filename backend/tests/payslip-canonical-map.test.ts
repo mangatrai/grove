@@ -400,6 +400,161 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.postTaxFilledFromOtherDeductionRows).toEqual({ current: true, ytd: true });
   });
 
+  it("maps hoursOrDaysYtd from employment_context.hours_or_days_worked_ytd", () => {
+    const ex = minimalExtract({
+      employment_context: {
+        ...minimalExtract().employment_context,
+        hours_or_days_worked_current: 80,
+        hours_or_days_worked_ytd: 480
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.hoursOrDaysYtd).toBe("480");
+    expect(summary.hoursOrDaysCurrent).toBe("80");
+  });
+
+  it("hoursOrDaysYtd is null when employment_context.hours_or_days_worked_ytd is null", () => {
+    const ex = minimalExtract();
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.hoursOrDaysYtd).toBeNull();
+  });
+
+  it("maps taxableEarningsCurrent and taxableEarningsYtd from summary", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        taxable_earnings_current: 4500,
+        taxable_earnings_ytd: 9000
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.taxableEarningsCurrent).toBe(4500);
+    expect(summary.taxableEarningsYtd).toBe(9000);
+  });
+
+  it("taxableEarningsCurrent and taxableEarningsYtd are null when absent in summary", () => {
+    const ex = minimalExtract();
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.taxableEarningsCurrent).toBeNull();
+    expect(summary.taxableEarningsYtd).toBeNull();
+  });
+
+  it("maps otherInformationCurrent and otherInformationYtd from summary", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        other_information_current: 250,
+        other_information_ytd: 1000
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.otherInformationCurrent).toBe(250);
+    expect(summary.otherInformationYtd).toBe(1000);
+  });
+
+  it("maps employmentRate and employmentRateType from employment_context into hybrid", () => {
+    const ex = minimalExtract({
+      employment_context: {
+        ...minimalExtract().employment_context,
+        rate: 180000,
+        rate_type: "annual"
+      }
+    });
+    const { hybrid } = mapCanonicalExtractToPersist(ex);
+    expect(hybrid.employmentRate).toBe(180000);
+    expect(hybrid.employmentRateType).toBe("annual");
+  });
+
+  it("employmentRate and employmentRateType are null when employment_context has no rate", () => {
+    const ex = minimalExtract();
+    const { hybrid } = mapCanonicalExtractToPersist(ex);
+    expect(hybrid.employmentRate).toBeNull();
+    expect(hybrid.employmentRateType).toBeNull();
+  });
+
+  it("flattenLineItems returns one row per item with correct section and sort_order", () => {
+    const earningsRow = {
+      name: "Regular Salary",
+      authority: null,
+      description: null,
+      dates: { start_date: "2026-02-16", end_date: "2026-02-28", raw: "02/16-02/28" },
+      hours_or_days: { current: 80, ytd: 336 },
+      rate: 9588.75,
+      amount_current: 9588.75,
+      amount_ytd: 38355,
+      raw_section: "EARNINGS"
+    };
+    const taxRow = {
+      name: "Federal Withholding",
+      authority: null,
+      description: null,
+      dates: { start_date: null, end_date: null, raw: null },
+      hours_or_days: { current: null, ytd: null },
+      rate: null,
+      amount_current: 2488.96,
+      amount_ytd: 11708.63,
+      raw_section: "TAX DEDUCTION(S)"
+    };
+    const preTaxRow1 = {
+      name: "401k PreTax Base Pay",
+      authority: null,
+      description: null,
+      dates: { start_date: null, end_date: null, raw: null },
+      hours_or_days: { current: null, ytd: null },
+      rate: null,
+      amount_current: 479.44,
+      amount_ytd: 2684.85,
+      raw_section: "PRE-TAX DEDUCTION(S)"
+    };
+    const preTaxRow2 = {
+      name: "Employee HSA",
+      authority: null,
+      description: null,
+      dates: { start_date: null, end_date: null, raw: null },
+      hours_or_days: { current: null, ytd: null },
+      rate: null,
+      amount_current: 297.92,
+      amount_ytd: 1191.68,
+      raw_section: "PRE-TAX DEDUCTION(S)"
+    };
+    const ex = minimalExtract({
+      line_items: {
+        ...minimalExtract().line_items,
+        earnings: [earningsRow],
+        tax_deductions: [taxRow],
+        pre_tax_deductions: [preTaxRow1, preTaxRow2]
+      }
+    });
+    const { lineItems } = mapCanonicalExtractToPersist(ex);
+    // 1 earning + 2 pre-tax + 1 tax = 4 total (other sections empty)
+    expect(lineItems.length).toBe(4);
+
+    const earningItem = lineItems.find((l) => l.section === "earnings");
+    expect(earningItem).toBeDefined();
+    expect(earningItem!.sortOrder).toBe(0);
+    expect(earningItem!.name).toBe("Regular Salary");
+    expect(earningItem!.amountCurrent).toBe(9588.75);
+    expect(earningItem!.hoursOrDaysCurrent).toBe(80);
+    expect(earningItem!.rawSection).toBe("EARNINGS");
+
+    const preTaxItems = lineItems.filter((l) => l.section === "pre_tax_deductions");
+    expect(preTaxItems.length).toBe(2);
+    expect(preTaxItems[0].sortOrder).toBe(0);
+    expect(preTaxItems[0].name).toBe("401k PreTax Base Pay");
+    expect(preTaxItems[1].sortOrder).toBe(1);
+    expect(preTaxItems[1].name).toBe("Employee HSA");
+
+    const taxItem = lineItems.find((l) => l.section === "tax_deductions");
+    expect(taxItem!.name).toBe("Federal Withholding");
+    expect(taxItem!.amountYtd).toBe(11708.63);
+  });
+
+  it("flattenLineItems returns empty array when all sections are empty", () => {
+    const ex = minimalExtract();
+    const { lineItems } = mapCanonicalExtractToPersist(ex);
+    expect(lineItems).toEqual([]);
+  });
+
   it("validateCanonicalForImport passes for minimal good extract", () => {
     expect(validateCanonicalForImport(minimalExtract())).toEqual({ ok: true });
   });

@@ -3,7 +3,8 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { MatchedDeposit, PayslipSnapshotDetail } from "../payslip/types";
+import type { MatchedDeposit, PayslipLineItemRow, PayslipLineItemSection, PayslipSnapshotDetail } from "../payslip/types";
+import { SECTION_LABELS, SECTION_ORDER } from "../payslip/types";
 
 export type { PayslipSnapshotDetail };
 
@@ -43,6 +44,66 @@ function periodLabel(r: PayslipSnapshotDetail): string {
     return b;
   }
   return "—";
+}
+
+/** Determine which columns to show for a line items section (skip if all rows have null). */
+function sectionHasHours(rows: PayslipLineItemRow[]): boolean {
+  return rows.some((r) => r.hoursOrDaysCurrent != null || r.hoursOrDaysYtd != null);
+}
+function sectionHasRate(rows: PayslipLineItemRow[]): boolean {
+  return rows.some((r) => r.rate != null);
+}
+
+function LineItemsSection({ section, rows }: { section: PayslipLineItemSection; rows: PayslipLineItemRow[] }) {
+  const showHours = sectionHasHours(rows);
+  const showRate = sectionHasRate(rows);
+  return (
+    <details style={{ marginBottom: "0.75rem" }}>
+      <summary style={{ cursor: "pointer", fontWeight: 600, padding: "0.4rem 0" }}>
+        {SECTION_LABELS[section]}
+        <span className="muted" style={{ fontWeight: 400, marginLeft: "0.5rem", fontSize: "0.85rem" }}>
+          ({rows.length} row{rows.length !== 1 ? "s" : ""})
+        </span>
+      </summary>
+      <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
+        <table className="ledger-table" style={{ fontSize: "0.85rem" }}>
+          <thead>
+            <tr>
+              <th style={{ minWidth: "12rem" }}>Name</th>
+              {showHours ? <th>Hours</th> : null}
+              {showRate ? <th>Rate</th> : null}
+              <th>Current</th>
+              <th>YTD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>
+                  {row.name ?? <span className="muted">—</span>}
+                  {row.dateRaw ? (
+                    <span className="muted" style={{ fontSize: "0.78rem", marginLeft: "0.35rem" }}>
+                      {row.dateRaw}
+                    </span>
+                  ) : null}
+                </td>
+                {showHours ? (
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {row.hoursOrDaysCurrent != null ? row.hoursOrDaysCurrent : "—"}
+                  </td>
+                ) : null}
+                {showRate ? (
+                  <td style={{ whiteSpace: "nowrap" }}>{row.rate != null ? formatMoney(row.rate) : "—"}</td>
+                ) : null}
+                <td style={{ whiteSpace: "nowrap" }}>{formatMoney(row.amountCurrent)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{formatMoney(row.amountYtd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
 }
 
 export function PayslipDetailPage() {
@@ -123,6 +184,12 @@ export function PayslipDetailPage() {
   if (!payslipId) {
     return <Navigate to="/payslips" replace />;
   }
+
+  // Sections that have at least one line item row
+  const nonEmptySections =
+    detail?.lineItems
+      ? SECTION_ORDER.filter((s) => (detail.lineItems![s]?.length ?? 0) > 0)
+      : [];
 
   return (
     <div className="payslips-page">
@@ -205,7 +272,27 @@ export function PayslipDetailPage() {
               <dt>Pay date</dt>
               <dd>{detail.payDate ?? "—"}</dd>
               <dt>Hours worked</dt>
-              <dd>{detail.hoursOrDaysCurrent ?? "—"}</dd>
+              <dd>
+                {detail.hoursOrDaysCurrent ?? "—"}
+                {detail.hoursOrDaysYtd != null ? (
+                  <span className="muted" style={{ marginLeft: "0.5rem", fontSize: "0.85rem" }}>
+                    YTD: {detail.hoursOrDaysYtd}
+                  </span>
+                ) : null}
+              </dd>
+              {detail.employmentRate != null ? (
+                <>
+                  <dt>Salary / Rate</dt>
+                  <dd>
+                    {formatMoney(detail.employmentRate)}
+                    {detail.employmentRateType ? (
+                      <span className="muted" style={{ marginLeft: "0.4rem", fontSize: "0.85rem" }}>
+                        ({detail.employmentRateType})
+                      </span>
+                    ) : null}
+                  </dd>
+                </>
+              ) : null}
             </dl>
           </div>
 
@@ -266,6 +353,13 @@ export function PayslipDetailPage() {
                     <td>{formatMoney(detail.grossPayCurrent)}</td>
                     <td>{formatMoney(detail.grossPayYtd)}</td>
                   </tr>
+                  {detail.taxableEarningsCurrent != null || detail.taxableEarningsYtd != null ? (
+                    <tr>
+                      <td className="muted" style={{ fontSize: "0.9rem" }}>↳ Taxable earnings</td>
+                      <td>{formatMoney(detail.taxableEarningsCurrent)}</td>
+                      <td>{formatMoney(detail.taxableEarningsYtd)}</td>
+                    </tr>
+                  ) : null}
                   <tr>
                     <td>Employee taxes</td>
                     <td>{formatMoney(detail.employeeTaxesCurrent)}</td>
@@ -281,6 +375,13 @@ export function PayslipDetailPage() {
                     <td>{formatMoney(detail.postTaxDeductionsCurrent)}</td>
                     <td>{formatMoney(detail.postTaxDeductionsYtd)}</td>
                   </tr>
+                  {detail.otherInformationCurrent != null || detail.otherInformationYtd != null ? (
+                    <tr>
+                      <td className="muted" style={{ fontSize: "0.9rem" }}>Other information</td>
+                      <td>{formatMoney(detail.otherInformationCurrent)}</td>
+                      <td>{formatMoney(detail.otherInformationYtd)}</td>
+                    </tr>
+                  ) : null}
                   <tr>
                     <td>Net pay</td>
                     <td>{formatMoney(detail.netPayCurrent)}</td>
@@ -290,6 +391,22 @@ export function PayslipDetailPage() {
               </table>
             </div>
           </div>
+
+          {nonEmptySections.length > 0 ? (
+            <div className="card" style={{ marginTop: "1rem" }}>
+              <h2 style={{ marginTop: 0 }}>Line items</h2>
+              <p className="muted" style={{ marginTop: 0, marginBottom: "1rem", fontSize: "0.9rem" }}>
+                Individual rows extracted from the payslip PDF, grouped by section.
+              </p>
+              {nonEmptySections.map((section) => (
+                <LineItemsSection
+                  key={section}
+                  section={section}
+                  rows={detail.lineItems![section]}
+                />
+              ))}
+            </div>
+          ) : null}
 
           <div className="card" style={{ marginTop: "1rem" }}>
             <details>

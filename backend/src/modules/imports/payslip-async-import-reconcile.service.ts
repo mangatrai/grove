@@ -115,7 +115,7 @@ export async function reconcilePayslipAsyncImportSession(
         continue;
       }
 
-      const { summary, hybrid } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
+      const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
       const buffer = fs.readFileSync(file.stored_path);
       const checksum = sha256Hex(buffer);
 
@@ -129,7 +129,8 @@ export async function reconcilePayslipAsyncImportSession(
         file.employer_id,
         file.owner_scope === "person" ? "person" : "household",
         file.owner_scope === "person" ? file.owner_person_profile_id : null,
-        hybrid
+        hybrid,
+        lineItems
       );
 
       if (!ins.ok) {

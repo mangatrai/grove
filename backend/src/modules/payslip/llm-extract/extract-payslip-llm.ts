@@ -109,7 +109,17 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     "If the PDF lists true post-tax rows only under line_items.other_deductions, still name them clearly (e.g. starting with \"Other deduction\") and set raw_section to the visible section label (e.g. OTHER DEDUCTION(S)) when possible — the server can also infer post-tax from the name if raw_section is blank.",
     "Deloitte: 'After-Tax Ded' / after-tax deduction totals map to summary.post_tax_deductions_current (and YTD when shown).",
     "Deloitte: 'TAXABLE EARNINGS (FED)' and similar federal taxable lines belong in summary.taxable_earnings_current / summary.taxable_earnings_ytd only — do not treat them as gross pay.",
-    "Do not invent totals; use null if unclear."
+    "Do not invent totals; use null if unclear.",
+    // IBM-specific guidance
+    "IBM Pay & Contributions layout: sections are EARNINGS, PRE-TAX DEDUCTIONS, POST-TAX DEDUCTIONS, TAX DEDUCTIONS, and OTHER INFORMATION (or 'Other Info'). Map ALL rows from the OTHER INFORMATION section (e.g. GLI Imputed Earnings, ESPP Discount, Merchandise Points Award, Employer HSA Contribution) into line_items.other_information — do NOT treat them as deductions or earnings. Set summary.other_information_current and summary.other_information_ytd to the OTHER INFORMATION section totals.",
+    "IBM 401k: there are multiple pre-tax rows (e.g. 401k PreTax Base Pay, 401k PreTax Perf Pay) and multiple post-tax rows (e.g. 401k After Tax Base Pay, 401k After Tax Perf Pay, 401k Roth Base Pay). Capture each as a distinct line_items row with its own name — do not merge them.",
+    "IBM ESPP: 'ESPP (Stock Salary)' and 'ESPP (Stock Other)' are post-tax payroll deductions — place them in line_items.post_tax_deductions. 'ESPP Discount' in the Other Information section is an employer contribution — place it in line_items.other_information.",
+    "IBM employment_context: set rate to the annual salary shown on the stub; set rate_type to 'annual'. Set hours_or_days_worked_current and hours_or_days_worked_ytd from the Hours or Days column in the Earnings section.",
+    // Deloitte-specific guidance
+    "Deloitte earnings: 'Equalization Tax Adv' and 'Recognition Award' are one-time earnings rows — place them in line_items.earnings with amount_current populated (not in deductions). 'Imp Inc Core Life' and 'Imp Inc Core LTD' rows in the earnings section carry an hours value — capture hours_or_days.current from the Hours column for those rows.",
+    "Deloitte pre-tax deductions: 'Flex Spending (Healt)' and 'Flex Spending (Dep C)' are separate rows — do not merge them. Preserve the names exactly as shown in the PDF.",
+    "Deloitte other deductions: 'Tax Advance' and 'Award Received' rows may show only a YTD value — set amount_current to null and amount_ytd to the visible value. 'Imp Inc Core Life' and 'Imp Inc Core LTD' appear here with both current and YTD amounts; capture both.",
+    "Deloitte employment_context: set rate to the biweekly salary shown (e.g. 8057.69); set rate_type to 'biweekly'. Set hours_or_days_worked_current from the hours shown in the Earnings section."
   ].join(" ");
 
   const userText = `There are ${pageCount} page image(s) in order (page 1 first). Extract the full payslip per schema.`;
