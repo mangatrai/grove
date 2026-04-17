@@ -1,6 +1,6 @@
 # API: Household export and restore (ZIP)
 
-Authenticated household backup as a **ZIP** (async job), and **destructive** restore from that ZIP (async job). Operator-oriented behavior (rate limits, bundle contents, staging paths) is summarized in [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md).
+Authenticated household backup as a **ZIP** (async job), and **destructive** restore from that ZIP (async job). Operator-oriented behavior (rate limits, bundle contents, staging paths) is summarized in [`RUNBOOK.md`](RUNBOOK.md) §11.
 
 ## `POST /exports/household`
 

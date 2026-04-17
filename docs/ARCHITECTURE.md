@@ -85,7 +85,7 @@ Operators may still want to **reclaim disk space** after they trust extracted ro
 
 ### Planned balance sheet / net worth (product backlog)
 
-A future **Summary / net-worth** page (assets vs liabilities, time-slice snapshots, manual balance edits) is specified in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md). Statement-level **beginning/ending balances** from BoA CSV/PDF are stored in `import_file.confidence_summary.statementBalances` after parse as a feeder for that work.
+The **Net Worth** page (assets vs liabilities, time-slice snapshots, manual balance edits) is shipped — see [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md). Statement-level **beginning/ending balances** from BoA CSV/PDF are stored in `import_file.confidence_summary.statementBalances` after parse and also persisted to `account_balance_snapshot` as `source = import`.
 
 ### Ledger surface (shipped)
 
@@ -191,8 +191,19 @@ For OFX/QFX imports: **FITID** (`reference_id`) is checked first (stronger dedup
 - UAT script for monthly close workflow.
 
 ## 15. Open Architecture Questions
-1. Migration path trigger criteria from SQLite to PostgreSQL (dataset size, write contention, or query latency thresholds).
-2. Search abstraction shape for future optional OpenSearch read-model indexing.
-3. Reconciliation policy escalation path (when/if to move from warn-only to soft-block).
-4. First parser-profile institution set lock for implementation: Bank of America checking, Citi credit cards, Chase credit cards.
+1. Search abstraction shape for future optional OpenSearch read-model indexing.
+2. Reconciliation policy escalation path (when/if to move from warn-only to soft-block).
+3. Async canonicalize: for large imports, `POST /imports/sessions/:id/canonicalize` could return a `202 { jobId }` and run in the background (same process poller or separate worker), with the client polling `GET /imports/sessions/:id/canonicalize/status`. Tracked: GitHub [#12](https://github.com/mangatrai/household-finance-app/issues/12).
+
+## 16. Database tooling reference
+
+| Script / path | Role |
+|----------------|------|
+| [`scripts/db-pg.mjs`](../scripts/db-pg.mjs) | Apply `migrations` + optional `seeds` |
+| [`scripts/preset-pg-test.mjs`](../scripts/preset-pg-test.mjs) | Reset `public` schema for tests |
+| [`scripts/db.sh`](../scripts/db.sh) | Wraps `db-pg.mjs` |
+| [`scripts/prep-test-db.sh`](../scripts/prep-test-db.sh) | Preset + clean import staging dirs |
+| [`docker-compose.yml`](../docker-compose.yml) | Local Postgres 18 on host port **5433** |
+
+Full env var reference: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md). Operator Q&A and Postgres connection shape: [`RUNBOOK.md`](RUNBOOK.md) §11.
 

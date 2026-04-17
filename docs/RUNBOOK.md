@@ -1,6 +1,6 @@
 # End-to-end runbook (brand new environment)
 
-Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Database layout and baseline notes: [`backend/db/README.md`](../backend/db/README.md). **Operator FAQ** (import sessions, recategorize scope, exports, Postgres probe): [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md). **Postgres cutover** roadmap: [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md).
+Single checklist to go from an empty machine to a running app. For **production** database policy (minimal seeds), see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md). API surface: [`openapi/openapi.yaml`](../openapi/openapi.yaml). Database layout: [`backend/db/README.md`](../backend/db/README.md). Operator Q&A and Postgres notes: §11 below.
 
 ## One-command map (local)
 
@@ -12,7 +12,7 @@ Single checklist to go from an empty machine to a running app. For **production*
 | Wipe DB and reapply migrations + seeds | `npm run db:cleanup` or `npm run db:reset` (add `--with-dev-seeds` via `npm run db:reset:dev`) |
 | Stop API + UI | `npm run stop:dev` (alias: `npm run services:stop`) |
 
-`setup` creates `.env` from `.env.example` if `.env` is missing. Aligns with [`docs/archive/MVP_BACKLOG.md`](archive/MVP_BACKLOG.md) (“fresh machine setup”) and [`docs/archive/IMPLEMENTATION_PLAN_90_DAYS.md`](archive/IMPLEMENTATION_PLAN_90_DAYS.md) (standardized local operations).
+`setup` creates `.env` from `.env.example` if `.env` is missing.
 
 ## 1. Prerequisites
 
@@ -54,15 +54,15 @@ Edit `.env`:
 | `VITE_PROXY_API` | (Optional) Base URL for API proxy in dev; default `http://127.0.0.1:4000`. |
 | `VITE_DEV_SIGNIN_EMAIL` / `VITE_DEV_SIGNIN_PASSWORD` | (Optional) Prefill sign-in on the home page in dev only; leave empty for no prefill. |
 | `OPENAI_*` | Used for **Deloitte payslip LLM import** when configured; not used for transaction categorization (rules-only). See [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md). |
-| `LOG_LEVEL` | (Optional) Backend verbosity: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). See [`LOGGING.md`](LOGGING.md). |
+| `LOG_LEVEL` | (Optional) Backend verbosity: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). See [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md). |
 
-**API logs:** Backend output is controlled by **`LOG_LEVEL`** (see [`LOGGING.md`](LOGGING.md)); capture to files with `npm run start:dev` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
+**API logs:** Backend output is controlled by **`LOG_LEVEL`**; capture to files with `npm run start:dev` → `.runtime/logs/backend.log`. Full index: [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md).
 
 **Seeded database user:** The first user is inserted only by [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) (email + bcrypt hash). Optional sign-in field prefill uses `VITE_DEV_SIGNIN_*` only (see above), not the backend env.
 
 ## 5. Database (Postgres: schema + seeds)
 
-**Postgres only** — see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) and [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md). Start local Postgres with **`docker compose up -d`** from the repo root (see [`docker-compose.yml`](../docker-compose.yml)), then set **`DATABASE_*`** in `.env` (port **5433** → server **5432** per compose).
+**Postgres only** — see [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) and §11 for connection details. Start local Postgres with **`docker compose up -d`** from the repo root (see [`docker-compose.yml`](../docker-compose.yml)), then set **`DATABASE_*`** in `.env` (port **5433** → server **5432** per compose).
 
 **Migrations:** ordered `*.sql` under [`backend/db/migrations/`](../backend/db/migrations/). The **API applies pending migrations on startup** when it first connects. **`npm run db:*`** / [`scripts/db.sh`](../scripts/db.sh) apply the same files using your `.env` **`DATABASE_*`** (useful before the API runs, or from CI).
 
@@ -165,7 +165,39 @@ Then start the API again (`npm run start:dev` or `npm run dev:backend`). Clear s
 | Port in use | Change `PORT` / `FRONTEND_PORT` in `.env` or stop the other process. |
 | 401 / invalid token | Clear browser storage for the site; sign in again. |
 | Missing tables / old schema | Run `npm run setup` or `npm run db:seed` after `db:cleanup`. |
-| Import staging disk | See [`archive/IMPORT_STAGING_PURGE.md`](archive/IMPORT_STAGING_PURGE.md); `npm run import:purge -- --help`. |
+| Import staging disk | `npm run import:purge -- --help` to prune old staged files. |
+
+## 11. Operator FAQ
+
+### Import sessions after finalize
+- Sessions are **not** auto-deleted or TTL-expired.
+- The list shows up to **40** sessions (newest first, all statuses).
+- After finalize the session row remains for audit (which files ran, links into Transactions filtered by session). It is not required for ongoing work.
+
+### "Re-apply rules to ledger" (`POST /categories/rules/recategorize`)
+- Scope: the **entire posted ledger** for the authenticated household (`transaction_canonical` where `status = 'posted'`).
+- **`uncategorized_only`** updates only rows with `category_id IS NULL`. **`all`** can overwrite categories when a rule matches.
+- Does **not** filter by import session; finalized imports' rows are included.
+
+### Household data export + restore (ZIP)
+- **Export:** Settings → Household → Export data triggers `POST /exports/household`. Job runs async; UI polls until complete, then shows a persistent Download link.
+- ZIP contains `manifest.json` + per-table JSON files (exportVersion 3). Tables: household settings, app users (bcrypt hashes), accounts, categories, rules, transactions, balance snapshots, payslip snapshots, person profiles, memberships.
+- `categories.json` / `category_rules.json` contain **only household-custom rows** — global seed rows are excluded (they re-seed on restore via `db:seed`).
+- Exports are rate-limited (10 per rolling hour). ZIPs stored in `data/exports/`; no auto-cleanup — delete manually if disk is a concern.
+- **Restore:** Settings → Household → Restore from backup — upload a ZIP from the export above.
+- Restore is **destructive and irreversible**: wipes current household data and replaces from ZIP.
+- All `token_version` values are incremented on restore (every existing JWT is invalidated; user is signed out automatically).
+- API: `POST /exports/household/import` (multipart `file`) → `{ jobId }` → poll `GET /exports/import/:jobId`.
+- Backward-compatible with v1/v2 ZIPs (single `household-bundle.json`).
+
+### PostgreSQL notes
+- The app uses PostgreSQL only via the `postgres` (porsager) client. Schema applied from `backend/db/migrations/`. Seeds in `backend/db/seeds/`.
+- Full-text search: `transaction_canonical.search_document` is a generated `tsvector` (English) over `merchant + memo` with a GIN index.
+- Connection shape (separate fields, not a URL — required for Koyeb and most managed providers):
+  ```ts
+  postgres({ host, port, database, username, password, ssl: ssl !== "0" ? "require" : false })
+  ```
+- Use `DATABASE_SSL=0` for local Docker; `DATABASE_SSL=1` (or omit) for managed TLS hosts.
 
 ## Related docs
 
@@ -174,8 +206,7 @@ Then start the API again (`npm run start:dev` or `npm run dev:backend`). Clear s
 - [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) — `.env` reference (`DATABASE_*`, Vite, transfer thresholds)  
 - [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) — production DB and seeds  
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — system design  
-- [`archive/README.md`](archive/README.md) — historical planning and handoff docs  
 
-## 11. Production and Docker
+## 12. Production and Docker
 
 Postgres + migrations-on-startup + bootstrap seeds + **Docker / Koyeb** deploy flow are documented in [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) (including **image vs `docker run`**, **`--env-file`**, and when to **`docker build`** again).

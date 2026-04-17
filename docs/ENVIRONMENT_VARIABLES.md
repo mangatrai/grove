@@ -21,21 +21,29 @@ Migrations: [`backend/db/migrations/`](../backend/db/migrations/). Seeds: [`back
 
 **Reset local data:** `npm run db:cleanup` or `npm run db:reset` runs [`scripts/db-cleanup.sh`](../scripts/db-cleanup.sh) with `--yes` (drops `public`, then migrations + **bootstrap seed only**). Use **`npm run db:reset:dev`** to also load sample BoA/Chase/Citi/Marcus `financial_account` rows.
 
-See [`POSTGRES_CUTOVER.md`](POSTGRES_CUTOVER.md) and [`RUNBOOK.md`](RUNBOOK.md).
+See [`RUNBOOK.md`](RUNBOOK.md) §11 for Postgres connection details and operator FAQ.
 
 ## Backend (runtime)
 
-**Logging (backend):** Set **`LOG_LEVEL`** and optional **`LOG_FILE`** in the repo root `.env` (see [`docs/LOGGING.md`](LOGGING.md)). Application code under `backend/src` should use [`logger`](../backend/src/logger.ts) only; ESLint blocks direct `console.*` outside `logger.ts`. Third-party libraries may still print to stderr.
+**Logging (backend):** Set **`LOG_LEVEL`** and optional **`LOG_FILE`** in the repo root `.env`. Implementation: [`backend/src/logger.ts`](../backend/src/logger.ts) — the **only** module that may write to `console` or a log file; all other backend code must `import { log } from "./logger.js"`.
 
-**Where output goes:** [`scripts/services.sh`](../scripts/services.sh) redirects **stdout/stderr** to [`.runtime/logs/`](../.runtime/logs/) when you run **`npm run start:dev`** (same as `npm run services:start`; backend → **`backend.log`**, frontend → **`frontend.log`**). It does not parse log levels—filtering is done inside the Node process for lines that go through `log.*`. Stop with **`npm run stop:dev`** (or **`npm run services:stop`**), status with **`npm run services:status`**.
+| `LOG_LEVEL` value | Behavior |
+|-------------------|----------|
+| `debug` | All output |
+| `info` | Default — hides `debug` |
+| `warn` | Warnings + errors only |
+| `error` | Errors only |
+| `silent` | Suppress everything |
 
-On macOS with launchd or Linux with systemd, logs go to the configured log path or `journalctl`.
+**`LOG_FILE`:** Set to a repo-relative or absolute path (e.g. `.runtime/logs/api.log`). Parent directories are created automatically. Lines are appended (ISO timestamp + level + message) while still printing to console (tee). If the file can't be opened, logging continues on console only with a one-time warning. GitHub [#10](https://github.com/mangatrai/household-finance-app/issues/10) tracks migrating remaining `console.*` calls.
+
+**Where output goes:** [`scripts/services.sh`](../scripts/services.sh) redirects **stdout/stderr** to [`.runtime/logs/`](../.runtime/logs/) when you run **`npm run start:dev`** (backend → **`backend.log`**, frontend → **`frontend.log`**). Stop with **`npm run stop:dev`**, status with **`npm run services:status`**.
 
 | Variable | Notes |
 |----------|--------|
 | `MODE` | `TEST` or `PROD`. Affects static SPA serving when **`frontend/dist`** exists; **not** used to pick a database file. |
 | `LOG_LEVEL` | Backend only: `debug`, `info`, `warn`, `error`, or `silent` (default `info`). |
-| `LOG_FILE` | Optional. Repo-relative or absolute path; timestamped lines are appended (tee with stdout/stderr). Empty = disabled. See [`LOGGING.md`](LOGGING.md). |
+| `LOG_FILE` | Optional. Repo-relative or absolute path; appended (tee with stdout/stderr). Empty = disabled. |
 | `PORT` | API listen port (default `4000`). |
 | `JWT_SECRET` | JWT signing; **min 32 chars** (raised from 16). The app **refuses to start in PROD** with the default dev value. Generate: `openssl rand -base64 48`. |
 | `ALLOWED_ORIGIN` | **PROD:** set to your app's public URL (e.g. `https://finance.example.com`) to lock CORS to that origin. Unset in TEST — all origins allowed. If unset in PROD, the API sends no `Allow-Origin` header (browser cross-origin requests blocked). |
@@ -58,4 +66,4 @@ On macOS with launchd or Linux with systemd, logs go to the configured log path 
 - **Seed user row:** [`backend/db/seeds/0001_bootstrap.sql`](../backend/db/seeds/0001_bootstrap.sql) — email and bcrypt hash for the default password.
 - **Tests:** `backend` `npm test` runs **`scripts/prep-test-db.sh`** (resets schema on the configured Postgres) then migrations + seeds + Vitest. **`DATABASE_*`** must be set (see `docker-compose.yml`).
 
-See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset. Operator Q&A: [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md).
+See also [`RUNBOOK.md`](RUNBOOK.md) for setup and reset.

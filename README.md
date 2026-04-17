@@ -17,7 +17,7 @@ Self-hosted household finance: import bank and card activity, categorize with ru
 | **HTTP API** | [`openapi/openapi.yaml`](openapi/openapi.yaml) · [`docs/API_INDEX.md`](docs/API_INDEX.md) |
 | **System design** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | **Release / change log** | [`docs/CHANGE_HISTORY.md`](docs/CHANGE_HISTORY.md) |
-| **Dead code / optional features audit** | [`docs/DEAD_CODE.md`](docs/DEAD_CODE.md) |
+| **User guide** | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) |
 
 ## One-command workflows (local dev)
 
@@ -68,7 +68,7 @@ npm run lint      # eslint both workspaces
 
 ## Import staging cleanup
 
-Dry-run by default; see `npm run import:purge -- --help` before using destructive flags. Background: [`docs/archive/IMPORT_STAGING_PURGE.md`](docs/archive/IMPORT_STAGING_PURGE.md).
+Dry-run by default; see `npm run import:purge -- --help` before using destructive flags.
 
 ## Sample CSV templates
 

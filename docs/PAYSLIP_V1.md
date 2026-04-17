@@ -12,7 +12,7 @@
 | **Bank import** (`transaction_canonical`) | Cash reality: what hit which account (e.g. BoA net pay deposit). |
 | **Payslip module** | Employer-reported compensation: gross, taxes, deductions, period, YTD — **not** double-counting net pay unless we explicitly choose to link them. |
 
-> **Progress:** **3.3a + 3.3b + income charts (🟡)** — **IBM** and **Deloitte** use **LLM + canonical map + hybrid snapshot** (**CR-051**, **CR-052**). **`422`** reason codes when OpenAI is missing or extraction fails. **`payslip_snapshot`** + **`POST /payslips/upload`** + **`GET /payslips`** + **`GET /payslips/:id`** + **`PATCH /payslips/:id`** + **`/payslips`** charts (**CR-031**, **CR-036**). **Employer + sniff:** **`0018`**, **`POST /payslips/sniff`**, multi-employer picker, **`adp_payslip_pdf`** stub (**CR-037**). **Unified Import:** **`ibm_pay_contributions_pdf`** / **`deloitte_payslip_pdf`** → snapshot (**`0015`**), parse → snapshot; payslip-only canonicalize (**CR-028**). **Still not:** full line-item grids in UI; ADP execution beyond stub. Details: **`docs/archive/CHECKPOINT.md`**, **`docs/CHANGE_HISTORY.md`**.
+> **Progress:** Shipped — IBM and Deloitte use LLM + canonical map + hybrid snapshot (**CR-051**, **CR-052**). `422` reason codes when OpenAI is missing or extraction fails. `payslip_snapshot` + upload/list/detail/charts (**CR-031**, **CR-036**). Employer + sniff (**CR-037**). Manual entry (**CR-028**). ADP stub present; full line-item grids in UI still deferred. See **`docs/CHANGE_HISTORY.md`**.
 
 **User mental model:** Net pay appears in the bank feed; payslip **explains** salary vs commission vs withholdings for **dashboards and analytics** on a **different screen** than the generic ledger.
 
@@ -70,7 +70,7 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 ## 5. UI
 
 - **Shipped (v1 summary):** list, detail, upload, **`POST /payslips/manual`** (typed entry, synthetic checksum), and **income charts** on **`/payslips`** (**CR-031**, **CR-036**, **CR-051**, **CR-056**).
-- **API vs UI:** **`PATCH /payslips/:id`** accepts summary-field updates for integrations and future work; the **detail route** (`/payslips/:payslipId`) is **read-only** in the app today — there is no full in-browser editor for parsed or manual stubs yet. Broader payslip UI (line-item grids, richer editing) tracks **Epic 3 — 3.3b+** in [`docs/archive/MVP_BACKLOG.md`](archive/MVP_BACKLOG.md).
+- **API vs UI:** **`PATCH /payslips/:id`** accepts summary-field updates for integrations and future work; the **detail route** (`/payslips/:payslipId`) is **read-only** in the app today — there is no full in-browser editor for parsed or manual stubs yet. Line-item grids and richer editing are deferred.
 - **Bank deposit match (CR-068, shipped):** `GET /payslips/:id` returns `matchedDeposits` — up to 5 `credit` transactions within ±3 days of `pay_date` whose amount is within 1% (min $0.50) of `net_pay_current`. Restricted to `salary_deposit_financial_account_id` on `person_profile` when set; otherwise all household accounts. Detail page shows a **Bank deposit** card with matched rows and **View** link into `/transactions`.
 - **Later:** line-item grids, salary vs commission split, richer tax analytics, full in-browser edit of parsed stubs.
 
@@ -128,8 +128,7 @@ For **v1**, we persist **summary-level** compensation buckets (period, pay date,
 
 ---
 
-## 9. Related backlog entries
+## 9. Related
 
-- `docs/archive/MVP_BACKLOG.md` — **Epic 3 Story 3.3**.
 - **Epic 6** — inbox / resolution overlap when payslip needs **human fix** for bad extractions.
 - **Implementation references:** `backend/src/modules/payslip/llm-extract/`, `payslip-canonical-map.ts`, `payslip-parse.service.ts`, `payslip-async-import-reconcile.service.ts`, `backend/tests/payslip-canonical-map.test.ts`, `backend/tests/payslip-upload.test.ts`.

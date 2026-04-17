@@ -1,6 +1,6 @@
 # API: Cash summary (Epic 7.1)
 
-> **Progress:** KPI + category breakdown + **spending power** (safe-to-spend, savings rate) + monthly category outflows — **`docs/CHECKPOINT.md`**. Set **`household.monthly_savings_target_usd`** via **`GET/PATCH /household/settings`** (see **`docs/API_HOUSEHOLD.md`**).
+> **Progress:** Shipped — KPI + category breakdown + spending power (safe-to-spend, savings rate) + monthly category outflows. Set **`household.monthly_savings_target_usd`** via **`GET/PATCH /household/settings`** (see **`docs/API_HOUSEHOLD.md`**).
 
 Base path: `/reports/cash-summary`  
 Auth: `Authorization: Bearer <JWT>` (requires authentication).

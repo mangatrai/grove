@@ -326,6 +326,8 @@ Rationale:
 - Phase 3: advanced search, deeper investment analytics, custom categories/tags UX maturity, configurable user-level budgets.
 - Cloud backup Phase 2: OneDrive provider (Microsoft OAuth + Graph API, same job runner as §19 Google Drive).
 - Staff module Phase 2: PDF pay stub generation for staff, mileage log export, multi-household-member payroll summary.
+- Balance sheet enhancements: multi-time-slice comparison views; denser persisted history independent of import events; household-vs-member subtotal breakdown rows on the net worth page (filtering shipped in CR-064; subtotals still deferred).
+- Async canonicalize: large imports benefit from a `202 { jobId }` response with background worker and client polling — avoids HTTP timeouts on slow LLM-backed parses. See GitHub [#12](https://github.com/mangatrai/household-finance-app/issues/12).
 
 ---
 

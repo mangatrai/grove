@@ -1,6 +1,6 @@
 # API: Import sessions and file intake (Epic 2.1–2.3)
 
-> **Progress:** Import pipeline status vs backlog → **`docs/CHECKPOINT.md`** (✅ / 🟡 / ⬜). **Undo before finalize:** **`POST .../undo-import`** (**Epic 6.3**, **CR-021**).
+> **Undo before finalize:** **`POST .../undo-import`** (**CR-021**). See **`docs/CHANGE_HISTORY.md`** for full pipeline history.
 
 Base path: `/imports`  
 Auth: `Authorization: Bearer <JWT>` (all routes require authentication).

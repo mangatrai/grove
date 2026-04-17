@@ -1,6 +1,6 @@
 # API: Resolution queue (Epic 4.2 / Epic 6 precursor)
 
-> **Progress:** Queue API + UI are 🟡 partial — see **`docs/CHECKPOINT.md`**.
+> **Progress:** Queue API + UI are shipped — see **`docs/CHANGE_HISTORY.md`** for details.
 
 Base path: `/resolution`  
 Auth: `Authorization: Bearer <JWT>` (all routes require authentication).

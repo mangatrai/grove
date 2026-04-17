@@ -16,7 +16,7 @@ Open **Net worth** from the sidebar for **assets vs liabilities** (non–payslip
 - **Balance sheet:** one table for all accounts. Account type classification: **assets** = checking, savings, investment, **retirement** (401K/IRA/pension); **liabilities** = credit card, loan, mortgage. Accounts of other types (e.g. payslip) are excluded. **Liability balances** are stored as **positive magnitudes** (what you owe); net worth = total assets − total liabilities. When you import a statement (OFX, BoA CSV/PDF, Marcus PDF, Wealthfront PDF) the **statement ending balance** is automatically saved as an import snapshot — it appears on the balance sheet immediately without manual entry. **Table as of** picks the snapshot date; use **Edit** on a row to post a manual balance (or **Bulk set as-of** to re-date manual snapshots). Account names link to **Transactions** for the balance as-of day; when a balance came from an import, an extra link opens transactions for that **import file**.
 - **Retry load** appears only if the trend or balance sheet failed to load; it refetches both.
 
-Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md), backlog notes in [`BALANCE_SHEET_BACKLOG.md`](BALANCE_SHEET_BACKLOG.md).
+Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md).
 
 ## Home (dashboard)
 
@@ -43,7 +43,7 @@ Open **Account → Settings** from the top bar.
 - **Household / finances:** monthly savings target, household member roster, income and employer setup (used for payslips), and other household-level options.
 - **Connected accounts:** add or edit **financial accounts** (bank, card, etc.). Pick an institution label, parser profile where applicable, account mask (e.g. last four digits), and **belongs-to** (household vs a specific member) so imports and reports attribute activity correctly.
 - **Custom institutions:** you can add household-specific institution names that complement the built-in list.
-- **Household backup (ZIP):** request an **export** of the household database slice (async job, then download the ZIP). **Restore from backup** uploads that ZIP and replaces household data (**destructive**); after a successful restore you are signed out because existing login tokens are invalidated. Prefer export → restore on a **fresh** instance or when you intentionally want to replace everything in the household. Details for operators: [`OPERATOR_FAQ.md`](OPERATOR_FAQ.md); API: [`API_EXPORTS.md`](API_EXPORTS.md).
+- **Household backup (ZIP):** request an **export** of the household database slice (async job, then download the ZIP). **Restore from backup** uploads that ZIP and replaces household data (**destructive**); after a successful restore you are signed out because existing login tokens are invalidated. Prefer export → restore on a **fresh** instance or when you intentionally want to replace everything in the household. Operator details: [`RUNBOOK.md`](RUNBOOK.md) §11; API: [`API_EXPORTS.md`](API_EXPORTS.md).
 
 ### Household members
 
@@ -125,7 +125,7 @@ On the **Payslips** list, use **Belongs-to** (same idea as Transactions) to narr
 |--------|-----------|
 | Net worth / balance sheet API | [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md) |
 | Environment variables | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) |
-| Logging | [`LOGGING.md`](LOGGING.md) |
+| Logging | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) |
 | API routes (machine-readable) | [`openapi/openapi.yaml`](../openapi/openapi.yaml) |
 | API topic index | [`API_INDEX.md`](API_INDEX.md) |
 | Change and release notes | [`CHANGE_HISTORY.md`](CHANGE_HISTORY.md) |
