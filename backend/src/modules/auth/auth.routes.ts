@@ -29,12 +29,12 @@ const loginSchema = z.object({
 /**
  * Minimum password strength for new passwords.
  * Requires at least one uppercase, one lowercase, one digit, and one special character.
- * Min 10 characters (OWASP 2021 recommendation for bcrypt-protected passwords).
+ * Min 12 characters.
  */
-const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{10,}$/;
+const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,}$/;
 const strongPassword = z
   .string()
-  .min(10, "Password must be at least 10 characters")
+  .min(12, "Password must be at least 12 characters")
   .regex(
     PASSWORD_STRENGTH_REGEX,
     "Password must include uppercase, lowercase, a number, and a special character"
@@ -92,6 +92,10 @@ authRouter.post("/change-password", requireAuth, async (req: AuthenticatedReques
   if (!out.ok) {
     if (out.code === "INVALID_CURRENT_PASSWORD") {
       res.status(400).json({ message: "Current password is incorrect", code: out.code });
+      return;
+    }
+    if (out.code === "SAME_AS_CURRENT") {
+      res.status(400).json({ message: "New password must be different from current password", code: out.code });
       return;
     }
     res.status(404).json({ message: "User not found", code: out.code });

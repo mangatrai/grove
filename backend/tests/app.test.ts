@@ -263,6 +263,17 @@ describe("auth change password", () => {
         newPassword
       });
     expect(badCurrent.status).toBe(400);
+    expect(badCurrent.body.code).toBe("INVALID_CURRENT_PASSWORD");
+
+    const sameAsCurrent = await request(app)
+      .post("/auth/change-password")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        currentPassword: oldPassword,
+        newPassword: oldPassword
+      });
+    expect(sameAsCurrent.status).toBe(400);
+    expect(sameAsCurrent.body.code).toBe("SAME_AS_CURRENT");
 
     const changeOk = await request(app)
       .post("/auth/change-password")

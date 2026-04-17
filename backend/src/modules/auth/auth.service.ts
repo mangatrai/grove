@@ -119,7 +119,7 @@ export async function changePassword(
   userId: string,
   currentPassword: string,
   newPassword: string
-): Promise<{ ok: true } | { ok: false; code: "INVALID_CURRENT_PASSWORD" | "NOT_FOUND" }> {
+): Promise<{ ok: true } | { ok: false; code: "INVALID_CURRENT_PASSWORD" | "SAME_AS_CURRENT" | "NOT_FOUND" }> {
   const row = await qGet<{ password_hash: string }>(
     `
   SELECT password_hash
@@ -135,6 +135,10 @@ export async function changePassword(
   const matches = await bcrypt.compare(currentPassword, row.password_hash);
   if (!matches) {
     return { ok: false, code: "INVALID_CURRENT_PASSWORD" };
+  }
+  const sameAsCurrent = await bcrypt.compare(newPassword, row.password_hash);
+  if (sameAsCurrent) {
+    return { ok: false, code: "SAME_AS_CURRENT" };
   }
   const nextHash = await bcrypt.hash(newPassword, 12);
   await qExec(
