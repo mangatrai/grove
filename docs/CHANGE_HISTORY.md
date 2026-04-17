@@ -18,6 +18,31 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-16 (database architecture review + index audit)
+
+### DB-007 — Performance index audit: 9 missing indexes added (migration 0021)
+
+- **Type:** DB
+- **What:** Audited all query patterns in `backend/src/modules/` against the migration schema. Found critical index gaps:
+  - `transaction_canonical` had only 2 indexes (fingerprint dedup + GIN full-text). Zero coverage for date-range queries, account-scoped queries, source_ref idempotency lookups, or transfer group joins.
+  - `resolution_item` had **zero indexes** despite being queried on every Needs Review load and dashboard summary.
+  - `transaction_raw`, `import_session`, `account_balance_snapshot`, `financial_account` had no query-supporting indexes.
+- **Added in `0021_performance_indexes.sql`:**
+  1. `idx_tc_household_date_status` on `transaction_canonical (household_id, txn_date DESC, status)` — covers all ledger list, cash summary, budget actuals, transfer detection date-window queries
+  2. `idx_tc_household_account_date` on `transaction_canonical (household_id, account_id, txn_date DESC)` — near-duplicate detection, per-account queries, payslip deposit match
+  3. `idx_tc_household_source_ref` partial on `transaction_canonical (household_id, source_ref) WHERE source_ref IS NOT NULL` — canonical ingest idempotency guard
+  4. `idx_tc_transfer_group` partial on `transaction_canonical (household_id, transfer_group_id) WHERE transfer_group_id IS NOT NULL` — transfer group lookups
+  5. `idx_ri_household_status_type` on `resolution_item (household_id, status, type)` — dashboard count, list by status/type
+  6. `idx_ri_household_target` on `resolution_item (household_id, target_id)` — per-transaction resolution lookup and close
+  7. `idx_transaction_raw_file_id` on `transaction_raw (file_id)` — canonical ingest join
+  8. `idx_import_session_household_started` on `import_session (household_id, started_at DESC)` — session listing
+  9. `idx_abs_household_account_date` on `account_balance_snapshot (household_id, financial_account_id, as_of_date DESC)` — balance sheet history
+  10. `idx_financial_account_household` on `financial_account (household_id)` — account listing
+- **New doc:** `docs/DATABASE_ARCHITECTURE.md` — records Postgres vs NoSQL rationale, full index inventory, and upgrade ladder (pg_trgm → materialized views → partitioning → TimescaleDB)
+- **Files:** `backend/db/migrations/0021_performance_indexes.sql`, `docs/DATABASE_ARCHITECTURE.md`
+
+---
+
 ## 2026-04-16 (bulk resolve by merchant — root cause fix)
 
 ### FIX-026 — "Resolve all by merchant name" always returned zero matches
