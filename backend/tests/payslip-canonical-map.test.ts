@@ -746,6 +746,72 @@ describe("payslip-canonical-map", () => {
     expect(otherItem!.name).toBe("Tax Advance");
   });
 
+  it("flattenLineItems nulls hoursOrDaysCurrent/YTD for non-earnings sections (defensive guard)", () => {
+    // Guard against models (e.g. gpt-4.1-mini) that put dollar amounts into hours_or_days for
+    // deduction rows. Only earnings rows may carry hours/days values in the DB.
+    const ex = minimalExtract({
+      line_items: {
+        ...minimalExtract().line_items,
+        other_deductions: [
+          {
+            name: "Tax Advance",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: 152.68 }, // LLM put dollar amount here
+            rate: null,
+            amount_current: null,
+            amount_ytd: 152.68,
+            raw_section: "OTHER DEDUCTION(S)"
+          }
+        ],
+        pre_tax_deductions: [
+          {
+            name: "401k",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: 8, ytd: 32 }, // LLM put something here erroneously
+            rate: null,
+            amount_current: 1000,
+            amount_ytd: 4000,
+            raw_section: "PRE-TAX DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { lineItems } = mapCanonicalExtractToPersist(ex);
+    const otherItem = lineItems.find((l) => l.section === "other_deductions");
+    expect(otherItem!.hoursOrDaysCurrent).toBeNull();
+    expect(otherItem!.hoursOrDaysYtd).toBeNull();
+    const preTaxItem = lineItems.find((l) => l.section === "pre_tax_deductions");
+    expect(preTaxItem!.hoursOrDaysCurrent).toBeNull();
+    expect(preTaxItem!.hoursOrDaysYtd).toBeNull();
+    // Earnings rows are NOT affected by the guard
+    const earningsEx = minimalExtract({
+      line_items: {
+        ...minimalExtract().line_items,
+        earnings: [
+          {
+            name: "Regular Salary",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: 80, ytd: 320 },
+            rate: null,
+            amount_current: 5000,
+            amount_ytd: 20000,
+            raw_section: "EARNINGS"
+          }
+        ]
+      }
+    });
+    const { lineItems: earningsLineItems } = mapCanonicalExtractToPersist(earningsEx);
+    const earningItem = earningsLineItems.find((l) => l.section === "earnings");
+    expect(earningItem!.hoursOrDaysCurrent).toBe(80);
+    expect(earningItem!.hoursOrDaysYtd).toBe(320);
+  });
+
   it("flattenLineItems returns empty array when all sections are empty", () => {
     const ex = minimalExtract();
     const { lineItems } = mapCanonicalExtractToPersist(ex);

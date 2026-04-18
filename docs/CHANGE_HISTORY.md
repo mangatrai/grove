@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-18 (payslip model upgrade + hours contamination guard)
+
+### FIX-115 — Deloitte extraction failures on gpt-4.1-mini: model upgrade + defensive hours guard
+
+- **Type:** FIX
+- **What:** `gpt-4.1-mini` was producing multiple structural errors on Deloitte payslips despite detailed prompt instructions: (a) dollar amounts written into `hours_or_days` fields for deduction rows (e.g. Tax Advance `hours_or_days.ytd=152.68`), (b) row-level amount mix-up (Equalization Tax Adv receiving Recognition Award's current amount), (c) Regular Salary gaining spurious `hours_or_days.current=8`, (d) Imp Inc Core Life/LTD persisting in `line_items.earnings` despite explicit prompt exclusion.
+- **Root cause:** `gpt-4.1-mini` has insufficient column-type disambiguation capability for the Deloitte two-column-group payslip layout. This is a model-quality problem, not a prompt-engineering problem — the model conflates money columns with hours columns when both appear adjacent in the deduction section.
+- **Fixes:**
+  1. **Model upgrade:** `OPENAI_MODEL` changed from `gpt-4.1-mini` → `gpt-4.1` in `.env`. `gpt-4.1` follows multi-step column-pairing instructions reliably; `gpt-4.1-mini` does not. `.env.example` updated to recommend `gpt-4.1` with a comment noting mini-model accuracy issues.
+  2. **Defensive guard in `flattenLineItems`:** `hoursOrDaysCurrent` and `hoursOrDaysYtd` are now unconditionally set to `null` for all non-`earnings` sections before DB insert. Deduction rows (pre-tax, post-tax, tax, other_deductions, other_information, taxable_earnings) never carry meaningful hours — any value placed there by the model is an extraction error. This guard prevents contaminated values from reaching `payslip_line_item` regardless of model.
+- **Files changed:**
+  - `.env` — `OPENAI_MODEL=gpt-4.1`
+  - `.env.example` — updated comment to recommend `gpt-4.1`
+  - `backend/src/modules/payslip/llm-extract/payslip-canonical-map.ts` — defensive `isEarnings` guard in `flattenLineItems`
+  - `backend/tests/payslip-canonical-map.test.ts` — new test: "flattenLineItems nulls hoursOrDaysCurrent/YTD for non-earnings sections"
+- **No DB migration needed.** Guard is applied at write time; historical rows with dollar-in-hours contamination will remain until re-processed.
+
+---
+
 ## 2026-04-18 (payslip Deloitte imputed-income dedup)
 
 ### FIX-114 — Deloitte Earnings section polluted by Imp Inc Core Life/LTD (duplicate rows)

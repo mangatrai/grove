@@ -54,10 +54,16 @@ function approxNetSanityNote(
  * Flatten all seven line_items sections from the LLM extract into a flat array
  * suitable for bulk insert into payslip_line_item.
  * sort_order is the original array index within each section (preserves PDF row order).
+ *
+ * Defensive guard: hoursOrDaysCurrent/YTD are nulled out for all non-earnings sections.
+ * Smaller models (e.g. gpt-4.1-mini) occasionally place dollar amounts into the hours_or_days
+ * field for deduction rows. Deductions never have meaningful hours values, so we prevent those
+ * contaminated values from reaching the DB regardless of model quality.
  */
 function flattenLineItems(lineItemsFromExtract: PayslipLlmExtract["line_items"]): LineItemForInsert[] {
   const out: LineItemForInsert[] = [];
   for (const section of PAYSLIP_LINE_ITEM_SECTIONS) {
+    const isEarnings = section === "earnings";
     const rows = lineItemsFromExtract[section as keyof typeof lineItemsFromExtract];
     rows.forEach((row: PayslipLineItem, idx: number) => {
       out.push({
@@ -69,8 +75,8 @@ function flattenLineItems(lineItemsFromExtract: PayslipLlmExtract["line_items"])
         dateStart: row.dates?.start_date ?? null,
         dateEnd: row.dates?.end_date ?? null,
         dateRaw: row.dates?.raw ?? null,
-        hoursOrDaysCurrent: row.hours_or_days?.current ?? null,
-        hoursOrDaysYtd: row.hours_or_days?.ytd ?? null,
+        hoursOrDaysCurrent: isEarnings ? (row.hours_or_days?.current ?? null) : null,
+        hoursOrDaysYtd: isEarnings ? (row.hours_or_days?.ytd ?? null) : null,
         rate: row.rate ?? null,
         amountCurrent: row.amount_current ?? null,
         amountYtd: row.amount_ytd ?? null,
