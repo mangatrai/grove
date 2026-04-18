@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-18 (payslip Deloitte imputed-income dedup)
+
+### FIX-114 — Deloitte Earnings section polluted by Imp Inc Core Life/LTD (duplicate rows)
+
+- **Type:** FIX
+- **What:** After FIX-113 merged `other_deductions` into the Post-Tax section, Deloitte imputed-income rows ("02/21 Imp Inc Core Life", "02/21 Imp Inc Core LTD") became visible in **both** the Earnings section and the Post-Tax Deductions section simultaneously. These rows appear in two places in the Deloitte PDF: the GROSS EARNINGS block (they inflate gross/taxable pay) and the OTHER DEDUCTION(S) block (they are deducted back so net pay is unaffected). The LLM was following the old prompt and placing them in both `line_items.earnings` and `line_items.other_deductions`.
+- **Root cause:** The prompt instruction for Deloitte earnings explicitly told the LLM to capture Imp Inc items from the earnings section. Combined with the Other Deductions prompt that correctly places them there too, they ended up stored in both sections in the DB.
+- **Fixes:**
+  1. **UI dedup (handles historical data):** `PayslipDetailPage` now builds an `otherDeductionNames` set before rendering. Any earnings row whose name appears in `other_deductions` is filtered out of the Earnings display. Imp Inc items show only in Post-Tax Deductions.
+  2. **Prompt fix (future re-processing):** Updated LLM instruction: Imp Inc Core Life/LTD must be placed **only** in `line_items.other_deductions` (with `hours_or_days.current` and `amount_current`); they must NOT be placed in `line_items.earnings`.
+- **Expected Earnings section (Deloitte) after fix:** Regular Salary, Equalization Tax Adv, Recognition Award — 3 rows, no imputed-income entries.
+- **Files changed:**
+  - `frontend/src/pages/PayslipDetailPage.tsx` — dedup filter on earnings before render.
+  - `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts` — Deloitte earnings prompt updated.
+- **No DB migration needed.** Historical snapshots are corrected at render time by the UI filter.
+
+---
+
 ## 2026-04-17 (payslip canonical map + UI correctness fixes)
 
 ### FIX-113 — Deloitte pre-tax YTD wrong; post-tax missing other-deductions; IBM pay date missing

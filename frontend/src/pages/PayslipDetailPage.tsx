@@ -192,19 +192,35 @@ export function PayslipDetailPage() {
     return <Navigate to="/payslips" replace />;
   }
 
-  // Merge other_deductions into post_tax_deductions for display.
-  // "Other Deductions" (e.g. Deloitte OTHER DEDUCTION(S)) are semantically post-tax;
-  // showing them as a separate section is confusing. Historical data may have rows
-  // in either section, so we always merge at render time.
+  // Build display-time merged line items:
+  //
+  // 1. Dedup Earnings: Deloitte imputed-income rows (e.g. "Imp Inc Core Life") appear in BOTH
+  //    the PDF's GROSS EARNINGS block AND the OTHER DEDUCTION(S) block — they add to gross pay
+  //    for tax purposes and are then deducted so net pay is unaffected. After merging
+  //    other_deductions into Post-Tax (step 2), they would show in both sections. Filter them
+  //    out of Earnings when they are already present in other_deductions.
+  //
+  // 2. Merge other_deductions into post_tax_deductions: "Other Deductions" (Deloitte OTHER
+  //    DEDUCTION(S)) are semantically post-tax. Historical data may have rows in either section.
   const mergedLineItems = detail?.lineItems
-    ? {
-        ...detail.lineItems,
-        post_tax_deductions: [
-          ...(detail.lineItems.post_tax_deductions ?? []),
-          ...(detail.lineItems.other_deductions ?? [])
-        ],
-        other_deductions: [] as typeof detail.lineItems.other_deductions
-      }
+    ? (() => {
+        const otherDeductionNames = new Set<string>(
+          (detail.lineItems!.other_deductions ?? [])
+            .map((r) => r.name)
+            .filter((n): n is string => n != null)
+        );
+        return {
+          ...detail.lineItems!,
+          earnings: (detail.lineItems!.earnings ?? []).filter(
+            (r) => r.name == null || !otherDeductionNames.has(r.name)
+          ),
+          post_tax_deductions: [
+            ...(detail.lineItems!.post_tax_deductions ?? []),
+            ...(detail.lineItems!.other_deductions ?? [])
+          ],
+          other_deductions: [] as typeof detail.lineItems.other_deductions
+        };
+      })()
     : detail?.lineItems;
 
   // Sections that have at least one line item row (using merged view)
