@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-18 (payslip inline editing)
+
+### UX-028 — Inline edit for payslip summary amounts
+
+- **Type:** UX / feature
+- **What:** Added inline editing to the Amounts table on the payslip detail page. Each summary row (Gross pay, Taxable earnings, Employee taxes, Pre-tax deductions, Post-tax deductions, Other information, Net pay) now has a muted ✏ pencil button. Clicking it puts that row into edit mode: Current and YTD become number inputs. Save (✓) calls `PATCH /payslips/:id` with just the two changed fields; Cancel (✗) restores the read-only view. Only one row is editable at a time. Enter saves; Escape cancels.
+- **Why:** LLM extraction (especially on complex Deloitte stubs) occasionally produces wrong summary totals. Re-processing is costly; manual correction is the practical fix. Line items cannot be individually edited (no backend endpoint) — only the summary totals are patchable.
+- **Design decisions:**
+  - All 7 amount rows are always visible (removed conditional hiding of Taxable earnings / Other information when null). This lets users add a value even when the LLM returned null.
+  - Pencil button is always rendered but at low opacity (0.45), fully opaque on hover — visible without cluttering the read-only view.
+  - Blank input = `null` (clears the field). Invalid number = inline error, no save.
+  - After PATCH succeeds, local state is updated preserving `lineItems` and `matchedDeposits` (those are not returned by PATCH).
+  - Line items section remains read-only with no change.
+- **Files changed:**
+  - `frontend/src/pages/PayslipDetailPage.tsx` — `SummaryAmountRow` component, `AMOUNT_ROWS` config, `patchPayslip` / `handleSaveRow` handlers, merged edit state.
+  - `frontend/src/payslip/payslipChartsModel.test.ts` — updated base fixture to include fields added in CR-072 (`hoursOrDaysYtd`, `taxableEarningsCurrent`, `taxableEarningsYtd`, `otherInformationCurrent`, `otherInformationYtd`, `employmentRate`, `employmentRateType`).
+- **No backend changes.** Uses existing `PATCH /payslips/:id` endpoint.
+
+---
+
 ## 2026-04-18 (payslip tax deduction YTD regression after model upgrade)
 
 ### FIX-116 — Employee taxes YTD wrong after gpt-4.1 upgrade (summary value beats line items)

@@ -27,6 +27,13 @@ const base = (): PayslipSnapshotDetail => ({
   netPayCurrent: 800,
   netPayYtd: null,
   hoursOrDaysCurrent: null,
+  hoursOrDaysYtd: null,
+  taxableEarningsCurrent: null,
+  taxableEarningsYtd: null,
+  otherInformationCurrent: null,
+  otherInformationYtd: null,
+  employmentRate: null,
+  employmentRateType: null,
   rawExtractJson: {},
   createdAt: "2026-01-15T12:00:00.000Z"
 });
