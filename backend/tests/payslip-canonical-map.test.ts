@@ -83,14 +83,21 @@ function minimalExtract(over: Partial<PayslipLlmExtract> = {}): PayslipLlmExtrac
 }
 
 describe("payslip-canonical-map", () => {
-  it("maps summary buckets and hybrid JSON strings", () => {
+  it("maps summary buckets and hybrid JSON strings (no line items → use summary)", () => {
     const ex = minimalExtract();
     const { summary, hybrid } = mapCanonicalExtractToPersist(ex, 1234);
     expect(summary.grossPayCurrent).toBe(5000);
     expect(summary.employeeTaxesCurrent).toBe(800);
     expect(summary.netPayCurrent).toBe(4000);
+    // No line items → summary pre/post-tax values used as-is
+    expect(summary.preTaxDeductionsCurrent).toBe(100);
+    expect(summary.preTaxDeductionsYtd).toBe(200);
+    expect(summary.postTaxDeductionsCurrent).toBe(50);
+    expect(summary.postTaxDeductionsYtd).toBe(100);
     expect(summary.hoursOrDaysCurrent).toBe("80");
     expect(summary.rawExtractJson.hoursDefaultBiweekly80).toBe(true);
+    expect(summary.rawExtractJson.preTaxFilledFromLineItems).toBeUndefined();
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toBeUndefined();
     expect(hybrid.employerEinOrFein).toBe("12-3456789");
     expect(hybrid.employeeId).toBe("E1");
     expect(JSON.parse(hybrid.taxProfileJson!)).toMatchObject({ marital_status: null });
@@ -150,47 +157,61 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.taxDeductionsFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
-  it("fills post-tax from line_items.post_tax_deductions when post_tax summary is null", () => {
+  // ---- Pre-tax: line items preferred over summary ----
+
+  it("prefers line item sum over summary for pre-tax when both exist (Deloitte bug: 401k-only header total)", () => {
+    // Real bug: LLM extracts summary.pre_tax_deductions_ytd=7332.50 (only 401k from PDF header)
+    // but line items correctly have 401k+FlexHealth+FlexDep. Mapper must prefer line item sum.
     const ex = minimalExtract({
       summary: {
         ...minimalExtract().summary,
-        post_tax_deductions_current: null,
-        post_tax_deductions_ytd: null,
-        other_deductions_current: 42,
-        other_deductions_ytd: 99
+        pre_tax_deductions_current: 2007.11,
+        pre_tax_deductions_ytd: 7332.50   // wrong — only 401k YTD
       },
       line_items: {
         ...minimalExtract().line_items,
-        post_tax_deductions: [
+        pre_tax_deductions: [
           {
-            name: "Row A",
+            name: "401(k) Contribution",
             authority: null,
             description: null,
             dates: { start_date: null, end_date: null, raw: null },
             hours_or_days: { current: null, ytd: null },
             rate: null,
-            amount_current: 10,
-            amount_ytd: 20,
-            raw_section: "POST-TAX DEDUCTION(S)"
+            amount_current: 1853.27,
+            amount_ytd: 7332.50,
+            raw_section: "PRE-TAX DEDUCTION(S)"
           },
           {
-            name: "Row B",
+            name: "Flex Spending (Healt)",
             authority: null,
             description: null,
             dates: { start_date: null, end_date: null, raw: null },
             hours_or_days: { current: null, ytd: null },
             rate: null,
-            amount_current: 32,
-            amount_ytd: 79,
-            raw_section: "POST-TAX DEDUCTION(S)"
+            amount_current: 96.15,
+            amount_ytd: 384.60,
+            raw_section: "PRE-TAX DEDUCTION(S)"
+          },
+          {
+            name: "Flex Spending (Dep C)",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 57.69,
+            amount_ytd: 230.76,
+            raw_section: "PRE-TAX DEDUCTION(S)"
           }
         ]
       }
     });
     const { summary } = mapCanonicalExtractToPersist(ex);
-    expect(summary.postTaxDeductionsCurrent).toBe(42);
-    expect(summary.postTaxDeductionsYtd).toBe(99);
-    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
+    // Line item sums: current=2007.11, ytd=7332.50+384.60+230.76=7947.86
+    expect(summary.preTaxDeductionsCurrent).toBeCloseTo(2007.11, 2);
+    expect(summary.preTaxDeductionsYtd).toBeCloseTo(7947.86, 2);
+    expect(summary.rawExtractJson.preTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
   it("fills pre-tax from line_items.pre_tax_deductions when summary pre-tax fields are null", () => {
@@ -243,6 +264,145 @@ describe("payslip-canonical-map", () => {
     expect(summary.preTaxDeductionsCurrent).toBeCloseTo(2007.11, 2);
     expect(summary.preTaxDeductionsYtd).toBeCloseTo(5940.75, 2);
     expect(summary.rawExtractJson.preTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
+  });
+
+  it("falls back to summary for pre-tax when line items are empty", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        pre_tax_deductions_current: 300,
+        pre_tax_deductions_ytd: 1200
+      }
+      // line_items.pre_tax_deductions defaults to []
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.preTaxDeductionsCurrent).toBe(300);
+    expect(summary.preTaxDeductionsYtd).toBe(1200);
+    expect(summary.rawExtractJson.preTaxFilledFromLineItems).toBeUndefined();
+  });
+
+  // ---- Post-tax: line items + other_deductions always combined ----
+
+  it("combines post_tax_deductions + other_deductions line items into post-tax total", () => {
+    // Realistic Deloitte scenario: After-Tax Ded in post_tax_deductions; Tax Advance / Award Received /
+    // Imp Inc Core Life / Imp Inc Core LTD in other_deductions. All are semantically post-tax.
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: 17.13,  // only After-Tax Ded (incomplete — missing other_deductions)
+        post_tax_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        post_tax_deductions: [
+          {
+            name: "After-Tax Ded",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 17.13,
+            amount_ytd: null,
+            raw_section: null
+          }
+        ],
+        other_deductions: [
+          {
+            name: "Tax Advance",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: null,
+            amount_ytd: 152.68,
+            raw_section: "OTHER DEDUCTION(S)"
+          },
+          {
+            name: "Award Received",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: null,
+            amount_ytd: 250.00,
+            raw_section: "OTHER DEDUCTION(S)"
+          },
+          {
+            name: "Imp Inc Core Life",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: "2026-02-21", raw: "02/21" },
+            hours_or_days: { current: 6.65, ytd: null },
+            rate: null,
+            amount_current: 26.60,
+            amount_ytd: null,
+            raw_section: "OTHER DEDUCTION(S)"
+          },
+          {
+            name: "Imp Inc Core LTD",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: "2026-02-21", raw: "02/21" },
+            hours_or_days: { current: 10.48, ytd: null },
+            rate: null,
+            amount_current: 41.92,
+            amount_ytd: null,
+            raw_section: "OTHER DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    // current: 17.13 + 26.60 + 41.92 = 85.65
+    expect(summary.postTaxDeductionsCurrent).toBeCloseTo(85.65, 2);
+    // ytd: 152.68 + 250.00 = 402.68
+    expect(summary.postTaxDeductionsYtd).toBeCloseTo(402.68, 2);
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
+    expect(summary.rawExtractJson.otherDeductionsFoldedIntoPostTax).toBe(true);
+  });
+
+  it("fills post-tax from line_items.post_tax_deductions when post_tax summary is null", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: null,
+        post_tax_deductions_ytd: null
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        post_tax_deductions: [
+          {
+            name: "Row A",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 10,
+            amount_ytd: 20,
+            raw_section: "POST-TAX DEDUCTION(S)"
+          },
+          {
+            name: "Row B",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 32,
+            amount_ytd: 79,
+            raw_section: "POST-TAX DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.postTaxDeductionsCurrent).toBe(42);
+    expect(summary.postTaxDeductionsYtd).toBe(99);
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
   it("fills post-tax from line_items.post_tax_deductions only (Deloitte OTHER DEDUCTION rows modeled as post-tax lines)", () => {
@@ -302,73 +462,7 @@ describe("payslip-canonical-map", () => {
     });
   });
 
-  it("backfills missing post-tax YTD from OTHER DEDUCTION(S) rows when model leaves post_tax YTD null", () => {
-    const ex = minimalExtract({
-      summary: {
-        ...minimalExtract().summary,
-        post_tax_deductions_current: 267.13,
-        post_tax_deductions_ytd: null
-      },
-      line_items: {
-        ...minimalExtract().line_items,
-        post_tax_deductions: [
-          {
-            name: "After-Tax Deduction",
-            authority: null,
-            description: null,
-            dates: { start_date: null, end_date: null, raw: null },
-            hours_or_days: { current: null, ytd: null },
-            rate: null,
-            amount_current: 267.13,
-            amount_ytd: null,
-            raw_section: "After-Tax Ded"
-          }
-        ],
-        other_deductions: [
-          {
-            name: "Award Received",
-            authority: null,
-            description: "02/07",
-            dates: { start_date: null, end_date: null, raw: "02/07" },
-            hours_or_days: { current: null, ytd: null },
-            rate: null,
-            amount_current: 250,
-            amount_ytd: 250,
-            raw_section: "OTHER DEDUCTION(S):"
-          },
-          {
-            name: "Imp Inc Core Life",
-            authority: null,
-            description: "02/07",
-            dates: { start_date: null, end_date: null, raw: "02/07" },
-            hours_or_days: { current: null, ytd: null },
-            rate: null,
-            amount_current: 6.65,
-            amount_ytd: 19.95,
-            raw_section: "OTHER DEDUCTION(S):"
-          },
-          {
-            name: "Imp Inc Core LTD",
-            authority: null,
-            description: "02/07",
-            dates: { start_date: null, end_date: null, raw: "02/07" },
-            hours_or_days: { current: null, ytd: null },
-            rate: null,
-            amount_current: 10.48,
-            amount_ytd: 31.44,
-            raw_section: "OTHER DEDUCTION(S):"
-          }
-        ]
-      }
-    });
-
-    const { summary } = mapCanonicalExtractToPersist(ex);
-    expect(summary.postTaxDeductionsCurrent).toBeCloseTo(267.13, 2);
-    expect(summary.postTaxDeductionsYtd).toBeCloseTo(301.39, 2);
-    expect(summary.rawExtractJson.postTaxFilledFromOtherDeductionRows).toEqual({ ytd: true });
-  });
-
-  it("treats other_deductions rows as post-tax when the line name says Other deduction but raw_section is null", () => {
+  it("uses other_deductions rows as post-tax even when raw_section is null", () => {
     const ex = minimalExtract({
       summary: {
         ...minimalExtract().summary,
@@ -397,8 +491,84 @@ describe("payslip-canonical-map", () => {
     const { summary } = mapCanonicalExtractToPersist(ex);
     expect(summary.postTaxDeductionsCurrent).toBe(25);
     expect(summary.postTaxDeductionsYtd).toBe(100);
-    expect(summary.rawExtractJson.postTaxFilledFromOtherDeductionRows).toEqual({ current: true, ytd: true });
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
+    expect(summary.rawExtractJson.otherDeductionsFoldedIntoPostTax).toBe(true);
   });
+
+  it("falls back to summary for post-tax when all line items are empty", () => {
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        post_tax_deductions_current: 77,
+        post_tax_deductions_ytd: 308
+      }
+      // all line_items empty
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.postTaxDeductionsCurrent).toBe(77);
+    expect(summary.postTaxDeductionsYtd).toBe(308);
+    expect(summary.rawExtractJson.postTaxFilledFromLineItems).toBeUndefined();
+  });
+
+  // ---- IBM pay date fallback ----
+
+  it("falls back to payment_information pay_date when pay_period.pay_date is null (IBM layout)", () => {
+    // IBM does not print a standalone pay date on the stub — it appears only in Payment Information.
+    const ex = minimalExtract({
+      pay_period: {
+        start_date: "2026-02-16",
+        end_date: "2026-02-28",
+        pay_date: null
+      },
+      payment_information: [
+        {
+          payment_type: null,
+          bank_name: null,
+          bank_location: null,
+          account_or_check_number_masked: "*****3560",
+          amount: 4350.17,
+          currency: "USD",
+          pay_date: "2026-02-27"
+        }
+      ]
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.payDate).toBe("2026-02-27");
+  });
+
+  it("uses pay_period.pay_date when present, ignoring payment_information", () => {
+    const ex = minimalExtract({
+      pay_period: {
+        start_date: "2026-02-08",
+        end_date: "2026-02-21",
+        pay_date: "2026-02-20"
+      },
+      payment_information: [
+        {
+          payment_type: "Direct Deposit",
+          bank_name: null,
+          bank_location: null,
+          account_or_check_number_masked: "XXXX6335",
+          amount: 4370.19,
+          currency: "USD",
+          pay_date: "2026-02-19"  // different — should be ignored
+        }
+      ]
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.payDate).toBe("2026-02-20");
+  });
+
+  it("payDate is null when both pay_period.pay_date and payment_information are empty", () => {
+    const ex = minimalExtract({
+      pay_period: { start_date: "2026-01-01", end_date: "2026-01-15", pay_date: null },
+      payment_information: []
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    expect(summary.payDate).toBeNull();
+  });
+
+  // ---- Hours and rate fields ----
 
   it("maps hoursOrDaysYtd from employment_context.hours_or_days_worked_ytd", () => {
     const ex = minimalExtract({
@@ -471,6 +641,8 @@ describe("payslip-canonical-map", () => {
     expect(hybrid.employmentRate).toBeNull();
     expect(hybrid.employmentRateType).toBeNull();
   });
+
+  // ---- flattenLineItems ----
 
   it("flattenLineItems returns one row per item with correct section and sort_order", () => {
     const earningsRow = {
@@ -549,11 +721,38 @@ describe("payslip-canonical-map", () => {
     expect(taxItem!.amountYtd).toBe(11708.63);
   });
 
+  it("flattenLineItems stores other_deductions with section=other_deductions (merged in UI, not DB)", () => {
+    const ex = minimalExtract({
+      line_items: {
+        ...minimalExtract().line_items,
+        other_deductions: [
+          {
+            name: "Tax Advance",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: null,
+            amount_ytd: 152.68,
+            raw_section: "OTHER DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { lineItems } = mapCanonicalExtractToPersist(ex);
+    const otherItem = lineItems.find((l) => l.section === "other_deductions");
+    expect(otherItem).toBeDefined();
+    expect(otherItem!.name).toBe("Tax Advance");
+  });
+
   it("flattenLineItems returns empty array when all sections are empty", () => {
     const ex = minimalExtract();
     const { lineItems } = mapCanonicalExtractToPersist(ex);
     expect(lineItems).toEqual([]);
   });
+
+  // ---- Validation ----
 
   it("validateCanonicalForImport passes for minimal good extract", () => {
     expect(validateCanonicalForImport(minimalExtract())).toEqual({ ok: true });

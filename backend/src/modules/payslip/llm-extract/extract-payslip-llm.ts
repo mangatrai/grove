@@ -119,7 +119,9 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     "Deloitte earnings: 'Equalization Tax Adv' and 'Recognition Award' are one-time earnings rows — place them in line_items.earnings with amount_current populated (not in deductions). 'Imp Inc Core Life' and 'Imp Inc Core LTD' rows in the earnings section carry an hours value — capture hours_or_days.current from the Hours column for those rows.",
     "Deloitte pre-tax deductions: 'Flex Spending (Healt)' and 'Flex Spending (Dep C)' are separate rows — do not merge them. Preserve the names exactly as shown in the PDF.",
     "Deloitte other deductions: 'Tax Advance' and 'Award Received' rows may show only a YTD value — set amount_current to null and amount_ytd to the visible value. 'Imp Inc Core Life' and 'Imp Inc Core LTD' appear here with both current and YTD amounts; capture both.",
-    "Deloitte employment_context: set rate to the biweekly salary shown (e.g. 8057.69); set rate_type to 'biweekly'. Set hours_or_days_worked_current from the hours shown in the Earnings section."
+    "Deloitte employment_context: set rate to the biweekly salary shown (e.g. 8057.69); set rate_type to 'biweekly'. Set hours_or_days_worked_current from the hours shown in the Earnings section.",
+    // IBM pay date
+    "IBM: pay_period.pay_date must be populated from the pay date visible in the Payment Information section (the date shown alongside the direct-deposit account number and amount, e.g. '02/27/2026' → '2026-02-27'). Do not leave pay_period.pay_date null if a date is visible there."
   ].join(" ");
 
   const userText = `There are ${pageCount} page image(s) in order (page 1 first). Extract the full payslip per schema.`;

@@ -46,16 +46,23 @@ function periodLabel(r: PayslipSnapshotDetail): string {
   return "—";
 }
 
-/** Determine which columns to show for a line items section (skip if all rows have null). */
-function sectionHasHours(rows: PayslipLineItemRow[]): boolean {
+/**
+ * Determine whether to show the Hours column for a section.
+ * Deduction sections (pre-tax, post-tax, tax, other) never have meaningful hours —
+ * any hours values on deduction rows (e.g. Deloitte imputed income) are internal
+ * payroll calculations not relevant to the user. Only the Earnings section shows hours.
+ */
+function sectionHasHours(section: PayslipLineItemSection, rows: PayslipLineItemRow[]): boolean {
+  if (section !== "earnings") return false;
   return rows.some((r) => r.hoursOrDaysCurrent != null || r.hoursOrDaysYtd != null);
 }
+
 function sectionHasRate(rows: PayslipLineItemRow[]): boolean {
   return rows.some((r) => r.rate != null);
 }
 
 function LineItemsSection({ section, rows }: { section: PayslipLineItemSection; rows: PayslipLineItemRow[] }) {
-  const showHours = sectionHasHours(rows);
+  const showHours = sectionHasHours(section, rows);
   const showRate = sectionHasRate(rows);
   return (
     <details style={{ marginBottom: "0.75rem" }}>
@@ -185,11 +192,25 @@ export function PayslipDetailPage() {
     return <Navigate to="/payslips" replace />;
   }
 
-  // Sections that have at least one line item row
-  const nonEmptySections =
-    detail?.lineItems
-      ? SECTION_ORDER.filter((s) => (detail.lineItems![s]?.length ?? 0) > 0)
-      : [];
+  // Merge other_deductions into post_tax_deductions for display.
+  // "Other Deductions" (e.g. Deloitte OTHER DEDUCTION(S)) are semantically post-tax;
+  // showing them as a separate section is confusing. Historical data may have rows
+  // in either section, so we always merge at render time.
+  const mergedLineItems = detail?.lineItems
+    ? {
+        ...detail.lineItems,
+        post_tax_deductions: [
+          ...(detail.lineItems.post_tax_deductions ?? []),
+          ...(detail.lineItems.other_deductions ?? [])
+        ],
+        other_deductions: [] as typeof detail.lineItems.other_deductions
+      }
+    : detail?.lineItems;
+
+  // Sections that have at least one line item row (using merged view)
+  const nonEmptySections = mergedLineItems
+    ? SECTION_ORDER.filter((s) => (mergedLineItems[s]?.length ?? 0) > 0)
+    : [];
 
   return (
     <div className="payslips-page">
@@ -402,7 +423,7 @@ export function PayslipDetailPage() {
                 <LineItemsSection
                   key={section}
                   section={section}
-                  rows={detail.lineItems![section]}
+                  rows={mergedLineItems![section]}
                 />
               ))}
             </div>

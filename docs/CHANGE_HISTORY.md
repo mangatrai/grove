@@ -18,6 +18,45 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-17 (payslip canonical map + UI correctness fixes)
+
+### FIX-113 — Deloitte pre-tax YTD wrong; post-tax missing other-deductions; IBM pay date missing
+
+- **Type:** FIX
+- **What:** Three inter-related payslip correctness bugs found against real Deloitte and IBM payslips after CR-072 shipped.
+- **Root causes & fixes:**
+
+  **1. Deloitte pre-tax YTD (e.g. $7332.50 instead of $7947.86)**
+  - `mapCanonicalExtractToPersist` only fell back to line item sums when the LLM `summary.pre_tax_deductions_ytd` was null. In practice the LLM reads the PDF section header total ($7332.50, only 401k) for the summary field while correctly extracting all three rows (401k + Flex Spending Health + Flex Spending Dep Care) with their individual YTDs. The line item sum is always more accurate.
+  - **Fix:** when `pre_tax_deductions` line items are present their computed sum is always preferred over the LLM summary value. The LLM summary is only used when the line items array is empty.
+
+  **2. Deloitte post-tax total wrong (current $17.13 missing Imp Inc Core Life/LTD)**
+  - `other_deductions` line items (Tax Advance, Award Received, Imp Inc Core Life, Imp Inc Core LTD) were only added to the post-tax total when `post_tax_deductions_current` was null. Since "After-Tax Ded" ($17.13) was already set, the other four rows were never included.
+  - Deloitte's "OTHER DEDUCTION(S)" section is semantically post-tax, identical to "POST-TAX DEDUCTION(S)". The two sections must be combined.
+  - **Fix:** `other_deductions` line items are now always combined with `post_tax_deductions` line items into a single post-tax total. Combined line item sums are preferred over the LLM summary value (same rule as pre-tax). Diagnostic flag `otherDeductionsFoldedIntoPostTax: true` added to `raw_extract_json` when folding occurs.
+
+  **3. IBM pay date missing**
+  - IBM payslips do not print a standalone pay date on the stub — it appears only in the "Payment Information" section. The LLM correctly extracts it into `payment_information[0].pay_date` but `mapCanonicalExtractToPersist` only read `pay_period.pay_date` (null for IBM).
+  - **Fix:** canonical map now falls back to `payment_information[].pay_date` (first non-null entry) when `pay_period.pay_date` is null.
+  - LLM prompt updated with explicit IBM instruction: "IBM: pay_period.pay_date must be populated from the pay date visible in the Payment Information section."
+
+  **4. Hours column shown for deduction sections in UI**
+  - Deloitte imputed income rows (Imp Inc Core Life, Imp Inc Core LTD) in `other_deductions` carry `hoursOrDaysCurrent` values because the PDF has an Hours column in that section. The `sectionHasHours` check was section-agnostic, causing an Hours column to appear in post-tax deduction line items.
+  - No post-tax (or any deduction) row should ever display hours — hours are meaningful only in the Earnings section.
+  - **Fix:** `sectionHasHours` now returns `false` for any section other than `earnings`.
+
+  **5. "Other Deductions" and "Post-Tax Deductions" shown as separate sections in UI**
+  - The line items panel listed both `post_tax_deductions` and `other_deductions` as distinct collapsible sections, which is confusing since they are the same concept for Deloitte.
+  - **Fix:** UI merges `other_deductions` rows into `post_tax_deductions` at render time (applicable to both historical and new data). The `other_deductions` section no longer appears as a separate group.
+
+- **Files changed:**
+  - `backend/src/modules/payslip/llm-extract/payslip-canonical-map.ts` — rewrote pre-tax and post-tax sum logic; added IBM pay date fallback; removed `isOtherDeductionPostTaxRow` / `sumOtherDeductionsMarkedAsPostTax` helpers (superseded).
+  - `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts` — added IBM pay date prompt instruction.
+  - `frontend/src/pages/PayslipDetailPage.tsx` — `sectionHasHours` gated to `earnings` only; `other_deductions` merged into `post_tax_deductions` for display.
+  - `backend/tests/payslip-canonical-map.test.ts` — updated two tests (backfill and raw_section-null scenarios now use new diagnostic field names); added 7 new tests: Deloitte pre-tax line-item-over-summary preference, combined post-tax (realistic Deloitte scenario), IBM pay date fallback, pay_period.pay_date priority, null pay date, pre-tax/post-tax fallback-to-summary when no line items, `other_deductions` stored section preserved in DB.
+
+---
+
 ## 2026-04-16 (payslip rich extraction + line item storage)
 
 ### CR-072 — Payslip rich extraction: per-row line items + 7 new snapshot columns

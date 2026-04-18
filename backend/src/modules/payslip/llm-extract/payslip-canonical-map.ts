@@ -24,22 +24,6 @@ function sumLineItemColumn(items: PayslipLineItem[], key: "amount_current" | "am
   return any ? sum : null;
 }
 
-function isOtherDeductionPostTaxRow(row: PayslipLineItem): boolean {
-  if (/OTHER\s+DEDUCTION/i.test(row.raw_section ?? "")) {
-    return true;
-  }
-  const label = `${row.name ?? ""} ${row.description ?? ""}`.trim();
-  return /\bother\s+deduction/i.test(label);
-}
-
-function sumOtherDeductionsMarkedAsPostTax(
-  items: PayslipLineItem[],
-  key: "amount_current" | "amount_ytd"
-): number | null {
-  const likelyPostTaxRows = items.filter((row) => isOtherDeductionPostTaxRow(row));
-  return sumLineItemColumn(likelyPostTaxRows, key);
-}
-
 /** Warn-only when gross - pre - tax - post differs materially from net (rounding / employer layout). */
 function approxNetSanityNote(
   s: PayslipLlmExtract["summary"],
@@ -98,40 +82,58 @@ function flattenLineItems(lineItemsFromExtract: PayslipLlmExtract["line_items"])
 }
 
 /**
- * Map validated canonical LLM extract into legacy `ParsedPayslipSummary` columns plus hybrid columns.
- * Employee taxes: summary tax_deductions_* or sum of `line_items.tax_deductions`.
- * Pre-tax / post-tax: summary fields or sums of `line_items.pre_tax_deductions` / `line_items.post_tax_deductions` only
- * (do not map `other_deductions` into post-tax — Deloitte OTHER DEDUCTION(S) belongs in post_tax line items per prompt).
- * Hours default to 80 when absent (biweekly Deloitte assumption).
+ * Map validated canonical LLM extract into `ParsedPayslipSummary` columns plus hybrid columns.
+ *
+ * Pre-tax deductions: when line items exist their sum is preferred over the LLM section-header
+ * total, which can be incomplete (e.g. Deloitte pre_tax_deductions_ytd only captures 401k in the
+ * header while Flex Spending rows are correctly extracted as individual line items).
+ *
+ * Post-tax deductions: `other_deductions` line items are always combined with `post_tax_deductions`
+ * line items. Payslips like Deloitte place "OTHER DEDUCTION(S)" in a separate PDF section that is
+ * semantically post-tax. Combined line item sums are preferred over the LLM summary value.
+ *
+ * IBM pay date: falls back to payment_information[0].pay_date when pay_period.pay_date is null
+ * (IBM does not print a top-level pay date; it appears only in the Payment Information block).
+ *
+ * Hours: default to 80 when absent (biweekly Deloitte assumption).
  */
 export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTokens?: number | null): CanonicalMapResult {
   const s = extract.summary;
   const emp = extract.employee;
   const em = extract.source_employer;
+
+  // ---- Pre-tax deductions ----
   const preTaxLines = extract.line_items.pre_tax_deductions;
   const preTaxSumCurrent = sumLineItemColumn(preTaxLines, "amount_current");
   const preTaxSumYtd = sumLineItemColumn(preTaxLines, "amount_ytd");
+
+  const preFromLines: { current?: boolean; ytd?: boolean } = {};
+  let preTaxCurrent: number | null;
+  let preTaxYtd: number | null;
+  if (preTaxLines.length > 0) {
+    // Prefer line item sums — they capture every row even when the PDF section header total is
+    // incomplete (e.g. Deloitte: 401k-only header total vs. three separate Flex Spending rows).
+    if (preTaxSumCurrent != null) {
+      preTaxCurrent = preTaxSumCurrent;
+      preFromLines.current = true;
+    } else {
+      preTaxCurrent = s.pre_tax_deductions_current;
+    }
+    if (preTaxSumYtd != null) {
+      preTaxYtd = preTaxSumYtd;
+      preFromLines.ytd = true;
+    } else {
+      preTaxYtd = s.pre_tax_deductions_ytd;
+    }
+  } else {
+    preTaxCurrent = s.pre_tax_deductions_current;
+    preTaxYtd = s.pre_tax_deductions_ytd;
+  }
+
+  // ---- Employee taxes ----
   const taxLines = extract.line_items.tax_deductions;
   const taxSumCurrent = sumLineItemColumn(taxLines, "amount_current");
   const taxSumYtd = sumLineItemColumn(taxLines, "amount_ytd");
-  const postTaxLines = extract.line_items.post_tax_deductions;
-  const postTaxSumCurrent = sumLineItemColumn(postTaxLines, "amount_current");
-  const postTaxSumYtd = sumLineItemColumn(postTaxLines, "amount_ytd");
-  const otherDeductionLines = extract.line_items.other_deductions;
-  const otherAsPostTaxSumCurrent = sumOtherDeductionsMarkedAsPostTax(otherDeductionLines, "amount_current");
-  const otherAsPostTaxSumYtd = sumOtherDeductionsMarkedAsPostTax(otherDeductionLines, "amount_ytd");
-
-  let preTaxCurrent = s.pre_tax_deductions_current;
-  let preTaxYtd = s.pre_tax_deductions_ytd;
-  const preFromLines: { current?: boolean; ytd?: boolean } = {};
-  if (preTaxCurrent == null && preTaxSumCurrent != null) {
-    preTaxCurrent = preTaxSumCurrent;
-    preFromLines.current = true;
-  }
-  if (preTaxYtd == null && preTaxSumYtd != null) {
-    preTaxYtd = preTaxSumYtd;
-    preFromLines.ytd = true;
-  }
 
   let employeeTaxesCurrent = s.tax_deductions_current;
   let employeeTaxesYtd = s.tax_deductions_ytd;
@@ -145,27 +147,41 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
     taxFromLines.ytd = true;
   }
 
-  let postTaxCurrent = s.post_tax_deductions_current;
-  let postTaxYtd = s.post_tax_deductions_ytd;
+  // ---- Post-tax deductions ----
+  // Always combine post_tax_deductions + other_deductions: both represent post-tax amounts.
+  // Deloitte places Tax Advance / Award Received / Imp Inc Core Life / Imp Inc Core LTD under
+  // "OTHER DEDUCTION(S)" which is a distinct PDF section but semantically identical to post-tax.
+  // Combined line item sums are preferred over the LLM summary header value for the same reason
+  // as pre-tax: individual rows are extracted accurately even when the header total is stale.
+  const postTaxLines = extract.line_items.post_tax_deductions;
+  const otherDeductionLines = extract.line_items.other_deductions;
+  const allPostTaxLines = [...postTaxLines, ...otherDeductionLines];
+  const allPostTaxSumCurrent = sumLineItemColumn(allPostTaxLines, "amount_current");
+  const allPostTaxSumYtd = sumLineItemColumn(allPostTaxLines, "amount_ytd");
+
   const postFromLines: { current?: boolean; ytd?: boolean } = {};
-  if (postTaxCurrent == null && postTaxSumCurrent != null) {
-    postTaxCurrent = postTaxSumCurrent;
-    postFromLines.current = true;
-  }
-  if (postTaxYtd == null && postTaxSumYtd != null) {
-    postTaxYtd = postTaxSumYtd;
-    postFromLines.ytd = true;
-  }
-  const postFromOtherDeductionRows: { current?: boolean; ytd?: boolean } = {};
-  if (postTaxCurrent == null && otherAsPostTaxSumCurrent != null) {
-    postTaxCurrent = otherAsPostTaxSumCurrent;
-    postFromOtherDeductionRows.current = true;
-  }
-  if (postTaxYtd == null && otherAsPostTaxSumYtd != null) {
-    postTaxYtd = otherAsPostTaxSumYtd;
-    postFromOtherDeductionRows.ytd = true;
+  let postTaxCurrent: number | null;
+  let postTaxYtd: number | null;
+  if (allPostTaxLines.length > 0) {
+    // Prefer combined line item sums (captures both sections)
+    if (allPostTaxSumCurrent != null) {
+      postTaxCurrent = allPostTaxSumCurrent;
+      postFromLines.current = true;
+    } else {
+      postTaxCurrent = s.post_tax_deductions_current;
+    }
+    if (allPostTaxSumYtd != null) {
+      postTaxYtd = allPostTaxSumYtd;
+      postFromLines.ytd = true;
+    } else {
+      postTaxYtd = s.post_tax_deductions_ytd;
+    }
+  } else {
+    postTaxCurrent = s.post_tax_deductions_current;
+    postTaxYtd = s.post_tax_deductions_ytd;
   }
 
+  // ---- Hours ----
   let hoursOrDaysCurrent: string | null =
     extract.employment_context.hours_or_days_worked_current != null
       ? String(extract.employment_context.hours_or_days_worked_current)
@@ -181,10 +197,19 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
       ? String(extract.employment_context.hours_or_days_worked_ytd)
       : null;
 
+  // ---- Pay date ----
+  // Fall back to payment_information[0].pay_date when pay_period.pay_date is null.
+  // IBM does not print a standalone pay date on the stub — it appears only in the
+  // Payment Information section alongside the direct-deposit amount.
+  const payDate =
+    extract.pay_period.pay_date ??
+    extract.payment_information.find((p) => p.pay_date != null)?.pay_date ??
+    null;
+
   const summary: ParsedPayslipSummary = {
     payPeriodStart: extract.pay_period.start_date,
     payPeriodEnd: extract.pay_period.end_date,
-    payDate: extract.pay_period.pay_date,
+    payDate,
     hoursOrDaysCurrent,
     hoursOrDaysYtd,
     grossPayCurrent: s.gross_pay_current,
@@ -213,9 +238,8 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
       ...(Object.keys(preFromLines).length > 0 ? { preTaxFilledFromLineItems: preFromLines } : {}),
       ...(Object.keys(taxFromLines).length > 0 ? { taxDeductionsFilledFromLineItems: taxFromLines } : {}),
       ...(Object.keys(postFromLines).length > 0 ? { postTaxFilledFromLineItems: postFromLines } : {}),
-      ...(Object.keys(postFromOtherDeductionRows).length > 0
-        ? { postTaxFilledFromOtherDeductionRows: postFromOtherDeductionRows }
-        : {}),
+      // Flag when other_deductions were folded into the post-tax total (diagnostic)
+      ...(otherDeductionLines.length > 0 ? { otherDeductionsFoldedIntoPostTax: true } : {}),
       ...approxNetSanityNote(s, employeeTaxesCurrent, postTaxCurrent)
     }
   };
