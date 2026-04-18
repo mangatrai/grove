@@ -21,6 +21,15 @@ const loginRateLimit = rateLimit({
   skip: () => env.MODE === "TEST"
 });
 
+const changePasswordRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many password change attempts. Please try again later." },
+  skip: () => env.MODE === "TEST"
+});
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8)
@@ -75,7 +84,7 @@ const changePasswordSchema = z.object({
   newPassword: strongPassword
 });
 
-authRouter.post("/change-password", requireAuth, async (req: AuthenticatedRequest, res) => {
+authRouter.post("/change-password", requireAuth, changePasswordRateLimit, async (req: AuthenticatedRequest, res) => {
   const parsed = changePasswordSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({

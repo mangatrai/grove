@@ -7,7 +7,7 @@
 #
 # Required env (set in Koyeb / your orchestrator — do not bake secrets into the image):
 #   MODE=PROD
-#   JWT_SECRET=<min 16 chars>
+#   JWT_SECRET=<min 32 chars — generate: openssl rand -base64 48>
 #   DATABASE_HOST, DATABASE_PORT, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME
 #   DATABASE_SSL=1   (typical for managed Postgres; use 0 only for local/no-TLS)
 # Optional: PORT (default 4000), OPENAI_* , LOG_LEVEL, TRANSFER_* , etc.

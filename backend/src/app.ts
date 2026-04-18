@@ -65,11 +65,35 @@ function isApiPath(urlPath: string): boolean {
   return API_PATH_PREFIXES.some((prefix) => urlPath === prefix || urlPath.startsWith(`${prefix}/`));
 }
 
+/**
+ * Minimal request logger: logs method, path, status code, and duration.
+ * Uses the existing `log` infrastructure (no extra dependency).
+ * Skips static asset requests (files with an extension) to keep logs readable.
+ */
+function requestLoggerMiddleware(): express.RequestHandler {
+  return (req, res, next) => {
+    const start = Date.now();
+    res.on("finish", () => {
+      // Skip static asset noise (JS chunks, CSS, images, favicon, etc.)
+      if (/\.[a-z0-9]{1,6}$/i.test(req.path)) return;
+      const ms = Date.now() - start;
+      log.info(`${req.method} ${req.path} ${res.statusCode} ${ms}ms`);
+    });
+    next();
+  };
+}
+
 export function buildApp() {
   const app = express();
 
+  // Trust the first hop (reverse proxy / load balancer) so rate limiters and
+  // IP-based logic see the real client IP from X-Forwarded-For rather than the
+  // proxy address. Required on Oracle Cloud / any cloud load balancer.
+  app.set("trust proxy", 1);
+
   app.use(helmet());
   app.use(corsMiddleware());
+  app.use(requestLoggerMiddleware());
   app.use(express.json({ limit: "50kb" }));
   app.use("/health", healthRouter);
   app.use("/auth", authRouter);

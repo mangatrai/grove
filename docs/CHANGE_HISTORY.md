@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-18 (pre-production hardening sweep)
+
+### FIX-118 — Graceful shutdown, trust proxy, request logging, change-password rate limit
+
+- **Type:** FIX / ops hardening
+- **What:**
+  1. **Graceful shutdown** (`backend/src/server.ts`) — Added `SIGTERM` and `SIGINT` handlers that stop accepting new connections, drain in-flight requests, then call `closeSql()` before exiting. A 10-second forced-exit timeout ensures a hung keep-alive doesn't stall container replacement. Previously the process was killed immediately by the orchestrator.
+  2. **`trust proxy` setting** (`backend/src/app.ts`) — Added `app.set('trust proxy', 1)` so that Express reads the real client IP from `X-Forwarded-For` when running behind Oracle Cloud / any load balancer. Without this, the login rate limiter sees every request coming from the proxy address, making it ineffective.
+  3. **Request logging middleware** (`backend/src/app.ts`) — Added `requestLoggerMiddleware()` that logs `METHOD /path STATUS Xms` for every non-static request using the existing `log` infrastructure. No new dependency. Skips requests for static assets (JS, CSS, images) to keep logs readable.
+  4. **Rate limit on `POST /auth/change-password`** (`backend/src/modules/auth/auth.routes.ts`) — Added `changePasswordRateLimit` (10 attempts per 15 minutes per IP). Same `skip: MODE === "TEST"` guard as the login limiter so tests are unaffected.
+  5. **Dockerfile JWT_SECRET comment** (`Dockerfile`) — Corrected `<min 16 chars>` to `<min 32 chars>` to match the Zod enforcement in `env.ts`.
+- **Why:** Pre-production sweep before Oracle Cloud free-tier deployment. All five issues were found in the sweep; none individually critical but collectively important for correct prod behavior.
+- **Files:** `backend/src/server.ts`, `backend/src/app.ts`, `backend/src/modules/auth/auth.routes.ts`, `Dockerfile`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## 2026-04-18 (payslip line item CRUD + cross-validation + manual page redesign)
 
 ### CR-117 — Payslip line item edit, delete, add + cross-validation warnings
