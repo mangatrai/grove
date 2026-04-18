@@ -15,6 +15,15 @@ import { SECTION_LABELS, SECTION_ORDER } from "../payslip/types";
 
 export type { PayslipSnapshotDetail };
 
+const ADD_SECTION_OPTIONS: { value: PayslipLineItemSection; label: string }[] = [
+  { value: "earnings",            label: "Earnings" },
+  { value: "pre_tax_deductions",  label: "Pre-tax deductions" },
+  { value: "tax_deductions",      label: "Tax deductions" },
+  { value: "post_tax_deductions", label: "Post-tax deductions" },
+  { value: "other_information",   label: "Other information" },
+  { value: "taxable_earnings",    label: "Taxable earnings" },
+];
+
 type EmployerRow = { id: string; displayName: string };
 
 /** Keys that can be patched via PATCH /payslips/:id */
@@ -474,6 +483,15 @@ export function PayslipDetailPage() {
   const [liSaving, setLiSaving] = useState(false);
   const [liSaveError, setLiSaveError] = useState<string | null>(null);
 
+  // Add line item form
+  const [addFormOpen, setAddFormOpen] = useState(false);
+  const [addSection, setAddSection] = useState<PayslipLineItemSection>("earnings");
+  const [addName, setAddName] = useState("");
+  const [addAmountCurrent, setAddAmountCurrent] = useState("");
+  const [addAmountYtd, setAddAmountYtd] = useState("");
+  const [addSaving, setAddSaving] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!payslipId) return;
     const res = await apiJson<PayslipSnapshotDetail>(`/payslips/${encodeURIComponent(payslipId)}`);
@@ -587,6 +605,44 @@ export function PayslipDetailPage() {
       setLiSaving(false);
     }
   }, [applyLineItemMutation]);
+
+  // --- Add line item handler ---
+  const handleAddLineItem = useCallback(async () => {
+    if (!payslipId) return;
+    setAddSaving(true);
+    setAddError(null);
+    try {
+      const body = {
+        section: addSection,
+        name: addName.trim() || null,
+        amountCurrent: addAmountCurrent.trim() === "" ? null : parseAmountInput(addAmountCurrent),
+        amountYtd: addAmountYtd.trim() === "" ? null : parseAmountInput(addAmountYtd),
+      };
+      const res = await apiFetch(`/payslips/${encodeURIComponent(payslipId)}/line-items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = text || res.statusText;
+        try { const j = JSON.parse(text) as { message?: string }; if (j.message) msg = j.message; } catch { /* raw */ }
+        setAddError(msg);
+        return;
+      }
+      const data = await res.json() as { snapshot: PayslipSnapshotDetail; lineItems: PayslipLineItemsGrouped; validationWarnings?: ValidationWarning[] };
+      applyLineItemMutation(data);
+      // Reset form
+      setAddFormOpen(false);
+      setAddName("");
+      setAddAmountCurrent("");
+      setAddAmountYtd("");
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setAddSaving(false);
+    }
+  }, [payslipId, addSection, addName, addAmountCurrent, addAmountYtd, applyLineItemMutation]);
 
   // --- Line item edit handlers ---
   const liCtx: LineItemEditCtx = {
@@ -832,22 +888,94 @@ export function PayslipDetailPage() {
             </div>
           </div>
 
-          {nonEmptySections.length > 0 ? (
-            <div className="card" style={{ marginTop: "1rem" }}>
-              <h2 style={{ marginTop: 0 }}>Line items</h2>
-              <p className="muted" style={{ marginTop: 0, marginBottom: "1rem", fontSize: "0.9rem" }}>
-                Individual rows from the payslip. Edit or delete to correct extraction errors — summary totals update automatically.
-              </p>
-              {nonEmptySections.map((section) => (
-                <LineItemsSection
-                  key={section}
-                  section={section}
-                  rows={mergedLineItems![section]}
-                  ctx={liCtx}
-                />
-              ))}
+          <div className="card" style={{ marginTop: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: nonEmptySections.length > 0 ? "0.5rem" : 0 }}>
+              <h2 style={{ marginTop: 0, marginBottom: 0 }}>Line items</h2>
+              {!addFormOpen ? (
+                <button type="button" className="secondary"
+                  onClick={() => { setAddFormOpen(true); setAddError(null); }}
+                  style={{ fontSize: "0.82rem", padding: "0.2rem 0.65rem" }}>
+                  + Add row
+                </button>
+              ) : null}
             </div>
-          ) : null}
+            {nonEmptySections.length > 0 ? (
+              <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
+                Edit or delete rows to correct extraction errors — summary totals update automatically.
+              </p>
+            ) : (
+              <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
+                No line items. Use "+ Add row" to enter individual earnings and deduction rows.
+              </p>
+            )}
+            {nonEmptySections.map((section) => (
+              <LineItemsSection
+                key={section}
+                section={section}
+                rows={mergedLineItems![section]}
+                ctx={liCtx}
+              />
+            ))}
+
+            {/* Inline add form */}
+            {addFormOpen ? (
+              <div style={{ marginTop: nonEmptySections.length > 0 ? "0.75rem" : 0, padding: "0.75rem", background: "rgba(0,0,0,0.025)", borderRadius: 6, border: "1px solid var(--color-border)" }}>
+                <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.5rem" }}>Add line item</div>
+                <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+                  <label className="field" style={{ flex: "0 0 auto", marginBottom: 0 }}>
+                    <span style={{ fontSize: "0.8rem" }}>Section</span>
+                    <select value={addSection} onChange={(e) => setAddSection(e.target.value as PayslipLineItemSection)}
+                      style={{ fontSize: "0.85rem", padding: "0.2rem 0.4rem" }} disabled={addSaving}>
+                      {ADD_SECTION_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
+                    <span style={{ fontSize: "0.8rem" }}>Name</span>
+                    <input type="text" value={addName}
+                      onChange={(e) => setAddName(e.target.value)}
+                      placeholder="e.g. Regular Pay"
+                      style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.4rem" }}
+                      disabled={addSaving}
+                      onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                    />
+                  </label>
+                  <label className="field" style={{ flex: "0 0 7rem", marginBottom: 0 }}>
+                    <span style={{ fontSize: "0.8rem" }}>Current</span>
+                    <input type="number" step="0.01" value={addAmountCurrent}
+                      onChange={(e) => setAddAmountCurrent(e.target.value)}
+                      placeholder="0.00"
+                      style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.4rem" }}
+                      disabled={addSaving}
+                      onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                    />
+                  </label>
+                  <label className="field" style={{ flex: "0 0 7rem", marginBottom: 0 }}>
+                    <span style={{ fontSize: "0.8rem" }}>YTD</span>
+                    <input type="number" step="0.01" value={addAmountYtd}
+                      onChange={(e) => setAddAmountYtd(e.target.value)}
+                      placeholder="0.00"
+                      style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.4rem" }}
+                      disabled={addSaving}
+                      onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                    />
+                  </label>
+                  <div style={{ display: "flex", gap: "0.4rem", paddingBottom: "0.05rem" }}>
+                    <button type="button" onClick={() => void handleAddLineItem()} disabled={addSaving}
+                      style={{ fontSize: "0.85rem", padding: "0.25rem 0.7rem" }}>
+                      {addSaving ? "…" : "Add"}
+                    </button>
+                    <button type="button" className="secondary" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}
+                      style={{ fontSize: "0.85rem", padding: "0.25rem 0.6rem" }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+                {addError ? <p className="error" style={{ marginTop: "0.4rem", marginBottom: 0, fontSize: "0.82rem" }}>{addError}</p> : null}
+              </div>
+            ) : null}
+          </div>
 
           <div className="card" style={{ marginTop: "1rem" }}>
             <details>
