@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-18 (payslip tax deduction YTD regression after model upgrade)
+
+### FIX-116 — Employee taxes YTD wrong after gpt-4.1 upgrade (summary value beats line items)
+
+- **Type:** FIX
+- **What:** After the FIX-115 model upgrade to `gpt-4.1`, employee taxes YTD displayed incorrectly ($6409.41 instead of $6909.02). The LLM was producing a wrong `summary.tax_deductions_ytd` while extracting the three individual tax rows correctly (their YTD values sum to $6909.02).
+- **Root cause:** Tax deductions used a different precedence rule than pre-tax: line item sums were only used when the summary field was `null`. Since `gpt-4.1` populated `tax_deductions_ytd` with a wrong header-read value ($6409.41), the correct line item sums were ignored.
+- **Fix:** Applied the same "always prefer line item sums when line items exist" rule to tax deductions that already governs pre-tax and post-tax deductions. Summary values are now only used when the `tax_deductions` line items array is empty.
+- **Files changed:**
+  - `backend/src/modules/payslip/llm-extract/payslip-canonical-map.ts` — tax deductions now prefer line item sums when items exist
+  - `backend/tests/payslip-canonical-map.test.ts` — new test: "prefers line item sum over summary for tax deductions when both exist"
+
+---
+
 ## 2026-04-18 (payslip model upgrade + hours contamination guard)
 
 ### FIX-115 — Deloitte extraction failures on gpt-4.1-mini: model upgrade + defensive hours guard

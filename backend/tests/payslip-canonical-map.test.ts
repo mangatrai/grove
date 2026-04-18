@@ -214,6 +214,61 @@ describe("payslip-canonical-map", () => {
     expect(summary.rawExtractJson.preTaxFilledFromLineItems).toEqual({ current: true, ytd: true });
   });
 
+  it("prefers line item sum over summary for tax deductions when both exist (gpt-4.1 summary mismatch)", () => {
+    // Real bug: gpt-4.1 emits summary.tax_deductions_ytd=6409.41 (wrong PDF header read) while
+    // line items correctly have each row's YTD. Line item sum must win.
+    const ex = minimalExtract({
+      summary: {
+        ...minimalExtract().summary,
+        tax_deductions_current: 1680.39,
+        tax_deductions_ytd: 6409.41   // wrong — LLM header misread
+      },
+      line_items: {
+        ...minimalExtract().line_items,
+        tax_deductions: [
+          {
+            name: "FED TX Withholding Tax",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 1074.44,
+            amount_ytd: 4441.41,
+            raw_section: "TAX DEDUCTION(S)"
+          },
+          {
+            name: "FED TX EE Social Securit",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 491.10,
+            amount_ytd: 1999.89,
+            raw_section: "TAX DEDUCTION(S)"
+          },
+          {
+            name: "FED TX EE Medicare Tax",
+            authority: null,
+            description: null,
+            dates: { start_date: null, end_date: null, raw: null },
+            hours_or_days: { current: null, ytd: null },
+            rate: null,
+            amount_current: 114.85,
+            amount_ytd: 467.72,
+            raw_section: "TAX DEDUCTION(S)"
+          }
+        ]
+      }
+    });
+    const { summary } = mapCanonicalExtractToPersist(ex);
+    // Line item sums: current=1680.39, ytd=4441.41+1999.89+467.72=6909.02
+    expect(summary.employeeTaxesCurrent).toBeCloseTo(1680.39, 2);
+    expect(summary.employeeTaxesYtd).toBeCloseTo(6909.02, 2);
+    expect(summary.rawExtractJson.taxDeductionsFilledFromLineItems).toEqual({ current: true, ytd: true });
+  });
+
   it("fills pre-tax from line_items.pre_tax_deductions when summary pre-tax fields are null", () => {
     const ex = minimalExtract({
       summary: {

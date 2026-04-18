@@ -137,6 +137,9 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   }
 
   // ---- Employee taxes ----
+  // Same rule as pre-tax: when line items exist their sum is preferred over the LLM summary value.
+  // LLMs occasionally misread the tax section total from the PDF header while extracting individual
+  // rows correctly (observed with gpt-4.1: summary ytd=$6409.41 but line items sum to $6909.02).
   const taxLines = extract.line_items.tax_deductions;
   const taxSumCurrent = sumLineItemColumn(taxLines, "amount_current");
   const taxSumYtd = sumLineItemColumn(taxLines, "amount_ytd");
@@ -144,13 +147,24 @@ export function mapCanonicalExtractToPersist(extract: PayslipLlmExtract, usageTo
   let employeeTaxesCurrent = s.tax_deductions_current;
   let employeeTaxesYtd = s.tax_deductions_ytd;
   const taxFromLines: { current?: boolean; ytd?: boolean } = {};
-  if (employeeTaxesCurrent == null && taxSumCurrent != null) {
-    employeeTaxesCurrent = taxSumCurrent;
-    taxFromLines.current = true;
-  }
-  if (employeeTaxesYtd == null && taxSumYtd != null) {
-    employeeTaxesYtd = taxSumYtd;
-    taxFromLines.ytd = true;
+  if (taxLines.length > 0) {
+    if (taxSumCurrent != null) {
+      employeeTaxesCurrent = taxSumCurrent;
+      taxFromLines.current = true;
+    }
+    if (taxSumYtd != null) {
+      employeeTaxesYtd = taxSumYtd;
+      taxFromLines.ytd = true;
+    }
+  } else {
+    if (employeeTaxesCurrent == null && taxSumCurrent != null) {
+      employeeTaxesCurrent = taxSumCurrent;
+      taxFromLines.current = true;
+    }
+    if (employeeTaxesYtd == null && taxSumYtd != null) {
+      employeeTaxesYtd = taxSumYtd;
+      taxFromLines.ytd = true;
+    }
   }
 
   // ---- Post-tax deductions ----
