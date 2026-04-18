@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 
 import { qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
+import { deriveSummaryFromLineItems, validatePayslipBalance } from "./payslip-validation.js";
+import type { ValidationWarning } from "./payslip-validation.js";
 
 export type MatchedDeposit = {
   id: string;
@@ -209,6 +211,7 @@ export async function insertManualPayslipSnapshot(
     ownerScope: "household" | "person";
     ownerPersonProfileId: string | null;
     summary: Omit<ParsedPayslipSummary, "rawExtractJson">;
+    lineItems?: LineItemForInsert[];
   }
 ): Promise<{ ok: true; snapshot: PayslipSnapshotRow }> {
   const checksum = syntheticManualPayslipChecksum();
@@ -235,7 +238,6 @@ export async function insertManualPayslipSnapshot(
     employmentRateType: null
   };
 
-  // Manual entry never has line items (no PDF parsed)
   const result = await insertPayslipSnapshot(
     householdId,
     MANUAL_FILE_NAME,
@@ -247,7 +249,7 @@ export async function insertManualPayslipSnapshot(
     input.ownerScope,
     input.ownerPersonProfileId,
     hybrid,
-    []
+    input.lineItems ?? []
   );
 
   if (!result.ok) {
@@ -416,6 +418,20 @@ export async function insertPayslipSnapshot(
   });
 }
 
+/** Group raw DB rows (already mapped) into the grouped shape. */
+function groupLineItemRows(rows: Record<string, unknown>[]): PayslipLineItemsGrouped {
+  const grouped = Object.fromEntries(
+    PAYSLIP_LINE_ITEM_SECTIONS.map((s) => [s, [] as PayslipLineItemRow[]])
+  ) as PayslipLineItemsGrouped;
+  for (const r of rows) {
+    const section = String(r.section) as PayslipLineItemSection;
+    if (section in grouped) {
+      grouped[section].push(rowToLineItem(r));
+    }
+  }
+  return grouped;
+}
+
 /**
  * Query all line items for a payslip, grouped by section.
  * Returns an empty array for sections with no rows (never undefined).
@@ -431,18 +447,7 @@ export async function getPayslipLineItems(
     payslipSnapshotId,
     householdId
   );
-
-  const grouped = Object.fromEntries(
-    PAYSLIP_LINE_ITEM_SECTIONS.map((s) => [s, [] as PayslipLineItemRow[]])
-  ) as PayslipLineItemsGrouped;
-
-  for (const r of rows) {
-    const section = String(r.section) as PayslipLineItemSection;
-    if (section in grouped) {
-      grouped[section].push(rowToLineItem(r));
-    }
-  }
-  return grouped;
+  return groupLineItemRows(rows);
 }
 
 export async function listPayslipSnapshots(
@@ -703,3 +708,255 @@ export async function deletePayslipSnapshotForHousehold(
   );
   return "deleted";
 }
+
+// ---------------------------------------------------------------------------
+// Line item CRUD (CR-117)
+// ---------------------------------------------------------------------------
+
+export type LineItemPatchInput = {
+  name?: string | null;
+  authority?: string | null;
+  amountCurrent?: number | null;
+  amountYtd?: number | null;
+  hoursOrDaysCurrent?: number | null;
+  hoursOrDaysYtd?: number | null;
+  rate?: number | null;
+};
+
+export type LineItemMutationResult =
+  | {
+      ok: true;
+      snapshot: PayslipSnapshotRow;
+      lineItems: PayslipLineItemsGrouped;
+      validationWarnings: ValidationWarning[];
+    }
+  | { ok: false; code: "NOT_FOUND" };
+
+/**
+ * Apply derived line-item sums to payslip_snapshot inside an open transaction.
+ * Only updates columns for which deriveSummaryFromLineItems returns a value.
+ */
+async function applyDerivedSummary(
+  tx: { unsafe(sql: string, params?: unknown[]): Promise<unknown[]> },
+  householdId: string,
+  payslipId: string,
+  lineItems: PayslipLineItemsGrouped
+): Promise<void> {
+  const derived = deriveSummaryFromLineItems(lineItems);
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  function col(column: string, val: unknown) {
+    sets.push(`${column} = ?`);
+    params.push(val);
+  }
+
+  if ("grossPayCurrent" in derived) col("gross_pay_current", derived.grossPayCurrent);
+  if ("grossPayYtd" in derived) col("gross_pay_ytd", derived.grossPayYtd);
+  if ("preTaxDeductionsCurrent" in derived) col("pre_tax_deductions_current", derived.preTaxDeductionsCurrent);
+  if ("preTaxDeductionsYtd" in derived) col("pre_tax_deductions_ytd", derived.preTaxDeductionsYtd);
+  if ("employeeTaxesCurrent" in derived) col("employee_taxes_current", derived.employeeTaxesCurrent);
+  if ("employeeTaxesYtd" in derived) col("employee_taxes_ytd", derived.employeeTaxesYtd);
+  if ("postTaxDeductionsCurrent" in derived) col("post_tax_deductions_current", derived.postTaxDeductionsCurrent);
+  if ("postTaxDeductionsYtd" in derived) col("post_tax_deductions_ytd", derived.postTaxDeductionsYtd);
+  if ("otherInformationCurrent" in derived) col("other_information_current", derived.otherInformationCurrent);
+  if ("otherInformationYtd" in derived) col("other_information_ytd", derived.otherInformationYtd);
+  if ("taxableEarningsCurrent" in derived) col("taxable_earnings_current", derived.taxableEarningsCurrent);
+  if ("taxableEarningsYtd" in derived) col("taxable_earnings_ytd", derived.taxableEarningsYtd);
+
+  if (sets.length === 0) {
+    return;
+  }
+
+  sets.push("updated_at = NOW()");
+  params.push(payslipId, householdId);
+
+  const { text, values } = sqlBind(
+    `UPDATE payslip_snapshot SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
+    params
+  );
+  await tx.unsafe(text, values as never[]);
+}
+
+/** Edit a line item. Cascades: re-sums affected sections and updates snapshot columns. */
+export async function patchPayslipLineItem(
+  householdId: string,
+  payslipId: string,
+  itemId: string,
+  patch: LineItemPatchInput
+): Promise<LineItemMutationResult> {
+  return qBegin(async (tx) => {
+    // Verify item belongs to this household + payslip
+    const check = await tx.unsafe(
+      `SELECT pli.id FROM payslip_line_item pli
+         JOIN payslip_snapshot ps ON ps.id = pli.payslip_snapshot_id
+        WHERE pli.id = $1 AND ps.id = $2 AND ps.household_id = $3
+        LIMIT 1`,
+      [itemId, payslipId, householdId]
+    );
+    if (!(check as unknown[]).length) {
+      return { ok: false as const, code: "NOT_FOUND" as const };
+    }
+
+    // Build the UPDATE for the line item
+    const sets: string[] = [];
+    const params: unknown[] = [];
+
+    function addCol(column: string, val: unknown) {
+      sets.push(`${column} = ?`);
+      params.push(val);
+    }
+
+    if ("name" in patch) addCol("name", patch.name);
+    if ("authority" in patch) addCol("authority", patch.authority);
+    if ("amountCurrent" in patch) addCol("amount_current", patch.amountCurrent);
+    if ("amountYtd" in patch) addCol("amount_ytd", patch.amountYtd);
+    if ("hoursOrDaysCurrent" in patch) addCol("hours_or_days_current", patch.hoursOrDaysCurrent);
+    if ("hoursOrDaysYtd" in patch) addCol("hours_or_days_ytd", patch.hoursOrDaysYtd);
+    if ("rate" in patch) addCol("rate", patch.rate);
+
+    if (sets.length > 0) {
+      params.push(itemId);
+      const { text, values } = sqlBind(
+        `UPDATE payslip_line_item SET ${sets.join(", ")} WHERE id = ?`,
+        params
+      );
+      await tx.unsafe(text, values as never[]);
+    }
+
+    // Re-fetch all line items and cascade to summary
+    const allRows = (await tx.unsafe(
+      `SELECT * FROM payslip_line_item WHERE payslip_snapshot_id = $1 AND household_id = $2 ORDER BY section, sort_order`,
+      [payslipId, householdId]
+    )) as Record<string, unknown>[];
+    const grouped = groupLineItemRows(allRows);
+
+    await applyDerivedSummary(tx, householdId, payslipId, grouped);
+
+    const snapRows = (await tx.unsafe(
+      `SELECT * FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,
+      [payslipId, householdId]
+    )) as Record<string, unknown>[];
+    const snapshot = rowToSnapshot(snapRows[0]!);
+
+    return {
+      ok: true as const,
+      snapshot,
+      lineItems: grouped,
+      validationWarnings: validatePayslipBalance(snapshot, grouped)
+    };
+  });
+}
+
+/** Delete a line item. Cascades: re-sums remaining items in the same section and updates snapshot. */
+export async function deletePayslipLineItem(
+  householdId: string,
+  payslipId: string,
+  itemId: string
+): Promise<LineItemMutationResult> {
+  return qBegin(async (tx) => {
+    const check = await tx.unsafe(
+      `SELECT pli.id FROM payslip_line_item pli
+         JOIN payslip_snapshot ps ON ps.id = pli.payslip_snapshot_id
+        WHERE pli.id = $1 AND ps.id = $2 AND ps.household_id = $3
+        LIMIT 1`,
+      [itemId, payslipId, householdId]
+    );
+    if (!(check as unknown[]).length) {
+      return { ok: false as const, code: "NOT_FOUND" as const };
+    }
+
+    await tx.unsafe(`DELETE FROM payslip_line_item WHERE id = $1`, [itemId]);
+
+    const allRows = (await tx.unsafe(
+      `SELECT * FROM payslip_line_item WHERE payslip_snapshot_id = $1 AND household_id = $2 ORDER BY section, sort_order`,
+      [payslipId, householdId]
+    )) as Record<string, unknown>[];
+    const grouped = groupLineItemRows(allRows);
+
+    await applyDerivedSummary(tx, householdId, payslipId, grouped);
+
+    const snapRows = (await tx.unsafe(
+      `SELECT * FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,
+      [payslipId, householdId]
+    )) as Record<string, unknown>[];
+    const snapshot = rowToSnapshot(snapRows[0]!);
+
+    return {
+      ok: true as const,
+      snapshot,
+      lineItems: grouped,
+      validationWarnings: validatePayslipBalance(snapshot, grouped)
+    };
+  });
+}
+
+/**
+ * Add a single line item to an existing payslip. Cascades summary like edit/delete.
+ * sort_order is assigned as max(sort_order)+1 within the section.
+ */
+export async function addPayslipLineItem(
+  householdId: string,
+  payslipId: string,
+  item: Omit<LineItemForInsert, "sortOrder">
+): Promise<LineItemMutationResult> {
+  return qBegin(async (tx) => {
+    // Verify payslip belongs to household
+    const check = await tx.unsafe(
+      `SELECT id FROM payslip_snapshot WHERE id = $1 AND household_id = $2 LIMIT 1`,
+      [payslipId, householdId]
+    );
+    if (!(check as unknown[]).length) {
+      return { ok: false as const, code: "NOT_FOUND" as const };
+    }
+
+    // Determine sort_order
+    const maxRows = (await tx.unsafe(
+      `SELECT COALESCE(MAX(sort_order), -1) AS m FROM payslip_line_item WHERE payslip_snapshot_id = $1 AND section = $2`,
+      [payslipId, item.section]
+    )) as Array<{ m: number }>;
+    const sortOrder = Number(maxRows[0]?.m ?? -1) + 1;
+
+    const newId = crypto.randomUUID();
+    const { text, values } = sqlBind(
+      `INSERT INTO payslip_line_item (
+        id, payslip_snapshot_id, household_id, section, sort_order,
+        name, authority, description,
+        date_start, date_end, date_raw,
+        hours_or_days_current, hours_or_days_ytd,
+        rate, amount_current, amount_ytd, raw_section
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        newId, payslipId, householdId, item.section, sortOrder,
+        item.name, item.authority, item.description,
+        item.dateStart, item.dateEnd, item.dateRaw,
+        item.hoursOrDaysCurrent, item.hoursOrDaysYtd,
+        item.rate, item.amountCurrent, item.amountYtd, item.rawSection
+      ]
+    );
+    await tx.unsafe(text, values as never[]);
+
+    const allRows = (await tx.unsafe(
+      `SELECT * FROM payslip_line_item WHERE payslip_snapshot_id = $1 AND household_id = $2 ORDER BY section, sort_order`,
+      [payslipId, householdId]
+    )) as Record<string, unknown>[];
+    const grouped = groupLineItemRows(allRows);
+
+    await applyDerivedSummary(tx, householdId, payslipId, grouped);
+
+    const snapRows = (await tx.unsafe(
+      `SELECT * FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,
+      [payslipId, householdId]
+    )) as Record<string, unknown>[];
+    const snapshot = rowToSnapshot(snapRows[0]!);
+
+    return {
+      ok: true as const,
+      snapshot,
+      lineItems: grouped,
+      validationWarnings: validatePayslipBalance(snapshot, grouped)
+    };
+  });
+}
+
+export type { ValidationWarning };

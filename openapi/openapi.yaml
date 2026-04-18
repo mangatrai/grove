@@ -527,7 +527,7 @@ paths:
       summary: Create payslip from manual summary (synthetic checksum; file name Manual entry)
       description: |
         At least one of `payDate`, `grossPayCurrent`, or `netPayCurrent` is required.
-        Line items cannot be added via this route; per-row entry is a backlog feature.
+        Optional `lineItems` array accepted — each item cascades into the matching summary column on save (CR-117).
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -618,9 +618,24 @@ paths:
                   type: string
                   nullable: true
                   description: "Rate type: annual, biweekly, or hourly (CR-072)"
+                lineItems:
+                  type: array
+                  maxItems: 200
+                  description: Optional individual line item rows (CR-117)
+                  items:
+                    $ref: '#/components/schemas/LineItemInput'
       responses:
         "201":
-          description: Payslip created; returns snapshot with new id
+          description: Payslip created; returns snapshot + validationWarnings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/PayslipSnapshotSummary' }
+                  validationWarnings:
+                    type: array
+                    items: { $ref: '#/components/schemas/ValidationWarning' }
         "400":
           description: Validation error (missing required field combination or invalid body)
         "409":
@@ -726,16 +741,128 @@ paths:
                       taxable_earnings:
                         type: array
                         items: { $ref: '#/components/schemas/PayslipLineItem' }
+                  validationWarnings:
+                    type: array
+                    description: Cross-validation results between line item sums and summary columns (CR-117)
+                    items: { $ref: '#/components/schemas/ValidationWarning' }
         "404":
           description: Payslip not found or not owned by this household
     patch:
       tags: [payslips]
-      summary: Update payslip fields (owner assignment, employer, summary amounts)
+      summary: Update payslip summary amounts
+      description: Returns `validationWarnings` alongside updated snapshot (CR-117).
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Updated snapshot + validation warnings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/PayslipSnapshotSummary' }
+                  validationWarnings:
+                    type: array
+                    items: { $ref: '#/components/schemas/ValidationWarning' }
+        "404":
+          description: Payslip not found
     delete:
       tags: [payslips]
       summary: Delete payslip snapshot (cascades to line items)
       security: [{ bearerAuth: [] }]
+  /payslips/{id}/line-items:
+    post:
+      tags: [payslips]
+      summary: Add a line item to an existing payslip (CR-117)
+      description: |
+        Inserts a new row and cascades: re-sums the affected section and updates the matching
+        summary column on `payslip_snapshot`. Returns updated snapshot + all line items + validation warnings.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LineItemInput' }
+      responses:
+        "201":
+          description: Line item added; returns mutation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineItemMutationResult' }
+        "400":
+          description: Invalid body
+        "404":
+          description: Payslip not found
+  /payslips/{id}/line-items/{itemId}:
+    patch:
+      tags: [payslips]
+      summary: Edit a single line item (CR-117)
+      description: |
+        Updates name, authority, amounts, hours, or rate. Cascades to summary column.
+        Returns updated snapshot + all line items + validation warnings.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, nullable: true }
+                authority: { type: string, nullable: true }
+                amountCurrent: { type: number, nullable: true }
+                amountYtd: { type: number, nullable: true }
+                hoursOrDaysCurrent: { type: number, nullable: true }
+                hoursOrDaysYtd: { type: number, nullable: true }
+                rate: { type: number, nullable: true }
+      responses:
+        "200":
+          description: Updated snapshot + line items + validation warnings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineItemMutationResult' }
+        "400":
+          description: Invalid body
+        "404":
+          description: Line item not found or not owned by this household
+    delete:
+      tags: [payslips]
+      summary: Delete a single line item (CR-117)
+      description: |
+        Hard-deletes the row. Cascades to summary column (re-sums remaining items in section).
+        Returns updated snapshot + all line items + validation warnings.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Deletion confirmed; returns updated mutation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LineItemMutationResult' }
+        "404":
+          description: Line item not found or not owned by this household
   /exports/household/import:
     post:
       tags: [exports]
@@ -1025,3 +1152,48 @@ components:
         amountYtd: { type: number, nullable: true }
         rawSection: { type: string, nullable: true }
         createdAt: { type: string }
+    ValidationWarning:
+      type: object
+      description: Cross-validation result from comparing line item sums to summary columns (CR-117)
+      properties:
+        code:
+          type: string
+          enum: [EARNINGS_SUM_MISMATCH, PRE_TAX_SUM_MISMATCH, TAX_SUM_MISMATCH, POST_TAX_SUM_MISMATCH, ARITHMETIC_IMBALANCE]
+        lineItemSum: { type: number, nullable: true }
+        summaryValue: { type: number, nullable: true }
+        delta: { type: number, nullable: true }
+        message: { type: string }
+    LineItemInput:
+      type: object
+      description: Body for creating or adding a line item row (CR-117)
+      required: [section]
+      properties:
+        section:
+          type: string
+          enum: [earnings, pre_tax_deductions, post_tax_deductions, tax_deductions, other_deductions, other_information, taxable_earnings]
+        name: { type: string, nullable: true }
+        authority: { type: string, nullable: true }
+        amountCurrent: { type: number, nullable: true }
+        amountYtd: { type: number, nullable: true }
+        hoursOrDaysCurrent: { type: number, nullable: true }
+        hoursOrDaysYtd: { type: number, nullable: true }
+        rate: { type: number, nullable: true }
+    PayslipSnapshotSummary:
+      type: object
+      description: Payslip snapshot row (summary columns; no lineItems or matchedDeposits)
+      properties:
+        id: { type: string }
+        payDate: { type: string, nullable: true }
+        grossPayCurrent: { type: number, nullable: true }
+        netPayCurrent: { type: number, nullable: true }
+    LineItemMutationResult:
+      type: object
+      description: Response from any line item create/edit/delete — includes updated snapshot, all items, and validation warnings (CR-117)
+      properties:
+        snapshot: { $ref: '#/components/schemas/PayslipSnapshotSummary' }
+        lineItems:
+          type: object
+          description: All remaining line items grouped by section
+        validationWarnings:
+          type: array
+          items: { $ref: '#/components/schemas/ValidationWarning' }

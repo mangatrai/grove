@@ -539,6 +539,11 @@ export function parseIbmPayslipFromText(text: string): ParsedPayslipSummary | nu
     postTaxDeductionsYtd: postTax.ytd,
     netPayCurrent: net.current,
     netPayYtd: net.ytd,
+    hoursOrDaysYtd: null,
+    taxableEarningsCurrent: null,
+    taxableEarningsYtd: null,
+    otherInformationCurrent: null,
+    otherInformationYtd: null,
     rawExtractJson
   };
 

@@ -14,6 +14,8 @@ import {
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
 import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
 import {
+  addPayslipLineItem,
+  deletePayslipLineItem,
   deletePayslipSnapshotForHousehold,
   findMatchedDeposits,
   getPayslipLineItems,
@@ -21,10 +23,13 @@ import {
   insertManualPayslipSnapshot,
   insertPayslipSnapshot,
   listPayslipSnapshots,
+  patchPayslipLineItem,
   patchPayslipSnapshotForHousehold,
   sha256Hex
 } from "./payslip.service.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "./payslip.types.js";
+import { validatePayslipBalance } from "./payslip-validation.js";
+import type { PayslipLineItemSection } from "./payslip.types.js";
 
 /** 25 MB per payslip file — PDFs are small; caps memory usage per upload request. */
 const upload = multer({
@@ -42,6 +47,46 @@ const listQuerySchema = z.object({
 const idParamSchema = z.object({
   id: z.string().uuid()
 });
+
+const lineItemParamSchema = z.object({
+  id: z.string().uuid(),
+  itemId: z.string().uuid()
+});
+
+const VALID_SECTIONS = [
+  "earnings",
+  "pre_tax_deductions",
+  "post_tax_deductions",
+  "tax_deductions",
+  "other_deductions",
+  "other_information",
+  "taxable_earnings"
+] as const;
+
+const lineItemPatchSchema = z
+  .object({
+    name: z.string().max(200).nullable().optional(),
+    authority: z.string().max(100).nullable().optional(),
+    amountCurrent: z.number().nullable().optional(),
+    amountYtd: z.number().nullable().optional(),
+    hoursOrDaysCurrent: z.number().nullable().optional(),
+    hoursOrDaysYtd: z.number().nullable().optional(),
+    rate: z.number().nullable().optional()
+  })
+  .strict();
+
+const lineItemBodySchema = z.object({
+  section: z.enum(VALID_SECTIONS),
+  name: z.string().max(200).nullable().optional(),
+  authority: z.string().max(100).nullable().optional(),
+  amountCurrent: z.number().nullable().optional(),
+  amountYtd: z.number().nullable().optional(),
+  hoursOrDaysCurrent: z.number().nullable().optional(),
+  hoursOrDaysYtd: z.number().nullable().optional(),
+  rate: z.number().nullable().optional()
+});
+
+const lineItemForManualSchema = lineItemBodySchema;
 
 const payslipPatchSchema = z
   .object({
@@ -75,7 +120,8 @@ const manualPayslipBodySchema = payslipPatchSchema
       employerId: z.union([z.string().uuid(), z.null()]).optional(),
       parserProfileId: z.string().min(1).max(120).optional(),
       ownerScope: z.enum(["household", "person"]).optional(),
-      ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional()
+      ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
+      lineItems: z.array(lineItemForManualSchema).max(200).optional()
     })
   )
   .strict()
@@ -225,16 +271,36 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
     otherInformationYtd: body.otherInformationYtd ?? null
   };
 
+  const manualLineItems = (body.lineItems ?? []).map((item, idx) => ({
+    section: item.section as PayslipLineItemSection,
+    sortOrder: idx,
+    name: item.name ?? null,
+    authority: item.authority ?? null,
+    description: null,
+    dateStart: null,
+    dateEnd: null,
+    dateRaw: null,
+    hoursOrDaysCurrent: item.hoursOrDaysCurrent ?? null,
+    hoursOrDaysYtd: item.hoursOrDaysYtd ?? null,
+    rate: item.rate ?? null,
+    amountCurrent: item.amountCurrent ?? null,
+    amountYtd: item.amountYtd ?? null,
+    rawSection: null
+  }));
+
   const result = await insertManualPayslipSnapshot(householdId, {
     parserProfileId,
     employerId: resolved.employerId,
     employerDisplayName,
     ownerScope,
     ownerPersonProfileId,
-    summary
+    summary,
+    lineItems: manualLineItems
   });
 
-  res.status(201).json({ snapshot: result.snapshot });
+  const lineItemsForValidation = await getPayslipLineItems(result.snapshot.id, householdId);
+  const validationWarnings = validatePayslipBalance(result.snapshot, lineItemsForValidation);
+  res.status(201).json({ snapshot: result.snapshot, validationWarnings });
 });
 
 payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRequest, res) => {
@@ -355,7 +421,8 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     findMatchedDeposits(householdId, snapshot.payDate, snapshot.netPayCurrent, snapshot.ownerPersonProfileId),
     getPayslipLineItems(snapshot.id, householdId)
   ]);
-  res.json({ ...snapshot, matchedDeposits, lineItems });
+  const validationWarnings = validatePayslipBalance(snapshot, lineItems);
+  res.json({ ...snapshot, matchedDeposits, lineItems, validationWarnings });
 });
 
 payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
@@ -375,7 +442,9 @@ payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
     return;
   }
-  res.json({ snapshot: updated });
+  const lineItemsForValidation = await getPayslipLineItems(updated.id, householdId);
+  const validationWarnings = validatePayslipBalance(updated, lineItemsForValidation);
+  res.json({ snapshot: updated, validationWarnings });
 });
 
 payslipRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
@@ -397,4 +466,81 @@ payslipRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
   res.status(204).send();
+});
+
+// ---------------------------------------------------------------------------
+// Line item endpoints (CR-117)
+// Register before /:id to avoid any potential ambiguity with Express routing.
+// ---------------------------------------------------------------------------
+
+/** POST /payslips/:id/line-items — add a line item to an existing payslip */
+payslipRouter.post("/:id/line-items", async (req: AuthenticatedRequest, res) => {
+  const params = idParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid payslip id", issues: params.error.flatten() });
+    return;
+  }
+  const body = lineItemBodySchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ message: "Invalid payload", issues: body.error.flatten() });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const result = await addPayslipLineItem(householdId, params.data.id, {
+    section: body.data.section as PayslipLineItemSection,
+    name: body.data.name ?? null,
+    authority: body.data.authority ?? null,
+    description: null,
+    dateStart: null,
+    dateEnd: null,
+    dateRaw: null,
+    hoursOrDaysCurrent: body.data.hoursOrDaysCurrent ?? null,
+    hoursOrDaysYtd: body.data.hoursOrDaysYtd ?? null,
+    rate: body.data.rate ?? null,
+    amountCurrent: body.data.amountCurrent ?? null,
+    amountYtd: body.data.amountYtd ?? null,
+    rawSection: null
+  });
+  if (!result.ok) {
+    res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.status(201).json({ snapshot: result.snapshot, lineItems: result.lineItems, validationWarnings: result.validationWarnings });
+});
+
+/** PATCH /payslips/:id/line-items/:itemId — edit a single line item */
+payslipRouter.patch("/:id/line-items/:itemId", async (req: AuthenticatedRequest, res) => {
+  const params = lineItemParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid id or itemId", issues: params.error.flatten() });
+    return;
+  }
+  const body = lineItemPatchSchema.safeParse(req.body ?? {});
+  if (!body.success) {
+    res.status(400).json({ message: "Invalid payload", issues: body.error.flatten() });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const result = await patchPayslipLineItem(householdId, params.data.id, params.data.itemId, body.data);
+  if (!result.ok) {
+    res.status(404).json({ message: "Line item not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.json({ snapshot: result.snapshot, lineItems: result.lineItems, validationWarnings: result.validationWarnings });
+});
+
+/** DELETE /payslips/:id/line-items/:itemId — delete a single line item */
+payslipRouter.delete("/:id/line-items/:itemId", async (req: AuthenticatedRequest, res) => {
+  const params = lineItemParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid id or itemId", issues: params.error.flatten() });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const result = await deletePayslipLineItem(householdId, params.data.id, params.data.itemId);
+  if (!result.ok) {
+    res.status(404).json({ message: "Line item not found", code: "NOT_FOUND" });
+    return;
+  }
+  res.json({ snapshot: result.snapshot, lineItems: result.lineItems, validationWarnings: result.validationWarnings });
 });

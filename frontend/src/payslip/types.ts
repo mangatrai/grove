@@ -1,3 +1,18 @@
+export type ValidationWarningCode =
+  | "EARNINGS_SUM_MISMATCH"
+  | "PRE_TAX_SUM_MISMATCH"
+  | "TAX_SUM_MISMATCH"
+  | "POST_TAX_SUM_MISMATCH"
+  | "ARITHMETIC_IMBALANCE";
+
+export type ValidationWarning = {
+  code: ValidationWarningCode;
+  lineItemSum: number | null;
+  summaryValue: number | null;
+  delta: number | null;
+  message: string;
+};
+
 export type MatchedDeposit = {
   id: string;
   txnDate: string;
@@ -81,6 +96,8 @@ export type PayslipSnapshotDetail = {
   matchedDeposits?: MatchedDeposit[];
   /** Individual line items grouped by section — only present on GET /payslips/:id */
   lineItems?: PayslipLineItemsGrouped;
+  /** Cross-validation warnings between line item sums and summary columns (CR-117) */
+  validationWarnings?: ValidationWarning[];
 };
 
 export const SECTION_LABELS: Record<PayslipLineItemSection, string> = {

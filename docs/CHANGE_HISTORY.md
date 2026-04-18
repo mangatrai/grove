@@ -18,6 +18,45 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-18 (payslip line item CRUD + cross-validation + manual page redesign)
+
+### CR-117 — Payslip line item edit, delete, add + cross-validation warnings
+
+- **Type:** CR / feature
+- **What:**
+  1. **Line item CRUD** — three new endpoints: `POST /payslips/:id/line-items`, `PATCH /payslips/:id/line-items/:itemId`, `DELETE /payslips/:id/line-items/:itemId`. Each mutates a single row and cascades: re-sums the affected section(s) from remaining line items and updates the matching `payslip_snapshot` summary column in the same transaction.
+  2. **Cross-validation** — new `payslip-validation.ts` with `validatePayslipBalance()`. Checks section sums against summary columns (tolerance $0.01) and arithmetic invariant `gross − pre_tax − taxes − post_tax ≈ net` (tolerance $1.00). Warnings returned on `GET /payslips/:id`, `PATCH /payslips/:id`, and all line item endpoints. Non-blocking.
+  3. **Summary PATCH now returns `validationWarnings`** — so the UI can immediately show whether a manual correction resolved or created a mismatch.
+  4. **POST /payslips/manual now accepts `lineItems[]`** — optional array of individual rows sent at creation time. Same cascade logic as above.
+  5. **IBM parser fix** — `ibm-payslip-pdf.ts` was missing `hoursOrDaysYtd`, `taxableEarningsCurrent`, `taxableEarningsYtd`, `otherInformationCurrent`, `otherInformationYtd` fields from `ParsedPayslipSummary`. Added as `null` to satisfy strict type.
+- **Cascade mapping** (line items → summary columns):
+  - `earnings` → `gross_pay_current / _ytd`
+  - `pre_tax_deductions` → `pre_tax_deductions_current / _ytd`
+  - `tax_deductions` → `employee_taxes_current / _ytd`
+  - `post_tax_deductions + other_deductions` (combined) → `post_tax_deductions_current / _ytd`
+  - `other_information` → `other_information_current / _ytd`
+  - `taxable_earnings` → `taxable_earnings_current / _ytd`
+  - `net_pay` intentionally excluded — it is the bank-deposit anchor for `matchedDeposits` and must not be auto-derived.
+- **Files:** `backend/src/modules/payslip/payslip-validation.ts` (new), `payslip.service.ts`, `payslip.routes.ts`, `payslip.types.ts` (IBM fix), `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`.
+
+### UX-030 — Payslip detail page: line item edit + delete + validation banner
+
+- **Type:** UX
+- **What:** Detail page (`PayslipDetailPage.tsx`) now supports inline edit (✏) and delete (✕) per line item row. Edit mode: name, authority, amounts, hours, rate go into inputs; Enter saves, Escape cancels. Delete mode: inline confirm row ("Delete X? [Delete] [Cancel]") — no modal. After any mutation, summary amounts in the Amounts table update automatically (cascade from backend). Validation warnings banner shows above the Amounts table when mismatches exist — color-coded amber for section sum mismatches, red for arithmetic imbalance. Also added Authority column to tax section display when any row has a non-null authority.
+- **Files:** `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/payslip/types.ts`.
+
+### UX-031 — Manual payslip page redesign + line item entry
+
+- **Type:** UX
+- **What:** Full redesign of `PayslipManualPage.tsx` (`/payslips/new`):
+  - Shorter header copy ("Enter totals from any pay stub — no PDF required." instead of paragraph).
+  - Logical card grouping: Who/Employer, Pay Period, Amounts, Line Items (optional, collapsed), Salary/Rate.
+  - **Reordered amounts**: Gross → Pre-tax deductions → Employee taxes → Post-tax deductions → Net pay (result last). Supplemental rows (Hours, Taxable earnings, Other information) separated by a visual divider.
+  - **Live arithmetic indicator**: computes `implied net = gross − pre_tax − taxes − post_tax` as you type. Green when it matches stated net (≤$1 diff), amber for $1–$50 diff, red for >$50.
+  - **Line items section**: collapsible `<details>` with a table (Section, Name, Current, YTD, ✕). "+ Add line item" button appends a blank row. Items are POSTed as `lineItems[]` with the summary fields.
+  - Statement template (parser profile) now shown inline as a labelled select instead of hidden in `<details>`.
+- **Files:** `frontend/src/pages/PayslipManualPage.tsx`.
+
 ## 2026-04-18 (payslip inline editing)
 
 ### UX-028 — Inline edit for payslip summary amounts
