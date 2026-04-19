@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-19 (backlog)
+
+### PRD-019 — Import pipeline simplification backlogged
+
+- **Type:** PRD / backlog
+- **What:** Documented a backlog item to collapse the current 6-step import flow (create session → upload → bind → parse → canonicalize → finalize) into 3 user-facing steps (upload → review → confirm). New proposed API: `POST /imports/upload`, `POST /imports/{id}/confirm`, `DELETE /imports/{id}`. Parser auto-detection, immediate preview on upload, undo from import history.
+- **Why:** Current pipeline exposes internal ETL stages as user-facing actions. Not building now — too close to production release. Grooming notes and open decisions captured for future sprint.
+- **Files:** `docs/IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md` (new)
+
+---
+
 ## 2026-04-18 (pre-production hardening sweep)
 
 ### FIX-118 — Graceful shutdown, trust proxy, request logging, change-password rate limit
