@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-21 (docs + backlog)
+
+### DOC-020 — OCI Always Free deployment guide + mobile UX backlog
+
+- **Type:** DOC / backlog
+- **What:**
+  1. **`docs/OCI_DEPLOYMENT.md`** (new) — end-to-end deployment guide for Oracle Cloud Infrastructure Always Free Tier. Covers: VM creation (A1 Flex 4 OCPU/24 GB, Ubuntu 22.04), OCI Security List + ufw firewall config, block volume attach/mount, PostgreSQL 17 installation and performance tuning for 24 GB RAM (`shared_buffers`, `effective_cache_size`, `work_mem`, connection limits), Postgres security hardening (localhost-only, `pg_hba.conf`), Node 20 via nvm, GitHub SSH deploy key generation, `.env` setup including JWT secret generation (`openssl rand -base64 48`), `npm run build` + `db:seed` first-time bootstrap, systemd service unit, DuckDNS free subdomain, nginx reverse proxy, Let's Encrypt HTTPS via Certbot, update deploy flow, and backup cron.
+  2. **`docs/MOBILE_UX_BACKLOG.md`** (new) — backlog for mobile responsive UX and PWA. Items: UX-R01 (viewport audit), UX-R02 (AppShell mobile drawer), UX-R03 (ledger table → card list), UX-R04 (Recharts ResponsiveContainer audit), UX-R05 (form Grid → Stack), UX-R06 (touch inline edit). PWA items: UX-P01 (manifest.json), UX-P02 (index.html meta tags), UX-P03 (app icons), UX-P04 (optional service worker). Status: backlogged.
+  3. **`docs/HOSTING_OPTIONS_AND_HOME_LAB.md`** (updated) — OCI section expanded, marked as current recommended self-hosted path, linked to new `OCI_DEPLOYMENT.md`. Related docs table updated.
+- **Why:** App is going to production on OCI Always Free Tier. Existing `PRODUCTION_SETUP.md` covers Koyeb/Docker only. A self-hosted OCI guide needed to cover VCN/firewall layering, Postgres direct install, systemd, nginx, and DuckDNS — all specific to the OCI bare-VM path. Mobile backlog added because primary access will be from phone browser.
+- **No code changes.** `trust proxy` was already set in FIX-118; nginx handles SSL termination without app modifications.
+- **Files:** `docs/OCI_DEPLOYMENT.md` (new), `docs/MOBILE_UX_BACKLOG.md` (new), `docs/HOSTING_OPTIONS_AND_HOME_LAB.md` (updated), `docs/CHANGE_HISTORY.md`
+
+---
+
 ## 2026-04-19 (backlog)
 
 ### PRD-019 — Import pipeline simplification backlogged

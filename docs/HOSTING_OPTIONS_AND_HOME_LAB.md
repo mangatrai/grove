@@ -51,10 +51,13 @@ Figures and rules **change**—always confirm on the provider’s site before re
 
 **Docs:** [Koyeb Databases](https://www.koyeb.com/docs/databases), [Pricing FAQ](https://www.koyeb.com/docs/faqs/pricing).
 
-### Oracle Cloud (OCI) Always Free
+### Oracle Cloud (OCI) Always Free ← current recommended self-hosted path
 
-- Often cited for **self-managed** stacks: **Ampere A1** Arm VMs (aggregate **~4 OCPU / 24 GB RAM** in the free allowance), plus **block storage**—enough to run **Docker + Postgres + apps** on **one** VM if you operate it yourself.
-- **Tradeoffs:** Account/signup friction; **capacity** in some regions can be scarce; **you** own backups, patching, and security groups.
+- **Ampere A1** Arm VMs: aggregate **4 OCPU / 24 GB RAM** in the free allowance (allocate all to one VM) plus **2 × 200 GB block volumes** — enough for Postgres + Node + nginx on a single machine with room to spare.
+- **Preferred deployment:** One A1 Flex VM running Ubuntu 22.04, Postgres 17 installed directly (no Docker), Node 20 via nvm, nginx as HTTPS reverse proxy, Let’s Encrypt (DuckDNS for free subdomain).
+- **Tradeoffs:** Account/signup friction; **capacity** in some regions can be scarce at creation time; **you** own backups, OS patching, and firewall rules.
+
+**Step-by-step guide:** [`docs/OCI_DEPLOYMENT.md`](OCI_DEPLOYMENT.md) — VM creation, Security Lists, ufw, Postgres tuning, GitHub SSH key, systemd service, DuckDNS, nginx + Certbot HTTPS.
 
 **Docs:** [OCI Always Free resources](https://docs.public.content.oci.oraclecloud.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm).
 
@@ -119,6 +122,7 @@ Discussed approach—**implement with scripts** on the server; not shipped in-re
 
 | Doc | Topic |
 |-----|--------|
+| [`OCI_DEPLOYMENT.md`](OCI_DEPLOYMENT.md) | **OCI Always Free** step-by-step: VM, Postgres, Node, nginx, HTTPS |
 | [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md) | Deploy notes, **Koyeb** build/run overrides, health checks |
 | [`RUNBOOK.md`](RUNBOOK.md) | Local/prod setup walkthrough |
 | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) | `MODE`, `DATABASE_*`, etc. |
@@ -129,4 +133,5 @@ Discussed approach—**implement with scripts** on the server; not shipped in-re
 
 | Date | Note |
 |------|------|
+| 2026-04-21 | **DOC-020**: Expanded OCI section — marked as preferred self-hosted path, linked new `OCI_DEPLOYMENT.md` step-by-step guide, added to Related docs table. |
 | 2026-04-11 | Initial write (**DOC-068**): $0 opex, Pi vs cloud free tiers, backup pattern, capex ≤ ~$100 hardware notes. |
