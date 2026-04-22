@@ -8,3 +8,4 @@ coverage
 # ./backend/data/ can appear if something ran with cwd=backend or an old path bug — treat like ./data/; do not commit.
 /data/
 .runtime/
+oci/oci-retry.sh
