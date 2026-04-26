@@ -18,6 +18,45 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-25 (mobile UX — v2)
+
+### UX-R01 through UX-R06 + UX-P01/P02/P03 — Mobile responsive fixes + PWA baseline
+
+- **Type:** UX / mobile
+- **What:**
+  1. **Budget page** — `ProgressView` KPI bar converted from hard-coded
+     `repeat(3, 1fr)` to `.budget-kpi-grid` class with `@media (max-width: 640px)`
+     single-column fallback. Both budget tables (setup/suggestion and progress)
+     wrapped in `overflowX: auto` containers.
+  2. **Import Workspace** — file-binding table wrapped in `overflowX: auto`.
+  3. **Transaction toolbar** — `@media (max-width: 640px)` reduces padding and
+     makes filter fields flex-wrap cleanly at 50% width pairs.
+  4. **Payslip Detail** — pencil/edit buttons converted to `.payslip-inline-edit-btn`
+     CSS class; `@media (hover: none)` rule forces full opacity on touch devices.
+  5. **Settings page** — audit confirmed the only `ledger-table` instance is already
+     wrapped; no change needed.
+  6. **app-main padding** — reduced to `0.75rem` side padding on ≤640px viewports.
+  7. **PWA manifest** — `frontend/public/manifest.json` created with `display:
+     standalone`, matching app theme colors.
+  8. **PWA meta tags** — `frontend/index.html` updated with manifest link,
+     Apple PWA tags, and `theme-color`.
+  9. **PWA icons** — `frontend/public/icons/icon-192.png` and `icon-512.png`
+     created (HF initials on dark navy).
+- **Why:** App is live and primary access is from phone browser. Viewport audit
+  (UX-R01) found three broken pages (Budget, Import Workspace broken; Payslip
+  edit controls invisible on touch). Mobile nav drawer was already implemented.
+  PWA baseline enables iOS/Android "Add to Home Screen."
+- **Files:** `frontend/src/pages/BudgetPage.tsx`,
+  `frontend/src/pages/ImportWorkspacePage.tsx`,
+  `frontend/src/pages/PayslipDetailPage.tsx`,
+  `frontend/src/index.css`,
+  `frontend/index.html`,
+  `frontend/public/manifest.json`,
+  `frontend/public/icons/icon-192.png`,
+  `frontend/public/icons/icon-512.png`
+
+---
+
 ## 2026-04-21 (docs + backlog)
 
 ### DOC-020 — OCI Always Free deployment guide + mobile UX backlog
