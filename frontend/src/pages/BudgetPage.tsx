@@ -422,6 +422,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
         <HelpIcon label={helpText} />
       </div>
 
+      <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
         <colgroup>
           <col style={{ width: colW.cat }} />
@@ -599,6 +600,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
           </tr>
         </tfoot>
       </table>
+      </div>
 
       {error ? <p style={{ color: "#dc2626", marginTop: "0.75rem" }}>{error}</p> : null}
 
@@ -648,7 +650,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
   return (
     <div>
       {/* Summary KPI cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
+      <div className="budget-kpi-grid">
         {(
           [
             { label: "Budgeted", value: fmtUSD(summary.totalBudgeted), accent: "var(--color-text-muted)" },
@@ -667,6 +669,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
         ))}
       </div>
 
+      <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "left" }}>
@@ -716,6 +719,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
           })}
         </tbody>
       </table>
+      </div>
 
       {summary.unbudgetedSpend > 0 && (
         <p style={{ marginTop: "0.75rem", color: "var(--color-text-muted)", fontSize: 13 }}>

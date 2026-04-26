@@ -1518,6 +1518,7 @@ export function ImportWorkspacePage() {
         {files.length === 0 ? (
           <p className="muted">No files yet.</p>
         ) : (
+          <div style={{ overflowX: "auto" }}>
           <table>
             <thead>
               <tr>
@@ -1827,6 +1828,7 @@ export function ImportWorkspacePage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

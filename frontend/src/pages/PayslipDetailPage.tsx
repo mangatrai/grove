@@ -223,10 +223,8 @@ function SummaryAmountRow({
       <td style={{ whiteSpace: "nowrap" }}>{formatMoney(currentVal)}</td>
       <td style={{ whiteSpace: "nowrap" }}>{formatMoney(ytdVal)}</td>
       <td>
-        <button type="button" className="secondary" onClick={onStartEdit} title={`Edit ${def.label}`}
-          style={{ fontSize: "0.75rem", padding: "0.1rem 0.4rem", opacity: 0.45 }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.45"; }}>
+        <button type="button" className="secondary payslip-inline-edit-btn" onClick={onStartEdit} title={`Edit ${def.label}`}
+          style={{ fontSize: "0.75rem", padding: "0.1rem 0.4rem" }}>
           ✏
         </button>
       </td>
@@ -386,20 +384,16 @@ function LineItemRow({
       <td style={{ whiteSpace: "nowrap" }}>{formatMoney(row.amountCurrent)}</td>
       <td style={{ whiteSpace: "nowrap" }}>{formatMoney(row.amountYtd)}</td>
       <td style={{ whiteSpace: "nowrap" }}>
-        <button type="button" className="secondary"
+        <button type="button" className="secondary payslip-inline-edit-btn"
           onClick={() => ctx.onStartEdit(row)}
           title="Edit row"
-          style={{ fontSize: "0.73rem", padding: "0.1rem 0.35rem", opacity: 0.45, marginRight: "0.25rem" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.45"; }}>
+          style={{ fontSize: "0.73rem", padding: "0.1rem 0.35rem", marginRight: "0.25rem" }}>
           ✏
         </button>
-        <button type="button" className="secondary"
+        <button type="button" className="secondary payslip-inline-edit-btn"
           onClick={() => ctx.onStartDelete(row.id)}
           title="Delete row"
-          style={{ fontSize: "0.73rem", padding: "0.1rem 0.35rem", opacity: 0.35, color: "var(--color-danger, #dc2626)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.35"; }}>
+          style={{ fontSize: "0.73rem", padding: "0.1rem 0.35rem", color: "var(--color-danger, #dc2626)" }}>
           ✕
         </button>
       </td>
