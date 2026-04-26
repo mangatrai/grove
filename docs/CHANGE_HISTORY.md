@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## 2026-04-26 (CR-118 import simplification — v2)
+
+### CR-118 — One-shot import upload, unified history, and primary Import page
+
+- **Type:** CR / feature
+- **What:**
+  1. Added `POST /imports/upload` to run one-shot upload flows for both bank and payslip files, reusing existing parse/canonical/payslip services and returning `{ ok, data/code, message }` service-style outcomes.
+  2. Added `GET /imports/history` to merge recent bank import sessions and payslip uploads into a single latest-first feed with undo affordance metadata.
+  3. Added schema migration `0023_import_session_stats.sql` to store canonicalize summary counts in `import_session.stats_json`; upload flow writes `{ addedCount, duplicateCount }`.
+  4. Added new frontend primary page `ImportPage` at `/imports` with one-shot form, success/error alerts, unified history table, and undo actions; kept `/imports/workspace` and `/imports/:sessionId` for advanced/manual flow.
+  5. Added backend coverage in `backend/tests/import-upload-flow.test.ts` for bank happy path, duplicate behavior, inference failure, history, and undo impact.
+- **Why:** CR-118 requires collapsing import UX into a simpler primary path while preserving advanced workspace behavior and existing backend pipelines.
+- **Files:** `backend/db/migrations/0023_import_session_stats.sql`, `backend/src/modules/imports/import-upload.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/tests/import-upload-flow.test.ts`, `frontend/src/pages/ImportPage.tsx`, `frontend/src/App.tsx`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## 2026-04-25 (mobile UX — v2)
 
 ### UX-R01 through UX-R06 + UX-P01/P02/P03 — Mobile responsive fixes + PWA baseline

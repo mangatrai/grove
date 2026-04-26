@@ -243,6 +243,69 @@ paths:
       tags: [imports]
       summary: Add household custom institution name
       security: [{ bearerAuth: [] }]
+  /imports/upload:
+    post:
+      tags: [imports]
+      summary: One-shot import upload (bank or payslip)
+      description: Upload a single file and run the end-to-end import flow for bank transactions or payslips.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [importType, file]
+              properties:
+                importType:
+                  type: string
+                  enum: [bank, payslip]
+                financialAccountId:
+                  type: string
+                  format: uuid
+                  description: Required when importType is bank
+                employerId:
+                  type: string
+                  format: uuid
+                  description: Optional when importType is payslip
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Bank import uploaded and canonicalized
+        "201":
+          description: Payslip upload parsed and inserted
+        "409":
+          description: Duplicate payslip upload
+        "422":
+          description: Business validation failure (parser inference, parse, employer, etc.)
+  /imports/history:
+    get:
+      tags: [imports]
+      summary: Unified recent import history (bank sessions + payslip uploads)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Recent merged import items (newest first, max 50)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { type: string, enum: [bank, payslip] }
+                        createdAt: { type: string, format: date-time }
+                        label: { type: string }
+                        status: { type: string }
+                        addedCount: { type: number, nullable: true }
+                        duplicateCount: { type: number, nullable: true }
+                        canUndo: { type: boolean }
   /imports/sessions:
     get:
       tags: [imports]
