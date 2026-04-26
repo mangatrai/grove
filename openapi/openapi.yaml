@@ -300,6 +300,7 @@ paths:
                       properties:
                         id: { type: string, format: uuid }
                         type: { type: string, enum: [bank, payslip] }
+                        accountType: { type: string, nullable: true, description: Bank account type context when available (e.g. checking, credit_card) }
                         createdAt: { type: string, format: date-time }
                         label: { type: string }
                         status: { type: string }

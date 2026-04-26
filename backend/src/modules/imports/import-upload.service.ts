@@ -237,6 +237,7 @@ export async function uploadAndImport(params: UploadParams): Promise<UploadAndIm
 export type ImportHistoryItem = {
   id: string;
   type: "bank" | "payslip";
+  accountType: string | null;
   createdAt: string;
   label: string;
   status: string;
@@ -251,6 +252,7 @@ export async function getImportHistory(householdId: string): Promise<ImportHisto
     created_at: string;
     status: string;
     file_name: string | null;
+    account_type: string | null;
     stats_json: string | null;
     canonical_count: string;
   }>(
@@ -258,6 +260,7 @@ export async function getImportHistory(householdId: string): Promise<ImportHisto
             s.started_at AS created_at,
             s.status,
             f.file_name,
+            f.account_type,
             s.stats_json::text AS stats_json,
             (
               SELECT COUNT(*)::text
@@ -272,9 +275,11 @@ export async function getImportHistory(householdId: string): Promise<ImportHisto
             ) AS canonical_count
        FROM import_session s
        LEFT JOIN LATERAL (
-         SELECT file_name FROM import_file
+         SELECT f.file_name, a.type AS account_type
+         FROM import_file f
+         LEFT JOIN financial_account a ON a.id = f.financial_account_id
          WHERE session_id = s.id
-         ORDER BY uploaded_at ASC
+         ORDER BY f.uploaded_at ASC
          LIMIT 1
        ) f ON TRUE
       WHERE s.household_id = ?
@@ -311,6 +316,7 @@ export async function getImportHistory(householdId: string): Promise<ImportHisto
     return {
       id: row.id,
       type: "bank",
+      accountType: row.account_type,
       createdAt: row.created_at,
       label: row.file_name || "Bank import session",
       status: row.status,
@@ -323,6 +329,7 @@ export async function getImportHistory(householdId: string): Promise<ImportHisto
   const payslipItems: ImportHistoryItem[] = payslipRows.map((row) => ({
     id: row.id,
     type: "payslip",
+    accountType: null,
     createdAt: row.created_at,
     label: row.file_name || "Payslip upload",
     status: "uploaded",

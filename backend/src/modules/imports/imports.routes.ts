@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { qGet } from "../../db/query.js";
+import { qExec, qGet } from "../../db/query.js";
 import {
   createImportSession,
   getSessionForHousehold,
@@ -766,6 +766,18 @@ importsRouter.post("/sessions/:sessionId/canonicalize", async (req: Authenticate
     return;
   }
 
+  await qExec(
+    `UPDATE import_session
+       SET stats_json = ?
+     WHERE id = ? AND household_id = ?`,
+    JSON.stringify({
+      addedCount: result.data.inserted,
+      duplicateCount: result.data.duplicates
+    }),
+    req.params.sessionId,
+    householdId
+  );
+
   res.status(200).json(result.data);
 });
 
@@ -930,6 +942,18 @@ importsRouter.post("/sessions/:sessionId/ofx-confirm", async (req: Authenticated
     res.status(500).json({ message: "Unexpected canonicalize error" });
     return;
   }
+
+  await qExec(
+    `UPDATE import_session
+       SET stats_json = ?
+     WHERE id = ? AND household_id = ?`,
+    JSON.stringify({
+      addedCount: canonResult.data.inserted,
+      duplicateCount: canonResult.data.duplicates
+    }),
+    sessionId,
+    householdId
+  );
 
   res.status(200).json({
     parsedFiles: parseResult.data.parsedFiles,

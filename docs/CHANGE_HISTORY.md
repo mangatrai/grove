@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-118c — Import parity upgrades on `/imports` (part 1: backend + history API)
+Date: 2026-04-26
+Files: backend/src/modules/imports/import-upload.service.ts, backend/src/modules/imports/imports.routes.ts, openapi/openapi.yaml, docs/CHANGE_HISTORY.md
+What:
+- Write `import_session.stats_json` after successful canonicalize on `POST /imports/sessions/:sessionId/ofx-confirm` and `POST /imports/sessions/:sessionId/canonicalize` so history matches one-shot upload counts.
+- Add `accountType` on `GET /imports/history` bank items (from first session file’s bound account) for richer labels than generic “bank”.
+Why: CR-118c plan — consistent outcome data on all bank canonicalize paths; OpenAPI reflects response shape (frontend parity in part 2).
+
+---
+
 ## CR-118b — ImportPage complete rebuild with Mantine UI + full feature parity
 Date: 2026-04-26
 Files: frontend/src/pages/ImportPage.tsx (complete rewrite)
