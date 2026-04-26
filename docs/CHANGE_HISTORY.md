@@ -18,13 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## CR-118c — Import parity upgrades on `/imports` (part 1: backend + history API)
+## CR-118c — Import parity upgrades on `/imports`
 Date: 2026-04-26
-Files: backend/src/modules/imports/import-upload.service.ts, backend/src/modules/imports/imports.routes.ts, openapi/openapi.yaml, docs/CHANGE_HISTORY.md
+Files: backend/src/modules/imports/import-upload.service.ts, backend/src/modules/imports/imports.routes.ts, frontend/src/pages/ImportPage.tsx, openapi/openapi.yaml, docs/CHANGE_HISTORY.md
 What:
-- Write `import_session.stats_json` after successful canonicalize on `POST /imports/sessions/:sessionId/ofx-confirm` and `POST /imports/sessions/:sessionId/canonicalize` so history matches one-shot upload counts.
-- Add `accountType` on `GET /imports/history` bank items (from first session file’s bound account) for richer labels than generic “bank”.
-Why: CR-118c plan — consistent outcome data on all bank canonicalize paths; OpenAPI reflects response shape (frontend parity in part 2).
+- **Backend:** Persist `import_session.stats_json` after successful canonicalize on `POST /imports/sessions/:sessionId/ofx-confirm` and `POST /imports/sessions/:sessionId/canonicalize`; add `accountType` on `GET /imports/history` bank items.
+- **Frontend:** Session-based multi-file bank and payslip import on `/imports`; Add account from picker (type list aligned with Advanced Import); lazy expandable per-import details from session summary; Needs Review link for duplicate triage; payslip employer UX for 0/1/many employers.
+Why: CR-118b hid outcomes and dropped multi-file and add-account parity relative to Advanced Import.
 
 ---
 

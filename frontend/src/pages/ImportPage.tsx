@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Badge,
@@ -21,7 +21,7 @@ import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
-import { inferParserProfile, type IncomeInferenceContext } from "../import/inferParserProfile";
+import { inferParserProfile, IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID, type IncomeInferenceContext } from "../import/inferParserProfile";
 import { friendlyParserLabel } from "../import/profileLabels";
 
 type ImportType = "bank" | "payslip";
@@ -41,29 +41,13 @@ type OwnerProfile = { id: string; label: string };
 type ImportHistoryItem = {
   id: string;
   type: "bank" | "payslip";
+  accountType: string | null;
   createdAt: string;
   label: string;
   status: string;
   addedCount: number | null;
   duplicateCount: number | null;
   canUndo: boolean;
-};
-
-type ImportUploadBankResult = {
-  type: "bank";
-  sessionId: string;
-  addedCount: number;
-  duplicateCount: number;
-  parserProfileId: string;
-};
-
-type ImportUploadPayslipResult = {
-  type: "payslip";
-  snapshotId: string;
-  payPeriodStart: string | null;
-  payPeriodEnd: string | null;
-  netPayCurrent: number | null;
-  employerDisplayName: string | null;
 };
 
 type OfxSuggestion = {
@@ -79,9 +63,44 @@ type OfxSuggestion = {
 type OfxPreflightState = {
   loading: boolean;
   failed: boolean;
-  sessionId: string | null;
-  fileId: string | null;
-  suggestion: OfxSuggestion | null;
+};
+
+type PreparedImportFile = {
+  id: string;
+  fileName: string;
+};
+
+type PreparedImportSession = {
+  fileKey: string;
+  sessionId: string;
+  files: PreparedImportFile[];
+  ofxSuggestionByFileId: Record<string, OfxSuggestion>;
+};
+
+type ImportSessionSummaryFile = {
+  fileId: string;
+  fileName: string;
+  status: string;
+  rawRowCount: number;
+  canonicalRowCount: number;
+  nearDuplicatesFlagged: number;
+  openItemsNeedingReview: number;
+  notPostedExactDuplicateOrSkipped: number;
+  reconciliation: {
+    available: boolean;
+    status: "ok" | "mismatch" | "insufficient_data";
+    openingBalance: number | null;
+    closingBalance: number | null;
+    expectedClosingBalance: number | null;
+    netActivity: number | null;
+    variance: number | null;
+    note: string;
+  };
+};
+
+type ImportSessionSummary = {
+  sessionId: string;
+  files: ImportSessionSummaryFile[];
 };
 
 function parseBelongsToChoice(choice: string): { ownerScope: "household" | "person"; ownerPersonProfileId: string | null } {
@@ -92,6 +111,13 @@ function parseBelongsToChoice(choice: string): { ownerScope: "household" | "pers
     }
   }
   return { ownerScope: "household", ownerPersonProfileId: null };
+}
+
+function formatAccountTypeLabel(type: string | null): string {
+  if (!type) {
+    return "Bank";
+  }
+  return type.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function buildAccountGroups(accounts: FinancialAccount[]): HierarchicalPickerGroup[] {
@@ -114,7 +140,9 @@ function buildAccountGroups(accounts: FinancialAccount[]): HierarchicalPickerGro
     }));
 }
 
-function mapOfxTypeToAccountType(t: string | null): string {
+const ADDABLE_ACCOUNT_TYPES = ["checking", "savings", "credit_card", "loan", "investment"] as const;
+
+function mapOfxTypeToAccountType(t: string | null): (typeof ADDABLE_ACCOUNT_TYPES)[number] {
   if (!t) {
     return "checking";
   }
@@ -125,6 +153,13 @@ function mapOfxTypeToAccountType(t: string | null): string {
     return "savings";
   }
   return "checking";
+}
+
+function fileListKey(files: File[]): string {
+  return files
+    .map((f) => `${f.name}:${f.size}:${f.lastModified}`)
+    .sort()
+    .join("|");
 }
 
 function isOfxFileName(fileName: string | null | undefined): boolean {
@@ -151,7 +186,7 @@ export function ImportPage() {
   const token = useAuthToken();
   const { role: currentRole, personProfileId: currentPersonProfileId } = useCurrentUser();
   const [importType, setImportType] = useState<ImportType>("bank");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [financialAccountId, setFinancialAccountId] = useState<string | null>(null);
   const [employerId, setEmployerId] = useState("");
   const [belongsToChoice, setBelongsToChoice] = useState<BelongsToChoice>("household");
@@ -163,16 +198,11 @@ export function ImportPage() {
   const [history, setHistory] = useState<ImportHistoryItem[]>([]);
 
   const [detectedProfileId, setDetectedProfileId] = useState<string | null>(null);
-  const [ofxState, setOfxState] = useState<OfxPreflightState>({
-    loading: false,
-    failed: false,
-    sessionId: null,
-    fileId: null,
-    suggestion: null
-  });
+  const [ofxState, setOfxState] = useState<OfxPreflightState>({ loading: false, failed: false });
+  const [preparedSession, setPreparedSession] = useState<PreparedImportSession | null>(null);
 
   const [showCreateAccount, setShowCreateAccount] = useState(false);
-  const [createAccountType, setCreateAccountType] = useState("checking");
+  const [createAccountType, setCreateAccountType] = useState<(typeof ADDABLE_ACCOUNT_TYPES)[number]>("checking");
   const [createInstitution, setCreateInstitution] = useState<string | null>(null);
   const [createLast4, setCreateLast4] = useState("");
   const [createBelongsToChoice, setCreateBelongsToChoice] = useState<BelongsToChoice>("household");
@@ -186,10 +216,16 @@ export function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [undoTarget, setUndoTarget] = useState<ImportHistoryItem | null>(null);
+  const [expandedHistoryRows, setExpandedHistoryRows] = useState<Record<string, boolean>>({});
+  const [summaryBySessionId, setSummaryBySessionId] = useState<Record<string, ImportSessionSummary | undefined>>({});
+  const [summaryLoadingBySessionId, setSummaryLoadingBySessionId] = useState<Record<string, boolean>>({});
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const sniffRunRef = useRef(0);
 
+  const currentFileKey = useMemo(() => fileListKey(files), [files]);
+  const hasOfxFiles = useMemo(() => files.some((f) => isOfxFileName(f.name)), [files]);
   const bankAccounts = useMemo(() => accounts.filter((a) => a.type !== "payslip"), [accounts]);
+  const payslipAccount = useMemo(() => accounts.find((a) => a.type === "payslip") ?? null, [accounts]);
   const accountGroups = useMemo(() => buildAccountGroups(bankAccounts), [bankAccounts]);
   const selectedAccount = useMemo(
     () => (financialAccountId ? bankAccounts.find((a) => a.id === financialAccountId) : undefined),
@@ -221,9 +257,9 @@ export function ImportPage() {
   );
   const canSubmit =
     !loading &&
-    !!file &&
+    files.length > 0 &&
     (importType === "payslip" || !!financialAccountId) &&
-    !(importType === "bank" && isOfxFileName(file?.name) && ofxState.loading);
+    !(importType === "bank" && hasOfxFiles && ofxState.loading);
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -251,62 +287,138 @@ export function ImportPage() {
     }
   }, [institutionCatalog.length, loadingInstitutions]);
 
+  function resetCreateAccountForm() {
+    setCreateAccountType("checking");
+    setCreateInstitution(null);
+    setCreateLast4("");
+    if (currentRole === "member" && currentPersonProfileId) {
+      setCreateBelongsToChoice(`person:${currentPersonProfileId}`);
+    } else {
+      setCreateBelongsToChoice("household");
+    }
+    setShowCreateAccount(false);
+  }
+
+  function parseApiError(text: string, fallback: string): { code?: string; message: string } {
+    if (!text) {
+      return { message: fallback };
+    }
+    try {
+      const parsed = JSON.parse(text) as { code?: string; message?: string };
+      return { code: parsed.code, message: parsed.message ?? fallback };
+    } catch {
+      return { message: text };
+    }
+  }
+
+  const prepareSessionForFiles = useCallback(
+    async (nextFiles: File[], includeOfxSuggestions: boolean): Promise<PreparedImportSession> => {
+      const key = fileListKey(nextFiles);
+      if (
+        preparedSession &&
+        preparedSession.fileKey === key &&
+        (!includeOfxSuggestions ||
+          !nextFiles.some((f) => isOfxFileName(f.name)) ||
+          Object.keys(preparedSession.ofxSuggestionByFileId).length > 0)
+      ) {
+        return preparedSession;
+      }
+
+      const sessionRes = await apiJson<{ session: { id: string } }>("/imports/sessions", {
+        method: "POST",
+        body: JSON.stringify({ sourceType: "upload" })
+      });
+      const sessionId = sessionRes.session.id;
+      const uploadForm = new FormData();
+      for (const file of nextFiles) {
+        uploadForm.append("files", file);
+      }
+      const uploadRes = await apiFetch(`/imports/sessions/${sessionId}/files`, { method: "POST", body: uploadForm });
+      const uploadText = await uploadRes.text();
+      if (!uploadRes.ok) {
+        const err = parseApiError(uploadText, "File upload failed");
+        throw new Error(err.message);
+      }
+      const uploadBody = uploadText
+        ? (JSON.parse(uploadText) as {
+            files?: Array<{ id: string; fileName?: string; file_name?: string }>;
+          })
+        : {};
+      const uploadedFiles: PreparedImportFile[] = (uploadBody.files ?? []).map((f, idx) => ({
+        id: f.id,
+        fileName: f.fileName ?? f.file_name ?? nextFiles[idx]?.name ?? ""
+      }));
+
+      const ofxSuggestionByFileId: Record<string, OfxSuggestion> = {};
+      if (includeOfxSuggestions) {
+        for (const uploaded of uploadedFiles) {
+          if (!isOfxFileName(uploaded.fileName)) {
+            continue;
+          }
+          try {
+            const suggestion = await apiJson<OfxSuggestion>(
+              `/imports/sessions/${sessionId}/files/${uploaded.id}/ofx-suggestion`
+            );
+            ofxSuggestionByFileId[uploaded.id] = suggestion;
+          } catch {
+            // non-fatal; caller handles fallback UI
+          }
+        }
+      }
+
+      const prepared: PreparedImportSession = {
+        fileKey: key,
+        sessionId,
+        files: uploadedFiles,
+        ofxSuggestionByFileId
+      };
+      setPreparedSession(prepared);
+      return prepared;
+    },
+    [preparedSession]
+  );
+
   const runOfxPreflight = useCallback(
-    async (nextFile: File) => {
+    async (nextFiles: File[]) => {
+      if (!nextFiles.some((f) => isOfxFileName(f.name))) {
+        setOfxState({ loading: false, failed: false });
+        return;
+      }
       const thisRun = ++sniffRunRef.current;
-      setOfxState({ loading: true, failed: false, sessionId: null, fileId: null, suggestion: null });
+      setOfxState({ loading: true, failed: false });
       try {
-        const sessionRes = await apiJson<{ session: { id: string } }>("/imports/sessions", {
-          method: "POST",
-          body: JSON.stringify({ sourceType: "upload" })
-        });
-        const sessionId = sessionRes.session.id;
-        const uploadForm = new FormData();
-        uploadForm.append("files", nextFile);
-        const uploadRes = await apiFetch(`/imports/sessions/${sessionId}/files`, {
-          method: "POST",
-          body: uploadForm
-        });
-        if (!uploadRes.ok) {
-          throw new Error("OFX preflight upload failed");
-        }
-        const uploadJson = (await uploadRes.json()) as { files?: Array<{ id: string }> };
-        const fileId = uploadJson.files?.[0]?.id;
-        if (!fileId) {
-          throw new Error("OFX preflight missing import file id");
-        }
-        const suggestion = await apiJson<OfxSuggestion>(
-          `/imports/sessions/${sessionId}/files/${fileId}/ofx-suggestion`
-        );
+        const prepared = await prepareSessionForFiles(nextFiles, true);
         if (sniffRunRef.current !== thisRun) {
           return;
         }
-
-        if (suggestion.matchedAccountId) {
-          setFinancialAccountId(suggestion.matchedAccountId);
-          if (sessionId && fileId) {
-            await apiJson(`/imports/sessions/${sessionId}/files/${fileId}`, {
-              method: "PATCH",
-              body: JSON.stringify({
-                financialAccountId: suggestion.matchedAccountId,
-                parserProfileId: "ofx_transactions",
-                ownerScope: "household",
-                ownerPersonProfileId: null
-              })
-            }).catch(() => {
-              // Non-fatal; explicit confirm payload still includes selected account and owner.
-            });
-          }
+        const matched = Object.values(prepared.ofxSuggestionByFileId).find((s) => s.matchedAccountId);
+        if (matched?.matchedAccountId) {
+          setFinancialAccountId(matched.matchedAccountId);
         }
-        setOfxState({ loading: false, failed: false, sessionId, fileId, suggestion });
+        setOfxState({ loading: false, failed: false });
       } catch {
         if (sniffRunRef.current === thisRun) {
-          setOfxState({ loading: false, failed: true, sessionId: null, fileId: null, suggestion: null });
+          setOfxState({ loading: false, failed: true });
         }
       }
     },
-    []
+    [prepareSessionForFiles]
   );
+
+  const loadSummaryForSession = useCallback(async (sessionId: string) => {
+    if (summaryBySessionId[sessionId] || summaryLoadingBySessionId[sessionId]) {
+      return;
+    }
+    setSummaryLoadingBySessionId((prev) => ({ ...prev, [sessionId]: true }));
+    try {
+      const summary = await apiJson<ImportSessionSummary>(`/imports/sessions/${sessionId}/summary`);
+      setSummaryBySessionId((prev) => ({ ...prev, [sessionId]: summary }));
+    } catch {
+      setSummaryBySessionId((prev) => ({ ...prev, [sessionId]: undefined }));
+    } finally {
+      setSummaryLoadingBySessionId((prev) => ({ ...prev, [sessionId]: false }));
+    }
+  }, [summaryBySessionId, summaryLoadingBySessionId]);
 
   useEffect(() => {
     if (!token) {
@@ -357,16 +469,20 @@ export function ImportPage() {
   }, [currentRole, currentPersonProfileId]);
 
   useEffect(() => {
-    if (importType !== "bank" || !selectedAccount || !file) {
+    if (importType !== "bank" || !selectedAccount || files.length === 0) {
       setDetectedProfileId(null);
       return;
     }
-    const inferred = inferParserProfile(selectedAccount, file.name, incomeInference);
+    const inferred = inferParserProfile(selectedAccount, files[0]?.name ?? "", incomeInference);
     setDetectedProfileId(inferred);
-  }, [file, importType, incomeInference, selectedAccount]);
+  }, [files, importType, incomeInference, selectedAccount]);
 
   useEffect(() => {
     if (importType !== "payslip") {
+      return;
+    }
+    if (employers.length === 0) {
+      setDetectedProfileId(IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
       return;
     }
     const selectedEmployer = employers.find((e) => e.id === employerId);
@@ -374,8 +490,8 @@ export function ImportPage() {
       setDetectedProfileId(selectedEmployer.parserProfileId);
       return;
     }
-    if (!selectedEmployer && employers.length === 1) {
-      setDetectedProfileId(employers[0]?.parserProfileId ?? "ibm_pay_contributions_pdf");
+    if (employers.length === 1) {
+      setDetectedProfileId(employers[0]?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID);
       return;
     }
     setDetectedProfileId(null);
@@ -389,25 +505,20 @@ export function ImportPage() {
   }, [loadInstitutions, showCreateAccount]);
 
   useEffect(() => {
-    if (importType !== "bank" || !file || !isOfxFileName(file.name)) {
-      setOfxState({ loading: false, failed: false, sessionId: null, fileId: null, suggestion: null });
-      setShowCreateAccount(false);
+    if (importType !== "bank" || files.length === 0) {
+      setPreparedSession(null);
+      setOfxState({ loading: false, failed: false });
+      resetCreateAccountForm();
       return;
     }
-    void runOfxPreflight(file);
-  }, [file, importType, runOfxPreflight]);
-
-  function parseErrorMessageFromResponse(status: number, statusText: string, text: string): { code?: string; message: string } {
-    if (!text) {
-      return { message: `${status} ${statusText}` };
+    if (files.some((f) => isOfxFileName(f.name))) {
+      void runOfxPreflight(files);
+    } else {
+      setOfxState({ loading: false, failed: false });
+      setPreparedSession(null);
+      resetCreateAccountForm();
     }
-    try {
-      const parsed = JSON.parse(text) as { code?: string; message?: string };
-      return { code: parsed.code, message: parsed.message ?? `${status} ${statusText}` };
-    } catch {
-      return { message: text };
-    }
-  }
+  }, [currentFileKey, files, importType, runOfxPreflight]);
 
   if (!token) {
     return <Navigate to="/" replace />;
@@ -418,8 +529,8 @@ export function ImportPage() {
     setError(null);
     setSuccess(null);
 
-    if (!file) {
-      setError("Please choose a file.");
+    if (files.length === 0) {
+      setError("Please choose at least one file.");
       return;
     }
     if (importType === "bank" && !financialAccountId) {
@@ -429,69 +540,140 @@ export function ImportPage() {
 
     setLoading(true);
     try {
-      const ownership = parseBelongsToChoice(belongsToChoice);
-      const isOfxBankImport = importType === "bank" && isOfxFileName(file.name) && !ofxState.failed && !!ofxState.sessionId && !!ofxState.fileId;
-
-      if (isOfxBankImport) {
-        const res = await apiFetch(`/imports/sessions/${ofxState.sessionId}/ofx-confirm`, {
-          method: "POST",
-          body: JSON.stringify({
-            fileId: ofxState.fileId,
-            financialAccountId,
-            ownerScope: ownership.ownerScope,
-            ownerPersonProfileId: ownership.ownerPersonProfileId
-          })
-        });
-        const text = await res.text();
-        const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-        if (!res.ok) {
-          const err = parseErrorMessageFromResponse(res.status, res.statusText, text);
-          setError(err.message);
-          return;
-        }
-        const added = Number(body.inserted ?? 0);
-        const dupes = Number(body.duplicates ?? 0);
-        setSuccess(`Import complete. ${added} added · ${dupes} duplicates.`);
+      let session: PreparedImportSession;
+      if (preparedSession && preparedSession.fileKey === currentFileKey) {
+        session = preparedSession;
       } else {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("importType", importType);
-        if (importType === "bank" && financialAccountId) {
-          form.append("financialAccountId", financialAccountId);
-        } else if (employerId) {
-          form.append("employerId", employerId);
-        }
-        const res = await apiFetch("/imports/upload", { method: "POST", body: form });
-        const text = await res.text();
-        const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-        if (!res.ok) {
-          const code = String((body.code ?? "") as string);
-          if (code === "PROFILE_INFERENCE_FAILED") {
+        session = await prepareSessionForFiles(files, importType === "bank");
+      }
+
+      const ownership = parseBelongsToChoice(belongsToChoice);
+      if (importType === "bank") {
+        for (const uploaded of session.files) {
+          const isOfx = isOfxFileName(uploaded.fileName);
+          const parserProfileId = isOfx
+            ? "ofx_transactions"
+            : inferParserProfile(selectedAccount, uploaded.fileName, incomeInference);
+          if (!parserProfileId) {
             setError("Format not recognised for this file/account combination. Try Advanced Import.");
-          } else if (code === "DUPLICATE_PAYSLIP") {
-            setError("This payslip file has already been uploaded.");
-          } else {
-            setError(String((body.message ?? `${res.status} ${res.statusText}`) as string));
+            return;
           }
+          await apiJson(`/imports/sessions/${session.sessionId}/files/${uploaded.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              financialAccountId,
+              parserProfileId,
+              ownerScope: ownership.ownerScope,
+              ownerPersonProfileId: ownership.ownerPersonProfileId
+            })
+          });
+        }
+      } else {
+        if (!payslipAccount) {
+          setError("Payslip import account is not available. Please refresh and try again.");
           return;
         }
-
-        if ((body.type as string) === "bank") {
-          const payload = body as unknown as ImportUploadBankResult;
-          setSuccess(`Import complete. ${payload.addedCount} added · ${payload.duplicateCount} duplicates.`);
-        } else {
-          const payload = body as unknown as ImportUploadPayslipResult;
-          setSuccess(
-            `Payslip saved${payload.employerDisplayName ? ` for ${payload.employerDisplayName}` : ""}. Net pay: ${fmtMoney(payload.netPayCurrent)}.`
-          );
+        let resolvedEmployerId: string | null = null;
+        let resolvedParserProfileId = IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+        if (employers.length === 1) {
+          resolvedEmployerId = employers[0]!.id;
+          resolvedParserProfileId = employers[0]!.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+        } else if (employers.length > 1) {
+          if (!employerId) {
+            setError("Please choose an employer for payslip import.");
+            return;
+          }
+          const selectedEmployer = employers.find((emp) => emp.id === employerId);
+          if (!selectedEmployer) {
+            setError("Selected employer is invalid.");
+            return;
+          }
+          resolvedEmployerId = selectedEmployer.id;
+          resolvedParserProfileId = selectedEmployer.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+        }
+        for (const uploaded of session.files) {
+          await apiJson(`/imports/sessions/${session.sessionId}/files/${uploaded.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              financialAccountId: payslipAccount.id,
+              parserProfileId: resolvedParserProfileId,
+              employerId: resolvedEmployerId,
+              ownerScope: ownership.ownerScope,
+              ownerPersonProfileId: ownership.ownerPersonProfileId
+            })
+          });
         }
       }
-      setFile(null);
-      setOfxState({ loading: false, failed: false, sessionId: null, fileId: null, suggestion: null });
-      setShowCreateAccount(false);
+
+      const parseRes = await apiFetch(`/imports/sessions/${session.sessionId}/parse`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      const parseText = await parseRes.text();
+      if (!parseRes.ok) {
+        const err = parseApiError(parseText, `${parseRes.status} ${parseRes.statusText}`);
+        setError(err.message);
+        return;
+      }
+      const parseBody = parseText
+        ? (JSON.parse(parseText) as {
+            parsedFiles?: number;
+            parsedRows?: number;
+            skippedFiles?: Array<{ fileId: string; reason: string }>;
+          })
+        : {};
+
+      const canonicalizeRes = await apiFetch(`/imports/sessions/${session.sessionId}/canonicalize`, {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      const canonicalizeText = await canonicalizeRes.text();
+      if (!canonicalizeRes.ok) {
+        const err = parseApiError(canonicalizeText, `${canonicalizeRes.status} ${canonicalizeRes.statusText}`);
+        setError(err.message);
+        return;
+      }
+      const canonicalizeBody = canonicalizeText
+        ? (JSON.parse(canonicalizeText) as { inserted?: number; duplicates?: number; skipped?: number })
+        : {};
+
+      if (importType === "bank") {
+        setSuccess(
+          `Import complete. ${Number(canonicalizeBody.inserted ?? 0)} added · ${Number(
+            canonicalizeBody.duplicates ?? 0
+          )} duplicates · ${Number(parseBody.parsedRows ?? 0)} parsed rows.`
+        );
+      } else {
+        setSuccess(
+          `Payslip import complete. ${Number(parseBody.parsedFiles ?? 0)} file(s) parsed; ${
+            parseBody.skippedFiles?.length ?? 0
+          } skipped.`
+        );
+      }
+
+      setSummaryBySessionId((prev) => {
+        const next = { ...prev };
+        delete next[session.sessionId];
+        return next;
+      });
+      if (expandedHistoryRows[session.sessionId]) {
+        void loadSummaryForSession(session.sessionId);
+      }
+
+      setFiles([]);
+      setPreparedSession(null);
+      setOfxState({ loading: false, failed: false });
+      resetCreateAccountForm();
       await loadHistory();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      if (msg.includes("DUPLICATE_PAYSLIP")) {
+        setError("This payslip file has already been uploaded.");
+      } else if (msg.includes("PROFILE_INFERENCE_FAILED")) {
+        setError("Format not recognised for this file/account combination. Try Advanced Import.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -519,17 +701,8 @@ export function ImportPage() {
       const accRes = await apiJson<{ accounts: FinancialAccount[] }>("/imports/accounts");
       setAccounts(accRes.accounts ?? []);
       setFinancialAccountId(created.id);
-      setShowCreateAccount(false);
-      if (ofxState.suggestion) {
-        setOfxState({
-          ...ofxState,
-          suggestion: {
-            ...ofxState.suggestion,
-            matchedAccountId: created.id
-          }
-        });
-      }
       setSuccess("Account created and selected.");
+      resetCreateAccountForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create account");
     } finally {
@@ -550,19 +723,19 @@ export function ImportPage() {
     const res = await apiFetch(endpoint, { method });
     if (!res.ok) {
       const text = await res.text();
-      try {
-        const parsed = JSON.parse(text) as { message?: string };
-        throw new Error(parsed.message || "Undo failed");
-      } catch {
-        throw new Error(text || "Undo failed");
-      }
+      throw new Error(parseApiError(text, "Undo failed").message);
     }
     setSuccess(undoTarget.type === "bank" ? "Import undone successfully." : "Payslip deleted successfully.");
     await loadHistory();
   }
 
+  const ofxSuggestions = useMemo(() => preparedSession?.ofxSuggestionByFileId ?? {}, [preparedSession]);
+  const firstOfxSuggestion = useMemo(
+    () => Object.values(ofxSuggestions)[0] ?? null,
+    [ofxSuggestions]
+  );
   const ofxMessage = useMemo(() => {
-    const suggestion = ofxState.suggestion;
+    const suggestion = firstOfxSuggestion;
     if (!suggestion) {
       return null;
     }
@@ -575,7 +748,7 @@ export function ImportPage() {
     if (suggestion.matchedAccountId) {
       return {
         color: "green",
-        text: `OFX: ${last4}${acctType} - matched.`,
+        text: `OFX: ${last4}${acctType} \u2713 matched`,
         balance
       };
     }
@@ -584,7 +757,17 @@ export function ImportPage() {
       text: `No account found for ${last4}${acctType}. Pick an account above or create new account.`,
       balance
     };
-  }, [ofxState.suggestion]);
+  }, [firstOfxSuggestion]);
+
+  function toggleRowDetails(item: ImportHistoryItem) {
+    if (item.type !== "bank") {
+      return;
+    }
+    setExpandedHistoryRows((prev) => ({ ...prev, [item.id]: !prev[item.id] }));
+    if (!expandedHistoryRows[item.id]) {
+      void loadSummaryForSession(item.id);
+    }
+  }
 
   return (
     <Stack gap="md" mt="md">
@@ -637,6 +820,18 @@ export function ImportPage() {
                 groups={accountGroups}
                 placeholder="Choose account"
                 ariaLabel="Bank account picker"
+                footer={
+                  <Button
+                    variant="subtle"
+                    size="compact-xs"
+                    onClick={() => {
+                      setCreateBelongsToChoice(belongsToChoice);
+                      setShowCreateAccount(true);
+                    }}
+                  >
+                    Add account
+                  </Button>
+                }
               />
               {detectedProfileId ? (
                 <Text size="xs" c="dimmed">Detected format: {friendlyParserLabel(detectedProfileId)}</Text>
@@ -644,17 +839,21 @@ export function ImportPage() {
             </Stack>
           ) : (
             <Stack gap={6}>
-              <Select
-                label="Employer"
-                placeholder="Auto-select"
-                data={[
-                  { value: "", label: "Auto-select" },
-                  ...employers.map((e) => ({ value: e.id, label: e.displayName }))
-                ]}
-                value={employerId}
-                onChange={(value) => setEmployerId(value ?? "")}
-                clearable={false}
-              />
+              {employers.length === 0 ? (
+                <Text size="sm" c="dimmed">Employer: Auto-detect (IBM default)</Text>
+              ) : employers.length === 1 ? (
+                <Text size="sm" c="dimmed">Employer: {employers[0]?.displayName}</Text>
+              ) : (
+                <Select
+                  label="Employer"
+                  placeholder="Select employer"
+                  data={employers.map((e) => ({ value: e.id, label: e.displayName }))}
+                  value={employerId || null}
+                  onChange={(value) => setEmployerId(value ?? "")}
+                  allowDeselect={false}
+                  withAsterisk
+                />
+              )}
               {detectedProfileId ? (
                 <Text size="xs" c="dimmed">Detected format: {friendlyParserLabel(detectedProfileId)}</Text>
               ) : null}
@@ -670,34 +869,42 @@ export function ImportPage() {
           />
 
           <FileInput
-            label="File"
-            placeholder="Choose file"
-            value={file}
-            onChange={setFile}
+            label="Files"
+            placeholder="Choose one or more files"
+            value={files}
+            onChange={(value) => {
+              if (!value) {
+                setFiles([]);
+                return;
+              }
+              setFiles(Array.isArray(value) ? value : [value]);
+            }}
             accept=".csv,.pdf,.ofx,.qfx,.qbo"
+            multiple
+            clearable
           />
 
-          {ofxState.failed && importType === "bank" && file && isOfxFileName(file.name) ? (
+          {ofxState.failed && importType === "bank" && hasOfxFiles ? (
             <Text size="xs" c="dimmed">
               OFX detection unavailable right now. Continue by selecting account manually.
             </Text>
           ) : null}
-          {ofxMessage && importType === "bank" && file && isOfxFileName(file.name) ? (
+          {ofxMessage && importType === "bank" && hasOfxFiles ? (
             <Stack gap={2}>
               <Text size="xs" c={ofxMessage.color === "green" ? "green" : "orange"}>
                 {ofxMessage.text}
               </Text>
               {ofxMessage.balance ? <Text size="xs" c="dimmed">{ofxMessage.balance}</Text> : null}
-              {!ofxState.suggestion?.matchedAccountId ? (
+              {!firstOfxSuggestion?.matchedAccountId ? (
                 <Text size="xs">
                   <Button
                     variant="subtle"
                     size="compact-xs"
                     onClick={() => {
                       setShowCreateAccount(true);
-                      setCreateAccountType(mapOfxTypeToAccountType(ofxState.suggestion?.normalizedAcctType ?? null));
-                      setCreateInstitution(ofxState.suggestion?.institution ?? null);
-                      setCreateLast4(ofxState.suggestion?.acctIdLast4 ?? "");
+                      setCreateAccountType(mapOfxTypeToAccountType(firstOfxSuggestion?.normalizedAcctType ?? null));
+                      setCreateInstitution(firstOfxSuggestion?.institution ?? null);
+                      setCreateLast4(firstOfxSuggestion?.acctIdLast4 ?? "");
                       setCreateBelongsToChoice(belongsToChoice);
                     }}
                   >
@@ -719,7 +926,7 @@ export function ImportPage() {
       {showCreateAccount ? (
         <Paper withBorder shadow="sm" p="md">
           <Stack gap="sm">
-            <Text fw={600}>Create account for OFX file</Text>
+            <Text fw={600}>Add account</Text>
             {loadingInstitutions ? (
               <Group>
                 <Loader size="xs" />
@@ -728,17 +935,9 @@ export function ImportPage() {
             ) : null}
             <Select
               label="Type"
-              data={[
-                { value: "checking", label: "checking" },
-                { value: "savings", label: "savings" },
-                { value: "credit_card", label: "credit_card" },
-                { value: "investment", label: "investment" },
-                { value: "loan", label: "loan" },
-                { value: "mortgage", label: "mortgage" },
-                { value: "retirement", label: "retirement" }
-              ]}
+              data={ADDABLE_ACCOUNT_TYPES.map((value) => ({ value, label: formatAccountTypeLabel(value) }))}
               value={createAccountType}
-              onChange={(value) => setCreateAccountType(value ?? "checking")}
+              onChange={(value) => setCreateAccountType((value as (typeof ADDABLE_ACCOUNT_TYPES)[number]) ?? "checking")}
               allowDeselect={false}
             />
             <Stack gap={6}>
@@ -770,7 +969,7 @@ export function ImportPage() {
               <Button onClick={() => void createAccountFromOfx()} loading={savingAccount}>
                 Save
               </Button>
-              <Button variant="default" onClick={() => setShowCreateAccount(false)} disabled={savingAccount}>
+              <Button variant="default" onClick={() => resetCreateAccountForm()} disabled={savingAccount}>
                 Cancel
               </Button>
             </Group>
@@ -797,38 +996,101 @@ export function ImportPage() {
                     <Table.Th>Type</Table.Th>
                     <Table.Th>File</Table.Th>
                     <Table.Th>Result</Table.Th>
+                    <Table.Th>Details</Table.Th>
                     <Table.Th />
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {history.map((item) => (
-                    <Table.Tr key={`${item.type}-${item.id}`}>
-                      <Table.Td>{fmtDate(item.createdAt)}</Table.Td>
-                      <Table.Td>
-                        <Badge variant="light" color={item.type === "bank" ? "blue" : "grape"}>
-                          {item.type === "bank" ? "Bank" : "Payslip"}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>{item.label}</Table.Td>
-                      <Table.Td>
-                        {item.type === "bank"
-                          ? item.addedCount == null && item.duplicateCount == null
-                            ? "—"
-                            : `${item.addedCount ?? 0} added · ${item.duplicateCount ?? 0} duplicates`
-                          : "—"}
-                      </Table.Td>
-                      <Table.Td style={{ textAlign: "right" }}>
-                        <Button
-                          variant="subtle"
-                          color="red"
-                          disabled={!item.canUndo}
-                          onClick={() => setUndoTarget(item)}
-                        >
-                          Undo
-                        </Button>
-                      </Table.Td>
-                    </Table.Tr>
-                  ))}
+                  {history.map((item) => {
+                    const expanded = Boolean(expandedHistoryRows[item.id]);
+                    const summary = summaryBySessionId[item.id];
+                    const isSummaryLoading = Boolean(summaryLoadingBySessionId[item.id]);
+                    return (
+                      <Fragment key={`${item.type}-${item.id}`}>
+                        <Table.Tr key={`${item.type}-${item.id}`}>
+                          <Table.Td>{fmtDate(item.createdAt)}</Table.Td>
+                          <Table.Td>
+                            <Badge variant="light" color={item.type === "bank" ? "blue" : "grape"}>
+                              {item.type === "bank" ? formatAccountTypeLabel(item.accountType) : "Payslip"}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>{item.label}</Table.Td>
+                          <Table.Td>
+                            {item.type === "bank"
+                              ? item.addedCount == null && item.duplicateCount == null
+                                ? "—"
+                                : `${item.addedCount ?? 0} added · ${item.duplicateCount ?? 0} duplicates`
+                              : "—"}
+                          </Table.Td>
+                          <Table.Td>
+                            <Button
+                              variant="subtle"
+                              size="compact-sm"
+                              disabled={item.type !== "bank"}
+                              onClick={() => toggleRowDetails(item)}
+                            >
+                              {expanded ? "Hide" : "Show"}
+                            </Button>
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            <Button
+                              variant="subtle"
+                              color="red"
+                              disabled={!item.canUndo}
+                              onClick={() => setUndoTarget(item)}
+                            >
+                              Undo
+                            </Button>
+                          </Table.Td>
+                        </Table.Tr>
+                        {item.type === "bank" && expanded ? (
+                          <Table.Tr key={`${item.id}-details`}>
+                            <Table.Td colSpan={6}>
+                              {isSummaryLoading ? (
+                                <Group>
+                                  <Loader size="xs" />
+                                  <Text size="xs" c="dimmed">Loading details...</Text>
+                                </Group>
+                              ) : summary ? (
+                                <Stack gap={6}>
+                                  <Text size="xs" c="dimmed">
+                                    Not posted includes exact duplicates or skipped lines. Near duplicates are sent to{" "}
+                                    <Link to="/transactions?needsReview=true">Transactions → Needs Review</Link>.
+                                  </Text>
+                                  <Table withTableBorder withColumnBorders>
+                                    <Table.Thead>
+                                      <Table.Tr>
+                                        <Table.Th>File status</Table.Th>
+                                        <Table.Th>Parsed rows</Table.Th>
+                                        <Table.Th>Posted to ledger</Table.Th>
+                                        <Table.Th>Near-duplicates flagged</Table.Th>
+                                        <Table.Th>Not posted (dup / skip)</Table.Th>
+                                        <Table.Th>Reconciliation</Table.Th>
+                                      </Table.Tr>
+                                    </Table.Thead>
+                                    <Table.Tbody>
+                                      {summary.files.map((f) => (
+                                        <Table.Tr key={f.fileId}>
+                                          <Table.Td>{f.fileName} ({f.status})</Table.Td>
+                                          <Table.Td>{f.rawRowCount}</Table.Td>
+                                          <Table.Td>{f.canonicalRowCount}</Table.Td>
+                                          <Table.Td>{f.nearDuplicatesFlagged}</Table.Td>
+                                          <Table.Td>{f.notPostedExactDuplicateOrSkipped}</Table.Td>
+                                          <Table.Td>{f.reconciliation.available ? f.reconciliation.status : "N/A"}</Table.Td>
+                                        </Table.Tr>
+                                      ))}
+                                    </Table.Tbody>
+                                  </Table>
+                                </Stack>
+                              ) : (
+                                <Text size="xs" c="dimmed">Details unavailable for this import.</Text>
+                              )}
+                            </Table.Td>
+                          </Table.Tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </Table.Tbody>
               </Table>
             </div>
