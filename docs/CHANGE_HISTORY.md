@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-118b — ImportPage complete rebuild with Mantine UI + full feature parity
+Date: 2026-04-26
+Files: frontend/src/pages/ImportPage.tsx (complete rewrite)
+What: Full Mantine UI, OFX detection using existing session API (create session + upload + ofx-suggestion + ofx-confirm), inline account creation, belongs-to assignment, client-side format inference label, import history with undo. No new backend endpoints.
+Why: CR-118 initial build used plain HTML and dropped OFX detection, belongs-to, and account creation.
+
+---
+
 ## 2026-04-26 (CR-118 import simplification — v2)
 
 ### CR-118 — One-shot import upload, unified history, and primary Import page
