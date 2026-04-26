@@ -8,6 +8,7 @@ import { CategoryRulesPage } from "./pages/CategoryRulesPage";
 import { HomeRoute } from "./pages/HomeRoute";
 import { NetWorthPage } from "./pages/NetWorthPage";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
+import { ImportPage } from "./pages/ImportPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PayslipDetailPage } from "./pages/PayslipDetailPage";
 import { PayslipManualPage } from "./pages/PayslipManualPage";
@@ -33,7 +34,8 @@ export function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
           <Route path="/import" element={<Navigate to="/imports" replace />} />
-          <Route path="/imports" element={<ImportWorkspacePage />} />
+          <Route path="/imports" element={<ImportPage />} />
+          <Route path="/imports/workspace" element={<ImportWorkspacePage />} />
           <Route path="/imports/:sessionId" element={<ImportWorkspacePage />} />
         </Route>
         <Route path="/dashboard" element={<Navigate to="/" replace />} />
