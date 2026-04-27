@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-120 (2026-04-27): Home screen overhaul with legacy fallback
+- Rebuilt the home screen into a new three-zone dashboard layout (Pulse, Action Items, Summary Cards, and 6-month trend) with month navigation and partial data rendering.
+- Added `DashboardPageLegacy.tsx` as a preserved one-click fallback and introduced `dashboard_classic` localStorage toggle between classic and new views.
+- Rewired `DashboardPage.tsx` to transparently export the new implementation (`DashboardPageV2`) without route changes.
+Files: frontend/src/pages/DashboardPageLegacy.tsx, frontend/src/pages/DashboardPageV2.tsx, frontend/src/pages/DashboardPage.tsx, docs/CHANGE_HISTORY.md
+
+---
+
 ## FIX-119 (2026-04-27): Route silent duplicate drops to Needs Review with FITID-aware messaging
 - canonical-ingest.service.ts: in-session FITID dedup and in-session fingerprint dedup no longer silently drop transactions
 - Both paths now call insertExactDuplicateForReview: status='duplicate' canonical row + resolution_item created, visible in Transactions -> Needs Review
