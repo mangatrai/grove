@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { IconArrowBackUp, IconLock, IconPlayerPlay, IconTrash, IconUpload } from "@tabler/icons-react";
+import { IconArrowBackUp, IconPlayerPlay, IconTrash, IconUpload } from "@tabler/icons-react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, getToken } from "../api";
@@ -119,35 +119,6 @@ function isUuid(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 }
 
-function messageFromApiError(err: unknown): string {
-  if (!(err instanceof Error)) {
-    return "Request failed";
-  }
-  const text = err.message;
-  const jsonStart = text.indexOf("{");
-  if (jsonStart >= 0) {
-    try {
-      const j = JSON.parse(text.slice(jsonStart)) as {
-        code?: string;
-        message?: string;
-        from?: string;
-        to?: string;
-      };
-      if (j.code === "INVALID_TRANSITION") {
-        const detail =
-          j.from != null && j.to != null ? ` Current status “${j.from}” cannot move to “${j.to}”.` : "";
-        return `${j.message ?? "Invalid session status change"}${detail}`.trim();
-      }
-      if (typeof j.message === "string" && j.message.length > 0) {
-        return j.message;
-      }
-    } catch {
-      /* use raw message */
-    }
-  }
-  return text;
-}
-
 function friendlyImportSkipReason(reason: string): string {
   if (reason === "payslip_pdf_extract_unreadable") {
     return "payslip_pdf_extract_unreadable (PDF has no usable text for parsing — re-export from payroll or use a text-based PDF)";
@@ -255,7 +226,7 @@ type MatcherPreviewRow = {
 
 type CategoryLabelRow = { id: string; name: string; parentId: string | null };
 
-type ImportConfirmAction = { kind: "undo" } | { kind: "finalize" } | { kind: "removeFile"; fileId: string };
+type ImportConfirmAction = { kind: "undo" } | { kind: "removeFile"; fileId: string };
 
 function categoryLabelForPreview(cat: CategoryLabelRow, all: CategoryLabelRow[]): string {
   if (!cat.parentId) {
@@ -321,7 +292,6 @@ export function ImportWorkspacePage() {
   const [startingSession, setStartingSession] = useState(false);
   const [pipelineBusy, setPipelineBusy] = useState(false);
   const [undoBusy, setUndoBusy] = useState(false);
-  const [finalizeBusy, setFinalizeBusy] = useState(false);
   const [lastImportSummary, setLastImportSummary] = useState<LastImportSummary | null>(null);
   const [sessionSummary, setSessionSummary] = useState<ImportSessionSummary | null>(null);
   const [incomeInference, setIncomeInference] = useState<IncomeInferenceContext>({});
@@ -337,7 +307,7 @@ export function ImportWorkspacePage() {
   // OFX/QFX/QBO: account suggestions fetched after upload (fileId → suggestion)
   const [ofxSuggestions, setOfxSuggestions] = useState<Record<string, OfxSuggestion | null>>({});
   // Inline create-account form for OFX files with no account match (fileId or null)
-  const [ofxCreateAccountFileId, setOfxCreateAccountFileId] = useState<string | null>(null);
+  const [createAccountFileId, setCreateAccountFileId] = useState<string | null>(null);
   const [newAcctType, setNewAcctType] = useState("");
   const [newAcctInstitution, setNewAcctInstitution] = useState("");
   const [newAcctMask, setNewAcctMask] = useState("");
@@ -525,13 +495,6 @@ export function ImportWorkspacePage() {
     setImportConfirmAction({ kind: "undo" });
   }, [sessionId, sessionSummary?.totals.canonicalRows]);
 
-  const openFinalizeConfirm = useCallback(() => {
-    if (!sessionId) {
-      return;
-    }
-    setImportConfirmAction({ kind: "finalize" });
-  }, [sessionId]);
-
   const handleImportConfirm = useCallback(async () => {
     if (!sessionId) {
       return;
@@ -560,26 +523,6 @@ export function ImportWorkspacePage() {
         throw err;
       } finally {
         setUndoBusy(false);
-      }
-      return;
-    }
-
-    if (a.kind === "finalize") {
-      setError(null);
-      setMessage(null);
-      setFinalizeBusy(true);
-      try {
-        await apiJson<{ sessionId: string; status: string }>(
-          `/imports/sessions/${sessionId}/status`,
-          { method: "PATCH", body: JSON.stringify({ status: "finalized" }) }
-        );
-        setMessage("Session finalized. This import session is now locked.");
-        await load();
-      } catch (err) {
-        setError(messageFromApiError(err));
-        throw err;
-      } finally {
-        setFinalizeBusy(false);
       }
       return;
     }
@@ -706,10 +649,10 @@ export function ImportWorkspacePage() {
 
   // Lazy-load institution catalog when the inline create-account form opens.
   useEffect(() => {
-    if (ofxCreateAccountFileId && institutionCatalogList.length === 0) {
+    if (createAccountFileId && institutionCatalogList.length === 0) {
       void loadInstitutions();
     }
-  }, [ofxCreateAccountFileId, institutionCatalogList.length, loadInstitutions]);
+  }, [createAccountFileId, institutionCatalogList.length, loadInstitutions]);
 
   useEffect(() => {
     if (!token || !sessionId) {
@@ -977,12 +920,6 @@ export function ImportWorkspacePage() {
     if (!sessionId || !list?.length) {
       return;
     }
-    if (!canUploadMore) {
-      setError(
-        "This session no longer accepts new files. Use “Start another import session” below to import more statements."
-      );
-      return;
-    }
     setError(null);
     setMessage(null);
     setUploading(true);
@@ -1037,7 +974,7 @@ export function ImportWorkspacePage() {
     }
   }
 
-  const canUploadMore = sessionStatus === "created" || sessionStatus === "processing";
+  const canUploadMore = true;
 
   async function startNewImportSession() {
     setStartingSession(true);
@@ -1208,7 +1145,7 @@ export function ImportWorkspacePage() {
     }
   }
 
-  async function createAccountForOfxFile(fileId: string) {
+  async function createAccountForFile(fileId: string) {
     if (!newAcctType || !newAcctInstitution) {
       setError("Account type and institution are required.");
       return;
@@ -1234,7 +1171,7 @@ export function ImportWorkspacePage() {
       // Refresh accounts list and auto-select the new account in the file binding.
       const accRes = await apiJson<{ accounts: FinancialAccount[] }>("/imports/accounts");
       setAccounts(accRes.accounts);
-      setOfxCreateAccountFileId(null);
+      setCreateAccountFileId(null);
       // Use the fresh accounts list directly — onAccountChange captures a stale `accounts`
       // closure and cannot find the just-created account, leaving the binding unset.
       const freshAccount = accRes.accounts.find((a) => a.id === result.id);
@@ -1313,7 +1250,7 @@ export function ImportWorkspacePage() {
         <div className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
             <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Import</h1>
-            <HelpIcon label="Start a new session to upload bank statements, parse them, and post transactions to your ledger. Parsed data stays in the database until you finalize or reset. Use Recent sessions to resume where you left off." />
+            <HelpIcon label="Start a new session to upload bank statements, parse them, and post transactions to your ledger. Parsed data stays in the database until you undo or reset. Use Recent sessions to resume where you left off." />
             <div style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 13 }}>
               <Link to="/" className="muted">Home</Link>
               <Link to="/categories/rules" className="muted">Classification rules</Link>
@@ -1334,7 +1271,7 @@ export function ImportWorkspacePage() {
         <div className="card">
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
             <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Recent sessions</h2>
-            <HelpIcon label="Open a session to upload files, parse, run import, or run the classification matcher preview. Sessions in Review hold parsed rows and ledger posts you can undo before finalizing." />
+            <HelpIcon label="Open a session to upload files, parse, run import, or run the classification matcher preview. Sessions hold parsed rows and ledger posts you can undo at any time." />
           </div>
           {hubLoading ? <p className="muted">Loading…</p> : null}
           {!hubLoading && recentSessions.length === 0 ? (
@@ -1374,7 +1311,7 @@ export function ImportWorkspacePage() {
       <div className="card import-workspace__control-band">
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: "0.5rem" }}>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Import session</h1>
-          <HelpIcon label="Upload bank statement files, assign each to an account, then Run import to parse and post transactions to your ledger. Review before finalizing to lock the session." />
+          <HelpIcon label="Upload bank statement files, assign each to an account, then Run import to parse and post transactions to your ledger." />
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
             <SessionStatusBadge status={sessionStatus ?? "—"} />
             <code style={{ fontSize: "0.78rem", color: "var(--color-text-muted)" }}>{sessionId?.slice(0, 8)}…</code>
@@ -1467,32 +1404,7 @@ export function ImportWorkspacePage() {
             />
             {uploading ? <span className="muted"> Uploading…</span> : null}
           </>
-        ) : sessionStatus == null ? (
-          <p className="muted">Could not determine session status. Refresh the page or return home.</p>
-        ) : (
-          <>
-            <p>
-              {sessionStatus === "review"
-                ? "This session is in review: parsed data is ready. You can’t add more files to this session yet (a dedicated transaction review screen is planned)."
-                : sessionStatus === "finalized"
-                  ? "This session is finalized. New files can’t be added here."
-                  : sessionStatus === "failed"
-                    ? "This session is in a failed state. Start fresh with a new session if you need to."
-                    : "This session no longer accepts new uploads."}
-            </p>
-            <p className="muted" style={{ marginTop: "0.5rem" }}>
-              To import more statements, start a <strong>new import session</strong>.
-            </p>
-            <div className="row" style={{ marginTop: "0.75rem" }}>
-              <button type="button" disabled={startingSession} onClick={() => void startNewImportSession()}>
-                {startingSession ? "Starting…" : "Start another import session"}
-              </button>
-              <Link to="/" className="muted" style={{ alignSelf: "center" }}>
-                Back to home
-              </Link>
-            </div>
-          </>
-        )}
+        ) : null}
       </div>
 
       <div className="card">
@@ -1561,20 +1473,18 @@ export function ImportWorkspacePage() {
                     <td>
                       <div>{f.file_name}</div>
                       <span className="muted">status: {f.status}</span>
-                      {sessionStatus !== "finalized" ? (
-                        <div style={{ marginTop: "0.35rem" }}>
-                          <button
-                            type="button"
-                            title="Remove file from session"
-                            disabled={removingFileId === f.id}
-                            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.82rem", padding: "0.2rem 0.5rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: removingFileId === f.id ? "not-allowed" : "pointer", color: "var(--color-danger, #dc2626)", opacity: removingFileId === f.id ? 0.6 : 1 }}
-                            onClick={() => openRemoveFileConfirm(f.id)}
-                          >
-                            <IconTrash size={12} />
-                            {removingFileId === f.id ? "Removing…" : "Remove"}
-                          </button>
-                        </div>
-                      ) : null}
+                      <div style={{ marginTop: "0.35rem" }}>
+                        <button
+                          type="button"
+                          title="Remove file from session"
+                          disabled={removingFileId === f.id}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: "0.82rem", padding: "0.2rem 0.5rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: removingFileId === f.id ? "not-allowed" : "pointer", color: "var(--color-danger, #dc2626)", opacity: removingFileId === f.id ? 0.6 : 1 }}
+                          onClick={() => openRemoveFileConfirm(f.id)}
+                        >
+                          <IconTrash size={12} />
+                          {removingFileId === f.id ? "Removing…" : "Remove"}
+                        </button>
+                      </div>
                     </td>
                     <td>
                       <HierarchicalSearchPicker
@@ -1633,134 +1543,154 @@ export function ImportWorkspacePage() {
                                   setNewAcctMask(sug.acctIdLast4 ?? "");
                                   setNewAcctScope("household");
                                   setNewAcctPersonId("");
-                                  setOfxCreateAccountFileId(f.id);
+                                  setCreateAccountFileId(f.id);
                                 }}
                               >
                                 create new account
                               </button>
                             </p>
-                            {ofxCreateAccountFileId === f.id ? (
-                              <div style={{ marginTop: "0.5rem", padding: "0.6rem", background: "var(--surface-raised, #f5f5f5)", borderRadius: 4, border: "1px solid var(--border)" }}>
-                                <p style={{ margin: "0 0 0.4rem", fontWeight: 500, fontSize: "0.88rem" }}>New account</p>
-                                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto", gap: "0.4rem 0.6rem", alignItems: "end" }}>
-                                  <div>
-                                    <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Type</label>
-                                    <select value={newAcctType} onChange={(e) => setNewAcctType(e.target.value)}>
-                                      <option value="">—</option>
-                                      <option value="checking">Checking</option>
-                                      <option value="savings">Savings</option>
-                                      <option value="credit_card">Credit card</option>
-                                      <option value="loan">Loan</option>
-                                      <option value="investment">Investment</option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Institution</label>
-                                    <HierarchicalSearchPicker
-                                      value={newAcctInstitution || null}
-                                      onChange={(v) => setNewAcctInstitution(v ?? "")}
-                                      groups={institutionPickerGroups}
-                                      placeholder="Choose institution"
-                                      ariaLabel="Institution for new account"
-                                      clearable
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Last 4</label>
-                                    <input
-                                      value={newAcctMask}
-                                      onChange={(e) => setNewAcctMask(e.target.value.replace(/\D/g, "").slice(-4))}
-                                      placeholder="4883"
-                                      maxLength={4}
-                                      style={{ width: "4.5rem" }}
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Belongs-to</label>
-                                    <HierarchicalSearchPicker
-                                      value={newAcctScope === "person" && newAcctPersonId ? (`person:${newAcctPersonId}` as BelongsToChoice) : "household"}
-                                      onChange={(v) => {
-                                        const p = parseBelongsToChoice(v ?? "household");
-                                        setNewAcctScope(p.ownerScope);
-                                        setNewAcctPersonId(p.ownerPersonProfileId ?? "");
-                                      }}
-                                      groups={buildBelongsToGroups(ownerProfiles)}
-                                      placeholder="Belongs-to"
-                                      ariaLabel="New account belongs-to"
-                                    />
-                                  </div>
-                                  <button type="button" disabled={creatingAccount} onClick={() => void createAccountForOfxFile(f.id)}>
-                                    {creatingAccount ? "Saving…" : "Save"}
-                                  </button>
-                                  <button type="button" className="secondary" onClick={() => { setOfxCreateAccountFileId(null); setAddingInstitution(false); setNewInstitutionName(""); }}>
-                                    Cancel
-                                  </button>
-                                </div>
-                                {/* Inline add-institution row — shown instead of window.prompt */}
-                                {addingInstitution ? (
-                                  <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginTop: "0.4rem" }}>
-                                    <input
-                                      autoFocus
-                                      value={newInstitutionName}
-                                      onChange={(e) => setNewInstitutionName(e.target.value)}
-                                      placeholder="Institution name"
-                                      style={{ flex: "1 1 12rem" }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                          e.preventDefault();
-                                          void (async () => {
-                                            if (!newInstitutionName.trim()) return;
-                                            setSavingInstitution(true);
-                                            try {
-                                              await apiJson("/imports/institutions/custom", { method: "POST", body: JSON.stringify({ displayName: newInstitutionName.trim() }) });
-                                              await loadInstitutions();
-                                              setNewAcctInstitution(newInstitutionName.trim());
-                                              setAddingInstitution(false);
-                                              setNewInstitutionName("");
-                                            } finally {
-                                              setSavingInstitution(false);
-                                            }
-                                          })();
-                                        }
-                                        if (e.key === "Escape") { setAddingInstitution(false); setNewInstitutionName(""); }
-                                      }}
-                                    />
-                                    <button
-                                      type="button"
-                                      disabled={savingInstitution || !newInstitutionName.trim()}
-                                      onClick={() => void (async () => {
-                                        if (!newInstitutionName.trim()) return;
-                                        setSavingInstitution(true);
-                                        try {
-                                          await apiJson("/imports/institutions/custom", { method: "POST", body: JSON.stringify({ displayName: newInstitutionName.trim() }) });
-                                          await loadInstitutions();
-                                          setNewAcctInstitution(newInstitutionName.trim());
-                                          setAddingInstitution(false);
-                                          setNewInstitutionName("");
-                                        } finally {
-                                          setSavingInstitution(false);
-                                        }
-                                      })()}
-                                    >
-                                      {savingInstitution ? "Saving…" : "Add"}
-                                    </button>
-                                    <button type="button" className="secondary" onClick={() => { setAddingInstitution(false); setNewInstitutionName(""); }}>Cancel</button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="secondary"
-                                    style={{ fontSize: "0.78rem", marginTop: "0.3rem", padding: "0.1rem 0.5rem" }}
-                                    onClick={() => { setAddingInstitution(true); setNewInstitutionName(""); }}
-                                  >
-                                    Add institution…
-                                  </button>
-                                )}
-                              </div>
-                            ) : null}
                           </div>
                         );
                       })() : null}
+                      {profileForRow !== OFX_PARSER_ID && !PAYSLIP_PARSER_IDS.has(profileForRow) ? (
+                        <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.82rem" }}>
+                          Pick one above or{" "}
+                          <button
+                            type="button"
+                            className="secondary"
+                            style={{ fontSize: "0.82rem", padding: "0 0.3rem", verticalAlign: "baseline" }}
+                            onClick={() => {
+                              setNewAcctType("checking");
+                              setNewAcctInstitution("");
+                              setNewAcctMask("");
+                              setNewAcctScope("household");
+                              setNewAcctPersonId("");
+                              setCreateAccountFileId(f.id);
+                            }}
+                          >
+                            create new account
+                          </button>
+                        </p>
+                      ) : null}
+                      {createAccountFileId === f.id ? (
+                        <div style={{ marginTop: "0.5rem", padding: "0.6rem", background: "var(--surface-raised, #f5f5f5)", borderRadius: 4, border: "1px solid var(--border)" }}>
+                          <p style={{ margin: "0 0 0.4rem", fontWeight: 500, fontSize: "0.88rem" }}>New account</p>
+                          <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto", gap: "0.4rem 0.6rem", alignItems: "end" }}>
+                            <div>
+                              <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Type</label>
+                              <select value={newAcctType} onChange={(e) => setNewAcctType(e.target.value)}>
+                                <option value="">—</option>
+                                <option value="checking">Checking</option>
+                                <option value="savings">Savings</option>
+                                <option value="credit_card">Credit card</option>
+                                <option value="loan">Loan</option>
+                                <option value="investment">Investment</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Institution</label>
+                              <HierarchicalSearchPicker
+                                value={newAcctInstitution || null}
+                                onChange={(v) => setNewAcctInstitution(v ?? "")}
+                                groups={institutionPickerGroups}
+                                placeholder="Choose institution"
+                                ariaLabel="Institution for new account"
+                                clearable
+                              />
+                            </div>
+                            <div>
+                              <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Last 4</label>
+                              <input
+                                value={newAcctMask}
+                                onChange={(e) => setNewAcctMask(e.target.value.replace(/\D/g, "").slice(-4))}
+                                placeholder="4883"
+                                maxLength={4}
+                                style={{ width: "4.5rem" }}
+                              />
+                            </div>
+                            <div>
+                              <label className="muted" style={{ display: "block", fontSize: "0.8rem" }}>Belongs-to</label>
+                              <HierarchicalSearchPicker
+                                value={newAcctScope === "person" && newAcctPersonId ? (`person:${newAcctPersonId}` as BelongsToChoice) : "household"}
+                                onChange={(v) => {
+                                  const p = parseBelongsToChoice(v ?? "household");
+                                  setNewAcctScope(p.ownerScope);
+                                  setNewAcctPersonId(p.ownerPersonProfileId ?? "");
+                                }}
+                                groups={buildBelongsToGroups(ownerProfiles)}
+                                placeholder="Belongs-to"
+                                ariaLabel="New account belongs-to"
+                              />
+                            </div>
+                            <button type="button" disabled={creatingAccount} onClick={() => void createAccountForFile(f.id)}>
+                              {creatingAccount ? "Saving…" : "Save"}
+                            </button>
+                            <button type="button" className="secondary" onClick={() => { setCreateAccountFileId(null); setAddingInstitution(false); setNewInstitutionName(""); }}>
+                              Cancel
+                            </button>
+                          </div>
+                          {/* Inline add-institution row — shown instead of window.prompt */}
+                          {addingInstitution ? (
+                            <div style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginTop: "0.4rem" }}>
+                              <input
+                                autoFocus
+                                value={newInstitutionName}
+                                onChange={(e) => setNewInstitutionName(e.target.value)}
+                                placeholder="Institution name"
+                                style={{ flex: "1 1 12rem" }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void (async () => {
+                                      if (!newInstitutionName.trim()) return;
+                                      setSavingInstitution(true);
+                                      try {
+                                        await apiJson("/imports/institutions/custom", { method: "POST", body: JSON.stringify({ displayName: newInstitutionName.trim() }) });
+                                        await loadInstitutions();
+                                        setNewAcctInstitution(newInstitutionName.trim());
+                                        setAddingInstitution(false);
+                                        setNewInstitutionName("");
+                                      } finally {
+                                        setSavingInstitution(false);
+                                      }
+                                    })();
+                                  }
+                                  if (e.key === "Escape") { setAddingInstitution(false); setNewInstitutionName(""); }
+                                }}
+                              />
+                              <button
+                                type="button"
+                                disabled={savingInstitution || !newInstitutionName.trim()}
+                                onClick={() => void (async () => {
+                                  if (!newInstitutionName.trim()) return;
+                                  setSavingInstitution(true);
+                                  try {
+                                    await apiJson("/imports/institutions/custom", { method: "POST", body: JSON.stringify({ displayName: newInstitutionName.trim() }) });
+                                    await loadInstitutions();
+                                    setNewAcctInstitution(newInstitutionName.trim());
+                                    setAddingInstitution(false);
+                                    setNewInstitutionName("");
+                                  } finally {
+                                    setSavingInstitution(false);
+                                  }
+                                })()}
+                              >
+                                {savingInstitution ? "Saving…" : "Add"}
+                              </button>
+                              <button type="button" className="secondary" onClick={() => { setAddingInstitution(false); setNewInstitutionName(""); }}>Cancel</button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="secondary"
+                              style={{ fontSize: "0.78rem", marginTop: "0.3rem", padding: "0.1rem 0.5rem" }}
+                              onClick={() => { setAddingInstitution(true); setNewInstitutionName(""); }}
+                            >
+                              Add institution…
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
                     </td>
                     {householdEmployers.length > 1 ? (
                       <td>
@@ -2085,83 +2015,50 @@ export function ImportWorkspacePage() {
         ) : null}
       </div>
 
-      {sessionStatus === "review" ? (
-        <>
-          <div className="card">
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
-              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Undo ledger posting</h2>
-              <HelpIcon label="While in Review (before finalized), you can remove posted transactions from this import and run import again. Parsed rows stay. Once finalized, this action is no longer available." />
-            </div>
-            <div className="row">
-              <button
-                type="button"
-                className="secondary"
-                disabled={
-                  undoBusy ||
-                  finalizeBusy ||
-                  pipelineBusy ||
-                  (sessionSummary?.totals.canonicalRows ?? 0) === 0
-                }
-                title={
-                  (sessionSummary?.totals.canonicalRows ?? 0) === 0
-                    ? "Nothing from this import is in the ledger yet"
-                    : undefined
-                }
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                onClick={openUndoConfirm}
-              >
-                <IconArrowBackUp size={15} />
-                {undoBusy ? "Working…" : "Undo posting"}
-              </button>
-            </div>
-          </div>
-
-          <div className="card import-finalize-session-card">
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
-              <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Finalize session</h2>
-              <HelpIcon label="Finalize to lock this session when you're done reviewing. Finalized sessions cannot be changed — undo is no longer available." />
-            </div>
-            <div className="row">
-              <button
-                type="button"
-                disabled={finalizeBusy || undoBusy || pipelineBusy}
-                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-                onClick={openFinalizeConfirm}
-              >
-                <IconLock size={15} />
-                {finalizeBusy ? "Working…" : "Finalize session"}
-              </button>
-            </div>
-          </div>
-        </>
-      ) : null}
+      <div className="card">
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.5rem" }}>
+          <h2 style={{ fontSize: "1.1rem", margin: 0 }}>Undo ledger posting</h2>
+          <HelpIcon label="You can remove posted transactions from this import and run import again. Parsed rows stay. Undo is available any time while the session exists." />
+        </div>
+        <div className="row">
+          <button
+            type="button"
+            className="secondary"
+            disabled={undoBusy || pipelineBusy || (sessionSummary?.totals.canonicalRows ?? 0) === 0}
+            title={
+              (sessionSummary?.totals.canonicalRows ?? 0) === 0
+                ? "Nothing from this import is in the ledger yet"
+                : undefined
+            }
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            onClick={openUndoConfirm}
+          >
+            <IconArrowBackUp size={15} />
+            {undoBusy ? "Working…" : "Undo posting"}
+          </button>
+        </div>
+      </div>
 
       <ConfirmDialog
         opened={importConfirmAction !== null}
         title={
           importConfirmAction?.kind === "undo"
             ? "Remove posted transactions?"
-            : importConfirmAction?.kind === "finalize"
-              ? "Finalize import session?"
-              : importConfirmAction?.kind === "removeFile"
+            : importConfirmAction?.kind === "removeFile"
                 ? "Remove file from session?"
                 : ""
         }
         message={
           importConfirmAction?.kind === "undo"
-            ? "Remove all transactions this import posted to the ledger? Parsed file rows stay so you can run import again. After the session is finalized, this rollback is no longer available."
-            : importConfirmAction?.kind === "finalize"
-              ? "After finalizing, the session is locked: you cannot undo ledger posting for this import, and this cannot be reversed from the app."
-              : importConfirmAction?.kind === "removeFile"
+            ? "Remove all transactions this import posted to the ledger? Parsed file rows stay so you can run import again."
+            : importConfirmAction?.kind === "removeFile"
                 ? "Staged data for this file (including parsed rows or payslip snapshot if any) will be deleted."
                 : ""
         }
         confirmLabel={
           importConfirmAction?.kind === "undo"
             ? "Remove from ledger"
-            : importConfirmAction?.kind === "finalize"
-              ? "Finalize session"
-              : importConfirmAction?.kind === "removeFile"
+            : importConfirmAction?.kind === "removeFile"
                 ? "Remove file"
                 : "Confirm"
         }

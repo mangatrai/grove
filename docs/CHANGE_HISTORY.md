@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-119b (2026-04-26): Fix sticky regression and extend inline account creation
+- Removed all localStorage sticky account logic from ImportWorkspacePage (dead for CSV/PDF and regression-prone for OFX shared profile key).
+- Extended inline `create new account` flow to non-OFX file rows (CSV/PDF/XLSX), reusing the existing in-row OFX create-account form/state and save path.
+- No backend or API changes.
+Files: frontend/src/pages/ImportWorkspacePage.tsx, docs/CHANGE_HISTORY.md
+
+---
+
+## CR-119 (2026-04-26): Kill ImportPage, restore workspace as primary import UX
+- Deleted frontend/src/pages/ImportPage.tsx
+- /imports and /import routes now redirect to /imports/workspace
+- Removed Finalize button and finalize flow from ImportWorkspacePage
+- Undo is now available on any session regardless of status (removed status=review guard from rollback service)
+- Added sticky last-used account per parser profile (localStorage) in workspace file binding
+- Backend CR-118 endpoints (POST /imports/upload, GET /imports/history) retained for API use
+Files: frontend/src/App.tsx, frontend/src/layout/AppTopBar.tsx, frontend/src/pages/ImportWorkspacePage.tsx, backend/src/modules/imports/import-session-rollback.service.ts, backend/src/modules/imports/imports.routes.ts, backend/tests/app.test.ts, docs/API_IMPORT_SESSIONS.md, CLAUDE.md, openapi/openapi.yaml
+
+---
+
 ## CR-118c — Import parity upgrades on `/imports`
 Date: 2026-04-26
 Files: backend/src/modules/imports/import-upload.service.ts, backend/src/modules/imports/imports.routes.ts, frontend/src/pages/ImportPage.tsx, openapi/openapi.yaml, docs/CHANGE_HISTORY.md
