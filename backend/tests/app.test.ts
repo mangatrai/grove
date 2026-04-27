@@ -698,6 +698,164 @@ describe("import sessions and file intake", () => {
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
 
+  it("routes same-import same-fingerprint different-FITID rows to Needs Review", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const tag = `energy-ogre-${Date.now()}`;
+    const txnDate = "2024-05-29";
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},ENERGY OGRE HOUSTON TX ${tag},-10.00,FITID001-${tag}`,
+      `${txnDate},ENERGY OGRE HOUSTON TX ${tag},-10.00,FITID002-${tag}`,
+      `${txnDate},ENERGY OGRE HOUSTON TX ${tag},-10.00,FITID003-${tag}`
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "energy-ogre.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.duplicates).toBe(2);
+
+    const statusCounts = (await sqlStmt(
+      `SELECT status, COUNT(*)::int AS c
+       FROM transaction_canonical
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND merchant LIKE ?
+       GROUP BY status`
+    ).all(sessionId, `%ENERGY OGRE HOUSTON TX ${tag}%`)) as Array<{ status: string; c: number }>;
+    const postedCount = statusCounts.find((r) => r.status === "posted")?.c ?? 0;
+    const dupCount = statusCounts.find((r) => r.status === "duplicate")?.c ?? 0;
+    expect(postedCount).toBe(1);
+    expect(dupCount).toBe(2);
+
+    const dupResolutions = (await sqlStmt(
+      `SELECT reason
+       FROM resolution_item
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND type = 'duplicate_ambiguity'
+         AND status = 'open'
+         AND reason LIKE ?
+       ORDER BY created_at DESC`
+    ).all(sessionId, `%different bank transaction ID%`)) as Array<{ reason: string }>;
+    expect(dupResolutions.length).toBeGreaterThanOrEqual(2);
+
+    const needsReview = await request(app)
+      .get(`/transactions?needsReview=true&sessionId=${sessionId}&limit=100`)
+      .set("authorization", `Bearer ${token}`);
+    expect(needsReview.status).toBe(200);
+    const duplicateRows = (needsReview.body.transactions as Array<{ status: string; merchant: string | null }>).filter(
+      (t) => t.status === "duplicate" && String(t.merchant ?? "").includes(`ENERGY OGRE HOUSTON TX ${tag}`)
+    );
+    expect(duplicateRows.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("routes same-import same-FITID rows to Needs Review with FITID duplicate messaging", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const tag = `same-fitid-${Date.now()}`;
+    const txnDate = "2024-06-03";
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},DUP FITID TEST ${tag},-12.00,FITIDSAME-${tag}`,
+      `${txnDate},DUP FITID TEST ${tag},-12.00,FITIDSAME-${tag}`
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "dup-fitid.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.duplicates).toBe(1);
+
+    const statusCounts = (await sqlStmt(
+      `SELECT status, COUNT(*)::int AS c
+       FROM transaction_canonical
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND merchant LIKE ?
+       GROUP BY status`
+    ).all(sessionId, `%DUP FITID TEST ${tag}%`)) as Array<{ status: string; c: number }>;
+    const postedCount = statusCounts.find((r) => r.status === "posted")?.c ?? 0;
+    const dupCount = statusCounts.find((r) => r.status === "duplicate")?.c ?? 0;
+    expect(postedCount).toBe(1);
+    expect(dupCount).toBe(1);
+
+    const fitidReason = (await sqlStmt(
+      `SELECT reason
+       FROM resolution_item
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND type = 'duplicate_ambiguity'
+         AND status = 'open'
+         AND reason LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 1`
+    ).get(sessionId, `%Duplicate bank transaction ID%`)) as { reason: string } | undefined;
+    expect(fitidReason).toBeTruthy();
+
+    const needsReview = await request(app)
+      .get(`/transactions?needsReview=true&sessionId=${sessionId}&limit=100`)
+      .set("authorization", `Bearer ${token}`);
+    expect(needsReview.status).toBe(200);
+    const duplicateRows = (needsReview.body.transactions as Array<{ status: string; merchant: string | null }>).filter(
+      (t) => t.status === "duplicate" && String(t.merchant ?? "").includes(`DUP FITID TEST ${tag}`)
+    );
+    expect(duplicateRows.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("CR-080: exact duplicate from a second import creates status=duplicate canonical and resolution_item", async () => {
     const token = await loginAndGetToken();
 

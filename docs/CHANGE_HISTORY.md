@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-119 (2026-04-27): Route silent duplicate drops to Needs Review with FITID-aware messaging
+- canonical-ingest.service.ts: in-session FITID dedup and in-session fingerprint dedup no longer silently drop transactions
+- Both paths now call insertExactDuplicateForReview: status='duplicate' canonical row + resolution_item created, visible in Transactions -> Needs Review
+- Cross-import fingerprint check now compares FITIDs: different FITID + same fingerprint shows "likely legitimate separate charge" message; same/missing FITID shows "exact duplicate"
+- Root cause: CitiCard OFX file had 3 charges (ENERGY OGRE, 2024-05-29, $10) with unique FITIDs but identical fingerprints — 2 were silently lost
+Files: backend/src/modules/canonical/canonical-ingest.service.ts, backend/tests/app.test.ts
+
+---
+
 ## CR-119b (2026-04-26): Fix sticky regression and extend inline account creation
 - Removed all localStorage sticky account logic from ImportWorkspacePage (dead for CSV/PDF and regression-prone for OFX shared profile key).
 - Extended inline `create new account` flow to non-OFX file rows (CSV/PDF/XLSX), reusing the existing in-row OFX create-account form/state and save path.
