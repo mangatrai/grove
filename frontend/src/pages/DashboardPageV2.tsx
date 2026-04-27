@@ -177,10 +177,14 @@ export function DashboardPageV2() {
   const isCurrentMonth = activeMonth === currentYearMonth();
 
   const loadCashSummary = useCallback(async () => {
+    if (useClassicView) {
+      return;
+    }
     setCashRetrying(true);
     try {
       const value = await apiJson<CashSummaryResponse>(
-        `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`
+        `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
+        { cache: "no-store" }
       );
       setCashData(value);
     } catch {
@@ -188,10 +192,10 @@ export function DashboardPageV2() {
     } finally {
       setCashRetrying(false);
     }
-  }, [activeMonth]);
+  }, [activeMonth, useClassicView]);
 
   const loadAll = useCallback(async () => {
-    if (!token) {
+    if (!token || useClassicView) {
       return;
     }
     setLoading(true);
@@ -199,16 +203,19 @@ export function DashboardPageV2() {
     const monthEnd = lastDayOf(activeMonth);
     const results = await Promise.allSettled([
       apiJson<CashSummaryResponse>(
-        `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`
+        `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
+        { cache: "no-store" }
       ),
-      apiJson<ResolutionSummary>("/resolution/summary"),
-      apiJson<NetWorthSnapshot>("/reports/balance-sheet"),
+      apiJson<ResolutionSummary>("/resolution/summary", { cache: "no-store" }),
+      apiJson<NetWorthSnapshot>("/reports/balance-sheet", { cache: "no-store" }),
       apiJson<{ points: NetWorthHistoryPoint[] }>(
-        `/reports/balance-sheet/history?from=${historyFrom}&to=${monthEnd}&interval=month`
+        `/reports/balance-sheet/history?from=${historyFrom}&to=${monthEnd}&interval=month`,
+        { cache: "no-store" }
       ),
-      apiJson<BudgetMonthResponse>(`/budget/${encodeURIComponent(activeMonth)}`),
+      apiJson<BudgetMonthResponse>(`/budget/${encodeURIComponent(activeMonth)}`, { cache: "no-store" }),
       apiJson<{ transactions: LedgerRow[] }>(
-        `/transactions?limit=200&dateFrom=${historyFrom}&dateTo=${monthEnd}`
+        `/transactions?limit=200&dateFrom=${historyFrom}&dateTo=${monthEnd}`,
+        { cache: "no-store" }
       )
     ]);
     setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
@@ -218,11 +225,14 @@ export function DashboardPageV2() {
     setBudgetData(results[4].status === "fulfilled" ? results[4].value : null);
     setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
     setLoading(false);
-  }, [activeMonth, token]);
+  }, [activeMonth, token, useClassicView]);
 
   useEffect(() => {
+    if (useClassicView) {
+      return;
+    }
     void loadAll();
-  }, [loadAll]);
+  }, [loadAll, useClassicView]);
 
   useEffect(() => {
     setShowAllRecurring(false);
@@ -601,7 +611,14 @@ export function DashboardPageV2() {
                 ) : null}
                 {(() => {
                   const points = (netWorthHistory ?? [])
-                    .filter((p) => p.netWorth !== null)
+                    .filter(
+                      (p): p is NetWorthHistoryPoint & { netWorth: number } =>
+                        p != null &&
+                        typeof p.date === "string" &&
+                        p.date.length > 0 &&
+                        typeof p.netWorth === "number" &&
+                        Number.isFinite(p.netWorth)
+                    )
                     .slice()
                     .sort((a, b) => a.date.localeCompare(b.date));
                   if (points.length < 2) return null;

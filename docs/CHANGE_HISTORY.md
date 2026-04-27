@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-120a (2026-04-27): Fix dashboard home-page crash loop on net worth history sort
+- Fixed `DashboardPageV2` crash when a net worth history point has missing/invalid `date` by validating rows before sparkline sort (`localeCompare`) and render.
+- Prevented V2 data fetch effects from running while classic view is active, avoiding background fetch churn under legacy fallback mode.
+Files: frontend/src/pages/DashboardPageV2.tsx, docs/CHANGE_HISTORY.md
+
+---
+
 ## CR-120 (2026-04-27): Home screen overhaul with legacy fallback
 - Rebuilt the home screen into a new three-zone dashboard layout (Pulse, Action Items, Summary Cards, and 6-month trend) with month navigation and partial data rendering.
 - Added `DashboardPageLegacy.tsx` as a preserved one-click fallback and introduced `dashboard_classic` localStorage toggle between classic and new views.
