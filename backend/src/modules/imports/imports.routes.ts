@@ -122,8 +122,6 @@ function mapRollbackFailureToStatus(failure: RollbackImportSessionFailure): numb
   switch (failure.code) {
     case "NOT_FOUND":
       return 404;
-    case "SESSION_NOT_REVIEW":
-      return 409;
     default:
       return 500;
   }
@@ -800,8 +798,7 @@ importsRouter.post("/sessions/:sessionId/undo-import", async (req: Authenticated
   if (!result.ok) {
     res.status(mapRollbackFailureToStatus(result)).json({
       message: result.message,
-      code: result.code,
-      ...(result.code === "SESSION_NOT_REVIEW" ? { currentStatus: result.currentStatus } : {})
+      code: result.code
     });
     return;
   }

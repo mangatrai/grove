@@ -835,7 +835,7 @@ describe("import sessions and file intake", () => {
     60_000
   );
 
-  it("returns 409 for undo-import when session is finalized", async () => {
+  it("allows undo-import when session is finalized", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
       .post("/imports/sessions")
@@ -860,8 +860,9 @@ describe("import sessions and file intake", () => {
       .post(`/imports/sessions/${sessionId}/undo-import`)
       .set("authorization", `Bearer ${token}`)
       .send({});
-    expect(undoRes.status).toBe(409);
-    expect(undoRes.body.code).toBe("SESSION_NOT_REVIEW");
+    expect(undoRes.status).toBe(200);
+    expect(undoRes.body.deletedCanonicalRows).toBe(0);
+    expect(undoRes.body.deletedResolutionItems).toBe(0);
   });
 
   it("returns 409 when canonicalize runs before parse (no transaction_raw)", async () => {

@@ -389,6 +389,15 @@ paths:
     post:
       tags: [imports]
       summary: Roll back session ledger effects — members restricted to own sessions
+      description: >
+        Removes canonical ledger rows and related resolution items tied to this import session.
+        This operation is allowed regardless of session status (created, processing, review, finalized, failed).
+        Returns 200 even when there is nothing to remove.
+      responses:
+        "200":
+          description: Undo completed
+        "404":
+          description: Import session not found for household
       security: [{ bearerAuth: [] }]
   /transactions:
     get:

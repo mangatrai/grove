@@ -136,7 +136,7 @@ PATCH /imports/sessions/{id}/files/{fileId} → Bind to financial account + pars
 POST /imports/sessions/{id}/parse       → Run adapter → insert transaction_raw rows
 POST /imports/sessions/{id}/canonicalize → canonical-ingest: dedupe + classify + transfer detect → transaction_canonical
 PATCH /imports/sessions/{id}/status     → Finalize (status: "finalized")
-POST /imports/sessions/{id}/undo-import → Rollback canonical rows (only while status = "review")
+POST /imports/sessions/{id}/undo-import → Rollback canonical rows (available regardless of session status)
 ```
 
 The canonical ingest (`canonical-ingest.service.ts`) is the **single write path** for all posted transactions. It enforces:

@@ -84,7 +84,7 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   }, [token]);
 
   function onNewImport() {
-    navigate("/imports");
+    navigate("/imports/workspace");
   }
 
   function logout() {
