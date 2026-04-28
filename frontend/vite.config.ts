@@ -28,7 +28,8 @@ export default defineConfig({
       "/health": api,
       "/household": api,
       "/exports": api,
-      "/budget": api
+      "/budget": api,
+      "/recurring-overrides": api
     }
   }
 });

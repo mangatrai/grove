@@ -2546,7 +2546,7 @@ export function TransactionsPage() {
           allTxns={data?.transactions ?? []}
           existingOverride={findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides)}
           onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
-            await apiFetch("/recurring-overrides", {
+            const postRes = await apiFetch("/recurring-overrides", {
               method: "POST",
               body: JSON.stringify({
                 merchantKey,
@@ -2555,6 +2555,9 @@ export function TransactionsPage() {
                 amountTolerancePct
               })
             });
+            if (!postRes.ok) {
+              throw new Error(`Failed to save recurring override (HTTP ${postRes.status})`);
+            }
             const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");
             if (updated.ok) {
               setRecurringOverrides(updated.data);
