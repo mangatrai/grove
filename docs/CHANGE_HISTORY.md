@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-123 (2026-04-28): Recurring overrides — hardening fixes across Phase 1/2/3
+- **Backend validation gap (whitespace key):** `merchantKey` Zod schema in `recurring.routes.ts` changed from `z.string().min(1)` to `z.string().trim().min(1)` — a single-space input like `" "` previously passed the `min(1)` check and reached the service where `.trim()` produced an empty string that could be persisted. Now rejected at the boundary with a 400.
+- **Case normalization:** `recurring.service.ts` now lowercases `merchantKey` before insert/upsert (was trim-only). The DB `UNIQUE (household_id, merchant_key)` constraint is case-sensitive; without this, `"Netflix"` and `"netflix"` created two separate rows with ambiguous matching behaviour. The frontend modal was already lowercasing client-side, but the API is now the authoritative normalizer.
+- **DELETE response not checked (Phase 2/3):** Three sites updated to throw on non-2xx DELETE responses instead of silently updating UI state as if the request succeeded:
+  - `TransactionsPage.tsx` — `onRemove` in the recurring modal wiring
+  - `SettingsPage.tsx` — `handleRemoveDismissed` inline handler
+  - `SettingsPage.tsx` — `onRemove` in the settings modal wiring
+  Errors now propagate to the modal's catch block and are surfaced to the user.
+- Files: `backend/src/modules/recurring/recurring.routes.ts`, `backend/src/modules/recurring/recurring.service.ts`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
 ## CR-123 (2026-04-28): Recurring overrides management tab in Settings (Phase 3)
 - Added a new `Recurring` tab to `frontend/src/pages/SettingsPage.tsx` with:
   - Separate confirmed and dismissed override tables.

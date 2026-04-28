@@ -829,7 +829,8 @@ export function SettingsPage() {
   }
 
   async function handleRemoveDismissed(override: RecurringOverride) {
-    await apiFetch(`/recurring-overrides/${override.id}`, { method: "DELETE" });
+    const res = await apiFetch(`/recurring-overrides/${override.id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to remove override (HTTP ${res.status})`);
     setRecurringOverrides((prev) => prev.filter((row) => row.id !== override.id));
   }
 
@@ -1745,7 +1746,8 @@ export function SettingsPage() {
                   setEditingOverride(null);
                 }}
                 onRemove={async () => {
-                  await apiFetch(`/recurring-overrides/${editingOverride.id}`, { method: "DELETE" });
+                  const delRes = await apiFetch(`/recurring-overrides/${editingOverride.id}`, { method: "DELETE" });
+                  if (!delRes.ok) throw new Error(`Failed to remove override (HTTP ${delRes.status})`);
                   setRecurringOverrides((prev) => prev.filter((o) => o.id !== editingOverride.id));
                   setEditingOverride(null);
                 }}

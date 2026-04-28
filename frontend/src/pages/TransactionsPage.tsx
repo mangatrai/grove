@@ -2567,7 +2567,8 @@ export function TransactionsPage() {
           onRemove={async () => {
             const existing = findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides);
             if (existing) {
-              await apiFetch(`/recurring-overrides/${existing.id}`, { method: "DELETE" });
+              const delRes = await apiFetch(`/recurring-overrides/${existing.id}`, { method: "DELETE" });
+              if (!delRes.ok) throw new Error(`Failed to remove recurring override (HTTP ${delRes.status})`);
               setRecurringOverrides((prev) => prev.filter((o) => o.id !== existing.id));
             }
             setRecurringModalTxn(null);

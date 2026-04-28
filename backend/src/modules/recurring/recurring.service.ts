@@ -65,7 +65,7 @@ export async function upsertOverride(
   userId: string,
   input: UpsertRecurringOverrideInput
 ): Promise<RecurringOverride> {
-  const merchantKey = input.merchantKey.trim();
+  const merchantKey = input.merchantKey.trim().toLowerCase();
   const displayName = input.displayName?.trim() ? input.displayName.trim() : null;
   const amountAnchor = input.amountAnchor ?? null;
   const amountTolerancePct = input.amountTolerancePct ?? 15;

@@ -6,7 +6,7 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import { deleteOverride, listOverrides, upsertOverride } from "./recurring.service.js";
 
 const upsertOverrideSchema = z.object({
-  merchantKey: z.string().min(1),
+  merchantKey: z.string().trim().min(1),
   displayName: z.string().optional(),
   verdict: z.enum(["confirmed", "dismissed"]),
   amountAnchor: z.number().finite().optional(),
