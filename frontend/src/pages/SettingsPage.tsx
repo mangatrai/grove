@@ -6,10 +6,11 @@ import { IconTrash } from "@tabler/icons-react";
 import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { RecurringTagModal, type RecurringOverride } from "../components/RecurringTagModal";
 import { formatAccountForSelect } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 
-const TABS = ["profile", "household", "accounts", "notifications", "security"] as const;
+const TABS = ["profile", "household", "accounts", "notifications", "security", "recurring"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -240,6 +241,10 @@ export function SettingsPage() {
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
+  const [recurringLoading, setRecurringLoading] = useState(false);
+  const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [editingOverride, setEditingOverride] = useState<RecurringOverride | null>(null);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -519,6 +524,19 @@ export function SettingsPage() {
     }
     void loadInstitutions();
   }, [token, tab, canManageHousehold, loadInstitutions]);
+
+  useEffect(() => {
+    if (!token || tab !== "recurring") return;
+    setRecurringLoading(true);
+    setRecurringError(null);
+    void apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides")
+      .then((res) => {
+        if (res.ok) setRecurringOverrides(res.data);
+        else setRecurringError("Failed to load recurring overrides.");
+      })
+      .catch(() => setRecurringError("Failed to load recurring overrides."))
+      .finally(() => setRecurringLoading(false));
+  }, [token, tab]);
 
   async function addCustomInstitutionName() {
     if (!token) {
@@ -810,6 +828,20 @@ export function SettingsPage() {
     }
   }
 
+  async function handleRemoveDismissed(override: RecurringOverride) {
+    await apiFetch(`/recurring-overrides/${override.id}`, { method: "DELETE" });
+    setRecurringOverrides((prev) => prev.filter((row) => row.id !== override.id));
+  }
+
+  const confirmedOverrides = useMemo(
+    () => recurringOverrides.filter((o) => o.verdict === "confirmed"),
+    [recurringOverrides]
+  );
+  const dismissedOverrides = useMemo(
+    () => recurringOverrides.filter((o) => o.verdict === "dismissed"),
+    [recurringOverrides]
+  );
+
   const tabLinks = useMemo(
     () =>
       TABS.filter((id) => id !== "household" || canManageHousehold).map((id) => (
@@ -827,7 +859,9 @@ export function SettingsPage() {
                 ? "Accounts"
                 : id === "notifications"
                   ? "Notifications"
-                  : "Security"}
+                  : id === "security"
+                    ? "Security"
+                    : "Recurring"}
         </button>
       )),
     [tab, setTab, canManageHousehold]
@@ -1592,6 +1626,131 @@ export function SettingsPage() {
                 </button>
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {tab === "recurring" ? (
+          <div className="settings-panel" role="tabpanel">
+            <h2 className="settings-panel__title">Recurring Payments</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Confirmed overrides always appear on the dashboard. Dismissed overrides suppress a merchant from the
+              heuristic suggestions permanently. Remove a dismissed override to let it resurface.
+            </p>
+
+            {recurringLoading ? <p className="muted">Loading…</p> : null}
+            {recurringError ? <p className="error">{recurringError}</p> : null}
+
+            {!recurringLoading && !recurringError ? (
+              <>
+                <h3 style={{ marginTop: "1.5rem", marginBottom: "0.5rem" }}>
+                  Confirmed ({confirmedOverrides.length})
+                </h3>
+                {confirmedOverrides.length === 0 ? (
+                  <p className="muted" style={{ fontSize: "0.9rem" }}>
+                    No confirmed recurring payments yet. Mark a transaction as recurring from the{" "}
+                    <Link to="/transactions">Transactions</Link> page.
+                  </p>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="ledger-table">
+                      <thead>
+                        <tr>
+                          <th>Merchant key</th>
+                          <th>Display name</th>
+                          <th>Amount anchor</th>
+                          <th>Tolerance</th>
+                          <th style={{ width: "1px" }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {confirmedOverrides.map((o) => (
+                          <tr key={o.id}>
+                            <td><code>{o.merchantKey}</code></td>
+                            <td>{o.displayName ?? <span className="muted">—</span>}</td>
+                            <td>{o.amountAnchor != null ? `$${o.amountAnchor.toFixed(2)}` : <span className="muted">any</span>}</td>
+                            <td>{o.amountTolerancePct}%</td>
+                            <td>
+                              <button
+                                type="button"
+                                className="secondary"
+                                style={{ fontSize: "0.85rem", padding: "0.2rem 0.6rem" }}
+                                onClick={() => setEditingOverride(o)}
+                              >
+                                Edit
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <h3 style={{ marginTop: "2rem", marginBottom: "0.5rem" }}>
+                  Dismissed ({dismissedOverrides.length})
+                </h3>
+                {dismissedOverrides.length === 0 ? (
+                  <p className="muted" style={{ fontSize: "0.9rem" }}>
+                    No dismissed suggestions. Dismiss a heuristic candidate from the dashboard to suppress it
+                    permanently.
+                  </p>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="ledger-table">
+                      <thead>
+                        <tr>
+                          <th>Merchant key</th>
+                          <th style={{ width: "1px" }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dismissedOverrides.map((o) => (
+                          <tr key={o.id}>
+                            <td><code>{o.merchantKey}</code></td>
+                            <td>
+                              <button
+                                type="button"
+                                className="secondary"
+                                style={{ fontSize: "0.85rem", padding: "0.2rem 0.6rem" }}
+                                onClick={() => void handleRemoveDismissed(o)}
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            ) : null}
+
+            {editingOverride ? (
+              <RecurringTagModal
+                opened={editingOverride !== null}
+                onClose={() => setEditingOverride(null)}
+                txnMerchant={editingOverride.merchantKey}
+                txnAmount={editingOverride.amountAnchor ?? 0}
+                allTxns={[]}
+                existingOverride={editingOverride}
+                onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+                  const res = await apiFetch("/recurring-overrides", {
+                    method: "POST",
+                    body: JSON.stringify({ merchantKey, verdict: "confirmed", amountAnchor, amountTolerancePct })
+                  });
+                  if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`);
+                  const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");
+                  if (updated.ok) setRecurringOverrides(updated.data);
+                  setEditingOverride(null);
+                }}
+                onRemove={async () => {
+                  await apiFetch(`/recurring-overrides/${editingOverride.id}`, { method: "DELETE" });
+                  setRecurringOverrides((prev) => prev.filter((o) => o.id !== editingOverride.id));
+                  setEditingOverride(null);
+                }}
+              />
+            ) : null}
           </div>
         ) : null}
       </div>

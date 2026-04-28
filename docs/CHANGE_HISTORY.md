@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-123 (2026-04-28): Recurring overrides management tab in Settings (Phase 3)
+- Added a new `Recurring` tab to `frontend/src/pages/SettingsPage.tsx` with:
+  - Separate confirmed and dismissed override tables.
+  - Confirmed row edit action wired to `RecurringTagModal` (save/remove).
+  - Dismissed row remove action for unsuppressing merchants.
+- Added recurring tab state/effects to fetch and maintain override data via existing API calls only (`GET`, `POST`, `DELETE` on `/recurring-overrides`).
+- Updated recurring API documentation in `docs/API_RECURRING.md` with a Phase 3 Settings management section.
+- Why: Phase 3 provides a centralized management surface for recurring tagging decisions so users can audit and adjust overrides without returning to dashboard suggestions or individual transaction rows.
+
+---
+
 ## CR-122 (2026-04-28): Recurring payments hybrid tagging Phase 2 in transactions view
 - Added recurring tagging UX to `frontend/src/pages/TransactionsPage.tsx`:
   - Loads recurring overrides alongside transactions/categories/accounts.

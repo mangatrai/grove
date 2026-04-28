@@ -108,3 +108,16 @@ Phase 2 recurring tagging in `frontend/src/pages/TransactionsPage.tsx` uses the 
   - `amountTolerancePct` (defaults to 15 if omitted by client)
 - Remove override calls `DELETE /recurring-overrides/:id` for the matched confirmed override.
 - After either mutation, the client refreshes `GET /recurring-overrides` so row icons and the client-side "Recurring only" filter stay in sync.
+
+---
+
+## Settings management (Phase 3)
+
+Settings now includes a `Recurring` tab in `frontend/src/pages/SettingsPage.tsx` for managing both confirmed and dismissed overrides.
+
+- The tab loads rows with `GET /recurring-overrides`.
+- Confirmed rows support edit (and remove via modal) using:
+  - `POST /recurring-overrides` (`verdict: "confirmed"`) for save/update
+  - `DELETE /recurring-overrides/:id` for remove
+- Dismissed rows support direct remove via `DELETE /recurring-overrides/:id`.
+- No new backend endpoints were added; this tab is a management UI over the same recurring override API.
