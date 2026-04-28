@@ -1972,7 +1972,7 @@ export function TransactionsPage() {
                       <th>Account</th>
                       <th>Amount</th>
                       <th>Description</th>
-                      <th title="Recurring" style={{ width: "1.5rem" }}></th>
+                      <th title="Recurring" style={{ width: "5.5rem", textAlign: "center" }}>Recurring</th>
                       {needsReviewTab ? <th>Why</th> : null}
                       {needsReviewTab ? <th>Session</th> : null}
                       {!trashTab ? <th>Belongs-to</th> : null}
