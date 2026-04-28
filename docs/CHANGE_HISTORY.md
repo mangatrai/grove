@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-120c (2026-04-28): Recurring category gate now uses substring token matching
+- `detectRecurring` category gate in `DashboardPageV2` previously used exact `Set.has()` checks for `EXCLUDE_CATEGORIES` / `ALLOW_CATEGORIES`, which missed common variants (for example names with suffixes/prefixes).
+- Fix: switched both gates to substring token checks (`[...SET].some((token) => cat.includes(token))`) so exclusion/allow logic still uses the same token lists but matches normalized category strings more reliably.
+- Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ## FIX-120b (2026-04-27): Net-worth sparkline never rendered — API shape mismatch
 - `NetWorthHistoryPoint` type in DashboardPageV2 declared `{ date, netWorth }` but `/reports/balance-sheet/history` returns `{ asOf, totals: { netWorth } }`. The sparkline filter checked `p.date` and `p.netWorth` — both `undefined` on every point — so the gate (`points.length < 2`) always failed and the sparkline never rendered.
 - Fix: corrected the `apiJson` generic to match the real response shape (`Array<{ asOf: string; totals: { netWorth: number | null } }>`), then mapped `asOf → date` and `totals.netWorth → netWorth` before setting state. Frontend display type unchanged.

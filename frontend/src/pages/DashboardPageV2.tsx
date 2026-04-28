@@ -232,12 +232,12 @@ function detectRecurring(txns: LedgerRow[]): RecurringItem[] {
 
     // Layer 3 — modal category gate: deny-list drops the bucket; allow-list relaxes the CV cap.
     const cat = modalCategory(rows);
-    if (cat && EXCLUDE_CATEGORIES.has(cat)) continue;
+    if (cat && [...EXCLUDE_CATEGORIES].some((token) => cat.includes(token))) continue;
 
     // Layer 2 — amount stability via coefficient of variation.
     const amounts = rows.map((r) => Math.abs(r.amount));
     const cv = coefficientOfVariation(amounts);
-    const cvCap = cat && ALLOW_CATEGORIES.has(cat) ? 0.5 : 0.25;
+    const cvCap = cat && [...ALLOW_CATEGORIES].some((token) => cat.includes(token)) ? 0.5 : 0.25;
     if (cv >= cvCap) continue;
 
     const sorted = [...amounts].sort((a, b) => a - b);
