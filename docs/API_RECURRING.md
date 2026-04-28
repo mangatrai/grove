@@ -93,3 +93,18 @@ Response `404`:
 
 Error codes:
 - `401` unauthorized.
+
+---
+
+## Frontend tagging flow (Transactions page)
+
+Phase 2 recurring tagging in `frontend/src/pages/TransactionsPage.tsx` uses the existing endpoints in this document; no new backend routes were added.
+
+- Clicking the recurring dot icon (`○` untagged, `●` confirmed) opens a modal for posted debit rows.
+- Confirm/save calls `POST /recurring-overrides` with:
+  - `merchantKey` (normalized match substring)
+  - `verdict: "confirmed"`
+  - optional `amountAnchor`
+  - `amountTolerancePct` (defaults to 15 if omitted by client)
+- Remove override calls `DELETE /recurring-overrides/:id` for the matched confirmed override.
+- After either mutation, the client refreshes `GET /recurring-overrides` so row icons and the client-side "Recurring only" filter stay in sync.

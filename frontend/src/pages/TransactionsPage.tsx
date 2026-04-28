@@ -3,11 +3,12 @@ import { IconArrowBackUp, IconPencil, IconPlus, IconTrash } from "@tabler/icons-
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { RecurringTagModal } from "../components/RecurringTagModal";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
@@ -111,6 +112,25 @@ type AccountRow = {
   type: string;
   account_mask: string | null;
 };
+
+type RecurringOverride = {
+  id: string;
+  householdId: string;
+  merchantKey: string;
+  displayName: string | null;
+  verdict: "confirmed" | "dismissed";
+  amountAnchor: number | null;
+  amountTolerancePct: number;
+  taggedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function findConfirmedOverride(merchant: string | null, overrides: RecurringOverride[]): RecurringOverride | null {
+  if (!merchant) return null;
+  const normalizedMerchant = merchant.toLowerCase();
+  return overrides.find((o) => o.verdict === "confirmed" && normalizedMerchant.includes(o.merchantKey.toLowerCase())) ?? null;
+}
 
 type OwnerProfileOption = { id: string; label: string };
 type BelongsToFilterValue = "" | "household" | `person:${string}`;
@@ -294,6 +314,7 @@ export function TransactionsPage() {
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
   const trashTab = searchParams.get("trash") === "true";
+  const recurringOnlyFilter = searchParams.get("recurringOnly") === "true";
   const resolutionTypes = useMemo((): LedgerResolutionType[] => {
     const seen = new Set<LedgerResolutionType>();
     for (const r of searchParams.getAll("resolutionType")) {
@@ -326,6 +347,7 @@ export function TransactionsPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -376,6 +398,7 @@ export function TransactionsPage() {
   const [patternPreview, setPatternPreview] = useState<{ matched: number; descriptions: string[] } | null>(null);
   const [patternPreviewLoading, setPatternPreviewLoading] = useState(false);
   const [patternResolving, setPatternResolving] = useState(false);
+  const [recurringModalTxn, setRecurringModalTxn] = useState<TxRow | null>(null);
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -492,14 +515,16 @@ export function TransactionsPage() {
         qs.set("amountMax", String(n));
       }
     }
-    const [txRes, catRes, acctRes] = await Promise.all([
+    const [txRes, catRes, acctRes, ovRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
       apiJson<{ categories: CategoryOption[] }>("/categories"),
-      apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+      apiJson<{ accounts: AccountRow[] }>("/imports/accounts"),
+      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides")
     ]);
     setData(txRes);
     setCategories(catRes.categories);
     setAccounts(acctRes.accounts);
+    setRecurringOverrides(ovRes.ok ? ovRes.data : []);
     if (ownerProfiles.length === 0) {
       try {
         const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
@@ -636,6 +661,13 @@ export function TransactionsPage() {
     return () => window.cancelAnimationFrame(id);
   }, [addOpen]);
 
+  const visibleTransactions = useMemo(() => {
+    if (!recurringOnlyFilter || !data?.transactions) {
+      return data?.transactions ?? [];
+    }
+    return data.transactions.filter((t) => findConfirmedOverride(t.merchant, recurringOverrides) !== null);
+  }, [data?.transactions, recurringOnlyFilter, recurringOverrides]);
+
   const selectedCount = selectedTxnIds.size;
 
   const openFlagCountInSelection = useMemo(() => {
@@ -659,9 +691,9 @@ export function TransactionsPage() {
   }, [data, selectedTxnIds]);
   const allVisibleSelected = useMemo(
     () =>
-      Boolean(data?.transactions.length) &&
-      data!.transactions.every((t) => selectedTxnIds.has(t.id)),
-    [data, selectedTxnIds]
+      Boolean(visibleTransactions.length) &&
+      visibleTransactions.every((t) => selectedTxnIds.has(t.id)),
+    [visibleTransactions, selectedTxnIds]
   );
 
   function toggleTxnSelected(txnId: string) {
@@ -677,29 +709,29 @@ export function TransactionsPage() {
   }
 
   function toggleSelectAllVisible() {
-    if (!data?.transactions.length) {
+    if (!visibleTransactions.length) {
       return;
     }
     if (allVisibleSelected) {
       setSelectedTxnIds(new Set());
     } else {
-      setSelectedTxnIds(new Set(data.transactions.map((t) => t.id)));
+      setSelectedTxnIds(new Set(visibleTransactions.map((t) => t.id)));
     }
   }
 
   const allVisibleAllSelected = useMemo(
     () =>
-      Boolean(data?.transactions.length) &&
-      data!.transactions.every((t) => selectedAllIds.has(t.id)),
-    [data, selectedAllIds]
+      Boolean(visibleTransactions.length) &&
+      visibleTransactions.every((t) => selectedAllIds.has(t.id)),
+    [visibleTransactions, selectedAllIds]
   );
 
   function toggleSelectAllTab() {
-    if (!data?.transactions.length) return;
+    if (!visibleTransactions.length) return;
     if (allVisibleAllSelected) {
       setSelectedAllIds(new Set());
     } else {
-      setSelectedAllIds(new Set(data.transactions.map((t) => t.id)));
+      setSelectedAllIds(new Set(visibleTransactions.map((t) => t.id)));
     }
   }
 
@@ -1153,7 +1185,8 @@ export function TransactionsPage() {
       resolutionTypes.length > 0 ||
       searchFromUrl ||
       amountMinUrl !== "" ||
-      amountMaxUrl !== ""
+      amountMaxUrl !== "" ||
+      recurringOnlyFilter
   );
 
   const canPageBack = pageOffset > 0;
@@ -1534,6 +1567,25 @@ export function TransactionsPage() {
                 onChange={(e) => setAmountMaxDraft(e.target.value)}
               />
             </label>
+            <label className="transactions-toolbar__field" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={recurringOnlyFilter}
+                onChange={(e) => {
+                  setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    if (e.target.checked) {
+                      next.set("recurringOnly", "true");
+                    } else {
+                      next.delete("recurringOnly");
+                    }
+                    next.set("offset", "0");
+                    return next;
+                  });
+                }}
+              />
+              <span className="transactions-toolbar__label" style={{ marginBottom: 0 }}>Recurring only</span>
+            </label>
             <button type="button" onClick={() => commitAmountFilters()}>
               Apply amounts
             </button>
@@ -1610,6 +1662,7 @@ export function TransactionsPage() {
                 [max <code>{amountMaxUrl}</code>]
               </>
             ) : null}
+            {recurringOnlyFilter ? <> [recurring only]</> : null}
             . <button type="button" className="link-button" onClick={() => clearFilters()}>Clear filters</button>
           </p>
         ) : null}
@@ -1855,7 +1908,7 @@ export function TransactionsPage() {
                 </select>
               </label>
             </div>
-            {data.transactions.length === 0 ? (
+            {visibleTransactions.length === 0 ? (
               <p className="muted">
                 {sessionFilter
                   ? "No posted rows for this session yet. Either parse/canonicalize has not finished, or all lines were flagged (duplicates / review queue)."
@@ -1919,6 +1972,7 @@ export function TransactionsPage() {
                       <th>Account</th>
                       <th>Amount</th>
                       <th>Description</th>
+                      <th title="Recurring" style={{ width: "1.5rem" }}></th>
                       {needsReviewTab ? <th>Why</th> : null}
                       {needsReviewTab ? <th>Session</th> : null}
                       {!trashTab ? <th>Belongs-to</th> : null}
@@ -1927,7 +1981,7 @@ export function TransactionsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {data.transactions.map((t) => {
+                    {visibleTransactions.map((t) => {
                       const accountLabel = formatAccountForSelect({
                         institution: t.institution,
                         type: t.accountType,
@@ -1939,7 +1993,8 @@ export function TransactionsPage() {
                       const detailItems = reviewDetailByTxn[t.id];
                       const detailLoading = reviewDetailLoadingIds.has(t.id);
                       const detailError = reviewDetailErr[t.id];
-                      const colSpan = needsReviewTab ? 11 : trashTab ? 7 : 10;
+                      const colSpan = needsReviewTab ? 12 : trashTab ? 8 : 11;
+                      const confirmedRecurringOverride = findConfirmedOverride(t.merchant, recurringOverrides);
                       return (
                         <Fragment key={t.id}>
                           <tr>
@@ -2045,6 +2100,33 @@ export function TransactionsPage() {
                                   </button>
                                 </div>
                               )}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {t.status === "posted" && t.direction === "debit" ? (
+                                <button
+                                  type="button"
+                                  title={confirmedRecurringOverride ? `Recurring: ${confirmedRecurringOverride.merchantKey}` : "Mark as recurring"}
+                                  onClick={() => setRecurringModalTxn(t)}
+                                  style={{
+                                    background: "none",
+                                    border: "none",
+                                    cursor: "pointer",
+                                    padding: "0.1rem",
+                                    color: confirmedRecurringOverride
+                                      ? "var(--color-accent, #2563eb)"
+                                      : "var(--color-text-muted, #94a3b8)",
+                                    fontSize: "0.9rem",
+                                    lineHeight: 1
+                                  }}
+                                  aria-label={
+                                    confirmedRecurringOverride
+                                      ? `Edit recurring override for ${t.merchant ?? ""}`
+                                      : `Mark ${t.merchant ?? ""} as recurring`
+                                  }
+                                >
+                                  {confirmedRecurringOverride ? "●" : "○"}
+                                </button>
+                              ) : null}
                             </td>
                             {needsReviewTab ? (
                               <td className="transactions-page__why-cell">
@@ -2453,6 +2535,41 @@ export function TransactionsPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {recurringModalTxn ? (
+        <RecurringTagModal
+          opened={recurringModalTxn !== null}
+          onClose={() => setRecurringModalTxn(null)}
+          txnMerchant={recurringModalTxn.merchant?.toLowerCase().trim() ?? ""}
+          txnAmount={Math.abs(recurringModalTxn.amount)}
+          allTxns={data?.transactions ?? []}
+          existingOverride={findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides)}
+          onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+            await apiFetch("/recurring-overrides", {
+              method: "POST",
+              body: JSON.stringify({
+                merchantKey,
+                verdict: "confirmed",
+                amountAnchor,
+                amountTolerancePct
+              })
+            });
+            const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");
+            if (updated.ok) {
+              setRecurringOverrides(updated.data);
+            }
+            setRecurringModalTxn(null);
+          }}
+          onRemove={async () => {
+            const existing = findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides);
+            if (existing) {
+              await apiFetch(`/recurring-overrides/${existing.id}`, { method: "DELETE" });
+              setRecurringOverrides((prev) => prev.filter((o) => o.id !== existing.id));
+            }
+            setRecurringModalTxn(null);
+          }}
+        />
       ) : null}
 
       <ConfirmDialog

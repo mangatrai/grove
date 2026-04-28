@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-122 (2026-04-28): Recurring payments hybrid tagging Phase 2 in transactions view
+- Added recurring tagging UX to `frontend/src/pages/TransactionsPage.tsx`:
+  - Loads recurring overrides alongside transactions/categories/accounts.
+  - Adds per-row recurring icon for posted debit transactions (`○` untagged, `●` confirmed) and opens a tagging modal.
+  - Adds client-side `recurringOnly=true` URL filter in More filters and includes it in active-filter/clear-filter behavior.
+- Added new modal component `frontend/src/components/RecurringTagModal.tsx` for confirm/edit/remove recurring overrides, including:
+  - Editable merchant match key, amount anchor, tolerance %, and live match count against loaded transactions.
+  - Confirm via existing `POST /recurring-overrides` and remove via existing `DELETE /recurring-overrides/:id`.
+- Updated recurring API doc `docs/API_RECURRING.md` with frontend tagging flow notes so future work understands how the transactions page consumes existing endpoints without backend changes.
+- Why: Phase 2 wires the already-shipped recurring override backend into day-to-day transaction triage, letting users tag and filter recurring debits directly where they review ledger rows.
+
+---
+
 ## CR-121 (2026-04-28): Recurring payments hybrid tagging Phase 1 override store + dashboard dismiss flow
 - Added migration `backend/db/migrations/0030_recurring_merchant_override.sql` introducing `recurring_merchant_override` with household-scoped unique `(household_id, merchant_key)` rows and confirm/dismiss verdict support.
 - Added new backend recurring module (`backend/src/modules/recurring/recurring.service.ts`, `backend/src/modules/recurring/recurring.routes.ts`, `backend/src/modules/recurring/recurring.types.ts`) and registered router in `backend/src/app.ts` for:
