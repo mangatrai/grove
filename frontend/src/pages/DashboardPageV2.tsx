@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  Anchor,
+  Badge,
+  Box,
+  Button,
+  Group,
+  Paper,
+  Progress,
+  SimpleGrid,
+  Skeleton,
+  Stack,
+  Text,
+  Title
+} from "@mantine/core";
+import {
   Bar,
   BarChart,
   CartesianGrid,
@@ -60,13 +74,53 @@ type LedgerRow = {
   amount: number;
   txnDate: string;
   status: string;
+  accountId: string;
+  institution: string;
+  accountType: string;
+  accountMask: string | null;
+  categoryName: string | null;
 };
 
 type CashDataState = CashSummaryResponse | null | "error";
 
 type RecurringItem = { merchant: string; medianAmount: number; monthCount: number };
 
+type AccountBucket = {
+  accountId: string;
+  name: string;
+  accountType: string;
+  thisMonthOutflow: number;
+  priorMonthOutflow: number;
+  priorMonthTxnCount: number;
+};
+
 const PIE_COLORS = ["#3b82f6", "#f59e0b", "#22c55e", "#e11d48", "#8b5cf6", "#64748b"];
+
+// Named for the field it actually checks (LedgerRow.merchant), not the brief's "description".
+const EXCLUDE_MERCHANT_TOKENS = [
+  "TRANSFER",
+  "E-PAYMENT",
+  "AUTOPAY",
+  "PAYDOWN",
+  "PAYMENT",
+  "DIRECT DEP",
+  "DIRECT DEPOSIT",
+  "REFUND"
+];
+
+const EXCLUDE_CATEGORIES = new Set([
+  "groceries",
+  "dining",
+  "restaurant",
+  "gas",
+  "fuel",
+  "shopping",
+  "entertainment"
+]);
+
+const ALLOW_CATEGORIES = new Set(["utilities", "subscriptions", "insurance", "rent", "mortgage", "loan"]);
+
+const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "mortgage"]);
 
 function currentYearMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -130,24 +184,111 @@ function formatNoCents(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
+function coefficientOfVariation(amounts: number[]): number {
+  if (amounts.length === 0) return Infinity;
+  const mean = amounts.reduce((a, b) => a + b, 0) / amounts.length;
+  if (mean === 0) return Infinity;
+  const variance = amounts.reduce((acc, x) => acc + (x - mean) ** 2, 0) / amounts.length;
+  return Math.sqrt(variance) / mean;
+}
+
+function modalCategory(rows: LedgerRow[]): string | null {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const c = r.categoryName?.toLowerCase().trim();
+    if (!c) continue;
+    counts.set(c, (counts.get(c) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const [c, n] of counts) {
+    if (n > bestN) {
+      best = c;
+      bestN = n;
+    }
+  }
+  return best;
+}
+
 function detectRecurring(txns: LedgerRow[]): RecurringItem[] {
-  const posted = txns.filter((t) => t.status === "posted" && t.amount < 0);
+  // Layer 1 — drop transfers/payoffs/payments/refunds by merchant token before grouping.
+  const filtered = txns.filter((t) => {
+    if (t.status !== "posted" || t.amount >= 0) return false;
+    const m = (t.merchant ?? "").toUpperCase();
+    return !EXCLUDE_MERCHANT_TOKENS.some((tok) => m.includes(tok));
+  });
+
   const byMerchant = new Map<string, LedgerRow[]>();
-  for (const t of posted) {
+  for (const t of filtered) {
     const key = (t.merchant ?? "Unknown").toLowerCase().trim();
     byMerchant.set(key, [...(byMerchant.get(key) ?? []), t]);
   }
+
   const results: RecurringItem[] = [];
   for (const [, rows] of byMerchant) {
     if (rows.length < 2) continue;
     const months = new Set(rows.map((r) => r.txnDate.slice(0, 7)));
     if (months.size < 2) continue;
-    const amounts = rows.map((r) => Math.abs(r.amount)).sort((a, b) => a - b);
-    const mid = Math.floor(amounts.length / 2);
-    const median = amounts.length % 2 === 0 ? (amounts[mid - 1]! + amounts[mid]!) / 2 : amounts[mid]!;
+
+    // Layer 3 — modal category gate: deny-list drops the bucket; allow-list relaxes the CV cap.
+    const cat = modalCategory(rows);
+    if (cat && EXCLUDE_CATEGORIES.has(cat)) continue;
+
+    // Layer 2 — amount stability via coefficient of variation.
+    const amounts = rows.map((r) => Math.abs(r.amount));
+    const cv = coefficientOfVariation(amounts);
+    const cvCap = cat && ALLOW_CATEGORIES.has(cat) ? 0.5 : 0.25;
+    if (cv >= cvCap) continue;
+
+    const sorted = [...amounts].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
     results.push({ merchant: rows[0]!.merchant ?? "Unknown", medianAmount: median, monthCount: months.size });
   }
   return results.sort((a, b) => b.medianAmount - a.medianAmount);
+}
+
+function computeAccountBuckets(txns: LedgerRow[], activeMonth: string): AccountBucket[] {
+  const priorYm = prevMonth(activeMonth);
+  const buckets = new Map<string, AccountBucket>();
+  for (const t of txns) {
+    if (t.status !== "posted" || t.amount >= 0) continue;
+    const isThis = t.txnDate.startsWith(activeMonth);
+    const isPrior = t.txnDate.startsWith(priorYm);
+    if (!isThis && !isPrior) continue;
+    let b = buckets.get(t.accountId);
+    if (!b) {
+      b = {
+        accountId: t.accountId,
+        name: `${t.institution}${t.accountMask ? ` · ${t.accountMask}` : ""}`,
+        accountType: t.accountType,
+        thisMonthOutflow: 0,
+        priorMonthOutflow: 0,
+        priorMonthTxnCount: 0
+      };
+      buckets.set(t.accountId, b);
+    }
+    const abs = Math.abs(t.amount);
+    if (isThis) b.thisMonthOutflow += abs;
+    if (isPrior) {
+      b.priorMonthOutflow += abs;
+      b.priorMonthTxnCount += 1;
+    }
+  }
+  return [...buckets.values()]
+    .filter((b) => b.thisMonthOutflow > 0)
+    .sort((a, b) => b.thisMonthOutflow - a.thisMonthOutflow)
+    .slice(0, 5);
+}
+
+function accountArrow(b: AccountBucket): { char: string; color: string } | null {
+  if (b.priorMonthTxnCount < 3) return null;
+  const liability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
+  if (b.priorMonthOutflow === 0) return { char: "→", color: "dimmed" };
+  const delta = (b.thisMonthOutflow - b.priorMonthOutflow) / b.priorMonthOutflow;
+  if (delta > 0.05) return { char: "↑", color: liability ? "red" : "orange" };
+  if (delta < -0.05) return { char: "↓", color: "green" };
+  return { char: "→", color: "dimmed" };
 }
 
 function outflowSlices(cashData: CashSummaryResponse | null): Array<{ categoryId: string | null; categoryName: string; outflows: number }> {
@@ -245,6 +386,12 @@ export function DashboardPageV2() {
     [recurring]
   );
 
+  const accountBuckets = useMemo(
+    () => (recentTxns && recentTxns.length >= 5 ? computeAccountBuckets(recentTxns, activeMonth) : []),
+    [recentTxns, activeMonth]
+  );
+  const showAccountModule = recentTxns !== null && recentTxns.length >= 5 && accountBuckets.length > 0;
+
   const trendData = cashData && cashData !== "error" ? cashData.monthlyTrend : [];
   const trendMax = useMemo(
     () => Math.max(0, ...trendData.flatMap((p) => [p.inflows, p.outflows])),
@@ -258,18 +405,19 @@ export function DashboardPageV2() {
     return (
       <>
         <DashboardPageLegacy />
-        <div style={{ textAlign: "right", padding: "0.5rem 1rem", fontSize: "0.82rem" }}>
-          <button
+        <Group justify="flex-end" px="md" py="xs">
+          <Button
             type="button"
-            className="secondary"
+            variant="default"
+            size="xs"
             onClick={() => {
               localStorage.removeItem("dashboard_classic");
               setUseClassicView(false);
             }}
           >
             Switch to new view
-          </button>
-        </div>
+          </Button>
+        </Group>
       </>
     );
   }
@@ -278,81 +426,94 @@ export function DashboardPageV2() {
   const monthStart = firstDayOf(activeMonth);
   const monthEnd = lastDayOf(activeMonth);
 
+  const netColor =
+    cashData && cashData !== "error"
+      ? cashData.household.net > 0
+        ? "green"
+        : cashData.household.net < 0
+          ? "red"
+          : "dimmed"
+      : "dimmed";
+
+  const savingsLineColor =
+    cashData && cashData !== "error"
+      ? cashData.household.transactionCount === 0
+        ? "dimmed"
+        : cashData.household.net < 0
+          ? "red"
+          : cashData.spendingPower.savingsRate !== null && cashData.spendingPower.savingsRate > 0.2
+            ? "green"
+            : "dimmed"
+      : "dimmed";
+
   return (
-    <main className="dashboard-page">
-      <div className="card dashboard-page__hero">
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.25rem" }}>
-          <button type="button" className="secondary" onClick={() => setActiveMonth((m) => prevMonth(m))} disabled={loading}>
-            ‹
-          </button>
-          <span style={{ fontWeight: 600, fontSize: "1.1rem" }}>{formatMonthLabel(activeMonth)}</span>
-          <button
+    <Box component="main" w="100%">
+      <Paper withBorder p="lg" radius="md" mb="md">
+        <Group gap="sm" mb="lg">
+          <Button
             type="button"
-            className="secondary"
+            variant="default"
+            size="xs"
+            onClick={() => setActiveMonth((m) => prevMonth(m))}
+            disabled={loading}
+          >
+            ‹
+          </Button>
+          <Text fw={600} size="lg">
+            {formatMonthLabel(activeMonth)}
+          </Text>
+          <Button
+            type="button"
+            variant="default"
+            size="xs"
             onClick={() => setActiveMonth((m) => nextMonth(m))}
             disabled={isCurrentMonth || loading}
           >
             ›
-          </button>
-          <span style={{ marginLeft: "auto", fontSize: "0.8rem" }}>
-            <button
-              type="button"
-              className="secondary"
-              style={{ fontSize: "0.8rem", padding: "0.2rem 0.5rem" }}
-              onClick={() => {
-                localStorage.setItem("dashboard_classic", "1");
-                setUseClassicView(true);
-              }}
-            >
-              Classic view
-            </button>
-          </span>
-        </div>
+          </Button>
+          <Button
+            type="button"
+            variant="default"
+            size="xs"
+            ml="auto"
+            onClick={() => {
+              localStorage.setItem("dashboard_classic", "1");
+              setUseClassicView(true);
+            }}
+          >
+            Classic view
+          </Button>
+        </Group>
 
         {loading ? (
-          <div style={{ height: 60, borderRadius: 6, background: "#e5e7eb", width: 200, margin: "0 auto 1rem" }} />
+          <Skeleton h={60} w={200} mx="auto" mb="md" radius="sm" />
         ) : cashUnavailable ? (
-          <p className="muted" style={{ textAlign: "center", marginBottom: "1rem" }}>
+          <Text ta="center" mb="md" c="dimmed">
             {cashRetrying ? (
               "Retrying…"
             ) : (
               <>
                 Cash flow unavailable ·{" "}
-                <button type="button" className="secondary" onClick={() => void loadCashSummary()}>
+                <Button type="button" variant="default" size="xs" onClick={() => void loadCashSummary()}>
                   Retry
-                </button>
+                </Button>
               </>
             )}
-          </p>
+          </Text>
         ) : cashData ? (
           <>
-            <p
-              style={{
-                fontSize: "2.8rem",
-                fontWeight: 700,
-                textAlign: "center",
-                margin: "0.2rem 0",
-                color: cashData.household.net > 0 ? "#16a34a" : cashData.household.net < 0 ? "#dc2626" : "#6b7280"
-              }}
-            >
+            <Text ta="center" fz="2.8rem" fw={700} my={4} c={netColor}>
               {cashData.household.net >= 0 ? "+" : "−"}${formatNoCents(Math.abs(cashData.household.net))}
-            </p>
-            <p
-              className="muted"
-              style={{
-                textAlign: "center",
-                fontSize: "0.95rem",
-                marginTop: 0,
-                color:
-                  cashData.household.transactionCount === 0
-                    ? undefined
-                    : cashData.household.net < 0
-                      ? "#dc2626"
-                      : cashData.spendingPower.savingsRate !== null && cashData.spendingPower.savingsRate > 0.2
-                        ? "#16a34a"
-                        : undefined
-              }}
-            >
+            </Text>
+            <Group justify="center" gap="lg" mt={2} mb={4}>
+              <Text size="sm" c="green">
+                ↑ ${formatNoCents(cashData.household.inflows)} inflow
+              </Text>
+              <Text size="sm" c="red">
+                ↓ ${formatNoCents(cashData.household.outflows)} outflow
+              </Text>
+            </Group>
+            <Text ta="center" size="sm" c={savingsLineColor}>
               {cashData.household.transactionCount === 0
                 ? "No transactions posted yet — import a statement to get started"
                 : cashData.spendingPower.savingsRate !== null &&
@@ -362,32 +523,27 @@ export function DashboardPageV2() {
                   : cashData.household.net < 0
                     ? "Spending exceeded income this month"
                     : ""}
-            </p>
+            </Text>
           </>
         ) : null}
 
         {budgetData?.exists && budgetData.summary.totalBudgeted > 0 ? (
-          <div style={{ marginTop: "0.8rem" }}>
-            <div style={{ height: 8, borderRadius: 4, background: "#e5e7eb", overflow: "hidden" }}>
-              <div
-                style={{
-                  width: `${Math.min(100, (budgetData.summary.totalSpent / budgetData.summary.totalBudgeted) * 100)}%`,
-                  height: "100%",
-                  background:
-                    budgetData.summary.totalSpent >= budgetData.summary.totalBudgeted
-                      ? "#dc2626"
-                      : budgetData.summary.totalSpent / budgetData.summary.totalBudgeted >= 0.8
-                        ? "#f59e0b"
-                        : "#22c55e"
-                }}
-              />
-            </div>
-            <div style={{ display: "flex", marginTop: "0.35rem", fontSize: "0.85rem" }}>
-              <span
-                className="muted"
-                style={{
-                  color: budgetData.summary.totalSpent > budgetData.summary.totalBudgeted ? "#dc2626" : undefined
-                }}
+          <Box mt="md">
+            <Progress
+              value={Math.min(100, (budgetData.summary.totalSpent / budgetData.summary.totalBudgeted) * 100)}
+              size="sm"
+              color={
+                budgetData.summary.totalSpent >= budgetData.summary.totalBudgeted
+                  ? "red"
+                  : budgetData.summary.totalSpent / budgetData.summary.totalBudgeted >= 0.8
+                    ? "yellow"
+                    : "green"
+              }
+            />
+            <Group justify="space-between" mt={6}>
+              <Text
+                size="sm"
+                c={budgetData.summary.totalSpent > budgetData.summary.totalBudgeted ? "red" : "dimmed"}
               >
                 {budgetData.summary.totalSpent > budgetData.summary.totalBudgeted
                   ? `Over budget by $${formatNoCents(budgetData.summary.totalSpent - budgetData.summary.totalBudgeted)}`
@@ -395,324 +551,310 @@ export function DashboardPageV2() {
                       100,
                       Math.round((budgetData.summary.totalSpent / budgetData.summary.totalBudgeted) * 100)
                     )}% of $${formatNoCents(budgetData.summary.totalBudgeted)} budget`}
-              </span>
-              <Link to="/budget" style={{ marginLeft: "auto" }}>
+              </Text>
+              <Anchor component={Link} to="/budget" size="sm">
                 Manage →
-              </Link>
-            </div>
-          </div>
+              </Anchor>
+            </Group>
+          </Box>
         ) : (
-          <p className="muted" style={{ marginTop: "0.7rem", fontSize: "0.9rem" }}>
-            No budget set for this month · <Link to="/budget">Set one up →</Link>
-          </p>
+          <Text mt="sm" size="sm" c="dimmed">
+            No budget set for this month ·{" "}
+            <Anchor component={Link} to="/budget">
+              Set one up →
+            </Anchor>
+          </Text>
         )}
 
         {!loading && cashData && cashData !== "error" && cashData.household.transactionCount > 0 ? (
-          <p className="muted" style={{ marginTop: "0.45rem", fontSize: "0.85rem" }}>
+          <Text mt="xs" size="sm" c="dimmed">
             {cashData.household.transactionCount} posted transactions
-          </p>
+          </Text>
         ) : null}
-      </div>
+      </Paper>
 
       {resolutionData?.totalOpen ? (
-        <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <Group gap="sm" mt="md" wrap="wrap">
           {(resolutionData.openByType.unknown_category ?? 0) > 0 ? (
-            <Link
+            <Badge
+              component={Link}
               to="/transactions?needsReview=true&resolutionType=unknown_category"
-              style={{
-                padding: "0.3rem 0.75rem",
-                borderRadius: "999px",
-                fontSize: "0.85rem",
-                fontWeight: 500,
-                textDecoration: "none",
-                border: "1px solid #fcd34d",
-                background: "#fef3c7",
-                color: "#92400e",
-                display: "inline-block"
-              }}
+              variant="light"
+              color="yellow"
+              size="lg"
+              radius="xl"
+              style={{ textDecoration: "none", cursor: "pointer" }}
             >
               ⚠ {resolutionData.openByType.unknown_category} uncategorized
-            </Link>
+            </Badge>
           ) : null}
           {(resolutionData.openByType.transfer_ambiguity ?? 0) > 0 ? (
-            <Link
+            <Badge
+              component={Link}
               to="/transactions?needsReview=true&resolutionType=transfer_ambiguity"
-              style={{
-                padding: "0.3rem 0.75rem",
-                borderRadius: "999px",
-                fontSize: "0.85rem",
-                fontWeight: 500,
-                textDecoration: "none",
-                border: "1px solid #fcd34d",
-                background: "#fef3c7",
-                color: "#92400e",
-                display: "inline-block"
-              }}
+              variant="light"
+              color="yellow"
+              size="lg"
+              radius="xl"
+              style={{ textDecoration: "none", cursor: "pointer" }}
             >
               ⟳ {resolutionData.openByType.transfer_ambiguity} transfer
               {resolutionData.openByType.transfer_ambiguity === 1 ? "" : "s"} to pair
-            </Link>
+            </Badge>
           ) : null}
           {(resolutionData.openByType.duplicate_ambiguity ?? 0) > 0 ? (
-            <Link
+            <Badge
+              component={Link}
               to="/transactions?needsReview=true&resolutionType=duplicate_ambiguity"
-              style={{
-                padding: "0.3rem 0.75rem",
-                borderRadius: "999px",
-                fontSize: "0.85rem",
-                fontWeight: 500,
-                textDecoration: "none",
-                border: "1px solid #fcd34d",
-                background: "#fef3c7",
-                color: "#92400e",
-                display: "inline-block"
-              }}
+              variant="light"
+              color="yellow"
+              size="lg"
+              radius="xl"
+              style={{ textDecoration: "none", cursor: "pointer" }}
             >
               ◑ {resolutionData.openByType.duplicate_ambiguity} possible duplicate
               {resolutionData.openByType.duplicate_ambiguity === 1 ? "" : "s"}
-            </Link>
+            </Badge>
           ) : null}
-        </div>
+        </Group>
       ) : null}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: "1rem",
-          marginTop: "1.2rem"
-        }}
-      >
-          <section
-            style={{
-              background: "var(--color-surface-alt, #f9fafb)",
-              border: "1px solid var(--color-border, #e5e7eb)",
-              borderRadius: "10px",
-              padding: "1.1rem 1.25rem"
-            }}
-          >
-            <p
-              style={{
-                fontSize: "0.75rem",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "#6b7280",
-                marginBottom: "0.5rem"
-              }}
-            >
-              Spending This Month
-            </p>
-            {loading ? (
-              <p className="muted">Loading…</p>
-            ) : cashUnavailable ? (
-              <p className="muted">Spending data unavailable</p>
-            ) : slices.length === 0 ? (
-              <p className="muted" style={{ textAlign: "center" }}>
-                No spending data for this month
-              </p>
-            ) : (
-              <>
-                <div style={{ width: "100%", height: 180 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={slices} dataKey="outflows" nameKey="categoryName" innerRadius={44} outerRadius={72}>
-                        {slices.map((_, i) => (
-                          <Cell key={String(i)} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(v: number) => `$${v.toFixed(2)}`} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div style={{ marginTop: "0.5rem" }}>
-                  {slices.map((slice, idx) => {
-                    const left = (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
-                        <span
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: "999px",
-                            background: PIE_COLORS[idx % PIE_COLORS.length]
-                          }}
-                        />
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" mt="lg">
+        <Paper component="section" withBorder p="md" radius="md">
+          <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
+            Spending This Month
+          </Text>
+          {loading ? (
+            <Text size="sm" c="dimmed">
+              Loading…
+            </Text>
+          ) : cashUnavailable ? (
+            <Text size="sm" c="dimmed">
+              Spending data unavailable
+            </Text>
+          ) : slices.length === 0 ? (
+            <Text size="sm" ta="center" c="dimmed">
+              No spending data for this month
+            </Text>
+          ) : (
+            <>
+              <Box w="100%" h={180}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={slices} dataKey="outflows" nameKey="categoryName" innerRadius={44} outerRadius={72}>
+                      {slices.map((_, i) => (
+                        <Cell key={String(i)} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => `$${v.toFixed(2)}`} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </Box>
+              <Stack gap={4} mt="xs">
+                {slices.map((slice, idx) => {
+                  const swatch = (
+                    <Group gap={6} wrap="nowrap">
+                      <Box
+                        w={6}
+                        h={6}
+                        style={{ borderRadius: "999px", background: PIE_COLORS[idx % PIE_COLORS.length] }}
+                      />
+                      <Text size="sm" component="span">
                         {slice.categoryName}
-                      </span>
-                    );
-                    const href =
-                      slice.categoryName === "Other"
-                        ? null
-                        : slice.categoryId
-                          ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
-                          : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
-                    return (
-                      <div
-                        key={`${slice.categoryName}-${idx}`}
-                        style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", marginBottom: "0.25rem" }}
-                      >
-                        {href ? <Link to={href}>{left}</Link> : left}
-                        <span>${formatNoCents(slice.outflows)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <p className="muted" style={{ fontSize: "0.8rem", marginTop: "0.4rem" }}>
-                  ${formatNoCents(totalOutflows)} total outflows
-                </p>
-              </>
-            )}
-          </section>
-
-          <section
-            style={{
-              background: "var(--color-surface-alt, #f9fafb)",
-              border: "1px solid var(--color-border, #e5e7eb)",
-              borderRadius: "10px",
-              padding: "1.1rem 1.25rem"
-            }}
-          >
-            <p
-              style={{
-                fontSize: "0.75rem",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "#6b7280",
-                marginBottom: "0.5rem"
-              }}
-            >
-              Net Worth
-            </p>
-            {loading ? (
-              <p className="muted">Loading…</p>
-            ) : (
-              <>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: "1.7rem",
-                    fontWeight: 700,
-                    color:
-                      netWorthData?.totals.netWorth == null
-                        ? "inherit"
-                        : netWorthData.totals.netWorth >= 0
-                          ? "#16a34a"
-                          : "#dc2626"
-                  }}
-                >
-                  {netWorthData?.totals.netWorth == null ? "—" : `$${formatNoCents(netWorthData.totals.netWorth)}`}
-                </p>
-                {netWorthData && (netWorthData.totals.assets !== null || netWorthData.totals.liabilities !== null) ? (
-                  <p className="muted" style={{ fontSize: "0.82rem", marginTop: "0.45rem" }}>
-                    Assets{" "}
-                    {netWorthData.totals.assets == null ? "—" : `$${formatNoCents(netWorthData.totals.assets)}`} ·
-                    Liabilities{" "}
-                    {netWorthData.totals.liabilities == null ? "—" : `$${formatNoCents(netWorthData.totals.liabilities)}`}
-                  </p>
-                ) : null}
-                {(() => {
-                  const points = (netWorthHistory ?? [])
-                    .filter(
-                      (p): p is NetWorthHistoryPoint & { netWorth: number } =>
-                        p != null &&
-                        typeof p.date === "string" &&
-                        p.date.length > 0 &&
-                        typeof p.netWorth === "number" &&
-                        Number.isFinite(p.netWorth)
-                    )
-                    .slice()
-                    .sort((a, b) => a.date.localeCompare(b.date));
-                  if (points.length < 2) return null;
-                  const latest = points[points.length - 1]!;
-                  return (
-                    <div style={{ width: "100%", height: 52, marginTop: "0.5rem" }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={points} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
-                          <Line
-                            type="monotone"
-                            dataKey="netWorth"
-                            dot={false}
-                            strokeWidth={2}
-                            stroke={(latest.netWorth ?? 0) >= 0 ? "#16a34a" : "#dc2626"}
-                            isAnimationActive={false}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
+                      </Text>
+                    </Group>
                   );
-                })()}
-                {netWorthData ? (
-                  <p className="muted" style={{ fontSize: "0.75rem", marginTop: "0.3rem" }}>
-                    as of {netWorthData.asOf}
-                  </p>
-                ) : null}
-                <div style={{ textAlign: "right" }}>
-                  <Link to="/net-worth" style={{ fontSize: "0.82rem" }}>
-                    View details →
-                  </Link>
-                </div>
-              </>
-            )}
-          </section>
+                  const href =
+                    slice.categoryName === "Other"
+                      ? null
+                      : slice.categoryId
+                        ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
+                        : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                  return (
+                    <Group key={`${slice.categoryName}-${idx}`} justify="space-between" gap={4} wrap="nowrap">
+                      {href ? (
+                        <Anchor component={Link} to={href} underline="hover">
+                          {swatch}
+                        </Anchor>
+                      ) : (
+                        swatch
+                      )}
+                      <Text size="sm">${formatNoCents(slice.outflows)}</Text>
+                    </Group>
+                  );
+                })}
+              </Stack>
+              <Text mt="xs" size="sm" c="dimmed">
+                ${formatNoCents(totalOutflows)} total outflows
+              </Text>
+            </>
+          )}
+        </Paper>
 
-          <section
-            style={{
-              background: "var(--color-surface-alt, #f9fafb)",
-              border: "1px solid var(--color-border, #e5e7eb)",
-              borderRadius: "10px",
-              padding: "1.1rem 1.25rem"
-            }}
-          >
-            <p
-              style={{
-                fontSize: "0.75rem",
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "#6b7280",
-                marginBottom: "0.5rem"
-              }}
-            >
-              Monthly Commitments
-            </p>
-            {loading ? (
-              <p className="muted">Loading…</p>
-            ) : recurring.length === 0 ? (
-              <p className="muted">
-                No recurring charges detected yet — import a few months of statements to see patterns
-              </p>
-            ) : (
-              <>
-                <p style={{ fontWeight: 600, fontSize: "1.4rem", margin: 0 }}>
-                  ${formatNoCents(recurringTotalMonthly)} / month
-                </p>
-                <p className="muted" style={{ marginTop: "0.35rem", fontSize: "0.85rem" }}>
-                  across {recurring.length} recurring charge{recurring.length === 1 ? "" : "s"}
-                </p>
-                <div>
-                  {recurringVisible.map((item) => (
-                    <div
-                      key={item.merchant}
-                      style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.25rem" }}
-                    >
-                      <span>{item.merchant}</span>
-                      <span>${item.medianAmount.toFixed(2)}/mo</span>
-                    </div>
-                  ))}
-                </div>
-                {!showAllRecurring && recurring.length > 5 ? (
-                  <button type="button" className="secondary" onClick={() => setShowAllRecurring(true)}>
-                    + {recurring.length - 5} more
-                  </button>
-                ) : null}
-              </>
-            )}
-          </section>
-      </div>
+        <Paper component="section" withBorder p="md" radius="md">
+          <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
+            Net Worth
+          </Text>
+          {loading ? (
+            <Text size="sm" c="dimmed">
+              Loading…
+            </Text>
+          ) : (
+            <>
+              <Text
+                m={0}
+                fz="1.5rem"
+                fw={700}
+                c={
+                  netWorthData?.totals.netWorth == null
+                    ? undefined
+                    : netWorthData.totals.netWorth >= 0
+                      ? "green"
+                      : "red"
+                }
+              >
+                {netWorthData?.totals.netWorth == null ? "—" : `$${formatNoCents(netWorthData.totals.netWorth)}`}
+              </Text>
+              {netWorthData && (netWorthData.totals.assets !== null || netWorthData.totals.liabilities !== null) ? (
+                <Text size="sm" c="dimmed" mt="xs">
+                  Assets {netWorthData.totals.assets == null ? "—" : `$${formatNoCents(netWorthData.totals.assets)}`} ·
+                  Liabilities{" "}
+                  {netWorthData.totals.liabilities == null ? "—" : `$${formatNoCents(netWorthData.totals.liabilities)}`}
+                </Text>
+              ) : null}
+              {(() => {
+                const points = (netWorthHistory ?? [])
+                  .filter(
+                    (p): p is NetWorthHistoryPoint & { netWorth: number } =>
+                      p != null &&
+                      typeof p.date === "string" &&
+                      p.date.length > 0 &&
+                      typeof p.netWorth === "number" &&
+                      Number.isFinite(p.netWorth)
+                  )
+                  .slice()
+                  .sort((a, b) => a.date.localeCompare(b.date));
+                const distinctNonZero = new Set(points.map((p) => p.netWorth).filter((v) => v !== 0)).size;
+                if (points.length < 2 || distinctNonZero < 2) return null;
+                const first = points[0]!.netWorth;
+                const last = points[points.length - 1]!.netWorth;
+                const stroke = last > first ? "#16a34a" : last < first ? "#dc2626" : "#6b7280";
+                return (
+                  <Box w="100%" h={48} mt="xs">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={points} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                        <Line
+                          type="monotone"
+                          dataKey="netWorth"
+                          dot={false}
+                          strokeWidth={2}
+                          stroke={stroke}
+                          isAnimationActive={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </Box>
+                );
+              })()}
+              {netWorthData ? (
+                <Text size="sm" c="dimmed" mt="xs">
+                  as of {netWorthData.asOf}
+                </Text>
+              ) : null}
+              <Group justify="flex-end" mt="xs">
+                <Anchor component={Link} to="/net-worth" size="sm">
+                  View details →
+                </Anchor>
+              </Group>
+            </>
+          )}
+        </Paper>
 
-      <h2 style={{ fontSize: "1rem", fontWeight: 600, margin: "1.5rem 0 0.5rem" }}>6-month trend</h2>
+        <Paper component="section" withBorder p="md" radius="md">
+          <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb={2} style={{ letterSpacing: "0.06em" }}>
+            Recurring Payments
+          </Text>
+          <Text size="xs" c="dimmed" mb="xs">
+            Estimated from repeated charges
+          </Text>
+          {loading ? (
+            <Text size="sm" c="dimmed">
+              Loading…
+            </Text>
+          ) : recurring.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              No recurring charges detected yet — import a few months of statements to see patterns
+            </Text>
+          ) : (
+            <>
+              <Text fw={600} fz="1.4rem" m={0}>
+                ${formatNoCents(recurringTotalMonthly)} / month
+              </Text>
+              <Text mt={6} size="sm" c="dimmed">
+                across {recurring.length} recurring charge{recurring.length === 1 ? "" : "s"}
+              </Text>
+              <Stack gap={4} mt="xs">
+                {recurringVisible.map((item) => (
+                  <Group key={item.merchant} justify="space-between" gap={4} wrap="nowrap">
+                    <Text size="sm">{item.merchant}</Text>
+                    <Text size="sm">${item.medianAmount.toFixed(2)}/mo</Text>
+                  </Group>
+                ))}
+              </Stack>
+              {!showAllRecurring && recurring.length > 5 ? (
+                <Button
+                  type="button"
+                  variant="default"
+                  size="xs"
+                  mt="xs"
+                  onClick={() => setShowAllRecurring(true)}
+                >
+                  + {recurring.length - 5} more
+                </Button>
+              ) : null}
+            </>
+          )}
+        </Paper>
+
+        {showAccountModule ? (
+          <Paper component="section" withBorder p="md" radius="md">
+            <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
+              By Account — This Month
+            </Text>
+            <Stack gap={4}>
+              {accountBuckets.map((b) => {
+                const arrow = accountArrow(b);
+                const href = `/transactions?accountId=${b.accountId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                return (
+                  <Group key={b.accountId} justify="space-between" gap={4} wrap="nowrap">
+                    <Anchor component={Link} to={href} size="sm" underline="hover">
+                      {b.name}
+                    </Anchor>
+                    <Group gap={6} wrap="nowrap">
+                      <Text size="sm">${formatNoCents(b.thisMonthOutflow)}</Text>
+                      {arrow ? (
+                        <Text size="sm" c={arrow.color} fw={600}>
+                          {arrow.char}
+                        </Text>
+                      ) : null}
+                    </Group>
+                  </Group>
+                );
+              })}
+            </Stack>
+          </Paper>
+        ) : null}
+      </SimpleGrid>
+
+      <Title order={4} mt="lg" mb="sm" fw={600}>
+        6-month trend
+      </Title>
       {cashUnavailable ? (
-        <p className="muted">Trend data unavailable</p>
+        <Text size="sm" c="dimmed">
+          Trend data unavailable
+        </Text>
       ) : !loading && trendData.length > 0 ? (
-        <div style={{ width: "100%", height: 220 }}>
+        <Box w="100%" h={220}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={trendData}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -724,9 +866,8 @@ export function DashboardPageV2() {
               <Bar dataKey="outflows" fill="#f97316" name="Spending" />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </Box>
       ) : null}
-    </main>
+    </Box>
   );
 }
-

@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-120 (2026-04-27): Dashboard Mantine reference + pulse breakdown, tighter recurring, per-account module, net-worth sparkline
+- DashboardPageV2 migrated entirely to Mantine 7 primitives (Paper, Stack, Group, SimpleGrid, Text, Title, Button, Progress, Badge, Anchor, Box, Skeleton). This is the project's first reference page for the Mantine pattern; all other pages remain on the existing project CSS classes (`.card`, `.muted`, `.secondary`, `.dashboard-page` in `frontend/src/index.css`). The dashboard's hard-coded greys/borders are now Mantine tokens (`c="dimmed"`, `Paper withBorder`), so the dashboard now follows the `data-mantine-color-scheme` dark/light flip that `index.css` already wires up. Recharts strokes/fills keep hex literals — Recharts does not read Mantine theme.
+- Pulse hero card: added inflow/outflow breakdown line under the headline net number (green ↑ inflow, red ↓ outflow).
+- `detectRecurring`: 3-layer filter — Layer 1 drops merchants whose name contains TRANSFER / E-PAYMENT / AUTOPAY / PAYDOWN / PAYMENT / DIRECT DEP / DIRECT DEPOSIT / REFUND; Layer 2 requires CV<0.25 amount stability; Layer 3 modal-category gate drops groceries/dining/restaurant/gas/fuel/shopping/entertainment buckets and relaxes the CV cap to 0.5 for utilities/subscriptions/insurance/rent/mortgage/loan. Section renamed "Monthly Commitments" → "Recurring Payments" with microcopy "Estimated from repeated charges".
+- New "By Account — This Month" card in the responsive SimpleGrid (top 5 accounts by `activeMonth` outflow, MoM arrow with 5% threshold, account-type-aware color: liability accounts (`credit_card`/`loan`/`mortgage`) ↑=red ↓=green, asset accounts ↑=orange ↓=green, → for flat or insufficient prior data; arrow omitted when prior month has fewer than 3 txns; whole module hidden when `recentTxns` is null or has fewer than 5 rows).
+- Net-worth card: headline 1.7rem→1.5rem, sub-lines (assets/liabilities and as-of) normalised to `size="sm"`, sparkline color now compares first vs last (green/red/gray) instead of absolute sign, height 48px (was 52), only renders with ≥2 distinct non-zero points.
+- LedgerRow type widened to surface `accountId`, `institution`, `accountType`, `accountMask`, `categoryName` fields the `/transactions` API already returns — no new API calls, no backend changes.
+- Follow-ups deferred (not in this PR): (a) audit of `frontend/src/pages` and `frontend/src/components` for Mantine vs `index.css` usage; (b) `docs/backlog/PRD-mantine-migration.md` describing the rollout pattern and migrate-when-touched rule; (c) cleanup of orphaned `.dashboard-page` / `.dashboard-page__hero` rules in `frontend/src/index.css` once no other file references them.
+Files: frontend/src/pages/DashboardPageV2.tsx, docs/CHANGE_HISTORY.md
+
+---
+
 ## FIX-120a (2026-04-27): Fix dashboard home-page crash loop on net worth history sort
 - Fixed `DashboardPageV2` crash when a net worth history point has missing/invalid `date` by validating rows before sparkline sort (`localeCompare`) and render.
 - Prevented V2 data fetch effects from running while classic view is active, avoiding background fetch churn under legacy fallback mode.
