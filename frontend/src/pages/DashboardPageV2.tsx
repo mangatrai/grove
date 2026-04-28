@@ -109,18 +109,53 @@ const EXCLUDE_MERCHANT_TOKENS = [
 ];
 
 const EXCLUDE_CATEGORIES = new Set([
-  "groceries",
+  "food",
+  "coffee",
   "dining",
-  "restaurant",
-  "gas",
-  "fuel",
+  "snacks",
   "shopping",
-  "entertainment"
+  "groceries",
+  "clothing",
+  "electronic",
+  "personal care",
+  "general merchandise",
+  "office",
+  "travel",
+  "airfare",
+  "hotel",
+  "car rental",
+  "taxi",
+  "parking",
+  "entertainment",
+  "movies",
+  "fuel",
+  "gas",
+  "gifts",
+  "tax"
 ]);
 
-const ALLOW_CATEGORIES = new Set(["utilities", "subscriptions", "insurance", "rent", "mortgage", "loan"]);
+const ALLOW_CATEGORIES = new Set([
+  "utilities",
+  "energy",
+  "internet",
+  "mobile",
+  "water",
+  "insurance",
+  "loan",
+  "mortgage",
+  "heloc",
+  "rent",
+  "housing",
+  "hoa",
+  "subscriptions",
+  "streaming",
+  "software",
+  "fitness",
+  "childcare",
+  "tuition"
+]);
 
-const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "mortgage"]);
+const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "mortgage", "checking"]);
 
 function currentYearMonth(): string {
   return new Date().toISOString().slice(0, 7);

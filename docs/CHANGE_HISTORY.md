@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-120d (2026-04-28): Expand recurring category lists and treat checking as liability in account trend arrows
+- Updated `DashboardPageV2` recurring-payment constants to broaden category gating coverage: `EXCLUDE_CATEGORIES` now includes food/coffee/snacks, expanded shopping variants, travel/parking/taxi, entertainment/movies, gifts, and tax-related tokens; `ALLOW_CATEGORIES` now includes utility subtypes, housing/hoa, subscriptions/streaming/software, fitness, and childcare/tuition.
+- Updated `LIABILITY_ACCOUNT_TYPES` in the same file to include `checking` so the By Account MoM arrow color logic treats checking accounts with the liability color policy.
+- Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ## FIX-120c (2026-04-28): Recurring category gate now uses substring token matching
 - `detectRecurring` category gate in `DashboardPageV2` previously used exact `Set.has()` checks for `EXCLUDE_CATEGORIES` / `ALLOW_CATEGORIES`, which missed common variants (for example names with suffixes/prefixes).
 - Fix: switched both gates to substring token checks (`[...SET].some((token) => cat.includes(token))`) so exclusion/allow logic still uses the same token lists but matches normalized category strings more reliably.
