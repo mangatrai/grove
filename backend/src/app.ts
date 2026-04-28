@@ -19,6 +19,7 @@ import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
 import { payslipRouter } from "./modules/payslip/payslip.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
+import { recurringRouter } from "./modules/recurring/recurring.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -58,7 +59,8 @@ const API_PATH_PREFIXES = [
   "/reports",
   "/payslips",
   "/exports",
-  "/budget"
+  "/budget",
+  "/recurring-overrides"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -107,6 +109,7 @@ export function buildApp() {
   app.use("/payslips", payslipRouter);
   app.use("/exports", exportsRouter);
   app.use("/budget", budgetRouter);
+  app.use("/recurring-overrides", recurringRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

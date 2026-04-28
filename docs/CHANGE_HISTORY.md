@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-121 (2026-04-28): Recurring payments hybrid tagging Phase 1 override store + dashboard dismiss flow
+- Added migration `backend/db/migrations/0030_recurring_merchant_override.sql` introducing `recurring_merchant_override` with household-scoped unique `(household_id, merchant_key)` rows and confirm/dismiss verdict support.
+- Added new backend recurring module (`backend/src/modules/recurring/recurring.service.ts`, `backend/src/modules/recurring/recurring.routes.ts`, `backend/src/modules/recurring/recurring.types.ts`) and registered router in `backend/src/app.ts` for:
+  - `GET /recurring-overrides` (list)
+  - `POST /recurring-overrides` (upsert confirmed/dismissed override)
+  - `DELETE /recurring-overrides/:id` (delete by id in household scope)
+- Updated dashboard recurring module (`frontend/src/pages/DashboardPageV2.tsx`) to:
+  - Fetch recurring overrides with other dashboard data.
+  - Persist dismiss actions via `POST /recurring-overrides` and optimistically hide dismissed heuristic candidates.
+  - Render confirmed overrides above heuristic suggestions, while filtering suggestions against confirmed/dismissed overrides.
+- Added backend test coverage in `backend/tests/recurring-overrides.test.ts` for CRUD upsert behavior, conflict update semantics, list responses, delete/not-found behavior, and auth guards.
+- Added docs/API updates for recurring endpoints: `docs/API_RECURRING.md` (new), `docs/API_INDEX.md`, `openapi/openapi.yaml`.
+
+---
+
 ## FIX-120d (2026-04-28): Expand recurring category lists and treat checking as liability in account trend arrows
 - Updated `DashboardPageV2` recurring-payment constants to broaden category gating coverage: `EXCLUDE_CATEGORIES` now includes food/coffee/snacks, expanded shopping variants, travel/parking/taxi, entertainment/movies, gifts, and tax-related tokens; `ALLOW_CATEGORIES` now includes utility subtypes, housing/hoa, subscriptions/streaming/software, fitness, and childcare/tuition.
 - Updated `LIABILITY_ACCOUNT_TYPES` in the same file to include `checking` so the By Account MoM arrow color logic treats checking accounts with the liability color policy.

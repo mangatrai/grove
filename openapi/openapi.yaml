@@ -20,6 +20,7 @@ tags:
   - name: payslips
   - name: exports
   - name: budget
+  - name: recurring
 paths:
   /health:
     get:
@@ -1194,6 +1195,91 @@ paths:
           description: Saved budget with actuals (same shape as GET /budget/:month)
         "400":
           description: Invalid month param or invalid body
+  /recurring-overrides:
+    get:
+      tags: [recurring]
+      summary: List recurring merchant overrides for household
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Overrides list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RecurringOverride'
+        "401":
+          description: Unauthorized
+    post:
+      tags: [recurring]
+      summary: Upsert recurring merchant override (confirm or dismiss)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merchantKey, verdict]
+              properties:
+                merchantKey:
+                  type: string
+                  minLength: 1
+                displayName:
+                  type: string
+                verdict:
+                  type: string
+                  enum: [confirmed, dismissed]
+                amountAnchor:
+                  type: number
+                amountTolerancePct:
+                  type: number
+                  default: 15
+      responses:
+        "200":
+          description: Upserted override
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/RecurringOverride'
+        "400":
+          description: Invalid request payload
+        "401":
+          description: Unauthorized
+  /recurring-overrides/{id}:
+    delete:
+      tags: [recurring]
+      summary: Delete recurring merchant override
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          description: Unauthorized
+        "404":
+          description: Override not found
 components:
   securitySchemes:
     bearerAuth:
@@ -1270,3 +1356,16 @@ components:
         validationWarnings:
           type: array
           items: { $ref: '#/components/schemas/ValidationWarning' }
+    RecurringOverride:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        merchantKey: { type: string }
+        displayName: { type: string, nullable: true }
+        verdict: { type: string, enum: [confirmed, dismissed] }
+        amountAnchor: { type: number, nullable: true }
+        amountTolerancePct: { type: number }
+        taggedByUserId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

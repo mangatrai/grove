@@ -30,7 +30,7 @@ import {
   YAxis
 } from "recharts";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { DashboardPageLegacy } from "./DashboardPageLegacy";
 
 type CashSummaryResponse = {
@@ -84,6 +84,19 @@ type LedgerRow = {
 type CashDataState = CashSummaryResponse | null | "error";
 
 type RecurringItem = { merchant: string; medianAmount: number; monthCount: number };
+
+type RecurringOverride = {
+  id: string;
+  householdId: string;
+  merchantKey: string;
+  displayName: string | null;
+  verdict: "confirmed" | "dismissed";
+  amountAnchor: number | null;
+  amountTolerancePct: number;
+  taggedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 type AccountBucket = {
   accountId: string;
@@ -283,6 +296,14 @@ function detectRecurring(txns: LedgerRow[]): RecurringItem[] {
   return results.sort((a, b) => b.medianAmount - a.medianAmount);
 }
 
+function merchantMatches(merchant: string, key: string): boolean {
+  return merchant.toLowerCase().includes(key.toLowerCase());
+}
+
+function normalizedKey(s: string): string {
+  return s.toLowerCase().trim();
+}
+
 function computeAccountBuckets(txns: LedgerRow[], activeMonth: string): AccountBucket[] {
   const priorYm = prevMonth(activeMonth);
   const buckets = new Map<string, AccountBucket>();
@@ -346,6 +367,7 @@ export function DashboardPageV2() {
   const [netWorthHistory, setNetWorthHistory] = useState<NetWorthHistoryPoint[] | null>(null);
   const [budgetData, setBudgetData] = useState<BudgetMonthResponse | null>(null);
   const [recentTxns, setRecentTxns] = useState<LedgerRow[] | null>(null);
+  const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [loading, setLoading] = useState(true);
   const [cashRetrying, setCashRetrying] = useState(false);
   const [showAllRecurring, setShowAllRecurring] = useState(false);
@@ -392,7 +414,8 @@ export function DashboardPageV2() {
       apiJson<{ transactions: LedgerRow[] }>(
         `/transactions?limit=200&dateFrom=${historyFrom}&dateTo=${monthEnd}`,
         { cache: "no-store" }
-      )
+      ),
+      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" })
     ]);
     setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
     setResolutionData(results[1].status === "fulfilled" ? results[1].value : null);
@@ -404,8 +427,42 @@ export function DashboardPageV2() {
     );
     setBudgetData(results[4].status === "fulfilled" ? results[4].value : null);
     setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
+    setRecurringOverrides(results[6].status === "fulfilled" && results[6].value.ok ? results[6].value.data : []);
     setLoading(false);
   }, [activeMonth, token, useClassicView]);
+
+  const dismissRecurring = useCallback(async (merchantKey: string) => {
+    const normalized = normalizedKey(merchantKey);
+    const nowIso = new Date().toISOString();
+    const optimistic: RecurringOverride = {
+      id: `optimistic-${normalized}`,
+      householdId: "optimistic",
+      merchantKey: normalized,
+      displayName: null,
+      verdict: "dismissed",
+      amountAnchor: null,
+      amountTolerancePct: 15,
+      taggedByUserId: null,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    setRecurringOverrides((prev) => [...prev.filter((row) => row.merchantKey !== normalized), optimistic]);
+    try {
+      const res = await apiFetch("/recurring-overrides", {
+        method: "POST",
+        body: JSON.stringify({ merchantKey: normalized, verdict: "dismissed" })
+      });
+      if (!res.ok) {
+        throw new Error("Failed to dismiss recurring suggestion");
+      }
+      const json = (await res.json()) as { ok: boolean; data: RecurringOverride };
+      if (json.ok) {
+        setRecurringOverrides((prev) => [...prev.filter((row) => row.merchantKey !== normalized), json.data]);
+      }
+    } catch {
+      setRecurringOverrides((prev) => prev.filter((row) => row.id !== optimistic.id));
+    }
+  }, []);
 
   useEffect(() => {
     if (useClassicView) {
@@ -418,11 +475,43 @@ export function DashboardPageV2() {
     setShowAllRecurring(false);
   }, [activeMonth]);
 
-  const recurring = useMemo(() => detectRecurring(recentTxns ?? []), [recentTxns]);
-  const recurringVisible = showAllRecurring ? recurring : recurring.slice(0, 5);
+  const recurringHeuristic = useMemo(() => detectRecurring(recentTxns ?? []), [recentTxns]);
+  const confirmedOverrides = useMemo(
+    () => recurringOverrides.filter((o) => o.verdict === "confirmed"),
+    [recurringOverrides]
+  );
+  const dismissedKeys = useMemo(
+    () => new Set(recurringOverrides.filter((o) => o.verdict === "dismissed").map((o) => normalizedKey(o.merchantKey))),
+    [recurringOverrides]
+  );
+  const confirmedRecurringItems = useMemo(() => {
+    return confirmedOverrides
+      .map((override) => {
+        const match = recurringHeuristic.find((item) => merchantMatches(item.merchant, override.merchantKey));
+        const fallback = override.amountAnchor ?? 0;
+        return {
+          merchant: override.displayName ?? override.merchantKey,
+          medianAmount: match?.medianAmount ?? fallback,
+          monthCount: match?.monthCount ?? 0
+        };
+      })
+      .sort((a, b) => b.medianAmount - a.medianAmount);
+  }, [confirmedOverrides, recurringHeuristic]);
+  const suggestedRecurringItems = useMemo(
+    () =>
+      recurringHeuristic
+        .filter((item) => !dismissedKeys.has(normalizedKey(item.merchant)))
+        .filter((item) => !confirmedOverrides.some((o) => merchantMatches(item.merchant, o.merchantKey))),
+    [confirmedOverrides, dismissedKeys, recurringHeuristic]
+  );
+  const recurringAll = useMemo(() => [...confirmedRecurringItems, ...suggestedRecurringItems], [
+    confirmedRecurringItems,
+    suggestedRecurringItems
+  ]);
+  const recurringVisible = showAllRecurring ? recurringAll : recurringAll.slice(0, 5);
   const recurringTotalMonthly = useMemo(
-    () => recurring.reduce((acc, item) => acc + item.medianAmount, 0),
-    [recurring]
+    () => recurringAll.reduce((acc, item) => acc + item.medianAmount, 0),
+    [recurringAll]
   );
 
   const accountBuckets = useMemo(
@@ -820,7 +909,7 @@ export function DashboardPageV2() {
             <Text size="sm" c="dimmed">
               Loading…
             </Text>
-          ) : recurring.length === 0 ? (
+          ) : recurringAll.length === 0 ? (
             <Text size="sm" c="dimmed">
               No recurring charges detected yet — import a few months of statements to see patterns
             </Text>
@@ -830,17 +919,40 @@ export function DashboardPageV2() {
                 ${formatNoCents(recurringTotalMonthly)} / month
               </Text>
               <Text mt={6} size="sm" c="dimmed">
-                across {recurring.length} recurring charge{recurring.length === 1 ? "" : "s"}
+                across {recurringAll.length} recurring charge{recurringAll.length === 1 ? "" : "s"}
               </Text>
               <Stack gap={4} mt="xs">
-                {recurringVisible.map((item) => (
-                  <Group key={item.merchant} justify="space-between" gap={4} wrap="nowrap">
-                    <Text size="sm">{item.merchant}</Text>
-                    <Text size="sm">${item.medianAmount.toFixed(2)}/mo</Text>
-                  </Group>
-                ))}
+                {recurringVisible.map((item) => {
+                  const isConfirmed = confirmedRecurringItems.some((confirmed) => confirmed.merchant === item.merchant);
+                  return (
+                    <Group key={item.merchant} justify="space-between" gap={4} wrap="nowrap">
+                      <Group gap={6} wrap="nowrap">
+                        <Text size="sm">{isConfirmed ? "●" : "○"}</Text>
+                        <Text size="sm">
+                          {item.merchant} {isConfirmed ? "" : "(Suggested)"}
+                        </Text>
+                      </Group>
+                      <Group gap={8} wrap="nowrap">
+                        <Text size="sm">${item.medianAmount.toFixed(2)}/mo</Text>
+                        {!isConfirmed ? (
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            color="gray"
+                            size="compact-xs"
+                            px={4}
+                            onClick={() => void dismissRecurring(item.merchant)}
+                            aria-label={`Dismiss recurring suggestion for ${item.merchant}`}
+                          >
+                            ×
+                          </Button>
+                        ) : null}
+                      </Group>
+                    </Group>
+                  );
+                })}
               </Stack>
-              {!showAllRecurring && recurring.length > 5 ? (
+              {!showAllRecurring && recurringAll.length > 5 ? (
                 <Button
                   type="button"
                   variant="default"
@@ -848,7 +960,7 @@ export function DashboardPageV2() {
                   mt="xs"
                   onClick={() => setShowAllRecurring(true)}
                 >
-                  + {recurring.length - 5} more
+                  + {recurringAll.length - 5} more
                 </Button>
               ) : null}
             </>
