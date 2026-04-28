@@ -349,7 +349,7 @@ export function DashboardPageV2() {
       ),
       apiJson<ResolutionSummary>("/resolution/summary", { cache: "no-store" }),
       apiJson<NetWorthSnapshot>("/reports/balance-sheet", { cache: "no-store" }),
-      apiJson<{ points: NetWorthHistoryPoint[] }>(
+      apiJson<{ points: Array<{ asOf: string; totals: { netWorth: number | null } }> }>(
         `/reports/balance-sheet/history?from=${historyFrom}&to=${monthEnd}&interval=month`,
         { cache: "no-store" }
       ),
@@ -362,7 +362,11 @@ export function DashboardPageV2() {
     setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
     setResolutionData(results[1].status === "fulfilled" ? results[1].value : null);
     setNetWorthData(results[2].status === "fulfilled" ? results[2].value : null);
-    setNetWorthHistory(results[3].status === "fulfilled" ? results[3].value.points : null);
+    setNetWorthHistory(
+      results[3].status === "fulfilled"
+        ? results[3].value.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
+        : null
+    );
     setBudgetData(results[4].status === "fulfilled" ? results[4].value : null);
     setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
     setLoading(false);

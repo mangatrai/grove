@@ -18,6 +18,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-120b (2026-04-27): Net-worth sparkline never rendered — API shape mismatch
+- `NetWorthHistoryPoint` type in DashboardPageV2 declared `{ date, netWorth }` but `/reports/balance-sheet/history` returns `{ asOf, totals: { netWorth } }`. The sparkline filter checked `p.date` and `p.netWorth` — both `undefined` on every point — so the gate (`points.length < 2`) always failed and the sparkline never rendered.
+- Fix: corrected the `apiJson` generic to match the real response shape (`Array<{ asOf: string; totals: { netWorth: number | null } }>`), then mapped `asOf → date` and `totals.netWorth → netWorth` before setting state. Frontend display type unchanged.
+- Files: `frontend/src/pages/DashboardPageV2.tsx`
+
 ## UX-120 (2026-04-27): Dashboard Mantine reference + pulse breakdown, tighter recurring, per-account module, net-worth sparkline
 - DashboardPageV2 migrated entirely to Mantine 7 primitives (Paper, Stack, Group, SimpleGrid, Text, Title, Button, Progress, Badge, Anchor, Box, Skeleton). This is the project's first reference page for the Mantine pattern; all other pages remain on the existing project CSS classes (`.card`, `.muted`, `.secondary`, `.dashboard-page` in `frontend/src/index.css`). The dashboard's hard-coded greys/borders are now Mantine tokens (`c="dimmed"`, `Paper withBorder`), so the dashboard now follows the `data-mantine-color-scheme` dark/light flip that `index.css` already wires up. Recharts strokes/fills keep hex literals — Recharts does not read Mantine theme.
 - Pulse hero card: added inflow/outflow breakdown line under the headline net number (green ↑ inflow, red ↓ outflow).
