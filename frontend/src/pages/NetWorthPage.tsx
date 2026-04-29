@@ -8,7 +8,6 @@ import {
   BarChart,
   CartesianGrid,
   LabelList,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -103,6 +102,13 @@ function formatMoney(n: number | null | undefined): string {
     return "—";
   }
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function formatSignedDelta(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value >= 0 ? "+" : "–"}${formatMoney(Math.abs(value))}`;
 }
 
 /** Display-only: liabilities negative, assets positive (matches net-worth intuition). */
@@ -529,47 +535,78 @@ export function NetWorthPage() {
         </div>
       </div>
 
+      <div style={{ marginTop: "1rem" }}>
+        <div className="net-worth-kpi-grid">
+          <div className="card net-worth-kpi-card net-worth-kpi-card--assets">
+            <div className="net-worth-kpi-card__label">Assets</div>
+            <div className="net-worth-kpi-card__value net-worth-kpi-card__value--regular" style={{ color: "var(--color-success)" }}>
+              {loading || !data ? "—" : formatMoney(data.totals.assets)}
+            </div>
+          </div>
+          <div className="card net-worth-kpi-card net-worth-kpi-card--liabilities">
+            <div className="net-worth-kpi-card__label">Liabilities</div>
+            <div className="net-worth-kpi-card__value net-worth-kpi-card__value--regular" style={{ color: "var(--color-warm)" }}>
+              {loading || !data ? "—" : formatMoney(data.totals.liabilities)}
+            </div>
+          </div>
+          <div
+            className="card net-worth-kpi-card net-worth-kpi-card--hero"
+            style={{
+              borderTopColor: loading || !data ? "var(--color-border)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"
+            }}
+          >
+            <div className="net-worth-kpi-card__label">Net worth</div>
+            <div
+              className="net-worth-kpi-card__value net-worth-kpi-card__value--hero"
+              style={{
+                color: loading || !data ? "var(--color-text-muted)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"
+              }}
+            >
+              {loading || !data ? "—" : formatMoney(data.totals.netWorth)}
+            </div>
+          </div>
+        </div>
+        <p className="muted" style={{ marginTop: "0.35rem", marginBottom: "0.8rem", textAlign: "right", fontSize: "0.8rem" }}>
+          Balances as of {tableAsOf}
+        </p>
+      </div>
+
       <div className="card" style={{ marginTop: "1rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
           <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Trend</h2>
           <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
         </div>
-        <div className="row net-worth__control-band" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap" }}>
-          <label className="field" style={{ marginBottom: 0 }}>
-            <span>Period</span>
-            <select value={periodPreset} onChange={(ev) => onPresetChange(ev.target.value as PeriodPreset)}>
-              <option value="3m">Last 3 months</option>
-              <option value="6m">Last 6 months</option>
-              <option value="12m">Last 12 months</option>
-              <option value="2y">Last 2 years</option>
-              <option value="3y">Last 3 years</option>
-              <option value="ytd">Year to date</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          {periodPreset === "custom" ? (
-            <>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>From</span>
-                <input type="date" value={customFrom} onChange={(ev) => setCustomFrom(ev.target.value)} />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>To</span>
-                <input type="date" value={customTo} onChange={(ev) => setCustomTo(ev.target.value)} />
-              </label>
-            </>
-          ) : null}
-          <label className="field" style={{ marginBottom: 0 }}>
-            <span>Interval</span>
-            <select value={histInterval} onChange={(ev) => setHistInterval(ev.target.value as "month" | "quarter" | "week" | "day")}>
-              <option value="month">Month-end</option>
-              <option value="quarter">Quarter-end</option>
-              <option value="week">Every 7 days</option>
-              <option value="day">Daily (max 120 points)</option>
-            </select>
-          </label>
-          <label className="field" style={{ marginBottom: 0, minWidth: "12rem" }}>
-            <span>Belongs to</span>
+        <div className="net-worth-period-pills" role="group" aria-label="Trend period preset">
+          <button type="button" className={`net-worth-period-pill${periodPreset === "3m" ? " is-active" : ""}`} onClick={() => onPresetChange("3m")}>3M</button>
+          <button type="button" className={`net-worth-period-pill${periodPreset === "6m" ? " is-active" : ""}`} onClick={() => onPresetChange("6m")}>6M</button>
+          <button type="button" className={`net-worth-period-pill${periodPreset === "12m" ? " is-active" : ""}`} onClick={() => onPresetChange("12m")}>12M</button>
+          <button type="button" className={`net-worth-period-pill${periodPreset === "2y" ? " is-active" : ""}`} onClick={() => onPresetChange("2y")}>2Y</button>
+          <button type="button" className={`net-worth-period-pill${periodPreset === "3y" ? " is-active" : ""}`} onClick={() => onPresetChange("3y")}>3Y</button>
+          <button type="button" className={`net-worth-period-pill${periodPreset === "ytd" ? " is-active" : ""}`} onClick={() => onPresetChange("ytd")}>YTD</button>
+          <button type="button" className={`net-worth-period-pill${periodPreset === "custom" ? " is-active" : ""}`} onClick={() => onPresetChange("custom")}>Custom</button>
+        </div>
+        {periodPreset === "custom" ? (
+          <div className="row net-worth__control-band" style={{ marginTop: "0.65rem", alignItems: "flex-end", gap: "0.75rem", flexWrap: "wrap" }}>
+            <label className="field" style={{ marginBottom: 0 }}>
+              <span>From</span>
+              <input type="date" value={customFrom} onChange={(ev) => setCustomFrom(ev.target.value)} />
+            </label>
+            <label className="field" style={{ marginBottom: 0 }}>
+              <span>To</span>
+              <input type="date" value={customTo} onChange={(ev) => setCustomTo(ev.target.value)} />
+            </label>
+          </div>
+        ) : null}
+        <div className="row net-worth__control-band" style={{ marginTop: "0.7rem", alignItems: "flex-end", gap: "0.65rem 1rem", flexWrap: "wrap" }}>
+          <span className="muted" style={{ fontSize: "0.75rem", marginBottom: "0.35rem" }}>Interval:</span>
+          <select value={histInterval} onChange={(ev) => setHistInterval(ev.target.value as "month" | "quarter" | "week" | "day")} style={{ maxWidth: "11rem" }}>
+            <option value="month">Month-end</option>
+            <option value="quarter">Quarter-end</option>
+            <option value="week">Every 7 days</option>
+            <option value="day">Daily (max 120 points)</option>
+          </select>
+          <span className="muted" style={{ fontSize: "0.75rem", marginBottom: "0.35rem" }}>Scope:</span>
+          <div style={{ minWidth: "12rem" }}>
             <HierarchicalSearchPicker
               value={belongsTo || null}
               onChange={(v) => setBelongsTo((v ?? "") as BelongsToFilter)}
@@ -578,7 +615,7 @@ export function NetWorthPage() {
               ariaLabel="Balance sheet owner filter"
               clearable
             />
-          </label>
+          </div>
         </div>
 
         {(loadError || historyError) ? (
@@ -595,155 +632,88 @@ export function NetWorthPage() {
           </div>
         ) : null}
 
-        {periodSummary ? (
-          <div style={{ marginTop: "1rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.6rem" }}>
-              <h3 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Period summary</h3>
-              <HelpIcon label="Start and end snapshots in the selected range." />
+        {periodSummary?.delta ? (
+          <div className="net-worth-delta-strip">
+            <div className="net-worth-delta-chip" style={{ background: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)" }}>
+              <div className="net-worth-delta-chip__label">ASSETS</div>
+              <div className="net-worth-delta-chip__value" style={{ color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>{formatSignedDelta(periodSummary.delta.assets)}</div>
+              <div className="net-worth-delta-chip__range">{periodSummary.startLabel} → {periodSummary.endLabel}</div>
             </div>
-            <div style={{ overflowX: "auto" }}>
-              <table className="ledger-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Assets</th>
-                    <th scope="col">Liabilities</th>
-                    <th scope="col">Net worth</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <th scope="row" style={{ fontWeight: 500 }}>Start ({periodSummary.startLabel})</th>
-                    <td>{formatMoney(periodSummary.start.assets)}</td>
-                    <td>{formatMoney(periodSummary.start.liabilities)}</td>
-                    <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.start.net)}</td>
-                  </tr>
-                  <tr>
-                    <th scope="row" style={{ fontWeight: 500 }}>End ({periodSummary.endLabel})</th>
-                    <td>{formatMoney(periodSummary.end.assets)}</td>
-                    <td>{formatMoney(periodSummary.end.liabilities)}</td>
-                    <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.end.net)}</td>
-                  </tr>
-                  {periodSummary.delta ? (
-                    <tr style={{ borderTop: "2px solid var(--color-border)" }}>
-                      <th scope="row" style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 12 }}>Change</th>
-                      <td style={{ color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.assets)}</td>
-                      <td style={{ color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.liabilities)}</td>
-                      <td style={{ color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 700 }}>{formatMoney(periodSummary.delta.net)}</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+            <div className="net-worth-delta-chip" style={{ background: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)" }}>
+              <div className="net-worth-delta-chip__label">LIABILITIES</div>
+              <div className="net-worth-delta-chip__value" style={{ color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)" }}>{formatSignedDelta(periodSummary.delta.liabilities)}</div>
+              <div className="net-worth-delta-chip__range">{periodSummary.startLabel} → {periodSummary.endLabel}</div>
+            </div>
+            <div className="net-worth-delta-chip" style={{ background: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)" }}>
+              <div className="net-worth-delta-chip__label">NET WORTH</div>
+              <div className="net-worth-delta-chip__value" style={{ color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>{formatSignedDelta(periodSummary.delta.net)}</div>
+              <div className="net-worth-delta-chip__range">{periodSummary.startLabel} → {periodSummary.endLabel}</div>
             </div>
           </div>
         ) : null}
+
         {historyLoading ? <p className="muted">Loading chart…</p> : null}
         {!historyLoading && chartRows.length > 0 ? (
-          <div style={{ width: "100%", height: 340, marginTop: "0.75rem" }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <defs>
-                  <linearGradient id="nwGradientGreen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#15803d" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#15803d" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="nwGradientAmber" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.18} />
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="asOf" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={52} />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: number) =>
-                    `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                  }
-                />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (!active || !payload?.length) {
-                      return null;
+          <div style={{ marginTop: "0.75rem" }}>
+            <div className="net-worth-manual-legend">
+              <span className="net-worth-manual-legend__item net-worth-manual-legend__item--hero"><span className="net-worth-manual-legend__dot" style={{ background: "var(--color-accent)" }} />Net worth</span>
+              <span className="net-worth-manual-legend__item"><span className="net-worth-manual-legend__dot" style={{ background: "#22c55e" }} />Assets</span>
+              <span className="net-worth-manual-legend__item"><span className="net-worth-manual-legend__dot" style={{ background: "#f59e0b" }} />Liabilities</span>
+            </div>
+            <div style={{ width: "100%", height: 340, marginTop: "0.5rem" }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                  <defs>
+                    <linearGradient id="nwGrad_netWorth" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2d6a4f" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#2d6a4f" stopOpacity={0.03} />
+                    </linearGradient>
+                    <linearGradient id="nwGrad_assets" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.12} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.01} />
+                    </linearGradient>
+                    <linearGradient id="nwGrad_liabilities" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="asOf" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={52} />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) =>
+                      `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                     }
-                    const asOf = String(label ?? "");
-                    return (
-                      <div className="card" style={{ padding: "0.5rem 0.75rem", fontSize: "0.85rem" }}>
-                        <div style={{ fontWeight: 600 }}>{asOf}</div>
-                        {payload.map((p) => (
-                          <div key={String(p.name ?? p.dataKey)}>
-                            <span style={{ color: String(p.color ?? "inherit") }}>{p.name}</span>:{" "}
-                            {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-                <Legend />
-                <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" fill="url(#nwGradientGreen)" strokeWidth={1.5} dot={false} connectNulls />
-                <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" fill="url(#nwGradientAmber)" strokeWidth={1.5} dot={false} connectNulls />
-                <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="#15803d" fill="url(#nwGradientGreen)" strokeWidth={2.5} dot={false} connectNulls />
-              </AreaChart>
-            </ResponsiveContainer>
+                  />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) {
+                        return null;
+                      }
+                      const asOf = String(label ?? "");
+                      return (
+                        <div className="card" style={{ padding: "0.5rem 0.75rem", fontSize: "0.85rem" }}>
+                          <div style={{ fontWeight: 600 }}>{asOf}</div>
+                          {payload.map((p) => (
+                            <div key={String(p.name ?? p.dataKey)}>
+                              <span style={{ color: String(p.color ?? "inherit") }}>{p.name}</span>:{" "}
+                              {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }}
+                  />
+                  <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.6} fill="url(#nwGrad_assets)" dot={false} connectNulls />
+                  <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" strokeWidth={1} strokeOpacity={0.5} fill="url(#nwGrad_liabilities)" dot={false} connectNulls />
+                  <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="var(--color-accent)" strokeWidth={2.5} fill="url(#nwGrad_netWorth)" dot={false} connectNulls />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         ) : null}
         {!historyLoading && chartRows.length === 0 && !historyError ? (
           <p className="muted">No history points in this range (add manual or import balances to see a line).</p>
-        ) : null}
-
-        {!loading && (topAssets.length > 0 || topLiabilities.length > 0) ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
-            {topAssets.length > 0 ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Assets</div>
-                <ResponsiveContainer width="100%" height={topAssets.length * 34 + 8}>
-                  <BarChart layout="vertical" data={topAssets} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
-                    <XAxis type="number" hide domain={[0, "dataMax"]} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={130}
-                      tick={{ fontSize: 11, fill: "var(--color-text)" }}
-                      tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v}
-                    />
-                    <Bar dataKey="balance" fill="#22c55e" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-                      <LabelList
-                        dataKey="balance"
-                        position="right"
-                        formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                        style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : null}
-            {topLiabilities.length > 0 ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Liabilities</div>
-                <ResponsiveContainer width="100%" height={topLiabilities.length * 34 + 8}>
-                  <BarChart layout="vertical" data={topLiabilities} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
-                    <XAxis type="number" hide domain={[0, "dataMax"]} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={130}
-                      tick={{ fontSize: 11, fill: "var(--color-text)" }}
-                      tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v}
-                    />
-                    <Bar dataKey="balance" fill="#f59e0b" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-                      <LabelList
-                        dataKey="balance"
-                        position="right"
-                        formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                        style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }}
-                      />
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : null}
-          </div>
         ) : null}
       </div>
 
@@ -758,47 +728,8 @@ export function NetWorthPage() {
             <input type="date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
           </label>
         </div>
-        <details className="net-worth-page__bulk-asof" style={{ marginBottom: "0.75rem" }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9rem" }}>Re-date all manual balances</summary>
-          <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.35rem", marginBottom: 0, maxWidth: "36rem" }}>
-            Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
-          </p>
-          <div className="row" style={{ alignItems: "flex-end", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
-            <label className="field" style={{ marginBottom: 0 }}>
-              <span>New as-of date</span>
-              <input type="date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
-            </label>
-            <button
-              type="button"
-              className="secondary"
-              disabled={bulkWorking || allTableRows.length === 0}
-              onClick={() => setBulkConfirmOpen(true)}
-            >
-              {bulkWorking ? "Applying…" : "Apply to all rows"}
-            </button>
-          </div>
-        </details>
-        {bulkSummary ? <p className="muted">{bulkSummary}</p> : null}
-        {loadError ? <p className="error">{loadError}</p> : null}
         {loading ? <p className="muted">Loading…</p> : null}
-        {!loading && data ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: "3px solid var(--color-success)" }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Assets</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-success)" }}>{formatMoney(data.totals.assets)}</div>
-            </div>
-            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: "3px solid var(--color-warm)" }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Liabilities</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-warm-dark, #d97706)" }}>{formatMoney(data.totals.liabilities)}</div>
-            </div>
-            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${(data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}` }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Net worth</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)" }}>{formatMoney(data.totals.netWorth)}</div>
-            </div>
-          </div>
-        ) : null}
-
-        {!loading && data ? (
+        {!loading && data && data.assets.length > 0 ? (
           <div style={{ overflowX: "auto" }}>
             {editDirty ? (
               <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.5rem", maxWidth: "40rem" }}>
@@ -806,6 +737,7 @@ export function NetWorthPage() {
                 or refreshing the tab may show a browser warning.
               </p>
             ) : null}
+            <h3 style={{ margin: "0 0 0.45rem", fontSize: "0.78rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>Assets</h3>
             <table className="ledger-table">
               <thead>
                 <tr>
@@ -817,71 +749,148 @@ export function NetWorthPage() {
                 </tr>
               </thead>
               <tbody>
-                {allTableRows.map((r) => {
+                {data.assets.map((r) => {
                   const signed = signedDisplayBalance(r);
-                  const drill = transactionsHref({
-                    accountId: r.financialAccountId,
-                    dateFrom: r.balanceAsOf ?? tableAsOf,
-                    dateTo: r.balanceAsOf ?? tableAsOf
-                  });
+                  const drill = transactionsHref({ accountId: r.financialAccountId, dateFrom: r.balanceAsOf ?? tableAsOf, dateTo: r.balanceAsOf ?? tableAsOf });
                   const isEditing = editingId === r.financialAccountId;
                   return (
                     <tr key={r.financialAccountId}>
                       <td>
                         <Link to={drill}>{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Link>
-                        {r.importFileId ? (
-                          <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: "0.2rem" }}>
-                            <Link to={transactionsHref({ fileId: r.importFileId })}>Transactions from import file</Link>
-                          </span>
-                        ) : null}
+                        {r.importFileId ? <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: "0.2rem" }}><Link to={transactionsHref({ fileId: r.importFileId })}>Transactions from import file</Link></span> : null}
                       </td>
-                      <td>
-                        <code style={{ fontSize: "0.8rem" }}>{r.type}</code>
-                      </td>
+                      <td><code style={{ fontSize: "0.8rem" }}>{r.type}</code></td>
                       <td>
                         {isEditing ? (
                           <form className="row" style={{ gap: "0.35rem", alignItems: "center", flexWrap: "wrap" }} onSubmit={saveRow}>
-                            <input
-                              style={{ width: "7rem" }}
-                              inputMode="decimal"
-                              value={editAmount}
-                              onChange={(ev) => setEditAmount(ev.target.value)}
-                              aria-label="Balance amount"
-                            />
+                            <input style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
                             <input type="date" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                            <button type="submit" className="primary" disabled={rowSaving}>
-                              Save
-                            </button>
-                            <button type="button" className="secondary" onClick={cancelEdit}>
-                              Cancel
-                            </button>
+                            <button type="submit" className="primary" disabled={rowSaving}>Save</button>
+                            <button type="button" className="secondary" onClick={cancelEdit}>Cancel</button>
                           </form>
-                        ) : (
-                          formatMoney(signed)
-                        )}
+                        ) : formatMoney(signed)}
                       </td>
                       <td>{r.balanceAsOf ?? "—"}</td>
                       <td>
-                        {!isEditing ? (
-                          <button
-                            type="button"
-                            className="net-worth-page__edit-icon"
-                            onClick={() => startEdit(r)}
-                            aria-label="Edit balance"
-                            title="Edit balance"
-                          >
-                            <IconPencil size={15} />
-                          </button>
-                        ) : null}
+                        {!isEditing ? <button type="button" className="net-worth-page__edit-icon" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance"><IconPencil size={15} /></button> : null}
                       </td>
                     </tr>
                   );
                 })}
+                <tr>
+                  <th scope="row" style={{ fontWeight: 700, color: "var(--color-success)" }}>Total Assets</th>
+                  <td />
+                  <td style={{ fontWeight: 700, color: "var(--color-success)" }}>{formatMoney(data.totals.assets)}</td>
+                  <td />
+                  <td />
+                </tr>
               </tbody>
             </table>
-            {rowSaveError ? <p className="error">{rowSaveError}</p> : null}
           </div>
         ) : null}
+        {!loading && data && data.liabilities.length > 0 ? (
+          <div style={{ overflowX: "auto", marginTop: "1rem" }}>
+            <h3 style={{ margin: "0 0 0.45rem", fontSize: "0.78rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>Liabilities</h3>
+            <table className="ledger-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Type</th>
+                  <th>Balance</th>
+                  <th>As of</th>
+                  <th aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.liabilities.map((r) => {
+                  const signed = signedDisplayBalance(r);
+                  const drill = transactionsHref({ accountId: r.financialAccountId, dateFrom: r.balanceAsOf ?? tableAsOf, dateTo: r.balanceAsOf ?? tableAsOf });
+                  const isEditing = editingId === r.financialAccountId;
+                  return (
+                    <tr key={r.financialAccountId}>
+                      <td>
+                        <Link to={drill}>{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Link>
+                        {r.importFileId ? <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: "0.2rem" }}><Link to={transactionsHref({ fileId: r.importFileId })}>Transactions from import file</Link></span> : null}
+                      </td>
+                      <td><code style={{ fontSize: "0.8rem" }}>{r.type}</code></td>
+                      <td>
+                        {isEditing ? (
+                          <form className="row" style={{ gap: "0.35rem", alignItems: "center", flexWrap: "wrap" }} onSubmit={saveRow}>
+                            <input style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                            <input type="date" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                            <button type="submit" className="primary" disabled={rowSaving}>Save</button>
+                            <button type="button" className="secondary" onClick={cancelEdit}>Cancel</button>
+                          </form>
+                        ) : formatMoney(signed)}
+                      </td>
+                      <td>{r.balanceAsOf ?? "—"}</td>
+                      <td>
+                        {!isEditing ? <button type="button" className="net-worth-page__edit-icon" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance"><IconPencil size={15} /></button> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr>
+                  <th scope="row" style={{ fontWeight: 700, color: "var(--color-warm)" }}>Total Liabilities</th>
+                  <td />
+                  <td style={{ fontWeight: 700, color: "var(--color-warm)" }}>{formatMoney(data.totals.liabilities)}</td>
+                  <td />
+                  <td />
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+        {rowSaveError ? <p className="error">{rowSaveError}</p> : null}
+        {!loading && data && (topAssets.length > 0 || topLiabilities.length > 0) ? (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
+            {topAssets.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Assets</div>
+                <ResponsiveContainer width="100%" height={topAssets.length * 34 + 8}>
+                  <BarChart layout="vertical" data={topAssets} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
+                    <XAxis type="number" hide domain={[0, "dataMax"]} />
+                    <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "var(--color-text)" }} tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v} />
+                    <Bar dataKey="balance" fill="#22c55e" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                      <LabelList dataKey="balance" position="right" formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : null}
+            {topLiabilities.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Liabilities</div>
+                <ResponsiveContainer width="100%" height={topLiabilities.length * 34 + 8}>
+                  <BarChart layout="vertical" data={topLiabilities} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
+                    <XAxis type="number" hide domain={[0, "dataMax"]} />
+                    <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "var(--color-text)" }} tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v} />
+                    <Bar dataKey="balance" fill="#f59e0b" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                      <LabelList dataKey="balance" position="right" formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <details className="net-worth-page__bulk-asof" style={{ marginBottom: "0.75rem", marginTop: "1rem" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9rem" }}>Re-date all manual balances</summary>
+          <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.35rem", marginBottom: 0, maxWidth: "36rem" }}>
+            Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
+          </p>
+          <div className="row" style={{ alignItems: "flex-end", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
+            <label className="field" style={{ marginBottom: 0 }}>
+              <span>New as-of date</span>
+              <input type="date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
+            </label>
+            <button type="button" className="secondary" disabled={bulkWorking || allTableRows.length === 0} onClick={() => setBulkConfirmOpen(true)}>
+              {bulkWorking ? "Applying…" : "Apply to all rows"}
+            </button>
+          </div>
+        </details>
+        {bulkSummary ? <p className="muted">{bulkSummary}</p> : null}
+        {loadError ? <p className="error">{loadError}</p> : null}
       </div>
 
       <ConfirmDialog
