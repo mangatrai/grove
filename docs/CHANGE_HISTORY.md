@@ -34,6 +34,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - Added server-side refresh rate limit in `backend/src/modules/insights/insights.routes.ts` (one refresh per household per 5 minutes, `429 RATE_LIMITED`), with test-mode bypass to keep integration tests deterministic.
 - Refactored `overBudgetCategories` in `backend/src/modules/insights/insight-prompt.service.ts` to replace per-budget-row spend lookups with a single grouped aggregate query (removes N+1 query pattern).
 - Expanded user and API docs for insights behavior and contracts: `docs/USER_GUIDE.md`, `docs/API_INSIGHTS.md`, and `openapi/openapi.yaml` (including `429` response contract).
+- Fixed desktop sidebar behavior so Settings/collapse controls stay visible within viewport-height navigation on long pages (`frontend/src/index.css` sidebar now viewport-anchored with internal nav scrolling).
+- Added All-tab bulk action parity in Transactions by wiring "Move to trash" into the existing household bulk-trash flow (`frontend/src/pages/TransactionsPage.tsx`).
+- Improved restore upload affordance in Settings with clearer Mantine `FileInput` presentation (placeholder, upload icon, full-width input, explicit action button width) while retaining disabled restore safety until a ZIP is selected (`frontend/src/pages/SettingsPage.tsx`).
+- Normalized landing sign-in CTA to Mantine `Button` so the first-page auth action follows the app theme contract and no longer renders as a legacy gray control (`frontend/src/pages/HomePage.tsx`).
+- Migrated Payslips list and Add-manual payslip pages toward Mantine-first presentation by replacing legacy card/header/action/button primitives with Mantine `Paper`/`Title`/`Text`/`Button`/`ActionIcon`/`Alert` wrappers while preserving existing backend/API behavior (`frontend/src/pages/PayslipsPage.tsx`, `frontend/src/pages/PayslipManualPage.tsx`).
+- Continued payslip Mantine pass on detail and confirmation UX: `frontend/src/pages/PayslipDetailPage.tsx` now uses Mantine layout shells (`Paper`/`Stack`/`Title`/`Text`/`Alert`/`Anchor`) for key sections, and shared delete confirmations were upgraded to Mantine buttons in `frontend/src/components/ConfirmDialog.tsx`.
+- Fixed visual alignment of Add-manual payslip field rows (`Who / employer`, `Salary / rate`) by normalizing row layout and control heights in `frontend/src/pages/PayslipManualPage.tsx`.
+- Fixed Add-manual line-item crash on environments without `crypto.randomUUID()` by adding a safe draft-id fallback generator in `frontend/src/pages/PayslipManualPage.tsx`.
+- Replaced remaining legacy Add-row controls in payslip detail line-item section with Mantine buttons (`frontend/src/pages/PayslipDetailPage.tsx`), reducing mixed button styling.
 
 ---
 

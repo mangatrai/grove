@@ -1,4 +1,5 @@
 import { FormEvent, useState } from "react";
+import { Button } from "@mantine/core";
 import { setToken } from "../api";
 
 /**
@@ -157,13 +158,17 @@ export function HomePage() {
                 {error && (
                   <p className="error home-landing__error">{error}</p>
                 )}
-                <button
+                <Button
                   type="submit"
+                  fullWidth
+                  radius="sm"
+                  mt="xs"
                   className="home-landing__submit"
+                  color="green"
                   disabled={loading}
                 >
                   {loading ? "Signing in…" : "Sign in"}
-                </button>
+                </Button>
               </form>
 
               {/* Helper links — no full forms; these are backlog CRs */}

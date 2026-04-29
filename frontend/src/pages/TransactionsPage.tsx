@@ -762,6 +762,26 @@ export function TransactionsPage() {
     }
   }
 
+  async function bulkTrashSelectedAll() {
+    const ids = data ? [...selectedAllIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (!ids.length) return;
+    setError(null);
+    setSavingBulkAll(true);
+    try {
+      await apiJson<{ trashed: number; skipped: number }>(
+        "/transactions/bulk-trash",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      );
+      setSelectedAllIds(new Set());
+      setBulkAllCategoryId("");
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk trash failed");
+    } finally {
+      setSavingBulkAll(false);
+    }
+  }
+
   function collectOpenResolutionIdsFromSelection(): string[] {
     if (!data) return [];
     const out: string[] = [];
@@ -1838,6 +1858,13 @@ export function TransactionsPage() {
               onClick={() => void bulkAssignCategoryAll()}
             >
               Apply category
+            </button>
+            <button
+              type="button"
+              disabled={savingBulkAll}
+              onClick={() => void bulkTrashSelectedAll()}
+            >
+              Move to trash
             </button>
             <button
               type="button"

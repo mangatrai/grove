@@ -1,4 +1,4 @@
-import { Modal, Stack, Text } from "@mantine/core";
+import { Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -60,24 +60,19 @@ export function ConfirmDialog({
     >
       <Stack gap="md">
         {typeof message === "string" ? <Text size="sm">{message}</Text> : <div>{message}</div>}
-        <div className="row" style={{ justifyContent: "flex-end", gap: "0.5rem", marginTop: "0.25rem" }}>
-          <button type="button" className="secondary" disabled={loading} onClick={onClose}>
+        <Group justify="flex-end" gap="sm" mt={4}>
+          <Button type="button" variant="default" disabled={loading} onClick={onClose}>
             {cancelLabel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className="primary"
-            style={
-              danger
-                ? { background: "#991b1b", borderColor: "#7f1d1d", color: "#fff" }
-                : undefined
-            }
+            color={danger ? "red" : undefined}
             disabled={loading}
             onClick={() => void handleConfirm()}
           >
             {loading ? "Working…" : confirmLabel}
-          </button>
-        </div>
+          </Button>
+        </Group>
       </Stack>
     </Modal>
   );

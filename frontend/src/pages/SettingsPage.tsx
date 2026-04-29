@@ -24,7 +24,7 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+import { IconTrash, IconUpload } from "@tabler/icons-react";
 
 import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -1558,19 +1558,24 @@ export function SettingsPage() {
                     Restored: {Object.entries(importStats).map(([k, v]) => `${String(v)} ${k}`).join(", ")}
                   </Text>
                 ) : null}
-                <Group align="end">
+                <Group align="end" grow wrap="nowrap">
                   <FileInput
                     label="Backup ZIP file"
                     accept=".zip"
                     disabled={importBusy}
                     value={importFile}
                     onChange={(file) => setImportFile(file)}
+                    placeholder="Choose backup ZIP…"
+                    leftSection={<IconUpload size={16} />}
+                    clearable
+                    w="100%"
                   />
                   <Button
                     type="button"
                     color="red"
                     disabled={importBusy || !importFile}
                     onClick={() => void runHouseholdRestore()}
+                    miw={180}
                   >
                     {importBusy ? "Restoring…" : "Restore from backup"}
                   </Button>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Alert, Anchor, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
@@ -740,38 +741,37 @@ export function PayslipDetailPage() {
   const validationWarnings = detail?.validationWarnings ?? [];
 
   return (
-    <div className="payslips-page">
-      <div className="card">
-        <p style={{ marginTop: 0 }}><Link to="/payslips">← Payslips</Link></p>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
-          <h1 style={{ marginTop: "0.25rem", marginBottom: 0 }}>Payslip detail</h1>
-          <button type="button" className="secondary"
-            style={{ fontSize: "0.85rem", alignSelf: "center" }}
+    <Stack className="payslips-page">
+      <Paper withBorder p="lg">
+        <Anchor component={Link} to="/payslips">← Payslips</Anchor>
+        <Group justify="space-between" align="flex-start" wrap="wrap" mt="xs">
+          <Title order={2} m={0}>Payslip detail</Title>
+          <Button type="button" variant="default"
             disabled={deleting || loading}
             onClick={() => setDeleteConfirm(true)}>
             {deleting ? "Deleting…" : "Delete payslip"}
-          </button>
-        </div>
-        <p className="muted">Click ✏ on any amount row or line item to correct it. Changes to line items auto-update the matching summary bucket.</p>
-      </div>
+          </Button>
+        </Group>
+        <Text c="dimmed" mt="xs">Click ✏ on any amount row or line item to correct it. Changes to line items auto-update the matching summary bucket.</Text>
+      </Paper>
 
       {loading ? (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <p className="muted">Loading…</p>
-        </div>
+        <Paper withBorder p="lg">
+          <Text c="dimmed">Loading…</Text>
+        </Paper>
       ) : null}
 
       {error ? (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <p className="error">{error}</p>
-          <p className="muted"><Link to="/payslips">Back to list</Link></p>
-        </div>
+        <Paper withBorder p="lg">
+          <Alert color="red" mb="sm">{error}</Alert>
+          <Anchor component={Link} to="/payslips">Back to list</Anchor>
+        </Paper>
       ) : null}
 
       {!loading && !error && detail ? (
         <>
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <h2 style={{ marginTop: 0 }}>Stub</h2>
+          <Paper withBorder p="lg">
+            <Title order={4} mt={0}>Stub</Title>
             <dl className="payslip-detail-dl">
               <dt>File</dt><dd>{detail.fileName}</dd>
               <dt>Uploaded</dt><dd style={{ whiteSpace: "nowrap" }}>{detail.createdAt}</dd>
@@ -786,10 +786,10 @@ export function PayslipDetailPage() {
               <dt>Checksum</dt>
               <dd><code style={{ fontSize: "0.75rem", wordBreak: "break-all" }}>{detail.fileChecksum}</code></dd>
             </dl>
-          </div>
+          </Paper>
 
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <h2 style={{ marginTop: 0 }}>Period</h2>
+          <Paper withBorder p="lg">
+            <Title order={4} mt={0}>Period</Title>
             <dl className="payslip-detail-dl">
               <dt>Pay period</dt><dd>{periodLabel(detail)}</dd>
               <dt>Pay date</dt><dd>{detail.payDate ?? "—"}</dd>
@@ -810,11 +810,11 @@ export function PayslipDetailPage() {
                 </dd></>
               ) : null}
             </dl>
-          </div>
+          </Paper>
 
           {detail.payDate != null && detail.netPayCurrent != null ? (
-            <div className="card" style={{ marginTop: "1rem" }}>
-              <h2 style={{ marginTop: 0 }}>Bank deposit</h2>
+            <Paper withBorder p="lg">
+              <Title order={4} mt={0}>Bank deposit</Title>
               {detail.matchedDeposits && detail.matchedDeposits.length > 0 ? (
                 <div style={{ overflowX: "auto" }}>
                   <table className="ledger-table">
@@ -839,15 +839,15 @@ export function PayslipDetailPage() {
                   </table>
                 </div>
               ) : (
-                <p className="muted" style={{ margin: 0 }}>
+                <Text c="dimmed" m={0}>
                   No matching deposit found near {detail.payDate} for {formatMoney(detail.netPayCurrent)}.
-                </p>
+                </Text>
               )}
-            </div>
+            </Paper>
           ) : null}
 
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <h2 style={{ marginTop: 0 }}>Amounts</h2>
+          <Paper withBorder p="lg">
+            <Title order={4} mt={0}>Amounts</Title>
             <ValidationWarningsBanner warnings={validationWarnings} />
             <div style={{ overflowX: "auto" }}>
               <table className="ledger-table">
@@ -880,27 +880,27 @@ export function PayslipDetailPage() {
                 </tbody>
               </table>
             </div>
-          </div>
+          </Paper>
 
-          <div className="card" style={{ marginTop: "1rem" }}>
+          <Paper withBorder p="lg">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: nonEmptySections.length > 0 ? "0.5rem" : 0 }}>
-              <h2 style={{ marginTop: 0, marginBottom: 0 }}>Line items</h2>
+              <Title order={4} mt={0} mb={0}>Line items</Title>
               {!addFormOpen ? (
-                <button type="button" className="secondary"
+                <Button type="button" variant="default" size="xs"
                   onClick={() => { setAddFormOpen(true); setAddError(null); }}
-                  style={{ fontSize: "0.82rem", padding: "0.2rem 0.65rem" }}>
+                >
                   + Add row
-                </button>
+                </Button>
               ) : null}
             </div>
             {nonEmptySections.length > 0 ? (
-              <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
+              <Text c="dimmed" mt="xs" mb="md" size="sm">
                 Edit or delete rows to correct extraction errors — summary totals update automatically.
-              </p>
+              </Text>
             ) : (
-              <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
+              <Text c="dimmed" mt="xs" mb="md" size="sm">
                 No line items. Use "+ Add row" to enter individual earnings and deduction rows.
-              </p>
+              </Text>
             )}
             {nonEmptySections.map((section) => (
               <LineItemsSection
@@ -956,22 +956,20 @@ export function PayslipDetailPage() {
                     />
                   </label>
                   <div style={{ display: "flex", gap: "0.4rem", paddingBottom: "0.05rem" }}>
-                    <button type="button" onClick={() => void handleAddLineItem()} disabled={addSaving}
-                      style={{ fontSize: "0.85rem", padding: "0.25rem 0.7rem" }}>
+                    <Button type="button" size="xs" onClick={() => void handleAddLineItem()} disabled={addSaving}>
                       {addSaving ? "…" : "Add"}
-                    </button>
-                    <button type="button" className="secondary" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}
-                      style={{ fontSize: "0.85rem", padding: "0.25rem 0.6rem" }}>
+                    </Button>
+                    <Button type="button" variant="default" size="xs" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}>
                       Cancel
-                    </button>
+                    </Button>
                   </div>
                 </div>
                 {addError ? <p className="error" style={{ marginTop: "0.4rem", marginBottom: 0, fontSize: "0.82rem" }}>{addError}</p> : null}
               </div>
             ) : null}
-          </div>
+          </Paper>
 
-          <div className="card" style={{ marginTop: "1rem" }}>
+          <Paper withBorder p="lg">
             <details>
               <summary style={{ cursor: "pointer", fontWeight: 600 }}>Parser diagnostics (raw JSON)</summary>
               <pre style={{
@@ -981,7 +979,7 @@ export function PayslipDetailPage() {
                 {JSON.stringify(detail.rawExtractJson, null, 2)}
               </pre>
             </details>
-          </div>
+          </Paper>
         </>
       ) : null}
 
@@ -994,6 +992,6 @@ export function PayslipDetailPage() {
         onClose={() => setDeleteConfirm(false)}
         onConfirm={() => void deletePayslip()}
       />
-    </div>
+    </Stack>
   );
 }

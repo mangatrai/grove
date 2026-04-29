@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Alert, Anchor, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
@@ -39,6 +40,14 @@ function parseDate(raw: string): string | null {
 function fmtMoney(n: number | null): string {
   if (n == null) return "";
   return `$${n.toFixed(2)}`;
+}
+
+function makeDraftId(): string {
+  const cryptoObj = globalThis.crypto as { randomUUID?: () => string } | undefined;
+  if (cryptoObj?.randomUUID) {
+    return cryptoObj.randomUUID();
+  }
+  return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 type DraftLineItem = {
@@ -157,7 +166,7 @@ export function PayslipManualPage() {
   const addLineItem = () => {
     setDraftLineItems((prev) => [
       ...prev,
-      { draftId: globalThis.crypto.randomUUID(), section: "earnings", name: "", amountCurrent: "", amountYtd: "" }
+      { draftId: makeDraftId(), section: "earnings", name: "", amountCurrent: "", amountYtd: "" }
     ]);
   };
 
@@ -278,25 +287,23 @@ export function PayslipManualPage() {
   const dateStyle: React.CSSProperties = { width: "100%", maxWidth: "12rem" };
 
   return (
-    <div className="payslips-page">
+    <Stack className="payslips-page">
       {/* Header */}
-      <div className="card">
-        <p style={{ marginTop: 0 }}><Link to="/payslips">← Payslips</Link></p>
-        <h1 style={{ marginTop: "0.25rem", marginBottom: "0.25rem" }}>Add payslip manually</h1>
-        <p className="muted" style={{ marginBottom: 0, fontSize: "0.9rem" }}>
-          Enter totals from any pay stub — no PDF required.
-        </p>
-      </div>
+      <Paper withBorder p="lg">
+        <Anchor component={Link} to="/payslips">← Payslips</Anchor>
+        <Title order={2} mt="xs" mb={4}>Add payslip manually</Title>
+        <Text c="dimmed" size="sm">Enter totals from any pay stub — no PDF required.</Text>
+      </Paper>
 
       <form onSubmit={onSubmit}>
         {/* Section 1: Context */}
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <h2 style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "1rem" }}>Who / employer</h2>
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+        <Paper withBorder p="lg">
+          <Title order={4} mt={0} mb="md">Who / employer</Title>
+          <Group align="end" grow>
             {hasEmployers && needsEmployerPick ? (
-              <label className="field" style={{ flex: "1 1 14rem", marginBottom: 0, minWidth: "min(100%, 14rem)" }}>
+              <label className="field" style={{ marginBottom: 0 }}>
                 <span>Employer</span>
-                <select value={employerId} onChange={(ev) => setEmployerId(ev.target.value)} required aria-required>
+                <select value={employerId} onChange={(ev) => setEmployerId(ev.target.value)} required aria-required style={{ minHeight: 36 }}>
                   <option value="">Select employer…</option>
                   {employers.map((em) => (
                     <option key={em.id} value={em.id}>{em.displayName}</option>
@@ -304,7 +311,7 @@ export function PayslipManualPage() {
                 </select>
               </label>
             ) : null}
-            <label className="field" style={{ flex: "1 1 14rem", marginBottom: 0, minWidth: "min(100%, 14rem)" }}>
+            <label className="field" style={{ marginBottom: 0 }}>
               <span>Belongs to</span>
               <HierarchicalSearchPicker
                 value={belongsTo}
@@ -316,21 +323,21 @@ export function PayslipManualPage() {
               />
             </label>
             {!hasEmployers ? (
-              <label className="field" style={{ flex: "1 1 12rem", marginBottom: 0, minWidth: "min(100%, 12rem)" }}>
+              <label className="field" style={{ marginBottom: 0 }}>
                 <span>Statement template</span>
-                <select value={parserProfileId} onChange={(ev) => setParserProfileId(ev.target.value)}>
+                <select value={parserProfileId} onChange={(ev) => setParserProfileId(ev.target.value)} style={{ minHeight: 36 }}>
                   {PARSER_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
               </label>
             ) : null}
-          </div>
-        </div>
+          </Group>
+        </Paper>
 
         {/* Section 2: Pay period */}
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <h2 style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "1rem" }}>Pay period</h2>
+        <Paper withBorder p="lg">
+          <Title order={4} mt={0} mb="md">Pay period</Title>
           <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
             <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
               <span>Period start</span>
@@ -348,14 +355,14 @@ export function PayslipManualPage() {
                 aria-label="Pay date" style={dateStyle} />
             </label>
           </div>
-        </div>
+        </Paper>
 
         {/* Section 3: Summary amounts */}
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <h2 style={{ marginTop: 0, marginBottom: "0.25rem", fontSize: "1rem" }}>Earnings, taxes & deductions</h2>
-          <p className="muted" style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "0.85rem" }}>
+        <Paper withBorder p="lg">
+          <Title order={4} mt={0} mb={4}>Earnings, taxes & deductions</Title>
+          <Text c="dimmed" size="sm" mt={0} mb="md">
             Current = this pay period. YTD = year-to-date total. Leave blank if unknown.
-          </p>
+          </Text>
           <div style={{ overflowX: "auto" }}>
             <table className="ledger-table payslip-manual__table">
               <thead>
@@ -414,7 +421,7 @@ export function PayslipManualPage() {
           {/* Live arithmetic check */}
           {impliedNet != null ? (
             <div style={{ marginTop: "0.75rem", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <span style={{ color: "var(--color-text-muted)" }}>Implied net (gross − deductions):</span>
+              <Text span c="dimmed">Implied net (gross − deductions):</Text>
               <span style={{ fontWeight: 600, color: netColor }}>{fmtMoney(impliedNet)}</span>
               {statedNet != null && netDelta != null && netDelta > 0.01 ? (
                 <span style={{ color: netColor, fontSize: "0.8rem" }}>
@@ -425,16 +432,16 @@ export function PayslipManualPage() {
               ) : null}
             </div>
           ) : null}
-        </div>
+        </Paper>
 
         {/* Section 4: Line items (optional) */}
-        <div className="card" style={{ marginTop: "1rem" }}>
+        <Paper withBorder p="lg">
           <details>
             <summary style={{ cursor: "pointer", fontWeight: 600, padding: "0.1rem 0" }}>
               Line items
-              <span className="muted" style={{ fontWeight: 400, marginLeft: "0.5rem", fontSize: "0.85rem" }}>
+              <Text span c="dimmed" style={{ fontWeight: 400, marginLeft: "0.5rem", fontSize: "0.85rem" }}>
                 optional — individual earnings and deduction rows
-              </span>
+              </Text>
               {draftLineItems.length > 0 ? (
                 <span style={{ marginLeft: "0.5rem", fontSize: "0.8rem", color: "var(--color-accent)" }}>
                   ({draftLineItems.length} added)
@@ -442,9 +449,9 @@ export function PayslipManualPage() {
               ) : null}
             </summary>
             <div style={{ marginTop: "0.75rem" }}>
-              <p className="muted" style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "0.85rem" }}>
+              <Text c="dimmed" size="sm" mt={0} mb="md">
                 Add individual rows (e.g. Regular Pay, 401k, Federal Tax). The matching summary totals above will auto-calculate from these when you save.
-              </p>
+              </Text>
               {draftLineItems.length > 0 ? (
                 <div style={{ overflowX: "auto", marginBottom: "0.75rem" }}>
                   <table className="ledger-table" style={{ fontSize: "0.85rem" }}>
@@ -499,12 +506,12 @@ export function PayslipManualPage() {
                             />
                           </td>
                           <td>
-                            <button type="button" className="secondary"
+                            <Button type="button" variant="subtle" color="red"
                               onClick={() => removeLineItem(d.draftId)}
                               title="Remove row"
                               style={{ fontSize: "0.75rem", padding: "0.1rem 0.4rem", color: "var(--color-danger, #dc2626)" }}>
                               ✕
-                            </button>
+                            </Button>
                           </td>
                         </tr>
                       ))}
@@ -512,41 +519,40 @@ export function PayslipManualPage() {
                   </table>
                 </div>
               ) : null}
-              <button type="button" className="secondary" onClick={addLineItem}
-                style={{ fontSize: "0.85rem", padding: "0.25rem 0.75rem" }}>
+              <Button type="button" variant="default" onClick={addLineItem} size="xs">
                 + Add line item
-              </button>
+              </Button>
             </div>
           </details>
-        </div>
+        </Paper>
 
         {/* Section 5: Employment info */}
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <h2 style={{ marginTop: 0, marginBottom: "0.75rem", fontSize: "1rem" }}>
+        <Paper withBorder p="lg">
+          <Title order={4} mt={0} mb="md">
             Salary / rate
-            <span className="muted" style={{ fontWeight: 400, marginLeft: "0.4rem", fontSize: "0.85rem" }}>(optional)</span>
-          </h2>
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-            <label className="field" style={{ flex: "1 1 14rem", marginBottom: 0 }}>
+            <Text span c="dimmed" style={{ fontWeight: 400, marginLeft: "0.4rem", fontSize: "0.85rem" }}>(optional)</Text>
+          </Title>
+          <Group align="end" grow>
+            <label className="field" style={{ marginBottom: 0 }}>
               <span>Annual salary or hourly rate</span>
               <input inputMode="decimal" value={employmentRate} onChange={(e) => setEmploymentRate(e.target.value)}
                 placeholder="e.g. 180000" aria-label="Employment rate or salary" style={{ width: "100%" }} />
             </label>
-            <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
+            <label className="field" style={{ marginBottom: 0 }}>
               <span>Rate type</span>
-              <select value={employmentRateType} onChange={(e) => setEmploymentRateType(e.target.value)} aria-label="Employment rate type">
+              <select value={employmentRateType} onChange={(e) => setEmploymentRateType(e.target.value)} aria-label="Employment rate type" style={{ minHeight: 36 }}>
                 <option value="">—</option>
                 <option value="annual">Annual</option>
                 <option value="biweekly">Biweekly</option>
                 <option value="hourly">Hourly</option>
               </select>
             </label>
-          </div>
-        </div>
+          </Group>
+        </Paper>
 
         {/* Submit */}
-        <div className="card" style={{ marginTop: "1rem" }}>
-          {submitError ? <p className="error" style={{ marginTop: 0 }}>{submitError}</p> : null}
+        <Paper withBorder p="lg">
+          {submitError ? <Alert color="red" mb="sm">{submitError}</Alert> : null}
           {validationWarnings.length > 0 ? (
             <div style={{ marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.4)", borderRadius: 6 }}>
               {validationWarnings.map((w, i) => (
@@ -556,14 +562,14 @@ export function PayslipManualPage() {
               ))}
             </div>
           ) : null}
-          <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
-            <button type="submit" className="primary" disabled={submitting}>
+          <Group gap="md" align="center">
+            <Button type="submit" loading={submitting} disabled={submitting}>
               {submitting ? "Saving…" : "Save payslip"}
-            </button>
-            <Link to="/payslips" className="button ghost">Cancel</Link>
-          </div>
-        </div>
+            </Button>
+            <Button component={Link} to="/payslips" variant="default">Cancel</Button>
+          </Group>
+        </Paper>
       </form>
-    </div>
+    </Stack>
   );
 }

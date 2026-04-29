@@ -157,6 +157,10 @@ a {
   flex-shrink: 0;
   background: var(--color-sidebar-bg);
   border-right: 1px solid var(--color-sidebar-border);
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   transition: width 0.2s ease;
