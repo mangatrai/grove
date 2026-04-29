@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-126 (2026-04-29): Net Worth page — Mantine migration + layout redesign
+- **Type:** UX
+- **Motivation:** Net Worth page was the last major page on the old `.card`/raw-div layout, inconsistent with the Mantine-first standard established by Dashboard V2 (UX-120). Layout was also flat — KPI totals were buried inside a section rather than promoted to the top.
+- **KPI hero strip:** Assets / Liabilities / Net Worth promoted to a `SimpleGrid` (3-col on sm+, stacked on mobile) at the top of the page. Each tile is a `Paper` with a color-coded top border (`--color-success` for assets, `--color-warm` for liabilities, accent/danger adaptive for net worth sign). Values use tabular-numeral font variant for alignment.
+- **Delta chips:** Period summary section now renders three delta chips (ASSETS, LIABILITIES, NET WORTH) showing signed change (`+$X` / `–$X`) over the selected trend window with green/red backgrounds keyed to financial direction (liabilities decreasing = green).
+- **`formatSignedDelta` helper:** New utility formats a signed numeric delta with `+`/`–` prefix and `$` amount — used exclusively by the delta chips.
+- **Period preset pills:** 3M / 6M / 12M / 2Y / 3Y / YTD / Custom controls retained but styled via existing CSS variables (pending full Mantine `SegmentedControl` migration in a later pass).
+- **Balance sheet table split:** Assets and Liabilities account tables now rendered as separate `Paper` sections rather than interleaved. Clarifies the two-sided structure.
+- **Mantine 7 migration:** All layout shells migrated — `Paper` (with `withBorder shadow="sm"`), `Stack`, `Group`, `SimpleGrid`, `Title`, `Text`, `Anchor`, `Alert`, `Skeleton`, `Button`, `Select`, `Divider`, `Box`. Chart tooltip shell converted to `Paper`.
+- **Recharts `Legend` removed:** Replaced with a manual legend using `Text`/`Group` Mantine primitives to match the visual language of the rest of the page.
+- **CSS delta:** 136 Net Worth-specific utility classes added mid-migration then fully removed once Mantine tokens replaced them — net zero CSS delta.
+- **No backend or API changes.** Pure presentation migration.
+- **Files changed:** `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/index.css` (net zero).
+
+---
+
 ## UX-125 (2026-04-29): Forest Studio design theme + 3-way OS-aware color scheme toggle
 - **Type:** UX
 - **Motivation:** App was visually monotonous (single green everywhere) and "harsh on eyes" due to cold blue-gray backgrounds and neon accent colors. Dark mode used cold navy blacks. Theme toggle had no "Auto (follow OS)" option despite Mantine already supporting it.
