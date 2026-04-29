@@ -62,6 +62,13 @@ const envSchema = z.object({
   LLM_PROVIDER: z.enum(["openai", "anthropic"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: optionalIntEnv(587, 1, 65535),
+  SMTP_SECURE: optionalBoolEnv(false),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  PUBLIC_BASE_URL: z.string().url().optional().or(z.literal("")),
   /**
    * Minimum severity emitted to stdout/stderr (`debug` = most verbose, `silent` = none).
    * Used by `backend/src/logger.ts`; set in repo root `.env`.
@@ -100,4 +107,12 @@ export function resolveLogFilePath(): string | undefined {
     return undefined;
   }
   return resolveConfiguredPath(env.LOG_FILE.trim());
+}
+
+export function isEmailConfigured(): boolean {
+  const smtpHost = env.SMTP_HOST?.trim() ?? "";
+  const smtpUser = env.SMTP_USER?.trim() ?? "";
+  const smtpPass = env.SMTP_PASS?.trim() ?? "";
+  const smtpFrom = env.SMTP_FROM?.trim() ?? "";
+  return smtpHost.length > 0 && smtpUser.length > 0 && smtpPass.length > 0 && smtpFrom.length > 0;
 }

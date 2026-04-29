@@ -59,6 +59,89 @@ paths:
           description: User payload
         "401":
           description: Unauthorized
+  /auth/capabilities:
+    get:
+      tags: [auth]
+      summary: Public auth feature capabilities
+      responses:
+        "200":
+          description: Capability flags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [emailEnabled]
+                properties:
+                  emailEnabled: { type: boolean }
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      summary: Request a password reset link (always responds 200)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Generic success response (same for known/unknown email)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    type: string
+                    example: If that address is registered, a reset link is on its way.
+        "400":
+          description: Validation failure (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      summary: Reset password using one-time token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                newPassword:
+                  type: string
+                  minLength: 12
+                  pattern: ^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,}$
+      responses:
+        "200":
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string, example: Password updated. Please sign in. }
+        "400":
+          description: Invalid/expired token, same password, or validation error
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthResetInvalidTokenResponse'
+                  - $ref: '#/components/schemas/AuthResetSameAsCurrentResponse'
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
   /auth/change-password:
     post:
       tags: [auth]
@@ -1908,6 +1991,26 @@ components:
           items:
             type: object
             additionalProperties: true
+    AuthResetInvalidTokenResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [INVALID_TOKEN]
+        message:
+          type: string
+          example: This link has expired or already been used.
+    AuthResetSameAsCurrentResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [SAME_AS_CURRENT]
+        message:
+          type: string
+          example: New password must be different from your current password.
     ServiceErrorResponse:
       type: object
       properties:

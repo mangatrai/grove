@@ -53,6 +53,44 @@ See [`RUNBOOK.md`](RUNBOOK.md) §11 for Postgres connection details and operator
 | `PAYSLIP_ASYNC_POLL_INTERVAL_MS` | Minimum milliseconds between background polls for queued Deloitte LLM extraction during import (default `120000`). |
 | `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS` | Max **inclusive** day span for **`GET /reports/cash-summary`** when both **`dateFrom`** and **`dateTo`** are set (default `1096`, min `31`, max `4000`). |
 
+## Email / SMTP (optional)
+
+Used by self-service password reset and future invite/notification flows.
+
+| Variable | Notes |
+|----------|-------|
+| `SMTP_HOST` | SMTP hostname (e.g. `smtp.gmail.com`, `smtp.resend.com`). |
+| `SMTP_PORT` | SMTP port (default `587`). |
+| `SMTP_SECURE` | `1` for SSL (typically port `465`), `0` for STARTTLS (typically `587`). |
+| `SMTP_USER` | SMTP login username (`resend` for Resend, Gmail address for Gmail). |
+| `SMTP_PASS` | SMTP password (Resend API key or Gmail App Password). |
+| `SMTP_FROM` | Display sender value, e.g. `Household Finance <you@gmail.com>`. |
+| `PUBLIC_BASE_URL` | Public app URL (e.g. `https://finance.example.com`) used in email links and OAuth callbacks. |
+
+**Resend SMTP example**
+
+```bash
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=465
+SMTP_SECURE=1
+SMTP_USER=resend
+SMTP_PASS=re_xxxxxxxxx
+SMTP_FROM=Household Finance <onboarding@resend.dev>
+PUBLIC_BASE_URL=https://finance.example.com
+```
+
+**Gmail App Password example**
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=0
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-16-char-app-password
+SMTP_FROM=Household Finance <you@gmail.com>
+PUBLIC_BASE_URL=https://finance.example.com
+```
+
 ## Frontend (Vite)
 
 | Variable | Notes |

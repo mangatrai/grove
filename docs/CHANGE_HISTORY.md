@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-095b (2026-04-29): Email infrastructure + self-service password reset
+- **Type:** CR
+- **Motivation:** Introduce production-ready email infrastructure and end-user password reset without exposing account enumeration, while keeping the existing admin reset path as fallback.
+- **Database:** Added migration `backend/db/migrations/0033_password_reset_token.sql` with `password_reset_token` table (`token_hash`, one-hour expiry, single-use via `used_at`) plus `idx_prt_user`.
+- **Backend mailer module:** Added `backend/src/modules/mailer/` with typed payloads (`mailer.types.ts`), reusable HTML wrapper (`templates/layout.ts`), password reset template (`templates/password-reset.ts`), and lazy singleton SMTP transport (`mailer.service.ts`) using nodemailer.
+- **Backend auth APIs:** Added `GET /auth/capabilities`, `POST /auth/forgot-password`, and `POST /auth/reset-password` in `auth.routes.ts` with Zod validation, TEST-mode-aware rate limits, and invariant `200` response for forgot-password.
+- **Auth service logic:** Added reset token issuance/rotation, SHA-256 token hashing, one-hour expiry, single-use token consumption in transaction, password change with bcrypt cost 12, and `token_version` bump to revoke prior JWTs.
+- **Config/env:** Added SMTP and public URL env vars in `backend/src/config/env.ts`, `.env.example`, and docs (`docs/ENVIRONMENT_VARIABLES.md`), including Resend and Gmail App Password examples.
+- **Frontend UX:** Added public `ResetPasswordPage` route (`/#/reset-password?token=...`) and updated `HomePage` to fetch `/auth/capabilities`; shows legacy admin tip when email is disabled and an inline forgot-password form when enabled; adds `?reset=1` success alert after reset.
+- **Contract docs:** Updated `openapi/openapi.yaml` with full schemas for the three new auth endpoints and error shapes; updated `docs/EMAIL_INFRASTRUCTURE.md` status to implemented.
+- **Tests:** Added `backend/tests/password-reset.test.ts` covering capabilities, forgot-password invariants, token lifecycle, reset success + JWT invalidation, invalid/expired/used token handling, weak password validation, and same-password rejection.
+
+---
+
 ## UX-126 (2026-04-29): Net Worth page — Mantine migration + layout redesign
 - **Type:** UX
 - **Motivation:** Net Worth page was the last major page on the old `.card`/raw-div layout, inconsistent with the Mantine-first standard established by Dashboard V2 (UX-120). Layout was also flat — KPI totals were buried inside a section rather than promoted to the top.

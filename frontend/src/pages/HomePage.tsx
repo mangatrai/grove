@@ -1,5 +1,6 @@
-import { FormEvent, useState } from "react";
-import { Button } from "@mantine/core";
+import { FormEvent, useEffect, useState } from "react";
+import { Alert, Button, TextInput } from "@mantine/core";
+import { useSearchParams } from "react-router-dom";
 import { setToken } from "../api";
 
 /**
@@ -8,6 +9,7 @@ import { setToken } from "../api";
  * the admin resets passwords from Settings → Members → Reset password.
  */
 export function HomePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [email, setEmail] = useState(
     () => import.meta.env.VITE_DEV_SIGNIN_EMAIL ?? ""
   );
@@ -17,6 +19,49 @@ export function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showForgotTip, setShowForgotTip] = useState(false);
+  const [emailEnabled, setEmailEnabled] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [showResetSuccess, setShowResetSuccess] = useState(() => searchParams.get("reset") === "1");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/auth/capabilities");
+        if (!res.ok) {
+          return;
+        }
+        const body = (await res.json()) as { emailEnabled?: boolean };
+        if (!cancelled) {
+          setEmailEnabled(Boolean(body.emailEnabled));
+        }
+      } catch {
+        // keep default false and preserve existing admin-tip fallback
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function onForgotPasswordSubmit(event: FormEvent) {
+    event.preventDefault();
+    setForgotLoading(true);
+    try {
+      await fetch("/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: forgotEmail })
+      });
+    } catch {
+      // Response stays identical to avoid enumeration and avoid leaking infra state.
+    } finally {
+      setForgotLoading(false);
+      setForgotSent(true);
+    }
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -129,6 +174,22 @@ export function HomePage() {
               <p className="home-landing__card-sub muted">
                 Welcome back — enter your credentials to continue.
               </p>
+              {showResetSuccess ? (
+                <Alert
+                  color="green"
+                  variant="light"
+                  withCloseButton
+                  onClose={() => {
+                    setShowResetSuccess(false);
+                    const next = new URLSearchParams(searchParams);
+                    next.delete("reset");
+                    setSearchParams(next, { replace: true });
+                  }}
+                  mb="sm"
+                >
+                  Password updated — please sign in.
+                </Alert>
+              ) : null}
 
               <form className="home-landing__form" onSubmit={onSubmit}>
                 <div className="home-landing__field">
@@ -171,7 +232,7 @@ export function HomePage() {
                 </Button>
               </form>
 
-              {/* Helper links — no full forms; these are backlog CRs */}
+              {/* Auth helper links */}
               <div className="home-landing__auth-links">
                 <span className="home-landing__auth-link-item">
                   New here?{" "}
@@ -186,29 +247,56 @@ export function HomePage() {
                 <span className="home-landing__auth-link-sep" aria-hidden>
                   ·
                 </span>
-                <span className="home-landing__auth-link-item">
-                  <button
-                    type="button"
-                    className="home-landing__auth-link"
-                    style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
-                    onClick={() => setShowForgotTip((v) => !v)}
-                  >
-                    Forgot password?
-                  </button>
-                </span>
-                {showForgotTip ? (
-                  <div style={{
-                    marginTop: "0.6rem", padding: "0.55rem 0.75rem",
-                    background: "var(--color-surface-alt, #f0f4ff)",
-                    border: "1px solid var(--color-border, #c7d2e8)",
-                    borderRadius: 6, fontSize: "0.82rem",
-                    color: "var(--color-text, #1e293b)", lineHeight: 1.5
-                  }}>
-                    Ask your household admin to reset your password.
-                    They can do this from <strong>Settings → Members → Reset password</strong>.
-                    You'll receive a temporary password and will be prompted to change it on first login.
+                {emailEnabled ? (
+                  <div style={{ width: "100%", marginTop: "0.6rem" }}>
+                    {forgotSent ? (
+                      <div style={{ fontSize: "0.82rem", color: "var(--color-text, #1e293b)" }}>
+                        If that address is registered, a link is on its way.
+                      </div>
+                    ) : (
+                      <form onSubmit={onForgotPasswordSubmit} style={{ display: "flex", gap: "0.45rem", alignItems: "end" }}>
+                        <TextInput
+                          type="email"
+                          size="xs"
+                          placeholder="your@email.com"
+                          value={forgotEmail}
+                          onChange={(event) => setForgotEmail(event.currentTarget.value)}
+                          required
+                          style={{ flex: 1 }}
+                        />
+                        <Button type="submit" size="xs" variant="default" loading={forgotLoading}>
+                          Send reset link
+                        </Button>
+                      </form>
+                    )}
                   </div>
-                ) : null}
+                ) : (
+                  <>
+                    <span className="home-landing__auth-link-item">
+                      <button
+                        type="button"
+                        className="home-landing__auth-link"
+                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                        onClick={() => setShowForgotTip((v) => !v)}
+                      >
+                        Forgot password?
+                      </button>
+                    </span>
+                    {showForgotTip ? (
+                      <div style={{
+                        marginTop: "0.6rem", padding: "0.55rem 0.75rem",
+                        background: "var(--color-surface-alt, #f0f4ff)",
+                        border: "1px solid var(--color-border, #c7d2e8)",
+                        borderRadius: 6, fontSize: "0.82rem",
+                        color: "var(--color-text, #1e293b)", lineHeight: 1.5
+                      }}>
+                        Ask your household admin to reset your password.
+                        They can do this from <strong>Settings → Members → Reset password</strong>.
+                        You'll receive a temporary password and will be prompted to change it on first login.
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
           </div>
