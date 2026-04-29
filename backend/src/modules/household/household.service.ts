@@ -32,11 +32,22 @@ export type HouseholdSettings = {
   monthlySavingsTargetUsd: number | null;
   salaryDepositFinancialAccountId: string | null;
   employers: EmployerStub[];
+  city: string | null;
+  state: string | null;
+  combinedGrossIncomeUsd: number | null;
 };
 
 export async function getHouseholdSettings(householdId: string, userId?: string): Promise<HouseholdSettings | null> {
-  const base = await qGet<{ monthlySavingsTargetUsd: number | null }>(
-    `SELECT monthly_savings_target_usd AS "monthlySavingsTargetUsd"
+  const base = await qGet<{
+    monthlySavingsTargetUsd: number | null;
+    city: string | null;
+    state: string | null;
+    combinedGrossIncomeUsd: number | null;
+  }>(
+    `SELECT monthly_savings_target_usd AS "monthlySavingsTargetUsd",
+            city,
+            state,
+            combined_gross_income_usd AS "combinedGrossIncomeUsd"
          FROM household WHERE id = ?`,
     householdId
   );
@@ -86,10 +97,21 @@ export async function getHouseholdSettings(householdId: string, userId?: string)
     }
   }
 
+  let combinedGrossIncomeUsd: number | null = null;
+  if (base.combinedGrossIncomeUsd != null && Number.isFinite(Number(base.combinedGrossIncomeUsd))) {
+    const g = Number(base.combinedGrossIncomeUsd);
+    if (g >= 0) {
+      combinedGrossIncomeUsd = Math.round(g * 100) / 100;
+    }
+  }
+
   return {
     monthlySavingsTargetUsd,
     salaryDepositFinancialAccountId,
-    employers
+    employers,
+    city: base.city?.trim() ? String(base.city) : null,
+    state: base.state?.trim() ? String(base.state) : null,
+    combinedGrossIncomeUsd
   };
 }
 
@@ -119,6 +141,9 @@ export async function updateHouseholdMonthlySavingsTarget(
 
 export type PatchHouseholdSettingsInput = {
   monthlySavingsTargetUsd?: number | null;
+  city?: string | null;
+  state?: string | null;
+  combinedGrossIncomeUsd?: number | null;
 };
 
 export type PatchHouseholdSettingsFailure = { ok: false; code: "INVALID_AMOUNT" };
@@ -132,6 +157,23 @@ export async function patchHouseholdSettings(
     if (!out.ok) {
       return out;
     }
+  }
+
+  if (input.city !== undefined) {
+    await qExec(`UPDATE household SET city = ? WHERE id = ?`, input.city, householdId);
+  }
+  if (input.state !== undefined) {
+    await qExec(`UPDATE household SET state = ? WHERE id = ?`, input.state, householdId);
+  }
+  if (input.combinedGrossIncomeUsd !== undefined) {
+    if (input.combinedGrossIncomeUsd !== null) {
+      if (!Number.isFinite(input.combinedGrossIncomeUsd) || input.combinedGrossIncomeUsd < 0) {
+        return { ok: false, code: "INVALID_AMOUNT" };
+      }
+    }
+    const v =
+      input.combinedGrossIncomeUsd === null ? null : Math.round(input.combinedGrossIncomeUsd * 100) / 100;
+    await qExec(`UPDATE household SET combined_gross_income_usd = ? WHERE id = ?`, v, householdId);
   }
 
   return { ok: true };
@@ -152,6 +194,11 @@ export type HouseholdMemberProfile = {
   avatarKey: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  age: number | null;
+  sex: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
+  individualGrossIncomeUsd: number | null;
+  riskTolerance: "conservative" | "moderate" | "aggressive" | null;
+  financialGoals: string[];
 };
 
 type MemberProfileRow = {
@@ -164,12 +211,44 @@ type MemberProfileRow = {
   avatar_key: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  age: number | null;
+  sex: string | null;
+  individual_gross_income_usd: number | null;
+  risk_tolerance: string | null;
+  financial_goals_json: string | null;
 };
+
+function parseFinancialGoalsJson(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) {
+    return [];
+  }
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v)) {
+      return [];
+    }
+    return v.filter((x): x is string => typeof x === "string");
+  } catch {
+    return [];
+  }
+}
 
 function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile {
   const parts = row.full_name.trim().split(/\s+/);
   const firstName = parts[0] ?? "";
   const lastName = parts.slice(1).join(" ");
+  const sexVal = row.sex;
+  const validSex =
+    sexVal === "male" || sexVal === "female" || sexVal === "nonbinary" || sexVal === "prefer_not_to_say"
+      ? sexVal
+      : null;
+  const rt = row.risk_tolerance;
+  const validRt =
+    rt === "conservative" || rt === "moderate" || rt === "aggressive" ? rt : null;
+  const ig =
+    row.individual_gross_income_usd != null && Number.isFinite(Number(row.individual_gross_income_usd))
+      ? Math.round(Number(row.individual_gross_income_usd) * 100) / 100
+      : null;
   return {
     id: row.id,
     householdId: row.household_id,
@@ -181,7 +260,12 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
     phoneNumber: row.phone_number,
     avatarKey: row.avatar_key,
     role: row.role,
-    relationship: row.relationship
+    relationship: row.relationship,
+    age: row.age != null && Number.isFinite(Number(row.age)) ? Number(row.age) : null,
+    sex: validSex,
+    individualGrossIncomeUsd: ig,
+    riskTolerance: validRt,
+    financialGoals: parseFinancialGoalsJson(row.financial_goals_json)
   };
 }
 
@@ -194,6 +278,11 @@ export type PatchProfileInput = {
   avatarKey?: string | null;
   salaryDepositFinancialAccountId?: string | null;
   employers?: EmployerInput[];
+  age?: number | null;
+  sex?: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
+  individualGrossIncomeUsd?: number | null;
+  riskTolerance?: "conservative" | "moderate" | "aggressive" | null;
+  financialGoals?: string[];
 };
 
 export type CreateMemberInput = {
@@ -227,7 +316,8 @@ async function ensureCurrentUserProfile(
 ): Promise<HouseholdMemberProfile | null> {
   const existing = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -287,7 +377,8 @@ async function ensureCurrentUserProfile(
 
   const created = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -319,7 +410,8 @@ export async function patchCurrentUserProfile(
   const existing = ensured
     ? await qGet<MemberProfileRow>(
         `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -394,6 +486,41 @@ export async function patchCurrentUserProfile(
     }
   }
 
+  if (input.age !== undefined) {
+    await qExec(`UPDATE person_profile SET age = ? WHERE household_id = ? AND linked_user_id = ?`, input.age, householdId, userId);
+  }
+  if (input.sex !== undefined) {
+    await qExec(`UPDATE person_profile SET sex = ? WHERE household_id = ? AND linked_user_id = ?`, input.sex, householdId, userId);
+  }
+  if (input.individualGrossIncomeUsd !== undefined) {
+    const v =
+      input.individualGrossIncomeUsd === null
+        ? null
+        : Math.round(input.individualGrossIncomeUsd * 100) / 100;
+    await qExec(
+      `UPDATE person_profile SET individual_gross_income_usd = ? WHERE household_id = ? AND linked_user_id = ?`,
+      v,
+      householdId,
+      userId
+    );
+  }
+  if (input.riskTolerance !== undefined) {
+    await qExec(
+      `UPDATE person_profile SET risk_tolerance = ? WHERE household_id = ? AND linked_user_id = ?`,
+      input.riskTolerance,
+      householdId,
+      userId
+    );
+  }
+  if (input.financialGoals !== undefined) {
+    await qExec(
+      `UPDATE person_profile SET financial_goals_json = ? WHERE household_id = ? AND linked_user_id = ?`,
+      JSON.stringify(input.financialGoals),
+      householdId,
+      userId
+    );
+  }
+
   const nextPhone = input.phoneNumber !== undefined ? input.phoneNumber : existing.phone_number;
   const nextAvatar = input.avatarKey !== undefined ? input.avatarKey : existing.avatar_key;
 
@@ -418,7 +545,8 @@ export async function patchCurrentUserProfile(
 
   const updated = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -438,7 +566,8 @@ export async function patchCurrentUserProfile(
 export async function listHouseholdMembers(householdId: string): Promise<HouseholdMemberProfile[]> {
   const rows = await qAll<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM household_membership m
   JOIN person_profile p
     ON p.id = m.person_profile_id
@@ -507,7 +636,8 @@ export async function createHouseholdMember(
 
   const created = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -531,7 +661,8 @@ export async function patchHouseholdMember(
 ): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" }> {
   const existing = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -583,7 +714,8 @@ export async function patchHouseholdMember(
 
   const updated = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id

@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-124 (2026-04-28): AI Financial Health Analysis (on-demand)
+- **Type:** CR + DB
+- Added migration `backend/db/migrations/0031_ai_financial_insight.sql` with new demographic fields on `household` (`city`, `state`, `combined_gross_income_usd`) and `person_profile` (`age`, `sex`, `individual_gross_income_usd`, `risk_tolerance`, `financial_goals_json`), plus new `household_ai_insight` and `insight_job` tables.
+- Added backend insights module under `backend/src/modules/insights/` with 5 routes: `GET /insights/financial`, `POST /insights/financial/refresh`, `GET /insights/financial/status/:jobId`, `GET /insights/financial/history`, `GET /insights/financial/:id`.
+- Added LLM provider abstraction in `llm-provider.service.ts` with `LLM_PROVIDER=openai|anthropic` and Anthropic SDK support.
+- Extended household/profile APIs and services to read/write demographics and financial profile fields.
+- Added dashboard financial health card (`frontend/src/components/FinancialHealthCard.tsx`) and integrated into `DashboardPageV2`; added Settings `insights` history tab plus new profile/household demographic form fields.
+- Added integration coverage in `backend/tests/insights.test.ts` for insights refresh/status and new household/profile fields.
+- Completed strict Mantine 7 sweep for `frontend/src/pages/SettingsPage.tsx` (all legacy tab controls migrated to Mantine components across profile, household, accounts, recurring, security, notifications, and insights sections).
+- Normalized validation error shape to `400 { errors: z.issues }` in household and insights route validators; aligned insights service/route envelope behavior and OpenAPI/docs response contracts.
+- Expanded OpenAPI household contract to match runtime handlers for `/household/members/{memberId}/data-count` and `/household/members/{memberId}/create-login`, plus detailed request/response/error mappings across household settings/profile/member endpoints.
+
+---
+
 ## FIX-123 (2026-04-28): Recurring overrides — hardening fixes across Phase 1/2/3
 - **Backend validation gap (whitespace key):** `merchantKey` Zod schema in `recurring.routes.ts` changed from `z.string().min(1)` to `z.string().trim().min(1)` — a single-space input like `" "` previously passed the `min(1)` check and reached the service where `.trim()` produced an empty string that could be persisted. Now rejected at the boundary with a 400.
 - **Case normalization:** `recurring.service.ts` now lowercases `merchantKey` before insert/upsert (was trim-only). The DB `UNIQUE (household_id, merchant_key)` constraint is case-sensitive; without this, `"Netflix"` and `"netflix"` created two separate rows with ambiguous matching behaviour. The frontend modal was already lowercasing client-side, but the API is now the authoritative normalizer.

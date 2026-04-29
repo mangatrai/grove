@@ -29,7 +29,8 @@ export default defineConfig({
       "/household": api,
       "/exports": api,
       "/budget": api,
-      "/recurring-overrides": api
+      "/recurring-overrides": api,
+      "/insights": api
     }
   }
 });

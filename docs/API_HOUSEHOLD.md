@@ -61,6 +61,7 @@ Send **at least one** field.
 ## Member management (`/household/members`)
 
 **Owner/admin only** for all write operations. Members receive **403**.
+Validation errors on member IDs and request payloads return **`400 { "errors": z.issues }`**.
 
 ### `GET /household/members`
 
@@ -124,3 +125,19 @@ Generates a new random temporary password for a member's login account, stores i
 
 **404:** member not found for this household.  
 **409:** `NO_LOGIN` — member does not have a login account (use `POST /household/members/:memberId/create-login` first).
+
+### `GET /household/members/:memberId/data-count`
+
+Returns assignment counts used by the delete confirmation flow.
+
+**200:** `{ "transactions": number, "payslips": number }`  
+**400:** invalid `memberId` (`{ "errors": [...] }`).
+
+### `POST /household/members/:memberId/create-login`
+
+Creates login credentials for an existing member profile.
+
+**201:** login created  
+**400:** invalid `memberId` or member missing email (`EMAIL_REQUIRED`)  
+**404:** member not found  
+**409:** `ALREADY_HAS_LOGIN` or `EMAIL_CONFLICT`

@@ -59,6 +59,9 @@ const envSchema = z.object({
   ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  LLM_PROVIDER: z.enum(["openai", "anthropic"]).default("openai"),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
   /**
    * Minimum severity emitted to stdout/stderr (`debug` = most verbose, `silent` = none).
    * Used by `backend/src/logger.ts`; set in repo root `.env`.

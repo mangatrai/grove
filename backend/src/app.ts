@@ -14,6 +14,7 @@ import { categoryRulesRouter } from "./modules/category/category-rules.routes.js
 import { exportsRouter } from "./modules/export/exports.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { householdRouter } from "./modules/household/household.routes.js";
+import { insightsRouter } from "./modules/insights/insights.routes.js";
 import { importsRouter } from "./modules/imports/imports.routes.js";
 import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
 import { payslipRouter } from "./modules/payslip/payslip.routes.js";
@@ -60,7 +61,8 @@ const API_PATH_PREFIXES = [
   "/payslips",
   "/exports",
   "/budget",
-  "/recurring-overrides"
+  "/recurring-overrides",
+  "/insights"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -110,6 +112,7 @@ export function buildApp() {
   app.use("/exports", exportsRouter);
   app.use("/budget", budgetRouter);
   app.use("/recurring-overrides", recurringRouter);
+  app.use("/insights", insightsRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

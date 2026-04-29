@@ -21,6 +21,7 @@ tags:
   - name: exports
   - name: budget
   - name: recurring
+  - name: insights
 paths:
   /health:
     get:
@@ -73,37 +74,289 @@ paths:
       tags: [household]
       summary: Household-level settings (targets, salary deposit, employers)
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Settings payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdSettings'
+        "404":
+          description: Household not found
     patch:
       tags: [household]
       summary: Update household settings (restricted fields)
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdSettingsPatch'
+      responses:
+        "200":
+          description: Updated settings payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdSettings'
+        "400":
+          description: Validation or business error
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
+                  - $ref: '#/components/schemas/ServiceErrorResponse'
+        "404":
+          description: Household not found
   /household/profile:
     get:
       tags: [household]
       summary: Signed-in person profile
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Profile payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "404":
+          description: Profile not found
     patch:
       tags: [household]
       summary: Update profile
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdProfilePatch'
+      responses:
+        "200":
+          description: Updated profile payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "400":
+          description: Validation failure (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members:
     get:
       tags: [household]
       summary: List household members
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HouseholdProfile'
     post:
       tags: [household]
       summary: Create member (admin)
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdMemberCreate'
+      responses:
+        "201":
+          description: Member created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "400":
+          description: Validation failure or required-email business check
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
+                  - $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members/{memberId}:
     patch:
       tags: [household]
       summary: Update member
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdMemberPatch'
+      responses:
+        "200":
+          description: Member updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "400":
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
     delete:
       tags: [household]
       summary: Remove member (admin). Deletes household_membership + person_profile. Returns 409 HAS_LOGIN_ACCOUNT when member has a linked login.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleteLogin:
+                  type: boolean
+      responses:
+        "204":
+          description: Member removed
+        "400":
+          description: Invalid member id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /household/members/{memberId}/data-count:
+    get:
+      tags: [household]
+      summary: Count assigned transactions and payslips for member
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Assignment counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdMemberDataCount'
+        "400":
+          description: Invalid member id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+  /household/members/{memberId}/create-login:
+    post:
+      tags: [household]
+      summary: Create login account for existing member
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: Login account created
+        "400":
+          description: Invalid member id or missing member email
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
+                  - $ref: '#/components/schemas/ServiceErrorResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Member already has login or email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members/{memberId}/reset-password:
     post:
       tags: [household]
@@ -112,6 +365,162 @@ paths:
         Returns { tempPassword } once (plaintext, not stored). Member must change on next login.
         404 if member not found; 409 NO_LOGIN if member has no login account.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Temporary password generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tempPassword: { type: string }
+        "400":
+          description: Invalid member id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Member has no login account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+
+  /insights/financial:
+    get:
+      tags: [insights]
+      summary: Latest financial health analysis for caller scope
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Latest insight or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    nullable: true
+                    oneOf:
+                      - $ref: '#/components/schemas/InsightRecord'
+  /insights/financial/refresh:
+    post:
+      tags: [insights]
+      summary: Trigger asynchronous financial health analysis generation
+      security: [{ bearerAuth: [] }]
+      responses:
+        "202":
+          description: Job enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  jobId: { type: string, format: uuid }
+  /insights/financial/status/{jobId}:
+    get:
+      tags: [insights]
+      summary: Poll insight generation job status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/InsightJob'
+        "400":
+          description: Invalid path params (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /insights/financial/history:
+    get:
+      tags: [insights]
+      summary: List historical financial analyses for caller scope
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Insight history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InsightRecord'
+  /insights/financial/{id}:
+    get:
+      tags: [insights]
+      summary: Retrieve a specific historical financial analysis
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Historical insight
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/InsightRecord'
+        "400":
+          description: Invalid path params (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Insight not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /categories:
     get:
       tags: [categories]
@@ -1369,3 +1778,128 @@ components:
         taggedByUserId: { type: string, format: uuid, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    HouseholdSettings:
+      type: object
+      properties:
+        monthlySavingsTargetUsd: { type: number, nullable: true }
+        salaryDepositFinancialAccountId: { type: string, format: uuid, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        combinedGrossIncomeUsd: { type: number, nullable: true }
+        employers:
+          type: array
+          items:
+            type: object
+    HouseholdSettingsPatch:
+      type: object
+      properties:
+        monthlySavingsTargetUsd: { type: number, nullable: true }
+        city: { type: string, nullable: true, maxLength: 100 }
+        state: { type: string, nullable: true, maxLength: 100 }
+        combinedGrossIncomeUsd: { type: number, nullable: true }
+    HouseholdProfile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        linkedUserId: { type: string, format: uuid, nullable: true }
+        fullName: { type: string }
+        email: { type: string, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarKey: { type: string, nullable: true }
+        role: { type: string, enum: [head, member] }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+        age: { type: integer, nullable: true }
+        sex: { type: string, nullable: true, enum: [male, female, nonbinary, prefer_not_to_say] }
+        individualGrossIncomeUsd: { type: number, nullable: true }
+        riskTolerance: { type: string, nullable: true, enum: [conservative, moderate, aggressive] }
+        financialGoals:
+          type: array
+          items: { type: string }
+    HouseholdProfilePatch:
+      type: object
+      properties:
+        age: { type: integer, nullable: true, minimum: 1, maximum: 129 }
+        sex: { type: string, nullable: true, enum: [male, female, nonbinary, prefer_not_to_say] }
+        individualGrossIncomeUsd: { type: number, nullable: true }
+        riskTolerance: { type: string, nullable: true, enum: [conservative, moderate, aggressive] }
+        financialGoals:
+          type: array
+          items: { type: string }
+    HouseholdMemberCreate:
+      type: object
+      required: [role, relationship]
+      properties:
+        firstName: { type: string, nullable: true }
+        lastName: { type: string, nullable: true }
+        fullName: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarKey: { type: string, nullable: true }
+        role: { type: string, enum: [head, member] }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+        createLogin: { type: boolean }
+    HouseholdMemberPatch:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        fullName: { type: string }
+        email: { type: string, format: email, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarKey: { type: string, nullable: true }
+        role: { type: string, enum: [head, member] }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+    HouseholdMemberDataCount:
+      type: object
+      properties:
+        transactions: { type: integer }
+        payslips: { type: integer }
+    InsightPayload:
+      type: object
+      properties:
+        healthRating: { type: string, enum: [strong, on_track, needs_attention, at_risk] }
+        healthRationale: { type: string }
+        localBenchmark: { type: string }
+        nationalBenchmark: { type: string }
+        whatsWorking: { type: array, items: { type: string } }
+        concerns: { type: array, items: { type: string } }
+        spendingAnalysis: { type: array, items: { type: string } }
+        investmentGaps: { type: array, items: { type: string } }
+        nextSteps: { type: array, items: { type: string } }
+    InsightRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        scope: { type: string, enum: [household, personal] }
+        userId: { type: string, format: uuid, nullable: true }
+        generatedAt: { type: string, format: date-time }
+        provider: { type: string }
+        model: { type: string }
+        promptVersion: { type: string }
+        payload:
+          $ref: '#/components/schemas/InsightPayload'
+    InsightJob:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, complete, failed] }
+        insightId: { type: string, format: uuid, nullable: true }
+        errorText: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    ValidationErrorsResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    ServiceErrorResponse:
+      type: object
+      properties:
+        ok: { type: boolean, enum: [false] }
+        code: { type: string }
+        message: { type: string }
