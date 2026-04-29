@@ -30,6 +30,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - Normalized validation error shape to `400 { errors: z.issues }` in household and insights route validators; aligned insights service/route envelope behavior and OpenAPI/docs response contracts.
 - Expanded OpenAPI household contract to match runtime handlers for `/household/members/{memberId}/data-count` and `/household/members/{memberId}/create-login`, plus detailed request/response/error mappings across household settings/profile/member endpoints.
 - Final UI polish pass: refined Settings tab/header density, restored pill-shaped top-bar controls, moved AI card below core dashboard KPIs, improved compact AI card presentation, prevented duplicate insight refresh triggers, fixed Security tab crash on password input, and enforced Security-only tab access during forced first-login password change.
+- Added migration `backend/db/migrations/0032_insight_job_household_index.sql` to index `insight_job(household_id)` for faster household-scoped job lookups.
+- Added server-side refresh rate limit in `backend/src/modules/insights/insights.routes.ts` (one refresh per household per 5 minutes, `429 RATE_LIMITED`), with test-mode bypass to keep integration tests deterministic.
+- Refactored `overBudgetCategories` in `backend/src/modules/insights/insight-prompt.service.ts` to replace per-budget-row spend lookups with a single grouped aggregate query (removes N+1 query pattern).
+- Expanded user and API docs for insights behavior and contracts: `docs/USER_GUIDE.md`, `docs/API_INSIGHTS.md`, and `openapi/openapi.yaml` (including `429` response contract).
 
 ---
 

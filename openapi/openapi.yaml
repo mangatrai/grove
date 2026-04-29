@@ -433,6 +433,17 @@ paths:
                 properties:
                   ok: { type: boolean }
                   jobId: { type: string, format: uuid }
+        "429":
+          description: Refresh rate-limited (one request per household every 5 minutes)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: false }
+                  code: { type: string, example: RATE_LIMITED }
+                  message: { type: string }
+                  retryAfterMs: { type: integer, minimum: 1 }
   /insights/financial/status/{jobId}:
     get:
       tags: [insights]

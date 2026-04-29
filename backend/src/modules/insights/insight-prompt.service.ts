@@ -42,14 +42,6 @@ function shiftMonthBack(yyyyMm: string, n: number): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-function monthBounds(yyyyMm: string): { start: string; end: string } {
-  const [y, m] = yyyyMm.split("-").map(Number);
-  const start = `${yyyyMm}-01`;
-  const lastDay = new Date(Date.UTC(y!, m!, 0));
-  const end = lastDay.toISOString().slice(0, 10);
-  return { start, end };
-}
-
 function currentUtcYearMonth(): string {
   return new Date().toISOString().slice(0, 7);
 }
@@ -272,30 +264,40 @@ async function overBudgetCategories(
     months[1],
     months[2]
   );
+  const userClause = userId ? " AND tc.user_id = ? " : "";
+  const spentRows = await qAll<{ category_id: string; month: string; spent: string | number }>(
+    `SELECT
+        bc.category_id,
+        bc.month,
+        COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS spent
+       FROM budget_category bc
+       LEFT JOIN transaction_canonical tc
+         ON tc.household_id = bc.household_id
+        AND tc.status = 'posted'
+        AND tc.transfer_group_id IS NULL
+        AND tc.category_id = bc.category_id
+        AND tc.txn_date >= to_char(to_date(bc.month || '-01', 'YYYY-MM-DD'), 'YYYY-MM-DD')
+        AND tc.txn_date < to_char(to_date(bc.month || '-01', 'YYYY-MM-DD') + interval '1 month', 'YYYY-MM-DD')
+        ${userClause}
+      WHERE bc.household_id = ?
+        AND bc.month IN (?, ?, ?)
+      GROUP BY bc.category_id, bc.month`,
+    ...(userId ? [userId] : []),
+    householdId,
+    months[0],
+    months[1],
+    months[2]
+  );
+  const spentByCategoryMonth = new Map<string, number>(
+    spentRows.map((row) => [`${row.category_id}:${row.month}`, Number(row.spent ?? 0)])
+  );
 
   type Agg = { name: string; overages: number[] };
   const byCat = new Map<string, Agg>();
 
   for (const br of budgetRows) {
     const budgeted = Number(br.amount);
-    const { start, end } = monthBounds(br.month);
-    const userClause = userId ? " AND tc.user_id = ? " : "";
-    const spentRow = await qGet<{ s: string | number }>(
-      `SELECT COALESCE(SUM(CASE WHEN tc.amount < 0 THEN -tc.amount ELSE 0 END), 0) AS s
-         FROM transaction_canonical tc
-        WHERE tc.household_id = ?
-          AND tc.status = 'posted'
-          AND tc.transfer_group_id IS NULL
-          AND tc.category_id = ?
-          AND tc.txn_date >= ? AND tc.txn_date <= ?
-          ${userClause}`,
-      householdId,
-      br.category_id,
-      start,
-      end,
-      ...(userId ? [userId] : [])
-    );
-    const spent = Number(spentRow?.s ?? 0);
+    const spent = spentByCategoryMonth.get(`${br.category_id}:${br.month}`) ?? 0;
     if (spent > budgeted) {
       const key = br.category_id;
       const name = br.cat_name || "Category";
