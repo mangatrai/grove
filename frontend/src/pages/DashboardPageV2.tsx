@@ -30,6 +30,7 @@ import {
   YAxis
 } from "recharts";
 
+import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { DashboardPageLegacy } from "./DashboardPageLegacy";
 
@@ -996,6 +997,10 @@ export function DashboardPageV2() {
           </Paper>
         ) : null}
       </SimpleGrid>
+
+      <Box mt="md">
+        <FinancialHealthCard />
+      </Box>
 
       <Title order={4} mt="lg" mb="sm" fw={600}>
         6-month trend

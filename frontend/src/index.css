@@ -12,11 +12,11 @@
   --color-page-bg: #f0f4f8;
   --color-header-bg: #ffffff;
 
-  /* Accent — emerald green (primary) */
-  --color-accent: #15803d;           /* green-700 */
-  --color-accent-bright: #22c55e;   /* green-500 — vibrant, readable on both modes */
-  --color-accent-hover: #16a34a;    /* green-600 */
-  --color-accent-subtle: #dcfce7;   /* green-100 */
+  /* Accent — forest green (primary) */
+  --color-accent: #1b5e20;
+  --color-accent-bright: #2e7d32;
+  --color-accent-hover: #255d2a;
+  --color-accent-subtle: #e8f3e9;
 
   /* Accent — amber/orange (complementary) */
   --color-warm: #f59e0b;            /* amber-400 */
@@ -67,10 +67,10 @@
   --color-page-bg: #0f1420;
   --color-header-bg: #111d30;
 
-  --color-accent: #4ade80;
-  --color-accent-bright: #86efac;
-  --color-accent-hover: #22c55e;
-  --color-accent-subtle: rgba(74, 222, 128, 0.12);
+  --color-accent: #58a66a;
+  --color-accent-bright: #7fc88f;
+  --color-accent-hover: #4b8f5c;
+  --color-accent-subtle: rgba(88, 166, 106, 0.16);
 
   --color-warm: #fbbf24;
   --color-warm-dark: #f59e0b;
@@ -387,7 +387,7 @@ a {
   align-items: center;
   gap: 0.35rem;
   padding: 0.35rem 0.75rem;
-  border-radius: 6px;
+  border-radius: 999px;
   border: 1px solid var(--color-accent);
   background: var(--color-accent-hover);
   color: #fff;
@@ -408,6 +408,8 @@ a {
 
 .user-menu__trigger {
   min-width: 5.5rem;
+  padding: 0.32rem 0.8rem;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #e2e8f0;
@@ -1288,7 +1290,7 @@ textarea {
   background: #f8fafc;
 }
 
-button {
+button:not([class]) {
   padding: 0.45rem 0.9rem;
   border-radius: 6px;
   border: 1px solid var(--color-accent-hover);
@@ -1315,7 +1317,7 @@ button.danger:hover:not(:disabled) {
   background: #b91c1c;
 }
 
-button:disabled {
+button:not([class]):disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

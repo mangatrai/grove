@@ -29,6 +29,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - Completed strict Mantine 7 sweep for `frontend/src/pages/SettingsPage.tsx` (all legacy tab controls migrated to Mantine components across profile, household, accounts, recurring, security, notifications, and insights sections).
 - Normalized validation error shape to `400 { errors: z.issues }` in household and insights route validators; aligned insights service/route envelope behavior and OpenAPI/docs response contracts.
 - Expanded OpenAPI household contract to match runtime handlers for `/household/members/{memberId}/data-count` and `/household/members/{memberId}/create-login`, plus detailed request/response/error mappings across household settings/profile/member endpoints.
+- Final UI polish pass: refined Settings tab/header density, restored pill-shaped top-bar controls, moved AI card below core dashboard KPIs, improved compact AI card presentation, prevented duplicate insight refresh triggers, fixed Security tab crash on password input, and enforced Security-only tab access during forced first-login password change.
 
 ---
 
