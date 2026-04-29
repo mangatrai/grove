@@ -736,7 +736,7 @@ export function NetWorthPage() {
                       }
                       const asOf = String(label ?? "");
                       return (
-                        <div className="card" style={{ padding: "0.5rem 0.75rem", fontSize: "0.85rem" }}>
+                        <Paper withBorder shadow="sm" radius="md" p="xs" style={{ fontSize: "0.85rem" }}>
                           <div style={{ fontWeight: 600 }}>{asOf}</div>
                           {payload.map((p) => (
                             <div key={String(p.name ?? p.dataKey)}>
@@ -744,7 +744,7 @@ export function NetWorthPage() {
                               {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
                             </div>
                           ))}
-                        </div>
+                        </Paper>
                       );
                     }}
                   />
