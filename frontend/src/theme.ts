@@ -1,7 +1,7 @@
 import { createTheme, type MantineThemeOverride } from "@mantine/core";
 
 export const appTheme: MantineThemeOverride = createTheme({
-  primaryColor: "green",
+  primaryColor: "forest",
   primaryShade: { light: 7, dark: 4 },
   defaultRadius: "md",
   fontFamily:
@@ -9,29 +9,32 @@ export const appTheme: MantineThemeOverride = createTheme({
   fontFamilyMonospace: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
 
   colors: {
-    green: [
-      "#f0fdf4", // 0 — near-white green tint
-      "#dcfce7", // 1
-      "#bbf7d0", // 2
-      "#86efac", // 3
-      "#4ade80", // 4 — bright emerald (dark mode accent)
-      "#22c55e", // 5 — vibrant green
-      "#16a34a", // 6 — medium green
-      "#15803d", // 7 — default primary
-      "#166534", // 8
-      "#14532d", // 9 — deepest green
+    // Earthy, mature forest greens — Pantone Forest family (not the juvenile lime ramp)
+    // Each shade is slightly warm-tinted to complement the warm neutral surfaces.
+    forest: [
+      "#F2F7F4", // 0 — near-white green tint
+      "#E2EEE7", // 1
+      "#C3DDCA", // 2
+      "#97C4A5", // 3
+      "#6BA984", // 4 — dark-mode accent (muted, warm emerald)
+      "#4A9464", // 5 — vibrant earthy green
+      "#3A7D52", // 6 — medium forest
+      "#2D6A4F", // 7 — default primary (mature, Pantone Forest)
+      "#1F5038", // 8
+      "#153828", // 9 — deepest forest
     ],
+    // Rich warm gold — replaces the cheap amber ramp
     amber: [
-      "#fffbeb", // 0
-      "#fef3c7", // 1
-      "#fde68a", // 2
-      "#fcd34d", // 3
-      "#fbbf24", // 4
-      "#f59e0b", // 5 — primary amber
-      "#d97706", // 6 — dark amber
-      "#b45309", // 7
-      "#92400e", // 8
-      "#78350f", // 9
+      "#FEF9EE", // 0
+      "#FEF0CE", // 1
+      "#FDE09A", // 2
+      "#FBCF6A", // 3
+      "#F9BD3A", // 4
+      "#F7AB0A", // 5 — warm gold
+      "#C8860A", // 6 — rich gold (primary warm)
+      "#9A6108", // 7
+      "#6C4205", // 8
+      "#3E2403", // 9
     ],
   },
 
@@ -58,6 +61,11 @@ export const appTheme: MantineThemeOverride = createTheme({
         withArrow: true,
         multiline: true,
         maw: 280,
+      },
+    },
+    Card: {
+      defaultProps: {
+        radius: "md",
       },
     },
   },

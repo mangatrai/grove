@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-125 (2026-04-29): Forest Studio design theme + 3-way OS-aware color scheme toggle
+- **Type:** UX
+- **Motivation:** App was visually monotonous (single green everywhere) and "harsh on eyes" due to cold blue-gray backgrounds and neon accent colors. Dark mode used cold navy blacks. Theme toggle had no "Auto (follow OS)" option despite Mantine already supporting it.
+- **Palette redesign: "Forest Studio"** — warm neutrals throughout, mature Pantone-forest greens, forest-night chrome. Grounded in UX research on warm vs cold color perception for extended use.
+  - **Light mode:** Page background changed from cold `#f0f4f8` → warm linen `#efebe3`. Surface from pure white → warm `#fdfcfb`. All borders warm stone-toned. Text warm stone-900 (`#1c1917`) instead of cold slate-900.
+  - **Dark mode:** Page bg changed from cold navy `#0f1420` → warm brown-black `#131009`. Surfaces warm brown-dark. Eliminates the "electric navy" look that's harsh at night.
+  - **Sidebar chrome:** Changed from cold navy (`#1a2540`) → dark forest night (`#1a2b1f`). Now has a clear semantic relationship to the forest green identity instead of feeling like a different app.
+  - **Active accent:** Changed from neon lime `#4ade80` → soothing mint teal `#6ee7b7`. Less fatiguing, more refined.
+  - **Primary color ramp:** Replaced with mature Pantone Forest family — `#2d6a4f` as default shade. Not aggressive lime-green, but sophisticated earthy forest.
+  - **Shadows:** Warm-tinted (rgba warm stone) instead of cold blue-tinted.
+- **3-way theme switcher** in `AppTopBar`: replaced the 2-state sun/moon toggle with a compact Sun | Monitor | Moon segmented control. "Monitor" sets `'auto'` which follows OS preference via `useMantineColorScheme({ setColorScheme('auto') })`. User preference persists in localStorage (`hf_color_scheme`). OS-auto was already wired in `main.tsx` via `defaultColorScheme="auto"` — this exposes it in the UI.
+- **Component updates:** KPI cards, KPI delta chips, table headers, category picker flyout, hs-picker, transaction toolbar, dashboard scope bar, bulk action bar, settings tabs, category rules section — all updated to use CSS variables instead of hardcoded cold blue-grays.
+- **KPI income/expense colors:** `kpi-in` and `kpi-out` now use `--color-success` and `--color-expense` (warm terracotta) instead of harsh hardcoded greens/reds.
+- **Files changed:** `frontend/src/theme.ts`, `frontend/src/index.css`, `frontend/src/layout/AppTopBar.tsx`, `frontend/src/pages/PayslipsPage.tsx` (fixed pre-existing unused import).
+
 ## CR-124 (2026-04-28): AI Financial Health Analysis (on-demand)
 - **Type:** CR + DB
 - Added migration `backend/db/migrations/0031_ai_financial_insight.sql` with new demographic fields on `household` (`city`, `state`, `combined_gross_income_usd`) and `person_profile` (`age`, `sex`, `individual_gross_income_usd`, `risk_tolerance`, `financial_goals_json`), plus new `household_ai_insight` and `insight_job` tables.
