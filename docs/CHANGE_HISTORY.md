@@ -18,14 +18,6 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## CR-125 Follow-up note (backlog): import restore column-name hardening
-**Date:** 2026-04-30
-**Files:** `backend/src/modules/export/import-household-bundle.service.ts`
-**What:** Tracked a low-risk hardening backlog item for restore-time dynamic object insert (`txInsertObject`): validate incoming JSON object keys as safe SQL identifiers (for example `/^[a-z_][a-z0-9_]*$/`) before generating column lists.
-**Why:** Current keys originate from `SELECT *` exports, but they are read from uploaded backups. Restore is owner/admin-only and self-hosted, so risk is low, but explicit identifier validation improves defense-in-depth.
-
----
-
 ## CR-125 — Export/Import Parity (exportVersion 4)
 **Date:** 2026-04-30
 **Files:** `backend/src/modules/export/export-registry.ts` (new), `backend/src/modules/export/export-household-bundle.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/server.ts`, `backend/src/db/export-coverage-check.ts`, `backend/tests/app.test.ts`
