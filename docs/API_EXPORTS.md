@@ -75,6 +75,34 @@ Queues a **restore** job: **wipe household-scoped data in FK-safe order**, then 
 
 **413:** Upload over **500 MB** (multer limit).
 
+## Preview endpoint
+
+`POST /exports/preview`
+
+**Auth:** Bearer token. **Role:** `owner` only.
+
+**Content-Type:** `multipart/form-data` with field **`file`** set to a `.hfb` backup file.
+
+Returns **200** with:
+
+- `exportVersion`
+- `exportedAt`
+- `encrypted`
+- `scope`
+- `personProfileId` (optional)
+- `format`
+- `tables` (`tableKey -> { rows }`)
+- `totalRows`
+
+**422:** backup is encrypted but `BACKUP_ENCRYPTION_KEY` is not configured.
+
+**400:** missing file, wrong extension, unsupported export version, missing manifest, or unreadable ZIP/JSON payload.
+
+Behavior guarantees:
+
+- Preview does **not** modify the database.
+- Temp upload file is always deleted after request completion.
+
 ## `GET /exports/import/{jobId}`
 
 **Auth:** Bearer JWT.

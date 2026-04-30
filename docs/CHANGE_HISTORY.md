@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-127 — Backup Preview Before Restore
+**Date:** 2026-04-30
+**Files:** `backend/src/modules/export/exports.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/app.test.ts`, `docs/API_EXPORTS.md`, `docs/CHANGE_HISTORY.md`, `openapi/openapi.yaml`
+**What:** Added `POST /exports/preview` so the server can read a `.hfb` backup (including decrypting it when `BACKUP_ENCRYPTION_KEY` is configured) and return manifest metadata/table row counts without touching the database. Updated Household Settings restore UX to a two-step flow: user uploads `.hfb`, clicks **Preview & Restore**, reviews export timestamp/encryption/scope/per-table rows in a modal, and only then confirms destructive restore.
+
+---
+
+## FIX-126a (2026-04-30): Restore FK-safe delete order for import metadata
+- **Type:** FIX
+- **Issue:** Household restore could fail with `import_file_financial_account_id_fkey` when existing `import_file` rows referenced `financial_account` rows that restore was about to delete.
+- **Fix:** In restore transaction, clear ephemeral import pipeline tables for the household in FK-safe order (`transaction_raw` → `import_file` → `import_session`) before deleting export-registry tables.
+- **Regression coverage:** Extended export/import roundtrip test to seed `import_session` + `import_file` + `transaction_raw` rows and assert restore completes with those rows cleared.
+- **Files changed:** `backend/src/modules/export/import-household-bundle.service.ts`, `backend/tests/app.test.ts`.
+
+---
+
 ## CR-126 — .hfb Format + Backup Encryption
 **Date:** 2026-04-30
 **Files:** `backend/src/modules/export/backup-crypto.ts` (new), `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/config/env.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/app.test.ts`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/API_EXPORTS.md`

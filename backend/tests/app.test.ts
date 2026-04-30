@@ -32,6 +32,9 @@ describe("app health", () => {
 
 describe("exports/imports roundtrip (CR-125)", () => {
   it("exports manifest v4 with full registry tables and restores missing parity tables", async () => {
+    const originalBackupKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
     const householdId = crypto.randomUUID();
     const ownerUserId = crypto.randomUUID();
     const ownerEmail = `cr125-owner-${Date.now()}@example.com`;
@@ -103,6 +106,27 @@ describe("exports/imports roundtrip (CR-125)", () => {
       ownerUserId,
       JSON.stringify({ healthRating: "on_track", notes: ["CR-125 seeded"] })
     );
+    const ephemeralAccountId = crypto.randomUUID();
+    const importSessionId = crypto.randomUUID();
+    const importFileId = crypto.randomUUID();
+    const transactionRawId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, type, institution, owner_scope)
+       VALUES (?, ?, 'checking', 'CR-125 Ephemeral Bank', 'household')`
+    ).run(ephemeralAccountId, householdId);
+    await sqlStmt(
+      `INSERT INTO import_session (id, household_id, source_type, status)
+       VALUES (?, ?, 'upload', 'review')`
+    ).run(importSessionId, householdId);
+    await sqlStmt(
+      `INSERT INTO import_file (
+         id, session_id, file_name, checksum, status, confidence_summary, stored_path, financial_account_id
+       ) VALUES (?, ?, 'ephemeral.csv', ?, 'parsed', '{}', '/tmp/ephemeral.csv', ?)`
+    ).run(importFileId, importSessionId, crypto.randomUUID(), ephemeralAccountId);
+    await sqlStmt(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, 0, '{}', 1.0)`
+    ).run(transactionRawId, importFileId);
 
     const startExport = await request(app)
       .post("/exports/household")
@@ -196,6 +220,17 @@ describe("exports/imports roundtrip (CR-125)", () => {
       `SELECT COUNT(*)::int AS c FROM household_ai_insight WHERE household_id = ?`
     ).get(householdId) as { c: number };
     expect(insightCount.c).toBeGreaterThan(0);
+
+    const leftoverImportFiles = await sqlStmt(
+      `SELECT COUNT(*)::int AS c
+       FROM import_file f
+       JOIN import_session s ON s.id = f.session_id
+       WHERE s.household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(leftoverImportFiles.c).toBe(0);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalBackupKey;
+    }
   }, 120_000);
 });
 
@@ -390,6 +425,166 @@ describe("backup encryption (CR-126)", () => {
       expect(result.status).toBe("failed");
       expect(result.error ?? "").toContain("encrypted");
       expect(result.error ?? "").toContain("BACKUP_ENCRYPTION_KEY");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+});
+
+describe("backup preview (CR-127)", () => {
+  async function createOwnerContext(seed: string): Promise<{
+    householdId: string;
+    ownerEmail: string;
+    ownerPassword: string;
+    token: string;
+  }> {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerProfileId = crypto.randomUUID();
+    const ownerEmail = `cr127-owner-${seed}-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'CR-127 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'CR-127 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+
+    const defaultCategory = await sqlStmt(
+      `SELECT id FROM category WHERE household_id IS NULL ORDER BY id LIMIT 1`
+    ).get() as { id: string };
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, source_ref, txn_date, amount, direction, merchant, category_id, status, fingerprint
+       ) VALUES (?, ?, ?, ?, '2030-01-20', 25.50, 'debit', 'CR-127 Coffee', ?, 'posted', ?)`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      SEED_BOA_CHECKING,
+      `cr127-seed:${seed}`,
+      defaultCategory.id,
+      crypto.randomUUID()
+    );
+
+    const login = await request(app).post("/auth/login").send({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    expect(login.status).toBe(200);
+    return { householdId, ownerEmail, ownerPassword, token: login.body.token as string };
+  }
+
+  async function waitForExportComplete(jobId: string, token: string): Promise<void> {
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app).get(`/exports/${jobId}`).set("authorization", `Bearer ${token}`);
+      expect(poll.status).toBe(200);
+      if ((poll.body.status as string) === "complete") return;
+    }
+    throw new Error("Export did not complete in time");
+  }
+
+  async function exportBackupBuffer(token: string): Promise<Buffer> {
+    const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${token}`);
+    expect(startExport.status).toBe(202);
+    const exportJobId = startExport.body.jobId as string;
+    await waitForExportComplete(exportJobId, token);
+    const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+      storage_path: string;
+    };
+    return readFileSync(exportRow.storage_path);
+  }
+
+  it("preview returns manifest summary for unencrypted .hfb", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const owner = await createOwnerContext("unencrypted-preview");
+      const fileBuffer = await exportBackupBuffer(owner.token);
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-unencrypted.hfb");
+
+      expect(preview.status).toBe(200);
+      expect(preview.body.exportVersion).toBe(4);
+      expect(preview.body.encrypted).toBe(false);
+      expect(preview.body.scope).toBe("household");
+      expect(preview.body.totalRows).toBeGreaterThan(0);
+      expect(Object.keys(preview.body.tables ?? {}).length).toBeGreaterThanOrEqual(5);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("preview returns manifest summary for encrypted .hfb", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = "a".repeat(64);
+    try {
+      const owner = await createOwnerContext("encrypted-preview");
+      const fileBuffer = await exportBackupBuffer(owner.token);
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-encrypted.hfb");
+
+      expect(preview.status).toBe(200);
+      expect(preview.body.encrypted).toBe(true);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("preview returns 422 for encrypted backup when no key configured", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = "a".repeat(64);
+    try {
+      const owner = await createOwnerContext("encrypted-no-key");
+      const fileBuffer = await exportBackupBuffer(owner.token);
+      env.BACKUP_ENCRYPTION_KEY = undefined;
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-encrypted-no-key.hfb");
+
+      expect(preview.status).toBe(422);
+      expect(String(preview.body.message ?? "").toLowerCase()).toContain("encrypted");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("preview does not modify any database rows", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const owner = await createOwnerContext("readonly-preview");
+      const before = await sqlStmt(
+        `SELECT COUNT(*)::int AS c FROM transaction_canonical WHERE household_id = ?`
+      ).get(owner.householdId) as { c: number };
+      const fileBuffer = await exportBackupBuffer(owner.token);
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-readonly.hfb");
+      expect(preview.status).toBe(200);
+
+      const after = await sqlStmt(
+        `SELECT COUNT(*)::int AS c FROM transaction_canonical WHERE household_id = ?`
+      ).get(owner.householdId) as { c: number };
+      expect(after.c).toBe(before.c);
     } finally {
       env.BACKUP_ENCRYPTION_KEY = originalKey;
     }

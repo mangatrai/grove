@@ -1,12 +1,16 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { Router } from "express";
 import multer from "multer";
+import unzipper from "unzipper";
 
+import { env } from "../../config/env.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { resolveDataPath } from "../../paths.js";
+import { decryptBackup, isEncryptedBackup } from "./backup-crypto.js";
 import {
   getExportJob,
   queueHouseholdExport,
@@ -42,10 +46,86 @@ const restoreUpload = multer({
   limits: { fileSize: 500 * 1024 * 1024 } // 500 MB safety cap
 });
 
+const previewUpload = multer({
+  dest: resolveDataPath("data/imports-preview-upload"),
+  limits: { fileSize: 500 * 1024 * 1024 }
+});
+
 export const exportsRouter = Router();
 exportsRouter.use(requireAuth);
 
 startExportCleanupSchedule();
+
+exportsRouter.post(
+  "/preview",
+  requireRole(["owner"]),
+  previewUpload.single("file"),
+  async (req: AuthenticatedRequest, res) => {
+    if (!req.file) {
+      res.status(400).json({ message: "No file uploaded. Send a multipart/form-data request with a 'file' field." });
+      return;
+    }
+
+    const ext = path.extname(req.file.originalname ?? "").toLowerCase();
+    if (ext !== ".hfb") {
+      res.status(400).json({ message: "Invalid file type. Only .hfb files are accepted." });
+      return;
+    }
+
+    try {
+      let buffer = Buffer.from(fs.readFileSync(req.file.path));
+      if (isEncryptedBackup(buffer)) {
+        if (!env.BACKUP_ENCRYPTION_KEY) {
+          res.status(422).json({
+            message: "This backup is encrypted. Configure BACKUP_ENCRYPTION_KEY on the server to preview or restore this file."
+          });
+          return;
+        }
+        buffer = Buffer.from(decryptBackup(buffer, env.BACKUP_ENCRYPTION_KEY));
+      }
+
+      let manifest: Record<string, unknown>;
+      try {
+        const directory = await unzipper.Open.buffer(buffer);
+        const manifestEntry = directory.files.find((f) => f.path === "manifest.json");
+        if (!manifestEntry) {
+          res.status(400).json({ message: "ZIP is missing manifest.json" });
+          return;
+        }
+        manifest = JSON.parse((await manifestEntry.buffer()).toString("utf-8")) as Record<string, unknown>;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        res.status(400).json({ message: `Could not read backup file: ${message}` });
+        return;
+      }
+
+      const version = Number(manifest.exportVersion);
+      if (![1, 2, 3, 4].includes(version)) {
+        res.status(400).json({ message: `Unsupported export version: ${String(manifest.exportVersion)}` });
+        return;
+      }
+
+      const rawTables = (manifest.tables ?? {}) as Record<string, { rows?: unknown }>;
+      const tables = Object.fromEntries(
+        Object.entries(rawTables).map(([tableKey, entry]) => [tableKey, { rows: Number(entry?.rows ?? 0) }])
+      ) as Record<string, { rows: number }>;
+      const totalRows = Object.values(tables).reduce((sum, entry) => sum + entry.rows, 0);
+
+      res.json({
+        exportVersion: version,
+        exportedAt: String(manifest.exportedAt ?? ""),
+        encrypted: Boolean(manifest.encrypted ?? false),
+        scope: manifest.scope === "member" ? "member" : "household",
+        personProfileId: typeof manifest.personProfileId === "string" ? manifest.personProfileId : undefined,
+        format: String(manifest.format ?? ""),
+        tables,
+        totalRows
+      });
+    } finally {
+      fs.unlinkSync(req.file.path);
+    }
+  }
+);
 
 /** Async restore from export bundle (.hfb). Owner only — wipes and replaces all household data. */
 exportsRouter.post(

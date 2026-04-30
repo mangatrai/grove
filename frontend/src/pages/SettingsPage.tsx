@@ -4,14 +4,17 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Anchor,
+  Badge,
   Box,
   Button,
   Checkbox,
+  Divider,
   FileInput,
   Fieldset,
   Group,
   Modal,
   MultiSelect,
+  NumberFormatter,
   NumberInput,
   Paper,
   PasswordInput,
@@ -164,6 +167,17 @@ type HouseholdMemberDraft = {
 
 type MeResponse = { user: { role: "owner" | "admin" | "member"; forcePasswordChange?: boolean } };
 
+type BackupPreview = {
+  exportVersion: number;
+  exportedAt: string;
+  encrypted: boolean;
+  scope: "household" | "member";
+  personProfileId?: string;
+  format: string;
+  tables: Record<string, { rows: number }>;
+  totalRows: number;
+};
+
 type InsightHistoryRow = {
   id: string;
   generatedAt: string;
@@ -178,6 +192,25 @@ type InstitutionsResponse = {
 };
 
 const PROFILE_ICON_KEYS = ["person", "home", "wallet", "briefcase", "star"] as const;
+
+const BACKUP_TABLE_LABELS: Record<string, string> = {
+  app_user: "Users",
+  household: "Household settings",
+  financial_account: "Financial accounts",
+  category: "Categories",
+  category_rule: "Category rules",
+  budget_category: "Budget months",
+  transaction_canonical: "Transactions",
+  account_balance_snapshot: "Balance snapshots",
+  payslip_snapshot: "Payslips",
+  payslip_line_item: "Payslip line items",
+  recurring_merchant_override: "Recurring overrides",
+  resolution_item: "Resolution items",
+  household_ai_insight: "AI insights",
+  household_membership: "Memberships",
+  household_custom_institution: "Custom institutions",
+  person_profile: "Person profiles"
+};
 
 const AVATAR_KEY_EMOJI: Record<(typeof PROFILE_ICON_KEYS)[number], string> = {
   person: "👤",
@@ -300,6 +333,10 @@ export function SettingsPage() {
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState(false);
   const [importStats, setImportStats] = useState<Record<string, number> | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewData, setPreviewData] = useState<BackupPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
@@ -530,6 +567,30 @@ export function SettingsPage() {
       setImportBusy(false);
     }
   }, [token, importFile]);
+
+  const handlePreviewAndRestore = useCallback(async () => {
+    if (!importFile) return;
+    setPreviewBusy(true);
+    setPreviewError(null);
+    setPreviewData(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const res = await apiFetch("/exports/preview", { method: "POST", body: formData });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setPreviewError((body as { message?: string }).message ?? "Could not read backup file.");
+        return;
+      }
+      const data = (await res.json()) as BackupPreview;
+      setPreviewData(data);
+      setPreviewModalOpen(true);
+    } catch {
+      setPreviewError("Failed to contact server.");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }, [importFile]);
 
   useEffect(() => {
     void (async () => {
@@ -1591,12 +1652,13 @@ export function SettingsPage() {
                   Restore from backup
                 </Title>
                 <Text c="dimmed">
-                  Upload an .hfb backup exported from this app to restore all household data on this instance.
+                  Upload an .hfb backup to preview its contents before restoring.
                 </Text>
                 <Alert color="red" variant="light">
-                  Warning: this will permanently replace all current accounts, transactions, rules, and net worth history.
-                  You will be signed out when the restore completes.
+                  Warning: restoring will permanently replace all current accounts, transactions, rules, and net worth history.
+                  You will be signed out when restore completes.
                 </Alert>
+                {previewError ? <Alert color="red">{previewError}</Alert> : null}
                 {importMessage ? (
                   <Alert color={importSuccess ? "green" : "red"}>{importMessage}</Alert>
                 ) : null}
@@ -1609,9 +1671,13 @@ export function SettingsPage() {
                   <FileInput
                     label="Backup .hfb file"
                     accept=".hfb"
-                    disabled={importBusy}
+                    disabled={previewBusy || importBusy}
                     value={importFile}
-                    onChange={(file) => setImportFile(file)}
+                    onChange={(file) => {
+                      setImportFile(file);
+                      setPreviewData(null);
+                      setPreviewError(null);
+                    }}
                     placeholder="Choose backup .hfb…"
                     leftSection={<IconUpload size={16} />}
                     clearable
@@ -1619,12 +1685,12 @@ export function SettingsPage() {
                   />
                   <Button
                     type="button"
-                    color="red"
-                    disabled={importBusy || !importFile}
-                    onClick={() => void runHouseholdRestore()}
+                    disabled={!importFile || previewBusy || importBusy}
+                    loading={previewBusy}
+                    onClick={() => void handlePreviewAndRestore()}
                     miw={180}
                   >
-                    {importBusy ? "Restoring…" : "Restore from backup"}
+                    {previewBusy ? "Reading backup..." : "Preview & Restore"}
                   </Button>
                 </Group>
               </>
@@ -2036,6 +2102,96 @@ export function SettingsPage() {
             ) : null}
           </Stack>
         ) : null}
+        <Modal
+          opened={previewModalOpen}
+          onClose={() => {
+            setPreviewModalOpen(false);
+            setPreviewData(null);
+            setImportFile(null);
+          }}
+          title="Backup Preview"
+          centered
+          size="lg"
+        >
+          {previewData ? (
+            <Stack gap="sm">
+              <Group justify="space-between" align="flex-start">
+                <Stack gap={2}>
+                  <Text fw={600}>Exported</Text>
+                  <Text c="dimmed" size="sm">{new Date(previewData.exportedAt).toLocaleString()}</Text>
+                </Stack>
+                <Badge color={previewData.encrypted ? "green" : "gray"} variant="light">
+                  {previewData.encrypted ? "Encrypted" : "Not encrypted"}
+                </Badge>
+              </Group>
+              <Group gap="xl">
+                <Text size="sm">
+                  Format version: <Text span fw={600}>{previewData.exportVersion}</Text>
+                </Text>
+                <Text size="sm">
+                  Scope: <Text span fw={600}>{previewData.scope === "member" ? "Personal (member)" : "Full household"}</Text>
+                </Text>
+                {previewData.personProfileId ? (
+                  <Text size="sm">
+                    Profile: <Text span fw={600}>{previewData.personProfileId}</Text>
+                  </Text>
+                ) : null}
+              </Group>
+              <Table striped>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Table</Table.Th>
+                    <Table.Th ta="right">Rows</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {Object.entries(previewData.tables)
+                    .filter(([, entry]) => entry.rows > 0)
+                    .map(([tableKey, entry]) => (
+                      <Table.Tr key={tableKey}>
+                        <Table.Td>{BACKUP_TABLE_LABELS[tableKey] ?? tableKey}</Table.Td>
+                        <Table.Td ta="right">
+                          <NumberFormatter value={entry.rows} thousandSeparator />
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                </Table.Tbody>
+              </Table>
+              <Group justify="flex-end">
+                <Text size="sm" fw={600}>
+                  Total: <NumberFormatter value={previewData.totalRows} thousandSeparator /> rows
+                </Text>
+              </Group>
+              <Divider />
+              <Alert color="red" variant="light">
+                This will permanently replace ALL current household data. You will be signed out when the restore completes.
+              </Alert>
+              <Group justify="flex-end">
+                <Button
+                  variant="default"
+                  onClick={() => {
+                    setPreviewModalOpen(false);
+                    setPreviewData(null);
+                    setImportFile(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  color="red"
+                  onClick={() => {
+                    void runHouseholdRestore();
+                    setPreviewModalOpen(false);
+                    setPreviewData(null);
+                    setImportFile(null);
+                  }}
+                >
+                  Restore from this backup
+                </Button>
+              </Group>
+            </Stack>
+          ) : null}
+        </Modal>
         </Tabs>
       </Paper>
       <ConfirmDialog

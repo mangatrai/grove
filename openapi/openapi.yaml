@@ -1528,6 +1528,37 @@ paths:
           description: Missing `file` field or not a `.hfb`
         "413":
           description: File exceeds upload limit (500 MB)
+  /exports/preview:
+    post:
+      tags: [exports]
+      summary: Preview .hfb backup contents before restore (read-only)
+      description: |
+        `multipart/form-data` with field **`file`** (`.hfb` only). Reads manifest metadata and table row counts,
+        decrypting with `BACKUP_ENCRYPTION_KEY` when needed. Does not query or modify database tables.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: .hfb backup produced by export job download
+      responses:
+        "200":
+          description: Preview summary from backup manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupPreviewResponse'
+        "400":
+          description: Missing file, invalid extension, unsupported version, or unreadable backup
+        "422":
+          description: Backup is encrypted but BACKUP_ENCRYPTION_KEY is not configured
   /exports/import/{jobId}:
     get:
       tags: [exports]
@@ -1882,6 +1913,37 @@ components:
             recurring_merchant_override: { file: recurring_merchant_override.json, rows: 1 }
             resolution_item: { file: resolution_item.json, rows: 4 }
             household_ai_insight: { file: household_ai_insight.json, rows: 2 }
+    BackupPreviewResponse:
+      type: object
+      required: [exportVersion, exportedAt, encrypted, scope, format, tables, totalRows]
+      properties:
+        exportVersion:
+          type: integer
+          enum: [1, 2, 3, 4]
+        exportedAt:
+          type: string
+        encrypted:
+          type: boolean
+        scope:
+          type: string
+          enum: [household, member]
+        personProfileId:
+          type: string
+          nullable: true
+        format:
+          type: string
+        tables:
+          type: object
+          additionalProperties:
+            type: object
+            required: [rows]
+            properties:
+              rows:
+                type: integer
+                minimum: 0
+        totalRows:
+          type: integer
+          minimum: 0
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)
