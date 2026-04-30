@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-095b-fix (2026-04-29): Password reset regressions (link, capabilities, login UX)
+- **Type:** FIX
+- **Reset link:** `requestPasswordReset` now builds `PUBLIC_BASE_URL/reset-password?token=...` for BrowserRouter instead of `/#/reset-password` (HashRouter). File: `backend/src/modules/auth/auth.service.ts`.
+- **Email readiness:** `isEmailConfigured()` now requires a non-empty `PUBLIC_BASE_URL` so reset links are always buildable when the UI reports email enabled. File: `backend/src/config/env.ts`.
+- **Forgot password UX:** When email is enabled, the reset form is gated behind a "Forgot password?" click (`showForgotForm`) instead of showing immediately. File: `frontend/src/pages/HomePage.tsx`.
+- **Tests:** `backend/tests/password-reset.test.ts` sets `PUBLIC_BASE_URL` in the SMTP test harness so integration tests still exercise token creation after the stricter `isEmailConfigured()` check; `beforeEach` clears email-related `env` fields so `GET /auth/capabilities` stays deterministic when the repo `.env` defines SMTP for local dev.
+
 ## CR-095b (2026-04-29): Email infrastructure + self-service password reset
 - **Type:** CR
 - **Motivation:** Introduce production-ready email infrastructure and end-user password reset without exposing account enumeration, while keeping the existing admin reset path as fallback.

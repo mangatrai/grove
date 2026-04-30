@@ -216,7 +216,7 @@ export async function requestPasswordReset(email: string): Promise<{ ok: true }>
 
   const publicBaseUrl = env.PUBLIC_BASE_URL?.trim() ?? "";
   const resetLink = publicBaseUrl
-    ? `${publicBaseUrl}/#/reset-password?token=${encodeURIComponent(rawToken)}`
+    ? `${publicBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`
     : rawToken;
   const template = renderPasswordResetTemplate({ resetLink });
 

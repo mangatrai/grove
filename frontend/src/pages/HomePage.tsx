@@ -23,6 +23,7 @@ export function HomePage() {
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotSent, setForgotSent] = useState(false);
+  const [showForgotForm, setShowForgotForm] = useState(false);
   const [showResetSuccess, setShowResetSuccess] = useState(() => searchParams.get("reset") === "1");
 
   useEffect(() => {
@@ -248,28 +249,39 @@ export function HomePage() {
                   ·
                 </span>
                 {emailEnabled ? (
-                  <div style={{ width: "100%", marginTop: "0.6rem" }}>
+                  <span className="home-landing__auth-link-item">
                     {forgotSent ? (
                       <div style={{ fontSize: "0.82rem", color: "var(--color-text, #1e293b)" }}>
                         If that address is registered, a link is on its way.
                       </div>
+                    ) : showForgotForm ? (
+                      <div style={{ width: "100%", marginTop: "0.6rem" }}>
+                        <form onSubmit={onForgotPasswordSubmit} style={{ display: "flex", gap: "0.45rem", alignItems: "end" }}>
+                          <TextInput
+                            type="email"
+                            size="xs"
+                            placeholder="your@email.com"
+                            value={forgotEmail}
+                            onChange={(event) => setForgotEmail(event.currentTarget.value)}
+                            required
+                            style={{ flex: 1 }}
+                          />
+                          <Button type="submit" size="xs" variant="default" loading={forgotLoading}>
+                            Send reset link
+                          </Button>
+                        </form>
+                      </div>
                     ) : (
-                      <form onSubmit={onForgotPasswordSubmit} style={{ display: "flex", gap: "0.45rem", alignItems: "end" }}>
-                        <TextInput
-                          type="email"
-                          size="xs"
-                          placeholder="your@email.com"
-                          value={forgotEmail}
-                          onChange={(event) => setForgotEmail(event.currentTarget.value)}
-                          required
-                          style={{ flex: 1 }}
-                        />
-                        <Button type="submit" size="xs" variant="default" loading={forgotLoading}>
-                          Send reset link
-                        </Button>
-                      </form>
+                      <button
+                        type="button"
+                        className="home-landing__auth-link"
+                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                        onClick={() => setShowForgotForm(true)}
+                      >
+                        Forgot password?
+                      </button>
                     )}
-                  </div>
+                  </span>
                 ) : (
                   <>
                     <span className="home-landing__auth-link-item">

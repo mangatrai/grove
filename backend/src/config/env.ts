@@ -114,5 +114,12 @@ export function isEmailConfigured(): boolean {
   const smtpUser = env.SMTP_USER?.trim() ?? "";
   const smtpPass = env.SMTP_PASS?.trim() ?? "";
   const smtpFrom = env.SMTP_FROM?.trim() ?? "";
-  return smtpHost.length > 0 && smtpUser.length > 0 && smtpPass.length > 0 && smtpFrom.length > 0;
+  const publicBaseUrl = env.PUBLIC_BASE_URL?.trim() ?? "";
+  return (
+    smtpHost.length > 0 &&
+    smtpUser.length > 0 &&
+    smtpPass.length > 0 &&
+    smtpFrom.length > 0 &&
+    publicBaseUrl.length > 0
+  );
 }

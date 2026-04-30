@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import { env } from "../src/config/env.js";
@@ -38,6 +38,7 @@ function setEmailConfigForTest(): void {
   env.SMTP_USER = "tester";
   env.SMTP_PASS = "secret";
   env.SMTP_FROM = "Household Finance <noreply@example.com>";
+  env.PUBLIC_BASE_URL = "https://finance.test.example";
 }
 
 function clearEmailConfigForTest(): void {
@@ -45,6 +46,7 @@ function clearEmailConfigForTest(): void {
   env.SMTP_USER = "";
   env.SMTP_PASS = "";
   env.SMTP_FROM = "";
+  env.PUBLIC_BASE_URL = "";
 }
 
 async function restoreKnownPassword(): Promise<void> {
@@ -55,9 +57,20 @@ async function restoreKnownPassword(): Promise<void> {
 }
 
 describe("password reset", () => {
+  beforeEach(() => {
+    clearEmailConfigForTest();
+  });
+
   afterEach(async () => {
     clearEmailConfigForTest();
     await cleanupPasswordResetRows();
+    // Restore the seed value — changePassword() always sets force_password_change=false,
+    // and the "resets password" test calls restoreKnownPassword() which hits that path.
+    // Without this, running the test suite leaves the owner account with the flag cleared,
+    // and the first-login gate won't fire when manually testing the app afterwards.
+    await sqlStmt(
+      `UPDATE app_user SET force_password_change = true WHERE lower(email) = lower(?)`
+    ).run(KNOWN_EMAIL);
   });
 
   it("GET /auth/capabilities returns emailEnabled=false in TEST mode", async () => {
