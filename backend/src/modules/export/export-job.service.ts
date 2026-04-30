@@ -112,15 +112,16 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
     const output = fs.createWriteStream(row.storage_path);
     const archive = archiver("zip", { zlib: { level: 6 } });
     archive.pipe(output);
+    const outputClosed = new Promise<void>((resolve, reject) => {
+      output.once("close", () => resolve());
+      output.once("error", (err) => reject(err));
+    });
     archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
     for (const t of tables) {
       archive.append(JSON.stringify(t.rows, null, 2), { name: t.fileName });
     }
     await archive.finalize();
-    await new Promise<void>((resolve, reject) => {
-      output.once("close", () => resolve());
-      output.once("error", (err) => reject(err));
-    });
+    await outputClosed;
     if (env.BACKUP_ENCRYPTION_KEY) {
       const plain = fs.readFileSync(row.storage_path);
       const encrypted = encryptBackup(plain, env.BACKUP_ENCRYPTION_KEY);

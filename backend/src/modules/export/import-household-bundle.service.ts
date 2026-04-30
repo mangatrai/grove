@@ -231,6 +231,28 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
          WHERE id = ?`,
         householdId
       );
+      // Ephemeral import pipeline rows are not restored; clear them first to avoid
+      // FKs from import_file.financial_account_id blocking financial_account deletes.
+      await txExec(
+        `DELETE FROM transaction_raw
+         WHERE file_id IN (
+           SELECT f.id
+           FROM import_file f
+           JOIN import_session s ON s.id = f.session_id
+           WHERE s.household_id = ?
+         )`,
+        householdId
+      );
+      await txExec(
+        `DELETE FROM import_file
+         WHERE session_id IN (
+           SELECT id
+           FROM import_session
+           WHERE household_id = ?
+         )`,
+        householdId
+      );
+      await txExec(`DELETE FROM import_session WHERE household_id = ?`, householdId);
       await txExec(`DELETE FROM export_job WHERE household_id = ?`, householdId);
       await txExec(`DELETE FROM import_job WHERE household_id = ? AND id <> ?`, householdId, jobId);
       await txExec(`DELETE FROM insight_job WHERE household_id = ?`, householdId);
