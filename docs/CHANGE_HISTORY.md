@@ -18,6 +18,34 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-095f (2026-04-30): Account import freshness metadata on `/imports/accounts`
+- **Type:** CR
+- **What changed:** `GET /imports/accounts` now returns per-account freshness metadata: `last_uploaded_at` (latest parsed upload timestamp) and `last_statement_end_date` (latest detected statement period end date).
+- **Backend behavior:** Freshness is derived from parsed `import_file` rows; statement end date is read from parser metadata (`confidence_summary.statementBalances.asOfEnd`) when available.
+- **Test coverage:** Added backend integration assertion that `/imports/accounts` includes freshness fields after a successful upload.
+- **Files changed:** `backend/src/modules/imports/import-file-binding.service.ts`, `backend/tests/import-upload-flow.test.ts`, `docs/API_IMPORT_SESSIONS.md`, `openapi/openapi.yaml`.
+
+---
+
+## FIX-095e (2026-04-30): Disable outbound email delivery in TEST mode
+- **Type:** FIX
+- **Issue:** Invite/password-reset integration tests set SMTP env fields to exercise token/invite flows, which allowed real email delivery attempts when transport resolved.
+- **Fix:** `sendMail()` now hard-stops outbound delivery when `MODE=TEST`, returning `DELIVERY_DISABLED_IN_TEST` after logging a skip message.
+- **Behavior impact:** Auth/member invite flows still execute and generate reset tokens during tests; only SMTP transmission is suppressed.
+- **Files changed:** `backend/src/modules/mailer/mailer.service.ts`.
+
+---
+
+## CR-095d (2026-04-29): Password-changed security notification email
+- **Type:** CR
+- **What changed:** `POST /auth/change-password` now sends a security notification email after a successful password update.
+- **When email configured:** `changePassword()` fires `sendMail()` as fire-and-forget after DB update succeeds.
+- **When not configured:** No-op; existing behavior remains unchanged.
+- **New template:** Added `backend/src/modules/mailer/templates/password-changed.ts`.
+- **Files changed:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/mailer/templates/password-changed.ts`, `backend/tests/password-reset.test.ts`.
+
+---
+
 ## UX-095c (2026-04-29): Explain guarded member delete in remove dialog
 - **Type:** UX
 - **Issue:** When removing a member with a linked login and leaving "Also delete their login account" unchecked, backend correctly returned `409 HAS_LOGIN_ACCOUNT` but the dialog showed no inline feedback.

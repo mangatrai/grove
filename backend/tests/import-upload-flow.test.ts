@@ -114,4 +114,23 @@ describe("CR-118 imports upload flow", () => {
     expect(afterItem).toBeDefined();
     expect(afterItem?.canUndo).toBe(false);
   });
+
+  it("GET /imports/accounts returns freshness fields after successful import upload", async () => {
+    const token = await loginOwner();
+
+    const upload = await request(app)
+      .post("/imports/upload")
+      .set("authorization", `Bearer ${token}`)
+      .field("importType", "bank")
+      .field("financialAccountId", SEED_BOA_CHECKING)
+      .attach("file", Buffer.from(BANK_CSV), "boa-freshness.csv");
+    expect(upload.status).toBe(200);
+
+    const accountsRes = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(accountsRes.status).toBe(200);
+    const account = (accountsRes.body.accounts as Array<Record<string, unknown>>).find((a) => a.id === SEED_BOA_CHECKING);
+    expect(account).toBeDefined();
+    expect(typeof account?.last_uploaded_at).toBe("string");
+    expect("last_statement_end_date" in (account ?? {})).toBe(true);
+  });
 });

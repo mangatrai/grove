@@ -136,7 +136,20 @@ items, and a derived “skipped” bucket. All per-file numbers come from one re
 
 Lists **financial accounts** for the caller’s household (for binding uploads before parse).
 
-**200:** `{ "accounts": [ { "id", "name", "institution", "accountType", "currency" } ] }`
+**200:** `{ "accounts": [ { ... } ] }`
+
+Each account row includes:
+
+- `id`
+- `type`
+- `institution`
+- `account_mask`
+- `currency`
+- `owner_scope`
+- `owner_person_profile_id`
+- `default_parser_profile_id`
+- `last_uploaded_at` (`date-time` or `null`) — latest **successfully parsed** statement upload timestamp for this account.
+- `last_statement_end_date` (`YYYY-MM-DD` or `null`) — latest statement period end detected from parsed statement metadata (`confidence_summary.statementBalances.asOfEnd`) for this account.
 
 ---
 

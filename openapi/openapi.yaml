@@ -741,6 +741,36 @@ paths:
       tags: [imports]
       summary: List financial accounts
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Household financial accounts with import freshness metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { type: string }
+                        institution: { type: string }
+                        account_mask: { type: string, nullable: true }
+                        currency: { type: string }
+                        owner_scope: { type: string, enum: [household, person] }
+                        owner_person_profile_id: { type: string, format: uuid, nullable: true }
+                        default_parser_profile_id: { type: string, nullable: true }
+                        last_uploaded_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: Latest successfully parsed statement upload for this account.
+                        last_statement_end_date:
+                          type: string
+                          nullable: true
+                          description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
     post:
       tags: [imports]
       summary: Create connected account

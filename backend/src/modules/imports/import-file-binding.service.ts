@@ -12,6 +12,27 @@ import { isParserProfileId } from "./profiles/profile-ids.js";
 
 const PAYSLIP_PARSER_PROFILES = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
 
+function parseStatementEndDate(confidenceSummary: string | null): string | null {
+  if (!confidenceSummary?.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(confidenceSummary) as {
+      statementBalances?: {
+        asOfEnd?: unknown;
+      };
+    };
+    const raw = parsed.statementBalances?.asOfEnd;
+    if (typeof raw !== "string") {
+      return null;
+    }
+    const normalized = raw.trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Ensures one `payslip` bucket row for import binding; `institution` follows Profile → Employer Setup.
  * Updates the label when employers change (e.g. after PATCH /household/profile or GET /imports/accounts).
@@ -166,15 +187,68 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
     default_parser_profile_id: string | null;
+    last_uploaded_at: string | null;
+    last_statement_end_date: string | null;
   }>
 > {
-  return qAll(
-    `SELECT id, type, institution, account_mask, currency, owner_scope, owner_person_profile_id, default_parser_profile_id
-       FROM financial_account
-       WHERE household_id = ?
-       ORDER BY CASE WHEN type = 'payslip' THEN 0 ELSE 1 END, institution, type`,
+  const accounts = await qAll<{
+    id: string;
+    type: string;
+    institution: string;
+    account_mask: string | null;
+    currency: string;
+    owner_scope: "household" | "person";
+    owner_person_profile_id: string | null;
+    default_parser_profile_id: string | null;
+    last_uploaded_at: string | null;
+  }>(
+    `SELECT fa.id,
+            fa.type,
+            fa.institution,
+            fa.account_mask,
+            fa.currency,
+            fa.owner_scope,
+            fa.owner_person_profile_id,
+            fa.default_parser_profile_id,
+            MAX(f.uploaded_at)::text AS last_uploaded_at
+       FROM financial_account fa
+       LEFT JOIN import_file f
+         ON f.financial_account_id = fa.id
+        AND f.status = 'parsed'
+      WHERE fa.household_id = ?
+      GROUP BY fa.id, fa.type, fa.institution, fa.account_mask, fa.currency, fa.owner_scope, fa.owner_person_profile_id, fa.default_parser_profile_id
+      ORDER BY CASE WHEN fa.type = 'payslip' THEN 0 ELSE 1 END, fa.institution, fa.type`,
     householdId
   );
+
+  const statementRows = await qAll<{
+    financial_account_id: string;
+    confidence_summary: string | null;
+  }>(
+    `SELECT f.financial_account_id, f.confidence_summary
+       FROM import_file f
+       INNER JOIN financial_account fa ON fa.id = f.financial_account_id
+      WHERE fa.household_id = ?
+        AND f.status = 'parsed'
+      ORDER BY f.uploaded_at DESC`,
+    householdId
+  );
+
+  const lastStatementEndByAccount = new Map<string, string>();
+  for (const row of statementRows) {
+    if (lastStatementEndByAccount.has(row.financial_account_id)) {
+      continue;
+    }
+    const asOfEnd = parseStatementEndDate(row.confidence_summary);
+    if (asOfEnd) {
+      lastStatementEndByAccount.set(row.financial_account_id, asOfEnd);
+    }
+  }
+
+  return accounts.map((account) => ({
+    ...account,
+    last_statement_end_date: lastStatementEndByAccount.get(account.id) ?? null
+  }));
 }
 
 export async function createHouseholdFinancialAccount(input: {
