@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-095c (2026-04-29): Explain guarded member delete in remove dialog
+- **Type:** UX
+- **Issue:** When removing a member with a linked login and leaving "Also delete their login account" unchecked, backend correctly returned `409 HAS_LOGIN_ACCOUNT` but the dialog showed no inline feedback.
+- **Fix:** Added explicit inline error messaging inside the remove-member confirmation dialog so users understand why deletion was blocked and what action is required.
+- **Files changed:** `frontend/src/pages/SettingsPage.tsx`.
+
+---
+
 ## FIX-095c (2026-04-29): Household member delete/login guard correctness
 - **Type:** FIX
 - **Issue:** Deleting a member with `deleteLogin=true` failed with FK violation (`person_profile.linked_user_id -> app_user.id`) because delete order removed `app_user` first.

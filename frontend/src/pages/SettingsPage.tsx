@@ -271,6 +271,7 @@ export function SettingsPage() {
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [removeMemberDeleteLogin, setRemoveMemberDeleteLogin] = useState(false);
   const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
+  const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
   const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
   const [emailEnabled, setEmailEnabled] = useState(false);
   const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
@@ -826,6 +827,7 @@ export function SettingsPage() {
     setRemoveMemberConfirm(memberId);
     setRemoveMemberDeleteLogin(false);
     setRemoveMemberDataCount(null);
+    setRemoveMemberError(null);
     try {
       const counts = await apiJson<{ transactions: number; payslips: number }>(
         `/household/members/${encodeURIComponent(memberId)}/data-count`
@@ -840,18 +842,31 @@ export function SettingsPage() {
     if (!token || !removeMemberConfirm) return;
     setMembersError(null);
     setMembersSuccess(null);
-    const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, {
-      method: "DELETE",
-      body: JSON.stringify({ deleteLogin: removeMemberDeleteLogin })
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { message?: string };
-      throw new Error(body.message ?? `Could not remove member (${res.status})`);
+    setRemoveMemberError(null);
+    try {
+      const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ deleteLogin: removeMemberDeleteLogin })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { message?: string; code?: string };
+        if (res.status === 409 && body.code === "HAS_LOGIN_ACCOUNT") {
+          const message = "This member has a linked login account. Select \"Also delete their login account\" to continue.";
+          setRemoveMemberError(message);
+          throw new Error(message);
+        }
+        throw new Error(body.message ?? `Could not remove member (${res.status})`);
+      }
+      setRemoveMemberConfirm(null);
+      setRemoveMemberDataCount(null);
+      setRemoveMemberError(null);
+      setMembersSuccess("Member removed.");
+      await loadMembers();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Could not remove member";
+      setRemoveMemberError(message);
+      throw e instanceof Error ? e : new Error(message);
     }
-    setRemoveMemberConfirm(null);
-    setRemoveMemberDataCount(null);
-    setMembersSuccess("Member removed.");
-    await loadMembers();
   }
 
   async function createLoginForExistingMember(memberId: string) {
@@ -2017,6 +2032,11 @@ export function SettingsPage() {
         title="Remove household member"
         message={
           <div style={{ fontSize: "0.9rem" }}>
+            {removeMemberError ? (
+              <div style={{ padding: "0.6rem 0.75rem", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, marginBottom: "0.75rem" }}>
+                {removeMemberError}
+              </div>
+            ) : null}
             {removeMemberDataCount && (removeMemberDataCount.transactions > 0 || removeMemberDataCount.payslips > 0) ? (
               <div style={{ padding: "0.6rem 0.75rem", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, marginBottom: "0.75rem" }}>
                 <strong>Warning:</strong> This member has{" "}
@@ -2038,7 +2058,7 @@ export function SettingsPage() {
         }
         confirmLabel="Remove member"
         danger
-        onClose={() => { setRemoveMemberConfirm(null); setRemoveMemberDataCount(null); }}
+        onClose={() => { setRemoveMemberConfirm(null); setRemoveMemberDataCount(null); setRemoveMemberError(null); }}
         onConfirm={() => confirmRemoveHouseholdMember()}
       />
       <ConfirmDialog
