@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-126 — .hfb Format + Backup Encryption
+**Date:** 2026-04-30
+**Files:** `backend/src/modules/export/backup-crypto.ts` (new), `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/config/env.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/app.test.ts`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/API_EXPORTS.md`
+**What:** All backup files now use the `.hfb` extension (Household Finance Backup). Added optional AES-256-GCM encryption via `BACKUP_ENCRYPTION_KEY` env var (64-char hex = 32-byte key). Encrypted files are prefixed with `HFB1` magic bytes + IV + auth tag. Restore auto-detects encrypted files and decrypts before processing. If a backup is encrypted and `BACKUP_ENCRYPTION_KEY` is absent, restore fails with a clear error message. Frontend FileInput now accepts `.hfb` only, and download filenames now use `.hfb`.
+
+---
+
 ## CR-125 — Export/Import Parity (exportVersion 4)
 **Date:** 2026-04-30
 **Files:** `backend/src/modules/export/export-registry.ts` (new), `backend/src/modules/export/export-household-bundle.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/server.ts`, `backend/src/db/export-coverage-check.ts`, `backend/tests/app.test.ts`

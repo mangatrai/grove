@@ -1491,9 +1491,9 @@ paths:
   /exports/household/import:
     post:
       tags: [exports]
-      summary: Restore household from export ZIP (async, destructive)
+      summary: Restore household from exported .hfb backup (async, destructive)
       description: |
-        `multipart/form-data` with field **`file`** (`.zip` only). Queues **wipe-then-restore** for the
+        `multipart/form-data` with field **`file`** (`.hfb` only). Queues **wipe-then-restore** for the
         authenticated household. Poll **`GET /exports/import/{jobId}`** until `status` is terminal.
         Successful restore increments **`app_user.token_version`** (all JWTs for that household’s users
         become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 4** (manifest + one JSON
@@ -1510,7 +1510,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: ZIP produced by export job download
+                  description: .hfb backup produced by export job download
       responses:
         "202":
           description: Restore job accepted; poll import job status
@@ -1525,7 +1525,7 @@ paths:
                   message:
                     type: string
         "400":
-          description: Missing `file` field or not a `.zip`
+          description: Missing `file` field or not a `.hfb`
         "413":
           description: File exceeds upload limit (500 MB)
   /exports/import/{jobId}:
@@ -1571,7 +1571,7 @@ paths:
   /exports/household:
     post:
       tags: [exports]
-      summary: Queue asynchronous household ZIP export
+      summary: Queue asynchronous household .hfb export
       security: [{ bearerAuth: [] }]
       responses:
         "202":
@@ -1581,15 +1581,15 @@ paths:
   /exports/{jobId}/download:
     get:
       tags: [exports]
-      summary: Download completed export ZIP
+      summary: Download completed export .hfb backup
       security: [{ bearerAuth: [] }]
       responses:
         "200":
-          description: application/zip download
+          description: Binary download (`household-export-{jobId}.hfb`)
         "404":
           description: Job not ready, file missing, or job not found
         "410":
-          description: Export expired — ZIP was auto-deleted after 48-hour retention window (EXPORT_EXPIRED)
+          description: Export expired — backup file was auto-deleted after 48-hour retention window (EXPORT_EXPIRED)
   /exports/{jobId}:
     get:
       tags: [exports]
@@ -1840,7 +1840,7 @@ components:
   schemas:
     ExportBundleManifest:
       type: object
-      description: Manifest JSON embedded in the exported ZIP bundle.
+      description: Manifest JSON embedded in the exported .hfb backup payload.
       properties:
         exportVersion:
           type: integer
@@ -1854,6 +1854,9 @@ components:
         format:
           type: string
           example: zip-split-v4
+        encrypted:
+          type: boolean
+          example: true
         scope:
           type: string
           nullable: true

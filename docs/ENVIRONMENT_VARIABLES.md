@@ -50,8 +50,22 @@ See [`RUNBOOK.md`](RUNBOOK.md) §11 for Postgres connection details and operator
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
 | `OPENAI_API_KEY` | API key for OpenAI (**required** for **IBM** and **Deloitte** payslip PDF extraction — upload, import parse, and Deloitte async reconcile). |
 | `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). Used by payslip extraction and any other OpenAI-backed features. |
+| `BACKUP_ENCRYPTION_KEY` | Optional. Exactly 64 hex characters (32 bytes). If set, all exported `.hfb` backups are encrypted with AES-256-GCM before being written to disk. |
 | `PAYSLIP_ASYNC_POLL_INTERVAL_MS` | Minimum milliseconds between background polls for queued Deloitte LLM extraction during import (default `120000`). |
 | `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS` | Max **inclusive** day span for **`GET /reports/cash-summary`** when both **`dateFrom`** and **`dateTo`** are set (default `1096`, min `31`, max `4000`). |
+
+```bash
+BACKUP_ENCRYPTION_KEY=   # Optional. 64 hex characters (32 bytes).
+                         # If set, all .hfb exports are encrypted with
+                         # AES-256-GCM before being written to disk.
+                         # Backups produced without a key can still be
+                         # restored without setting this variable.
+                         # Encrypted backups cannot be restored without
+                         # the matching key — store it safely alongside
+                         # JWT_SECRET.
+                         # Generate: node -e "console.log(require('crypto')
+                         #   .randomBytes(32).toString('hex'))"
+```
 
 ## Email / SMTP (optional)
 

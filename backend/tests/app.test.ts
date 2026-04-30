@@ -9,6 +9,8 @@ import unzipper from "unzipper";
 import * as XLSX from "xlsx";
 
 import { buildApp } from "../src/app.js";
+import { env } from "../src/config/env.js";
+import { decryptBackup, isEncryptedBackup } from "../src/modules/export/backup-crypto.js";
 import { resolveDataPath } from "../src/paths.js";
 import { sqlStmt } from "./pg-stmt.js";
 
@@ -142,7 +144,7 @@ describe("exports/imports roundtrip (CR-125)", () => {
     const restoreStart = await request(app)
       .post("/exports/household/import")
       .set("authorization", `Bearer ${token}`)
-      .attach("file", zipBuffer, "cr125-bundle.zip");
+      .attach("file", zipBuffer, "cr125-bundle.hfb");
     expect(restoreStart.status).toBe(202);
     const importJobId = restoreStart.body.jobId as string;
 
@@ -194,6 +196,203 @@ describe("exports/imports roundtrip (CR-125)", () => {
       `SELECT COUNT(*)::int AS c FROM household_ai_insight WHERE household_id = ?`
     ).get(householdId) as { c: number };
     expect(insightCount.c).toBeGreaterThan(0);
+  }, 120_000);
+});
+
+describe("backup encryption (CR-126)", () => {
+  async function createOwnerContext(seed: string): Promise<{
+    householdId: string;
+    ownerUserId: string;
+    ownerProfileId: string;
+    ownerEmail: string;
+    ownerPassword: string;
+    token: string;
+  }> {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerProfileId = crypto.randomUUID();
+    const ownerEmail = `cr126-owner-${seed}-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'CR-126 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'CR-126 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+
+    const login = await request(app).post("/auth/login").send({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    expect(login.status).toBe(200);
+    return {
+      householdId,
+      ownerUserId,
+      ownerProfileId,
+      ownerEmail,
+      ownerPassword,
+      token: login.body.token as string
+    };
+  }
+
+  async function waitForExportComplete(jobId: string, token: string): Promise<void> {
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app).get(`/exports/${jobId}`).set("authorization", `Bearer ${token}`);
+      expect(poll.status).toBe(200);
+      if ((poll.body.status as string) === "complete") return;
+    }
+    throw new Error("Export did not complete in time");
+  }
+
+  async function waitForImportTerminal(
+    jobId: string,
+    token: string,
+    relogin?: { email: string; password: string }
+  ): Promise<{ status: string; error: string | null }> {
+    let authToken = token;
+    for (let i = 0; i < 60; i += 1) {
+      const poll = await request(app).get(`/exports/import/${jobId}`).set("authorization", `Bearer ${authToken}`);
+      if (poll.status === 401 && relogin) {
+        const login = await request(app).post("/auth/login").send({
+          email: relogin.email,
+          password: relogin.password
+        });
+        expect(login.status).toBe(200);
+        authToken = login.body.token as string;
+        continue;
+      }
+      expect(poll.status).toBe(200);
+      const status = poll.body.status as string;
+      if (status === "complete" || status === "failed") {
+        return { status, error: (poll.body.error as string | null) ?? null };
+      }
+    }
+    throw new Error("Import did not reach terminal state in time");
+  }
+
+  it("unencrypted roundtrip: export produces valid .hfb, restore succeeds", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const owner = await createOwnerContext("unencrypted");
+      const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+
+      await waitForExportComplete(exportJobId, owner.token);
+
+      const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+        storage_path: string;
+      };
+      expect(exportRow.storage_path.endsWith(".hfb")).toBe(true);
+      const fileBuffer = readFileSync(exportRow.storage_path);
+      expect(isEncryptedBackup(fileBuffer)).toBe(false);
+
+      const zip = await unzipper.Open.buffer(fileBuffer);
+      const manifestEntry = zip.files.find((f) => f.path === "manifest.json");
+      expect(manifestEntry).toBeDefined();
+      const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as { encrypted?: boolean };
+      expect(manifest.encrypted).toBe(false);
+
+      const restoreStart = await request(app)
+        .post("/exports/household/import")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr126-unencrypted.hfb");
+      expect(restoreStart.status).toBe(202);
+
+      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+        email: owner.ownerEmail,
+        password: owner.ownerPassword
+      });
+      expect(result.status).toBe("complete");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("encrypted roundtrip: export encrypts file, restore decrypts and succeeds", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    const TEST_KEY = "a".repeat(64);
+    env.BACKUP_ENCRYPTION_KEY = TEST_KEY;
+    try {
+      const owner = await createOwnerContext("encrypted");
+      const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+      await waitForExportComplete(exportJobId, owner.token);
+
+      const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+        storage_path: string;
+      };
+      const fileBuffer = readFileSync(exportRow.storage_path);
+      expect(isEncryptedBackup(fileBuffer)).toBe(true);
+
+      const zipBuffer = decryptBackup(fileBuffer, TEST_KEY);
+      const zip = await unzipper.Open.buffer(zipBuffer);
+      const manifestEntry = zip.files.find((f) => f.path === "manifest.json");
+      expect(manifestEntry).toBeDefined();
+      const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as { encrypted?: boolean };
+      expect(manifest.encrypted).toBe(true);
+
+      const restoreStart = await request(app)
+        .post("/exports/household/import")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr126-encrypted.hfb");
+      expect(restoreStart.status).toBe(202);
+
+      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+        email: owner.ownerEmail,
+        password: owner.ownerPassword
+      });
+      expect(result.status).toBe("complete");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("restore fails with clear error when encrypted backup but no key configured", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    const TEST_KEY = "a".repeat(64);
+    env.BACKUP_ENCRYPTION_KEY = TEST_KEY;
+    try {
+      const owner = await createOwnerContext("missing-key");
+      const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+      await waitForExportComplete(exportJobId, owner.token);
+      const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+        storage_path: string;
+      };
+      const encryptedBuffer = readFileSync(exportRow.storage_path);
+      expect(isEncryptedBackup(encryptedBuffer)).toBe(true);
+
+      env.BACKUP_ENCRYPTION_KEY = undefined;
+
+      const restoreStart = await request(app)
+        .post("/exports/household/import")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", encryptedBuffer, "cr126-encrypted-no-key.hfb");
+      expect(restoreStart.status).toBe(202);
+
+      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+        email: owner.ownerEmail,
+        password: owner.ownerPassword
+      });
+      expect(result.status).toBe("failed");
+      expect(result.error ?? "").toContain("encrypted");
+      expect(result.error ?? "").toContain("BACKUP_ENCRYPTION_KEY");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
   }, 120_000);
 });
 

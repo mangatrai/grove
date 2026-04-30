@@ -477,7 +477,7 @@ export function SettingsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `household-export-${jobId}.zip`;
+      a.download = `household-export-${jobId}.hfb`;
       a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
@@ -1563,7 +1563,7 @@ export function SettingsPage() {
 
                 <Title order={4}>Export data</Title>
                 <Text c="dimmed">
-                  Download a full ZIP backup — accounts, transactions, net worth history, category rules, payslips, and more.
+                  Download a full .hfb backup — accounts, transactions, net worth history, category rules, payslips, and more.
                   Use this to migrate to a new host or keep an offline archive.
                 </Text>
                 <Text c="dimmed" size="sm">
@@ -1580,7 +1580,7 @@ export function SettingsPage() {
                     type="button"
                     onClick={() => void downloadExportZip(exportZipJobId)}
                   >
-                    Download household-export.zip
+                    Download household-export.hfb
                   </Button>
                 ) : null}
                 <Button type="button" variant="default" disabled={exportZipBusy} onClick={() => void runHouseholdZipExport()}>
@@ -1591,7 +1591,7 @@ export function SettingsPage() {
                   Restore from backup
                 </Title>
                 <Text c="dimmed">
-                  Upload a ZIP exported from this app to restore all household data on this instance.
+                  Upload an .hfb backup exported from this app to restore all household data on this instance.
                 </Text>
                 <Alert color="red" variant="light">
                   Warning: this will permanently replace all current accounts, transactions, rules, and net worth history.
@@ -1607,12 +1607,12 @@ export function SettingsPage() {
                 ) : null}
                 <Group align="end" grow wrap="nowrap">
                   <FileInput
-                    label="Backup ZIP file"
-                    accept=".zip"
+                    label="Backup .hfb file"
+                    accept=".hfb"
                     disabled={importBusy}
                     value={importFile}
                     onChange={(file) => setImportFile(file)}
-                    placeholder="Choose backup ZIP…"
+                    placeholder="Choose backup .hfb…"
                     leftSection={<IconUpload size={16} />}
                     clearable
                     w="100%"

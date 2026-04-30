@@ -7,6 +7,8 @@ import unzipper from "unzipper";
 import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
+import { env } from "../../config/env.js";
+import { decryptBackup, isEncryptedBackup } from "./backup-crypto.js";
 import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
 
 const IMPORTS_RESTORE_DIR = resolveDataPath("data/imports-restore");
@@ -47,7 +49,7 @@ export async function queueHouseholdImport(
 ): Promise<{ jobId: string }> {
   fs.mkdirSync(IMPORTS_RESTORE_DIR, { recursive: true });
   const jobId = randomUUID();
-  const dest = path.join(IMPORTS_RESTORE_DIR, `${jobId}.zip`);
+  const dest = path.join(IMPORTS_RESTORE_DIR, `${jobId}.hfb`);
   fs.renameSync(uploadedPath, dest);
   await qExec(
     `INSERT INTO import_job (id, household_id, requested_by_user_id, status, storage_path)
@@ -103,8 +105,8 @@ function normalizeTableKey(tableKey: string): string {
  * Read the ZIP and return normalised table data.
  * Supports exportVersion 4/3 (split files) and versions 1/2 (single household-bundle.json).
  */
-async function readZipEntries(zipPath: string): Promise<ZipContents> {
-  const directory = await unzipper.Open.file(zipPath);
+async function readZipEntries(data: Buffer): Promise<ZipContents> {
+  const directory = await unzipper.Open.buffer(data);
 
   const readEntry = async (name: string): Promise<string | null> => {
     const entry = directory.files.find((f) => f.path === name);
@@ -171,7 +173,20 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
   await qExec(`UPDATE import_job SET status = 'running' WHERE id = ?`, jobId);
 
   try {
-    const { manifest, tables } = await readZipEntries(row.storage_path);
+    const rawBuffer = fs.readFileSync(row.storage_path);
+    let zipBuffer: Buffer;
+    if (isEncryptedBackup(rawBuffer)) {
+      if (!env.BACKUP_ENCRYPTION_KEY) {
+        throw new Error(
+          "This backup is encrypted but BACKUP_ENCRYPTION_KEY is not configured on this server. " +
+          "Set BACKUP_ENCRYPTION_KEY to the key used when this backup was created."
+        );
+      }
+      zipBuffer = decryptBackup(rawBuffer, env.BACKUP_ENCRYPTION_KEY);
+    } else {
+      zipBuffer = rawBuffer;
+    }
+    const { manifest, tables } = await readZipEntries(zipBuffer);
 
     const bundleHouseholdId = manifest.householdId as string;
     if (!bundleHouseholdId) throw new Error("manifest.json is missing householdId");

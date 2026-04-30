@@ -36,7 +36,7 @@ function allowHouseholdExport(userId: string): boolean {
   return true;
 }
 
-/** Multer instance for restore ZIP uploads — stored on disk (not in memory, ZIPs can be large). */
+/** Multer instance for restore backup uploads — stored on disk (not in memory, files can be large). */
 const restoreUpload = multer({
   dest: resolveDataPath("data/imports-restore-upload"),
   limits: { fileSize: 500 * 1024 * 1024 } // 500 MB safety cap
@@ -47,7 +47,7 @@ exportsRouter.use(requireAuth);
 
 startExportCleanupSchedule();
 
-/** Async restore from export bundle ZIP. Owner only — wipes and replaces all household data. */
+/** Async restore from export bundle (.hfb). Owner only — wipes and replaces all household data. */
 exportsRouter.post(
   "/household/import",
   requireRole(["owner"]),
@@ -62,9 +62,8 @@ exportsRouter.post(
     }
 
     const ext = path.extname(req.file.originalname ?? "").toLowerCase();
-    const mime = req.file.mimetype ?? "";
-    if (ext !== ".zip" && mime !== "application/zip" && mime !== "application/x-zip-compressed") {
-      res.status(400).json({ message: "Invalid file type. Only .zip files are accepted." });
+    if (ext !== ".hfb") {
+      res.status(400).json({ message: "Invalid file type. Only .hfb files are accepted." });
       return;
     }
 
@@ -122,7 +121,7 @@ exportsRouter.post("/household", async (req: AuthenticatedRequest, res) => {
     jobId,
     scope: role === "member" ? "member" : "household",
     message:
-      "Export started. Poll GET /exports/:jobId until status is complete, then GET /exports/:jobId/download for the ZIP."
+      "Export started. Poll GET /exports/:jobId until status is complete, then GET /exports/:jobId/download for the .hfb backup."
   });
 });
 
@@ -158,8 +157,8 @@ exportsRouter.get("/:jobId/download", async (req: AuthenticatedRequest, res) => 
     });
     return;
   }
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", `attachment; filename="household-export-${jobId}.zip"`);
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="household-export-${jobId}.hfb"`);
   res.send(file.buffer);
 });
 

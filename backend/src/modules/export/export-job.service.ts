@@ -7,6 +7,8 @@ import archiver from "archiver";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
+import { env } from "../../config/env.js";
+import { encryptBackup } from "./backup-crypto.js";
 import { queryAllExportTables } from "./export-household-bundle.service.js";
 
 const EXPORTS_DIR = resolveDataPath("data/exports");
@@ -46,7 +48,7 @@ export async function queueHouseholdExport(
 ): Promise<{ jobId: string }> {
   fs.mkdirSync(EXPORTS_DIR, { recursive: true });
   const jobId = randomUUID();
-  const storagePath = path.join(EXPORTS_DIR, `${jobId}.zip`);
+  const storagePath = path.join(EXPORTS_DIR, `${jobId}.hfb`);
   await qExec(
     `INSERT INTO export_job (id, household_id, requested_by_user_id, status, storage_path, person_profile_id)
      VALUES (?, ?, ?, 'queued', ?, ?)`,
@@ -99,6 +101,7 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
       exportedAt,
       householdId,
       format: "zip-split-v4",
+      encrypted: Boolean(env.BACKUP_ENCRYPTION_KEY),
       tables: tableIndex
     };
     if (personProfileId) {
@@ -114,6 +117,15 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
       archive.append(JSON.stringify(t.rows, null, 2), { name: t.fileName });
     }
     await archive.finalize();
+    await new Promise<void>((resolve, reject) => {
+      output.once("close", () => resolve());
+      output.once("error", (err) => reject(err));
+    });
+    if (env.BACKUP_ENCRYPTION_KEY) {
+      const plain = fs.readFileSync(row.storage_path);
+      const encrypted = encryptBackup(plain, env.BACKUP_ENCRYPTION_KEY);
+      fs.writeFileSync(row.storage_path, encrypted);
+    }
     await qExec(
       `UPDATE export_job SET status = 'complete', completed_at = NOW(), error_text = NULL WHERE id = ?`,
       jobId
@@ -178,7 +190,7 @@ export async function readExportFileIfReady(householdId: string, jobId: string):
 }
 
 /**
- * Delete ZIP files and mark export_job rows as 'expired' for all complete exports
+ * Delete exported backup files and mark export_job rows as 'expired' for all complete exports
  * older than EXPORT_TTL_HOURS. Safe to call repeatedly.
  */
 export async function purgeExpiredExports(): Promise<void> {

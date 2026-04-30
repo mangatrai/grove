@@ -59,6 +59,10 @@ const envSchema = z.object({
   ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  BACKUP_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, "BACKUP_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)")
+    .optional(),
   LLM_PROVIDER: z.enum(["openai", "anthropic"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
