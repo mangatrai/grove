@@ -1,6 +1,6 @@
 export type ExportRow = Record<string, unknown>;
 
-export type MemberScopeFilter = (profileId: string) => string;
+export type MemberScopeFilter = (profileId: string) => { sql: string; params: unknown[] };
 
 export type ExportRegistryEntry = {
   tableKey: string;
@@ -33,6 +33,11 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 2,
     householdIdColumn: "id",
     memberScopeInclude: false,
+    onRestore: (row) => ({
+      ...row,
+      owner_user_id: null,
+      salary_deposit_financial_account_id: null
+    }),
     skipInsert: true
   },
   {
@@ -48,7 +53,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 4,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (_profileId) => "owner_person_profile_id = ?"
+    memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] })
   },
   {
     tableKey: "category",
@@ -64,7 +69,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 6,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (_profileId) => "id = ?"
+    memberScopeFilter: (profileId) => ({ sql: "id = ?", params: [profileId] })
   },
   {
     tableKey: "household_membership",
@@ -93,7 +98,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 10,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (_profileId) => "owner_person_profile_id = ?"
+    memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] })
   },
   {
     tableKey: "account_balance_snapshot",
@@ -101,8 +106,10 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 11,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (_profileId) =>
-      "financial_account_id IN (SELECT id FROM financial_account WHERE household_id = account_balance_snapshot.household_id AND owner_person_profile_id = ?)",
+    memberScopeFilter: (profileId) => ({
+      sql: "financial_account_id IN (SELECT id FROM financial_account WHERE household_id = account_balance_snapshot.household_id AND owner_person_profile_id = ?)",
+      params: [profileId]
+    }),
     onRestore: (row) => ({
       ...row,
       import_file_id: null
@@ -114,7 +121,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 12,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (_profileId) => "owner_person_profile_id = ?",
+    memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] }),
     onRestore: (row) => ({
       ...row,
       import_file_id: null
@@ -126,8 +133,10 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 13,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (_profileId) =>
-      "payslip_snapshot_id IN (SELECT id FROM payslip_snapshot WHERE household_id = payslip_line_item.household_id AND owner_person_profile_id = ?)"
+    memberScopeFilter: (profileId) => ({
+      sql: "payslip_snapshot_id IN (SELECT id FROM payslip_snapshot WHERE household_id = payslip_line_item.household_id AND owner_person_profile_id = ?)",
+      params: [profileId]
+    })
   },
   {
     tableKey: "recurring_merchant_override",

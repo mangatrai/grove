@@ -23,8 +23,9 @@ export async function queryAllExportTables(
     const where: string[] = [`${entry.householdIdColumn} = ?`];
     const params: unknown[] = [householdId];
     if (personProfileId && entry.memberScopeFilter) {
-      where.push(entry.memberScopeFilter(personProfileId));
-      params.push(personProfileId);
+      const filter = entry.memberScopeFilter(personProfileId);
+      where.push(filter.sql);
+      params.push(...filter.params);
     }
     const rows = (await qAll(
       `SELECT * FROM ${entry.tableName} WHERE ${where.join(" AND ")}`,

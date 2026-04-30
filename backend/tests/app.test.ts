@@ -86,6 +86,21 @@ describe("exports/imports roundtrip (CR-125)", () => {
          id, payslip_snapshot_id, household_id, section, sort_order, name, amount_current, amount_ytd
        ) VALUES (?, ?, ?, 'earnings', 0, 'Base salary', 100.00, 100.00)`
     ).run(crypto.randomUUID(), payslipId, householdId);
+    await sqlStmt(
+      `INSERT INTO recurring_merchant_override (
+         id, household_id, merchant_key, display_name, verdict, amount_anchor, amount_tolerance_pct, tagged_by_user_id
+       ) VALUES (?, ?, 'cr125-merchant', 'CR-125 Merchant', 'confirmed', 42.00, 15.00, ?)`
+    ).run(crypto.randomUUID(), householdId, ownerUserId);
+    await sqlStmt(
+      `INSERT INTO household_ai_insight (
+         id, household_id, scope, user_id, provider, model, prompt_version, payload_json
+       ) VALUES (?, ?, 'household', ?, 'openai', 'gpt-4o-mini', 'v1', ?::jsonb)`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      ownerUserId,
+      JSON.stringify({ healthRating: "on_track", notes: ["CR-125 seeded"] })
+    );
 
     const startExport = await request(app)
       .post("/exports/household")
@@ -171,6 +186,14 @@ describe("exports/imports roundtrip (CR-125)", () => {
       ).get(householdId) as { c: number };
       expect(lineItemCount.c).toBeGreaterThan(0);
     }
+    const recurringOverrideCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM recurring_merchant_override WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(recurringOverrideCount.c).toBeGreaterThan(0);
+    const insightCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM household_ai_insight WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(insightCount.c).toBeGreaterThan(0);
   }, 120_000);
 });
 

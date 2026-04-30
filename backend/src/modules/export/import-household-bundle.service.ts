@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import unzipper from "unzipper";
 
-import { qBegin, qExec, qGet } from "../../db/query.js";
+import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
@@ -116,7 +116,7 @@ async function readZipEntries(zipPath: string): Promise<ZipContents> {
   if (!manifestText) throw new Error("ZIP is missing manifest.json");
   const manifest = JSON.parse(manifestText) as Record<string, unknown>;
   const version = manifest.exportVersion as number;
-  const tables = new Map<string, Row[]>();
+  const tables = new Map<string, ExportRow[]>();
 
   if (version === 4 || version === 3) {
     // Split-file format: each table has its own JSON file listed in manifest.tables.
@@ -186,26 +186,56 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
 
     const stats: ImportStats = {};
     const ordered = [...EXPORT_REGISTRY].sort((a, b) => a.restoreOrder - b.restoreOrder);
+    let deferredHouseholdFks:
+      | { owner_user_id: string | null; salary_deposit_financial_account_id: string | null }
+      | null = null;
 
     await qBegin(async (tx) => {
+      const txExec = async (sqlStr: string, ...params: unknown[]): Promise<void> => {
+        const { text, values } = sqlBind(sqlStr, params);
+        await tx.unsafe(text, values as never[]);
+      };
+      const txInsertObject = async (tableName: string, objectRow: ExportRow): Promise<void> => {
+        const columns = Object.keys(objectRow);
+        if (columns.length === 0) {
+          return;
+        }
+        const placeholders = columns.map(() => "?").join(", ");
+        const values = columns.map((column) => objectRow[column]);
+        await txExec(
+          `INSERT INTO ${tableName} (${columns.join(", ")}) VALUES (${placeholders})`,
+          ...values
+        );
+      };
+
       // Break household-level FKs before deleting referenced rows.
-      await tx`UPDATE household
-               SET owner_user_id = NULL,
-                   salary_deposit_financial_account_id = NULL
-               WHERE id = ${householdId}`;
-      await tx`DELETE FROM export_job WHERE household_id = ${householdId}`;
-      await tx`DELETE FROM import_job WHERE household_id = ${householdId} AND id <> ${jobId}`;
-      await tx`DELETE FROM insight_job WHERE household_id = ${householdId}`;
+      await txExec(
+        `UPDATE household
+         SET owner_user_id = NULL,
+             salary_deposit_financial_account_id = NULL
+         WHERE id = ?`,
+        householdId
+      );
+      await txExec(`DELETE FROM export_job WHERE household_id = ?`, householdId);
+      await txExec(`DELETE FROM import_job WHERE household_id = ? AND id <> ?`, householdId, jobId);
+      await txExec(`DELETE FROM insight_job WHERE household_id = ?`, householdId);
 
       for (const entry of [...ordered].reverse()) {
         if (entry.skipInsert) {
           continue;
         }
         if (entry.tableName === "app_user") {
-          await tx`DELETE FROM app_user WHERE household_id = ${householdId} AND id <> ${row.requested_by_user_id}`;
+          await txExec(
+            `DELETE FROM app_user WHERE household_id = ? AND id <> ?`,
+            householdId,
+            row.requested_by_user_id
+          );
           continue;
         }
-        await tx`DELETE FROM ${tx(entry.tableName)} WHERE ${tx(entry.householdIdColumn)} = ${householdId}`;
+        await txExec(
+          `DELETE FROM ${entry.tableName} WHERE ${entry.householdIdColumn} = ?`,
+          householdId
+        );
       }
 
       for (const entry of ordered) {
@@ -214,7 +244,15 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
           stats[entry.tableKey] = 0;
           continue;
         }
-        let rows = sourceRows.map((row) => remap(row));
+        const remappedRows = sourceRows.map((entryRow) => remap(entryRow));
+        if (entry.tableName === "household" && remappedRows[0]) {
+          deferredHouseholdFks = {
+            owner_user_id: (remappedRows[0].owner_user_id as string | null) ?? null,
+            salary_deposit_financial_account_id:
+              (remappedRows[0].salary_deposit_financial_account_id as string | null) ?? null
+          };
+        }
+        let rows = remappedRows;
         if (entry.parentFirst) {
           rows = rows.sort((a, b) => {
             const aParent = a.parent_id == null ? 0 : 1;
@@ -232,7 +270,14 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
             const next = { ...first };
             delete next[entry.householdIdColumn];
             if (Object.keys(next).length > 0) {
-              await tx`UPDATE ${tx(entry.tableName)} SET ${tx(next)} WHERE ${tx(entry.householdIdColumn)} = ${householdId}`;
+              const updateColumns = Object.keys(next);
+              const updateSet = updateColumns.map((column) => `${column} = ?`).join(", ");
+              const updateValues = updateColumns.map((column) => next[column]);
+              await txExec(
+                `UPDATE ${entry.tableName} SET ${updateSet} WHERE ${entry.householdIdColumn} = ?`,
+                ...updateValues,
+                householdId
+              );
             }
           }
           stats[entry.tableKey] = rows.length;
@@ -243,13 +288,35 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
           if (entry.tableName === "app_user") {
             const updateRow = { ...row };
             delete updateRow.id;
-            await tx`INSERT INTO app_user ${tx(row)}
-                     ON CONFLICT (id) DO UPDATE SET ${tx(updateRow)}`;
+            const insertColumns = Object.keys(row);
+            const insertValues = insertColumns.map((column) => row[column]);
+            const updateColumns = Object.keys(updateRow);
+            const updateSet = updateColumns.map((column) => `${column} = ?`).join(", ");
+            const updateValues = updateColumns.map((column) => updateRow[column]);
+            await txExec(
+              `INSERT INTO app_user (${insertColumns.join(", ")})
+               VALUES (${insertColumns.map(() => "?").join(", ")})
+               ON CONFLICT (id) DO UPDATE SET ${updateSet}`,
+              ...insertValues,
+              ...updateValues
+            );
             continue;
           }
-          await tx`INSERT INTO ${tx(entry.tableName)} ${tx(row)}`;
+          await txInsertObject(entry.tableName, row);
         }
         stats[entry.tableKey] = rows.length;
+      }
+
+      if (deferredHouseholdFks) {
+        await txExec(
+          `UPDATE household
+           SET owner_user_id = ?,
+               salary_deposit_financial_account_id = ?
+           WHERE id = ?`,
+          deferredHouseholdFks.owner_user_id,
+          deferredHouseholdFks.salary_deposit_financial_account_id,
+          householdId
+        );
       }
     });
 
