@@ -115,8 +115,10 @@ async function generateWithAnthropic(input: object): Promise<InsightPayload> {
     },
     { signal }
   );
+  const isTextBlock = (block: Anthropic.Messages.ContentBlock): block is Anthropic.Messages.TextBlock =>
+    block.type === "text";
   const raw = msg.content
-    .filter((b): b is { type: "text"; text: string } => b.type === "text")
+    .filter(isTextBlock)
     .map((b) => b.text)
     .join("\n")
     .trim();
