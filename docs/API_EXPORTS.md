@@ -87,10 +87,33 @@ Poll **import (restore)** job status.
 
 ## Bundle format notes
 
-- Current exports use **`exportVersion` 3**: `manifest.json` plus **one JSON file per table** (see **CR-078 v2** in [`CHANGE_HISTORY.md`](CHANGE_HISTORY.md)).
-- Restore accepts **v3** and legacy **v1/v2** (`household-bundle.json`).
+- Current exports use **`exportVersion` 4**: `manifest.json` plus **one JSON file per table**.
+- Restore accepts **v4/v3** and legacy **v1/v2** (`household-bundle.json`).
 - **Categories / rules** in the ZIP are **household** rows only (global built-ins are not duplicated in the bundle).
 - **Member-scoped exports** set `scope: "member"` and `personProfileId` in `manifest.json`. Only the member's own data is included — these bundles are not suitable for full household restore.
+- Export now uses **`SELECT *`** for all backed-up tables, so all columns present in the database at export time are captured automatically.
+- Startup now runs an **export coverage check** that warns if any non-ephemeral DB table is missing from `EXPORT_REGISTRY` / `EXPORT_EPHEMERAL_TABLES`.
+
+## Tables in exportVersion 4
+
+| Table key | Included in household export | Included in member export |
+|------|-------------|-------------|
+| `app_user` | Yes | No |
+| `household` | Yes | No |
+| `household_custom_institution` | Yes | No |
+| `financial_account` | Yes | Yes (member-owned only) |
+| `category` | Yes | Yes |
+| `person_profile` | Yes | Yes (self only) |
+| `household_membership` | Yes | No |
+| `category_rule` | Yes | Yes |
+| `budget_category` | Yes | No |
+| `transaction_canonical` | Yes | Yes (member-owned only) |
+| `account_balance_snapshot` | Yes | Yes (member-owned accounts only) |
+| `payslip_snapshot` | Yes | Yes (member-owned only) |
+| `payslip_line_item` | Yes | Yes (for member-owned payslips only) |
+| `recurring_merchant_override` | Yes | No |
+| `resolution_item` | Yes | No |
+| `household_ai_insight` | Yes | No |
 
 ## After restore
 

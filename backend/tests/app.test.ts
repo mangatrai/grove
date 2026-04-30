@@ -5,6 +5,7 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import unzipper from "unzipper";
 import * as XLSX from "xlsx";
 
 import { buildApp } from "../src/app.js";
@@ -25,6 +26,152 @@ describe("app health", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "ok" });
   });
+});
+
+describe("exports/imports roundtrip (CR-125)", () => {
+  it("exports manifest v4 with full registry tables and restores missing parity tables", async () => {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerEmail = `cr125-owner-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerProfileId = crypto.randomUUID();
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'CR-125 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'CR-125 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+
+    const login = await request(app).post("/auth/login").send({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const category = await sqlStmt(
+      `SELECT id FROM category WHERE household_id IS NULL ORDER BY id LIMIT 1`
+    ).get() as { id: string };
+
+    const budgetId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO budget_category (id, household_id, category_id, month, amount)
+       VALUES (?, ?, ?, '2030-01', 250.00)`
+    ).run(budgetId, householdId, category.id);
+
+    const resolutionId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'unknown_category', ?, 'CR-125 test seed', 'open')`
+    ).run(resolutionId, householdId, crypto.randomUUID());
+
+    const payslipId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO payslip_snapshot (
+         id, household_id, file_name, file_checksum, parser_profile_id, pay_date,
+         owner_scope, owner_person_profile_id
+       ) VALUES (?, ?, 'cr125-test.pdf', ?, 'manual', '2030-01-15', 'person', ?)`
+    ).run(payslipId, householdId, crypto.randomUUID(), ownerProfileId);
+    await sqlStmt(
+      `INSERT INTO payslip_line_item (
+         id, payslip_snapshot_id, household_id, section, sort_order, name, amount_current, amount_ytd
+       ) VALUES (?, ?, ?, 'earnings', 0, 'Base salary', 100.00, 100.00)`
+    ).run(crypto.randomUUID(), payslipId, householdId);
+
+    const startExport = await request(app)
+      .post("/exports/household")
+      .set("authorization", `Bearer ${token}`);
+    expect(startExport.status).toBe(202);
+    const exportJobId = startExport.body.jobId as string;
+
+    let exportStatus = "queued";
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app)
+        .get(`/exports/${exportJobId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(poll.status).toBe(200);
+      exportStatus = poll.body.status as string;
+      if (exportStatus === "complete") break;
+    }
+    expect(exportStatus).toBe("complete");
+
+    const exportRow = await sqlStmt(
+      `SELECT storage_path FROM export_job WHERE id = ? AND household_id = ?`
+    ).get(exportJobId, householdId) as { storage_path: string };
+    const zipBuffer = readFileSync(exportRow.storage_path);
+
+    const zip = await unzipper.Open.buffer(zipBuffer);
+    const manifestEntry = zip.files.find((f) => f.path === "manifest.json");
+    expect(manifestEntry).toBeDefined();
+    const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as {
+      exportVersion: number;
+      tables: Record<string, { file: string; rows: number }>;
+    };
+
+    expect(manifest.exportVersion).toBe(4);
+    expect(manifest.tables["budget_category"]).toBeDefined();
+    expect(manifest.tables["payslip_line_item"]).toBeDefined();
+    expect(manifest.tables["recurring_merchant_override"]).toBeDefined();
+    expect(manifest.tables["resolution_item"]).toBeDefined();
+    expect(manifest.tables["household_ai_insight"]).toBeDefined();
+
+    const restoreStart = await request(app)
+      .post("/exports/household/import")
+      .set("authorization", `Bearer ${token}`)
+      .attach("file", zipBuffer, "cr125-bundle.zip");
+    expect(restoreStart.status).toBe(202);
+    const importJobId = restoreStart.body.jobId as string;
+
+    let importStatus = "queued";
+    let importToken = token;
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app)
+        .get(`/exports/import/${importJobId}`)
+        .set("authorization", `Bearer ${importToken}`);
+      if (poll.status === 401) {
+        const relogin = await request(app).post("/auth/login").send({
+          email: ownerEmail,
+          password: ownerPassword
+        });
+        expect(relogin.status).toBe(200);
+        importToken = relogin.body.token as string;
+        continue;
+      }
+      expect(poll.status).toBe(200);
+      importStatus = poll.body.status as string;
+      if (importStatus === "complete") break;
+    }
+    expect(importStatus).toBe("complete");
+
+    const budgetCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM budget_category WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(budgetCount.c).toBeGreaterThan(0);
+
+    const resolutionCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM resolution_item WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(resolutionCount.c).toBeGreaterThan(0);
+
+    const payslipCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM payslip_snapshot WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    if (payslipCount.c > 0) {
+      const lineItemCount = await sqlStmt(
+        `SELECT COUNT(*)::int AS c FROM payslip_line_item WHERE household_id = ?`
+      ).get(householdId) as { c: number };
+      expect(lineItemCount.c).toBeGreaterThan(0);
+    }
+  }, 120_000);
 });
 
 describe("auth and rbac baseline", () => {

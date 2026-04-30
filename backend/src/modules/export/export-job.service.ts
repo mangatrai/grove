@@ -90,16 +90,15 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
     const exportedAt = new Date().toISOString();
     const tables = await queryAllExportTables(householdId, personProfileId);
 
-    // Build manifest with per-table file inventory and row counts.
     const tableIndex: Record<string, { file: string; rows: number }> = {};
     for (const t of tables) {
       tableIndex[t.key] = { file: t.fileName, rows: t.rows.length };
     }
     const manifest: Record<string, unknown> = {
-      exportVersion: 3,
+      exportVersion: 4,
       exportedAt,
       householdId,
-      format: "zip-split-v3",
+      format: "zip-split-v4",
       tables: tableIndex
     };
     if (personProfileId) {

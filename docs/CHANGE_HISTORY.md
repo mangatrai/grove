@@ -18,11 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-125 — Export/Import Parity (exportVersion 4)
+**Date:** 2026-04-30
+**Files:** `backend/src/modules/export/export-registry.ts` (new), `backend/src/modules/export/export-household-bundle.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/server.ts`, `backend/src/db/export-coverage-check.ts`, `backend/tests/app.test.ts`
+**What:** Introduced `EXPORT_REGISTRY` as the single source of truth for backed-up tables. Export now uses `SELECT *` with no hardcoded column lists. Added five missing tables: `budget_category`, `payslip_line_item`, `recurring_merchant_override`, `resolution_item`, `household_ai_insight`. Fixed silently missing columns on `household`, `person_profile`, and `payslip_snapshot` (added by migrations 0022 and 0031 but absent from prior hardcoded SELECT lists). Added startup coverage check that warns if any non-ephemeral DB table is absent from the registry. Bumped `exportVersion` to 4. Import service handles v1/v2/v3 bundles with graceful skip for absent table keys.
+
+---
+
 ## UX-127 (2026-04-30): Surface account freshness dates in Settings and Import workspace
 - **Type:** UX
 - **What changed:** Added `Last upload` and `Statement ending` account freshness context in two high-use UI surfaces.
 - **Settings UI:** Connected Accounts table now includes an `Import freshness` column with both dates per account.
-- **Import UI:** Account picker options include freshness context, and each selected file/account row displays both dates directly under the account selector.
+- **Import UI:** Account picker keeps compact account labels; freshness dates are shown below the selected account row (not inside picker option labels).
 - **Display behavior:** Missing upload is shown as `Never`; missing statement end date is shown as `Not detected`.
 - **Files changed:** `frontend/src/import/accountDisplay.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/ImportWorkspacePage.tsx`.
 

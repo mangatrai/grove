@@ -1,191 +1,40 @@
-import { qAll, qGet } from "../../db/query.js";
+import { qAll } from "../../db/query.js";
+import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
 
 export type TableExport = {
-  /** Logical table key used in manifest.tables and import lookup. */
   key: string;
-  /** File name inside the ZIP. */
   fileName: string;
-  rows: Record<string, unknown>[];
+  rows: ExportRow[];
 };
 
 /**
- * Query all household tables and return them as individual table exports (exportVersion 3).
- *
- * When `personProfileId` is provided (member-scoped export):
- *  - transactions, accounts, payslips, balance_snapshots filtered to that profile.
- *  - Only the member's own person_profile row is included.
- *  - Users and household rows are omitted (privacy / security).
- *  - Categories, rules, and custom institutions are included in full (reference data).
+ * Query all export tables using EXPORT_REGISTRY.
  */
 export async function queryAllExportTables(
   householdId: string,
   personProfileId?: string | null
 ): Promise<TableExport[]> {
-  // Household-wide fields — omitted for member exports.
-  const household = personProfileId
-    ? undefined
-    : await qGet(
-        `SELECT id, name, owner_user_id, monthly_savings_target_usd, salary_deposit_financial_account_id, employers_json, created_at
-         FROM household WHERE id = ?`,
-        householdId
-      );
-
-  // Users omitted from member exports (security — no credentials for other accounts).
-  const users = personProfileId
-    ? []
-    : await qAll(
-        `SELECT id, household_id, email, role, password_hash, token_version, visibility_scope, created_at
-         FROM app_user WHERE household_id = ?`,
-        householdId
-      );
-
-  const accounts = personProfileId
-    ? await qAll(
-        `SELECT id, household_id, owner_user_id, type, institution, account_mask, currency,
-                owner_scope, owner_person_profile_id, default_parser_profile_id, created_at
-         FROM financial_account WHERE household_id = ? AND owner_person_profile_id = ?`,
-        householdId,
-        personProfileId
-      )
-    : await qAll(
-        `SELECT id, household_id, owner_user_id, type, institution, account_mask, currency,
-                owner_scope, owner_person_profile_id, default_parser_profile_id, created_at
-         FROM financial_account WHERE household_id = ?`,
-        householdId
-      );
-
-  // Only export household-custom categories (household_id IS NOT NULL).
-  // Global/builtin categories (household_id IS NULL) are seeded from db/seeds/ on every
-  // fresh instance and must NOT be included here — they would conflict on restore and
-  // are already present on the target instance after db:seed.  An empty categories.json
-  // is expected and correct for households that use only the global seed tree.
-  const categories = await qAll(
-    `SELECT id, household_id, parent_id, name, is_default
-     FROM category WHERE household_id = ?
-     ORDER BY name`,
-    householdId
-  );
-
-  // Same reasoning for category rules: global builtin rules (household_id IS NULL) are
-  // seeded and will be present on the target instance.  Only household-specific rules
-  // (created via the UI or CSV import) need to travel with the export.
-  const rules = await qAll(
-    `SELECT id, household_id, pattern, match_type, category_id, confidence, amount_scope, priority, enabled, created_at, updated_at
-     FROM category_rule WHERE household_id = ?`,
-    householdId
-  );
-
-  const transactions = personProfileId
-    ? await qAll(
-        `SELECT id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
-                merchant, memo, transfer_group_id, fingerprint, source_ref, reference_id,
-                status, classification_meta, owner_scope, owner_person_profile_id, created_at
-         FROM transaction_canonical WHERE household_id = ? AND owner_person_profile_id = ?
-         ORDER BY txn_date DESC, id`,
-        householdId,
-        personProfileId
-      )
-    : await qAll(
-        `SELECT id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
-                merchant, memo, transfer_group_id, fingerprint, source_ref, reference_id,
-                status, classification_meta, owner_scope, owner_person_profile_id, created_at
-         FROM transaction_canonical WHERE household_id = ?
-         ORDER BY txn_date DESC, id`,
-        householdId
-      );
-
-  const profiles = personProfileId
-    ? await qAll(
-        `SELECT id, household_id, linked_user_id, full_name, email, phone_number, avatar_key,
-                salary_deposit_financial_account_id, employers_json, created_at
-         FROM person_profile WHERE id = ?`,
-        personProfileId
-      )
-    : await qAll(
-        `SELECT id, household_id, linked_user_id, full_name, email, phone_number, avatar_key,
-                salary_deposit_financial_account_id, employers_json, created_at
-         FROM person_profile WHERE household_id = ?`,
-        householdId
-      );
-
-  // Memberships omitted for member exports.
-  const memberships = personProfileId
-    ? []
-    : await qAll(
-        `SELECT id, household_id, person_profile_id, role, relationship, created_at
-         FROM household_membership WHERE household_id = ?`,
-        householdId
-      );
-
-  const balanceSnapshots = personProfileId
-    ? await qAll(
-        `SELECT id, household_id, financial_account_id, as_of_date, amount, currency,
-                source, import_file_id, created_at, updated_at
-         FROM account_balance_snapshot
-         WHERE household_id = ? AND financial_account_id IN (
-           SELECT id FROM financial_account WHERE household_id = ? AND owner_person_profile_id = ?
-         )
-         ORDER BY as_of_date DESC, id`,
-        householdId,
-        householdId,
-        personProfileId
-      )
-    : await qAll(
-        `SELECT id, household_id, financial_account_id, as_of_date, amount, currency,
-                source, import_file_id, created_at, updated_at
-         FROM account_balance_snapshot WHERE household_id = ?
-         ORDER BY as_of_date DESC, id`,
-        householdId
-      );
-
-  const payslips = personProfileId
-    ? await qAll(
-        `SELECT id, household_id, file_name, file_checksum, parser_profile_id,
-                pay_period_start, pay_period_end, pay_date,
-                gross_pay_current, gross_pay_ytd,
-                employee_taxes_current, employee_taxes_ytd,
-                pre_tax_deductions_current, pre_tax_deductions_ytd,
-                post_tax_deductions_current, post_tax_deductions_ytd,
-                net_pay_current, net_pay_ytd, hours_or_days_current,
-                raw_extract_json, created_at, employer_id,
-                owner_scope, owner_person_profile_id
-         FROM payslip_snapshot WHERE household_id = ? AND owner_person_profile_id = ?
-         ORDER BY pay_date DESC, id`,
-        householdId,
-        personProfileId
-      )
-    : await qAll(
-        `SELECT id, household_id, file_name, file_checksum, parser_profile_id,
-                pay_period_start, pay_period_end, pay_date,
-                gross_pay_current, gross_pay_ytd,
-                employee_taxes_current, employee_taxes_ytd,
-                pre_tax_deductions_current, pre_tax_deductions_ytd,
-                post_tax_deductions_current, post_tax_deductions_ytd,
-                net_pay_current, net_pay_ytd, hours_or_days_current,
-                raw_extract_json, created_at, employer_id,
-                owner_scope, owner_person_profile_id
-         FROM payslip_snapshot WHERE household_id = ?
-         ORDER BY pay_date DESC, id`,
-        householdId
-      );
-
-  const customInstitutions = await qAll(
-    `SELECT id, household_id, display_name, created_at
-     FROM household_custom_institution WHERE household_id = ?`,
-    householdId
-  );
-
-  return [
-    { key: "household",           fileName: "household.json",          rows: household ? [household] : [] },
-    { key: "users",               fileName: "users.json",              rows: users },
-    { key: "accounts",            fileName: "accounts.json",           rows: accounts },
-    { key: "categories",          fileName: "categories.json",         rows: categories },
-    { key: "category_rules",      fileName: "category_rules.json",     rows: rules },
-    { key: "transactions",        fileName: "transactions.json",       rows: transactions },
-    { key: "person_profiles",     fileName: "person_profiles.json",    rows: profiles },
-    { key: "memberships",         fileName: "memberships.json",        rows: memberships },
-    { key: "balance_snapshots",   fileName: "balance_snapshots.json",  rows: balanceSnapshots },
-    { key: "payslips",            fileName: "payslips.json",           rows: payslips },
-    { key: "custom_institutions", fileName: "custom_institutions.json", rows: customInstitutions },
-  ];
+  const orderedEntries = [...EXPORT_REGISTRY].sort((a, b) => a.restoreOrder - b.restoreOrder);
+  const exports: TableExport[] = [];
+  for (const entry of orderedEntries) {
+    if (personProfileId && !entry.memberScopeInclude) {
+      continue;
+    }
+    const where: string[] = [`${entry.householdIdColumn} = ?`];
+    const params: unknown[] = [householdId];
+    if (personProfileId && entry.memberScopeFilter) {
+      where.push(entry.memberScopeFilter(personProfileId));
+      params.push(personProfileId);
+    }
+    const rows = (await qAll(
+      `SELECT * FROM ${entry.tableName} WHERE ${where.join(" AND ")}`,
+      ...params
+    )) as ExportRow[];
+    exports.push({
+      key: entry.tableKey,
+      fileName: `${entry.tableKey}.json`,
+      rows: entry.onExport ? entry.onExport(rows) : rows
+    });
+  }
+  return exports;
 }

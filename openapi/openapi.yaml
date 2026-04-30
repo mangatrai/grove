@@ -1496,7 +1496,7 @@ paths:
         `multipart/form-data` with field **`file`** (`.zip` only). Queues **wipe-then-restore** for the
         authenticated household. Poll **`GET /exports/import/{jobId}`** until `status` is terminal.
         Successful restore increments **`app_user.token_version`** (all JWTs for that household’s users
-        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 3** (manifest + one JSON
+        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 4** (manifest + one JSON
         per table); v1/v2 monolithic bundles are still accepted. See `docs/API_EXPORTS.md`.
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -1838,6 +1838,47 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ExportBundleManifest:
+      type: object
+      description: Manifest JSON embedded in the exported ZIP bundle.
+      properties:
+        exportVersion:
+          type: integer
+          example: 4
+        exportedAt:
+          type: string
+          format: date-time
+        householdId:
+          type: string
+          format: uuid
+        format:
+          type: string
+          example: zip-split-v4
+        scope:
+          type: string
+          nullable: true
+          example: household
+        personProfileId:
+          type: string
+          format: uuid
+          nullable: true
+        tables:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              file:
+                type: string
+              rows:
+                type: integer
+          example:
+            app_user: { file: app_user.json, rows: 2 }
+            household: { file: household.json, rows: 1 }
+            budget_category: { file: budget_category.json, rows: 3 }
+            payslip_line_item: { file: payslip_line_item.json, rows: 6 }
+            recurring_merchant_override: { file: recurring_merchant_override.json, rows: 1 }
+            resolution_item: { file: resolution_item.json, rows: 4 }
+            household_ai_insight: { file: household_ai_insight.json, rows: 2 }
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)
