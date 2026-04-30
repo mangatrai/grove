@@ -7,7 +7,7 @@ import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
-import { formatAccountForSelect } from "../import/accountDisplay";
+import { formatAccountForSelect, formatAccountFreshness } from "../import/accountDisplay";
 import {
   inferParserProfile,
   profilesEquivalent,
@@ -53,6 +53,8 @@ type FinancialAccount = {
   institution: string;
   account_mask: string | null;
   currency: string;
+  last_uploaded_at?: string | null;
+  last_statement_end_date?: string | null;
 };
 
 type BelongsToChoice = "household" | `person:${string}`;
@@ -100,8 +102,9 @@ function buildAccountGroups(accounts: FinancialAccount[]): HierarchicalPickerGro
         .sort((a, b) => formatAccountForSelect(a).localeCompare(formatAccountForSelect(b)))
         .map((a) => ({
           value: a.id,
-          label: formatAccountForSelect(a),
-          searchText: `${a.institution} ${a.type} ${a.account_mask ?? ""}`
+          label: `${formatAccountForSelect(a)} · Last upload ${formatAccountFreshness(a).lastUpload} · Statement ending ${formatAccountFreshness(a).statementEnding}`,
+          displayLabel: formatAccountForSelect(a),
+          searchText: `${a.institution} ${a.type} ${a.account_mask ?? ""} ${formatAccountFreshness(a).lastUpload} ${formatAccountFreshness(a).statementEnding}`
         }))
     }));
 }
@@ -1495,6 +1498,11 @@ export function ImportWorkspacePage() {
                         ariaLabel={`Account for ${f.file_name}`}
                         clearable
                       />
+                      {acc ? (
+                        <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.82rem" }}>
+                          Last upload {formatAccountFreshness(acc).lastUpload} · Statement ending {formatAccountFreshness(acc).statementEnding}
+                        </p>
+                      ) : null}
                       {/* OFX/QFX/QBO account hint — shown only for OFX files */}
                       {f.parser_profile_id === OFX_PARSER_ID ? (() => {
                         const sug = ofxSuggestions[f.id];

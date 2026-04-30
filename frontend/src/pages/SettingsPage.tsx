@@ -30,7 +30,7 @@ import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { RecurringTagModal, type RecurringOverride } from "../components/RecurringTagModal";
-import { formatAccountForSelect } from "../import/accountDisplay";
+import { formatAccountForSelect, formatAccountFreshness } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 
 const TABS = ["profile", "household", "accounts", "notifications", "security", "recurring", "insights"] as const;
@@ -60,6 +60,8 @@ type AccountRow = {
   institution: string;
   type: string;
   account_mask: string | null;
+  last_uploaded_at?: string | null;
+  last_statement_end_date?: string | null;
   owner_scope?: "household" | "person";
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
@@ -1759,6 +1761,7 @@ export function SettingsPage() {
                   <Table.Th>Institution</Table.Th>
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Mask</Table.Th>
+                  <Table.Th>Import freshness</Table.Th>
                   <Table.Th>Belongs-to</Table.Th>
                   <Table.Th />
                 </Table.Tr>
@@ -1769,6 +1772,14 @@ export function SettingsPage() {
                       <Table.Td>{a.institution}</Table.Td>
                       <Table.Td>{a.type}</Table.Td>
                       <Table.Td>{a.account_mask ?? "—"}</Table.Td>
+                      <Table.Td>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">Last upload</Text>
+                          <Text size="sm">{formatAccountFreshness(a).lastUpload}</Text>
+                          <Text size="xs" c="dimmed">Statement ending</Text>
+                          <Text size="sm">{formatAccountFreshness(a).statementEnding}</Text>
+                        </Stack>
+                      </Table.Td>
                       <Table.Td>
                         {a.owner_scope === "person"
                           ? formatBelongsToLabel(

@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-095g (2026-04-30): Surface account freshness dates in Settings and Import workspace
+- **Type:** UX
+- **What changed:** Added `Last upload` and `Statement ending` account freshness context in two high-use UI surfaces.
+- **Settings UI:** Connected Accounts table now includes an `Import freshness` column with both dates per account.
+- **Import UI:** Account picker options include freshness context, and each selected file/account row displays both dates directly under the account selector.
+- **Display behavior:** Missing upload is shown as `Never`; missing statement end date is shown as `Not detected`.
+- **Files changed:** `frontend/src/import/accountDisplay.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/ImportWorkspacePage.tsx`.
+
+---
+
 ## CR-095f (2026-04-30): Account import freshness metadata on `/imports/accounts`
 - **Type:** CR
 - **What changed:** `GET /imports/accounts` now returns per-account freshness metadata: `last_uploaded_at` (latest parsed upload timestamp) and `last_statement_end_date` (latest detected statement period end date).
