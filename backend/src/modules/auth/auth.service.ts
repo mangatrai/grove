@@ -5,6 +5,7 @@ import { createHash, randomUUID, webcrypto } from "node:crypto";
 import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { env } from "../../config/env.js";
 import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
+import { renderPasswordChangedTemplate } from "../mailer/templates/password-changed.js";
 import { renderPasswordResetTemplate } from "../mailer/templates/password-reset.js";
 import type { AuthUser, Role } from "./types.js";
 
@@ -123,9 +124,9 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string
 ): Promise<{ ok: true } | { ok: false; code: "INVALID_CURRENT_PASSWORD" | "SAME_AS_CURRENT" | "NOT_FOUND" }> {
-  const row = await qGet<{ password_hash: string }>(
+  const row = await qGet<{ password_hash: string; email: string }>(
     `
-  SELECT password_hash
+  SELECT password_hash, email
   FROM app_user
   WHERE id = ?
   LIMIT 1
@@ -153,6 +154,12 @@ export async function changePassword(
     nextHash,
     userId
   );
+  if (isEmailConfigured()) {
+    void sendMail({
+      to: row.email,
+      ...renderPasswordChangedTemplate()
+    });
+  }
   return { ok: true };
 }
 

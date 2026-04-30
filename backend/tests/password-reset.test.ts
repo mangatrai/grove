@@ -228,4 +228,22 @@ describe("password reset", () => {
     expect(res.body.code).toBe("SAME_AS_CURRENT");
   });
 
+  it("changePassword sends notification when email configured", async () => {
+    setEmailConfigForTest();
+    const token = await login();
+
+    const changeRes = await request(app)
+      .post("/auth/change-password")
+      .set("authorization", `Bearer ${token}`)
+      .send({ currentPassword: KNOWN_PASSWORD, newPassword: RESET_PASSWORD_1 });
+    expect(changeRes.status).toBe(200);
+
+    const updatedToken = await login(KNOWN_EMAIL, RESET_PASSWORD_1);
+    const restoreRes = await request(app)
+      .post("/auth/change-password")
+      .set("authorization", `Bearer ${updatedToken}`)
+      .send({ currentPassword: RESET_PASSWORD_1, newPassword: KNOWN_PASSWORD });
+    expect(restoreRes.status).toBe(200);
+  });
+
 });

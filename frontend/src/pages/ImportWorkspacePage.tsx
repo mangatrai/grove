@@ -102,7 +102,7 @@ function buildAccountGroups(accounts: FinancialAccount[]): HierarchicalPickerGro
         .sort((a, b) => formatAccountForSelect(a).localeCompare(formatAccountForSelect(b)))
         .map((a) => ({
           value: a.id,
-          label: `${formatAccountForSelect(a)} · Last upload ${formatAccountFreshness(a).lastUpload} · Statement ending ${formatAccountFreshness(a).statementEnding}`,
+          label: formatAccountForSelect(a),
           displayLabel: formatAccountForSelect(a),
           searchText: `${a.institution} ${a.type} ${a.account_mask ?? ""} ${formatAccountFreshness(a).lastUpload} ${formatAccountFreshness(a).statementEnding}`
         }))

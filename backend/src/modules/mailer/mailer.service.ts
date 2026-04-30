@@ -26,6 +26,10 @@ export async function sendMail(payload: MailPayload): Promise<{ ok: true } | { o
   if (!isEmailConfigured()) {
     return { ok: false, reason: "SMTP_NOT_CONFIGURED" };
   }
+  if (env.MODE === "TEST") {
+    log.info(`Email delivery skipped in TEST mode: ${payload.subject} -> ${payload.to}`);
+    return { ok: false, reason: "DELIVERY_DISABLED_IN_TEST" };
+  }
 
   try {
     const tx = getTransporter();
