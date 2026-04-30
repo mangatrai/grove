@@ -174,7 +174,7 @@ householdRouter.post("/members", requireRole(["owner", "admin"]), async (req: Au
     res.status(409).json({ message: "Email already in use", code: out.code });
     return;
   }
-  res.status(201).json({ member: out.member });
+  res.status(201).json({ member: out.member, inviteSent: out.inviteSent });
 });
 
 const patchMemberSchema = z
@@ -238,9 +238,9 @@ householdRouter.post("/members/:memberId/create-login", requireRole(["owner", "a
     if (out.code === "NOT_FOUND") { res.status(404).json({ message: "Member not found", code: out.code }); return; }
     if (out.code === "ALREADY_HAS_LOGIN") { res.status(409).json({ message: "Member already has a login account", code: out.code }); return; }
     if (out.code === "EMAIL_REQUIRED") { res.status(400).json({ message: "Member must have an email to create a login", code: out.code }); return; }
-    if (out.code === "EMAIL_CONFLICT") { res.status(409).json({ message: "Email already in use by another account", code: out.code }); return; }
+    res.status(409).json({ message: "Email already in use by another account", code: out.code }); return;
   }
-  res.status(201).json({ message: "Login account created. Default password: ChangeMe123!" });
+  res.status(201).json({ inviteSent: out.inviteSent });
 });
 
 householdRouter.post("/members/:memberId/reset-password", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
@@ -258,7 +258,11 @@ householdRouter.post("/members/:memberId/reset-password", requireRole(["owner", 
     res.status(404).json({ message: "Member not found", code: out.code });
     return;
   }
-  res.status(200).json({ tempPassword: out.tempPassword });
+  if (out.emailSent) {
+    res.status(200).json({ emailSent: true });
+    return;
+  }
+  res.status(200).json({ emailSent: false, tempPassword: out.tempPassword });
 });
 
 const deleteMemberBodySchema = z.object({

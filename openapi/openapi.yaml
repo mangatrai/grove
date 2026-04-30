@@ -285,6 +285,8 @@ paths:
                 properties:
                   member:
                     $ref: '#/components/schemas/HouseholdProfile'
+                  inviteSent:
+                    type: boolean
         "400":
           description: Validation failure or required-email business check
           content:
@@ -419,7 +421,15 @@ paths:
             format: uuid
       responses:
         "201":
-          description: Login account created
+          description: Login account created or invite sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inviteSent]
+                properties:
+                  inviteSent:
+                    type: boolean
         "400":
           description: Invalid member id or missing member email
           content:
@@ -443,9 +453,10 @@ paths:
   /household/members/{memberId}/reset-password:
     post:
       tags: [household]
-      summary: Reset member login password (owner/admin). Generates temp password, sets force_password_change, invalidates existing JWTs.
+      summary: Reset member login password (owner/admin). Sends reset email when SMTP is configured; otherwise returns a temporary password.
       description: >-
-        Returns { tempPassword } once (plaintext, not stored). Member must change on next login.
+        When email is configured, sends a one-hour reset link and returns { emailSent: true }.
+        When email is not configured, returns { emailSent: false, tempPassword } once (plaintext, not stored).
         404 if member not found; 409 NO_LOGIN if member has no login account.
       security: [{ bearerAuth: [] }]
       parameters:
@@ -457,12 +468,13 @@ paths:
             format: uuid
       responses:
         "200":
-          description: Temporary password generated
+          description: Reset initiated (email or temporary password fallback)
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  emailSent: { type: boolean }
                   tempPassword: { type: string }
         "400":
           description: Invalid member id

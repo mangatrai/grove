@@ -183,21 +183,13 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-export async function requestPasswordReset(email: string): Promise<{ ok: true }> {
-  if (!isEmailConfigured()) {
-    return { ok: true };
-  }
-  const user = await findUserByEmail(email);
-  if (!user) {
-    return { ok: true };
-  }
-
+export async function createPasswordResetToken(userId: string, ttlHours: number): Promise<string> {
   await qExec(
     `
     DELETE FROM password_reset_token
     WHERE user_id = ? AND used_at IS NULL
     `,
-    user.userId
+    userId
   );
 
   const rawTokenBytes = webcrypto.getRandomValues(new Uint8Array(32));
@@ -207,12 +199,27 @@ export async function requestPasswordReset(email: string): Promise<{ ok: true }>
   await qExec(
     `
     INSERT INTO password_reset_token (id, user_id, token_hash, expires_at)
-    VALUES (?, ?, ?, NOW() + interval '1 hour')
+    VALUES (?, ?, ?, NOW() + (? || ' hours')::interval)
     `,
     randomUUID(),
-    user.userId,
-    tokenHash
+    userId,
+    tokenHash,
+    String(ttlHours)
   );
+
+  return rawToken;
+}
+
+export async function requestPasswordReset(email: string): Promise<{ ok: true }> {
+  if (!isEmailConfigured()) {
+    return { ok: true };
+  }
+  const user = await findUserByEmail(email);
+  if (!user) {
+    return { ok: true };
+  }
+
+  const rawToken = await createPasswordResetToken(user.userId, 1);
 
   const publicBaseUrl = env.PUBLIC_BASE_URL?.trim() ?? "";
   const resetLink = publicBaseUrl

@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 
 import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
+import { env } from "../../config/env.js";
 
 import { isParserProfileId } from "../imports/profiles/profile-ids.js";
+import { createPasswordResetToken } from "../auth/auth.service.js";
+import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
+import { renderMemberInviteTemplate } from "../mailer/templates/member-invite.js";
+import { renderPasswordResetTemplate } from "../mailer/templates/password-reset.js";
 import {
   employersPayloadSchema,
   type EmployerInput,
@@ -585,7 +590,9 @@ const DEFAULT_MEMBER_PASSWORD = "ChangeMe123!";
 export async function createHouseholdMember(
   householdId: string,
   input: CreateMemberInput
-): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "EMAIL_CONFLICT" | "EMAIL_REQUIRED" }> {
+): Promise<
+  { ok: true; member: HouseholdMemberProfile; inviteSent: boolean } | { ok: false; code: "EMAIL_CONFLICT" | "EMAIL_REQUIRED" }
+> {
   const profileId = randomUUID();
   const membershipId = randomUUID();
   const email = input.email ?? null;
@@ -601,7 +608,13 @@ export async function createHouseholdMember(
     [input.firstName?.trim() ?? "", input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
 
   const userId = input.createLogin ? randomUUID() : null;
-  const passwordHash = input.createLogin ? await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12) : null;
+  const emailConfigured = isEmailConfigured();
+  const useInviteFlow = Boolean(input.createLogin && emailConfigured);
+  const passwordHash = input.createLogin
+    ? useInviteFlow
+      ? await bcrypt.hash(randomUUID(), 12)
+      : await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12)
+    : null;
 
   try {
     await qBegin(async (tx) => {
@@ -651,7 +664,15 @@ export async function createHouseholdMember(
   if (!created) {
     throw new Error("Created member could not be loaded");
   }
-  return { ok: true, member: toHouseholdMemberProfile(created) };
+  if (userId && useInviteFlow) {
+    const rawToken = await createPasswordResetToken(userId, 24);
+    const resetLink = `${env.PUBLIC_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    void sendMail({
+      to: email!,
+      ...renderMemberInviteTemplate({ resetLink })
+    });
+  }
+  return { ok: true, member: toHouseholdMemberProfile(created), inviteSent: Boolean(userId && useInviteFlow) };
 }
 
 export async function patchHouseholdMember(
@@ -797,7 +818,9 @@ export async function deleteHouseholdMember(
 export async function createLoginForMember(
   householdId: string,
   memberId: string
-): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "ALREADY_HAS_LOGIN" | "EMAIL_REQUIRED" | "EMAIL_CONFLICT" }> {
+): Promise<
+  { ok: true; inviteSent: boolean } | { ok: false; code: "NOT_FOUND" | "ALREADY_HAS_LOGIN" | "EMAIL_REQUIRED" | "EMAIL_CONFLICT" }
+> {
   const existing = await qGet<{ id: string; linked_user_id: string | null; email: string | null }>(
     `
   SELECT p.id, p.linked_user_id, p.email
@@ -814,7 +837,10 @@ export async function createLoginForMember(
   if (!existing.email?.trim()) return { ok: false, code: "EMAIL_REQUIRED" };
 
   const userId = randomUUID();
-  const passwordHash = await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12);
+  const inviteEnabled = isEmailConfigured();
+  const passwordHash = inviteEnabled
+    ? await bcrypt.hash(randomUUID(), 12)
+    : await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12);
   try {
     await qBegin(async (tx) => {
       await tx.unsafe(
@@ -832,7 +858,15 @@ export async function createLoginForMember(
     if (isPgUniqueViolation(err)) return { ok: false, code: "EMAIL_CONFLICT" };
     throw err;
   }
-  return { ok: true };
+  if (inviteEnabled) {
+    const rawToken = await createPasswordResetToken(userId, 24);
+    const resetLink = `${env.PUBLIC_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    void sendMail({
+      to: existing.email,
+      ...renderMemberInviteTemplate({ resetLink })
+    });
+  }
+  return { ok: true, inviteSent: inviteEnabled };
 }
 
 /**
@@ -852,10 +886,15 @@ function generateTempPassword(): string {
 export async function resetMemberPassword(
   householdId: string,
   memberId: string
-): Promise<{ ok: true; tempPassword: string } | { ok: false; code: "NOT_FOUND" | "NO_LOGIN" }> {
-  const row = await qGet<{ linked_user_id: string | null }>(
-    `SELECT p.linked_user_id
+): Promise<
+  | { ok: true; emailSent: true }
+  | { ok: true; emailSent: false; tempPassword: string }
+  | { ok: false; code: "NOT_FOUND" | "NO_LOGIN" }
+> {
+  const row = await qGet<{ linked_user_id: string | null; login_email: string | null }>(
+    `SELECT p.linked_user_id, u.email AS login_email
      FROM person_profile p
+     LEFT JOIN app_user u ON u.id = p.linked_user_id AND u.household_id = p.household_id
      WHERE p.household_id = ? AND p.id = ?
      LIMIT 1`,
     householdId,
@@ -863,6 +902,25 @@ export async function resetMemberPassword(
   );
   if (!row) return { ok: false, code: "NOT_FOUND" };
   if (!row.linked_user_id) return { ok: false, code: "NO_LOGIN" };
+  if (!row.login_email?.trim()) return { ok: false, code: "NO_LOGIN" };
+  const emailConfigured = isEmailConfigured();
+
+  if (emailConfigured) {
+    await qExec(
+      `UPDATE app_user
+       SET token_version = token_version + 1
+       WHERE id = ? AND household_id = ?`,
+      row.linked_user_id,
+      householdId
+    );
+    const rawToken = await createPasswordResetToken(row.linked_user_id, 1);
+    const resetLink = `${env.PUBLIC_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    void sendMail({
+      to: row.login_email,
+      ...renderPasswordResetTemplate({ resetLink })
+    });
+    return { ok: true, emailSent: true };
+  }
 
   const tempPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 12);
@@ -874,5 +932,5 @@ export async function resetMemberPassword(
     row.linked_user_id,
     householdId
   );
-  return { ok: true, tempPassword };
+  return { ok: true, emailSent: false, tempPassword };
 }

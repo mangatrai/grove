@@ -272,6 +272,7 @@ export function SettingsPage() {
   const [removeMemberDeleteLogin, setRemoveMemberDeleteLogin] = useState(false);
   const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
   const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
+  const [emailEnabled, setEmailEnabled] = useState(false);
   const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
   const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
   const [resetPasswordResult, setResetPasswordResult] = useState<{ memberId: string; tempPassword: string } | null>(null);
@@ -526,6 +527,20 @@ export function SettingsPage() {
       setImportBusy(false);
     }
   }, [token, importFile]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/auth/capabilities");
+        if (res.ok) {
+          const body = (await res.json()) as { emailEnabled?: boolean };
+          setEmailEnabled(Boolean(body.emailEnabled));
+        }
+      } catch {
+        // keep false
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!token) {
@@ -844,8 +859,15 @@ export function SettingsPage() {
     setMembersError(null);
     setMembersSuccess(null);
     try {
-      await apiJson(`/household/members/${encodeURIComponent(memberId)}/create-login`, { method: "POST" });
-      setMembersSuccess("Login created. Default password: ChangeMe123! — member must change it on first login.");
+      const data = await apiJson<{ inviteSent: boolean }>(
+        `/household/members/${encodeURIComponent(memberId)}/create-login`,
+        { method: "POST" }
+      );
+      if (data.inviteSent) {
+        setMembersSuccess("Invite sent — they'll receive a link to set their password.");
+      } else {
+        setMembersSuccess("Login created. Default password: ChangeMe123! — member must change it on first login.");
+      }
       await loadMembers();
     } catch (e: unknown) {
       setMembersError(e instanceof Error ? e.message : "Could not create login");
@@ -858,12 +880,16 @@ export function SettingsPage() {
     setResetPasswordBusy(true);
     setMembersError(null);
     try {
-      const data = await apiJson<{ tempPassword: string }>(
+      const data = await apiJson<{ emailSent: boolean; tempPassword?: string }>(
         `/household/members/${encodeURIComponent(memberId)}/reset-password`,
         { method: "POST" }
       );
       setResetPasswordForId(null);
-      setResetPasswordResult({ memberId, tempPassword: data.tempPassword });
+      if (data.emailSent) {
+        setMembersSuccess("Password reset link sent to member's email.");
+      } else {
+        setResetPasswordResult({ memberId, tempPassword: data.tempPassword! });
+      }
     } catch (e: unknown) {
       setMembersError(e instanceof Error ? e.message : "Could not reset password");
       setResetPasswordForId(null);
@@ -1405,10 +1431,14 @@ export function SettingsPage() {
                             }}
                             disabled={savingMemberIndex !== null}
                             label={
-                              <>
-                                Create login account (default password: <Text span ff="monospace">ChangeMe123!</Text>{" "}
-                                - must change on first login)
-                              </>
+                              emailEnabled
+                                ? "Create login account (invite email will be sent)"
+                                : (
+                                  <>
+                                    Create login account (default password: <Text span ff="monospace">ChangeMe123!</Text>{" "}
+                                    - must change on first login)
+                                  </>
+                                )
                             }
                           />
                         )}
@@ -2016,8 +2046,9 @@ export function SettingsPage() {
         title="Reset member password"
         message={
           <p style={{ fontSize: "0.9rem", margin: 0 }}>
-            This will generate a new temporary password and immediately invalidate their current session.
-            They will be required to change it on next login.
+            {emailEnabled
+              ? "A password reset link will be sent to their email address. Their current session will be invalidated immediately."
+              : "This will generate a new temporary password and immediately invalidate their current session. They will be required to change it on next login."}
           </p>
         }
         confirmLabel={resetPasswordBusy ? "Resetting…" : "Reset password"}

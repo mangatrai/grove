@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-095c (2026-04-29): Member invite email + admin reset-password email
+- **Type:** CR
+- **What changed:** Wired member login creation and admin-triggered member password reset to SMTP email infrastructure using existing `password_reset_token` flow (no new tables, no new routes).
+- **Create login (email configured):** `createHouseholdMember` and `createLoginForMember` now set an unguessable hash and send invite email with a 24-hour reset link (`inviteSent: true`).
+- **Create login (no email):** Existing `ChangeMe123!` + force-change fallback remains unchanged (`inviteSent: false`).
+- **Admin reset (email configured):** `resetMemberPassword` now invalidates session (`token_version` bump), creates a 1-hour reset token, sends reset email, and does not expose temp password.
+- **Admin reset (no email):** Existing temporary password flow and modal fallback remains unchanged.
+- **New template:** Added `backend/src/modules/mailer/templates/member-invite.ts`.
+- **Files changed:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/src/modules/mailer/templates/member-invite.ts`, `openapi/openapi.yaml`, `backend/tests/member-invite.test.ts`.
+
+---
+
 ## CR-095b-fix (2026-04-29): Password reset regressions (link, capabilities, login UX)
 - **Type:** FIX
 - **Reset link:** `requestPasswordReset` now builds `PUBLIC_BASE_URL/reset-password?token=...` for BrowserRouter instead of `/#/reset-password` (HashRouter). File: `backend/src/modules/auth/auth.service.ts`.
