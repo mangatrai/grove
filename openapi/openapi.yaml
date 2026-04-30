@@ -382,6 +382,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Member has a linked login account (HAS_LOGIN_ACCOUNT)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members/{memberId}/data-count:
     get:
       tags: [household]

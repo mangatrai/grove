@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-095c (2026-04-29): Household member delete/login guard correctness
+- **Type:** FIX
+- **Issue:** Deleting a member with `deleteLogin=true` failed with FK violation (`person_profile.linked_user_id -> app_user.id`) because delete order removed `app_user` first.
+- **Issue:** Deleting with `deleteLogin=false` still removed members even when a linked login existed, contrary to intended guard behavior.
+- **Fix:** `deleteHouseholdMember` now returns `HAS_LOGIN_ACCOUNT` when a linked login exists and `deleteLogin` is false, and when `deleteLogin` is true it deletes `household_membership` + `person_profile` before deleting `app_user`.
+- **Route mapping:** `DELETE /household/members/:memberId` now maps `HAS_LOGIN_ACCOUNT` to HTTP 409.
+- **Regression test:** Added backend coverage for both guarded delete (409) and full delete with login removal (204 + user row removed).
+- **Files changed:** `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/tests/member-invite.test.ts`, `openapi/openapi.yaml`.
+
+---
+
 ## CR-095c (2026-04-29): Member invite email + admin reset-password email
 - **Type:** CR
 - **What changed:** Wired member login creation and admin-triggered member password reset to SMTP email infrastructure using existing `password_reset_token` flow (no new tables, no new routes).

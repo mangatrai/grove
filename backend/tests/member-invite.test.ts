@@ -230,4 +230,54 @@ describe("member invite + admin reset email flows", () => {
       });
     expect(restoreRes.status).toBe(200);
   });
+
+  it("delete member enforces login guard and deleteLogin path", async () => {
+    clearEmailConfigForTest();
+    const token = await loginOwner();
+    const memberEmail = `delete-flow-${randomUUID()}@example.com`;
+
+    const createMemberRes = await request(app)
+      .post("/household/members")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        firstName: "Delete",
+        lastName: "Flow",
+        email: memberEmail,
+        role: "member",
+        relationship: "other",
+        createLogin: true
+      });
+    expect(createMemberRes.status).toBe(201);
+    expect(createMemberRes.body.inviteSent).toBe(false);
+
+    const memberId = (createMemberRes.body.member as { id: string }).id;
+    const linked = await sqlStmt<{ linked_user_id: string | null }>(
+      `SELECT linked_user_id FROM person_profile WHERE id = ? LIMIT 1`
+    ).get(memberId);
+    expect(linked?.linked_user_id).toBeTruthy();
+    const linkedUserId = linked!.linked_user_id!;
+
+    const blockedDeleteRes = await request(app)
+      .delete(`/household/members/${encodeURIComponent(memberId)}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ deleteLogin: false });
+    expect(blockedDeleteRes.status).toBe(409);
+    expect(blockedDeleteRes.body.code).toBe("HAS_LOGIN_ACCOUNT");
+
+    const stillExists = await sqlStmt<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt FROM person_profile WHERE household_id = ? AND id = ?`
+    ).get("10000000-0000-0000-0000-000000000001", memberId);
+    expect(Number(stillExists?.cnt ?? "0")).toBe(1);
+
+    const deleteWithLoginRes = await request(app)
+      .delete(`/household/members/${encodeURIComponent(memberId)}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ deleteLogin: true });
+    expect(deleteWithLoginRes.status).toBe(204);
+
+    const userCount = await sqlStmt<{ cnt: string }>(
+      `SELECT COUNT(*)::text AS cnt FROM app_user WHERE household_id = ? AND id = ?`
+    ).get("10000000-0000-0000-0000-000000000001", linkedUserId);
+    expect(Number(userCount?.cnt ?? "0")).toBe(0);
+  });
 });

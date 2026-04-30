@@ -281,6 +281,10 @@ householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), as
     deleteLogin: body.success ? body.data.deleteLogin : false
   });
   if (!out.ok) {
+    if (out.code === "HAS_LOGIN_ACCOUNT") {
+      res.status(409).json({ message: "Member has a linked login account", code: out.code });
+      return;
+    }
     res.status(404).json({ message: "Member not found", code: out.code });
     return;
   }

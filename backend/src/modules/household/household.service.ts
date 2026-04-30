@@ -779,7 +779,7 @@ export async function deleteHouseholdMember(
   householdId: string,
   memberId: string,
   opts: { deleteLogin?: boolean } = {}
-): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "HAS_LOGIN_ACCOUNT" }> {
   const existing = await qGet<{ id: string; linked_user_id: string | null }>(
     `
   SELECT p.id, p.linked_user_id
@@ -796,13 +796,10 @@ export async function deleteHouseholdMember(
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
+  if (existing.linked_user_id && !opts.deleteLogin) {
+    return { ok: false, code: "HAS_LOGIN_ACCOUNT" };
+  }
   await qBegin(async (tx) => {
-    if (opts.deleteLogin && existing.linked_user_id) {
-      await tx.unsafe(`DELETE FROM app_user WHERE id = $1 AND household_id = $2`, [
-        existing.linked_user_id,
-        householdId
-      ] as never[]);
-    }
     await tx.unsafe(`DELETE FROM household_membership WHERE household_id = $1 AND person_profile_id = $2`, [
       householdId,
       memberId
@@ -811,6 +808,12 @@ export async function deleteHouseholdMember(
       householdId,
       memberId
     ] as never[]);
+    if (opts.deleteLogin && existing.linked_user_id) {
+      await tx.unsafe(`DELETE FROM app_user WHERE id = $1 AND household_id = $2`, [
+        existing.linked_user_id,
+        householdId
+      ] as never[]);
+    }
   });
   return { ok: true };
 }
