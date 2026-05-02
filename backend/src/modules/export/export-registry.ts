@@ -170,6 +170,10 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   "insight_job",
   "password_reset_token",
   "backup_job",
-  // GCP service account private key — never include in .hfb backups
+// Infrastructure — not user data                                                                                                      
+  "schema_migrations",                                                                                                                   
+// Seeded global data — restored from seeds, not from backups                                                                          
+  "category_rule_global",
+// GCP service account private key — never include in .hfb backups
   "household_gdrive_config"
 ];
