@@ -24,7 +24,7 @@ export function ResetPasswordPage() {
         <Stack gap="sm">
           <Title order={3}>Reset password</Title>
           <Alert color="red" variant="light">Invalid or expired link.</Alert>
-          <Anchor href="/#/">Back to sign in</Anchor>
+          <Anchor href="/">Back to sign in</Anchor>
         </Stack>
       </Paper>
     );
@@ -81,7 +81,7 @@ export function ResetPasswordPage() {
         {tokenError ? (
           <Alert color="red" variant="light">
             This link has expired or was already used. Request a new one.{" "}
-            <Anchor href="/#/">Back to sign in</Anchor>
+            <Anchor href="/">Back to sign in</Anchor>
           </Alert>
         ) : null}
         {genericError ? (

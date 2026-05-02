@@ -84,7 +84,8 @@ export function ShellLayout() {
           return;
         }
         setToken(null);
-        window.location.replace(`/#/reset-password?token=${encodeURIComponent(body.token)}`);
+        // BrowserRouter (pathname routes) — hash URLs would leave pathname "/" and show HomePage.
+        window.location.replace(`/reset-password?token=${encodeURIComponent(body.token)}`);
       } catch {
         setSetupRedirecting(false);
       }
