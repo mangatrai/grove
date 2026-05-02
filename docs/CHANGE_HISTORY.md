@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-129 — Google Drive Service Account Connection (1/3: schema + dependency)
+**Date:** 2026-05-01
+**Files:** `backend/db/migrations/0034_gdrive_config.sql`, `backend/package.json`, `backend/package-lock.json`, `docs/CHANGE_HISTORY.md`
+**What:** Added `household_gdrive_config` (one row per household: service account JSON, Drive folder id/name, connection metadata). Added `googleapis` for Drive API validation (HTTP routes and UI in follow-up commits).
+
+---
+
 ## UX-128b — Forced password change via reset-password handoff
 **Date:** 2026-05-01
 **Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/password-reset.test.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`
