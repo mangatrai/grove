@@ -2338,7 +2338,10 @@ components:
         folderId: { type: string }
         folderName: { type: string, nullable: true }
         connectedAt: { type: string, format: date-time }
-        connectedByUserId: { type: string }
+        connectedByUserId:
+          type: string
+          nullable: true
+          description: User who connected; null if that app_user row was removed (ON DELETE SET NULL).
         lastVerifiedAt: { type: string, format: date-time, nullable: true }
         lastError: { type: string, nullable: true }
     GDriveConnectSuccessResponse:

@@ -24,6 +24,7 @@
     "express": "^4.19.2",
     "express-rate-limit": "^8.3.2",
     "googleapis": "^171.4.0",
+    "gaxios": "^7.1.4",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",

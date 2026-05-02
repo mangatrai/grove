@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-129a (2026-05-02): GDrive review — FK, errors, admin UI, tests, API doc
+- **Type:** FIX / engineering
+- **What:** `connected_by_user_id` is now nullable with `ON DELETE SET NULL` (migration `0035`) so removing an `app_user` does not block deletes. `testDriveConnection` maps HTTP **403/404** via `GaxiosError.response.status` instead of substring checks on the message. Settings **Data & Backup** shows Google Drive status to **admins** (read-only) as well as owners. Added `docs/API_GDRIVE.md`, `backend/tests/gdrive.test.ts` (mocked `googleapis`, no real network), and explicit `gaxios` dependency for typed errors. `household_gdrive_config` is listed in `EXPORT_EPHEMERAL_TABLES` so `.hfb` exports never embed the service account key.
+- **Files:** `backend/db/migrations/0035_gdrive_connected_by_set_null.sql`, `backend/package.json`, `backend/package-lock.json`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/export-registry.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-129 — Google Drive Service Account Connection
 **Date:** 2026-05-01
 **Files:** `backend/db/migrations/0034_gdrive_config.sql`, `backend/package.json`, `backend/package-lock.json`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/app.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`

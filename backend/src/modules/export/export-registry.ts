@@ -169,5 +169,7 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   "export_job",
   "insight_job",
   "password_reset_token",
-  "backup_job"
+  "backup_job",
+  // GCP service account private key — never include in .hfb backups
+  "household_gdrive_config"
 ];

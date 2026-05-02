@@ -76,7 +76,7 @@ type GDriveStatus = {
   folderId?: string;
   folderName?: string | null;
   connectedAt?: string;
-  connectedByUserId?: string;
+  connectedByUserId?: string | null;
   lastVerifiedAt?: string | null;
   lastError?: string | null;
 };
@@ -738,13 +738,13 @@ export function SettingsPage() {
   }, [token, tab]);
 
   useEffect(() => {
-    if (!token || tab !== "data" || authRole !== "owner") return;
+    if (!token || tab !== "data" || !canManageHousehold) return;
     setGdriveLoading(true);
     void apiJson<GDriveStatus>("/gdrive/status")
       .then((r) => setGdriveStatus(r))
       .catch(() => setGdriveStatus({ connected: false }))
       .finally(() => setGdriveLoading(false));
-  }, [token, tab, authRole]);
+  }, [token, tab, canManageHousehold]);
 
   async function addCustomInstitutionName() {
     if (!token) {
@@ -2093,25 +2093,32 @@ export function SettingsPage() {
               </>
             ) : null}
 
-            {authRole === "owner" ? (
+            {canManageHousehold ? (
               <>
                 <Divider mt="xl" mb="md" label="Google Drive Backup" labelPosition="left" />
-                <Text c="dimmed" size="sm">
-                  Connect a Google Drive folder using a Service Account to enable automated cloud backups.
-                  The service account email must have <strong>Editor</strong> access to the folder.
-                </Text>
+                {authRole === "admin" ? (
+                  <Text c="dimmed" size="sm">
+                    View-only: connection status for your household. Only a household owner can connect, disconnect, or
+                    change the service account key.
+                  </Text>
+                ) : (
+                  <Text c="dimmed" size="sm">
+                    Connect a Google Drive folder using a Service Account to enable automated cloud backups.
+                    The service account email must have <strong>Editor</strong> access to the folder.
+                  </Text>
+                )}
 
                 {gdriveLoading ? (
                   <Text c="dimmed" size="sm">
                     Loading…
                   </Text>
                 ) : null}
-                {gdriveError ? (
+                {authRole === "owner" && gdriveError ? (
                   <Alert color="red" variant="light" mt="xs">
                     {gdriveError}
                   </Alert>
                 ) : null}
-                {gdriveSuccess ? (
+                {authRole === "owner" && gdriveSuccess ? (
                   <Alert color="green" variant="light" mt="xs">
                     {gdriveSuccess}
                   </Alert>
@@ -2141,64 +2148,74 @@ export function SettingsPage() {
                           </Text>
                         ) : null}
                       </Stack>
-                      <Button
-                        type="button"
-                        variant="default"
-                        size="xs"
-                        color="red"
-                        onClick={() => setGdriveDisconnectConfirm(true)}
-                      >
-                        Disconnect
-                      </Button>
+                      {authRole === "owner" ? (
+                        <Button
+                          type="button"
+                          variant="default"
+                          size="xs"
+                          color="red"
+                          onClick={() => setGdriveDisconnectConfirm(true)}
+                        >
+                          Disconnect
+                        </Button>
+                      ) : null}
                     </Group>
                   </Paper>
                 ) : null}
 
                 {!gdriveLoading && !gdriveStatus?.connected ? (
-                  <Stack gap="sm" mt="xs" maw={560}>
-                    <Textarea
-                      label="Service Account Key JSON"
-                      description="Paste the full contents of your downloaded service account JSON key file."
-                      placeholder='{"type": "service_account", "project_id": "...", ...}'
-                      value={gdriveKeyInput}
-                      onChange={(e) => setGdriveKeyInput(e.currentTarget.value)}
-                      disabled={gdriveConnecting}
-                      minRows={5}
-                      maxRows={10}
-                      autosize
-                      styles={{ input: { fontFamily: "monospace", fontSize: "0.8rem" } }}
-                    />
-                    <TextInput
-                      label="Drive Folder ID"
-                      description="The folder ID from the Drive URL: drive.google.com/drive/folders/THIS_PART"
-                      placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
-                      value={gdriveFolderIdInput}
-                      onChange={(e) => setGdriveFolderIdInput(e.currentTarget.value)}
-                      disabled={gdriveConnecting}
-                    />
-                    <Group>
-                      <Button
-                        type="button"
-                        loading={gdriveConnecting}
-                        disabled={!gdriveKeyInput.trim() || !gdriveFolderIdInput.trim()}
-                        onClick={() => void handleGDriveConnect()}
-                      >
-                        {gdriveConnecting ? "Connecting…" : "Connect Google Drive"}
-                      </Button>
-                    </Group>
-                  </Stack>
+                  authRole === "owner" ? (
+                    <Stack gap="sm" mt="xs" maw={560}>
+                      <Textarea
+                        label="Service Account Key JSON"
+                        description="Paste the full contents of your downloaded service account JSON key file."
+                        placeholder='{"type": "service_account", "project_id": "...", ...}'
+                        value={gdriveKeyInput}
+                        onChange={(e) => setGdriveKeyInput(e.currentTarget.value)}
+                        disabled={gdriveConnecting}
+                        minRows={5}
+                        maxRows={10}
+                        autosize
+                        styles={{ input: { fontFamily: "monospace", fontSize: "0.8rem" } }}
+                      />
+                      <TextInput
+                        label="Drive Folder ID"
+                        description="The folder ID from the Drive URL: drive.google.com/drive/folders/THIS_PART"
+                        placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                        value={gdriveFolderIdInput}
+                        onChange={(e) => setGdriveFolderIdInput(e.currentTarget.value)}
+                        disabled={gdriveConnecting}
+                      />
+                      <Group>
+                        <Button
+                          type="button"
+                          loading={gdriveConnecting}
+                          disabled={!gdriveKeyInput.trim() || !gdriveFolderIdInput.trim()}
+                          onClick={() => void handleGDriveConnect()}
+                        >
+                          {gdriveConnecting ? "Connecting…" : "Connect Google Drive"}
+                        </Button>
+                      </Group>
+                    </Stack>
+                  ) : (
+                    <Text c="dimmed" size="sm" mt="xs">
+                      No Google Drive backup is configured. Ask a household owner to connect a folder here.
+                    </Text>
+                  )
                 ) : null}
 
-                <ConfirmDialog
-                  opened={gdriveDisconnectConfirm}
-                  title="Disconnect Google Drive?"
-                  message="This will remove the stored service account key and disable automated backups. You can reconnect at any time."
-                  confirmLabel="Disconnect"
-                  cancelLabel="Cancel"
-                  danger
-                  onClose={() => setGdriveDisconnectConfirm(false)}
-                  onConfirm={() => void handleGDriveDisconnect()}
-                />
+                {authRole === "owner" ? (
+                  <ConfirmDialog
+                    opened={gdriveDisconnectConfirm}
+                    title="Disconnect Google Drive?"
+                    message="This will remove the stored service account key and disable automated backups. You can reconnect at any time."
+                    confirmLabel="Disconnect"
+                    cancelLabel="Cancel"
+                    danger
+                    onClose={() => setGdriveDisconnectConfirm(false)}
+                    onConfirm={() => void handleGDriveDisconnect()}
+                  />
+                ) : null}
               </>
             ) : null}
           </Stack>

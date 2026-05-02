@@ -1,3 +1,4 @@
+import { GaxiosError } from "gaxios";
 import { google } from "googleapis";
 
 import { qExec, qGet } from "../../db/query.js";
@@ -16,7 +17,8 @@ export type GDriveStatus = {
   folderId: string;
   folderName: string | null;
   connectedAt: string;
-  connectedByUserId: string;
+  /** Present when the connecting user still exists; null after `ON DELETE SET NULL`. */
+  connectedByUserId: string | null;
   lastVerifiedAt: string | null;
   lastError: string | null;
 };
@@ -26,7 +28,7 @@ type GDriveRow = {
   folder_id: string;
   folder_name: string | null;
   connected_at: string;
-  connected_by_user_id: string;
+  connected_by_user_id: string | null;
   last_verified_at: string | null;
   last_error: string | null;
 };
@@ -88,15 +90,18 @@ export async function testDriveConnection(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn(`GDrive connection test failed: ${msg}`);
-    // Surface a clean message for common failure modes.
-    if (msg.includes("invalid_grant") || msg.includes("Invalid JWT")) {
-      return { ok: false, message: "Service account key is invalid or has been revoked." };
-    }
-    if (msg.includes("404") || msg.includes("notFound")) {
+    const httpStatus =
+      err instanceof GaxiosError
+        ? err.response?.status ?? (typeof err.status === "number" ? err.status : undefined)
+        : undefined;
+    if (httpStatus === 404) {
       return { ok: false, message: "Folder not found. Check the folder ID and ensure the service account has access." };
     }
-    if (msg.includes("403") || msg.includes("forbidden")) {
+    if (httpStatus === 403) {
       return { ok: false, message: "Permission denied. Share the folder with the service account email and try again." };
+    }
+    if (msg.includes("invalid_grant") || msg.includes("Invalid JWT")) {
+      return { ok: false, message: "Service account key is invalid or has been revoked." };
     }
     return { ok: false, message: `Could not connect to Google Drive: ${msg}` };
   }
