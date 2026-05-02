@@ -246,4 +246,44 @@ describe("password reset", () => {
     expect(restoreRes.status).toBe(200);
   });
 
+  describe("setup-forced-change-token", () => {
+    it("returns 200 and token when force_password_change is true", async () => {
+      await sqlStmt(`UPDATE app_user SET force_password_change = true WHERE lower(email) = lower(?)`).run(KNOWN_EMAIL);
+      const jwt = await login();
+      const res = await request(app)
+        .post("/auth/setup-forced-change-token")
+        .set("authorization", `Bearer ${jwt}`);
+      expect(res.status).toBe(200);
+      expect(typeof res.body.token).toBe("string");
+      expect((res.body.token as string).length).toBeGreaterThan(0);
+
+      const row = await sqlStmt<{ count: string }>(
+        `
+        SELECT count(*)::text AS count
+        FROM password_reset_token
+        WHERE user_id = (SELECT id FROM app_user WHERE lower(email) = lower(?) LIMIT 1)
+          AND token_hash = ?
+        `
+      ).get(KNOWN_EMAIL, hashToken(res.body.token as string));
+      expect(Number(row?.count ?? "0")).toBe(1);
+
+      await sqlStmt(`UPDATE app_user SET force_password_change = false WHERE lower(email) = lower(?)`).run(KNOWN_EMAIL);
+    });
+
+    it("returns 403 NOT_FORCED when flag is not set", async () => {
+      await sqlStmt(`UPDATE app_user SET force_password_change = false WHERE lower(email) = lower(?)`).run(KNOWN_EMAIL);
+      const jwt = await login();
+      const res = await request(app)
+        .post("/auth/setup-forced-change-token")
+        .set("authorization", `Bearer ${jwt}`);
+      expect(res.status).toBe(403);
+      expect(res.body.code).toBe("NOT_FORCED");
+    });
+
+    it("returns 401 without bearer token", async () => {
+      const res = await request(app).post("/auth/setup-forced-change-token");
+      expect(res.status).toBe(401);
+    });
+  });
+
 });

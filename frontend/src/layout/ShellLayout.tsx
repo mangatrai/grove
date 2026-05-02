@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 
-import { apiJson, setToken, useAuthToken } from "../api";
+import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { UserContext } from "../UserContext";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopBar } from "./AppTopBar";
@@ -20,6 +20,7 @@ export function ShellLayout() {
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [personProfileId, setPersonProfileId] = useState<string | null | undefined>(undefined);
+  const [setupRedirecting, setSetupRedirecting] = useState(false);
   // undefined = not yet loaded; null = loaded but no profile; string = loaded with profile
 
   useEffect(() => {
@@ -65,6 +66,29 @@ export function ShellLayout() {
     window.addEventListener("app:password-changed", handler);
     return () => window.removeEventListener("app:password-changed", handler);
   }, []);
+
+  useEffect(() => {
+    if (!forcePasswordChange || !token || setupRedirecting) return;
+    setSetupRedirecting(true);
+    void (async () => {
+      try {
+        const res = await apiFetch("/auth/setup-forced-change-token", { method: "POST" });
+        if (!res.ok) {
+          setSetupRedirecting(false);
+          return;
+        }
+        const body = (await res.json()) as { token?: string };
+        if (!body.token) {
+          setSetupRedirecting(false);
+          return;
+        }
+        setToken(null);
+        window.location.replace(`/#/reset-password?token=${encodeURIComponent(body.token)}`);
+      } catch {
+        setSetupRedirecting(false);
+      }
+    })();
+  }, [forcePasswordChange, token, setupRedirecting]);
 
   if (!token) {
     return (
@@ -117,42 +141,8 @@ export function ShellLayout() {
         />
         <div className="app-shell-main">
           <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
-          {forcePasswordChange && userRole === "owner" && pathname.startsWith("/settings") ? (
-            <div style={{
-              background: "#fef3c7",
-              borderBottom: "1px solid #fcd34d",
-              padding: "0.6rem 1.25rem",
-              fontSize: "0.88rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}>
-              <strong>First login:</strong> Your account was created with a temporary password. Please set a permanent password below before using the app.
-            </div>
-          ) : null}
-          {forcePasswordChange && userRole !== "owner" ? (
-            <div style={{
-              background: "#fef3c7",
-              borderBottom: "1px solid #fcd34d",
-              padding: "0.6rem 1.25rem",
-              fontSize: "0.88rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}>
-              <strong>Action required:</strong> Your password is temporary — please change it.{" "}
-              <Link to="/settings?tab=security" style={{ fontWeight: 600 }}>
-                Change password now →
-              </Link>
-            </div>
-          ) : null}
           <main className="app-main">
-            {/* Hard gate: owner with a temporary password must change it before accessing anything else. */}
-            {forcePasswordChange && userRole === "owner" && !pathname.startsWith("/settings") ? (
-              <Navigate to="/settings?tab=security" replace />
-            ) : (
-              <Outlet />
-            )}
+            <Outlet />
           </main>
         </div>
       </div>

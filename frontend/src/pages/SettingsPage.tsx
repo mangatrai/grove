@@ -36,7 +36,7 @@ import { RecurringTagModal, type RecurringOverride } from "../components/Recurri
 import { formatAccountForSelect, formatAccountFreshness } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 
-const TABS = ["profile", "household", "accounts", "notifications", "security", "recurring", "insights"] as const;
+const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -165,7 +165,7 @@ type HouseholdMemberDraft = {
   createLogin?: boolean;
 };
 
-type MeResponse = { user: { role: "owner" | "admin" | "member"; forcePasswordChange?: boolean } };
+type MeResponse = { user: { role: "owner" | "admin" | "member" } };
 
 type BackupPreview = {
   exportVersion: number;
@@ -176,14 +176,6 @@ type BackupPreview = {
   format: string;
   tables: Record<string, { rows: number }>;
   totalRows: number;
-};
-
-type InsightHistoryRow = {
-  id: string;
-  generatedAt: string;
-  provider: string;
-  model: string;
-  payload: { healthRating: string };
 };
 
 type InstitutionsResponse = {
@@ -321,7 +313,6 @@ export function SettingsPage() {
   const [securityError, setSecurityError] = useState<string | null>(null);
   const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
   const [authRole, setAuthRole] = useState<"owner" | "admin" | "member" | null>(null);
-  const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [accountOwners, setAccountOwners] = useState<Array<{ id: string; label: string }>>([]);
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -344,9 +335,6 @@ export function SettingsPage() {
   const [recurringLoading, setRecurringLoading] = useState(false);
   const [recurringError, setRecurringError] = useState<string | null>(null);
   const [editingOverride, setEditingOverride] = useState<RecurringOverride | null>(null);
-  const [insightHistory, setInsightHistory] = useState<InsightHistoryRow[]>([]);
-  const [insightHistoryError, setInsightHistoryError] = useState<string | null>(null);
-  const [insightHistoryLoading, setInsightHistoryLoading] = useState(false);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -358,7 +346,6 @@ export function SettingsPage() {
   });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
-  const securityOnlyMode = authRole === "owner" && forcePasswordChange;
 
   const loadInstitutions = useCallback(async () => {
     if (!token) {
@@ -613,19 +600,11 @@ export function SettingsPage() {
     void apiJson<MeResponse>("/auth/me")
       .then((r) => {
         setAuthRole(r.user.role);
-        setForcePasswordChange(Boolean(r.user.forcePasswordChange));
       })
       .catch(() => {
         setAuthRole(null);
-        setForcePasswordChange(false);
       });
   }, [token]);
-
-  useEffect(() => {
-    if (securityOnlyMode && tab !== "security") {
-      setTab("security");
-    }
-  }, [securityOnlyMode, tab, setTab]);
 
   useEffect(() => {
     if (!token || tab !== "household") {
@@ -695,19 +674,6 @@ export function SettingsPage() {
       })
       .catch(() => setRecurringError("Failed to load recurring overrides."))
       .finally(() => setRecurringLoading(false));
-  }, [token, tab]);
-
-  useEffect(() => {
-    if (!token || tab !== "insights") return;
-    setInsightHistoryLoading(true);
-    setInsightHistoryError(null);
-    void apiJson<{ ok: boolean; data: InsightHistoryRow[] }>("/insights/financial/history?limit=30")
-      .then((res) => {
-        if (res.ok) setInsightHistory(res.data);
-        else setInsightHistory([]);
-      })
-      .catch((e: unknown) => setInsightHistoryError(e instanceof Error ? e.message : "Failed to load insights history."))
-      .finally(() => setInsightHistoryLoading(false));
   }, [token, tab]);
 
   async function addCustomInstitutionName() {
@@ -1066,12 +1032,10 @@ export function SettingsPage() {
     [recurringOverrides]
   );
 
-  const visibleTabs = useMemo(() => {
-    if (securityOnlyMode) {
-      return ["security"] as SettingsTab[];
-    }
-    return TABS.filter((id) => id !== "household" || canManageHousehold);
-  }, [canManageHousehold, securityOnlyMode]);
+  const visibleTabs = useMemo(
+    () => TABS.filter((id) => id !== "household" || canManageHousehold),
+    [canManageHousehold]
+  );
 
   if (!token) {
     return <Navigate to="/" replace />;
@@ -1102,13 +1066,9 @@ export function SettingsPage() {
                     ? "Household"
                     : id === "accounts"
                       ? "Accounts"
-                      : id === "notifications"
-                        ? "Notifications"
-                        : id === "security"
-                          ? "Security"
-                          : id === "recurring"
-                            ? "Recurring"
-                            : "Insights"}
+                      : id === "recurring"
+                        ? "Recurring"
+                        : "Data & Backup"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -1357,6 +1317,58 @@ export function SettingsPage() {
                     {savingProfile ? "Saving…" : "Save profile"}
                   </Button>
                 </Group>
+                <Divider mt="xl" mb="md" label="Security" labelPosition="left" />
+                {securityError ? <Alert color="red">{securityError}</Alert> : null}
+                {securitySuccess ? <Alert color="green">{securitySuccess}</Alert> : null}
+                <Box
+                  component="form"
+                  maw={480}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void changePassword();
+                  }}
+                >
+                  <Stack>
+                    <PasswordInput
+                      label="Current password"
+                      value={passwordDraft.currentPassword}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setPasswordDraft((prev) => ({ ...prev, currentPassword: value }));
+                      }}
+                      disabled={changingPassword}
+                      autoComplete="current-password"
+                    />
+                    <PasswordInput
+                      label="New password"
+                      value={passwordDraft.newPassword}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setPasswordDraft((prev) => ({ ...prev, newPassword: value }));
+                      }}
+                      disabled={changingPassword}
+                      autoComplete="new-password"
+                    />
+                    <PasswordInput
+                      label="Confirm new password"
+                      value={passwordDraft.confirmPassword}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setPasswordDraft((prev) => ({ ...prev, confirmPassword: value }));
+                      }}
+                      disabled={changingPassword}
+                      autoComplete="new-password"
+                    />
+                    <Group>
+                      <Button type="submit" loading={changingPassword}>
+                        {changingPassword ? "Updating…" : "Change password"}
+                      </Button>
+                    </Group>
+                  </Stack>
+                </Box>
+
+                <Divider mt="xl" mb="md" label="Notifications" labelPosition="left" />
+                <Text c="dimmed">No notification service is configured. This section is reserved for future email and push notifications.</Text>
               </Stack>
             ) : null}
           </Stack>
@@ -1547,153 +1559,79 @@ export function SettingsPage() {
             {householdError ? <Alert color="red">{householdError}</Alert> : null}
             {loadingHousehold ? <Text c="dimmed">Loading…</Text> : null}
             {!loadingHousehold ? (
-              <>
-                <Stack mb="xl">
-                  <NumberInput
-                    label="Monthly savings target (USD)"
-                    min={0}
-                    step={0.01}
-                    placeholder="e.g. 500"
-                    value={targetDraft === "" ? "" : Number(targetDraft)}
-                    onChange={(value) => setTargetDraft(value === "" || value == null ? "" : String(value))}
-                    disabled={savingHousehold}
-                    maw={320}
-                  />
-                  <Fieldset legend="Household Demographics" mt="sm">
-                    <Stack gap="sm">
-                      <TextInput
-                        label="City"
-                        value={householdCityDraft}
-                        onChange={(e) => setHouseholdCityDraft(e.currentTarget.value)}
-                        disabled={savingHousehold}
-                      />
-                      <TextInput
-                        label="State"
-                        maxLength={100}
-                        value={householdStateDraft}
-                        onChange={(e) => setHouseholdStateDraft(e.currentTarget.value)}
-                        disabled={savingHousehold}
-                      />
-                      <NumberInput
-                        label="Combined gross household income"
-                        description="Combined gross income for all earners: base salary + regular bonuses. Exclude one-time items."
-                        prefix="$"
-                        thousandSeparator=","
-                        min={0}
-                        value={householdIncomeDraft === "" ? undefined : Number(householdIncomeDraft)}
-                        onChange={(value) =>
-                          setHouseholdIncomeDraft(
-                            typeof value === "number" && Number.isFinite(value) ? String(value) : ""
-                          )
-                        }
-                        disabled={savingHousehold}
-                        maw={360}
-                      />
-                    </Stack>
-                  </Fieldset>
-                  <Group>
-                    <Button
-                      type="button"
-                      loading={savingHousehold}
-                      onClick={() => {
-                        const t = targetDraft.trim();
-                        if (t === "") {
-                          void saveHouseholdTarget(null);
-                          return;
-                        }
-                        const n = Number(t);
-                        if (!Number.isFinite(n) || n < 0) {
-                          setHouseholdError("Enter a non-negative number or leave blank to clear.");
-                          return;
-                        }
-                        void saveHouseholdTarget(Math.round(n * 100) / 100);
-                      }}
-                    >
-                      {savingHousehold ? "Saving…" : "Save"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="default"
+              <Stack mb="xl">
+                <NumberInput
+                  label="Monthly savings target (USD)"
+                  min={0}
+                  step={0.01}
+                  placeholder="e.g. 500"
+                  value={targetDraft === "" ? "" : Number(targetDraft)}
+                  onChange={(value) => setTargetDraft(value === "" || value == null ? "" : String(value))}
+                  disabled={savingHousehold}
+                  maw={320}
+                />
+                <Fieldset legend="Household Demographics" mt="sm">
+                  <Stack gap="sm">
+                    <TextInput
+                      label="City"
+                      value={householdCityDraft}
+                      onChange={(e) => setHouseholdCityDraft(e.currentTarget.value)}
                       disabled={savingHousehold}
-                      onClick={() => void saveHouseholdTarget(null)}
-                    >
-                      Clear target
-                    </Button>
-                  </Group>
-                </Stack>
-
-                <Title order={4}>Export data</Title>
-                <Text c="dimmed">
-                  Download a full .hfb backup — accounts, transactions, net worth history, category rules, payslips, and more.
-                  Use this to migrate to a new host or keep an offline archive.
-                </Text>
-                <Text c="dimmed" size="sm">
-                  Export files are available for 48 hours after generation. Please download a local copy before then.
-                </Text>
-                {exportZipMessage ? (
-                  <Alert color={exportZipJobId ? "green" : "red"}>{exportZipMessage}</Alert>
-                ) : null}
-                {exportZipJobId ? (
+                    />
+                    <TextInput
+                      label="State"
+                      maxLength={100}
+                      value={householdStateDraft}
+                      onChange={(e) => setHouseholdStateDraft(e.currentTarget.value)}
+                      disabled={savingHousehold}
+                    />
+                    <NumberInput
+                      label="Combined gross household income"
+                      description="Combined gross income for all earners: base salary + regular bonuses. Exclude one-time items."
+                      prefix="$"
+                      thousandSeparator=","
+                      min={0}
+                      value={householdIncomeDraft === "" ? undefined : Number(householdIncomeDraft)}
+                      onChange={(value) =>
+                        setHouseholdIncomeDraft(
+                          typeof value === "number" && Number.isFinite(value) ? String(value) : ""
+                        )
+                      }
+                      disabled={savingHousehold}
+                      maw={360}
+                    />
+                  </Stack>
+                </Fieldset>
+                <Group>
                   <Button
-                    variant="subtle"
-                    px={0}
-                    justify="flex-start"
                     type="button"
-                    onClick={() => void downloadExportZip(exportZipJobId)}
-                  >
-                    Download household-export.hfb
-                  </Button>
-                ) : null}
-                <Button type="button" variant="default" disabled={exportZipBusy} onClick={() => void runHouseholdZipExport()}>
-                  {exportZipBusy ? "Preparing export…" : "Start data export"}
-                </Button>
-
-                <Title order={4} mt="xl">
-                  Restore from backup
-                </Title>
-                <Text c="dimmed">
-                  Upload an .hfb backup to preview its contents before restoring.
-                </Text>
-                <Alert color="red" variant="light">
-                  Warning: restoring will permanently replace all current accounts, transactions, rules, and net worth history.
-                  You will be signed out when restore completes.
-                </Alert>
-                {previewError ? <Alert color="red">{previewError}</Alert> : null}
-                {importMessage ? (
-                  <Alert color={importSuccess ? "green" : "red"}>{importMessage}</Alert>
-                ) : null}
-                {importStats ? (
-                  <Text c="dimmed" size="sm">
-                    Restored: {Object.entries(importStats).map(([k, v]) => `${String(v)} ${k}`).join(", ")}
-                  </Text>
-                ) : null}
-                <Group align="end" grow wrap="nowrap">
-                  <FileInput
-                    label="Backup .hfb file"
-                    accept=".hfb"
-                    disabled={previewBusy || importBusy}
-                    value={importFile}
-                    onChange={(file) => {
-                      setImportFile(file);
-                      setPreviewData(null);
-                      setPreviewError(null);
+                    loading={savingHousehold}
+                    onClick={() => {
+                      const t = targetDraft.trim();
+                      if (t === "") {
+                        void saveHouseholdTarget(null);
+                        return;
+                      }
+                      const n = Number(t);
+                      if (!Number.isFinite(n) || n < 0) {
+                        setHouseholdError("Enter a non-negative number or leave blank to clear.");
+                        return;
+                      }
+                      void saveHouseholdTarget(Math.round(n * 100) / 100);
                     }}
-                    placeholder="Choose backup .hfb…"
-                    leftSection={<IconUpload size={16} />}
-                    clearable
-                    w="100%"
-                  />
+                  >
+                    {savingHousehold ? "Saving…" : "Save"}
+                  </Button>
                   <Button
                     type="button"
-                    disabled={!importFile || previewBusy || importBusy}
-                    loading={previewBusy}
-                    onClick={() => void handlePreviewAndRestore()}
-                    miw={180}
+                    variant="default"
+                    disabled={savingHousehold}
+                    onClick={() => void saveHouseholdTarget(null)}
                   >
-                    {previewBusy ? "Reading backup..." : "Preview & Restore"}
+                    Clear target
                   </Button>
                 </Group>
-              </>
+              </Stack>
             ) : null}
           </Stack>
         ) : null}
@@ -1883,67 +1821,6 @@ export function SettingsPage() {
           </Stack>
         ) : null}
 
-        {tab === "notifications" ? (
-          <Stack mt="md">
-            <Title order={3}>Notifications</Title>
-            <Text c="dimmed">No notification service is configured for the local MVP. This tab is reserved.</Text>
-          </Stack>
-        ) : null}
-
-        {tab === "security" ? (
-          <Stack mt="md">
-            <Title order={3}>Security</Title>
-            {securityError ? <Alert color="red">{securityError}</Alert> : null}
-            {securitySuccess ? <Alert color="green">{securitySuccess}</Alert> : null}
-            <Box
-              component="form"
-              maw={480}
-              onSubmit={(e) => {
-                e.preventDefault();
-                void changePassword();
-              }}
-            >
-              <Stack>
-                <PasswordInput
-                  label="Current password"
-                  value={passwordDraft.currentPassword}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setPasswordDraft((prev) => ({ ...prev, currentPassword: value }));
-                  }}
-                  disabled={changingPassword}
-                  autoComplete="current-password"
-                />
-                <PasswordInput
-                  label="New password"
-                  value={passwordDraft.newPassword}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setPasswordDraft((prev) => ({ ...prev, newPassword: value }));
-                  }}
-                  disabled={changingPassword}
-                  autoComplete="new-password"
-                />
-                <PasswordInput
-                  label="Confirm new password"
-                  value={passwordDraft.confirmPassword}
-                  onChange={(e) => {
-                    const value = e.currentTarget.value;
-                    setPasswordDraft((prev) => ({ ...prev, confirmPassword: value }));
-                  }}
-                  disabled={changingPassword}
-                  autoComplete="new-password"
-                />
-                <Group>
-                  <Button type="submit" loading={changingPassword}>
-                    {changingPassword ? "Updating…" : "Change password"}
-                  </Button>
-                </Group>
-              </Stack>
-            </Box>
-          </Stack>
-        ) : null}
-
         {tab === "recurring" ? (
           <Stack mt="md">
             <Title order={3}>Recurring Payments</Title>
@@ -2066,39 +1943,84 @@ export function SettingsPage() {
           </Stack>
         ) : null}
 
-        {tab === "insights" ? (
+        {tab === "data" ? (
           <Stack mt="md">
-            <Title order={3}>AI Insights History</Title>
+            <Title order={3}>Data &amp; Backup</Title>
+
+            <Title order={4}>Export data</Title>
             <Text c="dimmed">
-              Historical financial health analyses generated from the dashboard.
+              Download a full .hfb backup — accounts, transactions, net worth history, category rules, payslips, and more.
+              Use this to migrate to a new host or keep an offline archive.
             </Text>
-            {insightHistoryLoading ? <Text c="dimmed">Loading…</Text> : null}
-            {insightHistoryError ? <Alert color="red">{insightHistoryError}</Alert> : null}
-            {!insightHistoryLoading && !insightHistoryError ? (
-              insightHistory.length === 0 ? (
-                <Text c="dimmed">No analysis history yet.</Text>
-              ) : (
-                <Table striped withTableBorder withColumnBorders>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Generated at</Table.Th>
-                      <Table.Th>Provider</Table.Th>
-                      <Table.Th>Model</Table.Th>
-                      <Table.Th>Health rating</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                      {insightHistory.map((row) => (
-                        <Table.Tr key={row.id}>
-                          <Table.Td>{new Date(row.generatedAt).toLocaleString()}</Table.Td>
-                          <Table.Td>{row.provider}</Table.Td>
-                          <Table.Td>{row.model}</Table.Td>
-                          <Table.Td>{row.payload?.healthRating ?? "—"}</Table.Td>
-                        </Table.Tr>
-                      ))}
-                  </Table.Tbody>
-                </Table>
-              )
+            <Text c="dimmed" size="sm">
+              Export files are available for 48 hours after generation. Please download a local copy before then.
+            </Text>
+            {exportZipMessage ? (
+              <Alert color={exportZipJobId ? "green" : "red"}>{exportZipMessage}</Alert>
+            ) : null}
+            {exportZipJobId ? (
+              <Button
+                variant="subtle"
+                px={0}
+                justify="flex-start"
+                type="button"
+                onClick={() => void downloadExportZip(exportZipJobId)}
+              >
+                Download household-export.hfb
+              </Button>
+            ) : null}
+            <Button type="button" variant="default" disabled={exportZipBusy} onClick={() => void runHouseholdZipExport()}>
+              {exportZipBusy ? "Preparing export…" : "Start data export"}
+            </Button>
+
+            {canManageHousehold ? (
+              <>
+                <Title order={4} mt="xl">
+                  Restore from backup
+                </Title>
+                <Text c="dimmed">
+                  Upload an .hfb backup to preview its contents before restoring.
+                </Text>
+                <Alert color="red" variant="light">
+                  Warning: restoring will permanently replace all current accounts, transactions, rules, and net worth history.
+                  You will be signed out when restore completes.
+                </Alert>
+                {previewError ? <Alert color="red">{previewError}</Alert> : null}
+                {importMessage ? (
+                  <Alert color={importSuccess ? "green" : "red"}>{importMessage}</Alert>
+                ) : null}
+                {importStats ? (
+                  <Text c="dimmed" size="sm">
+                    Restored: {Object.entries(importStats).map(([k, v]) => `${String(v)} ${k}`).join(", ")}
+                  </Text>
+                ) : null}
+                <Group align="end" grow wrap="nowrap">
+                  <FileInput
+                    label="Backup .hfb file"
+                    accept=".hfb"
+                    disabled={previewBusy || importBusy}
+                    value={importFile}
+                    onChange={(file) => {
+                      setImportFile(file);
+                      setPreviewData(null);
+                      setPreviewError(null);
+                    }}
+                    placeholder="Choose backup .hfb…"
+                    leftSection={<IconUpload size={16} />}
+                    clearable
+                    w="100%"
+                  />
+                  <Button
+                    type="button"
+                    disabled={!importFile || previewBusy || importBusy}
+                    loading={previewBusy}
+                    onClick={() => void handlePreviewAndRestore()}
+                    miw={180}
+                  >
+                    {previewBusy ? "Reading backup..." : "Preview & Restore"}
+                  </Button>
+                </Group>
+              </>
             ) : null}
           </Stack>
         ) : null}
@@ -2110,6 +2032,7 @@ export function SettingsPage() {
             setImportFile(null);
           }}
           title="Backup Preview"
+          closeOnClickOutside={false}
           centered
           size="lg"
         >

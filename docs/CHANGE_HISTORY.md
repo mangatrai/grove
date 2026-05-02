@@ -18,6 +18,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-128b — Forced password change via reset-password handoff
+**Date:** 2026-05-01
+**Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/password-reset.test.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`
+**What:** Replaced the forced-password-change gate (settings-only tabs + yellow banners + `Navigate` to settings) with a full-page redirect to the existing reset-password flow. New `POST /auth/setup-forced-change-token` issues a short-lived reset token for authenticated users with `force_password_change = true`. `ShellLayout` detects the flag from `/auth/me`, calls the endpoint, clears `localStorage` JWT, and uses `window.location.replace` to `/#/reset-password?token=...`, reusing `ResetPasswordPage` and `POST /auth/reset-password` (which already clears the flag, bumps `token_version`, and sends the password-changed email). Removed dead `securityOnlyMode` logic from Settings.
+
+---
+
+## CR-128 — Settings five tabs + dashboard financial health history
+**Date:** 2026-05-01
+**Files:** `frontend/src/pages/SettingsPage.tsx`, `frontend/src/components/FinancialHealthCard.tsx`
+**What:** Collapsed Settings to five tabs (`profile`, `household`, `accounts`, `recurring`, `data`): removed stub Notifications and Insights tabs; folded change-password and notifications copy into Profile; moved export/restore to **Data & Backup**. Dashboard **Financial Health** card replaces “View history →” settings link with a Mantine modal listing past analyses (re-fetch after new analysis via cache bust on `loadInsight`).
+
+---
+
+## FIX-128c (2026-05-01): Export preview read path and CR-127 backup test FK
+- **Type:** FIX
+- **What:** Moved `.hfb` extension validation inside the preview `try` so a rejected extension does not leave a dangling temp upload file. Use `Buffer` from `fs.readFileSync` / `decryptBackup` without redundant `Buffer.from` wrapping.
+- **Tests:** Backup preview integration seed now inserts a `financial_account` row and binds the import file to that account id (avoids FK issues vs a hardcoded BoA fixture id).
+- **Files changed:** `backend/src/modules/export/exports.routes.ts`, `backend/tests/app.test.ts`.
+
+---
+
 ## CR-127 — Backup Preview Before Restore
 **Date:** 2026-04-30
 **Files:** `backend/src/modules/export/exports.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/app.test.ts`, `docs/API_EXPORTS.md`, `docs/CHANGE_HISTORY.md`, `openapi/openapi.yaml`

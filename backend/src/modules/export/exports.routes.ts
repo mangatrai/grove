@@ -66,14 +66,14 @@ exportsRouter.post(
       return;
     }
 
-    const ext = path.extname(req.file.originalname ?? "").toLowerCase();
-    if (ext !== ".hfb") {
-      res.status(400).json({ message: "Invalid file type. Only .hfb files are accepted." });
-      return;
-    }
-
     try {
-      let buffer = Buffer.from(fs.readFileSync(req.file.path));
+      const ext = path.extname(req.file.originalname ?? "").toLowerCase();
+      if (ext !== ".hfb") {
+        res.status(400).json({ message: "Invalid file type. Only .hfb files are accepted." });
+        return;
+      }
+
+      let buffer: Buffer = fs.readFileSync(req.file.path);
       if (isEncryptedBackup(buffer)) {
         if (!env.BACKUP_ENCRYPTION_KEY) {
           res.status(422).json({
@@ -81,7 +81,7 @@ exportsRouter.post(
           });
           return;
         }
-        buffer = Buffer.from(decryptBackup(buffer, env.BACKUP_ENCRYPTION_KEY));
+        buffer = decryptBackup(buffer, env.BACKUP_ENCRYPTION_KEY);
       }
 
       let manifest: Record<string, unknown>;

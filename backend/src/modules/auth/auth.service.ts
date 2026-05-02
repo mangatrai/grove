@@ -182,6 +182,17 @@ export async function getForcePasswordChange(userId: string): Promise<boolean> {
   return Boolean(row?.force_password_change);
 }
 
+/**
+ * Issues a short-lived password reset token for a user who has force_password_change = true.
+ * Used by the frontend forced-change gate to hand off to the existing reset-password flow.
+ * Returns null if the flag is not set (caller should 403).
+ */
+export async function issueSetupToken(userId: string): Promise<string | null> {
+  const forced = await getForcePasswordChange(userId);
+  if (!forced) return null;
+  return createPasswordResetToken(userId, 1); // 1-hour TTL — same as email reset
+}
+
 function bytesToBase64Url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64url");
 }

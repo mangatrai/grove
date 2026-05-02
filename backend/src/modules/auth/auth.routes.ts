@@ -7,6 +7,7 @@ import { isEmailConfigured } from "../mailer/mailer.service.js";
 import {
   changePassword,
   getForcePasswordChange,
+  issueSetupToken,
   login,
   logoutUser,
   requestPasswordReset,
@@ -99,6 +100,15 @@ authRouter.post("/login", loginRateLimit, async (req, res) => {
 authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res) => {
   const forcePasswordChange = await getForcePasswordChange(req.authUser!.userId);
   res.status(200).json({ user: { ...req.authUser, forcePasswordChange } });
+});
+
+authRouter.post("/setup-forced-change-token", requireAuth, forgotPasswordRateLimit, async (req: AuthenticatedRequest, res) => {
+  const token = await issueSetupToken(req.authUser!.userId);
+  if (!token) {
+    res.status(403).json({ code: "NOT_FORCED", message: "No forced password change pending." });
+    return;
+  }
+  res.status(200).json({ token });
 });
 
 authRouter.get("/owner-only", requireAuth, requireRole(["owner", "admin"]), (_req, res) => {

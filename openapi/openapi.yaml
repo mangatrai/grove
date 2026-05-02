@@ -59,6 +59,43 @@ paths:
           description: User payload
         "401":
           description: Unauthorized
+  /auth/setup-forced-change-token:
+    post:
+      tags: [auth]
+      summary: Issue reset token for forced password change (signed-in users only)
+      description: |
+        When `force_password_change` is true for the authenticated user, creates a short-lived
+        password reset token (same mechanism as forgot-password) and returns the raw token so the
+        client can redirect to the reset-password UI. Returns 403 if no forced change is pending.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Raw one-time reset token (use with POST /auth/reset-password)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+                    minLength: 1
+        "401":
+          description: Unauthorized
+        "403":
+          description: User does not have a forced password change pending
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum: [NOT_FORCED]
+                  message:
+                    type: string
+                    example: No forced password change pending.
   /auth/capabilities:
     get:
       tags: [auth]

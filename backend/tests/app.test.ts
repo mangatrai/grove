@@ -441,6 +441,7 @@ describe("backup preview (CR-127)", () => {
     const householdId = crypto.randomUUID();
     const ownerUserId = crypto.randomUUID();
     const ownerProfileId = crypto.randomUUID();
+    const accountId = crypto.randomUUID();
     const ownerEmail = `cr127-owner-${seed}-${Date.now()}@example.com`;
     const ownerPassword = "ChangeMe123!";
     const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
@@ -458,6 +459,10 @@ describe("backup preview (CR-127)", () => {
       `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
        VALUES (?, ?, ?, 'CR-127 Owner', '[]')`
     ).run(ownerProfileId, householdId, ownerUserId);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, type, institution, owner_scope)
+       VALUES (?, ?, 'checking', 'CR-127 Test Bank', 'household')`
+    ).run(accountId, householdId);
 
     const defaultCategory = await sqlStmt(
       `SELECT id FROM category WHERE household_id IS NULL ORDER BY id LIMIT 1`
@@ -469,7 +474,7 @@ describe("backup preview (CR-127)", () => {
     ).run(
       crypto.randomUUID(),
       householdId,
-      SEED_BOA_CHECKING,
+      accountId,
       `cr127-seed:${seed}`,
       defaultCategory.id,
       crypto.randomUUID()

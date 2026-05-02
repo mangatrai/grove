@@ -10,10 +10,13 @@ import {
   Button,
   Group,
   Loader,
+  Modal,
   Paper,
+  ScrollArea,
   Stack,
   Text,
-  Title
+  Title,
+  UnstyledButton
 } from "@mantine/core";
 import { IconRefresh } from "@tabler/icons-react";
 
@@ -114,6 +117,11 @@ export function FinancialHealthCard() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [jobError, setJobError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRecords, setHistoryRecords] = useState<InsightRecord[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<InsightRecord | null>(null);
 
   const profileComplete = profile != null && profile.age != null;
 
@@ -137,6 +145,7 @@ export function FinancialHealthCard() {
     const res = await apiJson<{ ok: boolean; data: InsightRecord | null }>("/insights/financial");
     if (res.ok) {
       setInsight(res.data ?? null);
+      setHistoryRecords(null); // bust history cache so next modal open re-fetches
     } else {
       setInsight(null);
     }
@@ -206,6 +215,26 @@ export function FinancialHealthCard() {
       setGenerating(false);
     }
   }, [generating, pollJob]);
+
+  const openHistory = useCallback(async () => {
+    setHistoryOpen(true);
+    setSelectedRecord(null);
+    setHistoryError(null);
+    if (historyRecords !== null) return; // already loaded
+    setHistoryLoading(true);
+    try {
+      const res = await apiJson<{ ok: boolean; data: InsightRecord[] }>("/insights/financial/history?limit=30");
+      if (res.ok) {
+        setHistoryRecords(res.data);
+      } else {
+        setHistoryError("Could not load history.");
+      }
+    } catch (e: unknown) {
+      setHistoryError(e instanceof Error ? e.message : "Could not load history.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyRecords]);
 
   const localTitle = useMemo(
     () => locationLabel(profile?.city ?? null, profile?.state ?? null),
@@ -373,12 +402,125 @@ export function FinancialHealthCard() {
           </Accordion>
 
           <Group justify="flex-end" mt="md">
-            <Anchor component={Link} to="/settings?tab=insights" size="sm">
-              View history →
-            </Anchor>
+            <Button type="button" variant="subtle" size="sm" onClick={() => void openHistory()}>
+              View history
+            </Button>
           </Group>
         </>
       ) : null}
+      <Modal
+        opened={historyOpen}
+        onClose={() => {
+          setHistoryOpen(false);
+          setSelectedRecord(null);
+        }}
+        title={selectedRecord ? "Analysis Detail" : "Financial Health History"}
+        size="lg"
+        centered
+        scrollAreaComponent={ScrollArea.Autosize}
+      >
+        {selectedRecord ? (
+          <Stack gap="sm">
+            <Group>
+              <Button type="button" variant="subtle" size="sm" px={0} onClick={() => setSelectedRecord(null)}>
+                ← Back
+              </Button>
+            </Group>
+            <Group gap="xs">
+              <Badge color={ratingColor(selectedRecord.payload.healthRating)} variant="light">
+                {ratingLabel(selectedRecord.payload.healthRating)}
+              </Badge>
+              <Text size="xs" c="dimmed">
+                {formatInsightDate(selectedRecord.generatedAt)} · {selectedRecord.provider} {selectedRecord.model}
+              </Text>
+            </Group>
+            <Text size="sm" mb="xs">{selectedRecord.payload.healthRationale}</Text>
+            <Accordion variant="separated" radius="md">
+              <Accordion.Item value="benchmarks">
+                <Accordion.Control>Benchmarks</Accordion.Control>
+                <Accordion.Panel>
+                  <Stack gap="xs">
+                    <Box>
+                      <Text size="sm" fw={600}>Local</Text>
+                      <Text size="sm">{selectedRecord.payload.localBenchmark}</Text>
+                    </Box>
+                    <Box>
+                      <Text size="sm" fw={600}>National</Text>
+                      <Text size="sm">{selectedRecord.payload.nationalBenchmark}</Text>
+                    </Box>
+                  </Stack>
+                </Accordion.Panel>
+              </Accordion.Item>
+              <Accordion.Item value="working">
+                <Accordion.Control>What&apos;s working and concerns</Accordion.Control>
+                <Accordion.Panel>
+                  <Stack gap={4}>
+                    {selectedRecord.payload.whatsWorking.map((line, i) => (
+                      <Text key={`w-${String(i)}`} size="sm">+ {line}</Text>
+                    ))}
+                    {selectedRecord.payload.concerns.map((line, i) => (
+                      <Text key={`c-${String(i)}`} size="sm">- {line}</Text>
+                    ))}
+                  </Stack>
+                </Accordion.Panel>
+              </Accordion.Item>
+              <Accordion.Item value="details">
+                <Accordion.Control>Spending, investment gaps, and next steps</Accordion.Control>
+                <Accordion.Panel>
+                  <Stack gap={4}>
+                    {selectedRecord.payload.spendingAnalysis.map((line, i) => (
+                      <Text key={`s-${String(i)}`} size="sm">▸ {line}</Text>
+                    ))}
+                    {selectedRecord.payload.investmentGaps.map((line, i) => (
+                      <Text key={`g-${String(i)}`} size="sm">▸ {line}</Text>
+                    ))}
+                    {selectedRecord.payload.nextSteps.map((line, i) => (
+                      <Text key={`n-${String(i)}`} size="sm">▸ {line}</Text>
+                    ))}
+                  </Stack>
+                </Accordion.Panel>
+              </Accordion.Item>
+            </Accordion>
+          </Stack>
+        ) : (
+          <Stack gap="sm">
+            {historyLoading ? (
+              <Group gap="sm">
+                <Loader size="sm" />
+                <Text size="sm" c="dimmed">Loading history…</Text>
+              </Group>
+            ) : null}
+            {historyError ? (
+              <Alert color="red">{historyError}</Alert>
+            ) : null}
+            {!historyLoading && !historyError && historyRecords !== null ? (
+              historyRecords.length === 0 ? (
+                <Text size="sm" c="dimmed">No analyses yet.</Text>
+              ) : (
+                <Stack gap={4}>
+                  {historyRecords.map((rec) => (
+                    <UnstyledButton
+                      key={rec.id}
+                      onClick={() => setSelectedRecord(rec)}
+                      style={{ borderRadius: 8, padding: "8px 12px" }}
+                    >
+                      <Group justify="space-between">
+                        <Stack gap={2}>
+                          <Text size="sm" fw={500}>{formatInsightDate(rec.generatedAt)}</Text>
+                          <Text size="xs" c="dimmed">{rec.provider} · {rec.model}</Text>
+                        </Stack>
+                        <Badge color={ratingColor(rec.payload.healthRating)} variant="light" size="sm">
+                          {ratingLabel(rec.payload.healthRating)}
+                        </Badge>
+                      </Group>
+                    </UnstyledButton>
+                  ))}
+                </Stack>
+              )
+            ) : null}
+          </Stack>
+        )}
+      </Modal>
     </Paper>
   );
 }
