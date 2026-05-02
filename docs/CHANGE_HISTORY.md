@@ -23,6 +23,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 **Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/password-reset.test.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`
 **What:** Replaced the forced-password-change gate (settings-only tabs + yellow banners + `Navigate` to settings) with a full-page redirect to the existing reset-password flow. New `POST /auth/setup-forced-change-token` issues a short-lived reset token for authenticated users with `force_password_change = true`. `ShellLayout` detects the flag from `/auth/me`, calls the endpoint, clears `localStorage` JWT, and uses `window.location.replace` to `/#/reset-password?token=...`, reusing `ResetPasswordPage` and `POST /auth/reset-password` (which already clears the flag, bumps `token_version`, and sends the password-changed email). Removed dead `securityOnlyMode` logic from Settings.
 
+## FIX-128d (2026-05-02): ShellLayout forced-change redirect polish
+- **Type:** FIX
+- **What:** Reset `setupRedirecting` when JWT is cleared so a later sign-in cannot skip the setup-token effect. While `forcePasswordChange` is true (before `location.replace`), return `null` instead of rendering the full authed shell to avoid a brief sidebar flash.
+- **Files changed:** `frontend/src/layout/ShellLayout.tsx`, `docs/CHANGE_HISTORY.md`.
+
 ---
 
 ## CR-128 — Settings five tabs + dashboard financial health history

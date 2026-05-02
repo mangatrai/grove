@@ -28,6 +28,7 @@ export function ShellLayout() {
       setForcePasswordChange(false);
       setUserRole(null);
       setPersonProfileId(undefined);
+      setSetupRedirecting(false);
       return;
     }
     void apiJson<{ user: { forcePasswordChange?: boolean; role?: string; personProfileId?: string | null } }>("/auth/me")
@@ -127,6 +128,11 @@ export function ShellLayout() {
         </div>
       </div>
     );
+  }
+
+  // Forced-change redirect is in flight — don't flash the full shell.
+  if (forcePasswordChange) {
+    return null;
   }
 
   return (
