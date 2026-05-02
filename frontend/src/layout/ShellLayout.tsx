@@ -6,6 +6,18 @@ import { UserContext } from "../UserContext";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopBar } from "./AppTopBar";
 
+/** Set by HomePage on login when server returns `forcePasswordChange`; cleared after `/auth/me` or sign-out. */
+const LOGIN_FORCE_PASSWORD_HINT_KEY = "hf_login_force_password_change";
+
+function readLoginForcePasswordHint(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(LOGIN_FORCE_PASSWORD_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function ShellLayout() {
   const token = useAuthToken();
   const { pathname } = useLocation();
@@ -29,10 +41,20 @@ export function ShellLayout() {
       setUserRole(null);
       setPersonProfileId(undefined);
       setSetupRedirecting(false);
+      try {
+        sessionStorage.removeItem(LOGIN_FORCE_PASSWORD_HINT_KEY);
+      } catch {
+        /* ignore */
+      }
       return;
     }
     void apiJson<{ user: { forcePasswordChange?: boolean; role?: string; personProfileId?: string | null } }>("/auth/me")
       .then((r) => {
+        try {
+          sessionStorage.removeItem(LOGIN_FORCE_PASSWORD_HINT_KEY);
+        } catch {
+          /* ignore */
+        }
         setForcePasswordChange(Boolean(r.user.forcePasswordChange));
         setUserRole(r.user.role ?? null);
         setPersonProfileId(r.user.personProfileId ?? null);
@@ -69,7 +91,9 @@ export function ShellLayout() {
   }, []);
 
   useEffect(() => {
-    if (!forcePasswordChange || !token || setupRedirecting) return;
+    if (!token || setupRedirecting) return;
+    const hinted = readLoginForcePasswordHint();
+    if (!forcePasswordChange && !hinted) return;
     setSetupRedirecting(true);
     void (async () => {
       try {
@@ -91,6 +115,9 @@ export function ShellLayout() {
       }
     })();
   }, [forcePasswordChange, token, setupRedirecting]);
+
+  const loginForcePasswordHint = Boolean(token && readLoginForcePasswordHint());
+  const blockAuthedShellForForceChange = forcePasswordChange || loginForcePasswordHint;
 
   if (!token) {
     return (
@@ -131,8 +158,8 @@ export function ShellLayout() {
     );
   }
 
-  // Forced-change redirect is in flight — don't flash the full shell.
-  if (forcePasswordChange) {
+  // Forced-change redirect is in flight — don't flash the full shell (including before `/auth/me`).
+  if (blockAuthedShellForForceChange) {
     return null;
   }
 

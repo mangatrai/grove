@@ -86,7 +86,16 @@ export function HomePage() {
         setError(msg);
         return;
       }
-      const data = (await res.json()) as { token: string };
+      const data = (await res.json()) as { token: string; forcePasswordChange?: boolean };
+      try {
+        if (data.forcePasswordChange) {
+          sessionStorage.setItem("hf_login_force_password_change", "1");
+        } else {
+          sessionStorage.removeItem("hf_login_force_password_change");
+        }
+      } catch {
+        /* ignore */
+      }
       setToken(data.token);
     } catch {
       setError("Sign in failed. Check your network connection.");

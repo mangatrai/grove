@@ -7,6 +7,7 @@
 
 ## Auth routes
 
+- `POST /auth/login` — Returns `{ token, forcePasswordChange }`. When `forcePasswordChange` is true, the client should not render the main app shell before handing off to reset-password (same flag as `GET /auth/me`).
 - `POST /auth/setup-forced-change-token` — **Requires auth.** When `force_password_change` is true for the current user, returns `{ token }` (raw one-time reset token, same TTL as email reset). **403** with `code: NOT_FORCED` if the flag is not set. Used by the shell to redirect into the existing reset-password flow after clearing the JWT.
 
 ## Insights routes

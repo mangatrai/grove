@@ -23,6 +23,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 **Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/password-reset.test.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`
 **What:** Replaced the forced-password-change gate (settings-only tabs + yellow banners + `Navigate` to settings) with a full-page redirect to the existing reset-password flow. New `POST /auth/setup-forced-change-token` issues a short-lived reset token for authenticated users with `force_password_change = true`. `ShellLayout` detects the flag from `/auth/me`, calls the endpoint, clears `localStorage` JWT, and uses `window.location.replace` to `/reset-password?token=...` (pathname; matches `BrowserRouter`), reusing `ResetPasswordPage` and `POST /auth/reset-password` (which already clears the flag, bumps `token_version`, and sends the password-changed email). Removed dead `securityOnlyMode` logic from Settings.
 
+## FIX-128f (2026-05-02): No dashboard flash on first-login forced password reset
+- **Type:** FIX
+- **Issue:** After sign-in, `/auth/me` ran asynchronously so one frame could render the authed shell and dashboard before `forcePasswordChange` was applied.
+- **Fix:** `POST /auth/login` now returns `forcePasswordChange` (read with the credential check). `HomePage` sets a one-shot `sessionStorage` hint before storing the JWT; `ShellLayout` treats the hint like the forced flag for the shell gate and for starting the setup-token redirect, and clears the hint when `/auth/me` completes or the session ends.
+- **Files changed:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/HomePage.tsx`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`.
+
+---
+
 ## FIX-128e (2026-05-02): Forced-change redirect URL must use pathname (BrowserRouter)
 - **Type:** FIX
 - **Issue:** `window.location.replace('/#/reset-password?token=...')` left `location.pathname` as `/`, so React Router matched `HomeRoute` (sign-in) instead of `ResetPasswordPage`.

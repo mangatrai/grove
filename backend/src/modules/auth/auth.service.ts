@@ -13,6 +13,7 @@ interface DbLoginUser extends AuthUser {
   email: string;
   passwordHash: string;
   tokenVersion: number;
+  forcePasswordChange: boolean;
 }
 
 async function findUserByEmail(email: string): Promise<DbLoginUser | null> {
@@ -23,10 +24,12 @@ async function findUserByEmail(email: string): Promise<DbLoginUser | null> {
     email: string;
     password_hash: string;
     token_version: number;
+    force_password_change: boolean;
     person_profile_id: string | null;
   }>(
     `
   SELECT u.id, u.household_id, u.role, u.email, u.password_hash, u.token_version,
+         u.force_password_change,
          p.id AS person_profile_id
   FROM app_user u
   LEFT JOIN person_profile p ON p.linked_user_id = u.id AND p.household_id = u.household_id
@@ -45,7 +48,8 @@ async function findUserByEmail(email: string): Promise<DbLoginUser | null> {
     personProfileId: row.person_profile_id ?? null,
     email: row.email,
     passwordHash: row.password_hash,
-    tokenVersion: row.token_version
+    tokenVersion: row.token_version,
+    forcePasswordChange: Boolean(row.force_password_change)
   };
 }
 
@@ -61,7 +65,7 @@ export interface LoginPayload {
  */
 const DUMMY_HASH = "$2a$12$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234";
 
-export async function login(payload: LoginPayload): Promise<string | null> {
+export async function login(payload: LoginPayload): Promise<{ token: string; forcePasswordChange: boolean } | null> {
   const user = await findUserByEmail(payload.email);
 
   // Always run bcrypt (async) so response time is the same whether the email exists or not.
@@ -71,7 +75,7 @@ export async function login(payload: LoginPayload): Promise<string | null> {
     return null;
   }
 
-  return jwt.sign(
+  const token = jwt.sign(
     {
       sub: user.userId,
       householdId: user.householdId,
@@ -81,6 +85,7 @@ export async function login(payload: LoginPayload): Promise<string | null> {
     env.JWT_SECRET,
     { expiresIn: "8h", algorithm: "HS256" }
   );
+  return { token, forcePasswordChange: user.forcePasswordChange };
 }
 
 export async function verifyToken(token: string): Promise<AuthUser | null> {

@@ -88,13 +88,13 @@ authRouter.post("/login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  const token = await login(parsed.data);
-  if (!token) {
+  const result = await login(parsed.data);
+  if (!result) {
     res.status(401).json({ message: "Invalid credentials" });
     return;
   }
 
-  res.status(200).json({ token });
+  res.status(200).json({ token: result.token, forcePasswordChange: result.forcePasswordChange });
 });
 
 authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res) => {

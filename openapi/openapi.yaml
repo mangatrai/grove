@@ -47,6 +47,17 @@ paths:
       responses:
         "200":
           description: Token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, forcePasswordChange]
+                properties:
+                  token:
+                    type: string
+                  forcePasswordChange:
+                    type: boolean
+                    description: When true, client should send the user through forced password reset before normal app use.
         "401":
           description: Invalid credentials
   /auth/me:
