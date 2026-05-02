@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-129c (2026-05-02): Vite dev proxy missing `/gdrive`
+- **Type:** FIX
+- **Issue:** `POST /gdrive/connect` from the Vite dev server (port 3000) returned **404** because only other API path prefixes were proxied to the backend; requests never reached Express.
+- **Fix:** Added `"/gdrive"` to `server.proxy` in `frontend/vite.config.ts`.
+- **Files:** `frontend/vite.config.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-129b (2026-05-02): GDrive connect — parse response body safely
 - **Type:** FIX
 - **Issue:** `handleGDriveConnect` called `Response.json()` on every response; empty or non-JSON bodies (e.g. proxy/gateway, odd status codes) threw `Unexpected end of JSON input` and masked the real failure.

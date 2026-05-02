@@ -28,6 +28,7 @@ export default defineConfig({
       "/health": api,
       "/household": api,
       "/exports": api,
+      "/gdrive": api,
       "/budget": api,
       "/recurring-overrides": api,
       "/insights": api
