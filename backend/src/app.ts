@@ -12,6 +12,7 @@ import { budgetRouter } from "./modules/budget/budget.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
 import { exportsRouter } from "./modules/export/exports.routes.js";
+import { gdriveRouter } from "./modules/gdrive/gdrive.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { householdRouter } from "./modules/household/household.routes.js";
 import { insightsRouter } from "./modules/insights/insights.routes.js";
@@ -60,6 +61,7 @@ const API_PATH_PREFIXES = [
   "/reports",
   "/payslips",
   "/exports",
+  "/gdrive",
   "/budget",
   "/recurring-overrides",
   "/insights"
@@ -110,6 +112,7 @@ export function buildApp() {
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
   app.use("/exports", exportsRouter);
+  app.use("/gdrive", gdriveRouter);
   app.use("/budget", budgetRouter);
   app.use("/recurring-overrides", recurringRouter);
   app.use("/insights", insightsRouter);

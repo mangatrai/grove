@@ -10,6 +10,12 @@
 - `POST /auth/login` — Returns `{ token, forcePasswordChange }`. When `forcePasswordChange` is true, the client should not render the main app shell before handing off to reset-password (same flag as `GET /auth/me`).
 - `POST /auth/setup-forced-change-token` — **Requires auth.** When `force_password_change` is true for the current user, returns `{ token }` (raw one-time reset token, same TTL as email reset). **403** with `code: NOT_FORCED` if the flag is not set. Used by the shell to redirect into the existing reset-password flow after clearing the JWT.
 
+## Google Drive routes
+
+- `GET /gdrive/status` — owner or admin. Returns `{ connected: bool, folderId?, folderName?, connectedAt?, connectedByUserId?, lastVerifiedAt?, lastError? }`. The service account key is never returned.
+- `POST /gdrive/connect` — owner only. Body: `{ serviceAccountKeyJson: string, folderId: string }`. Validates key format, calls the Drive API to confirm folder access, then persists credentials. **422** with `code: DRIVE_CONNECTION_FAILED` when the Drive test fails. **429** when connect is rate-limited.
+- `DELETE /gdrive/disconnect` — owner only. Removes stored credentials.
+
 ## Insights routes
 
 - `GET /insights/financial`

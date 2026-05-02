@@ -18,10 +18,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## CR-129 — Google Drive Service Account Connection (1/3: schema + dependency)
+## CR-129 — Google Drive Service Account Connection (2/3: HTTP API + docs)
 **Date:** 2026-05-01
-**Files:** `backend/db/migrations/0034_gdrive_config.sql`, `backend/package.json`, `backend/package-lock.json`, `docs/CHANGE_HISTORY.md`
-**What:** Added `household_gdrive_config` (one row per household: service account JSON, Drive folder id/name, connection metadata). Added `googleapis` for Drive API validation (HTTP routes and UI in follow-up commits).
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/app.ts`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** `GET /gdrive/status` (owner/admin), `POST /gdrive/connect` (owner, validates key + folder via Drive API, rate-limited outside TEST), `DELETE /gdrive/disconnect` (owner). OpenAPI and API index updated. Service exports `getGDriveCredentials()` for CR-130. Settings UI remains in the next commit.
 
 ---
 
