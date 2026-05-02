@@ -610,16 +610,31 @@ export function SettingsPage() {
           folderId: gdriveFolderIdInput.trim()
         })
       });
-      const body = (await res.json()) as GDriveStatus & { message?: string };
+      const raw = await res.text();
+      let errPayload: { message?: string } = {};
+      if (raw.trim()) {
+        try {
+          errPayload = JSON.parse(raw) as { message?: string };
+        } catch {
+          setGdriveError(
+            res.ok
+              ? "Invalid response from server after connect."
+              : `Request failed (${res.status}). Server did not return JSON.`
+          );
+          return;
+        }
+      }
       if (!res.ok) {
-        setGdriveError(body.message ?? "Could not connect to Google Drive.");
+        setGdriveError(errPayload.message ?? "Could not connect to Google Drive.");
         return;
       }
       const refreshed = await apiJson<GDriveStatus>("/gdrive/status");
       setGdriveStatus(refreshed);
       setGdriveKeyInput("");
       setGdriveFolderIdInput("");
-      setGdriveSuccess(`Connected to folder "${body.folderName ?? body.folderId ?? ""}".`);
+      setGdriveSuccess(
+        `Connected to folder "${refreshed.folderName ?? refreshed.folderId ?? ""}".`
+      );
     } catch (e: unknown) {
       setGdriveError(e instanceof Error ? e.message : "Could not connect.");
     } finally {
