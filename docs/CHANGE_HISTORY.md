@@ -18,10 +18,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## CR-129 — Google Drive Service Account Connection (2/3: HTTP API + docs)
+## CR-129 — Google Drive Service Account Connection
 **Date:** 2026-05-01
-**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/app.ts`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
-**What:** `GET /gdrive/status` (owner/admin), `POST /gdrive/connect` (owner, validates key + folder via Drive API, rate-limited outside TEST), `DELETE /gdrive/disconnect` (owner). OpenAPI and API index updated. Service exports `getGDriveCredentials()` for CR-130. Settings UI remains in the next commit.
+**Files:** `backend/db/migrations/0034_gdrive_config.sql`, `backend/package.json`, `backend/package-lock.json`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/app.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** Google Drive Service Account connection. New `household_gdrive_config` table stores the service account JSON, folder ID, folder name (cached), and connection metadata. Three new endpoints: `GET /gdrive/status`, `POST /gdrive/connect` (validates key format + pings Drive API to confirm access), `DELETE /gdrive/disconnect`. Data & Backup settings tab gains a Connect/Disconnect UI (owner only). `getGDriveCredentials()` exported for use by CR-130 upload service.
 
 ---
 

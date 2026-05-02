@@ -24,6 +24,7 @@ import {
   Table,
   Tabs,
   Text,
+  Textarea,
   TextInput,
   Title
 } from "@mantine/core";
@@ -68,6 +69,16 @@ type AccountRow = {
   owner_scope?: "household" | "person";
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
+};
+
+type GDriveStatus = {
+  connected: boolean;
+  folderId?: string;
+  folderName?: string | null;
+  connectedAt?: string;
+  connectedByUserId?: string;
+  lastVerifiedAt?: string | null;
+  lastError?: string | null;
 };
 
 type BelongsToChoice = "household" | `person:${string}`;
@@ -335,6 +346,14 @@ export function SettingsPage() {
   const [recurringLoading, setRecurringLoading] = useState(false);
   const [recurringError, setRecurringError] = useState<string | null>(null);
   const [editingOverride, setEditingOverride] = useState<RecurringOverride | null>(null);
+  const [gdriveStatus, setGdriveStatus] = useState<GDriveStatus | null>(null);
+  const [gdriveLoading, setGdriveLoading] = useState(false);
+  const [gdriveConnecting, setGdriveConnecting] = useState(false);
+  const [gdriveError, setGdriveError] = useState<string | null>(null);
+  const [gdriveSuccess, setGdriveSuccess] = useState<string | null>(null);
+  const [gdriveKeyInput, setGdriveKeyInput] = useState("");
+  const [gdriveFolderIdInput, setGdriveFolderIdInput] = useState("");
+  const [gdriveDisconnectConfirm, setGdriveDisconnectConfirm] = useState(false);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -579,6 +598,48 @@ export function SettingsPage() {
     }
   }, [importFile]);
 
+  const handleGDriveConnect = useCallback(async () => {
+    setGdriveError(null);
+    setGdriveSuccess(null);
+    setGdriveConnecting(true);
+    try {
+      const res = await apiFetch("/gdrive/connect", {
+        method: "POST",
+        body: JSON.stringify({
+          serviceAccountKeyJson: gdriveKeyInput.trim(),
+          folderId: gdriveFolderIdInput.trim()
+        })
+      });
+      const body = (await res.json()) as GDriveStatus & { message?: string };
+      if (!res.ok) {
+        setGdriveError(body.message ?? "Could not connect to Google Drive.");
+        return;
+      }
+      const refreshed = await apiJson<GDriveStatus>("/gdrive/status");
+      setGdriveStatus(refreshed);
+      setGdriveKeyInput("");
+      setGdriveFolderIdInput("");
+      setGdriveSuccess(`Connected to folder "${body.folderName ?? body.folderId ?? ""}".`);
+    } catch (e: unknown) {
+      setGdriveError(e instanceof Error ? e.message : "Could not connect.");
+    } finally {
+      setGdriveConnecting(false);
+    }
+  }, [gdriveKeyInput, gdriveFolderIdInput]);
+
+  const handleGDriveDisconnect = useCallback(async () => {
+    setGdriveDisconnectConfirm(false);
+    setGdriveError(null);
+    setGdriveSuccess(null);
+    try {
+      await apiFetch("/gdrive/disconnect", { method: "DELETE" });
+      setGdriveStatus({ connected: false });
+      setGdriveSuccess("Google Drive disconnected.");
+    } catch {
+      setGdriveError("Could not disconnect. Please try again.");
+    }
+  }, []);
+
   useEffect(() => {
     void (async () => {
       try {
@@ -675,6 +736,15 @@ export function SettingsPage() {
       .catch(() => setRecurringError("Failed to load recurring overrides."))
       .finally(() => setRecurringLoading(false));
   }, [token, tab]);
+
+  useEffect(() => {
+    if (!token || tab !== "data" || authRole !== "owner") return;
+    setGdriveLoading(true);
+    void apiJson<GDriveStatus>("/gdrive/status")
+      .then((r) => setGdriveStatus(r))
+      .catch(() => setGdriveStatus({ connected: false }))
+      .finally(() => setGdriveLoading(false));
+  }, [token, tab, authRole]);
 
   async function addCustomInstitutionName() {
     if (!token) {
@@ -2020,6 +2090,115 @@ export function SettingsPage() {
                     {previewBusy ? "Reading backup..." : "Preview & Restore"}
                   </Button>
                 </Group>
+              </>
+            ) : null}
+
+            {authRole === "owner" ? (
+              <>
+                <Divider mt="xl" mb="md" label="Google Drive Backup" labelPosition="left" />
+                <Text c="dimmed" size="sm">
+                  Connect a Google Drive folder using a Service Account to enable automated cloud backups.
+                  The service account email must have <strong>Editor</strong> access to the folder.
+                </Text>
+
+                {gdriveLoading ? (
+                  <Text c="dimmed" size="sm">
+                    Loading…
+                  </Text>
+                ) : null}
+                {gdriveError ? (
+                  <Alert color="red" variant="light" mt="xs">
+                    {gdriveError}
+                  </Alert>
+                ) : null}
+                {gdriveSuccess ? (
+                  <Alert color="green" variant="light" mt="xs">
+                    {gdriveSuccess}
+                  </Alert>
+                ) : null}
+
+                {!gdriveLoading && gdriveStatus?.connected ? (
+                  <Paper withBorder p="sm" radius="md" mt="xs">
+                    <Group justify="space-between" wrap="nowrap">
+                      <Stack gap={2}>
+                        <Group gap="xs">
+                          <Badge color="green" variant="light">
+                            Connected
+                          </Badge>
+                          <Text size="sm" fw={500}>
+                            {gdriveStatus.folderName ?? gdriveStatus.folderId}
+                          </Text>
+                        </Group>
+                        <Text size="xs" c="dimmed">
+                          Connected{" "}
+                          {gdriveStatus.connectedAt
+                            ? new Date(gdriveStatus.connectedAt).toLocaleDateString()
+                            : ""}
+                        </Text>
+                        {gdriveStatus.lastError ? (
+                          <Text size="xs" c="red">
+                            Last error: {gdriveStatus.lastError}
+                          </Text>
+                        ) : null}
+                      </Stack>
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="xs"
+                        color="red"
+                        onClick={() => setGdriveDisconnectConfirm(true)}
+                      >
+                        Disconnect
+                      </Button>
+                    </Group>
+                  </Paper>
+                ) : null}
+
+                {!gdriveLoading && !gdriveStatus?.connected ? (
+                  <Stack gap="sm" mt="xs" maw={560}>
+                    <Textarea
+                      label="Service Account Key JSON"
+                      description="Paste the full contents of your downloaded service account JSON key file."
+                      placeholder='{"type": "service_account", "project_id": "...", ...}'
+                      value={gdriveKeyInput}
+                      onChange={(e) => setGdriveKeyInput(e.currentTarget.value)}
+                      disabled={gdriveConnecting}
+                      minRows={5}
+                      maxRows={10}
+                      autosize
+                      styles={{ input: { fontFamily: "monospace", fontSize: "0.8rem" } }}
+                    />
+                    <TextInput
+                      label="Drive Folder ID"
+                      description="The folder ID from the Drive URL: drive.google.com/drive/folders/THIS_PART"
+                      placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+                      value={gdriveFolderIdInput}
+                      onChange={(e) => setGdriveFolderIdInput(e.currentTarget.value)}
+                      disabled={gdriveConnecting}
+                    />
+                    <Group>
+                      <Button
+                        type="button"
+                        loading={gdriveConnecting}
+                        disabled={!gdriveKeyInput.trim() || !gdriveFolderIdInput.trim()}
+                        onClick={() => void handleGDriveConnect()}
+                      >
+                        {gdriveConnecting ? "Connecting…" : "Connect Google Drive"}
+                      </Button>
+                    </Group>
+                  </Stack>
+                ) : null}
+
+                <ConfirmDialog
+                  opened={gdriveDisconnectConfirm}
+                  title="Disconnect Google Drive?"
+                  message="This will remove the stored service account key and disable automated backups. You can reconnect at any time."
+                  confirmLabel="Disconnect"
+                  cancelLabel="Cancel"
+                  danger
+                  onClose={() => setGdriveDisconnectConfirm(false)}
+                  onConfirm={() => void handleGDriveDisconnect()}
+                />
               </>
             ) : null}
           </Stack>
