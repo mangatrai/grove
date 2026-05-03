@@ -354,6 +354,9 @@ export function SettingsPage() {
   const [gdriveKeyInput, setGdriveKeyInput] = useState("");
   const [gdriveFolderIdInput, setGdriveFolderIdInput] = useState("");
   const [gdriveDisconnectConfirm, setGdriveDisconnectConfirm] = useState(false);
+  const [backupJobId, setBackupJobId] = useState<string | null>(null);
+  const [backupPolling, setBackupPolling] = useState(false);
+  const [backupResult, setBackupResult] = useState<{ ok: boolean; fileName?: string; error?: string } | null>(null);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -646,12 +649,33 @@ export function SettingsPage() {
     setGdriveDisconnectConfirm(false);
     setGdriveError(null);
     setGdriveSuccess(null);
+    setBackupResult(null);
+    setBackupPolling(false);
+    setBackupJobId(null);
     try {
       await apiFetch("/gdrive/disconnect", { method: "DELETE" });
       setGdriveStatus({ connected: false });
       setGdriveSuccess("Google Drive disconnected.");
     } catch {
       setGdriveError("Could not disconnect. Please try again.");
+    }
+  }, []);
+
+  const handleBackupNow = useCallback(async () => {
+    setBackupResult(null);
+    setBackupPolling(true);
+    try {
+      const res = await apiFetch("/gdrive/backup", { method: "POST" });
+      const body = (await res.json()) as { jobId?: string; message?: string };
+      if (!res.ok || !body.jobId) {
+        setBackupResult({ ok: false, error: (body as { message?: string }).message ?? "Could not start backup." });
+        setBackupPolling(false);
+        return;
+      }
+      setBackupJobId(body.jobId);
+    } catch {
+      setBackupResult({ ok: false, error: "Could not reach server." });
+      setBackupPolling(false);
     }
   }, []);
 
@@ -760,6 +784,47 @@ export function SettingsPage() {
       .catch(() => setGdriveStatus({ connected: false }))
       .finally(() => setGdriveLoading(false));
   }, [token, tab, canManageHousehold]);
+
+  useEffect(() => {
+    if (!backupJobId || !backupPolling) return;
+    let cancelled = false;
+    const deadline = Date.now() + 3 * 60 * 1000;
+    void (async () => {
+      while (!cancelled && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        if (cancelled) break;
+        try {
+          const st = await apiJson<{
+            status: string;
+            driveFileName?: string | null;
+            errorText?: string | null;
+          }>(`/gdrive/backup/${encodeURIComponent(backupJobId)}`);
+          if (st.status === "complete") {
+            setBackupResult({ ok: true, fileName: st.driveFileName ?? undefined });
+            setBackupPolling(false);
+            setBackupJobId(null);
+            return;
+          }
+          if (st.status === "failed") {
+            setBackupResult({ ok: false, error: st.errorText ?? "Backup failed." });
+            setBackupPolling(false);
+            setBackupJobId(null);
+            return;
+          }
+        } catch {
+          /* keep polling */
+        }
+      }
+      if (!cancelled) {
+        setBackupResult({ ok: false, error: "Backup timed out. Check Drive connectivity and try again." });
+        setBackupPolling(false);
+        setBackupJobId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [backupJobId, backupPolling]);
 
   async function addCustomInstitutionName() {
     if (!token) {
@@ -2161,6 +2226,33 @@ export function SettingsPage() {
                           <Text size="xs" c="red">
                             Last error: {gdriveStatus.lastError}
                           </Text>
+                        ) : null}
+                        {authRole === "owner" ? (
+                          <Group mt="xs">
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="light"
+                              loading={backupPolling}
+                              disabled={backupPolling}
+                              onClick={() => void handleBackupNow()}
+                            >
+                              {backupPolling ? "Backing up…" : "Back up now"}
+                            </Button>
+                          </Group>
+                        ) : null}
+                        {backupResult ? (
+                          <Alert
+                            color={backupResult.ok ? "green" : "red"}
+                            variant="light"
+                            mt="xs"
+                            withCloseButton
+                            onClose={() => setBackupResult(null)}
+                          >
+                            {backupResult.ok
+                              ? `Backed up: ${backupResult.fileName ?? "file uploaded to Drive"}`
+                              : backupResult.error}
+                          </Alert>
                         ) : null}
                       </Stack>
                       {authRole === "owner" ? (

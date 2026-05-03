@@ -16,6 +16,8 @@ Authenticated household backup as a **`.hfb`** file (async job), and **destructi
 
 Queues an **export** job. Response is immediate (**202**); the `.hfb` backup is built in the background.
 
+When the job reaches **`complete`**, the server sends a **fire-and-forget** email to the requesting user (if SMTP is configured and the user has an email): subject *Your Household Finance export is ready*, with the file expiry time and either a **Settings → Data** link (`PUBLIC_BASE_URL` set) or instructions to open the app. Mail failures do not change the job status.
+
 **429:** Rolling window limit — **10 export starts per user per hour** (see `exports.routes.ts`).
 
 **202 body:**

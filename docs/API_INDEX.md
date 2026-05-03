@@ -17,6 +17,8 @@ Prose: [`API_GDRIVE.md`](API_GDRIVE.md).
 - `GET /gdrive/status` — owner or admin. Returns `{ connected: bool, folderId?, folderName?, connectedAt?, connectedByUserId?, lastVerifiedAt?, lastError? }`. The service account key is never returned. `connectedByUserId` may be `null` after the connecting user is removed (audit FK `ON DELETE SET NULL`).
 - `POST /gdrive/connect` — owner only. Body: `{ serviceAccountKeyJson: string, folderId: string }`. Validates key format, calls the Drive API to confirm folder access, then persists credentials. **422** with `code: DRIVE_CONNECTION_FAILED` when the Drive test fails. **429** when connect is rate-limited.
 - `DELETE /gdrive/disconnect` — owner only. Removes stored credentials.
+- `POST /gdrive/backup` — owner only. Queues async upload of a household `.hfb` to the connected Drive folder. **409** `GDRIVE_NOT_CONFIGURED` if not connected. **202** with `jobId`. **429** when backup start is rate-limited.
+- `GET /gdrive/backup/:jobId` — owner or admin. Backup job status (`complete` includes `driveFileId`, `driveFileName`, `sizeBytes`). **404** `BACKUP_JOB_NOT_FOUND` if missing.
 
 ## Insights routes
 

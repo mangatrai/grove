@@ -1,6 +1,6 @@
 # API: Google Drive (BYOC service account)
 
-Household-level **bring-your-own-credentials** link to a single Google Drive folder using a **service account JSON key**. The API never returns the stored key. Upload/backup automation is planned separately (CR-130+).
+Household-level **bring-your-own-credentials** link to a single Google Drive folder using a **service account JSON key**. The API never returns the stored key. Owners can queue an on-demand `.hfb` backup upload to that folder (`POST /gdrive/backup`).
 
 **Auth:** Bearer JWT on all routes.
 
@@ -11,6 +11,8 @@ Household-level **bring-your-own-credentials** link to a single Google Drive fol
 | `GET /gdrive/status` | Yes | Yes | **403** |
 | `POST /gdrive/connect` | Yes | **403** | **403** |
 | `DELETE /gdrive/disconnect` | Yes | **403** | **403** |
+| `POST /gdrive/backup` | Yes | **403** | **403** |
+| `GET /gdrive/backup/:jobId` | Yes | Yes | **403** |
 
 ## `GET /gdrive/status`
 
@@ -70,6 +72,28 @@ Returns connection metadata for the authenticated household. The service account
 ```
 
 Idempotent when already disconnected.
+
+## On-demand backup
+
+### `POST /gdrive/backup`
+
+**Owner only.** Queues an async job that builds a full-household `.hfb` (same bundle as a household export), uploads it to the connected Drive folder using the stored service account, then removes the local staging file.
+
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when no Drive folder is connected.
+
+**202** — `{ "jobId": "…", "message": "Backup started. Poll GET /gdrive/backup/:jobId for status." }`
+
+**429** — Too many backup starts per user in a rolling window (disabled when `MODE=TEST`).
+
+### `GET /gdrive/backup/:jobId`
+
+**Owner or admin.** Poll until `status` is `complete` or `failed`.
+
+**200** — `{ "id", "status", "driveFileId?", "driveFileName?", "sizeBytes?", "errorText?", "createdAt", "completedAt?" }` (camelCase JSON).
+
+**404** — `{ "code": "BACKUP_JOB_NOT_FOUND", "message": "Backup job not found." }` when the id does not belong to this household.
+
+`backup_job` rows are **ephemeral** (not included in `.hfb` exports). Retention and history UI are handled separately (CR-132).
 
 ## See also
 

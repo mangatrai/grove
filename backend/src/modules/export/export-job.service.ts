@@ -10,6 +10,8 @@ import { log } from "../../logger.js";
 import { env } from "../../config/env.js";
 import { encryptBackup } from "./backup-crypto.js";
 import { queryAllExportTables } from "./export-household-bundle.service.js";
+import { renderExportReadyTemplate } from "../mailer/templates/export-ready.js";
+import { sendMail } from "../mailer/mailer.service.js";
 
 const EXPORTS_DIR = resolveDataPath("data/exports");
 const EXPORT_TTL_HOURS = 48;
@@ -77,62 +79,102 @@ export function scheduleExportJobProcessing(jobId: string, householdId: string):
   });
 }
 
+/**
+ * Builds an encrypted or plain `.hfb` ZIP at `outputPath` for the given household scope.
+ * Shared by HTTP export jobs (`runExportJob`) and Google Drive backup (`gdrive-backup.service`).
+ */
+export async function buildHfbFile(
+  householdId: string,
+  personProfileId: string | null,
+  outputPath: string
+): Promise<{ tables: number; totalRows: number }> {
+  const exportedAt = new Date().toISOString();
+  const tables = await queryAllExportTables(householdId, personProfileId);
+
+  const tableIndex: Record<string, { file: string; rows: number }> = {};
+  for (const t of tables) {
+    tableIndex[t.key] = { file: t.fileName, rows: t.rows.length };
+  }
+  const manifest: Record<string, unknown> = {
+    exportVersion: 4,
+    exportedAt,
+    householdId,
+    format: "zip-split-v4",
+    encrypted: Boolean(env.BACKUP_ENCRYPTION_KEY),
+    tables: tableIndex
+  };
+  if (personProfileId) {
+    manifest["personProfileId"] = personProfileId;
+    manifest["scope"] = "member";
+  }
+
+  const output = fs.createWriteStream(outputPath);
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  archive.pipe(output);
+  const outputClosed = new Promise<void>((resolve, reject) => {
+    output.once("close", () => resolve());
+    output.once("error", (err) => reject(err));
+  });
+  archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
+  for (const t of tables) {
+    archive.append(JSON.stringify(t.rows, null, 2), { name: t.fileName });
+  }
+  await archive.finalize();
+  await outputClosed;
+  if (env.BACKUP_ENCRYPTION_KEY) {
+    const plain = fs.readFileSync(outputPath);
+    const encrypted = encryptBackup(plain, env.BACKUP_ENCRYPTION_KEY);
+    fs.writeFileSync(outputPath, encrypted);
+  }
+  const totalRows = tables.reduce((s, t) => s + t.rows.length, 0);
+  return { tables: tables.length, totalRows };
+}
+
 async function runExportJob(jobId: string, householdId: string): Promise<void> {
-  const row = (await qGet<{ storage_path: string; person_profile_id: string | null }>(
-    `SELECT storage_path, person_profile_id FROM export_job WHERE id = ? AND household_id = ?`,
+  const row = (await qGet<{
+    storage_path: string;
+    person_profile_id: string | null;
+    requested_by_user_id: string;
+  }>(
+    `SELECT storage_path, person_profile_id, requested_by_user_id FROM export_job WHERE id = ? AND household_id = ?`,
     jobId,
     householdId
-  )) as { storage_path: string; person_profile_id: string | null } | undefined;
+  )) as { storage_path: string; person_profile_id: string | null; requested_by_user_id: string } | undefined;
   if (!row?.storage_path) {
     return;
   }
   const personProfileId = row.person_profile_id ?? null;
   await qExec(`UPDATE export_job SET status = 'running' WHERE id = ?`, jobId);
   try {
-    const exportedAt = new Date().toISOString();
-    const tables = await queryAllExportTables(householdId, personProfileId);
-
-    const tableIndex: Record<string, { file: string; rows: number }> = {};
-    for (const t of tables) {
-      tableIndex[t.key] = { file: t.fileName, rows: t.rows.length };
-    }
-    const manifest: Record<string, unknown> = {
-      exportVersion: 4,
-      exportedAt,
-      householdId,
-      format: "zip-split-v4",
-      encrypted: Boolean(env.BACKUP_ENCRYPTION_KEY),
-      tables: tableIndex
-    };
-    if (personProfileId) {
-      manifest["personProfileId"] = personProfileId;
-      manifest["scope"] = "member";
-    }
-
-    const output = fs.createWriteStream(row.storage_path);
-    const archive = archiver("zip", { zlib: { level: 6 } });
-    archive.pipe(output);
-    const outputClosed = new Promise<void>((resolve, reject) => {
-      output.once("close", () => resolve());
-      output.once("error", (err) => reject(err));
-    });
-    archive.append(JSON.stringify(manifest, null, 2), { name: "manifest.json" });
-    for (const t of tables) {
-      archive.append(JSON.stringify(t.rows, null, 2), { name: t.fileName });
-    }
-    await archive.finalize();
-    await outputClosed;
-    if (env.BACKUP_ENCRYPTION_KEY) {
-      const plain = fs.readFileSync(row.storage_path);
-      const encrypted = encryptBackup(plain, env.BACKUP_ENCRYPTION_KEY);
-      fs.writeFileSync(row.storage_path, encrypted);
-    }
+    const { tables, totalRows } = await buildHfbFile(householdId, personProfileId, row.storage_path);
     await qExec(
       `UPDATE export_job SET status = 'complete', completed_at = NOW(), error_text = NULL WHERE id = ?`,
       jobId
     );
-    const totalRows = tables.reduce((s, t) => s + t.rows.length, 0);
-    log.info(`Export job ${jobId} complete for household ${householdId}: ${tables.length} files, ${totalRows} total rows`);
+    void (async () => {
+      try {
+        if (!row.requested_by_user_id) return;
+        const user = await qGet<{ email: string }>(
+          `SELECT email FROM app_user WHERE id = ?`,
+          row.requested_by_user_id
+        );
+        if (user?.email) {
+          const expiresAt = new Date(Date.now() + EXPORT_TTL_HOURS * 60 * 60 * 1000).toLocaleString("en-US", {
+            dateStyle: "long",
+            timeStyle: "short"
+          });
+          const base = env.PUBLIC_BASE_URL?.trim();
+          const settingsUrl = base ? `${base}/settings?tab=data` : null;
+          const tpl = renderExportReadyTemplate({ expiresAt, settingsUrl });
+          await sendMail({ to: user.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
+        }
+      } catch (mailErr: unknown) {
+        log.warn(
+          `Export-ready email failed for job ${jobId}: ${mailErr instanceof Error ? mailErr.message : String(mailErr)}`
+        );
+      }
+    })();
+    log.info(`Export job ${jobId} complete for household ${householdId}: ${tables} files, ${totalRows} total rows`);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     await qExec(`UPDATE export_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);

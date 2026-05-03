@@ -18,6 +18,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-130 (2026-05-03): On-demand Google Drive backup + export-ready email
+**Files:** `backend/db/migrations/0036_backup_job.sql`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/mailer/templates/export-ready.ts`, `backend/tests/gdrive-backup.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_GDRIVE.md`, `docs/API_EXPORTS.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** (1) **Google Drive backup** — `backup_job` table; `POST /gdrive/backup` (owner, rate-limited) queues an async job that writes a temp `.hfb` under `data/gdrive-backup-staging/`, streams it to Drive via `files.create`, then deletes the temp file in `finally`. `GET /gdrive/backup/:jobId` (owner or admin) returns status and Drive metadata. Settings **Data & Backup** adds **Back up now** when Drive is connected. (2) **Export email** — after a local export job completes, a fire-and-forget email notifies the requester with expiry text and a link to Settings → Data when `PUBLIC_BASE_URL` is set. Shared **`buildHfbFile`** in `export-job.service.ts` is used by both HTTP exports and Drive backups.
+
+---
+
 ## FIX-129c (2026-05-02): Vite dev proxy missing `/gdrive`
 - **Type:** FIX
 - **Issue:** `POST /gdrive/connect` from the Vite dev server (port 3000) returned **404** because only other API path prefixes were proxied to the backend; requests never reached Express.
