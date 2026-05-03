@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-130a (2026-05-03): CR-130 review — backup job error paths + polish
+- **Type:** FIX / polish
+- **What:** `runBackupJob` now loads Drive credentials inside the same `try` as `buildHfbFile` / upload so a DB failure cannot leave the row stuck in `running`; not-configured uses `throw` and the shared failure `UPDATE`. Removed redundant `mkdirSync` in `runBackupJob` (staging dir still ensured in `queueBackupJob`). Export-ready email HTML drops duplicate headline copy; plain-text lead line aligned. Settings disconnect clears backup UI state only after a successful API call. Backup integration test asserts `sizeBytes > 0` on success. Restored `qGet` import in `gdrive-backup.service.ts` (`getBackupJob` still depends on it — a missing import caused runtime failures on `GET /gdrive/backup/:jobId`).
+- **Files:** `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/mailer/templates/export-ready.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive-backup.test.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-130 (2026-05-03): On-demand Google Drive backup + export-ready email
 **Files:** `backend/db/migrations/0036_backup_job.sql`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/mailer/templates/export-ready.ts`, `backend/tests/gdrive-backup.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_GDRIVE.md`, `docs/API_EXPORTS.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
 **What:** (1) **Google Drive backup** — `backup_job` table; `POST /gdrive/backup` (owner, rate-limited) queues an async job that writes a temp `.hfb` under `data/gdrive-backup-staging/`, streams it to Drive via `files.create`, then deletes the temp file in `finally`. `GET /gdrive/backup/:jobId` (owner or admin) returns status and Drive metadata. Settings **Data & Backup** adds **Back up now** when Drive is connected. (2) **Export email** — after a local export job completes, a fire-and-forget email notifies the requester with expiry text and a link to Settings → Data when `PUBLIC_BASE_URL` is set. Shared **`buildHfbFile`** in `export-job.service.ts` is used by both HTTP exports and Drive backups.

@@ -76,21 +76,13 @@ export function scheduleBackupJobProcessing(jobId: string, householdId: string):
 
 async function runBackupJob(jobId: string, householdId: string): Promise<void> {
   await qExec(`UPDATE backup_job SET status = 'running' WHERE id = ?`, jobId);
-  const creds = await getGDriveCredentials(householdId);
-  if (!creds) {
-    const msg = "Google Drive is not configured for this household.";
-    await qExec(
-      `UPDATE backup_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
-      msg,
-      jobId
-    );
-    log.error(`Backup job ${jobId} failed: ${msg}`);
-    return;
-  }
-
   const tempPath = path.join(STAGING_DIR, `${jobId}.hfb`);
   try {
-    fs.mkdirSync(STAGING_DIR, { recursive: true });
+    const creds = await getGDriveCredentials(householdId);
+    if (!creds) {
+      throw new Error("Google Drive is not configured for this household.");
+    }
+
     await buildHfbFile(householdId, null, tempPath);
     const sizeBytes = fs.statSync(tempPath).size;
     const fileName = `hf-backup-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.hfb`;
@@ -101,23 +93,11 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     });
     const drive = google.drive({ version: "v3", auth });
 
-    let createRes: { data: { id?: string | null; name?: string | null } };
-    try {
-      createRes = await drive.files.create({
-        requestBody: { name: fileName, parents: [creds.folderId] },
-        media: { mimeType: "application/octet-stream", body: fs.createReadStream(tempPath) },
-        fields: "id,name"
-      });
-    } catch (err: unknown) {
-      const msg = mapDriveUploadError(err);
-      await qExec(
-        `UPDATE backup_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
-        msg,
-        jobId
-      );
-      log.error(`Backup job ${jobId} failed: ${msg}`);
-      return;
-    }
+    const createRes = await drive.files.create({
+      requestBody: { name: fileName, parents: [creds.folderId] },
+      media: { mimeType: "application/octet-stream", body: fs.createReadStream(tempPath) },
+      fields: "id,name"
+    });
 
     const driveFileId = createRes.data.id ?? null;
     const driveFileName = createRes.data.name ?? fileName;
@@ -130,7 +110,8 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg =
+      err instanceof GaxiosError ? mapDriveUploadError(err) : err instanceof Error ? err.message : String(err);
     await qExec(
       `UPDATE backup_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
       msg,

@@ -649,12 +649,12 @@ export function SettingsPage() {
     setGdriveDisconnectConfirm(false);
     setGdriveError(null);
     setGdriveSuccess(null);
-    setBackupResult(null);
-    setBackupPolling(false);
-    setBackupJobId(null);
     try {
       await apiFetch("/gdrive/disconnect", { method: "DELETE" });
       setGdriveStatus({ connected: false });
+      setBackupResult(null);
+      setBackupPolling(false);
+      setBackupJobId(null);
       setGdriveSuccess("Google Drive disconnected.");
     } catch {
       setGdriveError("Could not disconnect. Please try again.");

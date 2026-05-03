@@ -20,8 +20,8 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
           title: "Your Household Finance export is ready",
           content: `
         <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;">Your export is ready to download.</h1>
-        <p style="margin:0 0 16px;color:#374151;line-height:1.6;">
-          Your export is ready to download.
+        <p style="margin:0 0 20px;color:#374151;line-height:1.6;">
+          Your household export file is ready.
         </p>
         <p style="margin:0 0 20px;">
           <a href="${settingsUrl}" style="display:inline-block;padding:12px 18px;background:#2d6a4f;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">
@@ -42,7 +42,7 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
           content: `
         <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;">Your export is ready to download.</h1>
         <p style="margin:0 0 16px;color:#374151;line-height:1.6;">
-          Your export is ready to download.
+          Your household export file is ready.
         </p>
         <p style="margin:0 0 16px;color:#374151;line-height:1.6;">
           To download it: open the Household Finance app and go to Settings → Data and Backup.
@@ -56,7 +56,7 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
       ? [
           "Your Household Finance export is ready",
           "",
-          "Your export is ready to download.",
+          "Your household export file is ready.",
           "",
           `Download export: ${settingsUrl}`,
           "",
@@ -65,7 +65,7 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
       : [
           "Your Household Finance export is ready",
           "",
-          "Your export is ready to download.",
+          "Your household export file is ready.",
           "",
           "To download it: open the Household Finance app and go to Settings → Data & Backup.",
           "",

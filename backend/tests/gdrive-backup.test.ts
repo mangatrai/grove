@@ -198,6 +198,7 @@ describe("gdrive backup API", () => {
       expect(body.status).toBe("complete");
       expect(body.driveFileId).toBe("file-abc");
       expect(body.driveFileName).toBe("hf-backup-2026-05-03T00-00-00.hfb");
+      expect(Number(body.sizeBytes)).toBeGreaterThan(0);
       expect(fs.existsSync(tempPath)).toBe(false);
 
       const adminTok = await login(ADMIN_EMAIL, OWNER_PASSWORD);
