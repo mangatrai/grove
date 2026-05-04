@@ -258,11 +258,26 @@ export async function updateGDriveSchedulerSettings(
   );
 }
 
-/** Redirect browser to SPA settings after OAuth callback (same-origin PROD or explicit public base URL). */
+/**
+ * Origin (scheme + host + optional port, no path) for post–Google-OAuth redirects to the hash-router SPA.
+ * Prevents `Location: /#/settings?...` resolving on the API host (e.g. :4000) instead of Vite (:3000).
+ */
+export function resolveSpaOriginForGdriveRedirect(): string {
+  const explicit = env.FRONTEND_APP_URL?.trim() || env.PUBLIC_BASE_URL?.trim();
+  if (explicit) {
+    return explicit.replace(/\/$/, "");
+  }
+  if (env.MODE === "TEST") {
+    return "http://localhost:3000";
+  }
+  return "";
+}
+
+/** Redirect browser to SPA settings after OAuth callback (`/#/settings?...`). */
 export function buildSettingsGdriveRedirectUrl(query: Record<string, string>): string {
   const qs = new URLSearchParams(query).toString();
   const hashPath = `/#/settings${qs ? `?${qs}` : ""}`;
-  const base = env.PUBLIC_BASE_URL?.trim().replace(/\/$/, "") ?? "";
+  const base = resolveSpaOriginForGdriveRedirect();
   return base ? `${base}${hashPath}` : hashPath;
 }
 

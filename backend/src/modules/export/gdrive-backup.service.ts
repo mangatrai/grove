@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { GaxiosError } from "gaxios";
 import { google } from "googleapis";
 
+import { env } from "../../config/env.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
@@ -95,6 +96,48 @@ export type ListDriveBackupsResult =
 
 type ListHfbOptions = { maxTotal?: number };
 
+/** `TEST` or `PROD` subfolder under the household-configured Drive folder (matches `MODE`). */
+function driveBackupEnvFolderName(): "TEST" | "PROD" {
+  return env.MODE === "PROD" ? "PROD" : "TEST";
+}
+
+/**
+ * Ensures `{configuredFolder}/{TEST|PROD}/` exists; returns that subfolder's Drive file ID.
+ * All `.hfb` backups and prune/list operations use this folder, not the configured parent directly.
+ */
+async function ensureDriveBackupEnvSubfolderId(
+  refreshToken: string,
+  configuredParentFolderId: string
+): Promise<string> {
+  const label = driveBackupEnvFolderName();
+  const oauth2Client = buildOAuth2Client(refreshToken);
+  const drive = google.drive({ version: "v3", auth: oauth2Client });
+  const q = `'${configuredParentFolderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and name = '${label}' and trashed = false`;
+  const listRes = await drive.files.list({
+    q,
+    fields: "files(id,name)",
+    pageSize: 10
+  });
+  const found = listRes.data.files?.find((f) => f.name === label);
+  if (found?.id) {
+    return found.id;
+  }
+  const createRes = await drive.files.create({
+    requestBody: {
+      name: label,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [configuredParentFolderId]
+    },
+    fields: "id,name"
+  });
+  const id = createRes.data.id;
+  if (!id) {
+    throw new Error(`Could not create Drive backup folder "${label}".`);
+  }
+  log.info(`Drive backup: created env subfolder "${label}" (${id}) under configured folder.`);
+  return id;
+}
+
 /** Lists `.hfb` files in a folder (newest first). Used by `listDriveBackups` and pruning. */
 async function listHfbFilesInFolder(
   refreshToken: string,
@@ -139,7 +182,8 @@ export async function listDriveBackups(householdId: string): Promise<ListDriveBa
     return { ok: false, reason: "not_configured" };
   }
   try {
-    const files = await listHfbFilesInFolder(creds.refreshToken, creds.folderId, 20, { maxTotal: 20 });
+    const backupFolderId = await ensureDriveBackupEnvSubfolderId(creds.refreshToken, creds.folderId);
+    const files = await listHfbFilesInFolder(creds.refreshToken, backupFolderId, 20, { maxTotal: 20 });
     return { ok: true, files };
   } catch (err: unknown) {
     if (err instanceof GaxiosError) {
@@ -276,11 +320,12 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     const sizeBytes = fs.statSync(tempPath).size;
     const fileName = `hf-backup-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.hfb`;
 
+    const backupFolderId = await ensureDriveBackupEnvSubfolderId(creds.refreshToken, creds.folderId);
     const oauth2Client = buildOAuth2Client(creds.refreshToken);
     const drive = google.drive({ version: "v3", auth: oauth2Client });
 
     const createRes = await drive.files.create({
-      requestBody: { name: fileName, parents: [creds.folderId] },
+      requestBody: { name: fileName, parents: [backupFolderId] },
       media: { mimeType: "application/octet-stream", body: fs.createReadStream(tempPath) },
       fields: "id,name"
     });
@@ -296,7 +341,7 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
     if (creds.backupRetentionCount > 0) {
-      await pruneOldDriveBackups(creds.refreshToken, creds.folderId, creds.backupRetentionCount);
+      await pruneOldDriveBackups(creds.refreshToken, backupFolderId, creds.backupRetentionCount);
     }
   } catch (err: unknown) {
     if (err instanceof GaxiosError) {

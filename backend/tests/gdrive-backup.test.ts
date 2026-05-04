@@ -146,11 +146,19 @@ describe("gdrive backup API", () => {
         mimeType: "application/vnd.google-apps.folder"
       }
     });
-    filesCreateMock.mockResolvedValue({
-      data: {
-        id: "file-abc",
-        name: "hf-backup-2026-05-03T00-00-00.hfb"
+    filesCreateMock.mockImplementation((req: unknown) => {
+      const body = (req as { requestBody?: { mimeType?: string; name?: string } }).requestBody;
+      if (body?.mimeType === "application/vnd.google-apps.folder") {
+        return Promise.resolve({
+          data: { id: "drive-env-subfolder", name: body.name ?? "TEST" }
+        });
       }
+      return Promise.resolve({
+        data: {
+          id: "file-abc",
+          name: "hf-backup-2026-05-03T00-00-00.hfb"
+        }
+      });
     });
   });
 

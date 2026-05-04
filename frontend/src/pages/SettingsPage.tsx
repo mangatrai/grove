@@ -2739,7 +2739,7 @@ export function SettingsPage() {
                     <Stack gap="sm" mt="xs" maw={560}>
                       <TextInput
                         label="Drive Folder ID"
-                        description="The folder ID from the Drive URL: drive.google.com/drive/folders/THIS_PART"
+                        description="Top-level folder from the Drive URL (…/folders/THIS_PART). Backups go in a TEST or PROD subfolder inside it, matching the server environment."
                         placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
                         value={gdriveFolderIdInput}
                         onChange={(e) => setGdriveFolderIdInput(e.currentTarget.value)}

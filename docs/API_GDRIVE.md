@@ -4,7 +4,7 @@ Household-level link to a single Google Drive folder using **OAuth2** with a **u
 
 **Auth:** Bearer JWT on all routes **except** **`GET /gdrive/oauth/callback`** (browser redirect from Google; no `Authorization` header).
 
-**Server env:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (must match the OAuth client’s authorized redirect URI, e.g. `https://api.example.com/gdrive/oauth/callback`). **`JWT_SECRET`** also signs the OAuth `state` payload. **`PUBLIC_BASE_URL`** (optional) should be your SPA origin so the callback can redirect to `https://your-app/#/settings?...` when the API and UI run on different hosts.
+**Server env:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (must match the OAuth client’s authorized redirect URI, e.g. `https://api.example.com/gdrive/oauth/callback`). **`JWT_SECRET`** also signs the OAuth `state` payload. **`FRONTEND_APP_URL`** (optional) is the SPA origin for **`GET /gdrive/oauth/callback`** redirects (e.g. `http://localhost:3000` when the API is on port 4000 and Vite on 3000). If unset, **`PUBLIC_BASE_URL`** is used when set; in **`MODE=TEST`** the default is **`http://localhost:3000`**; in **`MODE=PROD`** with neither set, redirects are **relative** to the API host (same-origin deployments only). The SPA uses **hash routing** — the return URL is always **`…/#/settings?tab=data&…`**, not a path-only `/settings`.
 
 ## Server logging (Drive API failures)
 
@@ -37,7 +37,9 @@ For each `household_gdrive_config` row with **`backup_frequency_hours` > 0**:
 3. If **`now - last_completed_at` ≥ `backup_frequency_hours` hours**, the server inserts a new **`backup_job`** with **`triggered_by_user_id` null** (automatic), sets **`household_gdrive_config.last_scheduled_backup_at = NOW()`**, and processes the job asynchronously (same pipeline as manual backup).
 4. In **`MODE=PROD`**, if a completed job **does** exist and **`now - last_completed_at` > 2 × interval**, the server logs a **warning** (staleness / missed windows — e.g. Koyeb eco instance sleep). This does not block queuing when the interval in (3) is also exceeded.
 
-**Retention:** After each successful upload, the server lists **`.hfb`** files in the connected folder (newest first) and deletes the oldest excess files so at most **`backup_retention_count`** remain. Prune list/delete failures are **`log.warn`** only and do **not** fail the backup.
+**Backup path on Drive:** Under the folder ID the owner configured in Settings, the server uses a subfolder named **`TEST`** or **`PROD`** matching server **`MODE`**, creating it on first backup/list if missing. All **`.hfb`** uploads, **`GET /gdrive/backups`** listings, and retention pruning operate **only** inside that env subfolder so test and production backups never share the same Drive directory.
+
+**Retention:** After each successful upload, the server lists **`.hfb`** files in the **env subfolder** (newest first) and deletes the oldest excess files so at most **`backup_retention_count`** remain. Prune list/delete failures are **`log.warn`** only and do **not** fail the backup.
 
 ## `GET /gdrive/status`
 
@@ -146,7 +148,7 @@ Idempotent when already disconnected.
 
 ### `POST /gdrive/backup`
 
-**Owner only.** Queues an async job that builds a full-household `.hfb` (same bundle as a household export), uploads it to the connected Drive folder using the stored OAuth refresh token, then removes the local staging file.
+**Owner only.** Queues an async job that builds a full-household `.hfb` (same bundle as a household export), uploads it into the **`TEST`** or **`PROD`** subfolder under the configured Drive folder (see scheduler section above), using the stored OAuth refresh token, then removes the local staging file.
 
 **409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when no Drive folder is connected.
 
@@ -168,7 +170,7 @@ Idempotent when already disconnected.
 
 ### `GET /gdrive/backups`
 
-**Owner or admin.** Lists up to the **20** most recent files in the connected Drive folder whose names contain the substring `.hfb` (Drive query: `name contains '.hfb'`). Empty folder returns **`{ "files": [] }`** (not an error).
+**Owner or admin.** Lists up to the **20** most recent **`.hfb`** files in the **`TEST`/`PROD`** env subfolder under the configured Drive folder (same scope as backups). Empty folder returns **`{ "files": [] }`** (not an error).
 
 **200** — `{ "files": [ { "fileId", "fileName", "sizeBytes", "createdAt" } ] }`  
 - **`sizeBytes`** may be `null` when Drive does not return a size.  

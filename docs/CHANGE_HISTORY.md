@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-134 (2026-05-04): GDrive OAuth return URL + MODE-scoped backup folder on Drive
+**Why:** OAuth **`Location`** was relative (`/#/settings?…`), so the browser resolved it on the **API** host (e.g. :4000) instead of the Vite SPA (:3000). Backups also needed to live under **`{configuredFolder}/TEST/`** or **`/PROD/`** per server **`MODE`** so environments do not mix in Drive.
+**What:** **`FRONTEND_APP_URL`** env (optional); **`resolveSpaOriginForGdriveRedirect()`** picks **`FRONTEND_APP_URL` → `PUBLIC_BASE_URL` → `http://localhost:3000` in `MODE=TEST` → else relative** for **`buildSettingsGdriveRedirectUrl`**. **`gdrive-backup.service`**: **`ensureDriveBackupEnvSubfolderId`** lists/creates **`TEST`** or **`PROD`** under the configured folder; list/upload/prune use that id.
+**Files:** `backend/src/config/env.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/tests/gdrive.test.ts`, `backend/tests/gdrive-backup.test.ts`, `backend/tests/gdrive-restore.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `.env.example`, `openapi/openapi.yaml`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-133 (2026-05-04): Replace GDrive service account auth with OAuth2 user-delegated auth
 **Why:** Service accounts have no Drive storage quota; uploads to a personal Gmail user’s folder fail with **`storageQuotaExceeded`** (403). OAuth2 with a user refresh token stores backups under the user’s quota.
 **What:** Migration **`0038_gdrive_oauth2.sql`** drops **`service_account_json`**, adds **`oauth2_refresh_token`** only. Backend env **`GOOGLE_CLIENT_ID`**, **`GOOGLE_CLIENT_SECRET`**, **`GOOGLE_REDIRECT_URI`**. **`gdrive.service`** implements **`buildOAuth2Client`**, signed **`encodeGDriveOAuthState` / `decodeGDriveOAuthState`**, **`buildOAuthConsentUrl`**, **`exchangeAndConnect`**, **`buildSettingsGdriveRedirectUrl`**, **`assertOwnerOfHousehold`**. **`gdrive.routes`**: public **`GET /gdrive/oauth/callback`**, owner **`GET /gdrive/oauth/url`**, **`POST /gdrive/connect`** body **`{ code, folderId }`**. Backup/restore/prune use OAuth. Frontend Settings: folder ID + **Connect with Google Drive** (redirect flow); hash query **`gdrive=connected|error`** handling. Vitest sets **`GOOGLE_*`** in **`vitest.config.ts`**. OpenAPI + **`docs/API_GDRIVE.md`**, **`docs/API_INDEX.md`**, **`docs/ENVIRONMENT_VARIABLES.md`**, **`.env.example`** updated.

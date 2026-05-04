@@ -98,7 +98,13 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
   /** Full redirect URI registered in Google Cloud Console, e.g. http://127.0.0.1:4000/gdrive/oauth/callback */
-  GOOGLE_REDIRECT_URI: z.string().default("")
+  GOOGLE_REDIRECT_URI: z.string().default(""),
+  /**
+   * SPA origin for Google Drive OAuth return redirects when the API and UI differ (e.g. http://localhost:3000).
+   * If unset: uses `PUBLIC_BASE_URL` when set; in `MODE=TEST` defaults to `http://localhost:3000`; in `MODE=PROD`
+   * with neither set, redirects are relative to the API host (same-origin deployments only).
+   */
+  FRONTEND_APP_URL: z.string().default("")
 });
 
 export const env = envSchema.parse(process.env);

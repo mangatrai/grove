@@ -292,6 +292,7 @@ describe("gdrive API", () => {
     const res = await request(app).get("/gdrive/oauth/callback").query({ code: "google-code", state });
     expect(res.status).toBe(302);
     expect(String(res.headers.location)).toContain("gdrive=connected");
+    expect(String(res.headers.location)).toMatch(/^http:\/\/localhost:3000\/#\/settings/);
 
     const row = await sqlStmt("SELECT oauth2_refresh_token, folder_id FROM household_gdrive_config WHERE household_id = ?").get(
       HOUSEHOLD_ID

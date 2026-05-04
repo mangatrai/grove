@@ -14,7 +14,7 @@
 
 Prose: [`API_GDRIVE.md`](API_GDRIVE.md).
 
-- `GET /gdrive/oauth/callback` — public (Google redirect). Query `code` + `state`; exchanges OAuth code, verifies folder, upserts config; **302** to `/#/settings?tab=data&gdrive=connected` or `gdrive=error&message=…`.
+- `GET /gdrive/oauth/callback` — public (Google redirect). Query `code` + `state`; exchanges OAuth code, verifies folder, upserts config; **302** to the SPA **`/#/settings?tab=data&gdrive=connected`** (absolute origin from **`FRONTEND_APP_URL`** / **`PUBLIC_BASE_URL`**, or **`http://localhost:3000`** in **`MODE=TEST`** when unset) or **`gdrive=error&message=…`**.
 - `GET /gdrive/oauth/url` — owner only. Query `folderId`; **200** `{ url }` for browser redirect to Google consent. **400** `OAUTH_NOT_CONFIGURED` if `GOOGLE_*` env is missing.
 - `GET /gdrive/status` — owner or admin. Returns `{ connected, folderId?, … }` when connected (scheduler fields; `backupFrequencyHours` **0** = automatic backups off). OAuth tokens are never returned. `connectedByUserId` may be `null` after the connecting user is removed (audit FK `ON DELETE SET NULL`).
 - `POST /gdrive/connect` — owner only. Body: `{ code: string, folderId: string }`. Exchanges the OAuth code, verifies folder access, persists refresh/access metadata. **422** `DRIVE_CONNECTION_FAILED` when exchange or Drive check fails. **429** when connect is rate-limited.

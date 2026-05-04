@@ -152,6 +152,15 @@ describe("gdrive restore API (CR-131)", () => {
     filesListMock.mockReset();
     filesCreateMock.mockReset();
     filesListMock.mockResolvedValue({ data: { files: [] } });
+    filesCreateMock.mockImplementation((req: unknown) => {
+      const body = (req as { requestBody?: { mimeType?: string; name?: string } }).requestBody;
+      if (body?.mimeType === "application/vnd.google-apps.folder") {
+        return Promise.resolve({
+          data: { id: "drive-env-subfolder", name: body.name ?? "TEST" }
+        });
+      }
+      return Promise.resolve({ data: { id: "file-created", name: body?.name ?? "file" } });
+    });
     installDriveMocksForConnectAndDownload();
   });
 

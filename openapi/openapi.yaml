@@ -689,8 +689,9 @@ paths:
       description: |
         Public endpoint (no JWT). Google redirects here with `code` and `state` after user consent.
         Exchanges the code for tokens, verifies folder access, persists `household_gdrive_config`, then redirects the
-        browser to the SPA settings tab (`/#/settings?tab=data&gdrive=connected` or `gdrive=error&message=...`).
-        When `PUBLIC_BASE_URL` is set, the redirect uses that origin so split dev (API port vs Vite port) still lands on the UI.
+        browser to the hash-router SPA (`…/#/settings?tab=data&gdrive=connected` or `gdrive=error&message=...`).
+        Redirect origin: `FRONTEND_APP_URL`, else `PUBLIC_BASE_URL`, else in `MODE=TEST` defaults to `http://localhost:3000`,
+        else relative to the API host (same-origin deployments).
       parameters:
         - name: code
           in: query

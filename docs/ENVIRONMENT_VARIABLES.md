@@ -56,6 +56,7 @@ See [`RUNBOOK.md`](RUNBOOK.md) §11 for Postgres connection details and operator
 | `GOOGLE_CLIENT_ID` | Google OAuth2 Web client ID (Drive backup / restore). Empty = GDrive connect disabled (`OAUTH_NOT_CONFIGURED`). |
 | `GOOGLE_CLIENT_SECRET` | OAuth client secret (paired with `GOOGLE_CLIENT_ID`). |
 | `GOOGLE_REDIRECT_URI` | Full redirect URI registered in Google Cloud Console, e.g. `http://127.0.0.1:4000/gdrive/oauth/callback` (must match exactly). |
+| `FRONTEND_APP_URL` | Optional SPA origin for **Google Drive OAuth** return redirects (e.g. `http://localhost:3000`). If unset, falls back to **`PUBLIC_BASE_URL`**; in **`MODE=TEST`** defaults to `http://localhost:3000`; in **`MODE=PROD`** with neither set, redirects are relative to the API (same-origin only). |
 
 ```bash
 BACKUP_ENCRYPTION_KEY=   # Optional. 64 hex characters (32 bytes).
