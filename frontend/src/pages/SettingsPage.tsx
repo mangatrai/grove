@@ -30,7 +30,7 @@ import {
 } from "@mantine/core";
 import { IconTrash, IconUpload } from "@tabler/icons-react";
 
-import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
+import { apiFetch, apiJson, getToken, setToken, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { RecurringTagModal, type RecurringOverride } from "../components/RecurringTagModal";
@@ -79,6 +79,13 @@ type GDriveStatus = {
   connectedByUserId?: string | null;
   lastVerifiedAt?: string | null;
   lastError?: string | null;
+};
+
+type DriveBackupEntry = {
+  fileId: string;
+  fileName: string;
+  sizeBytes: number | null;
+  createdAt: string;
 };
 
 type BelongsToChoice = "household" | `person:${string}`;
@@ -357,6 +364,13 @@ export function SettingsPage() {
   const [backupJobId, setBackupJobId] = useState<string | null>(null);
   const [backupPolling, setBackupPolling] = useState(false);
   const [backupResult, setBackupResult] = useState<{ ok: boolean; fileName?: string; error?: string } | null>(null);
+  const [driveBackups, setDriveBackups] = useState<DriveBackupEntry[] | null>(null);
+  const [driveBackupsLoading, setDriveBackupsLoading] = useState(false);
+  const [driveBackupsError, setDriveBackupsError] = useState<string | null>(null);
+  const [driveRestoreConfirmFileId, setDriveRestoreConfirmFileId] = useState<string | null>(null);
+  const [driveRestoreJobId, setDriveRestoreJobId] = useState<string | null>(null);
+  const [driveRestorePolling, setDriveRestorePolling] = useState(false);
+  const [driveRestoreError, setDriveRestoreError] = useState<string | null>(null);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -655,6 +669,11 @@ export function SettingsPage() {
       setBackupResult(null);
       setBackupPolling(false);
       setBackupJobId(null);
+      setDriveBackups(null);
+      setDriveBackupsError(null);
+      setDriveRestorePolling(false);
+      setDriveRestoreJobId(null);
+      setDriveRestoreError(null);
       setGdriveSuccess("Google Drive disconnected.");
     } catch {
       setGdriveError("Could not disconnect. Please try again.");
@@ -676,6 +695,41 @@ export function SettingsPage() {
     } catch {
       setBackupResult({ ok: false, error: "Could not reach server." });
       setBackupPolling(false);
+    }
+  }, []);
+
+  const loadDriveBackups = useCallback(async () => {
+    setDriveBackupsLoading(true);
+    setDriveBackupsError(null);
+    try {
+      const res = await apiJson<{ files: DriveBackupEntry[] }>("/gdrive/backups");
+      setDriveBackups(res.files);
+    } catch {
+      setDriveBackupsError("Could not load Drive backup list.");
+    } finally {
+      setDriveBackupsLoading(false);
+    }
+  }, []);
+
+  const handleDriveRestore = useCallback(async (fileId: string) => {
+    setDriveRestoreConfirmFileId(null);
+    setDriveRestoreError(null);
+    setDriveRestorePolling(true);
+    try {
+      const res = await apiFetch("/gdrive/restore", {
+        method: "POST",
+        body: JSON.stringify({ fileId })
+      });
+      const body = (await res.json()) as { jobId?: string; message?: string };
+      if (!res.ok || !body.jobId) {
+        setDriveRestoreError(body.message ?? "Could not start restore.");
+        setDriveRestorePolling(false);
+        return;
+      }
+      setDriveRestoreJobId(body.jobId);
+    } catch {
+      setDriveRestoreError("Could not reach server.");
+      setDriveRestorePolling(false);
     }
   }, []);
 
@@ -825,6 +879,49 @@ export function SettingsPage() {
       cancelled = true;
     };
   }, [backupJobId, backupPolling]);
+
+  useEffect(() => {
+    if (!driveRestoreJobId || !driveRestorePolling) return;
+    let cancelled = false;
+    const deadline = Date.now() + 5 * 60 * 1000;
+    void (async () => {
+      while (!cancelled && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 3000));
+        if (cancelled) break;
+        try {
+          const st = await apiJson<{ status: string; error: string | null }>(
+            `/exports/import/${encodeURIComponent(driveRestoreJobId)}`
+          );
+          if (st.status === "complete") {
+            setToken(null);
+            setDriveRestorePolling(false);
+            setDriveRestoreJobId(null);
+            return;
+          }
+          if (st.status === "failed") {
+            setDriveRestoreError(st.error ?? "Restore failed.");
+            setDriveRestorePolling(false);
+            setDriveRestoreJobId(null);
+            return;
+          }
+        } catch {
+          if (!getToken()) {
+            setDriveRestorePolling(false);
+            setDriveRestoreJobId(null);
+            return;
+          }
+        }
+      }
+      if (!cancelled) {
+        setDriveRestoreError("Restore timed out. Try again or restore from a local file.");
+        setDriveRestorePolling(false);
+        setDriveRestoreJobId(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [driveRestoreJobId, driveRestorePolling]);
 
   async function addCustomInstitutionName() {
     if (!token) {
@@ -2253,6 +2350,96 @@ export function SettingsPage() {
                               ? `Backed up: ${backupResult.fileName ?? "file uploaded to Drive"}`
                               : backupResult.error}
                           </Alert>
+                        ) : null}
+                        {authRole === "owner" ? (
+                          <>
+                            <Divider my="sm" />
+                            <Group justify="space-between" align="center">
+                              <Text size="sm" fw={500}>
+                                Restore from Drive
+                              </Text>
+                              <Button
+                                type="button"
+                                size="xs"
+                                variant="subtle"
+                                loading={driveBackupsLoading}
+                                disabled={driveBackupsLoading || driveRestorePolling}
+                                onClick={() => void loadDriveBackups()}
+                              >
+                                {driveBackups === null ? "Load backups" : "Refresh"}
+                              </Button>
+                            </Group>
+
+                            {driveBackupsError ? (
+                              <Alert color="red" variant="light" mt="xs">
+                                {driveBackupsError}
+                              </Alert>
+                            ) : null}
+
+                            {driveRestoreError ? (
+                              <Alert
+                                color="red"
+                                variant="light"
+                                mt="xs"
+                                withCloseButton
+                                onClose={() => setDriveRestoreError(null)}
+                              >
+                                {driveRestoreError}
+                              </Alert>
+                            ) : null}
+
+                            {driveRestorePolling ? (
+                              <Text size="sm" c="dimmed" mt="xs">
+                                Restoring… please wait. You will be signed out when complete.
+                              </Text>
+                            ) : null}
+
+                            {driveBackups !== null && !driveBackupsLoading ? (
+                              driveBackups.length === 0 ? (
+                                <Text size="sm" c="dimmed" mt="xs">
+                                  No backups found in this Drive folder.
+                                </Text>
+                              ) : (
+                                <Stack gap={4} mt="xs">
+                                  {driveBackups.map((f) => (
+                                    <Group key={f.fileId} justify="space-between" wrap="nowrap">
+                                      <Stack gap={0}>
+                                        <Text size="sm" style={{ wordBreak: "break-all" }}>
+                                          {f.fileName}
+                                        </Text>
+                                        <Text size="xs" c="dimmed">
+                                          {f.createdAt ? new Date(f.createdAt).toLocaleString() : ""}
+                                          {f.sizeBytes != null ? ` · ${(f.sizeBytes / 1024).toFixed(0)} KB` : ""}
+                                        </Text>
+                                      </Stack>
+                                      <Button
+                                        type="button"
+                                        size="xs"
+                                        variant="default"
+                                        disabled={driveRestorePolling}
+                                        onClick={() => setDriveRestoreConfirmFileId(f.fileId)}
+                                      >
+                                        Restore
+                                      </Button>
+                                    </Group>
+                                  ))}
+                                </Stack>
+                              )
+                            ) : null}
+
+                            <ConfirmDialog
+                              opened={driveRestoreConfirmFileId !== null}
+                              title="Restore from Drive backup?"
+                              message="This will replace all household data with the selected backup. Your current data will be permanently deleted and you will be signed out. This cannot be undone."
+                              confirmLabel="Restore"
+                              cancelLabel="Cancel"
+                              danger
+                              onClose={() => setDriveRestoreConfirmFileId(null)}
+                              onConfirm={() => {
+                                if (driveRestoreConfirmFileId) void handleDriveRestore(driveRestoreConfirmFileId);
+                              }}
+                            />
+                          </>
                         ) : null}
                       </Stack>
                       {authRole === "owner" ? (

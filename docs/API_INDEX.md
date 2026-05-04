@@ -19,6 +19,8 @@ Prose: [`API_GDRIVE.md`](API_GDRIVE.md).
 - `DELETE /gdrive/disconnect` — owner only. Removes stored credentials.
 - `POST /gdrive/backup` — owner only. Queues async upload of a household `.hfb` to the connected Drive folder. **409** `GDRIVE_NOT_CONFIGURED` if not connected. **202** with `jobId`. **429** when backup start is rate-limited.
 - `GET /gdrive/backup/:jobId` — owner or admin. Backup job status (`complete` includes `driveFileId`, `driveFileName`, `sizeBytes`). **404** `BACKUP_JOB_NOT_FOUND` if missing.
+- `GET /gdrive/backups` — owner or admin. Lists up to 20 recent `.hfb` files in the connected Drive folder (`{ files: [...] }`). **502** `DRIVE_LIST_FAILED` if Drive is unavailable or not configured.
+- `POST /gdrive/restore` — owner only. Body `{ fileId }`; downloads from Drive and queues the same restore pipeline as household import. **409** `GDRIVE_NOT_CONFIGURED`, **502** `DRIVE_DOWNLOAD_FAILED`. **202** with `jobId`; poll **`GET /exports/import/:jobId`**; after `complete`, sign out (token invalidation).
 
 ## Insights routes
 

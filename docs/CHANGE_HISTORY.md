@@ -18,6 +18,12 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-131 (2026-05-03): Restore from Google Drive
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive-restore.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** Owners (and admins for listing) can **`GET /gdrive/backups`** to list recent `.hfb` files in the connected folder (Drive `files.list`, max 20). Owners can **`POST /gdrive/restore`** with a Drive `fileId`; the server streams the file via `files.get` alt=media into `data/gdrive-backup-staging/`, then **`queueHouseholdImport`** renames it into `data/imports-restore/` and runs the existing import job processor. Settings **Data & Backup** adds **Restore from Drive** (load/refresh list, confirm, poll **`GET /exports/import/:jobId`**). **`STAGING_DIR`** and **`ServiceAccountKey`** are exported for reuse; **`downloadDriveFile`** cleans partial files on error. **`transaction_canonical` `onExport`** strips generated **`search_document`** so `.hfb` round-trips and Drive restores do not fail inserts.
+
+---
+
 ## FIX-130a (2026-05-03): CR-130 review — backup job error paths + polish
 - **Type:** FIX / polish
 - **What:** `runBackupJob` now loads Drive credentials inside the same `try` as `buildHfbFile` / upload so a DB failure cannot leave the row stuck in `running`; not-configured uses `throw` and the shared failure `UPDATE`. Removed redundant `mkdirSync` in `runBackupJob` (staging dir still ensured in `queueBackupJob`). Export-ready email HTML drops duplicate headline copy; plain-text lead line aligned. Settings disconnect clears backup UI state only after a successful API call. Backup integration test asserts `sizeBytes > 0` on success. Restored `qGet` import in `gdrive-backup.service.ts` (`getBackupJob` still depends on it — a missing import caused runtime failures on `GET /gdrive/backup/:jobId`).

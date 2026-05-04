@@ -860,6 +860,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BackupJobNotFoundResponse'
+  /gdrive/backups:
+    get:
+      tags: [gdrive]
+      summary: List recent .hfb backups in the connected Drive folder
+      description: |
+        Owner or admin. Calls the Drive API `files.list` for the configured folder (names containing `.hfb`, not trashed),
+        newest first, page size 20. Returns an empty array when there are no matching files.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: File list (may be empty)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveBackupsListResponse'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Member role (insufficient permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "502":
+          description: Drive API failure or Google Drive not configured for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveListFailedResponse'
+  /gdrive/restore:
+    post:
+      tags: [gdrive]
+      summary: Restore household from a Drive backup file
+      description: |
+        Owner only. Downloads the given Drive file into staging, then queues the same async restore pipeline as
+        `POST /exports/household/import`. Poll `GET /exports/import/{jobId}` until terminal status; JWTs may be
+        invalidated after success (same as local restore).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GDriveRestoreRequest'
+      responses:
+        "202":
+          description: Restore job started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveRestoreStartedResponse'
+        "400":
+          description: Invalid JSON body (Zod validation failure)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string }
+                  issues:
+                    type: array
+                    items: { type: object }
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not connected for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+        "502":
+          description: Failed to download the file from Drive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveDownloadFailedResponse'
   /categories:
     get:
       tags: [categories]
@@ -2472,6 +2555,48 @@ components:
       required: [code, message]
       properties:
         code: { type: string, enum: [BACKUP_JOB_NOT_FOUND] }
+        message: { type: string }
+    DriveBackupEntry:
+      type: object
+      required: [fileId, fileName, createdAt]
+      properties:
+        fileId: { type: string }
+        fileName: { type: string }
+        sizeBytes: { type: integer, nullable: true }
+        createdAt: { type: string }
+    DriveBackupsListResponse:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveBackupEntry'
+    DriveListFailedResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [DRIVE_LIST_FAILED] }
+        message: { type: string }
+    DriveDownloadFailedResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [DRIVE_DOWNLOAD_FAILED] }
+        message: { type: string }
+    GDriveRestoreRequest:
+      type: object
+      required: [fileId]
+      properties:
+        fileId:
+          type: string
+          minLength: 1
+          description: Google Drive file id to download and import as .hfb
+    DriveRestoreStartedResponse:
+      type: object
+      required: [jobId, message]
+      properties:
+        jobId: { type: string }
         message: { type: string }
     ServiceErrorResponse:
       type: object

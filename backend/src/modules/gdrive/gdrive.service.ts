@@ -5,7 +5,7 @@ import { qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 
 /** Minimum fields required from a service account JSON key file. */
-type ServiceAccountKey = {
+export type ServiceAccountKey = {
   type: string;
   project_id: string;
   private_key: string;

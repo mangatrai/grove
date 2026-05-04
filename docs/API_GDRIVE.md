@@ -13,6 +13,8 @@ Household-level **bring-your-own-credentials** link to a single Google Drive fol
 | `DELETE /gdrive/disconnect` | Yes | **403** | **403** |
 | `POST /gdrive/backup` | Yes | **403** | **403** |
 | `GET /gdrive/backup/:jobId` | Yes | Yes | **403** |
+| `GET /gdrive/backups` | Yes | Yes | **403** |
+| `POST /gdrive/restore` | Yes | **403** | **403** |
 
 ## `GET /gdrive/status`
 
@@ -94,6 +96,28 @@ Idempotent when already disconnected.
 **404** — `{ "code": "BACKUP_JOB_NOT_FOUND", "message": "Backup job not found." }` when the id does not belong to this household.
 
 `backup_job` rows are **ephemeral** (not included in `.hfb` exports). Retention and history UI are handled separately (CR-132).
+
+## Restore from Drive
+
+### `GET /gdrive/backups`
+
+**Owner or admin.** Lists up to the **20** most recent files in the connected Drive folder whose names contain the substring `.hfb` (Drive query: `name contains '.hfb'`). Empty folder returns **`{ "files": [] }`** (not an error).
+
+**200** — `{ "files": [ { "fileId", "fileName", "sizeBytes", "createdAt" } ] }`  
+- **`sizeBytes`** may be `null` when Drive does not return a size.  
+- **`createdAt`** is the Drive `createdTime` string (ISO 8601 when present).
+
+**502** — `{ "code": "DRIVE_LIST_FAILED", "message": "..." }` when the Drive API fails or Google Drive is not configured for the household (same envelope for both).
+
+### `POST /gdrive/restore`
+
+**Owner only.** Body JSON: `{ "fileId": "<Drive file id>" }`. Downloads that file from Google Drive into staging under `data/gdrive-backup-staging/`, then **`queueHouseholdImport`** moves it into `data/imports-restore/` and starts the same async restore pipeline as `POST /exports/household/import`.
+
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when no Drive folder is connected.
+
+**502** — `{ "code": "DRIVE_DOWNLOAD_FAILED", "message": "..." }` when the download from Drive fails.
+
+**202** — `{ "jobId", "message" }` — poll **`GET /exports/import/:jobId`** until `status` is `complete` or `failed`. After a successful restore, JWTs for users in the bundle are invalidated (e.g. `token_version`); the client should treat completion like a local restore and **sign out** / clear the stored token.
 
 ## See also
 

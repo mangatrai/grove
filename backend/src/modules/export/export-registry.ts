@@ -98,7 +98,13 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 10,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] })
+    memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] }),
+    onExport: (rows) =>
+      rows.map((row) => {
+        const next = { ...row };
+        delete next.search_document;
+        return next;
+      })
   },
   {
     tableKey: "account_balance_snapshot",

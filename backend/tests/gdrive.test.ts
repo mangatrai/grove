@@ -9,8 +9,7 @@ vi.mock("googleapis", () => ({
   google: {
     auth: {
       GoogleAuth: class {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        constructor(_opts?: unknown) {}
+        constructor() {}
       }
     },
     drive: vi.fn(() => ({

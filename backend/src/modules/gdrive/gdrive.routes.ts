@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -15,10 +19,14 @@ import {
   testDriveConnection
 } from "./gdrive.service.js";
 import {
+  downloadDriveFile,
   getBackupJob,
+  listDriveBackups,
   queueBackupJob,
-  scheduleBackupJobProcessing
+  scheduleBackupJobProcessing,
+  STAGING_DIR
 } from "../export/gdrive-backup.service.js";
+import { queueHouseholdImport, scheduleImportJobProcessing } from "../export/import-household-bundle.service.js";
 
 const connectRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -41,6 +49,10 @@ const backupRateLimit = rateLimit({
 const connectSchema = z.object({
   serviceAccountKeyJson: z.string().min(1),
   folderId: z.string().min(1)
+});
+
+const restoreSchema = z.object({
+  fileId: z.string().min(1)
 });
 
 export const gdriveRouter = Router();
@@ -103,6 +115,58 @@ gdriveRouter.post("/connect", requireRole(["owner"]), connectRateLimit, async (r
 gdriveRouter.delete("/disconnect", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
   await disconnectGDrive(req.authUser!.householdId);
   res.status(200).json({ connected: false });
+});
+
+/** GET /gdrive/backups — owner or admin; list recent `.hfb` files in the connected Drive folder. */
+gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const result = await listDriveBackups(req.authUser!.householdId);
+  if (!result.ok) {
+    res.status(502).json({ code: "DRIVE_LIST_FAILED", message: result.message });
+    return;
+  }
+  res.json({ files: result.files });
+});
+
+/** POST /gdrive/restore — owner only; download from Drive and queue household import. */
+gdriveRouter.post("/restore", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+
+  const parsed = restoreSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+
+  const creds = await getGDriveCredentials(householdId);
+  if (!creds) {
+    res.status(409).json({
+      code: "GDRIVE_NOT_CONFIGURED",
+      message: "Google Drive is not connected."
+    });
+    return;
+  }
+
+  const { fileId } = parsed.data;
+  const tempPath = path.join(STAGING_DIR, `${randomUUID()}.hfb`);
+  fs.mkdirSync(STAGING_DIR, { recursive: true });
+
+  try {
+    await downloadDriveFile(creds.key, fileId, tempPath);
+  } catch (err: unknown) {
+    res.status(502).json({
+      code: "DRIVE_DOWNLOAD_FAILED",
+      message: err instanceof Error ? err.message : "Could not download backup from Drive."
+    });
+    return;
+  }
+
+  const { jobId } = await queueHouseholdImport(householdId, userId, tempPath);
+  scheduleImportJobProcessing(jobId, householdId);
+  res.status(202).json({
+    jobId,
+    message: "Restore started. Poll GET /exports/import/:jobId for status."
+  });
 });
 
 /** POST /gdrive/backup — owner only; queues async upload of .hfb to connected Drive folder. */

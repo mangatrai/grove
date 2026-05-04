@@ -9,9 +9,16 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { buildHfbFile } from "./export-job.service.js";
-import { getGDriveCredentials } from "../gdrive/gdrive.service.js";
+import { getGDriveCredentials, type ServiceAccountKey } from "../gdrive/gdrive.service.js";
 
-const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
+export const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
+
+export type DriveBackupEntry = {
+  fileId: string;
+  fileName: string;
+  sizeBytes: number | null;
+  createdAt: string;
+};
 
 export type BackupJobRow = {
   id: string;
@@ -41,6 +48,36 @@ function mapBackupRow(r: Record<string, unknown>): BackupJobRow {
   };
 }
 
+function mapDriveListError(err: unknown): string {
+  if (err instanceof GaxiosError) {
+    const status = err.response?.status;
+    if (status === 403) {
+      return "Permission denied accessing Drive folder.";
+    }
+    if (status === 404) {
+      return "Drive folder not found.";
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return `Could not list Drive backups: ${msg}`;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+function mapDriveDownloadError(err: unknown): Error {
+  if (err instanceof GaxiosError) {
+    const status = err.response?.status;
+    if (status === 403) {
+      return new Error("Permission denied downloading file from Drive.");
+    }
+    if (status === 404) {
+      return new Error("Backup file not found in Drive — it may have been deleted.");
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return new Error(`Drive download failed: ${msg}`);
+  }
+  return err instanceof Error ? err : new Error(String(err));
+}
+
 function mapDriveUploadError(err: unknown): string {
   if (err instanceof GaxiosError) {
     const status = err.response?.status;
@@ -54,6 +91,88 @@ function mapDriveUploadError(err: unknown): string {
     return `Drive upload failed: ${msg}`;
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+export async function listDriveBackups(
+  householdId: string
+): Promise<{ ok: true; files: DriveBackupEntry[] } | { ok: false; message: string }> {
+  const creds = await getGDriveCredentials(householdId);
+  if (!creds) {
+    return { ok: false, message: "Google Drive is not configured." };
+  }
+  try {
+    const auth = new google.auth.GoogleAuth({
+      credentials: creds.key,
+      scopes: ["https://www.googleapis.com/auth/drive"]
+    });
+    const drive = google.drive({ version: "v3", auth });
+    const res = await drive.files.list({
+      q: `'${creds.folderId}' in parents and name contains '.hfb' and trashed = false`,
+      fields: "files(id,name,size,createdTime)",
+      orderBy: "createdTime desc",
+      pageSize: 20
+    });
+    const raw = res.data.files ?? [];
+    const files: DriveBackupEntry[] = raw.map((f) => ({
+      fileId: f.id ?? "",
+      fileName: f.name ?? "",
+      sizeBytes: f.size != null && f.size !== "" ? Number(f.size) : null,
+      createdAt: f.createdTime ?? ""
+    }));
+    return { ok: true, files };
+  } catch (err: unknown) {
+    if (err instanceof GaxiosError) {
+      const status = err.response?.status;
+      if (status === 403) {
+        return { ok: false, message: "Permission denied accessing Drive folder." };
+      }
+      if (status === 404) {
+        return { ok: false, message: "Drive folder not found." };
+      }
+    }
+    return { ok: false, message: mapDriveListError(err) };
+  }
+}
+
+/**
+ * Download a Drive file to `destPath` (stream). On failure after a partial write,
+ * removes `destPath` before rethrowing.
+ */
+export async function downloadDriveFile(key: ServiceAccountKey, fileId: string, destPath: string): Promise<void> {
+  const auth = new google.auth.GoogleAuth({
+    credentials: key,
+    scopes: ["https://www.googleapis.com/auth/drive"]
+  });
+  const drive = google.drive({ version: "v3", auth });
+  let readable: NodeJS.ReadableStream;
+  try {
+    const getRes = await drive.files.get({ fileId, alt: "media" }, { responseType: "stream" });
+    readable = getRes.data as NodeJS.ReadableStream;
+  } catch (err: unknown) {
+    try {
+      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+    } catch {
+      /* ignore */
+    }
+    throw mapDriveDownloadError(err);
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const writeStream = fs.createWriteStream(destPath);
+    const fail = (err: unknown) => {
+      writeStream.destroy();
+      try {
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      } catch {
+        /* ignore */
+      }
+      reject(err instanceof Error ? err : new Error(String(err)));
+    };
+    readable.on("error", fail);
+    writeStream.on("error", fail);
+    writeStream.on("close", () => resolve());
+    readable.pipe(writeStream);
+  });
 }
 
 export async function queueBackupJob(householdId: string, userId: string): Promise<{ jobId: string }> {
