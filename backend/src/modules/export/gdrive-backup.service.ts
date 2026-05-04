@@ -92,30 +92,56 @@ export type ListDriveBackupsResult =
   | { ok: false; reason: "not_configured" }
   | { ok: false; reason: "drive_error"; message: string };
 
+type ListHfbOptions = { maxTotal?: number };
+
+/** Lists `.hfb` files in a folder (newest first). Used by `listDriveBackups` and pruning. */
+async function listHfbFilesInFolder(
+  key: ServiceAccountKey,
+  folderId: string,
+  pageSize: number,
+  opts?: ListHfbOptions
+): Promise<DriveBackupEntry[]> {
+  const auth = new google.auth.GoogleAuth({
+    credentials: key,
+    scopes: ["https://www.googleapis.com/auth/drive"]
+  });
+  const drive = google.drive({ version: "v3", auth });
+  const all: DriveBackupEntry[] = [];
+  let pageToken: string | undefined;
+  const q = `'${folderId}' in parents and name contains '.hfb' and trashed = false`;
+  const maxTotal = opts?.maxTotal;
+  do {
+    const res = await drive.files.list({
+      q,
+      fields: "nextPageToken, files(id,name,size,createdTime)",
+      orderBy: "createdTime desc",
+      pageSize: Math.min(pageSize, 1000),
+      pageToken
+    });
+    const raw = res.data.files ?? [];
+    for (const f of raw) {
+      all.push({
+        fileId: f.id ?? "",
+        fileName: f.name ?? "",
+        sizeBytes: f.size != null && f.size !== "" ? Number(f.size) : null,
+        createdAt: f.createdTime ?? ""
+      });
+      if (maxTotal != null && all.length >= maxTotal) {
+        return all.slice(0, maxTotal);
+      }
+    }
+    pageToken = res.data.nextPageToken ?? undefined;
+  } while (pageToken);
+  return all;
+}
+
 export async function listDriveBackups(householdId: string): Promise<ListDriveBackupsResult> {
   const creds = await getGDriveCredentials(householdId);
   if (!creds) {
     return { ok: false, reason: "not_configured" };
   }
   try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: creds.key,
-      scopes: ["https://www.googleapis.com/auth/drive"]
-    });
-    const drive = google.drive({ version: "v3", auth });
-    const res = await drive.files.list({
-      q: `'${creds.folderId}' in parents and name contains '.hfb' and trashed = false`,
-      fields: "files(id,name,size,createdTime)",
-      orderBy: "createdTime desc",
-      pageSize: 20
-    });
-    const raw = res.data.files ?? [];
-    const files: DriveBackupEntry[] = raw.map((f) => ({
-      fileId: f.id ?? "",
-      fileName: f.name ?? "",
-      sizeBytes: f.size != null && f.size !== "" ? Number(f.size) : null,
-      createdAt: f.createdTime ?? ""
-    }));
+    const files = await listHfbFilesInFolder(creds.key, creds.folderId, 20, { maxTotal: 20 });
     return { ok: true, files };
   } catch (err: unknown) {
     if (err instanceof GaxiosError) {
@@ -180,14 +206,57 @@ export async function downloadDriveFile(key: ServiceAccountKey, fileId: string, 
   });
 }
 
-export async function queueBackupJob(householdId: string, userId: string): Promise<{ jobId: string }> {
+/**
+ * Deletes oldest `.hfb` files in the folder when count exceeds `retentionCount`.
+ * Swallows list/delete errors (logs warnings) so backup success is never blocked.
+ */
+export async function pruneOldDriveBackups(
+  key: ServiceAccountKey,
+  folderId: string,
+  retentionCount: number
+): Promise<void> {
+  let files: DriveBackupEntry[];
+  try {
+    files = await listHfbFilesInFolder(key, folderId, 1000);
+  } catch (err: unknown) {
+    log.warn(
+      `Drive backup prune: list failed — ${err instanceof Error ? err.message : String(err)}`
+    );
+    return;
+  }
+  if (files.length <= retentionCount) {
+    return;
+  }
+  const excess = files.slice(retentionCount);
+  const auth = new google.auth.GoogleAuth({
+    credentials: key,
+    scopes: ["https://www.googleapis.com/auth/drive"]
+  });
+  const drive = google.drive({ version: "v3", auth });
+  for (let i = excess.length - 1; i >= 0; i--) {
+    const f = excess[i];
+    if (!f.fileId) continue;
+    try {
+      await drive.files.delete({ fileId: f.fileId });
+    } catch (delErr: unknown) {
+      log.warn(
+        `Drive backup prune: delete failed for ${f.fileId} — ${delErr instanceof Error ? delErr.message : String(delErr)}`
+      );
+    }
+  }
+}
+
+export async function queueBackupJob(
+  householdId: string,
+  triggeredByUserId: string | null | undefined
+): Promise<{ jobId: string }> {
   fs.mkdirSync(STAGING_DIR, { recursive: true });
   const jobId = randomUUID();
   await qExec(
     `INSERT INTO backup_job (id, household_id, triggered_by_user_id) VALUES (?, ?, ?)`,
     jobId,
     householdId,
-    userId
+    triggeredByUserId ?? null
   );
   return { jobId };
 }
@@ -233,6 +302,15 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
       jobId
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
+    if (creds.backupRetentionCount > 0) {
+      try {
+        await pruneOldDriveBackups(creds.key, creds.folderId, creds.backupRetentionCount);
+      } catch (pruneErr: unknown) {
+        log.warn(
+          `Backup job ${jobId}: pruning failed — ${pruneErr instanceof Error ? pruneErr.message : String(pruneErr)}`
+        );
+      }
+    }
   } catch (err: unknown) {
     const msg =
       err instanceof GaxiosError ? mapDriveUploadError(err) : err instanceof Error ? err.message : String(err);

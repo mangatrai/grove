@@ -18,6 +18,7 @@ import {
   NumberInput,
   Paper,
   PasswordInput,
+  Skeleton,
   SegmentedControl,
   Select,
   Stack,
@@ -79,6 +80,19 @@ type GDriveStatus = {
   connectedByUserId?: string | null;
   lastVerifiedAt?: string | null;
   lastError?: string | null;
+  backupFrequencyHours?: number;
+  backupRetentionCount?: number;
+  lastScheduledBackupAt?: string | null;
+};
+
+type GDriveBackupJobRow = {
+  id: string;
+  status: string;
+  driveFileName: string | null;
+  sizeBytes: number | null;
+  triggeredByUserId: string | null;
+  createdAt: string;
+  completedAt: string | null;
 };
 
 type DriveBackupEntry = {
@@ -102,6 +116,20 @@ function parseBelongsToChoice(choice: string): { ownerScope: "household" | "pers
 
 function formatBelongsToLabel(label: string): string {
   return `Household > ${label}`;
+}
+
+function formatRelativeTimeAgo(iso: string | null | undefined): string {
+  if (!iso) return "Never";
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "Never";
+  const sec = Math.floor((Date.now() - t) / 1000);
+  if (sec < 60) return "Just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const h = Math.floor(min / 60);
+  if (h < 48) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d === 1 ? "" : "s"} ago`;
 }
 
 function buildBelongsToGroups(accountOwners: Array<{ id: string; label: string }>): HierarchicalPickerGroup[] {
@@ -371,6 +399,12 @@ export function SettingsPage() {
   const [driveRestoreJobId, setDriveRestoreJobId] = useState<string | null>(null);
   const [driveRestorePolling, setDriveRestorePolling] = useState(false);
   const [driveRestoreError, setDriveRestoreError] = useState<string | null>(null);
+  const [gdriveSchedulerFreq, setGdriveSchedulerFreq] = useState("24");
+  const [gdriveSchedulerRetention, setGdriveSchedulerRetention] = useState<number | string>(7);
+  const [gdriveSchedulerSaving, setGdriveSchedulerSaving] = useState(false);
+  const [gdriveSchedulerSavedFlash, setGdriveSchedulerSavedFlash] = useState(false);
+  const [backupHistory, setBackupHistory] = useState<GDriveBackupJobRow[] | null>(null);
+  const [backupHistoryLoading, setBackupHistoryLoading] = useState(false);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -674,6 +708,8 @@ export function SettingsPage() {
       setDriveRestorePolling(false);
       setDriveRestoreJobId(null);
       setDriveRestoreError(null);
+      setBackupHistory(null);
+      setGdriveSchedulerSavedFlash(false);
       setGdriveSuccess("Google Drive disconnected.");
     } catch {
       setGdriveError("Could not disconnect. Please try again.");
@@ -710,6 +746,48 @@ export function SettingsPage() {
       setDriveBackupsLoading(false);
     }
   }, []);
+
+  const loadBackupHistory = useCallback(async () => {
+    setBackupHistoryLoading(true);
+    try {
+      const res = await apiJson<{ jobs: GDriveBackupJobRow[] }>("/gdrive/backups/history");
+      setBackupHistory(res.jobs);
+    } catch {
+      setBackupHistory([]);
+    } finally {
+      setBackupHistoryLoading(false);
+    }
+  }, []);
+
+  const handleSaveGdriveScheduler = useCallback(async () => {
+    const freq = Number(gdriveSchedulerFreq);
+    const retention = typeof gdriveSchedulerRetention === "number" ? gdriveSchedulerRetention : Number(gdriveSchedulerRetention);
+    if (![0, 12, 24, 48, 72, 168].includes(freq) || !Number.isFinite(retention) || retention < 1 || retention > 30) {
+      return;
+    }
+    setGdriveSchedulerSaving(true);
+    setGdriveSchedulerSavedFlash(false);
+    try {
+      const res = await apiFetch("/gdrive/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          backupFrequencyHours: freq,
+          backupRetentionCount: Math.round(retention)
+        })
+      });
+      if (!res.ok) {
+        return;
+      }
+      const st = await apiJson<GDriveStatus>("/gdrive/status");
+      setGdriveStatus(st);
+      setGdriveSchedulerSavedFlash(true);
+      window.setTimeout(() => setGdriveSchedulerSavedFlash(false), 3000);
+    } catch {
+      /* ignore */
+    } finally {
+      setGdriveSchedulerSaving(false);
+    }
+  }, [gdriveSchedulerFreq, gdriveSchedulerRetention]);
 
   const handleDriveRestore = useCallback(async (fileId: string) => {
     setDriveRestoreConfirmFileId(null);
@@ -840,6 +918,25 @@ export function SettingsPage() {
   }, [token, tab, canManageHousehold]);
 
   useEffect(() => {
+    if (!gdriveStatus?.connected) {
+      return;
+    }
+    setGdriveSchedulerFreq(String(gdriveStatus.backupFrequencyHours ?? 24));
+    setGdriveSchedulerRetention(gdriveStatus.backupRetentionCount ?? 7);
+  }, [
+    gdriveStatus?.connected,
+    gdriveStatus?.backupFrequencyHours,
+    gdriveStatus?.backupRetentionCount
+  ]);
+
+  useEffect(() => {
+    if (!token || tab !== "data" || !canManageHousehold || !gdriveStatus?.connected) {
+      return;
+    }
+    void loadBackupHistory();
+  }, [token, tab, canManageHousehold, gdriveStatus?.connected, loadBackupHistory]);
+
+  useEffect(() => {
     if (!backupJobId || !backupPolling) return;
     let cancelled = false;
     const deadline = Date.now() + 3 * 60 * 1000;
@@ -857,12 +954,17 @@ export function SettingsPage() {
             setBackupResult({ ok: true, fileName: st.driveFileName ?? undefined });
             setBackupPolling(false);
             setBackupJobId(null);
+            void loadBackupHistory();
+            void apiJson<GDriveStatus>("/gdrive/status")
+              .then((r) => setGdriveStatus(r))
+              .catch(() => {});
             return;
           }
           if (st.status === "failed") {
             setBackupResult({ ok: false, error: st.errorText ?? "Backup failed." });
             setBackupPolling(false);
             setBackupJobId(null);
+            void loadBackupHistory();
             return;
           }
         } catch {
@@ -878,7 +980,7 @@ export function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [backupJobId, backupPolling]);
+  }, [backupJobId, backupPolling, loadBackupHistory]);
 
   useEffect(() => {
     if (!driveRestoreJobId || !driveRestorePolling) return;
@@ -2351,8 +2453,66 @@ export function SettingsPage() {
                               : backupResult.error}
                           </Alert>
                         ) : null}
+                        {authRole === "owner" &&
+                        (gdriveStatus.backupFrequencyHours ?? 0) > 0 &&
+                        gdriveStatus.lastScheduledBackupAt &&
+                        Date.now() - new Date(gdriveStatus.lastScheduledBackupAt).getTime() >
+                          2 * (gdriveStatus.backupFrequencyHours ?? 0) * 3600 * 1000 ? (
+                          <Alert color="yellow" variant="light" mt="xs">
+                            Last automatic backup was over{" "}
+                            {Math.floor(
+                              (Date.now() - new Date(gdriveStatus.lastScheduledBackupAt).getTime()) / 3600000
+                            )}{" "}
+                            hours ago. If the server has been sleeping, some scheduled backups may have been missed. You
+                            can trigger one manually above.
+                          </Alert>
+                        ) : null}
                         {authRole === "owner" ? (
                           <>
+                            <Divider my="sm" label="Automatic backups" labelPosition="left" />
+                            <Stack gap="xs" maw={480}>
+                              <Group align="flex-end" wrap="wrap">
+                                <Select
+                                  label="Frequency"
+                                  data={[
+                                    { value: "0", label: "Disabled (manual only)" },
+                                    { value: "12", label: "Every 12 hours" },
+                                    { value: "24", label: "Every 24 hours" },
+                                    { value: "48", label: "Every 48 hours" },
+                                    { value: "72", label: "Every 3 days" },
+                                    { value: "168", label: "Weekly" }
+                                  ]}
+                                  value={gdriveSchedulerFreq}
+                                  onChange={(v) => setGdriveSchedulerFreq(v ?? "24")}
+                                />
+                                <NumberInput
+                                  label="Keep last N backups"
+                                  description="Pruned on Drive after each successful upload"
+                                  min={1}
+                                  max={30}
+                                  value={gdriveSchedulerRetention}
+                                  onChange={(v) => setGdriveSchedulerRetention(v ?? 7)}
+                                  w={180}
+                                />
+                                <Button
+                                  type="button"
+                                  size="xs"
+                                  loading={gdriveSchedulerSaving}
+                                  onClick={() => void handleSaveGdriveScheduler()}
+                                >
+                                  Save
+                                </Button>
+                                {gdriveSchedulerSavedFlash ? (
+                                  <Text size="sm" c="green" fw={500}>
+                                    Saved
+                                  </Text>
+                                ) : null}
+                              </Group>
+                              <Text size="xs" c="dimmed">
+                                Last automatic backup:{" "}
+                                {formatRelativeTimeAgo(gdriveStatus.lastScheduledBackupAt ?? null)}
+                              </Text>
+                            </Stack>
                             <Divider my="sm" />
                             <Group justify="space-between" align="center">
                               <Text size="sm" fw={500}>
@@ -2439,6 +2599,90 @@ export function SettingsPage() {
                                 if (driveRestoreConfirmFileId) void handleDriveRestore(driveRestoreConfirmFileId);
                               }}
                             />
+                          </>
+                        ) : null}
+                        {authRole === "owner" || authRole === "admin" ? (
+                          <>
+                            <Divider my="sm" label="Recent backup history" labelPosition="left" />
+                            {backupHistoryLoading ? (
+                              <Stack gap="xs" mt="xs">
+                                <Skeleton height={22} radius="sm" />
+                                <Skeleton height={22} radius="sm" />
+                                <Skeleton height={22} radius="sm" />
+                              </Stack>
+                            ) : backupHistory && backupHistory.length > 0 ? (
+                              <Stack gap="xs" mt="xs">
+                                <Table striped highlightOnHover withTableBorder withColumnBorders>
+                                  <Table.Thead>
+                                    <Table.Tr>
+                                      <Table.Th>Status</Table.Th>
+                                      <Table.Th>Date</Table.Th>
+                                      <Table.Th>File</Table.Th>
+                                      <Table.Th>Size</Table.Th>
+                                      <Table.Th>Source</Table.Th>
+                                    </Table.Tr>
+                                  </Table.Thead>
+                                  <Table.Tbody>
+                                    {backupHistory.slice(0, 10).map((job) => {
+                                      const badgeColor =
+                                        job.status === "complete"
+                                          ? "green"
+                                          : job.status === "failed"
+                                            ? "red"
+                                            : "blue";
+                                      const label =
+                                        job.status === "complete"
+                                          ? "Complete"
+                                          : job.status === "failed"
+                                            ? "Failed"
+                                            : job.status === "running"
+                                              ? "Running"
+                                              : "Queued";
+                                      const sizeLabel =
+                                        job.sizeBytes != null
+                                          ? job.sizeBytes >= 1024 * 1024
+                                            ? `${(job.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
+                                            : `${(job.sizeBytes / 1024).toFixed(0)} KB`
+                                          : "—";
+                                      return (
+                                        <Table.Tr key={job.id}>
+                                          <Table.Td>
+                                            <Badge size="sm" color={badgeColor} variant="light">
+                                              {label}
+                                            </Badge>
+                                          </Table.Td>
+                                          <Table.Td>
+                                            <Text size="sm">{new Date(job.createdAt).toLocaleString()}</Text>
+                                          </Table.Td>
+                                          <Table.Td>
+                                            <Text size="sm" style={{ wordBreak: "break-all" }}>
+                                              {job.driveFileName ?? "—"}
+                                            </Text>
+                                          </Table.Td>
+                                          <Table.Td>
+                                            <Text size="sm">{sizeLabel}</Text>
+                                          </Table.Td>
+                                          <Table.Td>
+                                            <Text size="sm" c="dimmed">
+                                              {job.triggeredByUserId == null ? "Automatic" : "Manual"}
+                                            </Text>
+                                          </Table.Td>
+                                        </Table.Tr>
+                                      );
+                                    })}
+                                  </Table.Tbody>
+                                </Table>
+                                {backupHistory.length > 10 ? (
+                                  <Text size="xs" c="dimmed">
+                                    Showing 10 most recent backups.
+                                  </Text>
+                                ) : null}
+                              </Stack>
+                            ) : (
+                              <Text size="sm" c="dimmed" mt="xs">
+                                No backup jobs recorded yet.
+                              </Text>
+                            )}
                           </>
                         ) : null}
                       </Stack>

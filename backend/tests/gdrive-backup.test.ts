@@ -8,6 +8,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 
 const filesGetMock = vi.hoisted(() => vi.fn());
 const filesCreateMock = vi.hoisted(() => vi.fn());
+const filesListMock = vi.hoisted(() => vi.fn());
+const filesDeleteMock = vi.hoisted(() => vi.fn());
 
 vi.mock("googleapis", () => ({
   google: {
@@ -17,7 +19,9 @@ vi.mock("googleapis", () => ({
     drive: vi.fn(() => ({
       files: {
         get: (...args: unknown[]) => filesGetMock(...args),
-        create: (...args: unknown[]) => filesCreateMock(...args)
+        create: (...args: unknown[]) => filesCreateMock(...args),
+        list: (...args: unknown[]) => filesListMock(...args),
+        delete: (...args: unknown[]) => filesDeleteMock(...args)
       }
     }))
   }
@@ -128,6 +132,10 @@ describe("gdrive backup API", () => {
     await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
     filesGetMock.mockReset();
     filesCreateMock.mockReset();
+    filesListMock.mockReset();
+    filesDeleteMock.mockReset();
+    filesListMock.mockResolvedValue({ data: { files: [] } });
+    filesDeleteMock.mockResolvedValue({});
     filesGetMock.mockResolvedValue({
       data: {
         id: "folder-mock",

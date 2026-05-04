@@ -16,11 +16,13 @@ import {
   getGDriveCredentials,
   getGDriveStatus,
   parseServiceAccountKey,
-  testDriveConnection
+  testDriveConnection,
+  updateGDriveSchedulerSettings
 } from "./gdrive.service.js";
 import {
   downloadDriveFile,
   getBackupJob,
+  getRecentBackupJobs,
   listDriveBackups,
   queueBackupJob,
   scheduleBackupJobProcessing,
@@ -53,6 +55,13 @@ const connectSchema = z.object({
 
 const restoreSchema = z.object({
   fileId: z.string().min(1)
+});
+
+const schedulerSettingsSchema = z.object({
+  backupFrequencyHours: z.number().int().refine((v) => [0, 12, 24, 48, 72, 168].includes(v), {
+    message: "backupFrequencyHours must be one of: 0, 12, 24, 48, 72, 168"
+  }),
+  backupRetentionCount: z.number().int().min(1).max(30)
 });
 
 export const gdriveRouter = Router();
@@ -132,6 +141,44 @@ gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: Authen
     return;
   }
   res.json({ files: result.files });
+});
+
+/** PATCH /gdrive/settings — owner only; scheduler frequency and Drive retention count. */
+gdriveRouter.patch("/settings", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const parsed = schedulerSettingsSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+  const creds = await getGDriveCredentials(householdId);
+  if (!creds) {
+    res.status(404).json({ code: "GDRIVE_NOT_CONFIGURED", message: "Google Drive is not connected." });
+    return;
+  }
+  await updateGDriveSchedulerSettings(householdId, {
+    backupFrequencyHours: parsed.data.backupFrequencyHours,
+    backupRetentionCount: parsed.data.backupRetentionCount
+  });
+  res.status(200).json({
+    backupFrequencyHours: parsed.data.backupFrequencyHours,
+    backupRetentionCount: parsed.data.backupRetentionCount
+  });
+});
+
+/** GET /gdrive/backups/history — owner or admin; recent `backup_job` rows (local attempts). */
+gdriveRouter.get("/backups/history", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const creds = await getGDriveCredentials(householdId);
+  if (!creds) {
+    res.status(409).json({
+      code: "GDRIVE_NOT_CONFIGURED",
+      message: "Google Drive is not connected."
+    });
+    return;
+  }
+  const jobs = await getRecentBackupJobs(householdId, 20);
+  res.status(200).json({ jobs });
 });
 
 /** POST /gdrive/restore — owner only; download from Drive and queue household import. */

@@ -1,6 +1,6 @@
 # API: Google Drive (BYOC service account)
 
-Household-level **bring-your-own-credentials** link to a single Google Drive folder using a **service account JSON key**. The API never returns the stored key. Owners can queue an on-demand `.hfb` backup upload to that folder (`POST /gdrive/backup`).
+Household-level **bring-your-own-credentials** link to a single Google Drive folder using a **service account JSON key**. The API never returns the stored key. Owners can queue an on-demand `.hfb` backup upload to that folder (`POST /gdrive/backup`), configure **automatic** backups and **Drive-side retention**, and inspect **local backup job history**.
 
 **Auth:** Bearer JWT on all routes.
 
@@ -11,10 +11,25 @@ Household-level **bring-your-own-credentials** link to a single Google Drive fol
 | `GET /gdrive/status` | Yes | Yes | **403** |
 | `POST /gdrive/connect` | Yes | **403** | **403** |
 | `DELETE /gdrive/disconnect` | Yes | **403** | **403** |
+| `PATCH /gdrive/settings` | Yes | **403** | **403** |
 | `POST /gdrive/backup` | Yes | **403** | **403** |
 | `GET /gdrive/backup/:jobId` | Yes | Yes | **403** |
 | `GET /gdrive/backups` | Yes | Yes | **403** |
+| `GET /gdrive/backups/history` | Yes | Yes | **403** |
 | `POST /gdrive/restore` | Yes | **403** | **403** |
+
+## Automatic backup scheduler (server heartbeat)
+
+When **`MODE` is not `TEST`**, the API starts a lightweight scheduler after DB startup: a **30 second** delay, then **`checkAndQueueDueBackups`** every **30 minutes**.
+
+For each `household_gdrive_config` row with **`backup_frequency_hours` > 0**:
+
+1. If any **`backup_job`** for that household is **`queued`** or **`running`**, skip (no duplicate queue).
+2. Find the most recent **`complete`** job by **`completed_at`**. If none exists, the household is treated as **overdue** immediately.
+3. If **`now - last_completed_at` ≥ `backup_frequency_hours` hours**, the server inserts a new **`backup_job`** with **`triggered_by_user_id` null** (automatic), sets **`household_gdrive_config.last_scheduled_backup_at = NOW()`**, and processes the job asynchronously (same pipeline as manual backup).
+4. In **`MODE=PROD`**, if a completed job **does** exist and **`now - last_completed_at` > 2 × interval**, the server logs a **warning** (staleness / missed windows — e.g. Koyeb eco instance sleep). This does not block queuing when the interval in (3) is also exceeded.
+
+**Retention:** After each successful upload, the server lists **`.hfb`** files in the connected folder (newest first) and deletes the oldest excess files so at most **`backup_retention_count`** remain. Prune list/delete failures are **`log.warn`** only and do **not** fail the backup.
 
 ## `GET /gdrive/status`
 
@@ -36,11 +51,17 @@ Returns connection metadata for the authenticated household. The service account
   "connectedAt": "2026-05-01T12:00:00.000Z",
   "connectedByUserId": "uuid-or-null",
   "lastVerifiedAt": "2026-05-01T12:00:00.000Z",
-  "lastError": null
+  "lastError": null,
+  "backupFrequencyHours": 24,
+  "backupRetentionCount": 7,
+  "lastScheduledBackupAt": "2026-05-01T03:00:00.000Z"
 }
 ```
 
 - **`connectedByUserId`** — Audit field; **`null`** if the connecting user was deleted (`ON DELETE SET NULL` on `household_gdrive_config.connected_by_user_id`).
+- **`backupFrequencyHours`** — **0** disables automatic backups (manual only). Allowed non-zero values: **12, 24, 48, 72, 168**.
+- **`backupRetentionCount`** — **1–30**; number of **`.hfb`** files to keep in Drive after each successful upload.
+- **`lastScheduledBackupAt`** — Last time the **scheduler** queued a job (not updated for manual **`POST /gdrive/backup`**).
 
 ## `POST /gdrive/connect`
 
@@ -74,6 +95,30 @@ Returns connection metadata for the authenticated household. The service account
 ```
 
 Idempotent when already disconnected.
+
+## `PATCH /gdrive/settings`
+
+**Owner only.** Updates scheduler fields on the existing `household_gdrive_config` row.
+
+**Body JSON**
+
+```json
+{
+  "backupFrequencyHours": 24,
+  "backupRetentionCount": 7
+}
+```
+
+- **`backupFrequencyHours`** — **0, 12, 24, 48, 72, or 168** (integer).
+- **`backupRetentionCount`** — **1–30** (integer).
+
+**200** — `{ "backupFrequencyHours", "backupRetentionCount" }` (echo).
+
+**400** — Zod validation (`issues`).
+
+**404** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected (or stored key cannot be loaded).
+
+**403** — Non-owner.
 
 ## On-demand backup
 
@@ -110,6 +155,14 @@ Idempotent when already disconnected.
 **409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when no Drive folder is connected for the household.
 
 **502** — `{ "code": "DRIVE_LIST_FAILED", "message": "..." }` when the Drive API call fails (permissions, network, etc.).
+
+### `GET /gdrive/backups/history`
+
+**Owner or admin.** Returns up to **20** rows from the **`backup_job`** table for this household (newest `created_at` first). This reflects **what the server attempted** (queued, running, complete, failed), including automatic jobs (**`triggeredByUserId`** is **`null`**). It is **not** the live Drive file list (use **`GET /gdrive/backups`** for restore).
+
+**200** — `{ "jobs": [ { "id", "householdId", "status", "driveFileId", "driveFileName", "sizeBytes", "errorText", "triggeredByUserId", "createdAt", "completedAt" } ] }` (camelCase).
+
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected.
 
 ### `POST /gdrive/restore`
 

@@ -21,6 +21,9 @@ export type GDriveStatus = {
   connectedByUserId: string | null;
   lastVerifiedAt: string | null;
   lastError: string | null;
+  backupFrequencyHours: number;
+  backupRetentionCount: number;
+  lastScheduledBackupAt: string | null;
 };
 
 type GDriveRow = {
@@ -31,6 +34,9 @@ type GDriveRow = {
   connected_by_user_id: string | null;
   last_verified_at: string | null;
   last_error: string | null;
+  backup_frequency_hours: number;
+  backup_retention_count: number;
+  last_scheduled_backup_at: string | null;
 };
 
 function mapRow(r: GDriveRow): GDriveStatus {
@@ -40,7 +46,10 @@ function mapRow(r: GDriveRow): GDriveStatus {
     connectedAt: String(r.connected_at),
     connectedByUserId: r.connected_by_user_id,
     lastVerifiedAt: r.last_verified_at ? String(r.last_verified_at) : null,
-    lastError: r.last_error ?? null
+    lastError: r.last_error ?? null,
+    backupFrequencyHours: Number(r.backup_frequency_hours),
+    backupRetentionCount: Number(r.backup_retention_count),
+    lastScheduledBackupAt: r.last_scheduled_backup_at != null ? String(r.last_scheduled_backup_at) : null
   };
 }
 
@@ -140,23 +149,38 @@ export async function disconnectGDrive(householdId: string): Promise<void> {
 
 export async function getGDriveStatus(householdId: string): Promise<GDriveStatus | null> {
   const r = await qGet<GDriveRow>(
-    `SELECT household_id, folder_id, folder_name, connected_at, connected_by_user_id, last_verified_at, last_error
+    `SELECT household_id, folder_id, folder_name, connected_at, connected_by_user_id, last_verified_at, last_error,
+            backup_frequency_hours, backup_retention_count, last_scheduled_backup_at
        FROM household_gdrive_config WHERE household_id = ?`,
     householdId
   );
   return r ? mapRow(r) : null;
 }
 
+/** Credentials plus scheduler fields for Drive backup and pruning (single DB read). */
+export type GDriveCredentials = {
+  key: ServiceAccountKey;
+  folderId: string;
+  backupFrequencyHours: number;
+  backupRetentionCount: number;
+  lastScheduledBackupAt: string | null;
+};
+
 /**
  * Load the stored service account credentials for a household.
- * Used by upload/restore services (CR-130, CR-131).
- * Returns null if no config exists.
+ * Used by upload/restore services (CR-130, CR-131) and backup scheduler.
+ * Returns null if no config exists or the stored key JSON is invalid.
  */
-export async function getGDriveCredentials(
-  householdId: string
-): Promise<{ key: ServiceAccountKey; folderId: string } | null> {
-  const r = await qGet<{ service_account_json: string; folder_id: string }>(
-    `SELECT service_account_json, folder_id FROM household_gdrive_config WHERE household_id = ?`,
+export async function getGDriveCredentials(householdId: string): Promise<GDriveCredentials | null> {
+  const r = await qGet<{
+    service_account_json: string;
+    folder_id: string;
+    backup_frequency_hours: number;
+    backup_retention_count: number;
+    last_scheduled_backup_at: string | null;
+  }>(
+    `SELECT service_account_json, folder_id, backup_frequency_hours, backup_retention_count, last_scheduled_backup_at
+       FROM household_gdrive_config WHERE household_id = ?`,
     householdId
   );
   if (!r) return null;
@@ -168,5 +192,25 @@ export async function getGDriveCredentials(
   }
   const result = parseServiceAccountKey(parsed);
   if (!result.ok) return null;
-  return { key: result.key, folderId: r.folder_id };
+  return {
+    key: result.key,
+    folderId: r.folder_id,
+    backupFrequencyHours: Number(r.backup_frequency_hours),
+    backupRetentionCount: Number(r.backup_retention_count),
+    lastScheduledBackupAt: r.last_scheduled_backup_at != null ? String(r.last_scheduled_backup_at) : null
+  };
+}
+
+export async function updateGDriveSchedulerSettings(
+  householdId: string,
+  settings: { backupFrequencyHours: number; backupRetentionCount: number }
+): Promise<void> {
+  await qExec(
+    `UPDATE household_gdrive_config
+       SET backup_frequency_hours = ?, backup_retention_count = ?
+     WHERE household_id = ?`,
+    settings.backupFrequencyHours,
+    settings.backupRetentionCount,
+    householdId
+  );
 }

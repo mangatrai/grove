@@ -182,6 +182,8 @@ describe("gdrive API", () => {
     expect(st.status).toBe(200);
     expect(st.body.connected).toBe(true);
     expect(st.body.folderId).toBe("folder-id-2");
+    expect(st.body.backupFrequencyHours).toBe(24);
+    expect(st.body.backupRetentionCount).toBe(7);
 
     const del = await request(app).delete("/gdrive/disconnect").set("authorization", `Bearer ${token}`);
     expect(del.status).toBe(200);
@@ -189,6 +191,29 @@ describe("gdrive API", () => {
 
     const after = await request(app).get("/gdrive/status").set("authorization", `Bearer ${token}`);
     expect(after.body.connected).toBe(false);
+  });
+
+  it("PATCH /gdrive/settings and GET /gdrive/backups/history after connect", async () => {
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    await request(app)
+      .post("/gdrive/connect")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        folderId: "folder-settings-hist"
+      });
+
+    const patch = await request(app)
+      .patch("/gdrive/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({ backupFrequencyHours: 48, backupRetentionCount: 14 });
+    expect(patch.status).toBe(200);
+    expect(patch.body.backupFrequencyHours).toBe(48);
+    expect(patch.body.backupRetentionCount).toBe(14);
+
+    const hist = await request(app).get("/gdrive/backups/history").set("authorization", `Bearer ${token}`);
+    expect(hist.status).toBe(200);
+    expect(Array.isArray(hist.body.jobs)).toBe(true);
   });
 
   it("DELETE /gdrive/disconnect is idempotent when not configured", async () => {
