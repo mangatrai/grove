@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-131a (2026-05-03): CR-131 review — backups list status, download settle guard
+- **Type:** FIX / polish
+- **What:** `downloadDriveFile` uses a **`settled`** guard so `writeStream.destroy()` after a read/write error does not also invoke **`resolve()`** from the **`close`** listener (Promise only settles once, but the double callback was misleading). **`mapDriveListError`** no longer duplicates Gaxios 403/404 branches already handled in **`listDriveBackups`**. **`GET /gdrive/backups`** returns **409** **`GDRIVE_NOT_CONFIGURED`** when Drive is not connected, and **502** **`DRIVE_LIST_FAILED`** only for upstream Drive API failures.
+- **Files:** `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/tests/gdrive-restore.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-131 (2026-05-03): Restore from Google Drive
 **Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive-restore.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
 **What:** Owners (and admins for listing) can **`GET /gdrive/backups`** to list recent `.hfb` files in the connected folder (Drive `files.list`, max 20). Owners can **`POST /gdrive/restore`** with a Drive `fileId`; the server streams the file via `files.get` alt=media into `data/gdrive-backup-staging/`, then **`queueHouseholdImport`** renames it into `data/imports-restore/` and runs the existing import job processor. Settings **Data & Backup** adds **Restore from Drive** (load/refresh list, confirm, poll **`GET /exports/import/:jobId`**). **`STAGING_DIR`** and **`ServiceAccountKey`** are exported for reuse; **`downloadDriveFile`** cleans partial files on error. **`transaction_canonical` `onExport`** strips generated **`search_document`** so `.hfb` round-trips and Drive restores do not fail inserts.

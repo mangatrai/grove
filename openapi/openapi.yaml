@@ -883,8 +883,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not connected for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
         "502":
-          description: Drive API failure or Google Drive not configured for this household
+          description: Drive API failure (list request)
           content:
             application/json:
               schema:

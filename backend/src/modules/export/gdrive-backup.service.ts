@@ -48,15 +48,9 @@ function mapBackupRow(r: Record<string, unknown>): BackupJobRow {
   };
 }
 
+/** Maps Drive list failures after explicit 403/404 handling in `listDriveBackups`. */
 function mapDriveListError(err: unknown): string {
   if (err instanceof GaxiosError) {
-    const status = err.response?.status;
-    if (status === 403) {
-      return "Permission denied accessing Drive folder.";
-    }
-    if (status === 404) {
-      return "Drive folder not found.";
-    }
     const msg = err instanceof Error ? err.message : String(err);
     return `Could not list Drive backups: ${msg}`;
   }
@@ -93,12 +87,15 @@ function mapDriveUploadError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export async function listDriveBackups(
-  householdId: string
-): Promise<{ ok: true; files: DriveBackupEntry[] } | { ok: false; message: string }> {
+export type ListDriveBackupsResult =
+  | { ok: true; files: DriveBackupEntry[] }
+  | { ok: false; reason: "not_configured" }
+  | { ok: false; reason: "drive_error"; message: string };
+
+export async function listDriveBackups(householdId: string): Promise<ListDriveBackupsResult> {
   const creds = await getGDriveCredentials(householdId);
   if (!creds) {
-    return { ok: false, message: "Google Drive is not configured." };
+    return { ok: false, reason: "not_configured" };
   }
   try {
     const auth = new google.auth.GoogleAuth({
@@ -124,13 +121,13 @@ export async function listDriveBackups(
     if (err instanceof GaxiosError) {
       const status = err.response?.status;
       if (status === 403) {
-        return { ok: false, message: "Permission denied accessing Drive folder." };
+        return { ok: false, reason: "drive_error", message: "Permission denied accessing Drive folder." };
       }
       if (status === 404) {
-        return { ok: false, message: "Drive folder not found." };
+        return { ok: false, reason: "drive_error", message: "Drive folder not found." };
       }
     }
-    return { ok: false, message: mapDriveListError(err) };
+    return { ok: false, reason: "drive_error", message: mapDriveListError(err) };
   }
 }
 
@@ -159,7 +156,10 @@ export async function downloadDriveFile(key: ServiceAccountKey, fileId: string, 
 
   await new Promise<void>((resolve, reject) => {
     const writeStream = fs.createWriteStream(destPath);
+    let settled = false;
     const fail = (err: unknown) => {
+      if (settled) return;
+      settled = true;
       writeStream.destroy();
       try {
         if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
@@ -170,7 +170,12 @@ export async function downloadDriveFile(key: ServiceAccountKey, fileId: string, 
     };
     readable.on("error", fail);
     writeStream.on("error", fail);
-    writeStream.on("close", () => resolve());
+    writeStream.on("close", () => {
+      if (!settled) {
+        settled = true;
+        resolve();
+      }
+    });
     readable.pipe(writeStream);
   });
 }

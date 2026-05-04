@@ -121,6 +121,13 @@ gdriveRouter.delete("/disconnect", requireRole(["owner"]), async (req: Authentic
 gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const result = await listDriveBackups(req.authUser!.householdId);
   if (!result.ok) {
+    if (result.reason === "not_configured") {
+      res.status(409).json({
+        code: "GDRIVE_NOT_CONFIGURED",
+        message: "Google Drive is not connected."
+      });
+      return;
+    }
     res.status(502).json({ code: "DRIVE_LIST_FAILED", message: result.message });
     return;
   }

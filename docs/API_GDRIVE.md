@@ -107,7 +107,9 @@ Idempotent when already disconnected.
 - **`sizeBytes`** may be `null` when Drive does not return a size.  
 - **`createdAt`** is the Drive `createdTime` string (ISO 8601 when present).
 
-**502** — `{ "code": "DRIVE_LIST_FAILED", "message": "..." }` when the Drive API fails or Google Drive is not configured for the household (same envelope for both).
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when no Drive folder is connected for the household.
+
+**502** — `{ "code": "DRIVE_LIST_FAILED", "message": "..." }` when the Drive API call fails (permissions, network, etc.).
 
 ### `POST /gdrive/restore`
 

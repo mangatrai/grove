@@ -157,11 +157,11 @@ describe("gdrive restore API (CR-131)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("GET /gdrive/backups returns 502 DRIVE_LIST_FAILED when Drive is not connected", async () => {
+  it("GET /gdrive/backups returns 409 GDRIVE_NOT_CONFIGURED when Drive is not connected", async () => {
     const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
     const res = await request(app).get("/gdrive/backups").set("authorization", `Bearer ${token}`);
-    expect(res.status).toBe(502);
-    expect(res.body.code).toBe("DRIVE_LIST_FAILED");
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("GDRIVE_NOT_CONFIGURED");
   });
 
   it("GET /gdrive/backups returns 403 for member", async () => {
