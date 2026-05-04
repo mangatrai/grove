@@ -93,7 +93,12 @@ const envSchema = z.object({
   /** Min milliseconds between background polls for async LLM payslip import (default 2 min). */
   PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
   /** Max inclusive span (days) for `GET /reports/cash-summary` when `dateFrom`+`dateTo` are set. Default ~3 years. */
-  CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS: optionalIntEnv(1096, 31, 4000)
+  CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS: optionalIntEnv(1096, 31, 4000),
+  /** Google OAuth2 (Drive) — optional; required for GDrive connect / backup when using user-delegated auth. */
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  /** Full redirect URI registered in Google Cloud Console, e.g. http://127.0.0.1:4000/gdrive/oauth/callback */
+  GOOGLE_REDIRECT_URI: z.string().default("")
 });
 
 export const env = envSchema.parse(process.env);

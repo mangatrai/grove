@@ -14,7 +14,18 @@ const filesDeleteMock = vi.hoisted(() => vi.fn());
 vi.mock("googleapis", () => ({
   google: {
     auth: {
-      GoogleAuth: class {}
+      OAuth2: class {
+        setCredentials(_: unknown) {}
+        async getToken(_: string) {
+          return {
+            tokens: {
+              refresh_token: "mock-refresh-token",
+              access_token: "mock-access-token",
+              expiry_date: Date.now() + 3_600_000
+            }
+          };
+        }
+      }
     },
     drive: vi.fn(() => ({
       files: {
@@ -42,14 +53,6 @@ const MEMBER_ID = "20000000-0000-0000-0000-000000000086";
 const MEMBER_EMAIL = "member-gdrive-api@example.com";
 
 const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
-
-const minimalServiceAccountKey = {
-  type: "service_account",
-  project_id: "test-proj",
-  private_key:
-    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n",
-  client_email: "svc@test-proj.iam.gserviceaccount.com"
-};
 
 function gaxios403(): GaxiosError {
   const config = { url: "https://www.googleapis.com/drive/v3/files" } as GaxiosOptionsPrepared;
@@ -191,7 +194,7 @@ describe("gdrive backup API", () => {
         .post("/gdrive/connect")
         .set("authorization", `Bearer ${ownerToken}`)
         .send({
-          serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+          code: "test-oauth-code",
           folderId: "folder-backup-ok"
         });
       expect(filesGetMock).toHaveBeenCalled();
@@ -227,7 +230,7 @@ describe("gdrive backup API", () => {
         .post("/gdrive/connect")
         .set("authorization", `Bearer ${ownerToken}`)
         .send({
-          serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+          code: "test-oauth-code",
           folderId: "folder-backup-fail"
         });
 

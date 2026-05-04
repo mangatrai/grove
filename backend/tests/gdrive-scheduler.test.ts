@@ -9,29 +9,21 @@ import { sqlStmt } from "./pg-stmt.js";
 const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
 const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
 
-const SA_JSON = JSON.stringify({
-  type: "service_account",
-  project_id: "p",
-  private_key:
-    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n",
-  client_email: "svc@p.iam.gserviceaccount.com"
-});
-
 async function insertGdriveConfig(freq: number): Promise<void> {
   await sqlStmt(
     `INSERT INTO household_gdrive_config
-      (household_id, service_account_json, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error,
+      (household_id, oauth2_refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error,
        backup_frequency_hours, backup_retention_count, last_scheduled_backup_at)
      VALUES (?, ?, 'fld', 'F', ?, NOW(), NULL, ?, 7, NULL)
      ON CONFLICT (household_id) DO UPDATE SET
-       service_account_json = EXCLUDED.service_account_json,
+       oauth2_refresh_token = EXCLUDED.oauth2_refresh_token,
        folder_id = EXCLUDED.folder_id,
        folder_name = EXCLUDED.folder_name,
        connected_by_user_id = EXCLUDED.connected_by_user_id,
        backup_frequency_hours = EXCLUDED.backup_frequency_hours,
        backup_retention_count = EXCLUDED.backup_retention_count,
        last_scheduled_backup_at = NULL`
-  ).run(HOUSEHOLD_ID, SA_JSON, OWNER_USER_ID, freq);
+  ).run(HOUSEHOLD_ID, "mock-refresh-token", OWNER_USER_ID, freq);
 }
 
 describe("gdrive backup scheduler", () => {

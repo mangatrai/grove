@@ -8,8 +8,20 @@ const filesGetMock = vi.hoisted(() => vi.fn());
 vi.mock("googleapis", () => ({
   google: {
     auth: {
-      GoogleAuth: class {
-        constructor() {}
+      OAuth2: class {
+        setCredentials(_: unknown) {}
+        generateAuthUrl() {
+          return "https://accounts.google.com/mock-oauth-url";
+        }
+        async getToken(_: string) {
+          return {
+            tokens: {
+              refresh_token: "mock-refresh-token",
+              access_token: "mock-access-token",
+              expiry_date: Date.now() + 3_600_000
+            }
+          };
+        }
       }
     },
     drive: vi.fn(() => ({
@@ -21,6 +33,7 @@ vi.mock("googleapis", () => ({
 }));
 
 import { buildApp } from "../src/app.js";
+import { encodeGDriveOAuthState } from "../src/modules/gdrive/gdrive.service.js";
 import { sqlStmt } from "./pg-stmt.js";
 
 const app = buildApp();
@@ -32,14 +45,7 @@ const ADMIN_ID = "20000000-0000-0000-0000-000000000087";
 const ADMIN_EMAIL = "admin-gdrive-api@example.com";
 const MEMBER_ID = "20000000-0000-0000-0000-000000000086";
 const MEMBER_EMAIL = "member-gdrive-api@example.com";
-
-const minimalServiceAccountKey = {
-  type: "service_account",
-  project_id: "test-proj",
-  private_key:
-    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n",
-  client_email: "svc@test-proj.iam.gserviceaccount.com"
-};
+const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
 
 function gaxios403(): GaxiosError {
   const config = { url: "https://www.googleapis.com/drive/v3/files/x" } as GaxiosOptionsPrepared;
@@ -128,37 +134,39 @@ describe("gdrive API", () => {
     expect(res.status).toBe(403);
   });
 
-  it("POST /gdrive/connect returns 400 INVALID_KEY_JSON for invalid JSON string", async () => {
+  it("GET /gdrive/oauth/url returns 400 when folderId is missing", async () => {
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    const res = await request(app).get("/gdrive/oauth/url").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /gdrive/oauth/url returns 200 with url for owner", async () => {
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    const res = await request(app)
+      .get("/gdrive/oauth/url")
+      .query({ folderId: "my-folder-id" })
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.url).toBe("https://accounts.google.com/mock-oauth-url");
+  });
+
+  it("POST /gdrive/connect returns 400 when code is missing", async () => {
     const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
     const res = await request(app)
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${token}`)
-      .send({ serviceAccountKeyJson: "not-json-at-all{", folderId: "any" });
+      .send({ folderId: "any" });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("INVALID_KEY_JSON");
   });
 
-  it("POST /gdrive/connect returns 400 INVALID_KEY_FORMAT for wrong key shape", async () => {
-    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
-    const res = await request(app)
-      .post("/gdrive/connect")
-      .set("authorization", `Bearer ${token}`)
-      .send({
-        serviceAccountKeyJson: JSON.stringify({ type: "service_account", project_id: "", private_key: "", client_email: "" }),
-        folderId: "x"
-      });
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe("INVALID_KEY_FORMAT");
-  });
-
-  it("POST /gdrive/connect returns 422 when Drive API returns 403", async () => {
+  it("POST /gdrive/connect returns 422 when Drive API returns 403 on folder verify", async () => {
     filesGetMock.mockRejectedValueOnce(gaxios403());
     const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
     const res = await request(app)
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${token}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-id-1"
       });
     expect(res.status).toBe(422);
@@ -172,7 +180,7 @@ describe("gdrive API", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${token}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-id-2"
       });
     expect(connect.status).toBe(200);
@@ -209,7 +217,7 @@ describe("gdrive API", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${token}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-settings-hist"
       });
 
@@ -239,7 +247,7 @@ describe("gdrive API", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${adminToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "c",
         folderId: "f"
       });
     expect(post.status).toBe(403);
@@ -254,7 +262,7 @@ describe("gdrive API", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${token}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "c",
         folderId: "f"
       });
     expect(res.status).toBe(403);
@@ -266,7 +274,7 @@ describe("gdrive API", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${ownerToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-member-test"
       });
 
@@ -275,13 +283,31 @@ describe("gdrive API", () => {
     expect(del.status).toBe(403);
   });
 
+  it("GET /gdrive/oauth/callback exchanges code and redirects to settings (no JWT)", async () => {
+    const state = encodeGDriveOAuthState({
+      householdId: HOUSEHOLD_ID,
+      userId: OWNER_USER_ID,
+      folderId: "folder-callback-ok"
+    });
+    const res = await request(app).get("/gdrive/oauth/callback").query({ code: "google-code", state });
+    expect(res.status).toBe(302);
+    expect(String(res.headers.location)).toContain("gdrive=connected");
+
+    const row = await sqlStmt("SELECT oauth2_refresh_token, folder_id FROM household_gdrive_config WHERE household_id = ?").get(
+      HOUSEHOLD_ID
+    );
+    expect(row?.oauth2_refresh_token).toBe("mock-refresh-token");
+    expect(row?.folder_id).toBe("folder-callback-ok");
+    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+  });
+
   it("admin can GET /gdrive/status after owner connects", async () => {
     const ownerToken = await login(OWNER_EMAIL, OWNER_PASSWORD);
     await request(app)
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${ownerToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-admin-read"
       });
 

@@ -11,12 +11,14 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import {
-  connectGDrive,
+  assertOwnerOfHousehold,
+  buildOAuthConsentUrl,
+  buildSettingsGdriveRedirectUrl,
+  decodeGDriveOAuthState,
   disconnectGDrive,
+  exchangeAndConnect,
   getGDriveCredentials,
   getGDriveStatus,
-  parseServiceAccountKey,
-  testDriveConnection,
   updateGDriveSchedulerSettings
 } from "./gdrive.service.js";
 import {
@@ -49,7 +51,7 @@ const backupRateLimit = rateLimit({
 });
 
 const connectSchema = z.object({
-  serviceAccountKeyJson: z.string().min(1),
+  code: z.string().min(1),
   folderId: z.string().min(1)
 });
 
@@ -64,10 +66,60 @@ const schedulerSettingsSchema = z.object({
   backupRetentionCount: z.number().int().min(1).max(30)
 });
 
+const oauthUrlQuerySchema = z.object({
+  folderId: z.string().min(1)
+});
+
 export const gdriveRouter = Router();
+
+/**
+ * Google OAuth redirect — no JWT (browser redirect from accounts.google.com).
+ * State is HMAC-signed; user must be household owner before tokens are persisted.
+ */
+gdriveRouter.get("/oauth/callback", async (req, res) => {
+  const errRedirect = (msg: string) => {
+    const safe = msg.slice(0, 500);
+    res.redirect(
+      302,
+      buildSettingsGdriveRedirectUrl({
+        tab: "data",
+        gdrive: "error",
+        message: encodeURIComponent(safe)
+      })
+    );
+  };
+
+  const code = String(req.query.code ?? "").trim();
+  const state = String(req.query.state ?? "").trim();
+  if (!code || !state) {
+    errRedirect("Missing OAuth code or state.");
+    return;
+  }
+
+  const decoded = decodeGDriveOAuthState(state);
+  if (!decoded.ok) {
+    errRedirect(decoded.message);
+    return;
+  }
+
+  const ownerOk = await assertOwnerOfHousehold(decoded.userId, decoded.householdId);
+  if (!ownerOk) {
+    errRedirect("Invalid user for this connection.");
+    return;
+  }
+
+  const result = await exchangeAndConnect(decoded.householdId, decoded.userId, code, decoded.folderId);
+  if (!result.ok) {
+    errRedirect(result.message);
+    return;
+  }
+
+  res.redirect(302, buildSettingsGdriveRedirectUrl({ tab: "data", gdrive: "connected" }));
+});
+
 gdriveRouter.use(requireAuth);
 
-/** GET /gdrive/status — returns connection state; never returns the key itself. */
+/** GET /gdrive/status — returns connection state; never returns tokens. */
 gdriveRouter.get("/status", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const status = await getGDriveStatus(req.authUser!.householdId);
   if (!status) {
@@ -77,7 +129,27 @@ gdriveRouter.get("/status", requireRole(["owner", "admin"]), async (req: Authent
   res.json({ connected: true, ...status });
 });
 
-/** POST /gdrive/connect — validates key + folder, saves to DB. */
+/** GET /gdrive/oauth/url — owner only; returns Google consent URL for the given folder. */
+gdriveRouter.get("/oauth/url", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
+  const parsed = oauthUrlQuerySchema.safeParse({ folderId: String(req.query.folderId ?? "").trim() });
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid query", issues: parsed.error.issues });
+    return;
+  }
+  if (!env.GOOGLE_CLIENT_ID.trim() || !env.GOOGLE_CLIENT_SECRET.trim() || !env.GOOGLE_REDIRECT_URI.trim()) {
+    res.status(400).json({
+      code: "OAUTH_NOT_CONFIGURED",
+      message: "Google OAuth is not configured on the server (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)."
+    });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const userId = req.authUser!.userId;
+  const url = buildOAuthConsentUrl(householdId, userId, parsed.data.folderId);
+  res.json({ url });
+});
+
+/** POST /gdrive/connect — owner only; exchange OAuth code (e.g. SPA flow) and save tokens. */
 gdriveRouter.post("/connect", requireRole(["owner"]), connectRateLimit, async (req: AuthenticatedRequest, res) => {
   const parsed = connectSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -85,37 +157,28 @@ gdriveRouter.post("/connect", requireRole(["owner"]), connectRateLimit, async (r
     return;
   }
 
-  let keyObj: unknown;
-  try {
-    keyObj = JSON.parse(parsed.data.serviceAccountKeyJson);
-  } catch {
-    res.status(400).json({ code: "INVALID_KEY_JSON", message: "Service account key is not valid JSON." });
+  if (!env.GOOGLE_CLIENT_ID.trim() || !env.GOOGLE_CLIENT_SECRET.trim() || !env.GOOGLE_REDIRECT_URI.trim()) {
+    res.status(400).json({
+      code: "OAUTH_NOT_CONFIGURED",
+      message: "Google OAuth is not configured on the server."
+    });
     return;
   }
 
-  const keyResult = parseServiceAccountKey(keyObj);
-  if (!keyResult.ok) {
-    res.status(400).json({ code: "INVALID_KEY_FORMAT", message: keyResult.message });
-    return;
-  }
-
-  const testResult = await testDriveConnection(keyResult.key, parsed.data.folderId);
-  if (!testResult.ok) {
-    res.status(422).json({ code: "DRIVE_CONNECTION_FAILED", message: testResult.message });
-    return;
-  }
-
-  await connectGDrive(
+  const result = await exchangeAndConnect(
     req.authUser!.householdId,
     req.authUser!.userId,
-    parsed.data.serviceAccountKeyJson,
-    parsed.data.folderId,
-    testResult.folderName
+    parsed.data.code,
+    parsed.data.folderId
   );
+  if (!result.ok) {
+    res.status(422).json({ code: "DRIVE_CONNECTION_FAILED", message: result.message });
+    return;
+  }
 
   res.status(200).json({
     connected: true,
-    folderName: testResult.folderName,
+    folderName: result.folderName,
     folderId: parsed.data.folderId
   });
 });
@@ -206,7 +269,7 @@ gdriveRouter.post("/restore", requireRole(["owner"]), async (req: AuthenticatedR
   fs.mkdirSync(STAGING_DIR, { recursive: true });
 
   try {
-    await downloadDriveFile(creds.key, fileId, tempPath);
+    await downloadDriveFile(creds.refreshToken, fileId, tempPath);
   } catch (err: unknown) {
     res.status(502).json({
       code: "DRIVE_DOWNLOAD_FAILED",

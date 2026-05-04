@@ -15,7 +15,18 @@ const filesCreateMock = vi.hoisted(() => vi.fn());
 vi.mock("googleapis", () => ({
   google: {
     auth: {
-      GoogleAuth: class {}
+      OAuth2: class {
+        setCredentials(_: unknown) {}
+        async getToken(_: string) {
+          return {
+            tokens: {
+              refresh_token: "mock-refresh-token",
+              access_token: "mock-access-token",
+              expiry_date: Date.now() + 3_600_000
+            }
+          };
+        }
+      }
     },
     drive: vi.fn(() => ({
       files: {
@@ -44,14 +55,6 @@ const MEMBER_EMAIL = "member-gdrive-api@example.com";
 
 const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
 const IMPORTS_RESTORE_DIR = resolveDataPath("data/imports-restore");
-
-const minimalServiceAccountKey = {
-  type: "service_account",
-  project_id: "test-proj",
-  private_key:
-    "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n",
-  client_email: "svc@test-proj.iam.gserviceaccount.com"
-};
 
 let hfbFixtureBuffer: Buffer;
 
@@ -176,7 +179,7 @@ describe("gdrive restore API (CR-131)", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${ownerToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-list-ok"
       });
 
@@ -214,7 +217,7 @@ describe("gdrive restore API (CR-131)", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${ownerToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-admin-list"
       });
 
@@ -251,7 +254,7 @@ describe("gdrive restore API (CR-131)", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${ownerToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-restore-role"
       });
 
@@ -276,7 +279,7 @@ describe("gdrive restore API (CR-131)", () => {
       .post("/gdrive/connect")
       .set("authorization", `Bearer ${ownerToken}`)
       .send({
-        serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+        code: "test-oauth-code",
         folderId: "folder-dl-fail"
       });
 
@@ -316,7 +319,7 @@ describe("gdrive restore API (CR-131)", () => {
         .post("/gdrive/connect")
         .set("authorization", `Bearer ${ownerToken}`)
         .send({
-          serviceAccountKeyJson: JSON.stringify(minimalServiceAccountKey),
+          code: "test-oauth-code",
           folderId: "folder-restore-ok"
         });
 

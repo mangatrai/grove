@@ -9,7 +9,8 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { buildHfbFile } from "./export-job.service.js";
-import { getGDriveCredentials, type ServiceAccountKey } from "../gdrive/gdrive.service.js";
+import { buildOAuth2Client, getGDriveCredentials } from "../gdrive/gdrive.service.js";
+import { logGoogleDriveApiError } from "../gdrive/log-google-drive-api-error.js";
 
 export const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
 
@@ -76,7 +77,7 @@ function mapDriveUploadError(err: unknown): string {
   if (err instanceof GaxiosError) {
     const status = err.response?.status;
     if (status === 403) {
-      return "Permission denied. Verify the service account still has Editor access to the Drive folder.";
+      return "Permission denied. Verify your Google account still has access to the Drive folder.";
     }
     if (status === 404) {
       return "Drive folder not found. The folder may have been deleted or the folder ID changed.";
@@ -96,16 +97,13 @@ type ListHfbOptions = { maxTotal?: number };
 
 /** Lists `.hfb` files in a folder (newest first). Used by `listDriveBackups` and pruning. */
 async function listHfbFilesInFolder(
-  key: ServiceAccountKey,
+  refreshToken: string,
   folderId: string,
   pageSize: number,
   opts?: ListHfbOptions
 ): Promise<DriveBackupEntry[]> {
-  const auth = new google.auth.GoogleAuth({
-    credentials: key,
-    scopes: ["https://www.googleapis.com/auth/drive"]
-  });
-  const drive = google.drive({ version: "v3", auth });
+  const oauth2Client = buildOAuth2Client(refreshToken);
+  const drive = google.drive({ version: "v3", auth: oauth2Client });
   const all: DriveBackupEntry[] = [];
   let pageToken: string | undefined;
   const q = `'${folderId}' in parents and name contains '.hfb' and trashed = false`;
@@ -141,10 +139,11 @@ export async function listDriveBackups(householdId: string): Promise<ListDriveBa
     return { ok: false, reason: "not_configured" };
   }
   try {
-    const files = await listHfbFilesInFolder(creds.key, creds.folderId, 20, { maxTotal: 20 });
+    const files = await listHfbFilesInFolder(creds.refreshToken, creds.folderId, 20, { maxTotal: 20 });
     return { ok: true, files };
   } catch (err: unknown) {
     if (err instanceof GaxiosError) {
+      logGoogleDriveApiError("listDriveBackups(files.list)", err);
       const status = err.response?.status;
       if (status === 403) {
         return { ok: false, reason: "drive_error", message: "Permission denied accessing Drive folder." };
@@ -161,17 +160,15 @@ export async function listDriveBackups(householdId: string): Promise<ListDriveBa
  * Download a Drive file to `destPath` (stream). On failure after a partial write,
  * removes `destPath` before rethrowing.
  */
-export async function downloadDriveFile(key: ServiceAccountKey, fileId: string, destPath: string): Promise<void> {
-  const auth = new google.auth.GoogleAuth({
-    credentials: key,
-    scopes: ["https://www.googleapis.com/auth/drive"]
-  });
-  const drive = google.drive({ version: "v3", auth });
+export async function downloadDriveFile(refreshToken: string, fileId: string, destPath: string): Promise<void> {
+  const oauth2Client = buildOAuth2Client(refreshToken);
+  const drive = google.drive({ version: "v3", auth: oauth2Client });
   let readable: NodeJS.ReadableStream;
   try {
     const getRes = await drive.files.get({ fileId, alt: "media" }, { responseType: "stream" });
     readable = getRes.data as NodeJS.ReadableStream;
   } catch (err: unknown) {
+    logGoogleDriveApiError(`downloadDriveFile(fileId=${fileId})`, err);
     try {
       if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
     } catch {
@@ -211,14 +208,15 @@ export async function downloadDriveFile(key: ServiceAccountKey, fileId: string, 
  * Swallows list/delete errors (logs warnings) so backup success is never blocked.
  */
 export async function pruneOldDriveBackups(
-  key: ServiceAccountKey,
+  refreshToken: string,
   folderId: string,
   retentionCount: number
 ): Promise<void> {
   let files: DriveBackupEntry[];
   try {
-    files = await listHfbFilesInFolder(key, folderId, 1000);
+    files = await listHfbFilesInFolder(refreshToken, folderId, 1000);
   } catch (err: unknown) {
+    logGoogleDriveApiError("pruneOldDriveBackups(files.list)", err);
     log.warn(
       `Drive backup prune: list failed — ${err instanceof Error ? err.message : String(err)}`
     );
@@ -228,17 +226,15 @@ export async function pruneOldDriveBackups(
     return;
   }
   const excess = files.slice(retentionCount);
-  const auth = new google.auth.GoogleAuth({
-    credentials: key,
-    scopes: ["https://www.googleapis.com/auth/drive"]
-  });
-  const drive = google.drive({ version: "v3", auth });
+  const oauth2Client = buildOAuth2Client(refreshToken);
+  const drive = google.drive({ version: "v3", auth: oauth2Client });
   for (let i = excess.length - 1; i >= 0; i--) {
     const f = excess[i];
     if (!f.fileId) continue;
     try {
       await drive.files.delete({ fileId: f.fileId });
     } catch (delErr: unknown) {
+      logGoogleDriveApiError(`pruneOldDriveBackups(files.delete fileId=${f.fileId})`, delErr);
       log.warn(
         `Drive backup prune: delete failed for ${f.fileId} — ${delErr instanceof Error ? delErr.message : String(delErr)}`
       );
@@ -280,11 +276,8 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     const sizeBytes = fs.statSync(tempPath).size;
     const fileName = `hf-backup-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}.hfb`;
 
-    const auth = new google.auth.GoogleAuth({
-      credentials: creds.key,
-      scopes: ["https://www.googleapis.com/auth/drive"]
-    });
-    const drive = google.drive({ version: "v3", auth });
+    const oauth2Client = buildOAuth2Client(creds.refreshToken);
+    const drive = google.drive({ version: "v3", auth: oauth2Client });
 
     const createRes = await drive.files.create({
       requestBody: { name: fileName, parents: [creds.folderId] },
@@ -303,9 +296,12 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
     if (creds.backupRetentionCount > 0) {
-      await pruneOldDriveBackups(creds.key, creds.folderId, creds.backupRetentionCount);
+      await pruneOldDriveBackups(creds.refreshToken, creds.folderId, creds.backupRetentionCount);
     }
   } catch (err: unknown) {
+    if (err instanceof GaxiosError) {
+      logGoogleDriveApiError(`Backup job ${jobId} upload(files.create) household=${householdId}`, err);
+    }
     const msg =
       err instanceof GaxiosError ? mapDriveUploadError(err) : err instanceof Error ? err.message : String(err);
     await qExec(

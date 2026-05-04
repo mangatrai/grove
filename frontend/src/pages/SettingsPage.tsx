@@ -25,7 +25,6 @@ import {
   Table,
   Tabs,
   Text,
-  Textarea,
   TextInput,
   Title
 } from "@mantine/core";
@@ -386,7 +385,6 @@ export function SettingsPage() {
   const [gdriveConnecting, setGdriveConnecting] = useState(false);
   const [gdriveError, setGdriveError] = useState<string | null>(null);
   const [gdriveSuccess, setGdriveSuccess] = useState<string | null>(null);
-  const [gdriveKeyInput, setGdriveKeyInput] = useState("");
   const [gdriveFolderIdInput, setGdriveFolderIdInput] = useState("");
   const [gdriveDisconnectConfirm, setGdriveDisconnectConfirm] = useState(false);
   const [backupJobId, setBackupJobId] = useState<string | null>(null);
@@ -655,49 +653,50 @@ export function SettingsPage() {
     }
   }, [importFile]);
 
-  const handleGDriveConnect = useCallback(async () => {
+  const startGDriveOAuth = useCallback(async () => {
     setGdriveError(null);
     setGdriveSuccess(null);
+    const folderId = gdriveFolderIdInput.trim();
+    if (!folderId) {
+      setGdriveError("Enter the Drive folder ID first.");
+      return;
+    }
     setGdriveConnecting(true);
     try {
-      const res = await apiFetch("/gdrive/connect", {
-        method: "POST",
-        body: JSON.stringify({
-          serviceAccountKeyJson: gdriveKeyInput.trim(),
-          folderId: gdriveFolderIdInput.trim()
-        })
-      });
+      const q = new URLSearchParams({ folderId });
+      const res = await apiFetch(`/gdrive/oauth/url?${q.toString()}`);
       const raw = await res.text();
-      let errPayload: { message?: string } = {};
+      let body: { url?: string; code?: string; message?: string } = {};
       if (raw.trim()) {
         try {
-          errPayload = JSON.parse(raw) as { message?: string };
+          body = JSON.parse(raw) as typeof body;
         } catch {
-          setGdriveError(
-            res.ok
-              ? "Invalid response from server after connect."
-              : `Request failed (${res.status}). Server did not return JSON.`
-          );
+          setGdriveError(`Request failed (${res.status}). Server did not return JSON.`);
           return;
         }
       }
       if (!res.ok) {
-        setGdriveError(errPayload.message ?? "Could not connect to Google Drive.");
+        if (body.code === "OAUTH_NOT_CONFIGURED") {
+          setGdriveError(
+            body.message ??
+              "Google OAuth is not configured on the server (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI)."
+          );
+        } else {
+          setGdriveError(body.message ?? "Could not start Google sign-in.");
+        }
         return;
       }
-      const refreshed = await apiJson<GDriveStatus>("/gdrive/status");
-      setGdriveStatus(refreshed);
-      setGdriveKeyInput("");
-      setGdriveFolderIdInput("");
-      setGdriveSuccess(
-        `Connected to folder "${refreshed.folderName ?? refreshed.folderId ?? ""}".`
-      );
+      if (!body.url) {
+        setGdriveError("Server did not return a sign-in URL.");
+        return;
+      }
+      window.location.href = body.url;
     } catch (e: unknown) {
-      setGdriveError(e instanceof Error ? e.message : "Could not connect.");
+      setGdriveError(e instanceof Error ? e.message : "Could not start Google sign-in.");
     } finally {
       setGdriveConnecting(false);
     }
-  }, [gdriveKeyInput, gdriveFolderIdInput]);
+  }, [gdriveFolderIdInput]);
 
   const handleGDriveDisconnect = useCallback(async () => {
     setGdriveDisconnectConfirm(false);
@@ -934,6 +933,33 @@ export function SettingsPage() {
     gdriveStatus?.backupFrequencyHours,
     gdriveStatus?.backupRetentionCount
   ]);
+
+  /** OAuth redirect returns here with `?gdrive=connected` or `?gdrive=error` (hash router). */
+  useEffect(() => {
+    const gdriveParam = searchParams.get("gdrive");
+    if (!gdriveParam || !token) {
+      return;
+    }
+    const message = searchParams.get("message");
+    if (gdriveParam === "connected") {
+      setGdriveSuccess("Google Drive connected successfully.");
+      setGdriveError(null);
+      void apiJson<GDriveStatus>("/gdrive/status")
+        .then((r) => setGdriveStatus(r))
+        .catch(() => {});
+    } else if (gdriveParam === "error") {
+      setGdriveError(message ? decodeURIComponent(message) : "Google Drive connection failed.");
+      setGdriveSuccess(null);
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("gdrive");
+    next.delete("message");
+    const t = next.get("tab");
+    if (!t || !isTab(t)) {
+      next.set("tab", "data");
+    }
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, token]);
 
   useEffect(() => {
     if (!token || tab !== "data" || !canManageHousehold || !gdriveStatus?.connected) {
@@ -2384,12 +2410,13 @@ export function SettingsPage() {
                 {authRole === "admin" ? (
                   <Text c="dimmed" size="sm">
                     View-only: connection status for your household. Only a household owner can connect, disconnect, or
-                    change the service account key.
+                    run backups.
                   </Text>
                 ) : (
                   <Text c="dimmed" size="sm">
-                    Connect a Google Drive folder using a Service Account to enable automated cloud backups.
-                    The service account email must have <strong>Editor</strong> access to the folder.
+                    Connect a Google Drive folder with your Google account (OAuth). Backups are stored in your folder
+                    and use your Drive storage. The folder must be one you can open in Drive with the same Google account
+                    you use to sign in.
                   </Text>
                 )}
 
@@ -2710,18 +2737,6 @@ export function SettingsPage() {
                 {!gdriveLoading && !gdriveStatus?.connected ? (
                   authRole === "owner" ? (
                     <Stack gap="sm" mt="xs" maw={560}>
-                      <Textarea
-                        label="Service Account Key JSON"
-                        description="Paste the full contents of your downloaded service account JSON key file."
-                        placeholder='{"type": "service_account", "project_id": "...", ...}'
-                        value={gdriveKeyInput}
-                        onChange={(e) => setGdriveKeyInput(e.currentTarget.value)}
-                        disabled={gdriveConnecting}
-                        minRows={5}
-                        maxRows={10}
-                        autosize
-                        styles={{ input: { fontFamily: "monospace", fontSize: "0.8rem" } }}
-                      />
                       <TextInput
                         label="Drive Folder ID"
                         description="The folder ID from the Drive URL: drive.google.com/drive/folders/THIS_PART"
@@ -2730,14 +2745,18 @@ export function SettingsPage() {
                         onChange={(e) => setGdriveFolderIdInput(e.currentTarget.value)}
                         disabled={gdriveConnecting}
                       />
+                      <Text size="xs" c="dimmed">
+                        You will be redirected to Google to approve access, then returned to Settings. The server must
+                        have Google OAuth env vars configured (see deployment docs).
+                      </Text>
                       <Group>
                         <Button
                           type="button"
                           loading={gdriveConnecting}
-                          disabled={!gdriveKeyInput.trim() || !gdriveFolderIdInput.trim()}
-                          onClick={() => void handleGDriveConnect()}
+                          disabled={!gdriveFolderIdInput.trim()}
+                          onClick={() => void startGDriveOAuth()}
                         >
-                          {gdriveConnecting ? "Connecting…" : "Connect Google Drive"}
+                          {gdriveConnecting ? "Starting…" : "Connect with Google Drive"}
                         </Button>
                       </Group>
                     </Stack>
@@ -2752,7 +2771,7 @@ export function SettingsPage() {
                   <ConfirmDialog
                     opened={gdriveDisconnectConfirm}
                     title="Disconnect Google Drive?"
-                    message="This will remove the stored service account key and disable automated backups. You can reconnect at any time."
+                    message="This will remove the stored Google connection and disable automated backups. You can reconnect at any time."
                     confirmLabel="Disconnect"
                     cancelLabel="Cancel"
                     danger

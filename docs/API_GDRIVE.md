@@ -1,13 +1,21 @@
-# API: Google Drive (BYOC service account)
+# API: Google Drive (OAuth2 user-delegated)
 
-Household-level **bring-your-own-credentials** link to a single Google Drive folder using a **service account JSON key**. The API never returns the stored key. Owners can queue an on-demand `.hfb` backup upload to that folder (`POST /gdrive/backup`), configure **automatic** backups and **Drive-side retention**, and inspect **local backup job history**.
+Household-level link to a single Google Drive folder using **OAuth2** with a **user refresh token** (files are owned by the user and use their Drive quota). The API **never** returns refresh or access tokens. Owners start connect via **`GET /gdrive/oauth/url`** (then Google redirect + **`GET /gdrive/oauth/callback`**) or **`POST /gdrive/connect`** with an authorization `code`. On-demand **`.hfb`** upload (`POST /gdrive/backup`), **automatic** backups, **Drive-side retention**, and **local backup job history** behave as before.
 
-**Auth:** Bearer JWT on all routes.
+**Auth:** Bearer JWT on all routes **except** **`GET /gdrive/oauth/callback`** (browser redirect from Google; no `Authorization` header).
+
+**Server env:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` (must match the OAuth client’s authorized redirect URI, e.g. `https://api.example.com/gdrive/oauth/callback`). **`JWT_SECRET`** also signs the OAuth `state` payload. **`PUBLIC_BASE_URL`** (optional) should be your SPA origin so the callback can redirect to `https://your-app/#/settings?...` when the API and UI run on different hosts.
+
+## Server logging (Drive API failures)
+
+When Google returns an HTTP error, the backend logs **`httpStatus`**, **`httpStatusText`**, and **`responseBody`** (Google’s JSON `error` object, including `errors[].reason`) with a short **`context`** label (for example `Backup job … upload(files.create)`). Connection tests use **`log.warn`**; backup upload, list, download, and prune failures use **`log.error`**. These details are **not** included in API JSON responses; **`backup_job.error_text`** stays a short, user-facing summary.
 
 ## Role matrix
 
 | Route | `owner` | `admin` | `member` |
 |-------|---------|---------|----------|
+| `GET /gdrive/oauth/callback` | Public (no JWT) | Public | Public |
+| `GET /gdrive/oauth/url` | Yes | **403** | **403** |
 | `GET /gdrive/status` | Yes | Yes | **403** |
 | `POST /gdrive/connect` | Yes | **403** | **403** |
 | `DELETE /gdrive/disconnect` | Yes | **403** | **403** |
@@ -33,7 +41,7 @@ For each `household_gdrive_config` row with **`backup_frequency_hours` > 0**:
 
 ## `GET /gdrive/status`
 
-Returns connection metadata for the authenticated household. The service account JSON is **never** included.
+Returns connection metadata for the authenticated household. OAuth tokens are **never** included.
 
 **200 — not configured**
 
@@ -63,24 +71,38 @@ Returns connection metadata for the authenticated household. The service account
 - **`backupRetentionCount`** — **1–30**; number of **`.hfb`** files to keep in Drive after each successful upload.
 - **`lastScheduledBackupAt`** — Last time the **scheduler** queued a job (not updated for manual **`POST /gdrive/backup`**).
 
+## `GET /gdrive/oauth/url`
+
+**Owner only.** Query: **`folderId`** (required).
+
+**200** — `{ "url": "<https://accounts.google.com/...>" }` — open in the browser (`window.location.href = url`).
+
+**400** — Zod validation (`issues`) if `folderId` missing, or **`OAUTH_NOT_CONFIGURED`** when `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` are not set on the server.
+
+## `GET /gdrive/oauth/callback`
+
+**Public.** Query: **`code`**, **`state`** (both required). `state` is HMAC-signed and includes `householdId`, `userId`, `folderId`, and expiry; the handler verifies the signing user is an **owner** of that household, exchanges `code` for tokens, verifies folder access, then upserts `household_gdrive_config` (**scheduler fields are not reset** on reconnect).
+
+**302** — Redirect to **`/#/settings?tab=data&gdrive=connected`** on success, or **`...&gdrive=error&message=<encoded>`** on failure. If **`PUBLIC_BASE_URL`** is set, the redirect is absolute under that origin.
+
 ## `POST /gdrive/connect`
 
 **Owner only.** Body JSON:
 
 ```json
 {
-  "serviceAccountKeyJson": "{ … full service account key file … }",
+  "code": "authorization code from Google",
   "folderId": "Drive folder ID from the URL"
 }
 ```
 
-1. Validates JSON shape (`type`, `project_id`, `private_key`, `client_email`).
-2. Calls the Google Drive API (`files.get`) to confirm the folder exists, is a folder, and is accessible to the service account.
-3. On success, upserts `household_gdrive_config` for the household (including `last_verified_at`).
+1. Exchanges `code` for OAuth tokens (`refresh_token` required).
+2. Calls the Drive API (`files.get`) to confirm the folder exists, is a folder, and is accessible to the **authenticated Google user**.
+3. On success, upserts `household_gdrive_config` (including `last_verified_at`; **`backup_frequency_hours`** / **`backup_retention_count`** preserved on conflict).
 
-**400** — `INVALID_KEY_JSON` (unparseable string), `INVALID_KEY_FORMAT` (wrong shape), or Zod `Invalid payload` with `issues`.
+**400** — Zod `Invalid payload` with `issues`, or **`OAUTH_NOT_CONFIGURED`** when Google OAuth env is missing on the server.
 
-**422** — `DRIVE_CONNECTION_FAILED` when the Drive API check fails (permissions, wrong ID, not a folder, invalid key, etc.).
+**422** — `DRIVE_CONNECTION_FAILED` when token exchange or the Drive API check fails.
 
 **429** — Too many connect attempts in a rolling window (disabled when `MODE=TEST`).
 
@@ -116,7 +138,7 @@ Idempotent when already disconnected.
 
 **400** — Zod validation (`issues`).
 
-**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected (or stored key cannot be loaded).
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected (or stored refresh token is missing).
 
 **403** — Non-owner.
 
@@ -124,7 +146,7 @@ Idempotent when already disconnected.
 
 ### `POST /gdrive/backup`
 
-**Owner only.** Queues an async job that builds a full-household `.hfb` (same bundle as a household export), uploads it to the connected Drive folder using the stored service account, then removes the local staging file.
+**Owner only.** Queues an async job that builds a full-household `.hfb` (same bundle as a household export), uploads it to the connected Drive folder using the stored OAuth refresh token, then removes the local staging file.
 
 **409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when no Drive folder is connected.
 

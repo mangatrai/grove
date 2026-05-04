@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-133 (2026-05-04): Replace GDrive service account auth with OAuth2 user-delegated auth
+**Why:** Service accounts have no Drive storage quota; uploads to a personal Gmail user’s folder fail with **`storageQuotaExceeded`** (403). OAuth2 with a user refresh token stores backups under the user’s quota.
+**What:** Migration **`0038_gdrive_oauth2.sql`** drops **`service_account_json`**, adds **`oauth2_refresh_token`**, **`oauth2_access_token`**, **`oauth2_access_token_expires_at`**. Backend env **`GOOGLE_CLIENT_ID`**, **`GOOGLE_CLIENT_SECRET`**, **`GOOGLE_REDIRECT_URI`**. **`gdrive.service`** implements **`buildOAuth2Client`**, signed **`encodeGDriveOAuthState` / `decodeGDriveOAuthState`**, **`buildOAuthConsentUrl`**, **`exchangeAndConnect`**, **`buildSettingsGdriveRedirectUrl`**, **`assertOwnerOfHousehold`**. **`gdrive.routes`**: public **`GET /gdrive/oauth/callback`**, owner **`GET /gdrive/oauth/url`**, **`POST /gdrive/connect`** body **`{ code, folderId }`**. Backup/restore/prune use OAuth. Frontend Settings: folder ID + **Connect with Google Drive** (redirect flow); hash query **`gdrive=connected|error`** handling. Vitest sets **`GOOGLE_*`** in **`vitest.config.ts`**. OpenAPI + **`docs/API_GDRIVE.md`**, **`docs/API_INDEX.md`**, **`docs/ENVIRONMENT_VARIABLES.md`**, **`.env.example`** updated.
+**Files:** `backend/db/migrations/0038_gdrive_oauth2.sql`, `backend/src/config/env.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/vitest.config.ts`, `backend/tests/gdrive.test.ts`, `backend/tests/gdrive-backup.test.ts`, `backend/tests/gdrive-restore.test.ts`, `backend/tests/gdrive-scheduler.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `openapi/openapi.yaml`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `docs/ENVIRONMENT_VARIABLES.md`, `.env.example`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-132b (2026-05-04): Log full Google Drive API error body on server
+- **Type:** FIX / ops
+- **What:** On any **`GaxiosError`** from the Drive API (connect **`files.get`**, backup **`files.create`**, list/download/prune), the backend now logs **`httpStatus`**, **`httpStatusText`**, **`responseBody`**, and **`message`** via **`logGoogleDriveApiError`** (`log.warn` for connection test, **`log.error`** elsewhere). User-facing strings and **`backup_job.error_text`** are unchanged.
+- **Files:** `backend/src/modules/gdrive/log-google-drive-api-error.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `docs/API_GDRIVE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-132a (2026-05-03): CR-132 follow-up — staleness anchor, PATCH 409, prune wrapper
 - **Type:** FIX / polish
 - **What:** Drive **staleness banner** in Settings now keys off the latest **`complete`** row from **`GET /gdrive/backups/history`** (`completed_at`) instead of **`lastScheduledBackupAt`**, so a manual success clears the alert and a failed “recent” queue no longer hides overdue gaps. **`PATCH /gdrive/settings`** returns **409** **`GDRIVE_NOT_CONFIGURED`** (same as other GDrive routes), not **404**. Removed a dead **`try/catch`** around **`pruneOldDriveBackups`** in **`runBackupJob`** because pruning already swallows errors internally.

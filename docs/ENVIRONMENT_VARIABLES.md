@@ -53,6 +53,9 @@ See [`RUNBOOK.md`](RUNBOOK.md) §11 for Postgres connection details and operator
 | `BACKUP_ENCRYPTION_KEY` | Optional. Exactly 64 hex characters (32 bytes). If set, all exported `.hfb` backups are encrypted with AES-256-GCM before being written to disk. |
 | `PAYSLIP_ASYNC_POLL_INTERVAL_MS` | Minimum milliseconds between background polls for queued Deloitte LLM extraction during import (default `120000`). |
 | `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS` | Max **inclusive** day span for **`GET /reports/cash-summary`** when both **`dateFrom`** and **`dateTo`** are set (default `1096`, min `31`, max `4000`). |
+| `GOOGLE_CLIENT_ID` | Google OAuth2 Web client ID (Drive backup / restore). Empty = GDrive connect disabled (`OAUTH_NOT_CONFIGURED`). |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret (paired with `GOOGLE_CLIENT_ID`). |
+| `GOOGLE_REDIRECT_URI` | Full redirect URI registered in Google Cloud Console, e.g. `http://127.0.0.1:4000/gdrive/oauth/callback` (must match exactly). |
 
 ```bash
 BACKUP_ENCRYPTION_KEY=   # Optional. 64 hex characters (32 bytes).
