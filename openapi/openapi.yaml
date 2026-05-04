@@ -902,7 +902,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
-        "404":
+        "409":
           description: Google Drive not configured for this household
           content:
             application/json:

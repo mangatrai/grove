@@ -303,13 +303,7 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
     if (creds.backupRetentionCount > 0) {
-      try {
-        await pruneOldDriveBackups(creds.key, creds.folderId, creds.backupRetentionCount);
-      } catch (pruneErr: unknown) {
-        log.warn(
-          `Backup job ${jobId}: pruning failed — ${pruneErr instanceof Error ? pruneErr.message : String(pruneErr)}`
-        );
-      }
+      await pruneOldDriveBackups(creds.key, creds.folderId, creds.backupRetentionCount);
     }
   } catch (err: unknown) {
     const msg =

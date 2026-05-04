@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-132a (2026-05-03): CR-132 follow-up — staleness anchor, PATCH 409, prune wrapper
+- **Type:** FIX / polish
+- **What:** Drive **staleness banner** in Settings now keys off the latest **`complete`** row from **`GET /gdrive/backups/history`** (`completed_at`) instead of **`lastScheduledBackupAt`**, so a manual success clears the alert and a failed “recent” queue no longer hides overdue gaps. **`PATCH /gdrive/settings`** returns **409** **`GDRIVE_NOT_CONFIGURED`** (same as other GDrive routes), not **404**. Removed a dead **`try/catch`** around **`pruneOldDriveBackups`** in **`runBackupJob`** because pruning already swallows errors internally.
+- **Files:** `frontend/src/pages/SettingsPage.tsx`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/tests/gdrive.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-132 (2026-05-03): Automated Google Drive backup scheduler + backup history
 **Files:** `backend/db/migrations/0037_gdrive_scheduler_settings.sql`, `backend/src/server.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/gdrive/gdrive-scheduler.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/tests/gdrive-scheduler.test.ts`, `backend/tests/gdrive-backup.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
 **What:** Migration adds **`backup_frequency_hours`**, **`backup_retention_count`**, and **`last_scheduled_backup_at`** on **`household_gdrive_config`**. A server-side heartbeat (**30s** grace, then **every 30 minutes**, skipped when **`MODE=TEST`**) calls **`checkAndQueueDueBackups`**: for each household with frequency greater than 0, queues **`backup_job`** with **`triggered_by_user_id` null** when the last **complete** job is older than the interval (or no complete job ever), skips when a **queued/running** job exists, updates **`last_scheduled_backup_at`**, and in **PROD** logs a **staleness warning** if the last success is older than twice the interval. **`runBackupJob`** prunes excess **`.hfb`** files on Drive after each successful upload (**`pruneOldDriveBackups`**; delete failures are warn-only). **`PATCH /gdrive/settings`** (owner), **`GET /gdrive/backups/history`** (owner/admin), extended **`GET /gdrive/status`**. Settings **Data & Backup** adds automatic backup controls, staleness **Alert**, and a **Recent backup history** table.

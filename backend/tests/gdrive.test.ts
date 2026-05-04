@@ -193,6 +193,16 @@ describe("gdrive API", () => {
     expect(after.body.connected).toBe(false);
   });
 
+  it("PATCH /gdrive/settings returns 409 GDRIVE_NOT_CONFIGURED when Drive is not connected", async () => {
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    const patch = await request(app)
+      .patch("/gdrive/settings")
+      .set("authorization", `Bearer ${token}`)
+      .send({ backupFrequencyHours: 24, backupRetentionCount: 7 });
+    expect(patch.status).toBe(409);
+    expect(patch.body.code).toBe("GDRIVE_NOT_CONFIGURED");
+  });
+
   it("PATCH /gdrive/settings and GET /gdrive/backups/history after connect", async () => {
     const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
     await request(app)

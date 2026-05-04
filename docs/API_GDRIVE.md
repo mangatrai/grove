@@ -116,7 +116,7 @@ Idempotent when already disconnected.
 
 **400** — Zod validation (`issues`).
 
-**404** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected (or stored key cannot be loaded).
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected (or stored key cannot be loaded).
 
 **403** — Non-owner.
 

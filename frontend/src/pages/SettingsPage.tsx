@@ -417,6 +417,12 @@ export function SettingsPage() {
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
 
+  /** Most recent completed job in history (GET /gdrive/backups/history is `created_at` desc). Used for staleness alert. */
+  const gdriveLastCompletedAt = useMemo(
+    () => backupHistory?.find((j) => j.status === "complete")?.completedAt ?? null,
+    [backupHistory]
+  );
+
   const loadInstitutions = useCallback(async () => {
     if (!token) {
       return;
@@ -2455,13 +2461,13 @@ export function SettingsPage() {
                         ) : null}
                         {authRole === "owner" &&
                         (gdriveStatus.backupFrequencyHours ?? 0) > 0 &&
-                        gdriveStatus.lastScheduledBackupAt &&
-                        Date.now() - new Date(gdriveStatus.lastScheduledBackupAt).getTime() >
+                        gdriveLastCompletedAt &&
+                        Date.now() - new Date(gdriveLastCompletedAt).getTime() >
                           2 * (gdriveStatus.backupFrequencyHours ?? 0) * 3600 * 1000 ? (
                           <Alert color="yellow" variant="light" mt="xs">
-                            Last automatic backup was over{" "}
+                            The last successful backup was over{" "}
                             {Math.floor(
-                              (Date.now() - new Date(gdriveStatus.lastScheduledBackupAt).getTime()) / 3600000
+                              (Date.now() - new Date(gdriveLastCompletedAt).getTime()) / 3600000
                             )}{" "}
                             hours ago. If the server has been sleeping, some scheduled backups may have been missed. You
                             can trigger one manually above.

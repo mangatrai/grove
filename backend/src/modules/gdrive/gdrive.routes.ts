@@ -153,7 +153,7 @@ gdriveRouter.patch("/settings", requireRole(["owner"]), async (req: Authenticate
   }
   const creds = await getGDriveCredentials(householdId);
   if (!creds) {
-    res.status(404).json({ code: "GDRIVE_NOT_CONFIGURED", message: "Google Drive is not connected." });
+    res.status(409).json({ code: "GDRIVE_NOT_CONFIGURED", message: "Google Drive is not connected." });
     return;
   }
   await updateGDriveSchedulerSettings(householdId, {
