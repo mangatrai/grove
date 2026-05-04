@@ -84,7 +84,7 @@ gdriveRouter.get("/oauth/callback", async (req, res) => {
       buildSettingsGdriveRedirectUrl({
         tab: "data",
         gdrive: "error",
-        message: encodeURIComponent(safe)
+        message: safe
       })
     );
   };

@@ -131,16 +131,12 @@ export async function exchangeAndConnect(
 ): Promise<{ ok: true; folderName: string } | { ok: false; message: string }> {
   const client = new google.auth.OAuth2(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET, env.GOOGLE_REDIRECT_URI);
   let refreshToken: string;
-  let accessToken: string | null | undefined;
-  let expiresAt: Date | null = null;
   try {
     const { tokens } = await client.getToken(code);
     if (!tokens.refresh_token) {
       return { ok: false, message: "No refresh token returned. Disconnect and reconnect to re-authorize." };
     }
     refreshToken = tokens.refresh_token;
-    accessToken = tokens.access_token;
-    expiresAt = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
     client.setCredentials(tokens);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -154,7 +150,7 @@ export async function exchangeAndConnect(
       return { ok: false, message: "The provided ID is not a folder." };
     }
     const folderName = res.data.name ?? folderId;
-    await connectGDrive(householdId, userId, refreshToken, accessToken ?? null, expiresAt, folderId, folderName);
+    await connectGDrive(householdId, userId, refreshToken, folderId, folderName);
     return { ok: true, folderName };
   } catch (err: unknown) {
     logGoogleDriveApiError("exchangeAndConnect(files.get folder)", err, "warn");
@@ -174,21 +170,15 @@ export async function connectGDrive(
   householdId: string,
   userId: string,
   refreshToken: string,
-  accessToken: string | null,
-  expiresAt: Date | null,
   folderId: string,
   folderName: string
 ): Promise<void> {
-  const expiresSql = expiresAt ? expiresAt.toISOString() : null;
   await qExec(
     `INSERT INTO household_gdrive_config
-       (household_id, oauth2_refresh_token, oauth2_access_token, oauth2_access_token_expires_at,
-        folder_id, folder_name, connected_by_user_id, last_verified_at, last_error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NULL)
+       (household_id, oauth2_refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error)
+     VALUES (?, ?, ?, ?, ?, NOW(), NULL)
      ON CONFLICT (household_id) DO UPDATE SET
        oauth2_refresh_token              = EXCLUDED.oauth2_refresh_token,
-       oauth2_access_token               = EXCLUDED.oauth2_access_token,
-       oauth2_access_token_expires_at    = EXCLUDED.oauth2_access_token_expires_at,
        folder_id                         = EXCLUDED.folder_id,
        folder_name                       = EXCLUDED.folder_name,
        connected_at                      = NOW(),
@@ -197,8 +187,6 @@ export async function connectGDrive(
        last_error                        = NULL`,
     householdId,
     refreshToken,
-    accessToken,
-    expiresSql,
     folderId,
     folderName,
     userId

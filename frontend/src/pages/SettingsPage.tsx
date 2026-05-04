@@ -948,7 +948,7 @@ export function SettingsPage() {
         .then((r) => setGdriveStatus(r))
         .catch(() => {});
     } else if (gdriveParam === "error") {
-      setGdriveError(message ? decodeURIComponent(message) : "Google Drive connection failed.");
+      setGdriveError(message ?? "Google Drive connection failed.");
       setGdriveSuccess(null);
     }
     const next = new URLSearchParams(searchParams);
