@@ -596,6 +596,8 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
     Date.now() - new Date(gdriveLastCompletedJob.completedAt).getTime() >
       2 * (gdriveStatus?.backupFrequencyHours ?? 0) * 3600 * 1000;
 
+  if (!active) return null;
+
   return (
     <Stack gap="xl">
 
