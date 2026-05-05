@@ -24,6 +24,7 @@ When Google returns an HTTP error, the backend logs **`httpStatus`**, **`httpSta
 | `GET /gdrive/backup/:jobId` | Yes | Yes | **403** |
 | `GET /gdrive/backups` | Yes | Yes | **403** |
 | `GET /gdrive/backups/history` | Yes | Yes | **403** |
+| `POST /gdrive/backups/:fileId/preview` | Yes | **403** | **403** |
 | `POST /gdrive/restore` | Yes | **403** | **403** |
 
 ## Automatic backup scheduler (server heartbeat)
@@ -187,6 +188,33 @@ Idempotent when already disconnected.
 **200** — `{ "jobs": [ { "id", "householdId", "status", "driveFileId", "driveFileName", "sizeBytes", "errorText", "triggeredByUserId", "createdAt", "completedAt" } ] }` (camelCase).
 
 **409** — `{ "code": "GDRIVE_NOT_CONFIGURED", "message": "..." }` when Drive is not connected.
+
+### `POST /gdrive/backups/:fileId/preview`
+
+**Owner only.** Downloads the Drive file identified by `:fileId` into a temporary staging path, reads the `.hfb` manifest via the shared `readHfbManifestFromFile()` helper, and returns a preview object without importing any data. The temp file is always deleted after the response.
+
+Returns the same shape as `POST /exports/preview`:
+
+```json
+{
+  "exportVersion": 3,
+  "exportedAt": "2026-05-05T10:00:00.000Z",
+  "encrypted": false,
+  "scope": "household",
+  "format": "split-json",
+  "tables": { "household": { "rows": 1 }, "app_user": { "rows": 3 } },
+  "totalRows": 4
+}
+```
+
+**409** — `{ "code": "GDRIVE_NOT_CONFIGURED" }` when no Drive folder is connected.  
+**404** — `{ "code": "DRIVE_FILE_NOT_FOUND" }` if the file doesn't exist in Drive.  
+**403** — `{ "code": "DRIVE_PERMISSION_DENIED" }` if Drive access is denied.  
+**422** — `{ "message": "..." }` if the backup is encrypted and no `BACKUP_ENCRYPTION_KEY` is set on the server.  
+**502** — `{ "code": "DRIVE_DOWNLOAD_FAILED" }` for other Drive download errors.  
+**400** — `{ "message": "..." }` if the file is not a valid `.hfb`.
+
+---
 
 ### `POST /gdrive/restore`
 

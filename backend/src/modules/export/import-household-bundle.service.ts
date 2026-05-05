@@ -11,6 +11,70 @@ import { env } from "../../config/env.js";
 import { decryptBackup, isEncryptedBackup } from "./backup-crypto.js";
 import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
 
+export type HfbManifestPreview = {
+  exportVersion: number;
+  exportedAt: string;
+  encrypted: boolean;
+  scope: "household" | "member";
+  personProfileId?: string;
+  format: string;
+  tables: Record<string, { rows: number }>;
+  totalRows: number;
+};
+
+/**
+ * Read an `.hfb` file from disk, decrypt if needed, and return the manifest preview shape.
+ * Throws with a descriptive message on any failure (bad zip, missing manifest, unsupported version,
+ * encrypted-no-key). Callers are responsible for deleting `filePath` after the call.
+ */
+export async function readHfbManifestFromFile(filePath: string): Promise<HfbManifestPreview> {
+  let buffer = fs.readFileSync(filePath);
+  if (isEncryptedBackup(buffer)) {
+    if (!env.BACKUP_ENCRYPTION_KEY) {
+      throw Object.assign(
+        new Error(
+          "This backup is encrypted. Configure BACKUP_ENCRYPTION_KEY on the server to preview or restore this file."
+        ),
+        { code: "ENCRYPTED_NO_KEY" }
+      );
+    }
+    buffer = decryptBackup(buffer, env.BACKUP_ENCRYPTION_KEY);
+  }
+
+  let manifest: Record<string, unknown>;
+  try {
+    const directory = await unzipper.Open.buffer(buffer);
+    const manifestEntry = directory.files.find((f) => f.path === "manifest.json");
+    if (!manifestEntry) throw new Error("ZIP is missing manifest.json");
+    manifest = JSON.parse((await manifestEntry.buffer()).toString("utf-8")) as Record<string, unknown>;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Could not read backup file: ${msg}`);
+  }
+
+  const version = Number(manifest.exportVersion);
+  if (![1, 2, 3, 4].includes(version)) {
+    throw new Error(`Unsupported export version: ${String(manifest.exportVersion)}`);
+  }
+
+  const rawTables = (manifest.tables ?? {}) as Record<string, { rows?: unknown }>;
+  const tables = Object.fromEntries(
+    Object.entries(rawTables).map(([k, v]) => [k, { rows: Number(v?.rows ?? 0) }])
+  ) as Record<string, { rows: number }>;
+  const totalRows = Object.values(tables).reduce((sum, t) => sum + t.rows, 0);
+
+  return {
+    exportVersion: version,
+    exportedAt: String(manifest.exportedAt ?? ""),
+    encrypted: Boolean(manifest.encrypted ?? false),
+    scope: manifest.scope === "member" ? "member" : "household",
+    personProfileId: typeof manifest.personProfileId === "string" ? manifest.personProfileId : undefined,
+    format: String(manifest.format ?? ""),
+    tables,
+    totalRows
+  };
+}
+
 const IMPORTS_RESTORE_DIR = resolveDataPath("data/imports-restore");
 
 export type ImportJobRow = {

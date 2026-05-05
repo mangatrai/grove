@@ -282,12 +282,12 @@ export function resolveSpaOriginForGdriveRedirect(): string {
   return publicBase ? publicBase.replace(/\/$/, "") : "";
 }
 
-/** Redirect browser to SPA settings after OAuth callback (`/#/settings?...`). */
+/** Redirect browser to SPA settings after OAuth callback (`/settings?...`). */
 export function buildSettingsGdriveRedirectUrl(query: Record<string, string>): string {
   const qs = new URLSearchParams(query).toString();
-  const hashPath = `/#/settings${qs ? `?${qs}` : ""}`;
+  const routePath = `/settings${qs ? `?${qs}` : ""}`;
   const base = resolveSpaOriginForGdriveRedirect();
-  return base ? `${base}${hashPath}` : hashPath;
+  return base ? `${base}${routePath}` : routePath;
 }
 
 /** Validate OAuth callback user is owner of the household in state (defense in depth). */

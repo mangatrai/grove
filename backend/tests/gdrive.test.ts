@@ -1,3 +1,6 @@
+import { PassThrough } from "node:stream";
+
+import archiver from "archiver";
 import { GaxiosError } from "gaxios";
 import type { GaxiosOptionsPrepared, GaxiosResponse } from "gaxios";
 import request from "supertest";
@@ -31,6 +34,29 @@ vi.mock("googleapis", () => ({
     }))
   }
 }));
+
+/** Build an in-memory .hfb ZIP stream with a minimal manifest.json. */
+function makeHfbStream(): PassThrough {
+  const pass = new PassThrough();
+  const archive = archiver("zip");
+  archive.pipe(pass);
+  const manifest = JSON.stringify({
+    exportVersion: 3,
+    exportedAt: "2026-05-04T00:00:00.000Z",
+    householdId: "10000000-0000-0000-0000-000000000001",
+    scope: "household",
+    format: "split-json",
+    tables: {
+      household: { file: "household.json", rows: 1 },
+      app_user: { file: "app_user.json", rows: 2 }
+    }
+  });
+  archive.append(manifest, { name: "manifest.json" });
+  archive.append("[]", { name: "household.json" });
+  archive.append("[]", { name: "app_user.json" });
+  void archive.finalize();
+  return pass;
+}
 
 import { buildApp } from "../src/app.js";
 import { encodeGDriveOAuthState } from "../src/modules/gdrive/gdrive.service.js";
@@ -283,16 +309,17 @@ describe("gdrive API", () => {
     expect(del.status).toBe(403);
   });
 
-  it("GET /gdrive/oauth/callback exchanges code and redirects to settings (no JWT)", async () => {
+  it("GET /gdrive/oauth/callback exchanges code and returns meta-refresh redirect to settings (no JWT)", async () => {
     const state = encodeGDriveOAuthState({
       householdId: HOUSEHOLD_ID,
       userId: OWNER_USER_ID,
       folderId: "folder-callback-ok"
     });
     const res = await request(app).get("/gdrive/oauth/callback").query({ code: "google-code", state });
-    expect(res.status).toBe(302);
-    expect(String(res.headers.location)).toContain("gdrive=connected");
-    expect(String(res.headers.location)).toMatch(/^http:\/\/localhost:3000\/#\/settings/);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/html/);
+    expect(String(res.text)).toContain("gdrive=connected");
+    expect(String(res.text)).toMatch(/localhost:3000\/settings/);
 
     const row = await sqlStmt("SELECT oauth2_refresh_token, folder_id FROM household_gdrive_config WHERE household_id = ?").get(
       HOUSEHOLD_ID
@@ -317,5 +344,78 @@ describe("gdrive API", () => {
     expect(st.status).toBe(200);
     expect(st.body.connected).toBe(true);
     expect(st.body.folderId).toBe("folder-admin-read");
+  });
+
+  it("POST /gdrive/backups/:fileId/preview returns 409 when Drive not connected", async () => {
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    const res = await request(app)
+      .post("/gdrive/backups/some-file-id/preview")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("GDRIVE_NOT_CONFIGURED");
+  });
+
+  it("POST /gdrive/backups/:fileId/preview returns 403 for non-owner", async () => {
+    const token = await login(ADMIN_EMAIL, OWNER_PASSWORD);
+    const res = await request(app)
+      .post("/gdrive/backups/some-file-id/preview")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /gdrive/backups/:fileId/preview returns manifest preview on success", async () => {
+    // Connect drive first
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    await request(app)
+      .post("/gdrive/connect")
+      .set("authorization", `Bearer ${token}`)
+      .send({ code: "test-oauth-code", folderId: "folder-preview-ok" });
+
+    // Mock the media download to return a valid .hfb stream
+    filesGetMock.mockImplementationOnce((_params: unknown, opts: { responseType?: string } | undefined) => {
+      if (opts?.responseType === "stream") {
+        return Promise.resolve({ data: makeHfbStream() });
+      }
+      return Promise.resolve({ data: { id: "folder-preview-ok", name: "Mock", mimeType: "application/vnd.google-apps.folder" } });
+    });
+
+    const res = await request(app)
+      .post("/gdrive/backups/file-abc/preview")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.exportVersion).toBe(3);
+    expect(res.body.scope).toBe("household");
+    expect(res.body.tables).toHaveProperty("household");
+    expect(res.body.tables).toHaveProperty("app_user");
+    expect(typeof res.body.totalRows).toBe("number");
+  });
+
+  it("POST /gdrive/backups/:fileId/preview returns 404 when Drive file not found", async () => {
+    const token = await login(OWNER_EMAIL, OWNER_PASSWORD);
+    await request(app)
+      .post("/gdrive/connect")
+      .set("authorization", `Bearer ${token}`)
+      .send({ code: "test-oauth-code", folderId: "folder-preview-404" });
+
+    const config404 = { url: "https://www.googleapis.com/drive/v3/files/missing" } as GaxiosOptionsPrepared;
+    const response404 = {
+      status: 404,
+      statusText: "Not Found",
+      config: config404,
+      data: {},
+      headers: new Headers()
+    } as unknown as GaxiosResponse;
+    filesGetMock.mockImplementationOnce((_params: unknown, opts: { responseType?: string } | undefined) => {
+      if (opts?.responseType === "stream") {
+        return Promise.reject(new GaxiosError("Not Found", config404, response404));
+      }
+      return Promise.resolve({ data: { id: "folder-preview-404", name: "Mock", mimeType: "application/vnd.google-apps.folder" } });
+    });
+
+    const res = await request(app)
+      .post("/gdrive/backups/missing-file/preview")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("DRIVE_FILE_NOT_FOUND");
   });
 });

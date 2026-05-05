@@ -1039,6 +1039,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DriveListFailedResponse'
+  /gdrive/backups/{fileId}/preview:
+    post:
+      tags: [gdrive]
+      summary: Preview a Drive backup file manifest
+      description: |
+        Owner only. Downloads the Drive file identified by `fileId` into a temporary staging path, reads the `.hfb`
+        manifest via the shared `readHfbManifestFromFile()` helper, and returns a preview object. The temp file is
+        always deleted. Returns the same shape as `POST /exports/preview`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Google Drive file ID
+      responses:
+        "200":
+          description: Backup manifest preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupPreviewResponse'
+        "400":
+          description: File is not a valid .hfb
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "403":
+          description: Drive permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "404":
+          description: Drive file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "409":
+          description: Google Drive not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+        "422":
+          description: Backup is encrypted and no BACKUP_ENCRYPTION_KEY is configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "502":
+          description: Drive download failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
   /gdrive/restore:
     post:
       tags: [gdrive]

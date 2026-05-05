@@ -30,7 +30,11 @@ import {
   scheduleBackupJobProcessing,
   STAGING_DIR
 } from "../export/gdrive-backup.service.js";
-import { queueHouseholdImport, scheduleImportJobProcessing } from "../export/import-household-bundle.service.js";
+import {
+  queueHouseholdImport,
+  readHfbManifestFromFile,
+  scheduleImportJobProcessing
+} from "../export/import-household-bundle.service.js";
 
 const connectRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -77,14 +81,28 @@ export const gdriveRouter = Router();
  * State is HMAC-signed; user must be household owner before tokens are persisted.
  */
 gdriveRouter.get("/oauth/callback", async (req, res) => {
+  /**
+   * Use a client-side JS redirect instead of HTTP 302.
+   * Browsers may strip the fragment identifier (#) from a 302 Location header,
+   * causing the hash-router SPA to load at the root route instead of /#/settings.
+   * window.location.replace() is reliable for URLs containing a fragment.
+   */
+  const jsRedirect = (url: string) => {
+    const encoded = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8">` +
+        `<meta http-equiv="refresh" content="0;url=${encoded}">` +
+        `<title>Redirecting\u2026</title></head><body><p>Redirecting\u2026</p></body></html>`
+    );
+  };
+
   const errRedirect = (msg: string) => {
-    const safe = msg.slice(0, 500);
-    res.redirect(
-      302,
+    jsRedirect(
       buildSettingsGdriveRedirectUrl({
         tab: "data",
         gdrive: "error",
-        message: safe
+        message: msg.slice(0, 500)
       })
     );
   };
@@ -114,7 +132,7 @@ gdriveRouter.get("/oauth/callback", async (req, res) => {
     return;
   }
 
-  res.redirect(302, buildSettingsGdriveRedirectUrl({ tab: "data", gdrive: "connected" }));
+  jsRedirect(buildSettingsGdriveRedirectUrl({ tab: "data", gdrive: "connected" }));
 });
 
 gdriveRouter.use(requireAuth);
@@ -204,6 +222,53 @@ gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: Authen
     return;
   }
   res.json({ files: result.files });
+});
+
+/** POST /gdrive/backups/:fileId/preview — owner only; download Drive file and return manifest preview. */
+gdriveRouter.post("/backups/:fileId/preview", requireRole(["owner"]), async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const fileId = String(req.params.fileId ?? "").trim();
+  if (!fileId) {
+    res.status(400).json({ message: "Missing fileId." });
+    return;
+  }
+
+  const creds = await getGDriveCredentials(householdId);
+  if (!creds) {
+    res.status(409).json({ code: "GDRIVE_NOT_CONFIGURED", message: "Google Drive is not connected." });
+    return;
+  }
+
+  fs.mkdirSync(STAGING_DIR, { recursive: true });
+  const tempPath = path.join(STAGING_DIR, `preview-${randomUUID()}.hfb`);
+  try {
+    await downloadDriveFile(creds.refreshToken, fileId, tempPath);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Could not download backup from Drive.";
+    if (msg.includes("not found") || msg.includes("404")) {
+      res.status(404).json({ code: "DRIVE_FILE_NOT_FOUND", message: msg });
+    } else if (msg.includes("Permission denied") || msg.includes("403")) {
+      res.status(403).json({ code: "DRIVE_PERMISSION_DENIED", message: msg });
+    } else {
+      res.status(502).json({ code: "DRIVE_DOWNLOAD_FAILED", message: msg });
+    }
+    return;
+  }
+
+  try {
+    const preview = await readHfbManifestFromFile(tempPath);
+    res.json(preview);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const code = (err as { code?: string }).code;
+    if (code === "ENCRYPTED_NO_KEY") {
+      res.status(422).json({ message: msg });
+    } else {
+      res.status(400).json({ message: msg });
+    }
+  } finally {
+    try { fs.unlinkSync(tempPath); } catch { /* already gone */ }
+  }
 });
 
 /** PATCH /gdrive/settings — owner only; scheduler frequency and Drive retention count. */

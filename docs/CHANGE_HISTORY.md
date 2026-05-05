@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-135 (2026-05-05): Unified Backup & Restore UI + Drive file preview endpoint
+**Why:** Manual (device) backup/restore and Google Drive backup/restore were two separate UI flows with duplicated logic. Device restore had a preview step; Drive restore did not — users had to restore blind. Unifying into one component gives a consistent preview-then-confirm flow for both paths.
+**What:**
+- **New endpoint `POST /gdrive/backups/:fileId/preview`** (owner only): downloads the named Drive file to a temp path, calls the shared `readHfbManifestFromFile()`, returns the same preview shape as `POST /exports/preview`, always deletes the temp file. Errors: 409 if not connected, 404/403/502 for Drive download failures, 422 for encrypted-no-key.
+- **`readHfbManifestFromFile(filePath)`** extracted to `import-household-bundle.service.ts` as a named export (decrypts if encrypted, unzips, reads `manifest.json`, returns `HfbManifestPreview`). Both `/exports/preview` and the new Drive preview route share it.
+- **`BackupRestoreSection`** new component (`frontend/src/pages/settings/BackupRestoreSection.tsx`): owns all backup/restore state. "Create Backup" section covers device download and Drive upload. "Restore" section has a `SegmentedControl` to switch between device file and Drive file restore — both paths go through the same preview modal before confirming. Compact Drive footer shows connection status, scheduler settings, connect/disconnect.
+- **`SettingsPage`** refactored: data tab replaced with `<BackupRestoreSection authRole={authRole} active={tab === "data"} />`. Removed ~500 lines of backup/gdrive state, effects, handlers, and UI. Added back `Table`, `Modal`, `SegmentedControl` imports; removed `Badge`, unused backup-only symbols.
+- **OAuth callback redirect fix**: `buildSettingsGdriveRedirectUrl` now builds `/settings?tab=data&gdrive=connected` (BrowserRouter path) instead of `/#/settings?…` (which BrowserRouter ignored, always rendering the home route). Meta-refresh HTML used instead of inline script (CSP-safe).
+**Files:** `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/tests/gdrive.test.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`, `frontend/src/pages/SettingsPage.tsx`, `openapi/openapi.yaml`, `docs/API_GDRIVE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-134 (2026-05-04): GDrive OAuth return URL + MODE-scoped backup folder on Drive
 **Why:** OAuth **`Location`** was relative (`/#/settings?…`), so the browser resolved it on the **API** host (e.g. :4000) instead of the Vite SPA (:3000). Backups also needed to live under **`{configuredFolder}/TEST/`** or **`/PROD/`** per server **`MODE`** so environments do not mix in Drive.
 **What:** **`FRONTEND_APP_URL`** env (optional); **`resolveSpaOriginForGdriveRedirect()`** picks **`FRONTEND_APP_URL` → `PUBLIC_BASE_URL` → `http://localhost:3000` in `MODE=TEST` → else relative** for **`buildSettingsGdriveRedirectUrl`**. **`gdrive-backup.service`**: **`ensureDriveBackupEnvSubfolderId`** lists/creates **`TEST`** or **`PROD`** under the configured folder; list/upload/prune use that id.
