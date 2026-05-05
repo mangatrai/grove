@@ -377,7 +377,7 @@ CREATE TABLE person_profile (
   phone_number                        TEXT,
   avatar_key                          TEXT,
   created_at                          TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
-  salary_deposit_financial_account_id TEXT,
+  salary_deposit_financial_account_id TEXT        REFERENCES financial_account(id) ON DELETE SET NULL,
   employers_json                      TEXT,
   -- AI health profile fields
   age                                 INTEGER          CHECK (age IS NULL OR (age > 0 AND age < 130)),
