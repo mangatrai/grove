@@ -18,6 +18,31 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DB-136 (2026-05-05): Squash 33 migrations into single baseline
+
+**Why:** 33 migration files had accumulated since v1, including redundant constraint-drop/re-add patterns, 3 dead columns (0003 `unstructured_*` — zero code references), 3 data migrations already covered by bootstrap, and one pure no-op (0039). Squashing simplifies fresh-install setup and makes the schema readable in one place.
+
+**What:**
+- Replaced `backend/db/migrations/0001_baseline.sql` with a single squashed file representing the complete final schema post-0039.
+- Archived `0002–0039` to `backend/db/migrations/archive/` — not deleted, preserved for historical reference.
+- **Squash decisions applied:**
+  - `transaction_canonical.status`: final form (includes `'trashed'`)
+  - `uq_transaction_canonical_fingerprint`: partial index (`WHERE status NOT IN ('duplicate', 'trashed')`)
+  - `financial_account.type`: final form (includes `'retirement'`)
+  - `export_job.status`: final form (includes `'expired'`)
+  - `household_gdrive_config`: final form — `connected_by_user_id` nullable ON DELETE SET NULL, scheduler columns, `oauth2_refresh_token` only (no `service_account_json`)
+  - 0003 `unstructured_*` columns on `import_file`: omitted (confirmed dead — zero references in backend/src/)
+  - 0013/0014/0015 category INSERTs: omitted (already in `0001_bootstrap.sql`)
+  - 0032 index: folded into `insight_job` table definition
+  - 0039 DROP COLUMN: omitted (columns `oauth2_access_token*` were never added by any migration)
+  - All 9 performance indexes from 0021 included
+- **Existing DBs:** safe — migration runner tracks by filename; `0001_baseline.sql` is already recorded in `schema_migrations`, so it is skipped. Files 0002–0039 are gone from the active directory and are not re-evaluated.
+- **Verified:** `npm run db:reset:dev` applied the squashed baseline cleanly (26 tables); `npm run test -w backend` — 371/371 tests passed.
+
+**Files:** `backend/db/migrations/0001_baseline.sql`, `backend/db/migrations/archive/` (0002–0039), `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-135 (2026-05-05): Unified Backup & Restore UI + Drive file preview endpoint
 **Why:** Manual (device) backup/restore and Google Drive backup/restore were two separate UI flows with duplicated logic. Device restore had a preview step; Drive restore did not — users had to restore blind. Unifying into one component gives a consistent preview-then-confirm flow for both paths.
 **What:**
