@@ -89,6 +89,7 @@ type GDriveBackupJobRow = {
   status: string;
   driveFileName: string | null;
   sizeBytes: number | null;
+  errorText: string | null;
   triggeredByUserId: string | null;
   createdAt: string;
   completedAt: string | null;
@@ -117,18 +118,20 @@ function formatBelongsToLabel(label: string): string {
   return `Household > ${label}`;
 }
 
-function formatRelativeTimeAgo(iso: string | null | undefined): string {
-  if (!iso) return "Never";
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return "Never";
-  const sec = Math.floor((Date.now() - t) / 1000);
-  if (sec < 60) return "Just now";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min} minute${min === 1 ? "" : "s"} ago`;
-  const h = Math.floor(min / 60);
-  if (h < 48) return `${h} hour${h === 1 ? "" : "s"} ago`;
-  const d = Math.floor(h / 24);
-  return `${d} day${d === 1 ? "" : "s"} ago`;
+
+/** Friendly backup date: "Today, 10:46 PM" / "Yesterday, 9:55 PM" / "May 3, 9:55 PM" */
+function formatBackupDate(iso: string | null | undefined): string {
+  if (!iso) return "Unknown";
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return "Unknown";
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const todayStr = now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === todayStr) return `Today, ${time}`;
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + `, ${time}`;
 }
 
 function buildBelongsToGroups(accountOwners: Array<{ id: string; label: string }>): HierarchicalPickerGroup[] {
@@ -402,7 +405,7 @@ export function SettingsPage() {
   const [gdriveSchedulerSaving, setGdriveSchedulerSaving] = useState(false);
   const [gdriveSchedulerSavedFlash, setGdriveSchedulerSavedFlash] = useState(false);
   const [backupHistory, setBackupHistory] = useState<GDriveBackupJobRow[] | null>(null);
-  const [backupHistoryLoading, setBackupHistoryLoading] = useState(false);
+  const [_backupHistoryLoading, setBackupHistoryLoading] = useState(false);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -415,11 +418,12 @@ export function SettingsPage() {
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
 
-  /** Most recent completed job in history (GET /gdrive/backups/history is `created_at` desc). Used for staleness alert. */
-  const gdriveLastCompletedAt = useMemo(
-    () => backupHistory?.find((j) => j.status === "complete")?.completedAt ?? null,
+  /** Most recent completed job in history. Used for staleness alert and last-backup summary. */
+  const gdriveLastCompletedJob = useMemo(
+    () => backupHistory?.find((j) => j.status === "complete") ?? null,
     [backupHistory]
   );
+  const gdriveLastCompletedAt = gdriveLastCompletedJob?.completedAt ?? null;
 
   const loadInstitutions = useCallback(async () => {
     if (!token) {
@@ -966,7 +970,8 @@ export function SettingsPage() {
       return;
     }
     void loadBackupHistory();
-  }, [token, tab, canManageHousehold, gdriveStatus?.connected, loadBackupHistory]);
+    void loadDriveBackups();
+  }, [token, tab, canManageHousehold, gdriveStatus?.connected, loadBackupHistory, loadDriveBackups]);
 
   useEffect(() => {
     if (!backupJobId || !backupPolling) return;
@@ -2437,189 +2442,253 @@ export function SettingsPage() {
                 ) : null}
 
                 {!gdriveLoading && gdriveStatus?.connected ? (
-                  <Paper withBorder p="sm" radius="md" mt="xs">
-                    <Group justify="space-between" wrap="nowrap">
-                      <Stack gap={2}>
-                        <Group gap="xs">
-                          <Badge color="green" variant="light">
-                            Connected
-                          </Badge>
-                          <Text size="sm" fw={500}>
-                            {gdriveStatus.folderName ?? gdriveStatus.folderId}
+                  <Paper withBorder p="md" radius="md" mt="xs">
+                    <Stack gap="md">
+                      {/* Connection header */}
+                      <Group justify="space-between" wrap="nowrap" align="flex-start">
+                        <Stack gap={4}>
+                          <Group gap="xs">
+                            <Badge color="green" variant="light">
+                              Connected
+                            </Badge>
+                            <Text size="sm" fw={500}>
+                              {gdriveStatus.folderName ?? gdriveStatus.folderId}
+                            </Text>
+                          </Group>
+                          <Text size="xs" c="dimmed">
+                            Connected{" "}
+                            {gdriveStatus.connectedAt
+                              ? new Date(gdriveStatus.connectedAt).toLocaleDateString()
+                              : ""}
                           </Text>
-                        </Group>
-                        <Text size="xs" c="dimmed">
-                          Connected{" "}
-                          {gdriveStatus.connectedAt
-                            ? new Date(gdriveStatus.connectedAt).toLocaleDateString()
-                            : ""}
-                        </Text>
-                        {gdriveStatus.lastError ? (
-                          <Text size="xs" c="red">
-                            Last error: {gdriveStatus.lastError}
-                          </Text>
-                        ) : null}
+                        </Stack>
                         {authRole === "owner" ? (
-                          <Group mt="xs">
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            color="gray"
+                            size="xs"
+                            onClick={() => setGdriveDisconnectConfirm(true)}
+                          >
+                            Disconnect
+                          </Button>
+                        ) : null}
+                      </Group>
+
+                      {/* Connection-level error */}
+                      {gdriveStatus.lastError ? (
+                        <Alert color="red" variant="light">
+                          Connection error: {gdriveStatus.lastError}
+                        </Alert>
+                      ) : null}
+
+                      {/* Back up now + last backup summary (owner only) */}
+                      {authRole === "owner" ? (
+                        <Group align="center" gap="md" wrap="wrap">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="light"
+                            loading={backupPolling}
+                            disabled={backupPolling}
+                            onClick={() => void handleBackupNow()}
+                          >
+                            {backupPolling ? "Backing up…" : "Back up now"}
+                          </Button>
+                          {!backupPolling ? (
+                            <Text size="sm" c="dimmed">
+                              {gdriveLastCompletedAt
+                                ? `Last backup: ${formatBackupDate(gdriveLastCompletedAt)}${gdriveLastCompletedJob?.sizeBytes != null ? ` · ${(gdriveLastCompletedJob.sizeBytes / 1024).toFixed(0)} KB` : ""}`
+                                : "No successful backups yet"}
+                            </Text>
+                          ) : null}
+                        </Group>
+                      ) : null}
+
+                      {/* Manual backup result */}
+                      {backupResult ? (
+                        <Alert
+                          color={backupResult.ok ? "green" : "red"}
+                          variant="light"
+                          withCloseButton
+                          onClose={() => setBackupResult(null)}
+                        >
+                          {backupResult.ok ? "Backup uploaded to Drive." : backupResult.error}
+                        </Alert>
+                      ) : null}
+
+                      {/* Last job failed alert (when most recent job is failed, not currently running) */}
+                      {authRole === "owner" &&
+                      !backupPolling &&
+                      !backupResult &&
+                      backupHistory &&
+                      backupHistory.length > 0 &&
+                      backupHistory[0].status === "failed" ? (
+                        <Alert color="red" variant="light" title="Last backup failed">
+                          {backupHistory[0].errorText ?? "Unknown error"}
+                        </Alert>
+                      ) : null}
+
+                      {/* Overdue staleness warning */}
+                      {authRole === "owner" &&
+                      (gdriveStatus.backupFrequencyHours ?? 0) > 0 &&
+                      gdriveLastCompletedAt &&
+                      Date.now() - new Date(gdriveLastCompletedAt).getTime() >
+                        2 * (gdriveStatus.backupFrequencyHours ?? 0) * 3600 * 1000 ? (
+                        <Alert color="yellow" variant="light">
+                          Last successful backup was over{" "}
+                          {Math.floor(
+                            (Date.now() - new Date(gdriveLastCompletedAt).getTime()) / 3600000
+                          )}{" "}
+                          hours ago. The server may have been sleeping and missed scheduled backups.
+                        </Alert>
+                      ) : null}
+
+                      {/* Automatic backup settings (owner only) */}
+                      {authRole === "owner" ? (
+                        <Box>
+                          <Text size="sm" fw={500} mb="xs">
+                            Automatic backups
+                          </Text>
+                          <Group align="flex-end" gap="sm" wrap="wrap">
+                            <Select
+                              label="Frequency"
+                              size="xs"
+                              data={[
+                                { value: "0", label: "Disabled" },
+                                { value: "12", label: "Every 12 hours" },
+                                { value: "24", label: "Every 24 hours" },
+                                { value: "48", label: "Every 48 hours" },
+                                { value: "72", label: "Every 3 days" },
+                                { value: "168", label: "Weekly" }
+                              ]}
+                              value={gdriveSchedulerFreq}
+                              onChange={(v) => setGdriveSchedulerFreq(v ?? "24")}
+                            />
+                            <NumberInput
+                              label="Keep last"
+                              description="backups on Drive"
+                              min={1}
+                              max={30}
+                              size="xs"
+                              value={gdriveSchedulerRetention}
+                              onChange={(v) => setGdriveSchedulerRetention(v ?? 7)}
+                              w={110}
+                            />
                             <Button
                               type="button"
                               size="xs"
-                              variant="light"
-                              loading={backupPolling}
-                              disabled={backupPolling}
-                              onClick={() => void handleBackupNow()}
+                              loading={gdriveSchedulerSaving}
+                              onClick={() => void handleSaveGdriveScheduler()}
                             >
-                              {backupPolling ? "Backing up…" : "Back up now"}
+                              Save
+                            </Button>
+                            {gdriveSchedulerSavedFlash ? (
+                              <Text size="sm" c="green" fw={500}>
+                                Saved
+                              </Text>
+                            ) : null}
+                          </Group>
+                        </Box>
+                      ) : null}
+
+                      {/* Backups on Drive — restore + visual history combined */}
+                      {authRole === "owner" || authRole === "admin" ? (
+                        <Box>
+                          <Group justify="space-between" mb="xs">
+                            <Text size="sm" fw={500}>
+                              Backups on Drive
+                            </Text>
+                            <Button
+                              type="button"
+                              size="xs"
+                              variant="subtle"
+                              loading={driveBackupsLoading}
+                              disabled={driveBackupsLoading || driveRestorePolling}
+                              onClick={() => void loadDriveBackups()}
+                            >
+                              Refresh
                             </Button>
                           </Group>
-                        ) : null}
-                        {backupResult ? (
-                          <Alert
-                            color={backupResult.ok ? "green" : "red"}
-                            variant="light"
-                            mt="xs"
-                            withCloseButton
-                            onClose={() => setBackupResult(null)}
-                          >
-                            {backupResult.ok
-                              ? `Backed up: ${backupResult.fileName ?? "file uploaded to Drive"}`
-                              : backupResult.error}
-                          </Alert>
-                        ) : null}
-                        {authRole === "owner" &&
-                        (gdriveStatus.backupFrequencyHours ?? 0) > 0 &&
-                        gdriveLastCompletedAt &&
-                        Date.now() - new Date(gdriveLastCompletedAt).getTime() >
-                          2 * (gdriveStatus.backupFrequencyHours ?? 0) * 3600 * 1000 ? (
-                          <Alert color="yellow" variant="light" mt="xs">
-                            The last successful backup was over{" "}
-                            {Math.floor(
-                              (Date.now() - new Date(gdriveLastCompletedAt).getTime()) / 3600000
-                            )}{" "}
-                            hours ago. If the server has been sleeping, some scheduled backups may have been missed. You
-                            can trigger one manually above.
-                          </Alert>
-                        ) : null}
-                        {authRole === "owner" ? (
-                          <>
-                            <Divider my="sm" label="Automatic backups" labelPosition="left" />
-                            <Stack gap="xs" maw={480}>
-                              <Group align="flex-end" wrap="wrap">
-                                <Select
-                                  label="Frequency"
-                                  data={[
-                                    { value: "0", label: "Disabled (manual only)" },
-                                    { value: "12", label: "Every 12 hours" },
-                                    { value: "24", label: "Every 24 hours" },
-                                    { value: "48", label: "Every 48 hours" },
-                                    { value: "72", label: "Every 3 days" },
-                                    { value: "168", label: "Weekly" }
-                                  ]}
-                                  value={gdriveSchedulerFreq}
-                                  onChange={(v) => setGdriveSchedulerFreq(v ?? "24")}
-                                />
-                                <NumberInput
-                                  label="Keep last N backups"
-                                  description="Pruned on Drive after each successful upload"
-                                  min={1}
-                                  max={30}
-                                  value={gdriveSchedulerRetention}
-                                  onChange={(v) => setGdriveSchedulerRetention(v ?? 7)}
-                                  w={180}
-                                />
-                                <Button
-                                  type="button"
-                                  size="xs"
-                                  loading={gdriveSchedulerSaving}
-                                  onClick={() => void handleSaveGdriveScheduler()}
-                                >
-                                  Save
-                                </Button>
-                                {gdriveSchedulerSavedFlash ? (
-                                  <Text size="sm" c="green" fw={500}>
-                                    Saved
-                                  </Text>
-                                ) : null}
-                              </Group>
-                              <Text size="xs" c="dimmed">
-                                Last automatic backup:{" "}
-                                {formatRelativeTimeAgo(gdriveStatus.lastScheduledBackupAt ?? null)}
-                              </Text>
+
+                          {driveBackupsError ? (
+                            <Alert color="red" variant="light" mb="xs">
+                              {driveBackupsError}
+                            </Alert>
+                          ) : null}
+                          {driveRestoreError ? (
+                            <Alert
+                              color="red"
+                              variant="light"
+                              mb="xs"
+                              withCloseButton
+                              onClose={() => setDriveRestoreError(null)}
+                            >
+                              {driveRestoreError}
+                            </Alert>
+                          ) : null}
+                          {driveRestorePolling ? (
+                            <Text size="sm" c="dimmed" mb="xs">
+                              Restoring… you will be signed out when complete.
+                            </Text>
+                          ) : null}
+
+                          {driveBackupsLoading ? (
+                            <Stack gap={6}>
+                              <Skeleton height={36} radius="sm" />
+                              <Skeleton height={36} radius="sm" />
+                              <Skeleton height={36} radius="sm" />
                             </Stack>
-                            <Divider my="sm" />
-                            <Group justify="space-between" align="center">
-                              <Text size="sm" fw={500}>
-                                Restore from Drive
-                              </Text>
-                              <Button
-                                type="button"
-                                size="xs"
-                                variant="subtle"
-                                loading={driveBackupsLoading}
-                                disabled={driveBackupsLoading || driveRestorePolling}
-                                onClick={() => void loadDriveBackups()}
-                              >
-                                {driveBackups === null ? "Load backups" : "Refresh"}
-                              </Button>
-                            </Group>
-
-                            {driveBackupsError ? (
-                              <Alert color="red" variant="light" mt="xs">
-                                {driveBackupsError}
-                              </Alert>
-                            ) : null}
-
-                            {driveRestoreError ? (
-                              <Alert
-                                color="red"
-                                variant="light"
-                                mt="xs"
-                                withCloseButton
-                                onClose={() => setDriveRestoreError(null)}
-                              >
-                                {driveRestoreError}
-                              </Alert>
-                            ) : null}
-
-                            {driveRestorePolling ? (
-                              <Text size="sm" c="dimmed" mt="xs">
-                                Restoring… please wait. You will be signed out when complete.
-                              </Text>
-                            ) : null}
-
-                            {driveBackups !== null && !driveBackupsLoading ? (
-                              driveBackups.length === 0 ? (
-                                <Text size="sm" c="dimmed" mt="xs">
-                                  No backups found in this Drive folder.
+                          ) : driveBackups === null ? (
+                            <Text size="sm" c="dimmed">
+                              Loading…
+                            </Text>
+                          ) : driveBackups.length === 0 ? (
+                            <Text size="sm" c="dimmed">
+                              No backups found in this Drive folder yet.
+                            </Text>
+                          ) : (
+                            <Stack gap={0}>
+                              {driveBackups.slice(0, 5).map((f, i) => (
+                                <Group
+                                  key={f.fileId}
+                                  justify="space-between"
+                                  wrap="nowrap"
+                                  py="xs"
+                                  style={{
+                                    borderTop: i > 0 ? "1px solid var(--mantine-color-dark-5)" : undefined
+                                  }}
+                                >
+                                  <Stack gap={0}>
+                                    <Text size="sm">{formatBackupDate(f.createdAt)}</Text>
+                                    {f.sizeBytes != null ? (
+                                      <Text size="xs" c="dimmed">
+                                        {(f.sizeBytes / 1024).toFixed(0)} KB
+                                      </Text>
+                                    ) : null}
+                                  </Stack>
+                                  {authRole === "owner" ? (
+                                    <Button
+                                      type="button"
+                                      size="xs"
+                                      variant="default"
+                                      disabled={driveRestorePolling}
+                                      onClick={() => setDriveRestoreConfirmFileId(f.fileId)}
+                                    >
+                                      Restore
+                                    </Button>
+                                  ) : null}
+                                </Group>
+                              ))}
+                              {driveBackups.length > 5 ? (
+                                <Text size="xs" c="dimmed" mt="xs">
+                                  Showing 5 most recent. Older backups are on Drive but not listed here.
                                 </Text>
-                              ) : (
-                                <Stack gap={4} mt="xs">
-                                  {driveBackups.map((f) => (
-                                    <Group key={f.fileId} justify="space-between" wrap="nowrap">
-                                      <Stack gap={0}>
-                                        <Text size="sm" style={{ wordBreak: "break-all" }}>
-                                          {f.fileName}
-                                        </Text>
-                                        <Text size="xs" c="dimmed">
-                                          {f.createdAt ? new Date(f.createdAt).toLocaleString() : ""}
-                                          {f.sizeBytes != null ? ` · ${(f.sizeBytes / 1024).toFixed(0)} KB` : ""}
-                                        </Text>
-                                      </Stack>
-                                      <Button
-                                        type="button"
-                                        size="xs"
-                                        variant="default"
-                                        disabled={driveRestorePolling}
-                                        onClick={() => setDriveRestoreConfirmFileId(f.fileId)}
-                                      >
-                                        Restore
-                                      </Button>
-                                    </Group>
-                                  ))}
-                                </Stack>
-                              )
-                            ) : null}
+                              ) : null}
+                            </Stack>
+                          )}
 
+                          {authRole === "owner" ? (
                             <ConfirmDialog
                               opened={driveRestoreConfirmFileId !== null}
                               title="Restore from Drive backup?"
@@ -2629,108 +2698,14 @@ export function SettingsPage() {
                               danger
                               onClose={() => setDriveRestoreConfirmFileId(null)}
                               onConfirm={() => {
-                                if (driveRestoreConfirmFileId) void handleDriveRestore(driveRestoreConfirmFileId);
+                                if (driveRestoreConfirmFileId)
+                                  void handleDriveRestore(driveRestoreConfirmFileId);
                               }}
                             />
-                          </>
-                        ) : null}
-                        {authRole === "owner" || authRole === "admin" ? (
-                          <>
-                            <Divider my="sm" label="Recent backup history" labelPosition="left" />
-                            {backupHistoryLoading ? (
-                              <Stack gap="xs" mt="xs">
-                                <Skeleton height={22} radius="sm" />
-                                <Skeleton height={22} radius="sm" />
-                                <Skeleton height={22} radius="sm" />
-                              </Stack>
-                            ) : backupHistory && backupHistory.length > 0 ? (
-                              <Stack gap="xs" mt="xs">
-                                <Table striped highlightOnHover withTableBorder withColumnBorders>
-                                  <Table.Thead>
-                                    <Table.Tr>
-                                      <Table.Th>Status</Table.Th>
-                                      <Table.Th>Date</Table.Th>
-                                      <Table.Th>File</Table.Th>
-                                      <Table.Th>Size</Table.Th>
-                                      <Table.Th>Source</Table.Th>
-                                    </Table.Tr>
-                                  </Table.Thead>
-                                  <Table.Tbody>
-                                    {backupHistory.slice(0, 10).map((job) => {
-                                      const badgeColor =
-                                        job.status === "complete"
-                                          ? "green"
-                                          : job.status === "failed"
-                                            ? "red"
-                                            : "blue";
-                                      const label =
-                                        job.status === "complete"
-                                          ? "Complete"
-                                          : job.status === "failed"
-                                            ? "Failed"
-                                            : job.status === "running"
-                                              ? "Running"
-                                              : "Queued";
-                                      const sizeLabel =
-                                        job.sizeBytes != null
-                                          ? job.sizeBytes >= 1024 * 1024
-                                            ? `${(job.sizeBytes / (1024 * 1024)).toFixed(1)} MB`
-                                            : `${(job.sizeBytes / 1024).toFixed(0)} KB`
-                                          : "—";
-                                      return (
-                                        <Table.Tr key={job.id}>
-                                          <Table.Td>
-                                            <Badge size="sm" color={badgeColor} variant="light">
-                                              {label}
-                                            </Badge>
-                                          </Table.Td>
-                                          <Table.Td>
-                                            <Text size="sm">{new Date(job.createdAt).toLocaleString()}</Text>
-                                          </Table.Td>
-                                          <Table.Td>
-                                            <Text size="sm" style={{ wordBreak: "break-all" }}>
-                                              {job.driveFileName ?? "—"}
-                                            </Text>
-                                          </Table.Td>
-                                          <Table.Td>
-                                            <Text size="sm">{sizeLabel}</Text>
-                                          </Table.Td>
-                                          <Table.Td>
-                                            <Text size="sm" c="dimmed">
-                                              {job.triggeredByUserId == null ? "Automatic" : "Manual"}
-                                            </Text>
-                                          </Table.Td>
-                                        </Table.Tr>
-                                      );
-                                    })}
-                                  </Table.Tbody>
-                                </Table>
-                                {backupHistory.length > 10 ? (
-                                  <Text size="xs" c="dimmed">
-                                    Showing 10 most recent backups.
-                                  </Text>
-                                ) : null}
-                              </Stack>
-                            ) : (
-                              <Text size="sm" c="dimmed" mt="xs">
-                                No backup jobs recorded yet.
-                              </Text>
-                            )}
-                          </>
-                        ) : null}
-                      </Stack>
-                      {authRole === "owner" ? (
-                        <Button
-                          type="button"
-                          variant="default"
-                          size="xs"
-                          color="red"
-                          onClick={() => setGdriveDisconnectConfirm(true)}
-                        >
-                          Disconnect
-                        </Button>
+                          ) : null}
+                        </Box>
                       ) : null}
-                    </Group>
+                    </Stack>
                   </Paper>
                 ) : null}
 

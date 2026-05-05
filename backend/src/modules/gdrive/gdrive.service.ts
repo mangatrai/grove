@@ -261,16 +261,25 @@ export async function updateGDriveSchedulerSettings(
 /**
  * Origin (scheme + host + optional port, no path) for post–Google-OAuth redirects to the hash-router SPA.
  * Prevents `Location: /#/settings?...` resolving on the API host (e.g. :4000) instead of Vite (:3000).
+ *
+ * Priority:
+ *  1. FRONTEND_APP_URL — explicit SPA origin (set this in dev when API and Vite run on different ports)
+ *  2. TEST fallback — http://localhost:3000 (Vite default; PUBLIC_BASE_URL is NOT used here because
+ *     it is often set to the API server URL for email links, which is the wrong host for SPA redirects)
+ *  3. PROD with no FRONTEND_APP_URL — PUBLIC_BASE_URL if set, else relative (API co-hosts SPA)
  */
 export function resolveSpaOriginForGdriveRedirect(): string {
-  const explicit = env.FRONTEND_APP_URL?.trim() || env.PUBLIC_BASE_URL?.trim();
-  if (explicit) {
-    return explicit.replace(/\/$/, "");
+  const frontendUrl = env.FRONTEND_APP_URL?.trim();
+  if (frontendUrl) {
+    return frontendUrl.replace(/\/$/, "");
   }
   if (env.MODE === "TEST") {
     return "http://localhost:3000";
   }
-  return "";
+  // PROD: API and SPA are co-hosted by the same Express server, so a relative redirect works.
+  // If the SPA is on a separate host, set FRONTEND_APP_URL.
+  const publicBase = env.PUBLIC_BASE_URL?.trim();
+  return publicBase ? publicBase.replace(/\/$/, "") : "";
 }
 
 /** Redirect browser to SPA settings after OAuth callback (`/#/settings?...`). */
