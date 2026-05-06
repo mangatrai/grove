@@ -18,6 +18,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-151 (2026-05-06): Mantine migration — codified intentional non-Mantine exceptions
+
+**Why:** After the full Mantine migration pass (UX-145–UX-150) an audit flagged several patterns as "remaining native HTML." Some are legitimate exceptions that should not be migrated; documenting them here prevents future sessions from treating them as bugs.
+
+**Codified exceptions (do not migrate):**
+
+| Location | Pattern | Reason |
+|---|---|---|
+| `HomePage.tsx` — `home-landing__*` classes | Branded landing shell: `.home-landing`, `.home-landing__glow`, `.home-landing__grid`, `.home-landing__hero`, `.home-landing__pills`, etc. | Custom designed marketing/branding layout. CSS-driven glow animation, two-column hero grid, and pill badges are intentional visual design. The interactive auth surface (sign-in card, forgot-password) is fully Mantine. Do not replace with Mantine `Grid`/`Stack`. |
+| `ImportWorkspacePage.tsx` — `<input type="file" multiple>` | Native file input element | No Mantine equivalent that preserves multi-file OS picker UX. `FileButton` changes the interaction model. Keep as bare `<input>`. |
+| Any `Box` or layout element — `style={{ zIndex: N }}` | Inline z-index | Mantine v7 `Box` has no `zIndex` prop; `style={{ zIndex }}` is the correct approach. |
+| `Box style={{ overflowX: "auto" }}` wrappers | Overflow containers for tables | Mantine has no overflow prop on layout primitives; `style=` is correct here. |
+| `Table.Th style={{ letterSpacing }}` | Letter-spacing on headers | `lts` is a Mantine v7 style prop; either form is acceptable. `style={{ letterSpacing }}` is not a migration miss. |
+| `Table.Td style={{ minWidth }}` | Column min-widths | `miw=` is the Mantine equivalent but `style={{ minWidth }}` is not a structural native-HTML issue; either is acceptable. |
+
+**Still to migrate (genuine miss):**
+- `SettingsPage.tsx` lines ~1785–1824: confirm-dialog `message` prop contains raw `<div style={...}>` error/warning boxes and `<p style={...}>` — should be `Alert`/`Stack`/`Text`.
+
+**Files:** `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-150 (2026-05-06): ImportWorkspacePage — full Mantine migration (2080 lines, 0% → 100%)
 
 **Why:** Largest frontend page, entirely native HTML — `.card`, `.muted`, custom `<dl>/<dt>/<dd>`, `<table className="ledger-table">`, `<details>/<summary>`, `<button>`, `<select>`, `<input>` throughout. No Mantine imports at start.
