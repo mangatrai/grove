@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-142 (2026-05-06): BudgetPage — full Mantine migration + setup table UX fixes
+
+**Why:** BudgetPage had zero Mantine usage — all layout was raw HTML with inline styles and two custom CSS classes (`budget-kpi-grid`, `card`). Setup table had three UX issues: input box was left-aligned in its column, the × remove button felt visually detached from its row, and the ►/▲ expand chevrons used the wrong convention (▼ on a collapsed row is ambiguous).
+
+**What:**
+- **Full Mantine migration:** Replaced all raw `<button>`, `<input>`, `<select>`, `<table>`, `<h1/h2>`, layout `<div>` elements with Mantine equivalents (`Button`, `ActionIcon`, `NumberInput`, `Select`, `Table.*`, `Title`, `Stack`, `Group`, `SimpleGrid`, `Paper`, `Progress`, `Text`).
+- **Custom CSS removed:** `budget-kpi-grid` block (and its `@media` rule) removed from `index.css`; replaced by `<SimpleGrid cols={{ base: 1, sm: 3 }}>`.
+- **`card` className removed:** Replaced by `<Paper p="md" withBorder radius="md">` throughout.
+- **Setup table — 4→3 columns:** Merged the separate action column into the "Your budget" column. Input + × icon now sit together in a right-aligned `<Group justify="flex-end">`, so the remove button is adjacent to the value it deletes.
+- **Input alignment fixed:** `NumberInput` now right-aligns within the cell via `Group justify="flex-end"`.
+- **Chevron semantics fixed:** Expand/collapse button changed from text ▼/▲ to `IconChevronRight` (collapsed) / `IconChevronDown` (expanded) — standard tree/accordion convention.
+- **`ProgressBar` component:** Replaced custom div with Mantine `<Progress>`.
+- **`AmountInput` component:** Replaced raw `<input type="number">` with Mantine `<NumberInput hideControls>`.
+- **`NavBtn` component:** Replaced raw `<button>` with `<ActionIcon variant="default">`.
+
+**Files:** `frontend/src/pages/BudgetPage.tsx`, `frontend/src/index.css`
+
+---
+
 ## UX-141 (2026-05-06): Category accordion layout + deletion UX fixes + remove Classic view link
 
 **Why:** The flat parent/child table required heavy scrolling and made hierarchy ambiguous. Deleting a parent category with subcategories silently failed (409 in devtools, no visible error — error rendered behind the ConfirmDialog or at the top of a long page). Dashboard "Classic view" button was kept alive past its useful life.

@@ -1412,18 +1412,6 @@ table.ledger-table thead th {
   max-width: 520px;
 }
 
-.budget-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-}
-
-@media (max-width: 640px) {
-  .budget-kpi-grid {
-    grid-template-columns: 1fr;
-  }
-}
 
 table.ledger-table.payslip-manual__table th,
 table.ledger-table.payslip-manual__table td {
