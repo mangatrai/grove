@@ -10,6 +10,7 @@ import { log } from "../../logger.js";
 import { env } from "../../config/env.js";
 import { decryptBackup, isEncryptedBackup } from "./backup-crypto.js";
 import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
+import { assertRestoreInsertColumnNames } from "./restore-insert-validation.js";
 
 export type HfbManifestPreview = {
   exportVersion: number;
@@ -275,6 +276,7 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
         await tx.unsafe(text, values as never[]);
       };
       const txInsertObject = async (tableName: string, objectRow: ExportRow): Promise<void> => {
+        assertRestoreInsertColumnNames(tableName, objectRow);
         const columns = Object.keys(objectRow);
         if (columns.length === 0) {
           return;

@@ -45,7 +45,7 @@ Open **Account → Settings** from the top bar.
 - **Connected accounts:** add or edit **financial accounts** (bank, card, etc.). Pick an institution label, parser profile where applicable, account mask (e.g. last four digits), and **belongs-to** (household vs a specific member) so imports and reports attribute activity correctly.
 - **Custom institutions:** you can add household-specific institution names that complement the built-in list.
 - **AI Insights history:** historical generated analyses live in the **Insights** tab. Use this for trend checks and to compare newer advice vs prior recommendations.
-- **Household backup (ZIP):** request an **export** of the household database slice (async job, then download the ZIP). **Restore from backup** uploads that ZIP and replaces household data (**destructive**); after a successful restore you are signed out because existing login tokens are invalidated. Prefer export → restore on a **fresh** instance or when you intentionally want to replace everything in the household. Operator details: [`RUNBOOK.md`](RUNBOOK.md) §11; API: [`API_EXPORTS.md`](API_EXPORTS.md).
+- **Household backup (.hfb):** request an **export** of the household database slice (async job, then download the **`.hfb`** bundle). **Restore from backup** uploads that file and replaces household data (**destructive**); after a successful restore you are signed out because existing login tokens are invalidated. Prefer export → restore on a **fresh** instance or when you intentionally want to replace everything in the household. Operator details: [`RUNBOOK.md`](RUNBOOK.md) §11; API: [`API_EXPORTS.md`](API_EXPORTS.md).
 
 ### AI analysis privacy notes
 

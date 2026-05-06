@@ -1,20 +1,25 @@
 # Mobile UX — responsive layout + PWA backlog
 
-**Status:** Backlogged. Do not build until groomed.
-**Origin:** Pre-production review, 2026-04-21. App was built desktop-first. Primary access from phone browser requires responsive fixes and a PWA install path.
+**Status:** **Partially shipped** (see **`docs/CHANGE_HISTORY.md`** — UX-R01 through UX-R06 + UX-P01/P02/P03, 2026-04-25). Viewport audit, Recharts sizing, form responsive props, payslip touch affordances, **`manifest.json`**, **`index.html` PWA meta**, and **`frontend/public/icons/`** are in place.
+
+**Remaining (not yet shipped):**
+- **UX-R02** — AppShell hamburger + **drawer nav** on viewports below `md` (sidebar still desktop-weighted for some flows).
+- **UX-R03** — Transactions **card-per-row** layout on phones (table still primary on small screens).
+- **UX-P04** (optional) — service worker / offline shell (`vite-plugin-pwa`); defer until R02/R03 are validated.
+
+**Origin:** Pre-production review, 2026-04-21.
 
 ---
 
-## Problem statement
+## Problem statement (historical — largely addressed for audit/PWA baseline)
 
-The app was designed for desktop viewports. On a phone (390–430px width, iPhone 14-class), several pain points appear:
+The app was built desktop-first. Remaining gaps for **primary phone use**:
 
-- **Navigation:** The sidebar takes up the full screen or is hidden with no trigger visible.
-- **Tables:** Transaction/ledger tables overflow horizontally; users must scroll sideways to see amounts and categories.
-- **Forms:** Multi-column form layouts (budget, rule editor) stack awkwardly on narrow viewports.
-- **No "Add to Home Screen" experience:** No PWA manifest means the app runs inside the browser with address bar chrome, rather than as a clean standalone app icon.
+- **Navigation:** drawer pattern (UX-R02) not fully equivalent to native mobile-first apps.
+- **Tables:** ledger still table-heavy on narrow widths until UX-R03 lands.
+- **Forms:** spot-check multi-column pages after future changes.
 
-The goal is to make every page fully usable on a phone browser, and to support PWA installation (iOS "Add to Home Screen" / Android "Install App") without going near the App Store.
+The goal remains: every page fully usable on a phone browser, plus installable PWA where supported.
 
 ---
 

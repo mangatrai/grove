@@ -179,16 +179,16 @@ Then start the API again (`npm run start:dev` or `npm run dev:backend`). Clear s
 - **`uncategorized_only`** updates only rows with `category_id IS NULL`. **`all`** can overwrite categories when a rule matches.
 - Does **not** filter by import session; finalized imports' rows are included.
 
-### Household data export + restore (ZIP)
-- **Export:** Settings → Household → Export data triggers `POST /exports/household`. Job runs async; UI polls until complete, then shows a persistent Download link.
-- ZIP contains `manifest.json` + per-table JSON files (exportVersion 3). Tables: household settings, app users (bcrypt hashes), accounts, categories, rules, transactions, balance snapshots, payslip snapshots, person profiles, memberships.
+### Household data export + restore (.hfb)
+- **Export:** Settings → **Data** → export triggers `POST /exports/household`. Job runs async; UI polls until complete, then shows a persistent download link.
+- The file is a **`.hfb`** (ZIP-shaped) bundle: `manifest.json` + per-table JSON files (**`exportVersion` 4** current). Tables: household settings, app users (bcrypt hashes), accounts, categories, rules, transactions, balance snapshots, payslip snapshots, person profiles, memberships, and other registry tables (see `docs/API_EXPORTS.md`).
 - `categories.json` / `category_rules.json` contain **only household-custom rows** — global seed rows are excluded (they re-seed on restore via `db:seed`).
-- Exports are rate-limited (10 per rolling hour). ZIPs stored in `data/exports/`; no auto-cleanup — delete manually if disk is a concern.
-- **Restore:** Settings → Household → Restore from backup — upload a ZIP from the export above.
-- Restore is **destructive and irreversible**: wipes current household data and replaces from ZIP.
+- Exports are rate-limited (10 per rolling hour). Files are stored under `data/exports/`; no auto-cleanup — delete manually if disk is a concern.
+- **Restore:** Settings → **Data** → restore uploads an `.hfb` from the export above (preview step recommended).
+- Restore is **destructive and irreversible**: wipes current household data and replaces from the bundle.
 - All `token_version` values are incremented on restore (every existing JWT is invalidated; user is signed out automatically).
 - API: `POST /exports/household/import` (multipart `file`) → `{ jobId }` → poll `GET /exports/import/:jobId`.
-- Backward-compatible with v1/v2 ZIPs (single `household-bundle.json`).
+- Backward-compatible with older bundles (v1/v2 single `household-bundle.json`, v3/v4 split JSON).
 
 ### PostgreSQL notes
 - The app uses PostgreSQL only via the `postgres` (porsager) client. Schema applied from `backend/db/migrations/`. Seeds in `backend/db/seeds/`.

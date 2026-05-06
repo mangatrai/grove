@@ -1,8 +1,10 @@
 # Recurring Payments — Hybrid Tagging System (Backlog)
 
-**Status:** Backlog — not started  
-**Depends on:** Existing transaction view (`/transactions`), `transaction_canonical` table, category system  
-**Related:** `frontend/src/pages/DashboardPageV2.tsx` → `detectRecurring`, `recurring_merchant_override` (new table)
+**Status:** **Phases 1–3 shipped** (**CR-121**, **CR-122**, **CR-123** — see **`docs/CHANGE_HISTORY.md`**). Override store, transaction tagging, dashboard dismiss/confirm, and Settings recurring management are implemented.
+
+**This file** documents the original design and **remaining / future** enhancements (below), not open MVP work.
+
+**Related:** `frontend/src/pages/DashboardPageV2.tsx` → `detectRecurring`, `recurring_merchant_override`
 
 ---
 

@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-138 (2026-05-05): v2 doc accuracy + restore hardening (Claude/Cursor punch list)
+
+**Why:** Operators and future sessions were misled by stale **ZIP / exportVersion 3** copy, missing **CHECKPOINT/MVP** pointers on the archived PRD, backlog headers that contradicted shipped mobile/recurring/import work, and two small restore hygiene gaps called out in **`docs/EXPORT_IMPORT_BACKLOG.md`**.
+
+**What:**
+- **Docs:** **`docs/RUNBOOK.md`** — `.hfb`, **`exportVersion` 4**, Settings → **Data**; **`CLAUDE.md`** export row; **`docs/API_GDRIVE.md`** preview example; **`docs/archive/FINANCE_APP_PRD.md`** — implementation-status line + **§19** backup format (**.hfb** / v4) instead of removed CHECKPOINT/MVP pointers and stale ZIP/v3 copy; **`docs/USER_GUIDE.md`** backup bullet; **`docs/DATABASE_ARCHITECTURE.md`** — **DB-136** squashed baseline + archive pointer; **`docs/MOBILE_UX_BACKLOG.md`**, **`docs/RECURRING_PAYMENTS_BACKLOG.md`**, **`docs/IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md`**, **`docs/EXPORT_IMPORT_BACKLOG.md`** — status headers aligned with shipped reality.
+- **Code:** **`restore-insert-validation.ts`** — enforce lowercase snake_case column keys before dynamic `INSERT` during restore; **`exports.routes.ts`** — **`unlinkSync`** on **`POST /exports/household/import`** when extension is not `.hfb`.
+- **Tests:** **`backend/tests/restore-insert-validation.test.ts`**.
+
+**Files:** `backend/src/modules/export/restore-insert-validation.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/tests/restore-insert-validation.test.ts`, `docs/RUNBOOK.md`, `CLAUDE.md`, `docs/API_GDRIVE.md`, `docs/archive/FINANCE_APP_PRD.md`, `docs/USER_GUIDE.md`, `docs/DATABASE_ARCHITECTURE.md`, `docs/MOBILE_UX_BACKLOG.md`, `docs/RECURRING_PAYMENTS_BACKLOG.md`, `docs/IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md`, `docs/EXPORT_IMPORT_BACKLOG.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-137 (2026-05-06): Expand test coverage — rule learning, RBAC, payslip deposits, ledger filters, recurring overrides
 
 **Why:** Pre-release coverage audit identified five gaps: (1) category rule learning endpoints had zero tests; (2) RBAC was only tested at the coarse "member blocked from household routes" level with no admin role tests and no positive member permission tests; (3) `matchedDeposits` on `GET /payslips/:id` (CR-068) was shipped but never asserted in tests; (4) ledger filter parameters (dateFrom/dateTo, accountId, amountMin/Max, trashOnly) were exercised only implicitly via the full import pipeline tests; (5) recurring override validation and household isolation had no dedicated tests.

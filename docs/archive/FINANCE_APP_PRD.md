@@ -1,6 +1,6 @@
 # Household Finance Platform - Product Requirements Document (PRD)
 
-**Implementation status:** This PRD is the north star. For what the repo implements today (✅ / 🟡 / ⬜), use **`docs/CHECKPOINT.md`** and **`docs/MVP_BACKLOG.md`** — not every PRD section has a shipped counterpart yet. **Target app shell and IA (phased):** **§13**. **Change audit / “why we diverged”:** **`docs/CHANGE_HISTORY.md`**. **Resume after a break:** start with **`CHECKPOINT`** + **`CHANGE_HISTORY`** (newest dated blocks).
+**Implementation status:** This PRD is the north star (archived copy; active planning uses **`docs/CHANGE_HISTORY.md`** for what shipped and why). **`docs/USER_GUIDE.md`**, **`openapi/openapi.yaml`**, and **`docs/API_*.md`** describe current behavior. **Target app shell and IA (phased):** **§13**.
 
 ## 1) Product Vision
 Build a private, self-hosted household finance platform that gives a trustworthy view of:
@@ -390,11 +390,11 @@ New fields added to Settings:
 ## 19) Automated Cloud Backup & Restore (FR-14)
 
 ### Overview
-Extends the existing manual export/restore capability with scheduled automated backups to Google Drive. A new "Backup & Restore" sub-tab in Settings consolidates all export, restore, and cloud backup configuration into one place. The existing export ZIP format (exportVersion 3) is reused as the backup payload.
+Extends the existing manual export/restore capability with scheduled automated backups to Google Drive. A new "Backup & Restore" sub-tab in Settings consolidates all export, restore, and cloud backup configuration into one place. **Shipped:** **`.hfb`** household bundles (**`exportVersion` 4** per **`docs/CHANGE_HISTORY.md`** **CR-125** / **CR-126**); Drive backups use the same payload as HTTP export.
 
 ### Design Decisions
 - **Phase 1 provider:** Google Drive only. Phase 2 adds OneDrive.
-- **Backup format:** existing `POST /exports/household` ZIP (exportVersion 3). No new format needed.
+- **Backup format:** same **`POST /exports/household`** pipeline as manual export (**.hfb**, **`exportVersion` 4**). Optional AES-GCM encryption via **`BACKUP_ENCRYPTION_KEY`**.
 - **Triggers:** scheduled (daily/weekly/monthly background job) and manual "Backup Now".
 - **Drive scope:** `drive.file` only — app can only access files it creates, not the user's full Drive.
 

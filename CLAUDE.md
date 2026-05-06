@@ -79,7 +79,7 @@ household-finance-app/
 | `ledger/` | `ledger.service.ts`, `ledger.routes.ts` | List/filter canonical transactions, manual entry, category updates |
 | `resolution/` | `resolution.service.ts` | Unresolved items queue (unknown_category, duplicate_ambiguity, transfer_ambiguity) |
 | `reports/` | `cash-summary.service.ts`, `balance-sheet.service.ts`, `reports.routes.ts` | Cash flow KPIs (`/reports/cash-summary`); net worth snapshot + history (`/reports/balance-sheet`, `/reports/balance-sheet/history`); manual balance POST/PATCH |
-| `export/` | `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`, `exports.routes.ts` | Async **ZIP export** (`exportVersion` 3: manifest + per-table JSON) and **async restore** (`POST /exports/household/import`, poll `GET /exports/import/:jobId`); wipe-then-restore, JWT invalidation via `token_version` |
+| `export/` | `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`, `exports.routes.ts` | Async **`.hfb` export** (`exportVersion` 4: manifest + per-table JSON) and **async restore** (`POST /exports/household/import`, poll `GET /exports/import/:jobId`); wipe-then-restore, JWT invalidation via `token_version` |
 | `budget/` | `budget.service.ts`, `budget.routes.ts` | Monthly per-category budgets; suggestions from recent spend; actuals vs budgeted with parent-level rollup (`/budget/suggest`, `/budget/months`, `/budget/:month` GET/PUT) |
 | `health/` | routes only | `GET /health` liveness endpoint |
 
@@ -339,7 +339,7 @@ Full checklist (image vs `docker run`, **`.env`**, Koyeb buildpack vs Dockerfile
 | `docs/ENVIRONMENT_VARIABLES.md` | Full env reference |
 | `docs/USER_GUIDE.md` | End-user features |
 | `docs/API_INDEX.md` | All API routes summary |
-| `docs/API_EXPORTS.md` | Export ZIP + restore API |
+| `docs/API_EXPORTS.md` | `.hfb` export + restore API |
 | `docs/API_*.md` | Per-domain API guides |
 | `docs/PAYSLIP_V1.md` | Payslip feature spec |
 | `docs/CHANGE_HISTORY.md` | Detailed changelog |

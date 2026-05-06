@@ -1,7 +1,8 @@
 # Import pipeline simplification — backlog
 
-**Status:** Backlogged. Do not build until groomed.
-**Origin:** Pre-production review, 2026-04-19. Current pipeline is functionally correct but exposes too many internal ETL steps as user-facing actions.
+**Status:** **Primary friction reduced** — **`/imports`** one-shot flow, **`ImportPage`** rebuild, and workspace routing (**CR-118**, **CR-119** series — see **`docs/CHANGE_HISTORY.md`**) replaced the worst multi-click session wizard for common cases. The API described below (upload → confirm in fewer round-trips, optional `POST /imports/upload` façade) remains a **future consolidation** if you want to collapse session endpoints further; not required for the current UI.
+
+**Origin:** Pre-production review, 2026-04-19.
 
 ---
 

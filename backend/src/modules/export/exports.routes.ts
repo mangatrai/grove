@@ -105,6 +105,11 @@ exportsRouter.post(
 
     const ext = path.extname(req.file.originalname ?? "").toLowerCase();
     if (ext !== ".hfb") {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch {
+        /* already gone */
+      }
       res.status(400).json({ message: "Invalid file type. Only .hfb files are accepted." });
       return;
     }

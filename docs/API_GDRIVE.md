@@ -197,7 +197,7 @@ Returns the same shape as `POST /exports/preview`:
 
 ```json
 {
-  "exportVersion": 3,
+  "exportVersion": 4,
   "exportedAt": "2026-05-05T10:00:00.000Z",
   "encrypted": false,
   "scope": "household",

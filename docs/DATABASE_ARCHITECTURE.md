@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document captures the architectural decision to use PostgreSQL, the reasoning behind it, the current index inventory verified against real query patterns, gaps that were found and fixed (migration `0021`), and the upgrade path if scale ever demands it.
+This document captures the architectural decision to use PostgreSQL, the reasoning behind it, the current index inventory verified against real query patterns, gaps that were found and fixed (historically migration **`0021`**, now folded into the squashed baseline), and the upgrade path if scale ever demands it.
 
 ---
 
@@ -61,9 +61,9 @@ PostgreSQL is the right choice now and for the foreseeable future for this app's
 
 | Bottleneck | Trigger point | Fix (within Postgres) |
 |---|---|---|
-| Ledger list slow | >100K rows per household | Compound index `(household_id, txn_date DESC, status)` — done in migration `0021` |
+| Ledger list slow | >100K rows per household | Compound index `(household_id, txn_date DESC, status)` — in squashed `0001_baseline.sql` (was migration `0021`) |
 | `LIKE '%pattern%'` merchant search | Large row counts | `pg_trgm` extension + GIN trigram index on `merchant`. Note: the `search_document` tsvector column already exists for full-text search via `@@`. |
-| Transfer detection self-join | >500K rows | Index on `(household_id, account_id, txn_date)` — done in migration `0021`. Further: narrow the date window (already done: ±2 days) |
+| Transfer detection self-join | >500K rows | Index on `(household_id, account_id, txn_date)` — in squashed baseline (was `0021`). Further: narrow the date window (already done: ±2 days) |
 | Cash summary / budget aggregations | >1M rows | Materialized view refreshed nightly; or Postgres range partitioning by `(household_id, txn_date)` |
 | Very high household count (SaaS) | >10K households | Postgres table partitioning by `household_id` (native, no extension). Citus for distributed Postgres. |
 
@@ -81,7 +81,7 @@ This is the right "if things get serious" move — not a database migration.
 ### The decision ladder
 
 ```
-Now:          Postgres + correct indexes (migration 0021)
+Now:          Postgres + correct indexes (`0001_baseline.sql` after DB-136 squash; historically `0021`)
 Near term:    pg_trgm for merchant text search if LIKE becomes slow
 Medium term:  Materialized views for cash summary / budget aggregations
 Long term:    Postgres table partitioning by household_id
@@ -94,7 +94,7 @@ Never:        MongoDB (wrong data shape for this domain)
 
 ## Index inventory — verified against actual query patterns
 
-All indexes verified by reading migrations `0001`–`0020` and cross-referencing against query code in `backend/src/modules/`.
+**Schema source:** Active DDL lives in **`backend/db/migrations/0001_baseline.sql`** (squashed **DB-136**, 2026-05-05). Older numbered files through **`0039`** are preserved under **`backend/db/migrations/archive/`** for history only. Indexes below were verified against that baseline and query code in `backend/src/modules/`.
 
 ### `transaction_canonical` — the hot table
 
@@ -107,11 +107,11 @@ All indexes verified by reading migrations `0001`–`0020` and cross-referencing
 | `idx_tc_household_source_ref` ✨ | `(household_id, source_ref)` WHERE `source_ref IS NOT NULL` | Partial B-tree | **Idempotency guard in canonical ingest** |
 | `idx_tc_transfer_group` ✨ | `(household_id, transfer_group_id)` WHERE `transfer_group_id IS NOT NULL` | Partial B-tree | **Transfer group lookups** |
 
-✨ = added in migration `0021` (were missing before).
+✨ = added in archived migration `0021` (folded into `0001_baseline.sql`).
 
 **Gap that remains (deferred):** `(account_id, reference_id)` for `WHERE account_id=? AND reference_id=?` during ingest. Only relevant for bank adapters that emit reference IDs (BoA checks). Low priority; add when a second reference-ID adapter ships.
 
-### `resolution_item` — had zero indexes before `0021`
+### `resolution_item` — indexes from archived `0021` (in baseline)
 
 | Index | Columns | Covers |
 |---|---|---|
@@ -158,9 +158,8 @@ All indexes verified by reading migrations `0001`–`0020` and cross-referencing
 
 ## Migration reference
 
-- **`0001_baseline.sql`** — full schema + initial indexes
-- **`0012_exact_duplicate_review.sql`** — narrowed fingerprint unique index to partial (excludes `duplicate`/`trashed`)
-- **`0021_performance_indexes.sql`** — adds 9 missing indexes identified in this audit (April 2026)
+- **`0001_baseline.sql`** — full current schema, including fingerprint partial unique index and performance indexes formerly added in **`0012`** / **`0021`** (see **`docs/CHANGE_HISTORY.md`** **DB-136**).
+- **`backend/db/migrations/archive/`** — superseded incremental files **`0002`–`0039`** kept for audit only.
 
 ---
 
