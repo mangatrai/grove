@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-139 (2026-05-06): Net Worth page — remove misleading account links, fix type labels, full Mantine migration
+
+**Why:** Account names in the Assets/Liabilities tables were wrapped in `<Link>` that drilled to `/transactions` filtered to a single as-of date, which almost always returned zero results. The "Transactions from import file" sub-link had the same problem. The Type column surfaced raw DB enum values (`credit_card`, `investment`) instead of human-readable labels. Several non-Mantine patterns remained: raw `<table>`, custom `<button>` with hand-rolled CSS, raw `<input type="date">`, and a `<details>/<summary>` for the bulk re-date section.
+
+**What:**
+- **Account names** are now plain text — no link.
+- **"Transactions from import file"** sub-link removed entirely.
+- **`transactionsHref`** helper removed (no longer used on this page).
+- **Type column** now displays human-readable labels via `formatAccountType()` (`credit_card` → "Credit Card", `checking` → "Checking", etc.).
+- **Tables** migrated from `<table className="ledger-table">` to Mantine `Table` with `withTableBorder` + `withRowBorders`.
+- **Edit icon** migrated from `<button className="net-worth-page__edit-icon">` to Mantine `ActionIcon variant="subtle"`.
+- **Inline edit form** migrated from `<form className="row">` to `<form>` with Mantine `Group`.
+- **Date inputs** (snapshot date, custom range, inline edit, bulk re-date) migrated from raw `<input type="date">` to Mantine `TextInput type="date"`.
+- **Bulk re-date section** migrated from `<details>/<summary>` to Mantine `Collapse` with a toggle `Button`.
+- **CSS** — removed `net-worth-page`, `net-worth-page__edit-icon`, `net-worth-page__edit-icon:hover`, `net-worth-page__bulk-asof > summary` rules from `index.css`; removed orphaned `.net-worth-page__edit-icon` entry from the `@media (hover: none)` block.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/index.css`
+
+---
+
 ## FIX-138 (2026-05-05): v2 doc accuracy + restore hardening (Claude/Cursor punch list)
 
 **Why:** Operators and future sessions were misled by stale **ZIP / exportVersion 3** copy, missing **CHECKPOINT/MVP** pointers on the archived PRD, backlog headers that contradicted shipped mobile/recurring/import work, and two small restore hygiene gaps called out in **`docs/EXPORT_IMPORT_BACKLOG.md`**.

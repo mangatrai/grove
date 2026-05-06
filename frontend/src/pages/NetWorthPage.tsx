@@ -1,9 +1,11 @@
 import { IconPencil } from "@tabler/icons-react";
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Box,
   Button,
+  Collapse,
   Divider,
   Group,
   Paper,
@@ -11,7 +13,9 @@ import {
   SimpleGrid,
   Skeleton,
   Stack,
+  Table,
   Text,
+  TextInput,
   Title
 } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
@@ -141,6 +145,21 @@ function storageAmountFromInput(raw: number, side: "asset" | "liability"): numbe
   return Math.abs(raw);
 }
 
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  checking: "Checking",
+  savings: "Savings",
+  credit_card: "Credit Card",
+  investment: "Investment",
+  retirement: "Retirement",
+  loan: "Loan",
+  mortgage: "Mortgage",
+  payslip: "Payslip",
+};
+
+function formatAccountType(type: string): string {
+  return ACCOUNT_TYPE_LABELS[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void {
   if (belongsTo === "household") {
     qs.set("ownerScope", "household");
@@ -153,29 +172,6 @@ function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void
   }
 }
 
-function transactionsHref(opts: {
-  accountId?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  /** Ledger filter: transactions posted from this import file. */
-  fileId?: string;
-}): string {
-  const q = new URLSearchParams();
-  if (opts.accountId) {
-    q.set("accountId", opts.accountId);
-  }
-  if (opts.dateFrom) {
-    q.set("dateFrom", opts.dateFrom);
-  }
-  if (opts.dateTo) {
-    q.set("dateTo", opts.dateTo);
-  }
-  if (opts.fileId) {
-    q.set("fileId", opts.fileId);
-  }
-  const s = q.toString();
-  return s ? `/transactions?${s}` : "/transactions";
-}
 
 export function NetWorthPage() {
   const token = useAuthToken();
@@ -214,6 +210,7 @@ export function NetWorthPage() {
   const [rowSaving, setRowSaving] = useState(false);
 
   const [bulkAsOfDraft, setBulkAsOfDraft] = useState(() => tableAsOf);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkWorking, setBulkWorking] = useState(false);
   const [bulkSummary, setBulkSummary] = useState<string | null>(null);
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
@@ -541,7 +538,7 @@ export function NetWorthPage() {
   }
 
   return (
-    <Stack gap="md" className="net-worth-page">
+    <Stack gap="md">
       <Paper withBorder shadow="sm" radius="md" p="md">
         <Group justify="space-between" align="center">
           <Group gap={8} align="center">
@@ -610,14 +607,8 @@ export function NetWorthPage() {
         </Group>
         {periodPreset === "custom" ? (
           <Group align="flex-end" gap="sm" mt="sm" wrap="wrap">
-            <Box>
-              <Text size="xs" fw={600} mb={4}>From</Text>
-              <input type="date" value={customFrom} onChange={(ev) => setCustomFrom(ev.target.value)} />
-            </Box>
-            <Box>
-              <Text size="xs" fw={600} mb={4}>To</Text>
-              <input type="date" value={customTo} onChange={(ev) => setCustomTo(ev.target.value)} />
-            </Box>
+            <TextInput type="date" size="sm" label="From" value={customFrom} onChange={(ev) => setCustomFrom(ev.target.value)} />
+            <TextInput type="date" size="sm" label="To" value={customTo} onChange={(ev) => setCustomTo(ev.target.value)} />
           </Group>
         ) : null}
         <Group align="flex-end" gap="md" mt="sm" wrap="wrap">
@@ -768,8 +759,7 @@ export function NetWorthPage() {
           <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
         </Group>
         <Box mb="sm" style={{ maxWidth: "12rem" }}>
-          <Text size="xs" fw={600} mb={4}>Snapshot date</Text>
-          <input type="date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
+          <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
         </Box>
         {loading ? <Skeleton height={120} radius="md" animate /> : null}
         {!loading && data && data.assets.length > 0 ? (
@@ -781,54 +771,60 @@ export function NetWorthPage() {
               </Text>
             ) : null}
             <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Assets</Text>
-            <table className="ledger-table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Type</th>
-                  <th>Balance</th>
-                  <th>As of</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table withTableBorder withRowBorders verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Account</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Balance</Table.Th>
+                  <Table.Th>As of</Table.Th>
+                  <Table.Th aria-label="Actions" />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                 {data.assets.map((r) => {
                   const signed = signedDisplayBalance(r);
-                  const drill = transactionsHref({ accountId: r.financialAccountId, dateFrom: r.balanceAsOf ?? tableAsOf, dateTo: r.balanceAsOf ?? tableAsOf });
                   const isEditing = editingId === r.financialAccountId;
                   return (
-                    <tr key={r.financialAccountId}>
-                      <td>
-                        <Link to={drill}>{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Link>
-                        {r.importFileId ? <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: "0.2rem" }}><Link to={transactionsHref({ fileId: r.importFileId })}>Transactions from import file</Link></span> : null}
-                      </td>
-                      <td><code style={{ fontSize: "0.8rem" }}>{r.type}</code></td>
-                      <td>
+                    <Table.Tr key={r.financialAccountId}>
+                      <Table.Td>
+                        <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{formatAccountType(r.type)}</Text>
+                      </Table.Td>
+                      <Table.Td>
                         {isEditing ? (
-                          <form className="row" style={{ gap: "0.35rem", alignItems: "center", flexWrap: "wrap" }} onSubmit={saveRow}>
-                            <input style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
-                            <input type="date" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
-                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                          <form onSubmit={saveRow}>
+                            <Group gap={4} wrap="wrap" align="center">
+                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                              <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                              <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                              <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                            </Group>
                           </form>
                         ) : formatMoney(signed)}
-                      </td>
-                      <td>{r.balanceAsOf ?? "—"}</td>
-                      <td>
-                        {!isEditing ? <button type="button" className="net-worth-page__edit-icon" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance"><IconPencil size={15} /></button> : null}
-                      </td>
-                    </tr>
+                      </Table.Td>
+                      <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
+                      <Table.Td>
+                        {!isEditing ? (
+                          <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance">
+                            <IconPencil size={15} />
+                          </ActionIcon>
+                        ) : null}
+                      </Table.Td>
+                    </Table.Tr>
                   );
                 })}
-                <tr>
-                  <th scope="row" style={{ fontWeight: 700, color: "var(--color-success)" }}>Total Assets</th>
-                  <td />
-                  <td style={{ fontWeight: 700, color: "var(--color-success)" }}>{formatMoney(data.totals.assets)}</td>
-                  <td />
-                  <td />
-                </tr>
-              </tbody>
-            </table>
+                <Table.Tr>
+                  <Table.Td><Text size="sm" fw={700} c="green">Total Assets</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td><Text size="sm" fw={700} c="green">{formatMoney(data.totals.assets)}</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td />
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
           </div>
         ) : null}
         {!loading && data && data.liabilities.length > 0 ? (
@@ -836,54 +832,60 @@ export function NetWorthPage() {
             {!loading && data && data.assets.length > 0 ? <Divider my="md" /> : null}
             <div style={{ overflowX: "auto", marginTop: "1rem" }}>
               <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Liabilities</Text>
-            <table className="ledger-table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Type</th>
-                  <th>Balance</th>
-                  <th>As of</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
+            <Table withTableBorder withRowBorders verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Account</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Balance</Table.Th>
+                  <Table.Th>As of</Table.Th>
+                  <Table.Th aria-label="Actions" />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                 {data.liabilities.map((r) => {
                   const signed = signedDisplayBalance(r);
-                  const drill = transactionsHref({ accountId: r.financialAccountId, dateFrom: r.balanceAsOf ?? tableAsOf, dateTo: r.balanceAsOf ?? tableAsOf });
                   const isEditing = editingId === r.financialAccountId;
                   return (
-                    <tr key={r.financialAccountId}>
-                      <td>
-                        <Link to={drill}>{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Link>
-                        {r.importFileId ? <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: "0.2rem" }}><Link to={transactionsHref({ fileId: r.importFileId })}>Transactions from import file</Link></span> : null}
-                      </td>
-                      <td><code style={{ fontSize: "0.8rem" }}>{r.type}</code></td>
-                      <td>
+                    <Table.Tr key={r.financialAccountId}>
+                      <Table.Td>
+                        <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{formatAccountType(r.type)}</Text>
+                      </Table.Td>
+                      <Table.Td>
                         {isEditing ? (
-                          <form className="row" style={{ gap: "0.35rem", alignItems: "center", flexWrap: "wrap" }} onSubmit={saveRow}>
-                            <input style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
-                            <input type="date" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
-                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                          <form onSubmit={saveRow}>
+                            <Group gap={4} wrap="wrap" align="center">
+                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                              <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                              <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                              <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                            </Group>
                           </form>
                         ) : formatMoney(signed)}
-                      </td>
-                      <td>{r.balanceAsOf ?? "—"}</td>
-                      <td>
-                        {!isEditing ? <button type="button" className="net-worth-page__edit-icon" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance"><IconPencil size={15} /></button> : null}
-                      </td>
-                    </tr>
+                      </Table.Td>
+                      <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
+                      <Table.Td>
+                        {!isEditing ? (
+                          <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance">
+                            <IconPencil size={15} />
+                          </ActionIcon>
+                        ) : null}
+                      </Table.Td>
+                    </Table.Tr>
                   );
                 })}
-                <tr>
-                  <th scope="row" style={{ fontWeight: 700, color: "var(--color-warm)" }}>Total Liabilities</th>
-                  <td />
-                  <td style={{ fontWeight: 700, color: "var(--color-warm)" }}>{formatMoney(data.totals.liabilities)}</td>
-                  <td />
-                  <td />
-                </tr>
-              </tbody>
-            </table>
+                <Table.Tr>
+                  <Table.Td><Text size="sm" fw={700} style={{ color: "var(--color-warm)" }}>Total Liabilities</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td><Text size="sm" fw={700} style={{ color: "var(--color-warm)" }}>{formatMoney(data.totals.liabilities)}</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td />
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
             </div>
           </>
         ) : null}
@@ -920,21 +922,27 @@ export function NetWorthPage() {
             ) : null}
           </SimpleGrid>
         ) : null}
-        <details className="net-worth-page__bulk-asof" style={{ marginBottom: "0.75rem", marginTop: "1rem" }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9rem" }}>Re-date all manual balances</summary>
-          <Text size="sm" c="dimmed" mt="xs" mb={0} style={{ maxWidth: "36rem" }}>
-            Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
-          </Text>
-          <Group align="flex-end" gap="sm" wrap="wrap" mt="sm">
-            <Box>
-              <Text size="xs" fw={600} mb={4}>New as-of date</Text>
-              <input type="date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
-            </Box>
-            <Button type="button" variant="default" size="sm" disabled={bulkWorking || allTableRows.length === 0} onClick={() => setBulkConfirmOpen(true)}>
-              {bulkWorking ? "Applying…" : "Apply to all rows"}
-            </Button>
-          </Group>
-        </details>
+        <Box mt="md">
+          <Button
+            variant="subtle"
+            size="xs"
+            color="gray"
+            onClick={() => setBulkOpen((v) => !v)}
+          >
+            {bulkOpen ? "Hide" : "Re-date all manual balances"}
+          </Button>
+          <Collapse in={bulkOpen}>
+            <Text size="sm" c="dimmed" mt="xs" mb={0} style={{ maxWidth: "36rem" }}>
+              Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
+            </Text>
+            <Group align="flex-end" gap="sm" wrap="wrap" mt="sm">
+              <TextInput type="date" size="sm" label="New as-of date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
+              <Button type="button" variant="default" size="sm" disabled={bulkWorking || allTableRows.length === 0} onClick={() => setBulkConfirmOpen(true)} style={{ alignSelf: "flex-end" }}>
+                {bulkWorking ? "Applying…" : "Apply to all rows"}
+              </Button>
+            </Group>
+          </Collapse>
+        </Box>
         {bulkSummary ? <Text size="sm" c="dimmed" mt="xs">{bulkSummary}</Text> : null}
         {loadError ? <Alert color="red" variant="light" radius="md" mt="sm">{loadError}</Alert> : null}
       </Paper>

@@ -1020,27 +1020,6 @@ a {
   width: 100%;
 }
 
-.net-worth-page {
-  width: 100%;
-}
-
-.net-worth-page__edit-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.2rem 0.35rem;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--color-text-muted, #64748b);
-  vertical-align: middle;
-}
-
-.net-worth-page__edit-icon:hover {
-  color: var(--color-accent-bright, #0ea5e9);
-  background: rgba(15, 23, 42, 0.06);
-}
 
 .payslip-inline-edit-btn {
   opacity: 0.45;
@@ -1060,14 +1039,9 @@ a {
 
 @media (hover: none) {
   .payslip-inline-edit-btn,
-  .payslip-amount-edit-btn,
-  .net-worth-page__edit-icon {
+  .payslip-amount-edit-btn {
     opacity: 1 !important;
   }
-}
-
-.net-worth-page__bulk-asof > summary {
-  user-select: none;
 }
 
 .import-workspace-page {
