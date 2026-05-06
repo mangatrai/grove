@@ -1782,22 +1782,22 @@ export function SettingsPage() {
         opened={removeMemberConfirm !== null}
         title="Remove household member"
         message={
-          <div style={{ fontSize: "0.9rem" }}>
+          <Stack gap={0}>
             {removeMemberError ? (
-              <div style={{ padding: "0.6rem 0.75rem", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 6, marginBottom: "0.75rem" }}>
+              <Alert color="red" mb="sm">
                 {removeMemberError}
-              </div>
+              </Alert>
             ) : null}
             {removeMemberDataCount && (removeMemberDataCount.transactions > 0 || removeMemberDataCount.payslips > 0) ? (
-              <div style={{ padding: "0.6rem 0.75rem", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, marginBottom: "0.75rem" }}>
+              <Alert color="yellow" mb="sm">
                 <strong>Warning:</strong> This member has{" "}
                 {removeMemberDataCount.transactions > 0 ? <><strong>{removeMemberDataCount.transactions}</strong> transaction(s)</> : null}
                 {removeMemberDataCount.transactions > 0 && removeMemberDataCount.payslips > 0 ? " and " : null}
                 {removeMemberDataCount.payslips > 0 ? <><strong>{removeMemberDataCount.payslips}</strong> payslip(s)</> : null}
                 {" "}assigned to them. Those records will remain but show no owner. Use <strong>Transactions → Belongs-to</strong> filter to reassign before deleting.
-              </div>
+              </Alert>
             ) : null}
-            <p style={{ margin: "0 0 0.75rem" }}>This member will be permanently removed from the household. This cannot be undone.</p>
+            <Text size="sm" mb="sm">This member will be permanently removed from the household. This cannot be undone.</Text>
             {memberDrafts.find((m) => m.id === removeMemberConfirm)?.linkedUserId ? (
               <Checkbox
                 checked={removeMemberDeleteLogin}
@@ -1805,7 +1805,7 @@ export function SettingsPage() {
                 label="Also delete their login account"
               />
             ) : null}
-          </div>
+          </Stack>
         }
         confirmLabel="Remove member"
         danger
@@ -1816,11 +1816,11 @@ export function SettingsPage() {
         opened={resetPasswordForId !== null}
         title="Reset member password"
         message={
-          <p style={{ fontSize: "0.9rem", margin: 0 }}>
+          <Text size="sm">
             {emailEnabled
               ? "A password reset link will be sent to their email address. Their current session will be invalidated immediately."
               : "This will generate a new temporary password and immediately invalidate their current session. They will be required to change it on next login."}
-          </p>
+          </Text>
         }
         confirmLabel={resetPasswordBusy ? "Resetting…" : "Reset password"}
         onClose={() => setResetPasswordForId(null)}

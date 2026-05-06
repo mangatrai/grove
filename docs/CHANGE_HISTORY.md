@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-152 (2026-05-06): SettingsPage ConfirmDialog messages migrated to Mantine
+
+**Why:** The remove-member and reset-password confirmation dialogs still rendered `message` content with raw HTML (`<div>/<p>` plus inline style objects), which diverged from the Mantine-only UI surface target.
+
+**What:**
+- Replaced remove-member dialog `message` wrapper from raw `<div style={...}>` to Mantine `Stack`.
+- Replaced custom red/amber styled warning blocks with Mantine `Alert color="red"` and `Alert color="yellow"`.
+- Replaced confirmation text `<p style={...}>` with Mantine `Text size="sm"`.
+- Replaced reset-password dialog `message` `<p style={...}>` with Mantine `Text size="sm"`.
+- Kept all logic/state/handlers/API behavior unchanged (UI-surface-only change).
+
+**Files:** `frontend/src/pages/SettingsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-151 (2026-05-06): Mantine migration — codified intentional non-Mantine exceptions
 
 **Why:** After the full Mantine migration pass (UX-145–UX-150) an audit flagged several patterns as "remaining native HTML." Some are legitimate exceptions that should not be migrated; documenting them here prevents future sessions from treating them as bugs.
