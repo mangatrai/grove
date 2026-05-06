@@ -1,6 +1,24 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  Modal,
+  Paper,
+  Radio,
+  Select,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -17,25 +35,6 @@ type CategoryRow = {
 type HierarchyRow =
   | { kind: "parent"; category: CategoryRow }
   | { kind: "child"; category: CategoryRow; parent: CategoryRow };
-
-function SourceBadge({ c }: { c: CategoryRow }) {
-  const household = c.householdScoped;
-  return (
-    <span style={{
-      display: "inline-block",
-      padding: "0.1rem 0.45rem",
-      borderRadius: 4,
-      fontSize: 11,
-      fontWeight: 600,
-      background: household ? "var(--color-accent-subtle, #dcfce7)" : "var(--color-surface-alt, #f8fafc)",
-      color: household ? "var(--color-accent)" : "var(--color-text-muted)",
-      border: `1px solid ${household ? "var(--color-accent-bright, #22c55e)" : "var(--color-border)"}`,
-      whiteSpace: "nowrap"
-    }}>
-      {household ? "Yours" : "Built-in"}
-    </span>
-  );
-}
 
 function compareRootCategories(a: CategoryRow, b: CategoryRow): number {
   const rank = (name: string) => (name === "Income" ? 0 : 1);
@@ -82,7 +81,6 @@ export function CategoriesPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const canManageCategories = authRole === "owner" || authRole === "admin";
-  const canEditBuiltIns = canManageCategories;
 
   const load = useCallback(async () => {
     const res = await apiJson<{ categories: CategoryRow[] }>("/categories");
@@ -130,16 +128,16 @@ export function CategoriesPage() {
     return rows;
   }, [categories, topLevelParents]);
 
+  const parentOptions = useMemo(
+    () => topLevelParents.map((p) => ({ value: p.id, label: p.name })),
+    [topLevelParents]
+  );
+
   function openEdit(row: HierarchyRow) {
     setError(null);
     setEditRow(row);
-    if (row.kind === "parent") {
-      setEditName(row.category.name);
-      setEditParentId("");
-    } else {
-      setEditName(row.category.name);
-      setEditParentId(row.parent.id);
-    }
+    setEditName(row.category.name);
+    setEditParentId(row.kind === "child" ? row.parent.id : "");
     setEditOpen(true);
   }
 
@@ -160,25 +158,19 @@ export function CategoriesPage() {
       setError("Name is required.");
       return;
     }
-    const cat = editRow.kind === "parent" ? editRow.category : editRow.category;
     const isChild = editRow.kind === "child";
     if (isChild && !editParentId) {
       setError("Choose a parent group.");
       return;
     }
-
     setEditSaving(true);
     setError(null);
     try {
       const body: { name: string; parentId?: string | null } = { name: trimmed };
-      if (isChild) {
-        body.parentId = editParentId;
-      } else {
-        body.parentId = null;
-      }
-      const res = await apiFetch(`/categories/${cat.id}`, {
+      body.parentId = isChild ? editParentId : null;
+      const res = await apiFetch(`/categories/${editRow.category.id}`, {
         method: "PATCH",
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         throw new Error(await readErrorMessage(res));
@@ -209,8 +201,8 @@ export function CategoriesPage() {
         method: "POST",
         body: JSON.stringify({
           name: trimmed,
-          parentId: addMode === "parent" ? null : parentId
-        })
+          parentId: addMode === "parent" ? null : parentId,
+        }),
       });
       setName("");
       setParentId("");
@@ -221,10 +213,6 @@ export function CategoriesPage() {
     } finally {
       setSaving(false);
     }
-  }
-
-  function requestDeleteCategory(id: string) {
-    setDeleteConfirmId(id);
   }
 
   const confirmDeleteCategory = useCallback(async () => {
@@ -245,218 +233,177 @@ export function CategoriesPage() {
     }
   }, [deleteConfirmId, load]);
 
-  const showEditForRow = (row: HierarchyRow): boolean => {
-    const c = row.kind === "parent" ? row.category : row.category;
-    if (c.householdScoped) {
-      return canManageCategories;
-    }
-    return canEditBuiltIns;
-  };
-
   if (!token) {
     return <Navigate to="/" replace />;
   }
 
   return (
-    <div>
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.5rem" }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Categories</h1>
-          <HelpIcon label="Parent groups are the top-level buckets (Housing, Shopping…). Categories are specific line items underneath. Built-in entries can be renamed by owners/admins but not deleted. Source 'Yours' = added by your household." />
-          <span style={{ marginLeft: "auto", display: "flex", gap: 12, fontSize: 13 }}>
-            <Link to="/transactions">Transactions</Link>
-            <Link to="/categories/rules">Rules</Link>
-          </span>
-        </div>
+    <Paper p="md">
+      <Group mb="xs" align="center">
+        <Title order={1} size="h2" style={{ margin: 0 }}>Categories</Title>
+        <HelpIcon label="Parent groups are the top-level buckets (Housing, Shopping…). Categories are specific line items underneath. Built-in entries can be renamed by owners/admins but not deleted. Source 'Yours' = added by your household." />
+        <Group ml="auto" gap="md" fz="sm">
+          <Anchor component={Link} to="/transactions">Transactions</Anchor>
+          <Anchor component={Link} to="/categories/rules">Rules</Anchor>
+        </Group>
+      </Group>
 
-        {error ? <p className="error">{error}</p> : null}
+      {error ? <Alert color="red" mb="sm">{error}</Alert> : null}
 
-        {editOpen && editRow ? (
-          <div
-            className="categories-page__edit-backdrop"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="categories-edit-title"
-          >
-            <div className="categories-page__edit-dialog card">
-              <h2 id="categories-edit-title" style={{ fontSize: "1.05rem", marginTop: 0 }}>
-                Edit category
-              </h2>
-              <form onSubmit={(e) => void onSaveEdit(e)}>
-                <label className="categories-page__name-field">
-                  Name
-                  <input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    autoFocus
-                    required
-                  />
-                </label>
-                {editRow.kind === "child" ? (
-                  <label className="categories-page__parent-select">
-                    Parent group
-                    <select value={editParentId} onChange={(e) => setEditParentId(e.target.value)} required>
-                      <option value="">Select parent…</option>
-                      {topLevelParents.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : categoryHasChildren(editRow.category.id, categories) ? (
-                  <p className="muted" style={{ marginTop: "0.5rem" }}>
-                    This group has subcategories; only the name can be changed here.
-                  </p>
-                ) : null}
-                <div className="categories-page__edit-actions" style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
-                  <button type="submit" disabled={editSaving}>
-                    {editSaving ? "Saving…" : "Save"}
-                  </button>
-                  <button type="button" className="secondary" onClick={() => closeEdit()} disabled={editSaving}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        ) : null}
-
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1rem" }}>Add category</h2>
-        <form onSubmit={(e) => void onCreate(e)} className="categories-page__add-form">
-          <fieldset className="categories-page__add-fieldset">
-            <legend className="sr-only">Add category</legend>
-            <div className="categories-page__add-mode">
-              <span className="categories-page__add-label">Add a</span>
-              <label className="categories-page__radio">
-                <input
-                  type="radio"
-                  name="addMode"
-                  checked={addMode === "parent"}
-                  onChange={() => {
-                    setAddMode("parent");
-                    setParentId("");
-                  }}
-                />{" "}
-                New parent group
-              </label>
-              <label className="categories-page__radio">
-                <input
-                  type="radio"
-                  name="addMode"
-                  checked={addMode === "child"}
-                  onChange={() => setAddMode("child")}
-                />{" "}
-                Subcategory under a parent
-              </label>
-            </div>
-            {addMode === "child" ? (
-              <label className="categories-page__parent-select">
-                Parent group
-                <select
-                  value={parentId}
-                  onChange={(e) => setParentId(e.target.value)}
-                  required={addMode === "child"}
-                >
-                  <option value="">Select parent…</option>
-                  {topLevelParents.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <label className="categories-page__name-field">
-              {addMode === "parent" ? "Name of new group" : "Name of subcategory"}
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={addMode === "parent" ? "e.g. Pets, Travel" : "e.g. Vet, Flights"}
+      <Modal opened={editOpen && editRow !== null} onClose={closeEdit} title="Edit category" centered>
+        <form onSubmit={(e) => void onSaveEdit(e)}>
+          <Stack gap="sm">
+            <TextInput
+              label="Name"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              autoFocus
+              required
+            />
+            {editRow?.kind === "child" ? (
+              <Select
+                label="Parent group"
+                value={editParentId}
+                onChange={(v) => setEditParentId(v ?? "")}
+                data={parentOptions}
+                placeholder="Select parent…"
+                required
               />
-            </label>
-            <button
-              type="submit"
-              disabled={saving || !name.trim() || (addMode === "child" && !parentId)}
-            >
-              {saving ? "Saving…" : "Add"}
-            </button>
-          </fieldset>
+            ) : editRow && categoryHasChildren(editRow.category.id, categories) ? (
+              <Text size="sm" c="dimmed">
+                This group has subcategories; only the name can be changed here.
+              </Text>
+            ) : null}
+            <Group justify="flex-end" gap="sm" mt={4}>
+              <Button variant="default" onClick={closeEdit} disabled={editSaving}>Cancel</Button>
+              <Button type="submit" loading={editSaving}>Save</Button>
+            </Group>
+          </Stack>
         </form>
+      </Modal>
 
-        <h2 style={{ fontSize: "1.05rem", marginTop: "1.25rem" }}>All categories</h2>
-        {loading ? <p className="muted">Loading…</p> : null}
-        {!loading && categories.length === 0 ? <p className="muted">No categories.</p> : null}
-        {!loading && categories.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
-            <table className="ledger-table categories-page__table">
-              <thead>
-                <tr>
-                  <th scope="col">Parent group</th>
-                  <th scope="col">Category</th>
-                  <th scope="col"><span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>Source <HelpIcon label="Built-in: ships with the app. Yours: added by your household. Built-ins can be renamed by owners/admins." /></span></th>
-                  <th scope="col" />
-                </tr>
-              </thead>
-              <tbody>
-                {hierarchyRows.map((row) => {
-                  if (row.kind === "parent") {
-                    const c = row.category;
-                    return (
-                      <tr key={c.id} className="categories-page__row categories-page__row--parent">
-                        <td className="muted" title="This row is a top-level group">
-                          —
-                        </td>
-                        <td className="categories-page__category-cell categories-page__category-cell--parent">
-                          {c.name}
-                        </td>
-                        <td><SourceBadge c={c} /></td>
-                        <td>
-                          <span style={{ display: "inline-flex", gap: "0.35rem" }}>
-                            {showEditForRow(row) ? (
-                              <button type="button" onClick={() => openEdit(row)} title="Edit" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}>
-                                <IconPencil size={13} />
-                              </button>
-                            ) : null}
-                            {c.householdScoped && canManageCategories ? (
-                              <button type="button" onClick={() => requestDeleteCategory(c.id)} title="Delete" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}>
-                                <IconTrash size={13} />
-                              </button>
-                            ) : null}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  }
-                  const c = row.category;
-                  const p = row.parent;
+      <Title order={2} size="h4" mt="md" mb="xs">Add category</Title>
+      <form onSubmit={(e) => void onCreate(e)}>
+        <Group align="flex-end" gap="md" wrap="wrap">
+          <Radio.Group
+            value={addMode}
+            onChange={(v) => {
+              setAddMode(v as "parent" | "child");
+              if (v === "parent") setParentId("");
+            }}
+            label="Add a"
+          >
+            <Group gap="md" mt={4}>
+              <Radio value="parent" label="New parent group" />
+              <Radio value="child" label="Subcategory under a parent" />
+            </Group>
+          </Radio.Group>
+          {addMode === "child" ? (
+            <Select
+              label="Parent group"
+              value={parentId}
+              onChange={(v) => setParentId(v ?? "")}
+              data={parentOptions}
+              placeholder="Select parent…"
+              miw={200}
+            />
+          ) : null}
+          <TextInput
+            label={addMode === "parent" ? "Name of new group" : "Name of subcategory"}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={addMode === "parent" ? "e.g. Pets, Travel" : "e.g. Vet, Flights"}
+          />
+          <Button
+            type="submit"
+            loading={saving}
+            disabled={!name.trim() || (addMode === "child" && !parentId)}
+          >
+            Add
+          </Button>
+        </Group>
+      </form>
+
+      <Title order={2} size="h4" mt="lg" mb="xs">All categories</Title>
+      {loading ? <Skeleton height={80} /> : null}
+      {!loading && categories.length === 0 ? <Text c="dimmed">No categories.</Text> : null}
+      {!loading && categories.length > 0 ? (
+        <Table.ScrollContainer minWidth={500}>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Parent group</Table.Th>
+                <Table.Th>Category</Table.Th>
+                <Table.Th>
+                  <Group gap={4}>
+                    Source
+                    <HelpIcon label="Built-in: ships with the app. Yours: added by your household. Built-ins can be renamed by owners/admins." />
+                  </Group>
+                </Table.Th>
+                <Table.Th />
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {hierarchyRows.map((row) => {
+                const c = row.category;
+                if (row.kind === "parent") {
                   return (
-                    <tr key={c.id} className="categories-page__row categories-page__row--child">
-                      <td>{p.name}</td>
-                      <td className="categories-page__category-cell categories-page__category-cell--child">{c.name}</td>
-                      <td><SourceBadge c={c} /></td>
-                      <td>
-                        <span style={{ display: "inline-flex", gap: "0.35rem" }}>
-                          {showEditForRow(row) ? (
-                            <button type="button" onClick={() => openEdit(row)} title="Edit" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}>
-                              <IconPencil size={13} />
-                            </button>
+                    <Table.Tr key={c.id}>
+                      <Table.Td c="dimmed" title="This row is a top-level group">—</Table.Td>
+                      <Table.Td fw={600}>{c.name}</Table.Td>
+                      <Table.Td>
+                        <Badge variant={c.householdScoped ? "light" : "outline"} color={c.householdScoped ? "green" : "gray"} size="sm">
+                          {c.householdScoped ? "Yours" : "Built-in"}
+                        </Badge>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4} wrap="nowrap">
+                          {canManageCategories ? (
+                            <ActionIcon variant="subtle" color="gray" title="Edit" onClick={() => openEdit(row)}>
+                              <IconPencil size={14} />
+                            </ActionIcon>
                           ) : null}
-                          {c.householdScoped ? (
-                            <button type="button" onClick={() => requestDeleteCategory(c.id)} title="Delete" style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}>
-                              <IconTrash size={13} />
-                            </button>
+                          {c.householdScoped && canManageCategories ? (
+                            <ActionIcon variant="subtle" color="red" title="Delete" onClick={() => setDeleteConfirmId(c.id)}>
+                              <IconTrash size={14} />
+                            </ActionIcon>
                           ) : null}
-                        </span>
-                      </td>
-                    </tr>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-      </div>
+                }
+                const p = row.parent;
+                return (
+                  <Table.Tr key={c.id}>
+                    <Table.Td>{p.name}</Table.Td>
+                    <Table.Td style={{ paddingLeft: "1rem", borderLeft: "3px solid var(--mantine-color-default-border)" }}>{c.name}</Table.Td>
+                    <Table.Td>
+                      <Badge variant={c.householdScoped ? "light" : "outline"} color={c.householdScoped ? "green" : "gray"} size="sm">
+                        {c.householdScoped ? "Yours" : "Built-in"}
+                      </Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap={4} wrap="nowrap">
+                        {canManageCategories ? (
+                          <ActionIcon variant="subtle" color="gray" title="Edit" onClick={() => openEdit(row)}>
+                            <IconPencil size={14} />
+                          </ActionIcon>
+                        ) : null}
+                        {c.householdScoped && canManageCategories ? (
+                          <ActionIcon variant="subtle" color="red" title="Delete" onClick={() => setDeleteConfirmId(c.id)}>
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        ) : null}
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      ) : null}
 
       <ConfirmDialog
         opened={deleteConfirmId !== null}
@@ -468,6 +415,6 @@ export function CategoriesPage() {
         onClose={() => setDeleteConfirmId(null)}
         onConfirm={confirmDeleteCategory}
       />
-    </div>
+    </Paper>
   );
 }

@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-140 (2026-05-06): Mantine migration + bug fixes — CategoriesPage and CategoryRulesPage
+
+**Why:** Both pages retained custom CSS, hand-rolled dialogs, and raw HTML form elements. Bugs: permission gap where `member`-role users could see delete buttons on household child categories; dead ternary code; inline rule editing collapsed multi-line patterns; CSV file input didn't reset after import; `runTest` fired on empty input; `<details>` collapsed on every `load()` re-render.
+
+**What:**
+- **Permission gap (CategoriesPage):** Child delete button now gates on `c.householdScoped && canManageCategories` (was missing `canManageCategories`).
+- **Dead code (CategoriesPage):** Two dead ternaries and `canEditBuiltIns` tautology alias removed.
+- **Inline edit pattern corruption (CategoryRulesPage):** Changed from `<input>` to `<Textarea autosize>` — multi-line patterns no longer collapsed on edit.
+- **File input reset (CategoryRulesPage):** Controlled `selectedFile` state; `<FileInput>` cleared on successful import.
+- **`runTest` guard:** Rejects empty description before hitting the API.
+- **`<details>` state reset:** Replaced with controlled `<Accordion multiple value={openedSections}>` — open state survives `load()` re-renders.
+- **Mantine migration:** `Modal`, `Badge`, `Radio.Group`, `Select`, `TextInput`, `Table` (+`ScrollContainer`), `ActionIcon`, `Paper`, `Accordion`, `FileInput`, `Textarea`, `NumberInput`, `Checkbox`, `Code`, `Alert`, `Skeleton`, `Anchor`.
+- **CSS cleanup:** Removed all `categories-page__*` and `category-rules-page__*` classes including dark-mode overrides.
+
+**Files:** `frontend/src/pages/CategoriesPage.tsx`, `frontend/src/pages/CategoryRulesPage.tsx`, `frontend/src/index.css`
+
+---
+
 ## UX-139 (2026-05-06): Net Worth page — remove misleading account links, fix type labels, full Mantine migration
 
 **Why:** Account names in the Assets/Liabilities tables were wrapped in `<Link>` that drilled to `/transactions` filtered to a single as-of date, which almost always returned zero results. The "Transactions from import file" sub-link had the same problem. The Type column surfaced raw DB enum values (`credit_card`, `investment`) instead of human-readable labels. Several non-Mantine patterns remained: raw `<table>`, custom `<button>` with hand-rolled CSS, raw `<input type="date">`, and a `<details>/<summary>` for the bulk re-date section.
