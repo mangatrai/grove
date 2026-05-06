@@ -771,13 +771,13 @@ export function NetWorthPage() {
               </Text>
             ) : null}
             <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Assets</Text>
-            <Table withTableBorder withRowBorders verticalSpacing="xs">
+            <Table withTableBorder withRowBorders striped="odd" verticalSpacing="xs">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Account</Table.Th>
-                  <Table.Th>Type</Table.Th>
-                  <Table.Th>Balance</Table.Th>
-                  <Table.Th>As of</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Account</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Type</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Balance</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>As of</Table.Th>
                   <Table.Th aria-label="Actions" />
                 </Table.Tr>
               </Table.Thead>
@@ -832,13 +832,13 @@ export function NetWorthPage() {
             {!loading && data && data.assets.length > 0 ? <Divider my="md" /> : null}
             <div style={{ overflowX: "auto", marginTop: "1rem" }}>
               <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Liabilities</Text>
-            <Table withTableBorder withRowBorders verticalSpacing="xs">
+            <Table withTableBorder withRowBorders striped="odd" verticalSpacing="xs">
               <Table.Thead>
                 <Table.Tr>
-                  <Table.Th>Account</Table.Th>
-                  <Table.Th>Type</Table.Th>
-                  <Table.Th>Balance</Table.Th>
-                  <Table.Th>As of</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Account</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Type</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Balance</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>As of</Table.Th>
                   <Table.Th aria-label="Actions" />
                 </Table.Tr>
               </Table.Thead>
