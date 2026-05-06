@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-137 (2026-05-06): Expand test coverage — rule learning, RBAC, payslip deposits, ledger filters, recurring overrides
+
+**Why:** Pre-release coverage audit identified five gaps: (1) category rule learning endpoints had zero tests; (2) RBAC was only tested at the coarse "member blocked from household routes" level with no admin role tests and no positive member permission tests; (3) `matchedDeposits` on `GET /payslips/:id` (CR-068) was shipped but never asserted in tests; (4) ledger filter parameters (dateFrom/dateTo, accountId, amountMin/Max, trashOnly) were exercised only implicitly via the full import pipeline tests; (5) recurring override validation and household isolation had no dedicated tests.
+
+**What:**
+- `backend/tests/category-rule-learning.test.ts` — 9 new tests: auth guard + 404 + invalid body + classification preview happy path (verifies PAYROLL classifies as Salary) + cross-household isolation; `from-ledger` auth/RBAC/404/parent-category/happy-path
+- `backend/tests/rbac.test.ts` — 15 new tests covering: member CAN read transactions/cash-summary/budget/categories; member CANNOT call rule write endpoints (PATCH/DELETE/recategorize/from-ledger/household-clear) or bulk-reassign-owner; admin CAN manage members/settings/rules/gdrive-status; admin CANNOT restore/export-preview/gdrive-connect/gdrive-disconnect
+- `backend/tests/ledger-filters.test.ts` — 11 new tests using an isolated test household: dateFrom, dateTo, dateFrom+dateTo, accountId (two accounts), amountMin, amountMax, amountMin+amountMax, trashOnly (include/exclude), combined accountId+dateFrom, and two input-validation 400 errors
+- `backend/tests/payslip-upload.test.ts` — updated existing "returns full snapshot after upload" to assert `matchedDeposits` and `validationWarnings` are arrays; added 2 new tests verifying deposit match within ±3 days/1% tolerance and exclusion outside the window
+- `backend/tests/recurring-overrides.test.ts` — added 4 validation tests (missing merchantKey, missing verdict, invalid verdict enum, whitespace merchantKey) and 2 household isolation tests
+
+**Result:** Tests grow from ~397 to 422 backend tests; all pass.
+
+---
+
 ## DB-136 (2026-05-05): Squash 33 migrations into single baseline
 
 **Why:** 33 migration files had accumulated since v1, including redundant constraint-drop/re-add patterns, 3 dead columns (0003 `unstructured_*` — zero code references), 3 data migrations already covered by bootstrap, and one pure no-op (0039). Squashing simplifies fresh-install setup and makes the schema readable in one place.
