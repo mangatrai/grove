@@ -223,7 +223,6 @@ function AmountInput({ value, onChange }: { value: string; onChange: (v: string)
       min={0}
       step={1}
       leftSection={<span>$</span>}
-      w={110}
       size="xs"
       styles={{ input: { textAlign: "right" } }}
       hideControls
@@ -415,19 +414,19 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
       </Group>
 
       <div style={{ overflowX: "auto" }}>
-        <Table style={{ tableLayout: "fixed", width: "100%" }} withRowBorders>
+        <Table style={{ tableLayout: "fixed", width: "100%" }} withRowBorders striped="odd" verticalSpacing={6}>
           <colgroup>
             <col style={{ width: "42%" }} />
             <col style={{ width: "20%" }} />
-            <col style={{ width: "38%" }} />
+            <col style={{ width: "30%" }} />
+            <col style={{ width: "8%" }} />
           </colgroup>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th>Category</Table.Th>
-              <Table.Th style={{ textAlign: "right" }}>
-                <Text size="xs" c="dimmed">Last month</Text>
-              </Table.Th>
-              <Table.Th style={{ textAlign: "right" }}>Your budget</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Category</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Last month</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Your budget</Table.Th>
+              <Table.Th />
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -441,10 +440,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
 
               return [
                 // Parent / group header row
-                <Table.Tr
-                  key={`group-${g.parentId}`}
-                  style={{ background: isDetailed ? "var(--mantine-color-gray-0)" : undefined }}
-                >
+                <Table.Tr key={`group-${g.parentId}`}>
                   <Table.Td py="xs" pl={0}>
                     <Group gap={6} wrap="nowrap">
                       {(isDetailed || g.leaves.length > 0) ? (
@@ -468,29 +464,27 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
                         : "—"}
                     </Text>
                   </Table.Td>
-                  <Table.Td>
-                    <Group justify="flex-end" gap={6} wrap="nowrap">
-                      {isDetailed ? (
-                        <Text size="sm" c="dimmed">
-                          {fmtUSD(g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0))}
-                        </Text>
-                      ) : (
-                        <AmountInput value={g.lumpAmount} onChange={(v) => setLump(g.parentId, v)} />
-                      )}
-                      {!isDetailed ? (
-                        <ActionIcon
-                          variant="subtle"
-                          color="gray"
-                          size="sm"
-                          onClick={() => removeGroup(g.parentId)}
-                          title="Remove"
-                        >
-                          <IconX size={14} />
-                        </ActionIcon>
-                      ) : (
-                        <span style={{ width: 28 }} />
-                      )}
-                    </Group>
+                  <Table.Td style={{ textAlign: "right" }}>
+                    {isDetailed ? (
+                      <Text size="sm" c="dimmed">
+                        {fmtUSD(g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0))}
+                      </Text>
+                    ) : (
+                      <AmountInput value={g.lumpAmount} onChange={(v) => setLump(g.parentId, v)} />
+                    )}
+                  </Table.Td>
+                  <Table.Td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                    {!isDetailed && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        onClick={() => removeGroup(g.parentId)}
+                        title="Remove"
+                      >
+                        <IconX size={14} />
+                      </ActionIcon>
+                    )}
                   </Table.Td>
                 </Table.Tr>,
 
@@ -511,19 +505,19 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
                             : "—"}
                         </Text>
                       </Table.Td>
-                      <Table.Td>
-                        <Group justify="flex-end" gap={6} wrap="nowrap">
-                          <AmountInput value={leaf.amount} onChange={(v) => setLeafAmount(g.parentId, leaf.categoryId, v)} />
-                          <ActionIcon
-                            variant="subtle"
-                            color="gray"
-                            size="sm"
-                            onClick={() => removeLeaf(g.parentId, leaf.categoryId)}
-                            title="Remove sub-category"
-                          >
-                            <IconX size={14} />
-                          </ActionIcon>
-                        </Group>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <AmountInput value={leaf.amount} onChange={(v) => setLeafAmount(g.parentId, leaf.categoryId, v)} />
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          onClick={() => removeLeaf(g.parentId, leaf.categoryId)}
+                          title="Remove sub-category"
+                        >
+                          <IconX size={14} />
+                        </ActionIcon>
                       </Table.Td>
                     </Table.Tr>
                   );
@@ -533,7 +527,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
           </Table.Tbody>
           <Table.Tfoot>
             <Table.Tr>
-              <Table.Td colSpan={3} pt="md" pb="xs">
+              <Table.Td colSpan={4} pt="md" pb="xs">
                 {availableToAdd.length > 0 && (
                   <Group gap="xs">
                     <Select
@@ -559,6 +553,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
               <Table.Td pl={0} pt="md" pb="xs" fw={600}>Total</Table.Td>
               <Table.Td />
               <Table.Td style={{ textAlign: "right" }} pt="md" pb="xs" fw={600}>{fmtUSD(total)}</Table.Td>
+              <Table.Td />
             </Table.Tr>
           </Table.Tfoot>
         </Table>
@@ -633,14 +628,14 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
       </SimpleGrid>
 
       <div style={{ overflowX: "auto" }}>
-        <Table withRowBorders style={{ width: "100%" }}>
+        <Table withRowBorders striped="odd" verticalSpacing={6} style={{ width: "100%" }}>
           <Table.Thead>
             <Table.Tr>
-              <Table.Th style={{ minWidth: 140 }}>Category</Table.Th>
-              <Table.Th style={{ minWidth: 160 }}>Progress</Table.Th>
-              <Table.Th style={{ textAlign: "right" }}>Spent</Table.Th>
-              <Table.Th style={{ textAlign: "right" }}>Budget</Table.Th>
-              <Table.Th style={{ textAlign: "right", minWidth: 80 }}>Left / Over</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", minWidth: 140 }}>Category</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", minWidth: 160 }}>Progress</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Spent</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Budget</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right", minWidth: 80 }}>Left / Over</Table.Th>
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
