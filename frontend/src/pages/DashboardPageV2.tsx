@@ -600,18 +600,7 @@ export function DashboardPageV2() {
           >
             ›
           </Button>
-          <Button
-            type="button"
-            variant="default"
-            size="xs"
-            ml="auto"
-            onClick={() => {
-              localStorage.setItem("dashboard_classic", "1");
-              setUseClassicView(true);
-            }}
-          >
-            Classic view
-          </Button>
+          {/* TODO: future cleanup — remove DashboardPageLegacy and the useClassicView toggle when v1 is fully retired */}
         </Group>
 
         {loading ? (

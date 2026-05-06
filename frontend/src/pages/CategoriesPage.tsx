@@ -2,6 +2,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Anchor,
@@ -78,7 +79,9 @@ export function CategoriesPage() {
   const [editName, setEditName] = useState("");
   const [editParentId, setEditParentId] = useState<string>("");
   const [editSaving, setEditSaving] = useState(false);
+
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [blockDeleteOpen, setBlockDeleteOpen] = useState(false);
 
   const canManageCategories = authRole === "owner" || authRole === "admin";
 
@@ -113,20 +116,6 @@ export function CategoriesPage() {
     () => categories.filter((c) => !c.parentId).sort(compareRootCategories),
     [categories]
   );
-
-  const hierarchyRows = useMemo((): HierarchyRow[] => {
-    const rows: HierarchyRow[] = [];
-    for (const root of topLevelParents) {
-      rows.push({ kind: "parent", category: root });
-      const children = categories
-        .filter((c) => c.parentId === root.id)
-        .sort((a, b) => a.name.localeCompare(b.name));
-      for (const child of children) {
-        rows.push({ kind: "child", category: child, parent: root });
-      }
-    }
-    return rows;
-  }, [categories, topLevelParents]);
 
   const parentOptions = useMemo(
     () => topLevelParents.map((p) => ({ value: p.id, label: p.name })),
@@ -229,7 +218,6 @@ export function CategoriesPage() {
       await load();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not delete");
-      throw err;
     }
   }, [deleteConfirmId, load]);
 
@@ -248,8 +236,9 @@ export function CategoriesPage() {
         </Group>
       </Group>
 
-      {error ? <Alert color="red" mb="sm">{error}</Alert> : null}
+      {error ? <Alert color="red" mb="sm" withCloseButton onClose={() => setError(null)}>{error}</Alert> : null}
 
+      {/* Edit category modal */}
       <Modal opened={editOpen && editRow !== null} onClose={closeEdit} title="Edit category" centered>
         <form onSubmit={(e) => void onSaveEdit(e)}>
           <Stack gap="sm">
@@ -282,6 +271,25 @@ export function CategoriesPage() {
         </form>
       </Modal>
 
+      {/* Blocked delete modal — shown when trying to delete a parent that still has children */}
+      <Modal
+        opened={blockDeleteOpen}
+        onClose={() => setBlockDeleteOpen(false)}
+        title="Cannot delete group"
+        centered
+        size="sm"
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            This group still has subcategories. Delete or move all subcategories first, then delete the group.
+          </Text>
+          <Group justify="flex-end">
+            <Button onClick={() => setBlockDeleteOpen(false)}>OK</Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {/* Add category form */}
       <Title order={2} size="h4" mt="md" mb="xs">Add category</Title>
       <form onSubmit={(e) => void onCreate(e)}>
         <Group align="flex-end" gap="md" wrap="wrap">
@@ -324,91 +332,120 @@ export function CategoriesPage() {
         </Group>
       </form>
 
-      <Title order={2} size="h4" mt="lg" mb="xs">All categories</Title>
-      {loading ? <Skeleton height={80} /> : null}
+      {/* All categories — accordion grouped by parent */}
+      <Group mt="lg" mb="xs" align="center">
+        <Title order={2} size="h4" style={{ margin: 0 }}>All categories</Title>
+        <HelpIcon label="Built-in: ships with the app. Yours: added by your household. Built-ins can be renamed by owners/admins but not deleted." />
+      </Group>
+
+      {loading ? <Skeleton height={120} /> : null}
       {!loading && categories.length === 0 ? <Text c="dimmed">No categories.</Text> : null}
-      {!loading && categories.length > 0 ? (
-        <Table.ScrollContainer minWidth={500}>
-          <Table striped highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Parent group</Table.Th>
-                <Table.Th>Category</Table.Th>
-                <Table.Th>
-                  <Group gap={4}>
-                    Source
-                    <HelpIcon label="Built-in: ships with the app. Yours: added by your household. Built-ins can be renamed by owners/admins." />
-                  </Group>
-                </Table.Th>
-                <Table.Th />
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {hierarchyRows.map((row) => {
-                const c = row.category;
-                if (row.kind === "parent") {
-                  return (
-                    <Table.Tr key={c.id}>
-                      <Table.Td c="dimmed" title="This row is a top-level group">—</Table.Td>
-                      <Table.Td fw={600}>{c.name}</Table.Td>
-                      <Table.Td>
-                        <Badge variant={c.householdScoped ? "light" : "outline"} color={c.householdScoped ? "green" : "gray"} size="sm">
-                          {c.householdScoped ? "Yours" : "Built-in"}
-                        </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={4} wrap="nowrap">
-                          {canManageCategories ? (
-                            <ActionIcon variant="subtle" color="gray" title="Edit" onClick={() => openEdit(row)}>
-                              <IconPencil size={14} />
-                            </ActionIcon>
-                          ) : null}
-                          {c.householdScoped && canManageCategories ? (
-                            <ActionIcon variant="subtle" color="red" title="Delete" onClick={() => setDeleteConfirmId(c.id)}>
-                              <IconTrash size={14} />
-                            </ActionIcon>
-                          ) : null}
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                }
-                const p = row.parent;
-                return (
-                  <Table.Tr key={c.id}>
-                    <Table.Td>{p.name}</Table.Td>
-                    <Table.Td style={{ paddingLeft: "1rem", borderLeft: "3px solid var(--mantine-color-default-border)" }}>{c.name}</Table.Td>
-                    <Table.Td>
-                      <Badge variant={c.householdScoped ? "light" : "outline"} color={c.householdScoped ? "green" : "gray"} size="sm">
-                        {c.householdScoped ? "Yours" : "Built-in"}
-                      </Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap={4} wrap="nowrap">
-                        {canManageCategories ? (
-                          <ActionIcon variant="subtle" color="gray" title="Edit" onClick={() => openEdit(row)}>
-                            <IconPencil size={14} />
-                          </ActionIcon>
-                        ) : null}
-                        {c.householdScoped && canManageCategories ? (
-                          <ActionIcon variant="subtle" color="red" title="Delete" onClick={() => setDeleteConfirmId(c.id)}>
+      {!loading && topLevelParents.length > 0 ? (
+        <Accordion multiple variant="separated" chevronPosition="left">
+          {topLevelParents.map((parent) => {
+            const children = categories
+              .filter((c) => c.parentId === parent.id)
+              .sort((a, b) => a.name.localeCompare(b.name));
+            const parentRow: HierarchyRow = { kind: "parent", category: parent };
+
+            return (
+              <Accordion.Item key={parent.id} value={parent.id}>
+                <Accordion.Control>
+                  <Group gap="sm" wrap="nowrap">
+                    <Text fw={600} size="sm">{parent.name}</Text>
+                    <Badge
+                      variant={parent.householdScoped ? "light" : "outline"}
+                      color={parent.householdScoped ? "green" : "gray"}
+                      size="sm"
+                    >
+                      {parent.householdScoped ? "Yours" : "Built-in"}
+                    </Badge>
+                    <Text size="xs" c="dimmed">
+                      {children.length === 0
+                        ? "no subcategories"
+                        : `${children.length} subcategor${children.length === 1 ? "y" : "ies"}`}
+                    </Text>
+                    {canManageCategories ? (
+                      <Group gap={4} wrap="nowrap" ml="auto" onClick={(e) => e.stopPropagation()}>
+                        <ActionIcon variant="subtle" color="gray" title="Edit group" onClick={() => openEdit(parentRow)}>
+                          <IconPencil size={14} />
+                        </ActionIcon>
+                        {parent.householdScoped ? (
+                          <ActionIcon
+                            variant="subtle"
+                            color="red"
+                            title="Delete group"
+                            onClick={() => {
+                              if (categoryHasChildren(parent.id, categories)) {
+                                setBlockDeleteOpen(true);
+                              } else {
+                                setDeleteConfirmId(parent.id);
+                              }
+                            }}
+                          >
                             <IconTrash size={14} />
                           </ActionIcon>
                         ) : null}
                       </Group>
-                    </Table.Td>
-                  </Table.Tr>
-                );
-              })}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+                    ) : null}
+                  </Group>
+                </Accordion.Control>
+                <Accordion.Panel>
+                  {children.length === 0 ? (
+                    <Text size="sm" c="dimmed" px="xs" pb="xs">No subcategories.</Text>
+                  ) : (
+                    <Table highlightOnHover withRowBorders={false}>
+                      <Table.Tbody>
+                        {children.map((child) => {
+                          const childRow: HierarchyRow = { kind: "child", category: child, parent };
+                          return (
+                            <Table.Tr key={child.id}>
+                              <Table.Td>{child.name}</Table.Td>
+                              <Table.Td>
+                                <Badge
+                                  variant={child.householdScoped ? "light" : "outline"}
+                                  color={child.householdScoped ? "green" : "gray"}
+                                  size="sm"
+                                >
+                                  {child.householdScoped ? "Yours" : "Built-in"}
+                                </Badge>
+                              </Table.Td>
+                              <Table.Td>
+                                <Group gap={4} wrap="nowrap" justify="flex-end">
+                                  {canManageCategories ? (
+                                    <ActionIcon variant="subtle" color="gray" title="Edit" onClick={() => openEdit(childRow)}>
+                                      <IconPencil size={14} />
+                                    </ActionIcon>
+                                  ) : null}
+                                  {child.householdScoped && canManageCategories ? (
+                                    <ActionIcon
+                                      variant="subtle"
+                                      color="red"
+                                      title="Delete"
+                                      onClick={() => setDeleteConfirmId(child.id)}
+                                    >
+                                      <IconTrash size={14} />
+                                    </ActionIcon>
+                                  ) : null}
+                                </Group>
+                              </Table.Td>
+                            </Table.Tr>
+                          );
+                        })}
+                      </Table.Tbody>
+                    </Table>
+                  )}
+                </Accordion.Panel>
+              </Accordion.Item>
+            );
+          })}
+        </Accordion>
       ) : null}
 
       <ConfirmDialog
         opened={deleteConfirmId !== null}
         title="Delete category?"
-        message="Delete this category? It must have no subcategories and no transaction rows."
+        message="This cannot be undone. The category must have no transaction rows."
         confirmLabel="Delete"
         danger
         closeOnClickOutside={false}

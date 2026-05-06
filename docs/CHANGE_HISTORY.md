@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-141 (2026-05-06): Category accordion layout + deletion UX fixes + remove Classic view link
+
+**Why:** The flat parent/child table required heavy scrolling and made hierarchy ambiguous. Deleting a parent category with subcategories silently failed (409 in devtools, no visible error — error rendered behind the ConfirmDialog or at the top of a long page). Dashboard "Classic view" button was kept alive past its useful life.
+
+**What:**
+- **Accordion layout:** "All categories" section replaced flat `<Table>` with a Mantine `<Accordion multiple>`. Each parent group is one collapsible item; its label shows name + source badge + subcategory count + edit/delete actions. Children are listed in a compact table inside the panel. Dramatically reduces page scroll.
+- **Parent with children — blocked delete modal:** Delete button pre-checks `categoryHasChildren()` client-side; if true, opens a focused `<Modal>` ("Delete or move all subcategories first") instead of the silent 409 or a page-level error behind the old dialog.
+- **Error visibility:** Removed `throw err` from `confirmDeleteCategory` — errors now surface on the page after the dialog closes.
+- **Page-level error close button:** Added `withCloseButton` to the top-level `<Alert>` so errors can be dismissed.
+- **Classic view button removed:** `DashboardPageV2.tsx` no longer renders the "Classic view" toggle. `DashboardPageLegacy` and `useClassicView` state retained for future cleanup (TODO comment added).
+
+**Files:** `frontend/src/pages/CategoriesPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-140 (2026-05-06): Mantine migration + bug fixes — CategoriesPage and CategoryRulesPage
 
 **Why:** Both pages retained custom CSS, hand-rolled dialogs, and raw HTML form elements. Bugs: permission gap where `member`-role users could see delete buttons on household child categories; dead ternary code; inline rule editing collapsed multi-line patterns; CSV file input didn't reset after import; `runTest` fired on empty input; `<details>` collapsed on every `load()` re-render.
