@@ -18,6 +18,166 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-150 (2026-05-06): ImportWorkspacePage — full Mantine migration (2080 lines, 0% → 100%)
+
+**Why:** Largest frontend page, entirely native HTML — `.card`, `.muted`, custom `<dl>/<dt>/<dd>`, `<table className="ledger-table">`, `<details>/<summary>`, `<button>`, `<select>`, `<input>` throughout. No Mantine imports at start.
+
+**What:**
+- Added full Mantine import block: `ActionIcon`, `Alert`, `Anchor`, `Badge`, `Box`, `Button`, `Code`, `Collapse`, `Group`, `List`, `Paper`, `Select`, `SimpleGrid`, `Skeleton`, `Stack`, `Table`, `Text`, `TextInput`, `Title`.
+- Added `@tabler/icons-react` icons: `IconArrowBackUp`, `IconChevronDown`, `IconChevronRight`, `IconPlayerPlay`, `IconTrash`, `IconUpload`.
+- Replaced `SessionStatusBadge` with Mantine `Badge` (color map: created/gray, processing/blue, review/yellow, finalized/green, failed/red).
+- Added `StatRow` helper component for key/value stat display using `Group`/`Text`.
+- Added `showPayslipHelp` and `showSeparateSteps` state for controlled `Collapse` toggles.
+- **Hub view (no sessionId):** `<div>/<h1>/<h2>/<ul>/<li>` → `Stack > Paper > Group/Title/Alert/Button` for header + session list rows with `Code`/`SessionStatusBadge`/`Anchor`.
+- **Session control band:** `<div className="card">` → `Paper` with `Group`/`Title`/`Code`/`Button`/`Alert`.
+- **Last import summary:** `<div className="card">` → `Paper` with `List`/`List.Item`/`Text`/`Anchor`.
+- **Upload files:** `<div className="card">` → `Paper`; native `<input type="file">` kept (no Mantine equivalent).
+- **Files & account table:** `<details>/<summary>` payslip help → `Collapse` + `Anchor` toggle; `<table>` → Mantine `Table withRowBorders`; `<select>` employer → `Select`; advanced format `<select>` → `Select`; OFX hints `<div>/<p>` → `Stack`/`Text`/`Anchor`; inline create-account form `<div style={{ grid }}>` → `Paper withBorder` + `Group`/`Select`/`TextInput`/`Button`; `<button>` remove → `ActionIcon`.
+- **Outcomes by file:** `<dl className="import-file-outcome-stats">` → `Stack` with `StatRow` entries; `<div className="import-file-outcomes">` → `SimpleGrid cols={{ base:1, sm:2, lg:3 }}`; `<div className="import-file-outcome-card">` → `Paper withBorder`.
+- **Generic tabular mapping:** `<div className="row">/<label>/<input>` → `Group` with 4 `TextInput` components.
+- **Run import:** `<button>` → `Button leftSection={<IconPlayerPlay>}`; `<details>/<summary>` separate steps → `Collapse` with `Anchor` toggle + `showSeparateSteps` state; secondary `<button>` → `Button variant="default"`.
+- **Classification matcher preview:** `<button>` → `Button variant="default"`; `<span className="muted">` → `Text c="dimmed"`; `<table className="ledger-table">` → Mantine `Table`; `<code>` → `Code fz="xs"`.
+- **Undo ledger posting:** `<button className="secondary">` → `Button variant="default" leftSection={<IconArrowBackUp>}`.
+- Outer session view `</div>` → `</Stack>`.
+
+**Files:** `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-149 (2026-05-06): DashboardPageLegacy — remove dead code, clean up V2 toggle
+
+**Why:** The classic view toggle was removed from the UI in a recent commit. `DashboardPageLegacy` was no longer reachable from any UI path. Keeping it added dead weight (1425 lines at 0% Mantine) and a stale import.
+
+**What:**
+- Deleted `frontend/src/pages/DashboardPageLegacy.tsx`.
+- Removed `DashboardPageLegacy` import from `DashboardPageV2.tsx`.
+- Removed `useClassicView` state and all guards from `loadCashSummary`, `loadAll`, and `useEffect`.
+- Removed the `if (useClassicView) { return <DashboardPageLegacy /> }` render branch and "Switch to new view" button.
+- Removed stale TODO comment referencing the toggle cleanup.
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/DashboardPageLegacy.tsx` (deleted)
+
+---
+
+## UX-148 (2026-05-06): ResolutionQueuePage — full Mantine migration
+
+**Why:** Page had zero Mantine imports — entirely native HTML (`.card`, `.muted`, `.error`, native `<table>`, `<p>`, `<div>`).
+
+**What:**
+- Replaced page wrapper with `Stack` + `Paper withBorder`.
+- Replaced `<h1>` with `Title`, `<p className="muted">` with `Text c="dimmed"`, `<p className="error">` with `Alert color="red"`.
+- Loading state replaced with `Skeleton`.
+- Replaced native `<table>/<thead>/<tbody>/<tr>/<th>/<td>` with Mantine `Table` primitives with uppercase dimmed headers.
+- Replaced `<Link>` with `<Anchor component={Link}>` throughout.
+- Overflow wrapper `<div>` → `Box`.
+
+**Files:** `frontend/src/pages/ResolutionQueuePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-147 (2026-05-06): PayslipsPage — migrate custom list rows to Mantine
+
+**Why:** Page shell was Mantine but every payslip list row was a hand-rolled div/span nest with raw CSS vars, inline flex layout, and custom border/padding styles.
+
+**What:**
+- Removed `className="payslips-page"` from `Stack`.
+- Replaced KPI card `style={{ color: accent }}` with Mantine `c=` color prop and Mantine color tokens for `borderTop`.
+- Replaced belongs-to filter `<div>` wrapper with `Box`.
+- Replaced entire list row section: `div/span` nest → `Paper withBorder` + `Group`/`Box`/`Text` with Mantine size/fw/c props.
+- Actions `<div>` gap wrapper → `Group gap={6}`.
+
+**Files:** `frontend/src/pages/PayslipsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-146 (2026-05-06): HomePage — migrate sign-in form and auth links to Mantine
+
+**Why:** Sign-in card used native `<input type="email">`, `<input type="password">`, `<label>`, `<button>` (forgot password), raw error `<p className="error">`, and a bare `<div>` auth-links container. Branded hero section intentionally stays custom CSS.
+
+**What:**
+- Replaced sign-in card outer `<div className="home-landing__card card">` with `Paper withBorder`.
+- Replaced native email input with `TextInput`, password input with `PasswordInput` (shows inline error).
+- Removed separate `<p className="error">` — error now passed to `PasswordInput error=` prop.
+- `<Button>` already Mantine; removed `className="home-landing__submit"` and `disabled={loading}` → `loading={loading}`.
+- Replaced native `<button>` "Forgot password?" links with `<Anchor component="button">`.
+- Replaced inline `<div style={...}>` tip box with `Paper withBorder`.
+- Replaced `<a>` request-access link with `<Anchor>`.
+- Replaced auth-links `<div>/<span>` layout with `Text size="xs"` inline.
+- Forgot-password form wrapper `<div>/<form style=...>` → `Stack component="form"`.
+- Sign-in form `<form className="...">` → `Stack component="form"`.
+
+**Files:** `frontend/src/pages/HomePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-145 (2026-05-06): BudgetPage + NetWorthPage — Mantine polish pass
+
+**Why:** Both pages had no `className=` but accumulated native `<div>`, `<span>`, `<form>` remnants from earlier migrations, plus raw CSS var color strings instead of Mantine color props.
+
+**BudgetPage changes:**
+- Added `Box` to imports.
+- Overflow `<div style={{ overflowX: "auto" }}>` (×2) → `Box`.
+- Spacer `<span style={{ width: 22 }}>` → `Box w={22}`.
+- Inline `<span title="...">` annotations → `Text span`.
+- `leftSection={<span>$</span>}` → `Text size="xs"`.
+- Progress bar `<div style={{ flex: 1 }}>` → `Box`.
+- Bottom Edit button wrapper `<div>` → `Group`.
+
+**NetWorthPage changes:**
+- Chart container `<div style={{ width: "100%", height: 340 }}>` → `Box`.
+- Both overflow `<div style={{ overflowX: "auto" }}>` → `Box`.
+- Both inline-edit `<form onSubmit={saveRow}>` → `Group component="form" onSubmit={saveRow}` (no wrapper needed).
+- Recharts tooltip `<div>/<span>` → `Text`/`Text span` with Mantine size/fw props.
+- Top-assets/liabilities section `<div>/<div style=...>` header → `Box` + `Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed"`.
+
+**Files:** `frontend/src/pages/BudgetPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-146 (2026-05-06): Transactions page — full Mantine UI migration
+
+**Why:** `TransactionsPage` still relied on mixed native controls and class/style-driven wrappers in key interaction areas, which diverged from the Mantine-first visual system and led to inconsistent theming.
+
+**What:**
+- Replaced remaining native/class-based sections with Mantine primitives across the full page surface: bulk bars, action rows, ledger table cells/actions, expanded review detail panels, and add-transaction modal.
+- Replaced native form/table controls with Mantine components (`TextInput`, `NativeSelect`, `Checkbox`, `Radio.Group`, `Button`, `ActionIcon`, `Table.*`, `Modal`, `Alert`, `Badge`, layout `Stack/Group/Box/SimpleGrid/Paper`).
+- Removed remaining `muted/error/card` class-based rendering on `TransactionsPage` and reduced inline styles to unavoidable cases.
+- Preserved all logic, handlers, state transitions, API calls, and routing/query-param behavior.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-144 (2026-05-06): Payslip detail page — Mantine-only body migration
+
+**Why:** `PayslipDetailPage` had a Mantine shell but the core interaction surface (summary inline edits, line-item edit/delete flows, section tables, matched deposit table, diagnostics toggles) still used native HTML controls and custom inline/class styling, causing inconsistent theming behavior.
+
+**What:**
+- Replaced native `<input>/<select>/<button>` in the detail body with Mantine `TextInput`, `NumberInput`, `Select`, `Button`, and `ActionIcon`.
+- Replaced all native table markup in the detail body with Mantine `Table` primitives (`Table.Thead`, `Table.Tbody`, `Table.Tr`, `Table.Th`, `Table.Td`).
+- Replaced raw layout wrappers and class/style-driven text with Mantine `Stack`, `Group`, `Box`, `Text`, `Alert`, and `Code`.
+- Replaced native disclosure blocks (`details/summary`) with controlled Mantine button toggles for line-item sections and parser diagnostics.
+- Preserved all existing state, handlers, API calls, and routing behavior.
+
+**Files:** `frontend/src/pages/PayslipDetailPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-143 (2026-05-06): Payslip manual entry page — Mantine-only UI migration
+
+**Why:** `PayslipManualPage` still used native form controls (`input`, `select`, `table`, `details`) and mixed custom layout/styling patterns, which prevented consistent theme/dark-mode behavior and diverged from the Mantine-only frontend direction.
+
+**What:**
+- Replaced native form controls with Mantine components (`TextInput`, `NumberInput`, `Select`, `Button`, `ActionIcon`).
+- Replaced native table markup with Mantine `Table` primitives for both summary amounts and optional line-item rows.
+- Replaced raw layout containers with Mantine layout primitives (`Stack`, `Group`, `Box`) and removed class-based/error-muted text rendering in favor of Mantine `Text`/`Alert`.
+- Replaced `<form>` wrapper with Mantine form wrapper (`<Stack component="form">`).
+- Replaced `<details>/<summary>` line-item section with controlled Mantine toggle UI and retained all existing data/submit behavior.
+
+**Files:** `frontend/src/pages/PayslipManualPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-142 (2026-05-06): BudgetPage — full Mantine migration + setup table UX fixes
 
 **Why:** BudgetPage had zero Mantine usage — all layout was raw HTML with inline styles and two custom CSS classes (`budget-kpi-grid`, `card`). Setup table had three UX issues: input box was left-aligned in its column, the × remove button felt visually detached from its row, and the ►/▲ expand chevrons used the wrong convention (▼ on a collapsed row is ambiguous).

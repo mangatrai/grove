@@ -32,7 +32,6 @@ import {
 
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
-import { DashboardPageLegacy } from "./DashboardPageLegacy";
 
 type CashSummaryResponse = {
   range: { start: string; end: string; label: string };
@@ -360,7 +359,6 @@ function outflowSlices(cashData: CashSummaryResponse | null): Array<{ categoryId
 
 export function DashboardPageV2() {
   const token = useAuthToken();
-  const [useClassicView, setUseClassicView] = useState(() => localStorage.getItem("dashboard_classic") === "1");
   const [activeMonth, setActiveMonth] = useState<string>(() => currentYearMonth());
   const [cashData, setCashData] = useState<CashDataState>(null);
   const [resolutionData, setResolutionData] = useState<ResolutionSummary | null>(null);
@@ -376,9 +374,6 @@ export function DashboardPageV2() {
   const isCurrentMonth = activeMonth === currentYearMonth();
 
   const loadCashSummary = useCallback(async () => {
-    if (useClassicView) {
-      return;
-    }
     setCashRetrying(true);
     try {
       const value = await apiJson<CashSummaryResponse>(
@@ -391,10 +386,10 @@ export function DashboardPageV2() {
     } finally {
       setCashRetrying(false);
     }
-  }, [activeMonth, useClassicView]);
+  }, [activeMonth]);
 
   const loadAll = useCallback(async () => {
-    if (!token || useClassicView) {
+    if (!token) {
       return;
     }
     setLoading(true);
@@ -430,7 +425,7 @@ export function DashboardPageV2() {
     setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
     setRecurringOverrides(results[6].status === "fulfilled" && results[6].value.ok ? results[6].value.data : []);
     setLoading(false);
-  }, [activeMonth, token, useClassicView]);
+  }, [activeMonth, token]);
 
   const dismissRecurring = useCallback(async (merchantKey: string) => {
     const normalized = normalizedKey(merchantKey);
@@ -466,11 +461,8 @@ export function DashboardPageV2() {
   }, []);
 
   useEffect(() => {
-    if (useClassicView) {
-      return;
-    }
     void loadAll();
-  }, [loadAll, useClassicView]);
+  }, [loadAll]);
 
   useEffect(() => {
     setShowAllRecurring(false);
@@ -530,27 +522,6 @@ export function DashboardPageV2() {
   const slices = cashData && cashData !== "error" ? outflowSlices(cashData) : [];
   const totalOutflows = slices.reduce((acc, s) => acc + s.outflows, 0);
 
-  if (useClassicView) {
-    return (
-      <>
-        <DashboardPageLegacy />
-        <Group justify="flex-end" px="md" py="xs">
-          <Button
-            type="button"
-            variant="default"
-            size="xs"
-            onClick={() => {
-              localStorage.removeItem("dashboard_classic");
-              setUseClassicView(false);
-            }}
-          >
-            Switch to new view
-          </Button>
-        </Group>
-      </>
-    );
-  }
-
   const cashUnavailable = cashData === "error";
   const monthStart = firstDayOf(activeMonth);
   const monthEnd = lastDayOf(activeMonth);
@@ -600,7 +571,6 @@ export function DashboardPageV2() {
           >
             ›
           </Button>
-          {/* TODO: future cleanup — remove DashboardPageLegacy and the useClassicView toggle when v1 is fully retired */}
         </Group>
 
         {loading ? (

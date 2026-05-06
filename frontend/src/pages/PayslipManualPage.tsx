@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Alert, Anchor, Button, Group, Paper, Stack, Text, Title } from "@mantine/core";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Box,
+  Button,
+  Group,
+  NumberInput,
+  Paper,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import { Link, Navigate, useNavigate } from "react-router-dom";
+import { IconChevronDown, IconChevronRight, IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { apiJson, useAuthToken } from "../api";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
@@ -96,6 +112,7 @@ export function PayslipManualPage() {
 
   // Line items
   const [draftLineItems, setDraftLineItems] = useState<DraftLineItem[]>([]);
+  const [lineItemsOpen, setLineItemsOpen] = useState(false);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -276,18 +293,15 @@ export function PayslipManualPage() {
   if (!token) return <Navigate to="/" replace />;
 
   // Implied net color
-  let netColor = "var(--color-text-muted)";
+  let netColor: string = "dimmed";
   if (impliedNet != null && statedNet != null) {
-    if (netDelta! <= 1) netColor = "var(--color-success, #16a34a)";
-    else if (netDelta! <= 50) netColor = "#d97706";
-    else netColor = "var(--color-danger, #dc2626)";
+    if (netDelta! <= 1) netColor = "green";
+    else if (netDelta! <= 50) netColor = "yellow";
+    else netColor = "red";
   }
 
-  const inputStyle: React.CSSProperties = { width: "100%", maxWidth: "11rem" };
-  const dateStyle: React.CSSProperties = { width: "100%", maxWidth: "12rem" };
-
   return (
-    <Stack className="payslips-page">
+    <Stack>
       {/* Header */}
       <Paper withBorder p="lg">
         <Anchor component={Link} to="/payslips">← Payslips</Anchor>
@@ -295,24 +309,23 @@ export function PayslipManualPage() {
         <Text c="dimmed" size="sm">Enter totals from any pay stub — no PDF required.</Text>
       </Paper>
 
-      <form onSubmit={onSubmit}>
+      <Stack component="form" onSubmit={onSubmit} gap="md">
         {/* Section 1: Context */}
         <Paper withBorder p="lg">
           <Title order={4} mt={0} mb="md">Who / employer</Title>
           <Group align="end" grow>
             {hasEmployers && needsEmployerPick ? (
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Employer</span>
-                <select value={employerId} onChange={(ev) => setEmployerId(ev.target.value)} required aria-required style={{ minHeight: 36 }}>
-                  <option value="">Select employer…</option>
-                  {employers.map((em) => (
-                    <option key={em.id} value={em.id}>{em.displayName}</option>
-                  ))}
-                </select>
-              </label>
+              <Select
+                label="Employer"
+                value={employerId}
+                onChange={(value) => setEmployerId(value ?? "")}
+                data={employers.map((em) => ({ value: em.id, label: em.displayName }))}
+                placeholder="Select employer..."
+                required
+              />
             ) : null}
-            <label className="field" style={{ marginBottom: 0 }}>
-              <span>Belongs to</span>
+            <Box>
+              <Text size="sm" fw={500} mb={6}>Belongs to</Text>
               <HierarchicalSearchPicker
                 value={belongsTo}
                 onChange={(v) => setBelongsTo(v)}
@@ -321,16 +334,14 @@ export function PayslipManualPage() {
                 ariaLabel="Belongs to scope"
                 clearable
               />
-            </label>
+            </Box>
             {!hasEmployers ? (
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>Statement template</span>
-                <select value={parserProfileId} onChange={(ev) => setParserProfileId(ev.target.value)} style={{ minHeight: 36 }}>
-                  {PARSER_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </label>
+              <Select
+                label="Statement template"
+                value={parserProfileId}
+                onChange={(value) => setParserProfileId(value ?? "")}
+                data={PARSER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+              />
             ) : null}
           </Group>
         </Paper>
@@ -338,23 +349,32 @@ export function PayslipManualPage() {
         {/* Section 2: Pay period */}
         <Paper withBorder p="lg">
           <Title order={4} mt={0} mb="md">Pay period</Title>
-          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-            <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
-              <span>Period start</span>
-              <input type="date" value={payPeriodStart} onChange={(e) => setPayPeriodStart(e.target.value)}
-                aria-label="Pay period start" style={dateStyle} />
-            </label>
-            <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
-              <span>Period end</span>
-              <input type="date" value={payPeriodEnd} onChange={(e) => setPayPeriodEnd(e.target.value)}
-                aria-label="Pay period end" style={dateStyle} />
-            </label>
-            <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
-              <span>Pay date</span>
-              <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)}
-                aria-label="Pay date" style={dateStyle} />
-            </label>
-          </div>
+          <Group grow align="end">
+            <TextInput
+              type="date"
+              label="Period start"
+              value={payPeriodStart}
+              onChange={(e) => setPayPeriodStart(e.target.value)}
+              aria-label="Pay period start"
+              maw={220}
+            />
+            <TextInput
+              type="date"
+              label="Period end"
+              value={payPeriodEnd}
+              onChange={(e) => setPayPeriodEnd(e.target.value)}
+              aria-label="Pay period end"
+              maw={220}
+            />
+            <TextInput
+              type="date"
+              label="Pay date"
+              value={payDate}
+              onChange={(e) => setPayDate(e.target.value)}
+              aria-label="Pay date"
+              maw={220}
+            />
+          </Group>
         </Paper>
 
         {/* Section 3: Summary amounts */}
@@ -363,190 +383,189 @@ export function PayslipManualPage() {
           <Text c="dimmed" size="sm" mt={0} mb="md">
             Current = this pay period. YTD = year-to-date total. Leave blank if unknown.
           </Text>
-          <div style={{ overflowX: "auto" }}>
-            <table className="ledger-table payslip-manual__table">
-              <thead>
-                <tr>
-                  <th scope="col" style={{ minWidth: "11rem" }}>Description</th>
-                  <th scope="col">Current</th>
-                  <th scope="col">YTD</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 500 }}>Gross pay</th>
-                  <td><input inputMode="decimal" value={grossPayCurrent} onChange={(e) => setGrossPayCurrent(e.target.value)} placeholder="0.00" aria-label="Gross pay current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={grossPayYtd} onChange={(e) => setGrossPayYtd(e.target.value)} placeholder="0.00" aria-label="Gross pay YTD" style={inputStyle} /></td>
-                </tr>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 500 }}>Pre-tax deductions</th>
-                  <td><input inputMode="decimal" value={preTaxCurrent} onChange={(e) => setPreTaxCurrent(e.target.value)} placeholder="0.00" aria-label="Pre-tax deductions current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={preTaxYtd} onChange={(e) => setPreTaxYtd(e.target.value)} placeholder="0.00" aria-label="Pre-tax deductions YTD" style={inputStyle} /></td>
-                </tr>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 500 }}>Employee taxes</th>
-                  <td><input inputMode="decimal" value={employeeTaxesCurrent} onChange={(e) => setEmployeeTaxesCurrent(e.target.value)} placeholder="0.00" aria-label="Employee taxes current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={employeeTaxesYtd} onChange={(e) => setEmployeeTaxesYtd(e.target.value)} placeholder="0.00" aria-label="Employee taxes YTD" style={inputStyle} /></td>
-                </tr>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 500 }}>Post-tax deductions</th>
-                  <td><input inputMode="decimal" value={postTaxCurrent} onChange={(e) => setPostTaxCurrent(e.target.value)} placeholder="0.00" aria-label="Post-tax deductions current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={postTaxYtd} onChange={(e) => setPostTaxYtd(e.target.value)} placeholder="0.00" aria-label="Post-tax deductions YTD" style={inputStyle} /></td>
-                </tr>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 500 }}>Net pay</th>
-                  <td><input inputMode="decimal" value={netPayCurrent} onChange={(e) => setNetPayCurrent(e.target.value)} placeholder="0.00" aria-label="Net pay current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={netPayYtd} onChange={(e) => setNetPayYtd(e.target.value)} placeholder="0.00" aria-label="Net pay YTD" style={inputStyle} /></td>
-                </tr>
-                {/* Supplemental rows */}
-                <tr style={{ borderTop: "2px solid var(--color-border)" }}>
-                  <th scope="row" style={{ fontWeight: 400, color: "var(--color-text-muted)", fontSize: "0.9rem" }}>Hours / days</th>
-                  <td><input value={hoursOrDaysCurrent} onChange={(e) => setHoursOrDaysCurrent(e.target.value)} aria-label="Hours or days current" style={inputStyle} /></td>
-                  <td><input value={hoursOrDaysYtd} onChange={(e) => setHoursOrDaysYtd(e.target.value)} aria-label="Hours or days YTD" style={inputStyle} /></td>
-                </tr>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 400, color: "var(--color-text-muted)", fontSize: "0.9rem" }}>Taxable earnings</th>
-                  <td><input inputMode="decimal" value={taxableEarningsCurrent} onChange={(e) => setTaxableEarningsCurrent(e.target.value)} placeholder="0.00" aria-label="Taxable earnings current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={taxableEarningsYtd} onChange={(e) => setTaxableEarningsYtd(e.target.value)} placeholder="0.00" aria-label="Taxable earnings YTD" style={inputStyle} /></td>
-                </tr>
-                <tr>
-                  <th scope="row" style={{ fontWeight: 400, color: "var(--color-text-muted)", fontSize: "0.9rem" }}>Other information</th>
-                  <td><input inputMode="decimal" value={otherInformationCurrent} onChange={(e) => setOtherInformationCurrent(e.target.value)} placeholder="0.00" aria-label="Other information current" style={inputStyle} /></td>
-                  <td><input inputMode="decimal" value={otherInformationYtd} onChange={(e) => setOtherInformationYtd(e.target.value)} placeholder="0.00" aria-label="Other information YTD" style={inputStyle} /></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <Table withTableBorder striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th miw={170}>Description</Table.Th>
+                <Table.Th>Current</Table.Th>
+                <Table.Th>YTD</Table.Th>
+              </Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              <Table.Tr>
+                <Table.Td><Text fw={500}>Gross pay</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={grossPayCurrent} onChange={(v) => setGrossPayCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Gross pay current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={grossPayYtd} onChange={(v) => setGrossPayYtd(String(v ?? ""))} placeholder="0.00" aria-label="Gross pay YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text fw={500}>Pre-tax deductions</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={preTaxCurrent} onChange={(v) => setPreTaxCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Pre-tax deductions current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={preTaxYtd} onChange={(v) => setPreTaxYtd(String(v ?? ""))} placeholder="0.00" aria-label="Pre-tax deductions YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text fw={500}>Employee taxes</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={employeeTaxesCurrent} onChange={(v) => setEmployeeTaxesCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Employee taxes current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={employeeTaxesYtd} onChange={(v) => setEmployeeTaxesYtd(String(v ?? ""))} placeholder="0.00" aria-label="Employee taxes YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text fw={500}>Post-tax deductions</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={postTaxCurrent} onChange={(v) => setPostTaxCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Post-tax deductions current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={postTaxYtd} onChange={(v) => setPostTaxYtd(String(v ?? ""))} placeholder="0.00" aria-label="Post-tax deductions YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text fw={500}>Net pay</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={netPayCurrent} onChange={(v) => setNetPayCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Net pay current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={netPayYtd} onChange={(v) => setNetPayYtd(String(v ?? ""))} placeholder="0.00" aria-label="Net pay YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text c="dimmed" size="sm">Hours / days</Text></Table.Td>
+                <Table.Td><TextInput value={hoursOrDaysCurrent} onChange={(e) => setHoursOrDaysCurrent(e.target.value)} aria-label="Hours or days current" /></Table.Td>
+                <Table.Td><TextInput value={hoursOrDaysYtd} onChange={(e) => setHoursOrDaysYtd(e.target.value)} aria-label="Hours or days YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text c="dimmed" size="sm">Taxable earnings</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={taxableEarningsCurrent} onChange={(v) => setTaxableEarningsCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Taxable earnings current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={taxableEarningsYtd} onChange={(v) => setTaxableEarningsYtd(String(v ?? ""))} placeholder="0.00" aria-label="Taxable earnings YTD" /></Table.Td>
+              </Table.Tr>
+              <Table.Tr>
+                <Table.Td><Text c="dimmed" size="sm">Other information</Text></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={otherInformationCurrent} onChange={(v) => setOtherInformationCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Other information current" /></Table.Td>
+                <Table.Td><NumberInput decimalScale={2} value={otherInformationYtd} onChange={(v) => setOtherInformationYtd(String(v ?? ""))} placeholder="0.00" aria-label="Other information YTD" /></Table.Td>
+              </Table.Tr>
+            </Table.Tbody>
+          </Table>
 
           {/* Live arithmetic check */}
           {impliedNet != null ? (
-            <div style={{ marginTop: "0.75rem", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <Text span c="dimmed">Implied net (gross − deductions):</Text>
-              <span style={{ fontWeight: 600, color: netColor }}>{fmtMoney(impliedNet)}</span>
+            <Group mt="md" gap="xs">
+              <Text size="sm" c="dimmed">Implied net (gross - deductions):</Text>
+              <Text size="sm" fw={600} c={netColor}>{fmtMoney(impliedNet)}</Text>
               {statedNet != null && netDelta != null && netDelta > 0.01 ? (
-                <span style={{ color: netColor, fontSize: "0.8rem" }}>
+                <Text size="sm" c={netColor}>
                   (stated net {fmtMoney(statedNet)}, diff ${netDelta.toFixed(2)})
-                </span>
+                </Text>
               ) : statedNet != null && netDelta != null && netDelta <= 0.01 ? (
-                <span style={{ color: netColor, fontSize: "0.8rem" }}>✓ matches stated net</span>
+                <Text size="sm" c={netColor}>matches stated net</Text>
               ) : null}
-            </div>
+            </Group>
           ) : null}
         </Paper>
 
         {/* Section 4: Line items (optional) */}
         <Paper withBorder p="lg">
-          <details>
-            <summary style={{ cursor: "pointer", fontWeight: 600, padding: "0.1rem 0" }}>
-              Line items
-              <Text span c="dimmed" style={{ fontWeight: 400, marginLeft: "0.5rem", fontSize: "0.85rem" }}>
-                optional — individual earnings and deduction rows
-              </Text>
-              {draftLineItems.length > 0 ? (
-                <span style={{ marginLeft: "0.5rem", fontSize: "0.8rem", color: "var(--color-accent)" }}>
-                  ({draftLineItems.length} added)
-                </span>
-              ) : null}
-            </summary>
-            <div style={{ marginTop: "0.75rem" }}>
-              <Text c="dimmed" size="sm" mt={0} mb="md">
+          <Group justify="space-between" align="center">
+            <Group gap="xs">
+              <Button
+                type="button"
+                variant="subtle"
+                onClick={() => setLineItemsOpen((v) => !v)}
+                leftSection={lineItemsOpen ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+              >
+                Line items
+              </Button>
+              <Text size="sm" c="dimmed">optional - individual earnings and deduction rows</Text>
+              {draftLineItems.length > 0 ? <Text size="sm" c="green">({draftLineItems.length} added)</Text> : null}
+            </Group>
+          </Group>
+          {lineItemsOpen ? (
+            <Stack mt="md">
+              <Text c="dimmed" size="sm">
                 Add individual rows (e.g. Regular Pay, 401k, Federal Tax). The matching summary totals above will auto-calculate from these when you save.
               </Text>
               {draftLineItems.length > 0 ? (
-                <div style={{ overflowX: "auto", marginBottom: "0.75rem" }}>
-                  <table className="ledger-table" style={{ fontSize: "0.85rem" }}>
-                    <thead>
-                      <tr>
-                        <th style={{ minWidth: "9rem" }}>Section</th>
-                        <th style={{ minWidth: "10rem" }}>Name</th>
-                        <th style={{ minWidth: "7rem" }}>Current</th>
-                        <th style={{ minWidth: "7rem" }}>YTD</th>
-                        <th style={{ width: "2rem" }} />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {draftLineItems.map((d) => (
-                        <tr key={d.draftId}>
-                          <td>
-                            <select
-                              value={d.section}
-                              onChange={(e) => updateLineItem(d.draftId, "section", e.target.value)}
-                              style={{ fontSize: "0.83rem", padding: "0.15rem 0.3rem", width: "100%" }}
-                            >
-                              {SECTION_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>{o.label}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td>
-                            <input
-                              type="text"
-                              value={d.name}
-                              onChange={(e) => updateLineItem(d.draftId, "name", e.target.value)}
-                              placeholder="e.g. Regular Pay"
-                              style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              inputMode="decimal"
-                              value={d.amountCurrent}
-                              onChange={(e) => updateLineItem(d.draftId, "amountCurrent", e.target.value)}
-                              placeholder="0.00"
-                              style={{ width: "100%", maxWidth: "7rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
-                            />
-                          </td>
-                          <td>
-                            <input
-                              inputMode="decimal"
-                              value={d.amountYtd}
-                              onChange={(e) => updateLineItem(d.draftId, "amountYtd", e.target.value)}
-                              placeholder="0.00"
-                              style={{ width: "100%", maxWidth: "7rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
-                            />
-                          </td>
-                          <td>
-                            <Button type="button" variant="subtle" color="red"
-                              onClick={() => removeLineItem(d.draftId)}
-                              title="Remove row"
-                              style={{ fontSize: "0.75rem", padding: "0.1rem 0.4rem", color: "var(--color-danger, #dc2626)" }}>
-                              ✕
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <Table withTableBorder striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th miw={140}>Section</Table.Th>
+                      <Table.Th miw={180}>Name</Table.Th>
+                      <Table.Th miw={120}>Current</Table.Th>
+                      <Table.Th miw={120}>YTD</Table.Th>
+                      <Table.Th w={48} />
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {draftLineItems.map((d) => (
+                      <Table.Tr key={d.draftId}>
+                        <Table.Td>
+                          <Select
+                            value={d.section}
+                            onChange={(value) => updateLineItem(d.draftId, "section", value ?? d.section)}
+                            data={SECTION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <TextInput
+                            value={d.name}
+                            onChange={(e) => updateLineItem(d.draftId, "name", e.target.value)}
+                            placeholder="e.g. Regular Pay"
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            decimalScale={2}
+                            value={d.amountCurrent}
+                            onChange={(v) => updateLineItem(d.draftId, "amountCurrent", String(v ?? ""))}
+                            placeholder="0.00"
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <NumberInput
+                            decimalScale={2}
+                            value={d.amountYtd}
+                            onChange={(v) => updateLineItem(d.draftId, "amountYtd", String(v ?? ""))}
+                            placeholder="0.00"
+                          />
+                        </Table.Td>
+                        <Table.Td>
+                          <ActionIcon
+                            type="button"
+                            variant="subtle"
+                            color="red"
+                            onClick={() => removeLineItem(d.draftId)}
+                            title="Remove row"
+                            aria-label="Remove row"
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
               ) : null}
-              <Button type="button" variant="default" onClick={addLineItem} size="xs">
-                + Add line item
+              <Button type="button" variant="default" onClick={addLineItem} size="xs" leftSection={<IconPlus size={14} />}>
+                Add line item
               </Button>
-            </div>
-          </details>
+            </Stack>
+          ) : null}
         </Paper>
 
         {/* Section 5: Employment info */}
         <Paper withBorder p="lg">
           <Title order={4} mt={0} mb="md">
             Salary / rate
-            <Text span c="dimmed" style={{ fontWeight: 400, marginLeft: "0.4rem", fontSize: "0.85rem" }}>(optional)</Text>
+            <Text span c="dimmed" size="sm" fw={400} ml={6}>(optional)</Text>
           </Title>
           <Group align="end" grow>
-            <label className="field" style={{ marginBottom: 0 }}>
-              <span>Annual salary or hourly rate</span>
-              <input inputMode="decimal" value={employmentRate} onChange={(e) => setEmploymentRate(e.target.value)}
-                placeholder="e.g. 180000" aria-label="Employment rate or salary" style={{ width: "100%" }} />
-            </label>
-            <label className="field" style={{ marginBottom: 0 }}>
-              <span>Rate type</span>
-              <select value={employmentRateType} onChange={(e) => setEmploymentRateType(e.target.value)} aria-label="Employment rate type" style={{ minHeight: 36 }}>
-                <option value="">—</option>
-                <option value="annual">Annual</option>
-                <option value="biweekly">Biweekly</option>
-                <option value="hourly">Hourly</option>
-              </select>
-            </label>
+            <NumberInput
+              label="Annual salary or hourly rate"
+              value={employmentRate}
+              onChange={(v) => setEmploymentRate(String(v ?? ""))}
+              placeholder="e.g. 180000"
+              aria-label="Employment rate or salary"
+            />
+            <Select
+              label="Rate type"
+              value={employmentRateType}
+              onChange={(value) => setEmploymentRateType(value ?? "")}
+              aria-label="Employment rate type"
+              data={[
+                { value: "", label: "-" },
+                { value: "annual", label: "Annual" },
+                { value: "biweekly", label: "Biweekly" },
+                { value: "hourly", label: "Hourly" }
+              ]}
+            />
           </Group>
         </Paper>
 
@@ -554,13 +573,15 @@ export function PayslipManualPage() {
         <Paper withBorder p="lg">
           {submitError ? <Alert color="red" mb="sm">{submitError}</Alert> : null}
           {validationWarnings.length > 0 ? (
-            <div style={{ marginBottom: "0.75rem", padding: "0.5rem 0.75rem", background: "rgba(234,179,8,0.07)", border: "1px solid rgba(234,179,8,0.4)", borderRadius: 6 }}>
-              {validationWarnings.map((w, i) => (
-                <div key={i} style={{ fontSize: "0.82rem", color: w.code === "ARITHMETIC_IMBALANCE" ? "var(--color-danger, #dc2626)" : "#92400e" }}>
-                  {w.message}
-                </div>
-              ))}
-            </div>
+            <Alert color="yellow" mb="sm">
+              <Stack gap={4}>
+                {validationWarnings.map((w, i) => (
+                  <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "yellow"}>
+                    {w.message}
+                  </Text>
+                ))}
+              </Stack>
+            </Alert>
           ) : null}
           <Group gap="md" align="center">
             <Button type="submit" loading={submitting} disabled={submitting}>
@@ -569,7 +590,7 @@ export function PayslipManualPage() {
             <Button component={Link} to="/payslips" variant="default">Cancel</Button>
           </Group>
         </Paper>
-      </form>
+      </Stack>
     </Stack>
   );
 }

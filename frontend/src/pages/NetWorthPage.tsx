@@ -695,7 +695,7 @@ export function NetWorthPage() {
                 <Text size="xs" c="dimmed">Liabilities</Text>
               </Group>
             </Group>
-            <div style={{ width: "100%", height: 340, marginTop: "0.5rem" }}>
+            <Box style={{ width: "100%", height: 340, marginTop: "0.5rem" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
                   <defs>
@@ -727,13 +727,13 @@ export function NetWorthPage() {
                       }
                       const asOf = String(label ?? "");
                       return (
-                        <Paper withBorder shadow="sm" radius="md" p="xs" style={{ fontSize: "0.85rem" }}>
-                          <div style={{ fontWeight: 600 }}>{asOf}</div>
+                        <Paper withBorder shadow="sm" radius="md" p="xs">
+                          <Text size="xs" fw={600} mb={2}>{asOf}</Text>
                           {payload.map((p) => (
-                            <div key={String(p.name ?? p.dataKey)}>
-                              <span style={{ color: String(p.color ?? "inherit") }}>{p.name}</span>:{" "}
+                            <Text size="xs" key={String(p.name ?? p.dataKey)}>
+                              <Text span size="xs" style={{ color: String(p.color ?? "inherit") }}>{p.name}</Text>:{" "}
                               {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
-                            </div>
+                            </Text>
                           ))}
                         </Paper>
                       );
@@ -744,7 +744,7 @@ export function NetWorthPage() {
                   <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="var(--color-accent)" strokeWidth={2.5} fill="url(#nwGrad_netWorth)" dot={false} connectNulls />
                 </AreaChart>
               </ResponsiveContainer>
-            </div>
+            </Box>
           </Box>
         ) : null}
         {!historyLoading && chartRows.length === 0 && !historyError ? (
@@ -763,7 +763,7 @@ export function NetWorthPage() {
         </Box>
         {loading ? <Skeleton height={120} radius="md" animate /> : null}
         {!loading && data && data.assets.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
+          <Box style={{ overflowX: "auto" }}>
             {editDirty ? (
               <Text size="sm" c="dimmed" mb="xs" style={{ maxWidth: "40rem" }}>
                 Unsaved balance changes — use <strong>Save</strong> or <strong>Cancel</strong> before leaving this page. Closing
@@ -795,14 +795,12 @@ export function NetWorthPage() {
                       </Table.Td>
                       <Table.Td>
                         {isEditing ? (
-                          <form onSubmit={saveRow}>
-                            <Group gap={4} wrap="wrap" align="center">
-                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
-                              <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                              <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
-                              <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
-                            </Group>
-                          </form>
+                          <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow}>
+                            <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                            <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                          </Group>
                         ) : formatMoney(signed)}
                       </Table.Td>
                       <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
@@ -825,12 +823,12 @@ export function NetWorthPage() {
                 </Table.Tr>
               </Table.Tbody>
             </Table>
-          </div>
+          </Box>
         ) : null}
         {!loading && data && data.liabilities.length > 0 ? (
           <>
             {!loading && data && data.assets.length > 0 ? <Divider my="md" /> : null}
-            <div style={{ overflowX: "auto", marginTop: "1rem" }}>
+            <Box style={{ overflowX: "auto", marginTop: "1rem" }}>
               <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Liabilities</Text>
             <Table withTableBorder withRowBorders striped="odd" verticalSpacing="xs">
               <Table.Thead>
@@ -856,14 +854,12 @@ export function NetWorthPage() {
                       </Table.Td>
                       <Table.Td>
                         {isEditing ? (
-                          <form onSubmit={saveRow}>
-                            <Group gap={4} wrap="wrap" align="center">
-                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
-                              <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                              <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
-                              <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
-                            </Group>
-                          </form>
+                          <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow}>
+                            <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                            <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                          </Group>
                         ) : formatMoney(signed)}
                       </Table.Td>
                       <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
@@ -886,15 +882,15 @@ export function NetWorthPage() {
                 </Table.Tr>
               </Table.Tbody>
             </Table>
-            </div>
+            </Box>
           </>
         ) : null}
         {rowSaveError ? <Alert color="red" variant="light" radius="md" mt="sm">{rowSaveError}</Alert> : null}
         {!loading && data && (topAssets.length > 0 || topLiabilities.length > 0) ? (
           <SimpleGrid cols={2} spacing="lg" mt="md" style={{ paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
             {topAssets.length > 0 ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Assets</div>
+              <Box>
+                <Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed" mb={6}>Top Assets</Text>
                 <ResponsiveContainer width="100%" height={topAssets.length * 34 + 8}>
                   <BarChart layout="vertical" data={topAssets} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <XAxis type="number" hide domain={[0, "dataMax"]} />
@@ -904,11 +900,11 @@ export function NetWorthPage() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+              </Box>
             ) : null}
             {topLiabilities.length > 0 ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Liabilities</div>
+              <Box>
+                <Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed" mb={6}>Top Liabilities</Text>
                 <ResponsiveContainer width="100%" height={topLiabilities.length * 34 + 8}>
                   <BarChart layout="vertical" data={topLiabilities} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <XAxis type="number" hide domain={[0, "dataMax"]} />
@@ -918,7 +914,7 @@ export function NetWorthPage() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+              </Box>
             ) : null}
           </SimpleGrid>
         ) : null}

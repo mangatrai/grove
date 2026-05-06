@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Alert, Button, TextInput } from "@mantine/core";
+import { Alert, Anchor, Button, Paper, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
 import { useSearchParams } from "react-router-dom";
 import { setToken } from "../api";
 
@@ -179,33 +179,33 @@ export function HomePage() {
 
           {/* ── Auth card ─────────────────────────────────────────────── */}
           <div className="home-landing__aside">
-            <div className="home-landing__card card">
-              <h2 className="home-landing__card-title">Sign in</h2>
-              <p className="home-landing__card-sub muted">
-                Welcome back — enter your credentials to continue.
-              </p>
-              {showResetSuccess ? (
-                <Alert
-                  color="green"
-                  variant="light"
-                  withCloseButton
-                  onClose={() => {
-                    setShowResetSuccess(false);
-                    const next = new URLSearchParams(searchParams);
-                    next.delete("reset");
-                    setSearchParams(next, { replace: true });
-                  }}
-                  mb="sm"
-                >
-                  Password updated — please sign in.
-                </Alert>
-              ) : null}
+            <Paper withBorder shadow="sm" radius="md" p="lg">
+              <Stack gap="md">
+                <div>
+                  <Text fw={600} size="lg">Sign in</Text>
+                  <Text c="dimmed" size="sm">Welcome back — enter your credentials to continue.</Text>
+                </div>
 
-              <form className="home-landing__form" onSubmit={onSubmit}>
-                <div className="home-landing__field">
-                  <label htmlFor="home-email">Email</label>
-                  <input
+                {showResetSuccess ? (
+                  <Alert
+                    color="green"
+                    variant="light"
+                    withCloseButton
+                    onClose={() => {
+                      setShowResetSuccess(false);
+                      const next = new URLSearchParams(searchParams);
+                      next.delete("reset");
+                      setSearchParams(next, { replace: true });
+                    }}
+                  >
+                    Password updated — please sign in.
+                  </Alert>
+                ) : null}
+
+                <Stack gap="sm" component="form" onSubmit={onSubmit}>
+                  <TextInput
                     id="home-email"
+                    label="Email"
                     type="email"
                     autoComplete="username"
                     value={email}
@@ -213,59 +213,40 @@ export function HomePage() {
                     placeholder="you@example.com"
                     required
                   />
-                </div>
-                <div className="home-landing__field">
-                  <label htmlFor="home-password">Password</label>
-                  <input
+                  <PasswordInput
                     id="home-password"
-                    type="password"
+                    label="Password"
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     required
+                    error={error ?? undefined}
                   />
-                </div>
-                {error && (
-                  <p className="error home-landing__error">{error}</p>
-                )}
-                <Button
-                  type="submit"
-                  fullWidth
-                  radius="sm"
-                  mt="xs"
-                  className="home-landing__submit"
-                  color="green"
-                  disabled={loading}
-                >
-                  {loading ? "Signing in…" : "Sign in"}
-                </Button>
-              </form>
-
-              {/* Auth helper links */}
-              <div className="home-landing__auth-links">
-                <span className="home-landing__auth-link-item">
-                  New here?{" "}
-                  <a
-                    href="mailto:admin@household.local"
-                    className="home-landing__auth-link"
-                    title="Contact your household admin to be added as a member"
+                  <Button
+                    type="submit"
+                    fullWidth
+                    radius="sm"
+                    color="green"
+                    loading={loading}
                   >
+                    Sign in
+                  </Button>
+                </Stack>
+
+                {/* Auth helper links */}
+                <Text size="xs" c="dimmed" ta="center">
+                  New here?{" "}
+                  <Anchor href="mailto:admin@household.local" size="xs" title="Contact your household admin to be added as a member">
                     Request access
-                  </a>
-                </span>
-                <span className="home-landing__auth-link-sep" aria-hidden>
-                  ·
-                </span>
-                {emailEnabled ? (
-                  <span className="home-landing__auth-link-item">
-                    {forgotSent ? (
-                      <div style={{ fontSize: "0.82rem", color: "var(--color-text, #1e293b)" }}>
-                        If that address is registered, a link is on its way.
-                      </div>
-                    ) : showForgotForm ? (
-                      <div style={{ width: "100%", marginTop: "0.6rem" }}>
-                        <form onSubmit={onForgotPasswordSubmit} style={{ display: "flex", gap: "0.45rem", alignItems: "end" }}>
+                  </Anchor>
+                  {" · "}
+                  {emailEnabled ? (
+                    <>
+                      {forgotSent ? (
+                        <Text size="xs" c="dimmed" span>If that address is registered, a link is on its way.</Text>
+                      ) : showForgotForm ? (
+                        <Stack gap={6} component="form" onSubmit={onForgotPasswordSubmit} mt={4}>
                           <TextInput
                             type="email"
                             size="xs"
@@ -273,53 +254,36 @@ export function HomePage() {
                             value={forgotEmail}
                             onChange={(event) => setForgotEmail(event.currentTarget.value)}
                             required
-                            style={{ flex: 1 }}
                           />
-                          <Button type="submit" size="xs" variant="default" loading={forgotLoading}>
+                          <Button type="submit" size="xs" variant="default" loading={forgotLoading} fullWidth>
                             Send reset link
                           </Button>
-                        </form>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="home-landing__auth-link"
-                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
-                        onClick={() => setShowForgotForm(true)}
-                      >
+                        </Stack>
+                      ) : (
+                        <Anchor size="xs" component="button" type="button" onClick={() => setShowForgotForm(true)}>
+                          Forgot password?
+                        </Anchor>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Anchor size="xs" component="button" type="button" onClick={() => setShowForgotTip((v) => !v)}>
                         Forgot password?
-                      </button>
-                    )}
-                  </span>
-                ) : (
-                  <>
-                    <span className="home-landing__auth-link-item">
-                      <button
-                        type="button"
-                        className="home-landing__auth-link"
-                        style={{ background: "none", border: "none", padding: 0, cursor: "pointer" }}
-                        onClick={() => setShowForgotTip((v) => !v)}
-                      >
-                        Forgot password?
-                      </button>
-                    </span>
-                    {showForgotTip ? (
-                      <div style={{
-                        marginTop: "0.6rem", padding: "0.55rem 0.75rem",
-                        background: "var(--color-surface-alt, #f0f4ff)",
-                        border: "1px solid var(--color-border, #c7d2e8)",
-                        borderRadius: 6, fontSize: "0.82rem",
-                        color: "var(--color-text, #1e293b)", lineHeight: 1.5
-                      }}>
-                        Ask your household admin to reset your password.
-                        They can do this from <strong>Settings → Members → Reset password</strong>.
-                        You'll receive a temporary password and will be prompted to change it on first login.
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </div>
-            </div>
+                      </Anchor>
+                      {showForgotTip ? (
+                        <Paper withBorder p="xs" mt={6} radius="sm">
+                          <Text size="xs" c="dimmed" lh={1.5}>
+                            Ask your household admin to reset your password.
+                            They can do this from <Text span fw={600}>Settings → Members → Reset password</Text>.
+                            You'll receive a temporary password and will be prompted to change it on first login.
+                          </Text>
+                        </Paper>
+                      ) : null}
+                    </>
+                  )}
+                </Text>
+              </Stack>
+            </Paper>
           </div>
         </div>
       </div>

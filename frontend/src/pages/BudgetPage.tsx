@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconPencil, IconX } from "@tabler/icons-react";
 import {
   ActionIcon,
+  Box,
   Button,
   Group,
   NumberInput,
@@ -222,7 +223,7 @@ function AmountInput({ value, onChange }: { value: string; onChange: (v: string)
       onChange={(v) => onChange(String(typeof v === "number" ? v : parseFloat(v as string) || 0))}
       min={0}
       step={1}
-      leftSection={<span>$</span>}
+      leftSection={<Text size="xs">$</Text>}
       size="xs"
       styles={{ input: { textAlign: "right" } }}
       hideControls
@@ -413,7 +414,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
         <HelpIcon label={helpText} />
       </Group>
 
-      <div style={{ overflowX: "auto" }}>
+      <Box style={{ overflowX: "auto" }}>
         <Table style={{ tableLayout: "fixed", width: "100%" }} withRowBorders striped="odd" verticalSpacing={6}>
           <colgroup>
             <col style={{ width: "42%" }} />
@@ -453,14 +454,14 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
                         >
                           {isDetailed ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
                         </ActionIcon>
-                      ) : <span style={{ width: 22, display: "inline-block" }} />}
+                      ) : <Box w={22} style={{ display: "inline-block" }} />}
                       <Text fw={600} size="sm">{g.parentName}</Text>
                     </Group>
                   </Table.Td>
                   <Table.Td style={{ textAlign: "right" }}>
                     <Text size="xs" c="dimmed">
                       {refTotal > 0
-                        ? <>{fmtUSD(refTotal)}{refHasThreeMonthAvg ? <span title="Includes 3-month average for some sub-categories"> *</span> : null}</>
+                        ? <>{fmtUSD(refTotal)}{refHasThreeMonthAvg ? <Text span title="Includes 3-month average for some sub-categories"> *</Text> : null}</>
                         : "—"}
                     </Text>
                   </Table.Td>
@@ -500,7 +501,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
                         <Text size="xs" c="dimmed">
                           {sug
                             ? sug.basis === "three_month_avg"
-                              ? <>{fmtUSD(sug.lastMonthActual)} <span title="3-month average">(avg {fmtUSD(sug.threeMonthAvg)})</span></>
+                              ? <>{fmtUSD(sug.lastMonthActual)} <Text span size="xs" title="3-month average">(avg {fmtUSD(sug.threeMonthAvg)})</Text></>
                               : fmtUSD(sug.lastMonthActual)
                             : "—"}
                         </Text>
@@ -557,7 +558,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
             </Table.Tr>
           </Table.Tfoot>
         </Table>
-      </div>
+      </Box>
 
       {error && <Text c="red" size="sm">{error}</Text>}
 
@@ -627,7 +628,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
         ))}
       </SimpleGrid>
 
-      <div style={{ overflowX: "auto" }}>
+      <Box style={{ overflowX: "auto" }}>
         <Table withRowBorders striped="odd" verticalSpacing={6} style={{ width: "100%" }}>
           <Table.Thead>
             <Table.Tr>
@@ -666,7 +667,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
                     </Table.Td>
                     <Table.Td py="xs">
                       <Group gap={8} wrap="nowrap">
-                        <div style={{ flex: 1 }}><ProgressBar percent={cat.percentUsed} /></div>
+                        <Box style={{ flex: 1 }}><ProgressBar percent={cat.percentUsed} /></Box>
                         <Text size="xs" c="dimmed" w={42} ta="right">{cat.percentUsed}%</Text>
                       </Group>
                     </Table.Td>
@@ -687,7 +688,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
             })}
           </Table.Tbody>
         </Table>
-      </div>
+      </Box>
 
       {summary.unbudgetedSpend > 0 && (
         <Text size="sm" c="dimmed">
@@ -698,11 +699,11 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
         </Text>
       )}
 
-      <div>
+      <Group>
         <Button variant="default" leftSection={<IconPencil size={14} />} onClick={onEdit}>
           Edit budget
         </Button>
-      </div>
+      </Group>
     </Stack>
   );
 }
