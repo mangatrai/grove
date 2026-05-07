@@ -165,3 +165,9 @@ household,,,FEDEx Office,contains,debit_only,,Shopping > Office,40,0.95,true
 household,,,FEDEX OFFICE,contains,debit_only,,Shopping > Office,40,0.95,true
 household,,,ACH,contains,debit_only,,Transfers > Transfers out,40,0.95,true
 household,,,ACH,contains,credit_only,,Transfers > Transfers in,40,0.95,true
+household,,,payyourselfback,contains,any,,Transfers > Transfers in,100,0.9,true
+household,,,tj maxx,contains,any,,Home > Home improvement,100,0.9,true
+household,,,homedepot,contains,any,,Home > Home improvement,100,0.9,true
+household,,,nebraska furniture mart o,contains,any,,Home > Furniture,100,0.9,true
+household,,,einstein bros bagels,contains,any,,Food > Dining out,100,0.9,true
+household,,,category spend bonus,contains,any,,Transfers > Transfers in,100,0.9,true

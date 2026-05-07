@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
-import { qGet } from "../../db/query.js";
+import { qExec, qGet } from "../../db/query.js";
 import {
   createImportSession,
   getSessionForHousehold,
@@ -37,11 +37,16 @@ import { upsertManualBalanceSnapshot } from "../reports/balance-sheet.service.js
 import { deleteImportSessionFile, type DeleteImportFileFailure } from "./import-file-delete.service.js";
 import { isParserProfileId, PARSER_PROFILE_IDS } from "./profiles/profile-ids.js";
 import { suggestAccountForOfx } from "./ofx-account-match.service.js";
+import { getImportHistory, uploadAndImport } from "./import-upload.service.js";
 
 /** 50 MB per file, max 20 files per upload request. Prevents memory-based DoS. */
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024, files: 20 }
+});
+const uploadSingle = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1 }
 });
 
 const createSessionSchema = z.object({
@@ -85,6 +90,21 @@ const accountUpsertSchema = z.object({
   initialBalance: z.number().finite().optional().nullable(),
   initialBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable()
 });
+const importUploadSchema = z
+  .object({
+    importType: z.enum(["bank", "payslip"]),
+    financialAccountId: z.string().uuid().optional(),
+    employerId: z.string().uuid().optional()
+  })
+  .superRefine((value, ctx) => {
+    if (value.importType === "bank" && !value.financialAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["financialAccountId"],
+        message: "financialAccountId is required for bank imports"
+      });
+    }
+  });
 
 function mapServiceFailureToStatus(failure: ServiceFailure): number {
   switch (failure.code) {
@@ -102,8 +122,6 @@ function mapRollbackFailureToStatus(failure: RollbackImportSessionFailure): numb
   switch (failure.code) {
     case "NOT_FOUND":
       return 404;
-    case "SESSION_NOT_REVIEW":
-      return 409;
     default:
       return 500;
   }
@@ -150,6 +168,69 @@ function mapDeleteImportFileFailureToStatus(failure: DeleteImportFileFailure): n
 
 export const importsRouter = Router();
 importsRouter.use(requireAuth);
+
+importsRouter.post("/upload", uploadSingle.single("file"), async (req: AuthenticatedRequest, res) => {
+  const file = req.file;
+  if (!file || !file.buffer?.length) {
+    res.status(400).json({ message: "No file provided", code: "MISSING_FILE" });
+    return;
+  }
+
+  const parsed = importUploadSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload", issues: parsed.error.issues });
+    return;
+  }
+
+  const { householdId, userId } = req.authUser!;
+  const payload = parsed.data;
+
+  const result =
+    payload.importType === "bank"
+      ? await uploadAndImport({
+          importType: "bank",
+          householdId,
+          userId,
+          file,
+          financialAccountId: payload.financialAccountId!
+        })
+      : await uploadAndImport({
+          importType: "payslip",
+          householdId,
+          userId,
+          file,
+          employerId: payload.employerId
+        });
+
+  if (!result.ok) {
+    if (result.code === "DUPLICATE_PAYSLIP") {
+      res.status(409).json({ code: result.code, message: result.message });
+      return;
+    }
+    if (result.code === "PROFILE_INFERENCE_FAILED" || result.code === "PARSE_FAILED") {
+      res.status(422).json({ code: result.code, message: result.message });
+      return;
+    }
+    if (result.code === "UNSUPPORTED_PARSER" || result.code === "OPENAI_API_NOT_CONFIGURED" || result.code === "LLM_CANONICAL_VALIDATION_FAILED" || result.code === "LLM_EXTRACTION_FAILED" || result.code === "EMPLOYER_REQUIRED" || result.code === "INVALID_EMPLOYER") {
+      res.status(422).json({ code: result.code, message: result.message });
+      return;
+    }
+    res.status(422).json({ code: result.code, message: result.message });
+    return;
+  }
+
+  if (result.data.type === "payslip") {
+    res.status(201).json(result.data);
+    return;
+  }
+  res.status(200).json(result.data);
+});
+
+importsRouter.get("/history", async (req: AuthenticatedRequest, res) => {
+  const { householdId } = req.authUser!;
+  const items = await getImportHistory(householdId);
+  res.status(200).json({ items });
+});
 
 importsRouter.post("/sessions", async (req: AuthenticatedRequest, res) => {
   const parsed = createSessionSchema.safeParse(req.body ?? {});
@@ -683,6 +764,18 @@ importsRouter.post("/sessions/:sessionId/canonicalize", async (req: Authenticate
     return;
   }
 
+  await qExec(
+    `UPDATE import_session
+       SET stats_json = ?
+     WHERE id = ? AND household_id = ?`,
+    JSON.stringify({
+      addedCount: result.data.inserted,
+      duplicateCount: result.data.duplicates
+    }),
+    req.params.sessionId,
+    householdId
+  );
+
   res.status(200).json(result.data);
 });
 
@@ -705,8 +798,7 @@ importsRouter.post("/sessions/:sessionId/undo-import", async (req: Authenticated
   if (!result.ok) {
     res.status(mapRollbackFailureToStatus(result)).json({
       message: result.message,
-      code: result.code,
-      ...(result.code === "SESSION_NOT_REVIEW" ? { currentStatus: result.currentStatus } : {})
+      code: result.code
     });
     return;
   }
@@ -847,6 +939,18 @@ importsRouter.post("/sessions/:sessionId/ofx-confirm", async (req: Authenticated
     res.status(500).json({ message: "Unexpected canonicalize error" });
     return;
   }
+
+  await qExec(
+    `UPDATE import_session
+       SET stats_json = ?
+     WHERE id = ? AND household_id = ?`,
+    JSON.stringify({
+      addedCount: canonResult.data.inserted,
+      duplicateCount: canonResult.data.duplicates
+    }),
+    sessionId,
+    householdId
+  );
 
   res.status(200).json({
     parsedFiles: parseResult.data.parsedFiles,

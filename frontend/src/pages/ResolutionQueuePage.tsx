@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { Alert, Anchor, Box, Paper, Skeleton, Stack, Table, Text, Title } from "@mantine/core";
 
 import { apiJson, useAuthToken } from "../api";
 
@@ -65,57 +66,65 @@ export function ResolutionQueuePage() {
   }
 
   return (
-    <div className="resolution-queue-page">
-      <div className="card">
-        <h1>Open resolution items</h1>
-        <p className="muted">
+    <Stack>
+      <Paper withBorder p="lg">
+        <Title order={2} mb="xs">Open resolution items</Title>
+        <Text c="dimmed" size="sm" mb="md">
           Full queue of open review items (including near-duplicates that never received a ledger row — they do not
-          appear on <Link to="/transactions?needsReview=true">Transactions → Needs review</Link>). Use status actions from
-          your workflow; this list is the API-backed <code>GET /resolution</code> surface.
-        </p>
-        {error ? <p className="error">{error}</p> : null}
-        {loading ? <p className="muted">Loading…</p> : null}
-        {!loading && data && data.items.length === 0 ? <p className="muted">No open items.</p> : null}
+          appear on <Anchor component={Link} to="/transactions?needsReview=true">Transactions → Needs review</Anchor>).
+          Use status actions from your workflow; this list is the API-backed <code>GET /resolution</code> surface.
+        </Text>
+
+        {error ? <Alert color="red" mb="sm">{error}</Alert> : null}
+        {loading ? <Skeleton height={120} radius="sm" /> : null}
+
+        {!loading && data && data.items.length === 0 ? (
+          <Text c="dimmed">No open items.</Text>
+        ) : null}
+
         {!loading && data && data.items.length > 0 ? (
-          <div style={{ overflowX: "auto" }}>
-            <table className="ledger-table">
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>File</th>
-                  <th>Raw preview</th>
-                  <th>Session</th>
-                </tr>
-              </thead>
-              <tbody>
+          <Box style={{ overflowX: "auto" }}>
+            <Table withRowBorders striped="odd" verticalSpacing={6}>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Type</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Status</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>File</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Raw preview</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Session</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                 {data.items.map((it) => (
-                  <tr key={it.id}>
-                    <td>{TYPE_LABELS[it.type] ?? it.type}</td>
-                    <td>{it.status}</td>
-                    <td style={{ maxWidth: "14rem", wordBreak: "break-word" }}>{it.context.fileName ?? "—"}</td>
-                    <td style={{ fontSize: "0.85rem" }}>
+                  <Table.Tr key={it.id}>
+                    <Table.Td>{TYPE_LABELS[it.type] ?? it.type}</Table.Td>
+                    <Table.Td>{it.status}</Table.Td>
+                    <Table.Td style={{ maxWidth: "14rem", wordBreak: "break-word" }}>
+                      {it.context.fileName ?? "—"}
+                    </Table.Td>
+                    <Table.Td fz="sm">
                       {it.context.raw
                         ? `${it.context.raw.txnDate ?? "—"} · ${it.context.raw.description ?? "—"} · ${it.context.raw.amount != null ? `$${it.context.raw.amount.toFixed(2)}` : "—"}`
                         : "—"}
-                    </td>
-                    <td>
+                    </Table.Td>
+                    <Table.Td>
                       {it.context.sessionId ? (
-                        <Link to={`/imports/${it.context.sessionId}`}>Import session</Link>
+                        <Anchor component={Link} to={`/imports/${it.context.sessionId}`}>Import session</Anchor>
                       ) : (
                         "—"
                       )}
-                    </td>
-                  </tr>
+                    </Table.Td>
+                  </Table.Tr>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </Table.Tbody>
+            </Table>
+          </Box>
         ) : null}
-        <p style={{ marginTop: "1rem" }}>
-          <Link to="/transactions?needsReview=true">← Back to Transactions → Needs review</Link>
-        </p>
-      </div>
-    </div>
+
+        <Text size="sm" mt="md">
+          <Anchor component={Link} to="/transactions?needsReview=true">← Back to Transactions → Needs review</Anchor>
+        </Text>
+      </Paper>
+    </Stack>
   );
 }

@@ -79,7 +79,7 @@ household-finance-app/
 | `ledger/` | `ledger.service.ts`, `ledger.routes.ts` | List/filter canonical transactions, manual entry, category updates |
 | `resolution/` | `resolution.service.ts` | Unresolved items queue (unknown_category, duplicate_ambiguity, transfer_ambiguity) |
 | `reports/` | `cash-summary.service.ts`, `balance-sheet.service.ts`, `reports.routes.ts` | Cash flow KPIs (`/reports/cash-summary`); net worth snapshot + history (`/reports/balance-sheet`, `/reports/balance-sheet/history`); manual balance POST/PATCH |
-| `export/` | `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`, `exports.routes.ts` | Async **ZIP export** (`exportVersion` 3: manifest + per-table JSON) and **async restore** (`POST /exports/household/import`, poll `GET /exports/import/:jobId`); wipe-then-restore, JWT invalidation via `token_version` |
+| `export/` | `export-household-bundle.service.ts`, `export-job.service.ts`, `import-household-bundle.service.ts`, `exports.routes.ts` | Async **`.hfb` export** (`exportVersion` 4: manifest + per-table JSON) and **async restore** (`POST /exports/household/import`, poll `GET /exports/import/:jobId`); wipe-then-restore, JWT invalidation via `token_version` |
 | `budget/` | `budget.service.ts`, `budget.routes.ts` | Monthly per-category budgets; suggestions from recent spend; actuals vs budgeted with parent-level rollup (`/budget/suggest`, `/budget/months`, `/budget/:month` GET/PUT) |
 | `health/` | routes only | `GET /health` liveness endpoint |
 
@@ -136,7 +136,7 @@ PATCH /imports/sessions/{id}/files/{fileId} → Bind to financial account + pars
 POST /imports/sessions/{id}/parse       → Run adapter → insert transaction_raw rows
 POST /imports/sessions/{id}/canonicalize → canonical-ingest: dedupe + classify + transfer detect → transaction_canonical
 PATCH /imports/sessions/{id}/status     → Finalize (status: "finalized")
-POST /imports/sessions/{id}/undo-import → Rollback canonical rows (only while status = "review")
+POST /imports/sessions/{id}/undo-import → Rollback canonical rows (available regardless of session status)
 ```
 
 The canonical ingest (`canonical-ingest.service.ts`) is the **single write path** for all posted transactions. It enforces:
@@ -171,7 +171,7 @@ When adding a new adapter: create a file in `profiles/`, register its ID in the 
 
 Rule schema: `pattern` (regex), `categoryId`, `amountScope` (any | credit_only | debit_only), `priority`.
 
-> **Note:** AI/LLM-based transaction categorization (Anthropic API) was explored and fully removed. Classification is rule-based only. OpenAI is used exclusively for payslip PDF extraction.
+> **Note:** AI/LLM-based transaction categorization (Anthropic API) was explored and fully removed. Classification is rule-based only. OpenAI is used for payslip PDF extraction. The `@anthropic-ai/sdk` remains in the dependency tree for the optional AI insights pipeline (`LLM_PROVIDER=anthropic`); do not remove it.
 
 ---
 
@@ -339,7 +339,7 @@ Full checklist (image vs `docker run`, **`.env`**, Koyeb buildpack vs Dockerfile
 | `docs/ENVIRONMENT_VARIABLES.md` | Full env reference |
 | `docs/USER_GUIDE.md` | End-user features |
 | `docs/API_INDEX.md` | All API routes summary |
-| `docs/API_EXPORTS.md` | Export ZIP + restore API |
+| `docs/API_EXPORTS.md` | `.hfb` export + restore API |
 | `docs/API_*.md` | Per-domain API guides |
 | `docs/PAYSLIP_V1.md` | Payslip feature spec |
 | `docs/CHANGE_HISTORY.md` | Detailed changelog |

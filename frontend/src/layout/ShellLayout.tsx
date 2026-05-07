@@ -1,10 +1,22 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 
-import { apiJson, setToken, useAuthToken } from "../api";
+import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { UserContext } from "../UserContext";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopBar } from "./AppTopBar";
+
+/** Set by HomePage on login when server returns `forcePasswordChange`; cleared after `/auth/me` or sign-out. */
+const LOGIN_FORCE_PASSWORD_HINT_KEY = "hf_login_force_password_change";
+
+function readLoginForcePasswordHint(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(LOGIN_FORCE_PASSWORD_HINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 export function ShellLayout() {
   const token = useAuthToken();
@@ -20,6 +32,7 @@ export function ShellLayout() {
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [personProfileId, setPersonProfileId] = useState<string | null | undefined>(undefined);
+  const [setupRedirecting, setSetupRedirecting] = useState(false);
   // undefined = not yet loaded; null = loaded but no profile; string = loaded with profile
 
   useEffect(() => {
@@ -27,10 +40,21 @@ export function ShellLayout() {
       setForcePasswordChange(false);
       setUserRole(null);
       setPersonProfileId(undefined);
+      setSetupRedirecting(false);
+      try {
+        sessionStorage.removeItem(LOGIN_FORCE_PASSWORD_HINT_KEY);
+      } catch {
+        /* ignore */
+      }
       return;
     }
     void apiJson<{ user: { forcePasswordChange?: boolean; role?: string; personProfileId?: string | null } }>("/auth/me")
       .then((r) => {
+        try {
+          sessionStorage.removeItem(LOGIN_FORCE_PASSWORD_HINT_KEY);
+        } catch {
+          /* ignore */
+        }
         setForcePasswordChange(Boolean(r.user.forcePasswordChange));
         setUserRole(r.user.role ?? null);
         setPersonProfileId(r.user.personProfileId ?? null);
@@ -65,6 +89,35 @@ export function ShellLayout() {
     window.addEventListener("app:password-changed", handler);
     return () => window.removeEventListener("app:password-changed", handler);
   }, []);
+
+  useEffect(() => {
+    if (!token || setupRedirecting) return;
+    const hinted = readLoginForcePasswordHint();
+    if (!forcePasswordChange && !hinted) return;
+    setSetupRedirecting(true);
+    void (async () => {
+      try {
+        const res = await apiFetch("/auth/setup-forced-change-token", { method: "POST" });
+        if (!res.ok) {
+          setSetupRedirecting(false);
+          return;
+        }
+        const body = (await res.json()) as { token?: string };
+        if (!body.token) {
+          setSetupRedirecting(false);
+          return;
+        }
+        setToken(null);
+        // BrowserRouter (pathname routes) — hash URLs would leave pathname "/" and show HomePage.
+        window.location.replace(`/reset-password?token=${encodeURIComponent(body.token)}`);
+      } catch {
+        setSetupRedirecting(false);
+      }
+    })();
+  }, [forcePasswordChange, token, setupRedirecting]);
+
+  const loginForcePasswordHint = Boolean(token && readLoginForcePasswordHint());
+  const blockAuthedShellForForceChange = forcePasswordChange || loginForcePasswordHint;
 
   if (!token) {
     return (
@@ -105,6 +158,11 @@ export function ShellLayout() {
     );
   }
 
+  // Forced-change redirect is in flight — don't flash the full shell (including before `/auth/me`).
+  if (blockAuthedShellForForceChange) {
+    return null;
+  }
+
   return (
     <UserContext.Provider value={{ role: userRole, personProfileId: personProfileId ?? null }}>
     <div className="app-frame app-frame--authed">
@@ -117,42 +175,8 @@ export function ShellLayout() {
         />
         <div className="app-shell-main">
           <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
-          {forcePasswordChange && userRole === "owner" && pathname.startsWith("/settings") ? (
-            <div style={{
-              background: "#fef3c7",
-              borderBottom: "1px solid #fcd34d",
-              padding: "0.6rem 1.25rem",
-              fontSize: "0.88rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}>
-              <strong>First login:</strong> Your account was created with a temporary password. Please set a permanent password below before using the app.
-            </div>
-          ) : null}
-          {forcePasswordChange && userRole !== "owner" ? (
-            <div style={{
-              background: "#fef3c7",
-              borderBottom: "1px solid #fcd34d",
-              padding: "0.6rem 1.25rem",
-              fontSize: "0.88rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.75rem"
-            }}>
-              <strong>Action required:</strong> Your password is temporary — please change it.{" "}
-              <Link to="/settings?tab=security" style={{ fontWeight: 600 }}>
-                Change password now →
-              </Link>
-            </div>
-          ) : null}
           <main className="app-main">
-            {/* Hard gate: owner with a temporary password must change it before accessing anything else. */}
-            {forcePasswordChange && userRole === "owner" && !pathname.startsWith("/settings") ? (
-              <Navigate to="/settings?tab=security" replace />
-            ) : (
-              <Outlet />
-            )}
+            <Outlet />
           </main>
         </div>
       </div>

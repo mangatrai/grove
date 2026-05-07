@@ -1,4 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Box,
+  Button,
+  Code,
+  Group,
+  NumberInput,
+  Paper,
+  Select,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
+import { IconChevronDown, IconChevronRight, IconPencil, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
@@ -117,32 +135,19 @@ function sectionHasAuthority(rows: PayslipLineItemRow[]): boolean {
 function ValidationWarningsBanner({ warnings }: { warnings: ValidationWarning[] }) {
   if (warnings.length === 0) return null;
   return (
-    <div style={{
-      marginBottom: "0.75rem",
-      padding: "0.6rem 0.8rem",
-      background: "rgba(234, 179, 8, 0.07)",
-      border: "1px solid rgba(234, 179, 8, 0.45)",
-      borderRadius: 6
-    }}>
-      <div style={{ fontWeight: 600, fontSize: "0.82rem", marginBottom: "0.25rem", color: "var(--color-text)" }}>
-        Data quality issues
-      </div>
-      {warnings.map((w, i) => (
-        <div
-          key={i}
-          style={{
-            fontSize: "0.82rem",
-            marginTop: "0.2rem",
-            color: w.code === "ARITHMETIC_IMBALANCE" ? "var(--color-danger, #dc2626)" : "#92400e"
-          }}
-        >
-          {w.message}
-        </div>
-      ))}
-      <div style={{ fontSize: "0.78rem", marginTop: "0.4rem", color: "var(--color-text-muted)" }}>
-        Edit or delete line items below, or correct the summary amounts directly. Warnings are non-blocking.
-      </div>
-    </div>
+    <Alert color="yellow" mb="sm">
+      <Stack gap={4}>
+        <Text fw={600} size="sm">Data quality issues</Text>
+        {warnings.map((w, i) => (
+          <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "yellow"}>
+            {w.message}
+          </Text>
+        ))}
+        <Text size="xs" c="dimmed">
+          Edit or delete line items below, or correct the summary amounts directly. Warnings are non-blocking.
+        </Text>
+      </Stack>
+    </Alert>
   );
 }
 
@@ -171,66 +176,67 @@ function SummaryAmountRow({
     if (isEditing) currentInputRef.current?.select();
   }, [isEditing]);
 
-  const labelStyle: React.CSSProperties = def.muted
-    ? { color: "var(--color-text-muted, #666)", fontSize: "0.9rem" }
-    : {};
-
   if (isEditing) {
     return (
       <>
-        <tr>
-          <td style={labelStyle}>{def.label}</td>
-          <td>
-            <input
+        <Table.Tr>
+          <Table.Td>
+            <Text size="sm" c={def.muted ? "dimmed" : undefined}>{def.label}</Text>
+          </Table.Td>
+          <Table.Td>
+            <NumberInput
               ref={currentInputRef}
-              type="number" step="0.01"
               value={editState!.currentVal}
-              onChange={(e) => onEditChange({ ...editState!, currentVal: e.target.value })}
+              onChange={(v) => onEditChange({ ...editState!, currentVal: String(v ?? "") })}
               onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCancel(); }}
-              style={{ width: "7.5rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
-              disabled={saving} placeholder="null"
+              disabled={saving}
+              placeholder="null"
+              decimalScale={2}
+              maw={150}
             />
-          </td>
-          <td>
-            <input
-              type="number" step="0.01"
+          </Table.Td>
+          <Table.Td>
+            <NumberInput
               value={editState!.ytdVal}
-              onChange={(e) => onEditChange({ ...editState!, ytdVal: e.target.value })}
+              onChange={(v) => onEditChange({ ...editState!, ytdVal: String(v ?? "") })}
               onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCancel(); }}
-              style={{ width: "7.5rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
-              disabled={saving} placeholder="null"
+              disabled={saving}
+              placeholder="null"
+              decimalScale={2}
+              maw={150}
             />
-          </td>
-          <td style={{ whiteSpace: "nowrap" }}>
-            <button type="button" onClick={onSave} disabled={saving}
-              style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem", marginRight: "0.3rem" }}
-              title="Save">{saving ? "…" : "✓"}</button>
-            <button type="button" className="secondary" onClick={onCancel} disabled={saving}
-              style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem" }}
-              title="Cancel">✗</button>
-          </td>
-        </tr>
+          </Table.Td>
+          <Table.Td>
+            <Group gap={6} wrap="nowrap">
+              <Button type="button" onClick={onSave} disabled={saving} size="xs" title="Save">
+                {saving ? "..." : "Save"}
+              </Button>
+              <Button type="button" variant="default" onClick={onCancel} disabled={saving} size="xs" title="Cancel">
+                Cancel
+              </Button>
+            </Group>
+          </Table.Td>
+        </Table.Tr>
         {saveError ? (
-          <tr><td colSpan={4}><span className="error" style={{ fontSize: "0.8rem" }}>{saveError}</span></td></tr>
+          <Table.Tr>
+            <Table.Td colSpan={4}><Text size="sm" c="red">{saveError}</Text></Table.Td>
+          </Table.Tr>
         ) : null}
       </>
     );
   }
 
   return (
-    <tr>
-      <td style={labelStyle}>{def.label}</td>
-      <td style={{ whiteSpace: "nowrap" }}>{formatMoney(currentVal)}</td>
-      <td style={{ whiteSpace: "nowrap" }}>{formatMoney(ytdVal)}</td>
-      <td>
-        <button type="button" className="secondary" onClick={onStartEdit} title={`Edit ${def.label}`}
-          style={{ fontSize: "0.75rem", padding: "0.1rem 0.4rem", opacity: 0.45 }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.45"; }}>
-          ✏
-        </button>
-      </td>
-    </tr>
+    <Table.Tr>
+      <Table.Td><Text size="sm" c={def.muted ? "dimmed" : undefined}>{def.label}</Text></Table.Td>
+      <Table.Td><Text size="sm">{formatMoney(currentVal)}</Text></Table.Td>
+      <Table.Td><Text size="sm">{formatMoney(ytdVal)}</Text></Table.Td>
+      <Table.Td>
+        <ActionIcon type="button" variant="subtle" onClick={onStartEdit} title={`Edit ${def.label}`} aria-label={`Edit ${def.label}`}>
+          <IconPencil size={14} />
+        </ActionIcon>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -274,25 +280,20 @@ function LineItemRow({
 
   if (isDeleting) {
     return (
-      <tr style={{ background: "rgba(220, 38, 38, 0.04)" }}>
-        <td colSpan={colSpan} style={{ fontSize: "0.85rem", padding: "0.4rem 0.5rem" }}>
-          <span style={{ marginRight: "0.75rem", color: "var(--color-danger, #dc2626)" }}>
-            Delete <strong>{row.name ?? "this row"}</strong>?
-          </span>
-          <button type="button"
-            onClick={() => ctx.onConfirmDelete(row.id)}
-            disabled={ctx.saving}
-            style={{ fontSize: "0.8rem", padding: "0.15rem 0.6rem", marginRight: "0.35rem",
-              background: "var(--color-danger, #dc2626)", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
-            {ctx.saving ? "…" : "Delete"}
-          </button>
-          <button type="button" className="secondary" onClick={ctx.onCancelDelete} disabled={ctx.saving}
-            style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem" }}>
-            Cancel
-          </button>
-          {ctx.saveError ? <span className="error" style={{ marginLeft: "0.5rem", fontSize: "0.8rem" }}>{ctx.saveError}</span> : null}
-        </td>
-      </tr>
+      <Table.Tr>
+        <Table.Td colSpan={colSpan}>
+          <Group gap="sm" wrap="wrap">
+            <Text size="sm" c="red">Delete <strong>{row.name ?? "this row"}</strong>?</Text>
+            <Button type="button" color="red" onClick={() => ctx.onConfirmDelete(row.id)} disabled={ctx.saving} size="xs">
+              {ctx.saving ? "..." : "Delete"}
+            </Button>
+            <Button type="button" variant="default" onClick={ctx.onCancelDelete} disabled={ctx.saving} size="xs">
+              Cancel
+            </Button>
+            {ctx.saveError ? <Text size="sm" c="red">{ctx.saveError}</Text> : null}
+          </Group>
+        </Table.Td>
+      </Table.Tr>
     );
   }
 
@@ -300,110 +301,98 @@ function LineItemRow({
     const f = ctx.editFields;
     return (
       <>
-        <tr style={{ background: "rgba(0,0,0,0.02)" }}>
-          <td>
-            <input ref={nameInputRef} type="text" value={f.name}
+        <Table.Tr>
+          <Table.Td>
+            <TextInput ref={nameInputRef} value={f.name}
               onChange={(e) => ctx.onEditChange({ ...f, name: e.target.value })}
               onKeyDown={(e) => { if (e.key === "Escape") ctx.onCancelEdit(); }}
-              style={{ width: "100%", minWidth: "9rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
               disabled={ctx.saving} placeholder="Name" />
-          </td>
+          </Table.Td>
           {showAuthority ? (
-            <td>
-              <input type="text" value={f.authority}
+            <Table.Td>
+              <TextInput value={f.authority}
                 onChange={(e) => ctx.onEditChange({ ...f, authority: e.target.value })}
-                style={{ width: "6rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
                 disabled={ctx.saving} placeholder="Authority" />
-            </td>
+            </Table.Td>
           ) : null}
           {showHours ? (
-            <td>
-              <input type="number" step="0.01" value={f.hoursOrDaysCurrent}
-                onChange={(e) => ctx.onEditChange({ ...f, hoursOrDaysCurrent: e.target.value })}
-                style={{ width: "5rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
+            <Table.Td>
+              <NumberInput decimalScale={2} value={f.hoursOrDaysCurrent}
+                onChange={(v) => ctx.onEditChange({ ...f, hoursOrDaysCurrent: String(v ?? "") })}
                 disabled={ctx.saving} placeholder="Hours" />
-            </td>
+            </Table.Td>
           ) : null}
           {showRate ? (
-            <td>
-              <input type="number" step="0.01" value={f.rate}
-                onChange={(e) => ctx.onEditChange({ ...f, rate: e.target.value })}
-                style={{ width: "6rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
+            <Table.Td>
+              <NumberInput decimalScale={2} value={f.rate}
+                onChange={(v) => ctx.onEditChange({ ...f, rate: String(v ?? "") })}
                 disabled={ctx.saving} placeholder="Rate" />
-            </td>
+            </Table.Td>
           ) : null}
-          <td>
-            <input type="number" step="0.01" value={f.amountCurrent}
-              onChange={(e) => ctx.onEditChange({ ...f, amountCurrent: e.target.value })}
+          <Table.Td>
+            <NumberInput decimalScale={2} value={f.amountCurrent}
+              onChange={(v) => ctx.onEditChange({ ...f, amountCurrent: String(v ?? "") })}
               onKeyDown={(e) => { if (e.key === "Enter") ctx.onSaveEdit(row.id); if (e.key === "Escape") ctx.onCancelEdit(); }}
-              style={{ width: "7rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
               disabled={ctx.saving} placeholder="Current" />
-          </td>
-          <td>
-            <input type="number" step="0.01" value={f.amountYtd}
-              onChange={(e) => ctx.onEditChange({ ...f, amountYtd: e.target.value })}
+          </Table.Td>
+          <Table.Td>
+            <NumberInput decimalScale={2} value={f.amountYtd}
+              onChange={(v) => ctx.onEditChange({ ...f, amountYtd: String(v ?? "") })}
               onKeyDown={(e) => { if (e.key === "Enter") ctx.onSaveEdit(row.id); if (e.key === "Escape") ctx.onCancelEdit(); }}
-              style={{ width: "7rem", fontSize: "0.85rem", padding: "0.2rem 0.3rem" }}
               disabled={ctx.saving} placeholder="YTD" />
-          </td>
-          <td style={{ whiteSpace: "nowrap" }}>
-            <button type="button" onClick={() => ctx.onSaveEdit(row.id)} disabled={ctx.saving}
-              style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem", marginRight: "0.3rem" }}
-              title="Save">{ctx.saving ? "…" : "✓"}</button>
-            <button type="button" className="secondary" onClick={ctx.onCancelEdit} disabled={ctx.saving}
-              style={{ fontSize: "0.8rem", padding: "0.15rem 0.5rem" }}
-              title="Cancel">✗</button>
-          </td>
-        </tr>
+          </Table.Td>
+          <Table.Td>
+            <Group gap={6} wrap="nowrap">
+              <Button type="button" onClick={() => ctx.onSaveEdit(row.id)} disabled={ctx.saving} size="xs" title="Save">
+                {ctx.saving ? "..." : "Save"}
+              </Button>
+              <Button type="button" variant="default" onClick={ctx.onCancelEdit} disabled={ctx.saving} size="xs" title="Cancel">
+                Cancel
+              </Button>
+            </Group>
+          </Table.Td>
+        </Table.Tr>
         {ctx.saveError ? (
-          <tr><td colSpan={colSpan}><span className="error" style={{ fontSize: "0.8rem" }}>{ctx.saveError}</span></td></tr>
+          <Table.Tr>
+            <Table.Td colSpan={colSpan}><Text size="sm" c="red">{ctx.saveError}</Text></Table.Td>
+          </Table.Tr>
         ) : null}
       </>
     );
   }
 
   return (
-    <tr>
-      <td>
-        {row.name ?? <span className="muted">—</span>}
+    <Table.Tr>
+      <Table.Td>
+        {row.name ?? <Text span c="dimmed">—</Text>}
         {row.dateRaw ? (
-          <span className="muted" style={{ fontSize: "0.78rem", marginLeft: "0.35rem" }}>{row.dateRaw}</span>
+          <Text span c="dimmed" size="xs" ml={6}>{row.dateRaw}</Text>
         ) : null}
-      </td>
+      </Table.Td>
       {showAuthority ? (
-        <td style={{ whiteSpace: "nowrap", fontSize: "0.82rem", color: "var(--color-text-muted)" }}>
-          {row.authority ?? "—"}
-        </td>
+        <Table.Td><Text size="sm" c="dimmed">{row.authority ?? "—"}</Text></Table.Td>
       ) : null}
       {showHours ? (
-        <td style={{ whiteSpace: "nowrap" }}>
+        <Table.Td>
           {row.hoursOrDaysCurrent != null ? row.hoursOrDaysCurrent : "—"}
-        </td>
+        </Table.Td>
       ) : null}
       {showRate ? (
-        <td style={{ whiteSpace: "nowrap" }}>{row.rate != null ? formatMoney(row.rate) : "—"}</td>
+        <Table.Td>{row.rate != null ? formatMoney(row.rate) : "—"}</Table.Td>
       ) : null}
-      <td style={{ whiteSpace: "nowrap" }}>{formatMoney(row.amountCurrent)}</td>
-      <td style={{ whiteSpace: "nowrap" }}>{formatMoney(row.amountYtd)}</td>
-      <td style={{ whiteSpace: "nowrap" }}>
-        <button type="button" className="secondary"
-          onClick={() => ctx.onStartEdit(row)}
-          title="Edit row"
-          style={{ fontSize: "0.73rem", padding: "0.1rem 0.35rem", opacity: 0.45, marginRight: "0.25rem" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.45"; }}>
-          ✏
-        </button>
-        <button type="button" className="secondary"
-          onClick={() => ctx.onStartDelete(row.id)}
-          title="Delete row"
-          style={{ fontSize: "0.73rem", padding: "0.1rem 0.35rem", opacity: 0.35, color: "var(--color-danger, #dc2626)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.35"; }}>
-          ✕
-        </button>
-      </td>
-    </tr>
+      <Table.Td>{formatMoney(row.amountCurrent)}</Table.Td>
+      <Table.Td>{formatMoney(row.amountYtd)}</Table.Td>
+      <Table.Td>
+        <Group gap={4} wrap="nowrap">
+          <ActionIcon type="button" variant="subtle" onClick={() => ctx.onStartEdit(row)} title="Edit row" aria-label="Edit row">
+            <IconPencil size={14} />
+          </ActionIcon>
+          <ActionIcon type="button" variant="subtle" color="red" onClick={() => ctx.onStartDelete(row.id)} title="Delete row" aria-label="Delete row">
+            <IconTrash size={14} />
+          </ActionIcon>
+        </Group>
+      </Table.Td>
+    </Table.Tr>
   );
 }
 
@@ -417,29 +406,37 @@ function LineItemsSection({
   const showHours = sectionHasHours(section, rows);
   const showRate = sectionHasRate(rows);
   const showAuthority = sectionHasAuthority(rows);
+  const [open, setOpen] = useState(false);
 
   return (
-    <details style={{ marginBottom: "0.75rem" }}>
-      <summary style={{ cursor: "pointer", fontWeight: 600, padding: "0.4rem 0" }}>
-        {SECTION_LABELS[section]}
-        <span className="muted" style={{ fontWeight: 400, marginLeft: "0.5rem", fontSize: "0.85rem" }}>
+    <Stack mb="sm">
+      <Group>
+        <Button
+          type="button"
+          variant="subtle"
+          onClick={() => setOpen((v) => !v)}
+          leftSection={open ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+        >
+          {SECTION_LABELS[section]}
+        </Button>
+        <Text c="dimmed" size="sm">
           ({rows.length} row{rows.length !== 1 ? "s" : ""})
-        </span>
-      </summary>
-      <div style={{ overflowX: "auto", marginTop: "0.5rem" }}>
-        <table className="ledger-table" style={{ fontSize: "0.85rem" }}>
-          <thead>
-            <tr>
-              <th style={{ minWidth: "10rem" }}>Name</th>
-              {showAuthority ? <th style={{ minWidth: "5rem" }}>Authority</th> : null}
-              {showHours ? <th>Hours</th> : null}
-              {showRate ? <th>Rate</th> : null}
-              <th>Current</th>
-              <th>YTD</th>
-              <th style={{ width: "4rem" }} />
-            </tr>
-          </thead>
-          <tbody>
+        </Text>
+      </Group>
+      {open ? (
+        <Table withTableBorder striped highlightOnHover>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th miw={160}>Name</Table.Th>
+              {showAuthority ? <Table.Th miw={90}>Authority</Table.Th> : null}
+              {showHours ? <Table.Th>Hours</Table.Th> : null}
+              {showRate ? <Table.Th>Rate</Table.Th> : null}
+              <Table.Th>Current</Table.Th>
+              <Table.Th>YTD</Table.Th>
+              <Table.Th w={64} />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
             {rows.map((row) => (
               <LineItemRow
                 key={row.id}
@@ -450,10 +447,10 @@ function LineItemsSection({
                 ctx={ctx}
               />
             ))}
-          </tbody>
-        </table>
-      </div>
-    </details>
+          </Table.Tbody>
+        </Table>
+      ) : null}
+    </Stack>
   );
 }
 
@@ -491,6 +488,7 @@ export function PayslipDetailPage() {
   const [addAmountYtd, setAddAmountYtd] = useState("");
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!payslipId) return;
@@ -746,123 +744,122 @@ export function PayslipDetailPage() {
   const validationWarnings = detail?.validationWarnings ?? [];
 
   return (
-    <div className="payslips-page">
-      <div className="card">
-        <p style={{ marginTop: 0 }}><Link to="/payslips">← Payslips</Link></p>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "0.5rem" }}>
-          <h1 style={{ marginTop: "0.25rem", marginBottom: 0 }}>Payslip detail</h1>
-          <button type="button" className="secondary"
-            style={{ fontSize: "0.85rem", alignSelf: "center" }}
+    <Stack>
+      <Paper withBorder p="lg">
+        <Anchor component={Link} to="/payslips">← Payslips</Anchor>
+        <Group justify="space-between" align="flex-start" wrap="wrap" mt="xs">
+          <Title order={2} m={0}>Payslip detail</Title>
+          <Button type="button" variant="default"
             disabled={deleting || loading}
             onClick={() => setDeleteConfirm(true)}>
             {deleting ? "Deleting…" : "Delete payslip"}
-          </button>
-        </div>
-        <p className="muted">Click ✏ on any amount row or line item to correct it. Changes to line items auto-update the matching summary bucket.</p>
-      </div>
+          </Button>
+        </Group>
+        <Text c="dimmed" mt="xs">Click ✏ on any amount row or line item to correct it. Changes to line items auto-update the matching summary bucket.</Text>
+      </Paper>
 
       {loading ? (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <p className="muted">Loading…</p>
-        </div>
+        <Paper withBorder p="lg">
+          <Text c="dimmed">Loading…</Text>
+        </Paper>
       ) : null}
 
       {error ? (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <p className="error">{error}</p>
-          <p className="muted"><Link to="/payslips">Back to list</Link></p>
-        </div>
+        <Paper withBorder p="lg">
+          <Alert color="red" mb="sm">{error}</Alert>
+          <Anchor component={Link} to="/payslips">Back to list</Anchor>
+        </Paper>
       ) : null}
 
       {!loading && !error && detail ? (
         <>
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <h2 style={{ marginTop: 0 }}>Stub</h2>
-            <dl className="payslip-detail-dl">
-              <dt>File</dt><dd>{detail.fileName}</dd>
-              <dt>Uploaded</dt><dd style={{ whiteSpace: "nowrap" }}>{detail.createdAt}</dd>
-              <dt>Parser</dt><dd><code style={{ fontSize: "0.85rem" }}>{detail.parserProfileId}</code></dd>
+          <Paper withBorder p="lg">
+            <Title order={4} mt={0}>Stub</Title>
+            <Stack gap={6}>
+              <Group><Text fw={600} miw={110}>File</Text><Text>{detail.fileName}</Text></Group>
+              <Group><Text fw={600} miw={110}>Uploaded</Text><Text>{detail.createdAt}</Text></Group>
+              <Group><Text fw={600} miw={110}>Parser</Text><Code>{detail.parserProfileId}</Code></Group>
               {detail.employerId ? (
-                <><dt>Employer</dt>
-                <dd>{employers.find((e) => e.id === detail.employerId)?.displayName ?? `${detail.employerId.slice(0, 8)}…`}</dd></>
+                <Group>
+                  <Text fw={600} miw={110}>Employer</Text>
+                  <Text>{employers.find((e) => e.id === detail.employerId)?.displayName ?? `${detail.employerId.slice(0, 8)}…`}</Text>
+                </Group>
               ) : null}
               {detail.importFileId ? (
-                <><dt>Import file</dt><dd><code style={{ fontSize: "0.85rem" }}>{detail.importFileId}</code></dd></>
+                <Group><Text fw={600} miw={110}>Import file</Text><Code>{detail.importFileId}</Code></Group>
               ) : null}
-              <dt>Checksum</dt>
-              <dd><code style={{ fontSize: "0.75rem", wordBreak: "break-all" }}>{detail.fileChecksum}</code></dd>
-            </dl>
-          </div>
+              <Group align="flex-start"><Text fw={600} miw={110}>Checksum</Text><Code>{detail.fileChecksum}</Code></Group>
+            </Stack>
+          </Paper>
 
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <h2 style={{ marginTop: 0 }}>Period</h2>
-            <dl className="payslip-detail-dl">
-              <dt>Pay period</dt><dd>{periodLabel(detail)}</dd>
-              <dt>Pay date</dt><dd>{detail.payDate ?? "—"}</dd>
-              <dt>Hours worked</dt>
-              <dd>
+          <Paper withBorder p="lg">
+            <Title order={4} mt={0}>Period</Title>
+            <Stack gap={6}>
+              <Group><Text fw={600} miw={110}>Pay period</Text><Text>{periodLabel(detail)}</Text></Group>
+              <Group><Text fw={600} miw={110}>Pay date</Text><Text>{detail.payDate ?? "—"}</Text></Group>
+              <Group>
+                <Text fw={600} miw={110}>Hours worked</Text>
+                <Text>
                 {detail.hoursOrDaysCurrent ?? "—"}
                 {detail.hoursOrDaysYtd != null ? (
-                  <span className="muted" style={{ marginLeft: "0.5rem", fontSize: "0.85rem" }}>YTD: {detail.hoursOrDaysYtd}</span>
+                  <Text span c="dimmed" size="sm" ml={8}>YTD: {detail.hoursOrDaysYtd}</Text>
                 ) : null}
-              </dd>
+                </Text>
+              </Group>
               {detail.employmentRate != null ? (
-                <><dt>Salary / Rate</dt>
-                <dd>
+                <Group>
+                  <Text fw={600} miw={110}>Salary / Rate</Text>
+                  <Text>
                   {formatMoney(detail.employmentRate)}
                   {detail.employmentRateType ? (
-                    <span className="muted" style={{ marginLeft: "0.4rem", fontSize: "0.85rem" }}>({detail.employmentRateType})</span>
+                    <Text span c="dimmed" size="sm" ml={6}>({detail.employmentRateType})</Text>
                   ) : null}
-                </dd></>
+                  </Text>
+                </Group>
               ) : null}
-            </dl>
-          </div>
+            </Stack>
+          </Paper>
 
           {detail.payDate != null && detail.netPayCurrent != null ? (
-            <div className="card" style={{ marginTop: "1rem" }}>
-              <h2 style={{ marginTop: 0 }}>Bank deposit</h2>
+            <Paper withBorder p="lg">
+              <Title order={4} mt={0}>Bank deposit</Title>
               {detail.matchedDeposits && detail.matchedDeposits.length > 0 ? (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="ledger-table">
-                    <thead>
-                      <tr>
-                        <th>Date</th><th>Description</th><th>Amount</th><th>Account</th><th />
-                      </tr>
-                    </thead>
-                    <tbody>
+                <Table withTableBorder striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Date</Table.Th><Table.Th>Description</Table.Th><Table.Th>Amount</Table.Th><Table.Th>Account</Table.Th><Table.Th />
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
                       {detail.matchedDeposits.map((d) => (
-                        <tr key={d.id}>
-                          <td style={{ whiteSpace: "nowrap" }}>{d.txnDate}</td>
-                          <td>{d.merchant ?? d.memo ?? "—"}</td>
-                          <td style={{ whiteSpace: "nowrap" }}>{formatMoney(d.amount)}</td>
-                          <td style={{ whiteSpace: "nowrap" }}>{accountLabel(d)}</td>
-                          <td>
-                            <Link to={depositWindowLink(d.accountId, detail.payDate!)} style={{ fontSize: "0.85rem" }}>View</Link>
-                          </td>
-                        </tr>
+                        <Table.Tr key={d.id}>
+                          <Table.Td>{d.txnDate}</Table.Td>
+                          <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
+                          <Table.Td>{formatMoney(d.amount)}</Table.Td>
+                          <Table.Td>{accountLabel(d)}</Table.Td>
+                          <Table.Td><Anchor component={Link} to={depositWindowLink(d.accountId, detail.payDate!)}>View</Anchor></Table.Td>
+                        </Table.Tr>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                  </Table.Tbody>
+                </Table>
               ) : (
-                <p className="muted" style={{ margin: 0 }}>
+                <Text c="dimmed" m={0}>
                   No matching deposit found near {detail.payDate} for {formatMoney(detail.netPayCurrent)}.
-                </p>
+                </Text>
               )}
-            </div>
+            </Paper>
           ) : null}
 
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <h2 style={{ marginTop: 0 }}>Amounts</h2>
+          <Paper withBorder p="lg">
+            <Title order={4} mt={0}>Amounts</Title>
             <ValidationWarningsBanner warnings={validationWarnings} />
-            <div style={{ overflowX: "auto" }}>
-              <table className="ledger-table">
-                <thead>
-                  <tr>
-                    <th /><th>Current</th><th>YTD</th><th style={{ width: "2.5rem" }} />
-                  </tr>
-                </thead>
-                <tbody>
+            <Table withTableBorder striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th /><Table.Th>Current</Table.Th><Table.Th>YTD</Table.Th><Table.Th w={48} />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                   {AMOUNT_ROWS.map((def) => (
                     <SummaryAmountRow
                       key={def.key}
@@ -883,30 +880,29 @@ export function PayslipDetailPage() {
                       onCancel={() => { setSummaryEdit(null); setSummarySaveError(null); }}
                     />
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+              </Table.Tbody>
+            </Table>
+          </Paper>
 
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: nonEmptySections.length > 0 ? "0.5rem" : 0 }}>
-              <h2 style={{ marginTop: 0, marginBottom: 0 }}>Line items</h2>
+          <Paper withBorder p="lg">
+            <Group justify="space-between" mb={nonEmptySections.length > 0 ? "xs" : 0}>
+              <Title order={4} mt={0} mb={0}>Line items</Title>
               {!addFormOpen ? (
-                <button type="button" className="secondary"
+                <Button type="button" variant="default" size="xs"
                   onClick={() => { setAddFormOpen(true); setAddError(null); }}
-                  style={{ fontSize: "0.82rem", padding: "0.2rem 0.65rem" }}>
+                >
                   + Add row
-                </button>
+                </Button>
               ) : null}
-            </div>
+            </Group>
             {nonEmptySections.length > 0 ? (
-              <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
+              <Text c="dimmed" mt="xs" mb="md" size="sm">
                 Edit or delete rows to correct extraction errors — summary totals update automatically.
-              </p>
+              </Text>
             ) : (
-              <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "1rem", fontSize: "0.9rem" }}>
+              <Text c="dimmed" mt="xs" mb="md" size="sm">
                 No line items. Use "+ Add row" to enter individual earnings and deduction rows.
-              </p>
+              </Text>
             )}
             {nonEmptySections.map((section) => (
               <LineItemsSection
@@ -919,75 +915,75 @@ export function PayslipDetailPage() {
 
             {/* Inline add form */}
             {addFormOpen ? (
-              <div style={{ marginTop: nonEmptySections.length > 0 ? "0.75rem" : 0, padding: "0.75rem", background: "rgba(0,0,0,0.025)", borderRadius: 6, border: "1px solid var(--color-border)" }}>
-                <div style={{ fontWeight: 600, fontSize: "0.88rem", marginBottom: "0.5rem" }}>Add line item</div>
-                <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "flex-end" }}>
-                  <label className="field" style={{ flex: "0 0 auto", marginBottom: 0 }}>
-                    <span style={{ fontSize: "0.8rem" }}>Section</span>
-                    <select value={addSection} onChange={(e) => setAddSection(e.target.value as PayslipLineItemSection)}
-                      style={{ fontSize: "0.85rem", padding: "0.2rem 0.4rem" }} disabled={addSaving}>
-                      {ADD_SECTION_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field" style={{ flex: "1 1 10rem", marginBottom: 0 }}>
-                    <span style={{ fontSize: "0.8rem" }}>Name</span>
-                    <input type="text" value={addName}
-                      onChange={(e) => setAddName(e.target.value)}
-                      placeholder="e.g. Regular Pay"
-                      style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.4rem" }}
-                      disabled={addSaving}
-                      onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
-                    />
-                  </label>
-                  <label className="field" style={{ flex: "0 0 7rem", marginBottom: 0 }}>
-                    <span style={{ fontSize: "0.8rem" }}>Current</span>
-                    <input type="number" step="0.01" value={addAmountCurrent}
-                      onChange={(e) => setAddAmountCurrent(e.target.value)}
-                      placeholder="0.00"
-                      style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.4rem" }}
-                      disabled={addSaving}
-                      onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
-                    />
-                  </label>
-                  <label className="field" style={{ flex: "0 0 7rem", marginBottom: 0 }}>
-                    <span style={{ fontSize: "0.8rem" }}>YTD</span>
-                    <input type="number" step="0.01" value={addAmountYtd}
-                      onChange={(e) => setAddAmountYtd(e.target.value)}
-                      placeholder="0.00"
-                      style={{ width: "100%", fontSize: "0.85rem", padding: "0.2rem 0.4rem" }}
-                      disabled={addSaving}
-                      onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
-                    />
-                  </label>
-                  <div style={{ display: "flex", gap: "0.4rem", paddingBottom: "0.05rem" }}>
-                    <button type="button" onClick={() => void handleAddLineItem()} disabled={addSaving}
-                      style={{ fontSize: "0.85rem", padding: "0.25rem 0.7rem" }}>
-                      {addSaving ? "…" : "Add"}
-                    </button>
-                    <button type="button" className="secondary" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}
-                      style={{ fontSize: "0.85rem", padding: "0.25rem 0.6rem" }}>
+              <Paper withBorder p="md" mt={nonEmptySections.length > 0 ? "md" : 0}>
+                <Text fw={600} size="sm" mb="sm">Add line item</Text>
+                <Group gap="sm" align="flex-end" wrap="wrap">
+                  <Select
+                    label="Section"
+                    value={addSection}
+                    onChange={(value) => value && setAddSection(value as PayslipLineItemSection)}
+                    data={ADD_SECTION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                    disabled={addSaving}
+                    maw={220}
+                  />
+                  <TextInput
+                    label="Name"
+                    value={addName}
+                    onChange={(e) => setAddName(e.target.value)}
+                    placeholder="e.g. Regular Pay"
+                    disabled={addSaving}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                    miw={220}
+                  />
+                  <NumberInput
+                    label="Current"
+                    decimalScale={2}
+                    value={addAmountCurrent}
+                    onChange={(v) => setAddAmountCurrent(String(v ?? ""))}
+                    placeholder="0.00"
+                    disabled={addSaving}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                    maw={120}
+                  />
+                  <NumberInput
+                    label="YTD"
+                    decimalScale={2}
+                    value={addAmountYtd}
+                    onChange={(v) => setAddAmountYtd(String(v ?? ""))}
+                    placeholder="0.00"
+                    disabled={addSaving}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                    maw={120}
+                  />
+                  <Group gap={6}>
+                    <Button type="button" size="xs" onClick={() => void handleAddLineItem()} disabled={addSaving}>
+                      {addSaving ? "..." : "Add"}
+                    </Button>
+                    <Button type="button" variant="default" size="xs" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}>
                       Cancel
-                    </button>
-                  </div>
-                </div>
-                {addError ? <p className="error" style={{ marginTop: "0.4rem", marginBottom: 0, fontSize: "0.82rem" }}>{addError}</p> : null}
-              </div>
+                    </Button>
+                  </Group>
+                </Group>
+                {addError ? <Text c="red" size="sm" mt="sm">{addError}</Text> : null}
+              </Paper>
             ) : null}
-          </div>
+          </Paper>
 
-          <div className="card" style={{ marginTop: "1rem" }}>
-            <details>
-              <summary style={{ cursor: "pointer", fontWeight: 600 }}>Parser diagnostics (raw JSON)</summary>
-              <pre style={{
-                marginTop: "0.75rem", fontSize: "0.75rem", overflow: "auto", maxHeight: "24rem",
-                padding: "0.75rem", background: "var(--surface-muted, rgba(0,0,0,0.04))", borderRadius: "6px"
-              }}>
-                {JSON.stringify(detail.rawExtractJson, null, 2)}
-              </pre>
-            </details>
-          </div>
+          <Paper withBorder p="lg">
+            <Button
+              type="button"
+              variant="subtle"
+              onClick={() => setDiagnosticsOpen((v) => !v)}
+              leftSection={diagnosticsOpen ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+            >
+              Parser diagnostics (raw JSON)
+            </Button>
+            {diagnosticsOpen ? (
+              <Box mt="md">
+                <Code block>{JSON.stringify(detail.rawExtractJson, null, 2)}</Code>
+              </Box>
+            ) : null}
+          </Paper>
         </>
       ) : null}
 
@@ -1000,6 +996,6 @@ export function PayslipDetailPage() {
         onClose={() => setDeleteConfirm(false)}
         onConfirm={() => void deletePayslip()}
       />
-    </div>
+    </Stack>
   );
 }

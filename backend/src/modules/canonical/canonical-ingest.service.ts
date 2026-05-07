@@ -369,8 +369,8 @@ export async function canonicalizeImportSession(
   };
 
   const seenFingerprintsThisRun = new Set<string>();
-  /** Fingerprints already queued in `ops` but not yet inserted (dedupe within same import run). */
-  const fingerprintsAwaitingInsert = new Set<string>();
+  /** fingerprint → referenceId (FITID) of first queued row with this fingerprint, or null if none. */
+  const fingerprintsAwaitingInsert = new Map<string, string | null>();
   /** reference_ids (FITID) already queued or inserted this run — avoids redundant DB check per row. */
   const seenReferenceIdsThisRun = new Set<string>();
   /** Same-session rows queued before DB insert — used so near-duplicate detection matches deferred canonicalize. */
@@ -478,7 +478,8 @@ export async function canonicalizeImportSession(
     rounded: number,
     fingerprint: string,
     diag: CanonicalFileDiagnostics,
-    existingCanonicalId: string | null
+    existingCanonicalId: string | null,
+    overrideMessage?: string
   ): Promise<void> {
     const desc = parsed.description.trim();
     const merchant = desc.length > 120 ? desc.slice(0, 120) : desc;
@@ -530,6 +531,7 @@ export async function canonicalizeImportSession(
         existingCanonicalId,
         rawId: row.raw_id,
         message:
+          overrideMessage ??
           "Exact duplicate: same account, date, amount, and fingerprint (or FITID) as an existing posted ledger row. Resolve to keep or trash to discard."
       })
     );
@@ -595,9 +597,24 @@ export async function canonicalizeImportSession(
     if (referenceId) {
       const refKey = `${accountId}:${referenceId}`;
       if (seenReferenceIdsThisRun.has(refKey)) {
-        // Same FITID seen earlier in this run (e.g. file uploaded twice in one session). Skip.
+        const fingerprint = computeTransactionFingerprint({
+          householdId,
+          accountId,
+          txnDate: normDate,
+          amount: rounded,
+          normalizedDescription: normDesc
+        });
+        await insertExactDuplicateForReview(
+          row,
+          parsed,
+          normDate,
+          rounded,
+          fingerprint,
+          diag,
+          null,
+          "Duplicate bank transaction ID (FITID) within this import — the same FITID appears more than once in this file."
+        );
         duplicates += 1;
-        diag.duplicateFingerprint += 1;
         continue;
       }
       const existsRefRow = await qGet<{ id: string }>(
@@ -630,20 +647,43 @@ export async function canonicalizeImportSession(
     });
 
     if (seenFingerprintsThisRun.has(fingerprint) || fingerprintsAwaitingInsert.has(fingerprint)) {
-      // Same fingerprint seen in this run only (in-session dedup). Skip silently.
+      const firstQueuedRefId = fingerprintsAwaitingInsert.get(fingerprint) ?? null;
+      const differentFitids =
+        referenceId !== null && firstQueuedRefId !== null && referenceId !== firstQueuedRefId;
+      const msg = differentFitids
+        ? "Same date, amount, and merchant as another transaction in this import but a different bank transaction ID (FITID) — likely a legitimate separate charge. Verify before accepting."
+        : "Same account, date, amount, and description fingerprint as another transaction in this import — likely a duplicate.";
+      await insertExactDuplicateForReview(
+        row,
+        parsed,
+        normDate,
+        rounded,
+        fingerprint,
+        diag,
+        null,
+        msg
+      );
       duplicates += 1;
-      diag.duplicateFingerprint += 1;
       continue;
     }
 
-    const existsFpRow = await qGet<{ id: string }>(
-      `SELECT id FROM transaction_canonical WHERE household_id = ? AND fingerprint = ?`,
+    const existsFpRow = await qGet<{ id: string; referenceId: string | null }>(
+      `SELECT id, reference_id AS "referenceId"
+       FROM transaction_canonical
+       WHERE household_id = ? AND fingerprint = ?`,
       householdId,
       fingerprint
     );
     if (existsFpRow) {
+      const differentFitids =
+        referenceId !== null &&
+        existsFpRow.referenceId !== null &&
+        referenceId !== existsFpRow.referenceId;
+      const msg = differentFitids
+        ? "Same date, amount, and merchant as an existing ledger transaction but a different bank transaction ID (FITID) — likely a legitimate separate charge. Verify before accepting."
+        : "Exact duplicate: same account, date, amount, and fingerprint as an existing posted ledger row. Resolve to keep or trash to discard.";
       // Exact duplicate from a previous import — keep it in Needs Review.
-      await insertExactDuplicateForReview(row, parsed, normDate, rounded, fingerprint, diag, existsFpRow.id);
+      await insertExactDuplicateForReview(row, parsed, normDate, rounded, fingerprint, diag, existsFpRow.id, msg);
       duplicates += 1;
       continue;
     }
@@ -749,7 +789,10 @@ export async function canonicalizeImportSession(
       diag
     };
 
-    fingerprintsAwaitingInsert.add(fingerprint);
+    fingerprintsAwaitingInsert.set(fingerprint, referenceId);
+    if (referenceId) {
+      seenReferenceIdsThisRun.add(`${accountId}:${referenceId}`);
+    }
     pendingNearRows.push({
       accountId,
       normDate,

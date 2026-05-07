@@ -3,7 +3,16 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 
 import { env } from "../../config/env.js";
-import { changePassword, getForcePasswordChange, login, logoutUser } from "./auth.service.js";
+import { isEmailConfigured } from "../mailer/mailer.service.js";
+import {
+  changePassword,
+  getForcePasswordChange,
+  issueSetupToken,
+  login,
+  logoutUser,
+  requestPasswordReset,
+  resetPassword
+} from "./auth.service.js";
 import type { AuthenticatedRequest } from "./auth.middleware.js";
 import { requireAuth } from "./auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
@@ -30,6 +39,24 @@ const changePasswordRateLimit = rateLimit({
   skip: () => env.MODE === "TEST"
 });
 
+const forgotPasswordRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many password reset requests. Please try again later." },
+  skip: () => env.MODE === "TEST"
+});
+
+const resetPasswordRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Too many password reset attempts. Please try again later." },
+  skip: () => env.MODE === "TEST"
+});
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8)
@@ -41,7 +68,7 @@ const loginSchema = z.object({
  * Min 12 characters.
  */
 const PASSWORD_STRENGTH_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,}$/;
-const strongPassword = z
+export const strongPassword = z
   .string()
   .min(12, "Password must be at least 12 characters")
   .regex(
@@ -61,18 +88,27 @@ authRouter.post("/login", loginRateLimit, async (req, res) => {
     return;
   }
 
-  const token = await login(parsed.data);
-  if (!token) {
+  const result = await login(parsed.data);
+  if (!result) {
     res.status(401).json({ message: "Invalid credentials" });
     return;
   }
 
-  res.status(200).json({ token });
+  res.status(200).json({ token: result.token, forcePasswordChange: result.forcePasswordChange });
 });
 
 authRouter.get("/me", requireAuth, async (req: AuthenticatedRequest, res) => {
   const forcePasswordChange = await getForcePasswordChange(req.authUser!.userId);
   res.status(200).json({ user: { ...req.authUser, forcePasswordChange } });
+});
+
+authRouter.post("/setup-forced-change-token", requireAuth, forgotPasswordRateLimit, async (req: AuthenticatedRequest, res) => {
+  const token = await issueSetupToken(req.authUser!.userId);
+  if (!token) {
+    res.status(403).json({ code: "NOT_FORCED", message: "No forced password change pending." });
+    return;
+  }
+  res.status(200).json({ token });
 });
 
 authRouter.get("/owner-only", requireAuth, requireRole(["owner", "admin"]), (_req, res) => {
@@ -82,6 +118,19 @@ authRouter.get("/owner-only", requireAuth, requireRole(["owner", "admin"]), (_re
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: strongPassword
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email()
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: strongPassword
+});
+
+authRouter.get("/capabilities", (_req, res) => {
+  res.status(200).json({ emailEnabled: isEmailConfigured() });
 });
 
 authRouter.post("/change-password", requireAuth, changePasswordRateLimit, async (req: AuthenticatedRequest, res) => {
@@ -111,6 +160,40 @@ authRouter.post("/change-password", requireAuth, changePasswordRateLimit, async 
     return;
   }
   res.status(200).json({ message: "Password updated" });
+});
+
+authRouter.post("/forgot-password", forgotPasswordRateLimit, async (req, res) => {
+  const parsed = forgotPasswordSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+
+  await requestPasswordReset(parsed.data.email);
+  res.status(200).json({ message: "If that address is registered, a reset link is on its way." });
+});
+
+authRouter.post("/reset-password", resetPasswordRateLimit, async (req, res) => {
+  const parsed = resetPasswordSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+
+  const out = await resetPassword(parsed.data.token, parsed.data.newPassword);
+  if (!out.ok) {
+    if (out.code === "INVALID_TOKEN") {
+      res.status(400).json({ code: out.code, message: "This link has expired or already been used." });
+      return;
+    }
+    res.status(400).json({
+      code: out.code,
+      message: "New password must be different from your current password."
+    });
+    return;
+  }
+
+  res.status(200).json({ message: "Password updated. Please sign in." });
 });
 
 /**

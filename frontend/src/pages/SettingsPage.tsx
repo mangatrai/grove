@@ -1,15 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
+import {
+  Alert,
+  Anchor,
+  Box,
+  Button,
+  Checkbox,
+  Divider,
+  Fieldset,
+  Group,
+  Modal,
+  MultiSelect,
+  NumberInput,
+  Paper,
+  PasswordInput,
+  SegmentedControl,
+  Select,
+  Stack,
+  Table,
+  Tabs,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import { IconTrash } from "@tabler/icons-react";
 
-import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
-import { formatAccountForSelect } from "../import/accountDisplay";
+import { RecurringTagModal, type RecurringOverride } from "../components/RecurringTagModal";
+import { formatAccountForSelect, formatAccountFreshness } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
+import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 
-const TABS = ["profile", "household", "accounts", "notifications", "security"] as const;
+const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -19,6 +44,9 @@ function isTab(s: string | null): s is SettingsTab {
 type HouseholdSettingsResponse = {
   monthlySavingsTargetUsd: number | null;
   salaryDepositFinancialAccountId: string | null;
+  city: string | null;
+  state: string | null;
+  combinedGrossIncomeUsd: number | null;
   employers: Array<{
     id: string;
     displayName: string;
@@ -33,6 +61,8 @@ type AccountRow = {
   institution: string;
   type: string;
   account_mask: string | null;
+  last_uploaded_at?: string | null;
+  last_statement_end_date?: string | null;
   owner_scope?: "household" | "person";
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
@@ -53,6 +83,8 @@ function parseBelongsToChoice(choice: string): { ownerScope: "household" | "pers
 function formatBelongsToLabel(label: string): string {
   return `Household > ${label}`;
 }
+
+
 
 function buildBelongsToGroups(accountOwners: Array<{ id: string; label: string }>): HierarchicalPickerGroup[] {
   return [
@@ -82,6 +114,11 @@ type HouseholdProfileResponse = {
     avatarKey: string | null;
     role: "head" | "member";
     relationship: "self" | "spouse" | "child" | "dependent" | "other";
+    age: number | null;
+    sex: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
+    individualGrossIncomeUsd: number | null;
+    riskTolerance: "conservative" | "moderate" | "aggressive" | null;
+    financialGoals: string[];
   };
 };
 
@@ -109,6 +146,11 @@ type ProfileDraft = {
   email: string;
   phone: string;
   avatarIconKey: string;
+  age: string;
+  sex: "" | "male" | "female" | "nonbinary" | "prefer_not_to_say";
+  individualGrossIncomeUsd: string;
+  riskTolerance: "" | "conservative" | "moderate" | "aggressive";
+  financialGoals: string[];
   employers: EmployerDraft[];
 };
 
@@ -153,6 +195,11 @@ function normalizeProfileDraft(payload: HouseholdProfileResponse): ProfileDraft 
     email: p.email ?? "",
     phone: (p.phoneNumber ?? "").trim(),
     avatarIconKey: (p.avatarKey ?? PROFILE_ICON_KEYS[0]).trim() || PROFILE_ICON_KEYS[0],
+    age: p.age == null ? "" : String(p.age),
+    sex: p.sex ?? "",
+    individualGrossIncomeUsd: p.individualGrossIncomeUsd == null ? "" : String(p.individualGrossIncomeUsd),
+    riskTolerance: p.riskTolerance ?? "",
+    financialGoals: Array.isArray(p.financialGoals) ? p.financialGoals : [],
     employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf", salaryDepositAccountId: "" }]
   };
 }
@@ -189,6 +236,9 @@ export function SettingsPage() {
   );
 
   const [targetDraft, setTargetDraft] = useState("");
+  const [householdCityDraft, setHouseholdCityDraft] = useState("");
+  const [householdStateDraft, setHouseholdStateDraft] = useState("");
+  const [householdIncomeDraft, setHouseholdIncomeDraft] = useState("");
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [loadingHousehold, setLoadingHousehold] = useState(true);
   const [savingHousehold, setSavingHousehold] = useState(false);
@@ -199,6 +249,11 @@ export function SettingsPage() {
     email: "",
     phone: "",
     avatarIconKey: PROFILE_ICON_KEYS[0],
+    age: "",
+    sex: "",
+    individualGrossIncomeUsd: "",
+    riskTolerance: "",
+    financialGoals: [],
     employers: [{ displayName: "", parserProfileId: "ibm_pay_contributions_pdf", salaryDepositAccountId: "" }]
   });
   const [loadingProfile, setLoadingProfile] = useState(false);
@@ -213,7 +268,9 @@ export function SettingsPage() {
   const [removeMemberConfirm, setRemoveMemberConfirm] = useState<string | null>(null);
   const [removeMemberDeleteLogin, setRemoveMemberDeleteLogin] = useState(false);
   const [removeMemberDataCount, setRemoveMemberDataCount] = useState<{ transactions: number; payslips: number } | null>(null);
+  const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
   const [creatingLoginForId, setCreatingLoginForId] = useState<string | null>(null);
+  const [emailEnabled, setEmailEnabled] = useState(false);
   const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
   const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
   const [resetPasswordResult, setResetPasswordResult] = useState<{ memberId: string; tempPassword: string } | null>(null);
@@ -229,17 +286,13 @@ export function SettingsPage() {
   const [accountOwners, setAccountOwners] = useState<Array<{ id: string; label: string }>>([]);
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [exportZipBusy, setExportZipBusy] = useState(false);
-  const [exportZipJobId, setExportZipJobId] = useState<string | null>(null);
-  const [exportZipMessage, setExportZipMessage] = useState<string | null>(null);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importBusy, setImportBusy] = useState(false);
-  const [importMessage, setImportMessage] = useState<string | null>(null);
-  const [importSuccess, setImportSuccess] = useState(false);
-  const [importStats, setImportStats] = useState<Record<string, number> | null>(null);
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
+  const [recurringLoading, setRecurringLoading] = useState(false);
+  const [recurringError, setRecurringError] = useState<string | null>(null);
+  const [editingOverride, setEditingOverride] = useState<RecurringOverride | null>(null);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
     type: "checking",
@@ -344,123 +397,45 @@ export function SettingsPage() {
       ]);
       setAccounts(acct.accounts);
       setTargetDraft(r.monthlySavingsTargetUsd != null ? String(r.monthlySavingsTargetUsd) : "");
+      setHouseholdCityDraft(r.city ?? "");
+      setHouseholdStateDraft(r.state ?? "");
+      setHouseholdIncomeDraft(r.combinedGrossIncomeUsd == null ? "" : String(r.combinedGrossIncomeUsd));
     } catch (e: unknown) {
       setHouseholdError(e instanceof Error ? e.message : "Could not load settings");
       setTargetDraft("");
+      setHouseholdCityDraft("");
+      setHouseholdStateDraft("");
+      setHouseholdIncomeDraft("");
     } finally {
       setLoadingHousehold(false);
     }
   }, []);
 
-  const runHouseholdZipExport = useCallback(async () => {
-    if (!token) return;
-    setExportZipBusy(true);
-    setExportZipMessage(null);
-    setExportZipJobId(null);
-    try {
-      const { jobId } = await apiJson<{ jobId: string }>("/exports/household", { method: "POST" });
-      const deadline = Date.now() + 120_000;
-      while (Date.now() < deadline) {
-        const st = await apiJson<{ status: string; error: string | null }>(`/exports/${jobId}`);
-        if (st.status === "failed") throw new Error(st.error ?? "Export failed");
-        if (st.status === "complete") {
-          setExportZipJobId(jobId);
-          setExportZipMessage("Export ready — click the link below to download.");
-          return;
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/auth/capabilities");
+        if (res.ok) {
+          const body = (await res.json()) as { emailEnabled?: boolean };
+          setEmailEnabled(Boolean(body.emailEnabled));
         }
-        await new Promise((r) => setTimeout(r, 800));
+      } catch {
+        // keep false
       }
-      throw new Error("Export timed out; wait a moment and try again.");
-    } catch (e: unknown) {
-      setExportZipMessage(e instanceof Error ? e.message : String(e));
-    } finally {
-      setExportZipBusy(false);
-    }
-  }, [token]);
-
-  const downloadExportZip = useCallback(async (jobId: string) => {
-    try {
-      const res = await apiFetch(`/exports/${jobId}/download`);
-      if (!res.ok) {
-        const txt = await res.text();
-        let msg = `Download failed (${res.status})`;
-        try {
-          const body = JSON.parse(txt) as { code?: string; message?: string };
-          if (body.code === "EXPORT_EXPIRED") {
-            msg = "This export has expired (files are kept for 48 hours). Please start a new export.";
-            setExportZipJobId(null);
-          } else {
-            msg = body.message ?? msg;
-          }
-        } catch { /* ignore */ }
-        setExportZipMessage(msg);
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `household-export-${jobId}.zip`;
-      a.rel = "noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e: unknown) {
-      setExportZipMessage(e instanceof Error ? e.message : String(e));
-    }
+    })();
   }, []);
-
-  const runHouseholdRestore = useCallback(async () => {
-    if (!token || !importFile) return;
-    setImportBusy(true);
-    setImportMessage(null);
-    setImportSuccess(false);
-    setImportStats(null);
-    try {
-      const formData = new FormData();
-      formData.append("file", importFile);
-      const res = await apiFetch("/exports/household/import", { method: "POST", body: formData });
-      if (!res.ok) {
-        const txt = await res.text();
-        let msg = `Upload failed (${res.status})`;
-        try { msg = (JSON.parse(txt) as { message?: string }).message ?? msg; } catch { /* ignore */ }
-        throw new Error(msg);
-      }
-      const { jobId } = (await res.json()) as { jobId: string };
-      setImportMessage("Restoring… this may take a minute.");
-      const deadline = Date.now() + 300_000;
-      while (Date.now() < deadline) {
-        const st = await apiJson<{ status: string; error: string | null; stats: Record<string, number> | null }>(`/exports/import/${jobId}`);
-        if (st.status === "failed") throw new Error(st.error ?? "Restore failed");
-        if (st.status === "complete") {
-          setImportStats(st.stats);
-          setImportSuccess(true);
-          setImportMessage("Restore complete. Signing you out in 3 seconds…");
-          setTimeout(() => {
-            setToken(null);
-            window.location.href = "/";
-          }, 3000);
-          return;
-        }
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-      throw new Error("Restore timed out.");
-    } catch (e: unknown) {
-      setImportMessage(e instanceof Error ? e.message : String(e));
-      setImportSuccess(false);
-    } finally {
-      setImportBusy(false);
-    }
-  }, [token, importFile]);
 
   useEffect(() => {
     if (!token) {
       return;
     }
     void apiJson<MeResponse>("/auth/me")
-      .then((r) => setAuthRole(r.user.role))
-      .catch(() => setAuthRole(null));
+      .then((r) => {
+        setAuthRole(r.user.role);
+      })
+      .catch(() => {
+        setAuthRole(null);
+      });
   }, [token]);
 
   useEffect(() => {
@@ -519,6 +494,19 @@ export function SettingsPage() {
     }
     void loadInstitutions();
   }, [token, tab, canManageHousehold, loadInstitutions]);
+
+  useEffect(() => {
+    if (!token || tab !== "recurring") return;
+    setRecurringLoading(true);
+    setRecurringError(null);
+    void apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides")
+      .then((res) => {
+        if (res.ok) setRecurringOverrides(res.data);
+        else setRecurringError("Failed to load recurring overrides.");
+      })
+      .catch(() => setRecurringError("Failed to load recurring overrides."))
+      .finally(() => setRecurringLoading(false));
+  }, [token, tab]);
 
   async function addCustomInstitutionName() {
     if (!token) {
@@ -608,9 +596,20 @@ export function SettingsPage() {
     setSavingHousehold(true);
     setHouseholdError(null);
     try {
+      const incomeTrim = householdIncomeDraft.trim();
+      const parsedIncome = incomeTrim === "" ? null : Number(incomeTrim);
+      if (parsedIncome !== null && (!Number.isFinite(parsedIncome) || parsedIncome < 0)) {
+        setHouseholdError("Combined gross household income must be a non-negative number.");
+        return;
+      }
       await apiJson<HouseholdSettingsResponse>("/household/settings", {
         method: "PATCH",
-        body: JSON.stringify({ monthlySavingsTargetUsd: value })
+        body: JSON.stringify({
+          monthlySavingsTargetUsd: value,
+          city: householdCityDraft.trim() || null,
+          state: householdStateDraft.trim() || null,
+          combinedGrossIncomeUsd: parsedIncome
+        })
       });
       await loadHousehold();
     } catch (e: unknown) {
@@ -629,7 +628,17 @@ export function SettingsPage() {
     setProfileSuccess(null);
     try {
       const iconKey = profileDraft.avatarIconKey.trim() || PROFILE_ICON_KEYS[0];
-        await apiJson<HouseholdProfileResponse>("/household/profile", {
+      const ageTrim = profileDraft.age.trim();
+      const incomeTrim = profileDraft.individualGrossIncomeUsd.trim();
+      const age = ageTrim === "" ? null : Number(ageTrim);
+      const individualIncome = incomeTrim === "" ? null : Number(incomeTrim);
+      if (age !== null && (!Number.isInteger(age) || age < 1 || age > 129)) {
+        throw new Error("Age must be an integer between 1 and 129.");
+      }
+      if (individualIncome !== null && (!Number.isFinite(individualIncome) || individualIncome < 0)) {
+        throw new Error("Individual gross annual income must be a non-negative number.");
+      }
+      await apiJson<HouseholdProfileResponse>("/household/profile", {
         method: "PATCH",
         body: JSON.stringify({
           firstName: profileDraft.firstName.trim(),
@@ -637,6 +646,11 @@ export function SettingsPage() {
           email: profileDraft.email.trim() || null,
           phoneNumber: profileDraft.phone.trim() || null,
           avatarKey: iconKey,
+          age,
+          sex: profileDraft.sex || null,
+          individualGrossIncomeUsd: individualIncome,
+          riskTolerance: profileDraft.riskTolerance || null,
+          financialGoals: profileDraft.financialGoals,
           salaryDepositFinancialAccountId:
             profileDraft.employers[0]?.salaryDepositAccountId &&
             profileDraft.employers[0].salaryDepositAccountId !== ""
@@ -674,6 +688,7 @@ export function SettingsPage() {
     setRemoveMemberConfirm(memberId);
     setRemoveMemberDeleteLogin(false);
     setRemoveMemberDataCount(null);
+    setRemoveMemberError(null);
     try {
       const counts = await apiJson<{ transactions: number; payslips: number }>(
         `/household/members/${encodeURIComponent(memberId)}/data-count`
@@ -688,18 +703,31 @@ export function SettingsPage() {
     if (!token || !removeMemberConfirm) return;
     setMembersError(null);
     setMembersSuccess(null);
-    const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, {
-      method: "DELETE",
-      body: JSON.stringify({ deleteLogin: removeMemberDeleteLogin })
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({})) as { message?: string };
-      throw new Error(body.message ?? `Could not remove member (${res.status})`);
+    setRemoveMemberError(null);
+    try {
+      const res = await apiFetch(`/household/members/${encodeURIComponent(removeMemberConfirm)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ deleteLogin: removeMemberDeleteLogin })
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { message?: string; code?: string };
+        if (res.status === 409 && body.code === "HAS_LOGIN_ACCOUNT") {
+          const message = "This member has a linked login account. Select \"Also delete their login account\" to continue.";
+          setRemoveMemberError(message);
+          throw new Error(message);
+        }
+        throw new Error(body.message ?? `Could not remove member (${res.status})`);
+      }
+      setRemoveMemberConfirm(null);
+      setRemoveMemberDataCount(null);
+      setRemoveMemberError(null);
+      setMembersSuccess("Member removed.");
+      await loadMembers();
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Could not remove member";
+      setRemoveMemberError(message);
+      throw e instanceof Error ? e : new Error(message);
     }
-    setRemoveMemberConfirm(null);
-    setRemoveMemberDataCount(null);
-    setMembersSuccess("Member removed.");
-    await loadMembers();
   }
 
   async function createLoginForExistingMember(memberId: string) {
@@ -707,8 +735,15 @@ export function SettingsPage() {
     setMembersError(null);
     setMembersSuccess(null);
     try {
-      await apiJson(`/household/members/${encodeURIComponent(memberId)}/create-login`, { method: "POST" });
-      setMembersSuccess("Login created. Default password: ChangeMe123! — member must change it on first login.");
+      const data = await apiJson<{ inviteSent: boolean }>(
+        `/household/members/${encodeURIComponent(memberId)}/create-login`,
+        { method: "POST" }
+      );
+      if (data.inviteSent) {
+        setMembersSuccess("Invite sent — they'll receive a link to set their password.");
+      } else {
+        setMembersSuccess("Login created. Default password: ChangeMe123! — member must change it on first login.");
+      }
       await loadMembers();
     } catch (e: unknown) {
       setMembersError(e instanceof Error ? e.message : "Could not create login");
@@ -721,12 +756,16 @@ export function SettingsPage() {
     setResetPasswordBusy(true);
     setMembersError(null);
     try {
-      const data = await apiJson<{ tempPassword: string }>(
+      const data = await apiJson<{ emailSent: boolean; tempPassword?: string }>(
         `/household/members/${encodeURIComponent(memberId)}/reset-password`,
         { method: "POST" }
       );
       setResetPasswordForId(null);
-      setResetPasswordResult({ memberId, tempPassword: data.tempPassword });
+      if (data.emailSent) {
+        setMembersSuccess("Password reset link sent to member's email.");
+      } else {
+        setResetPasswordResult({ memberId, tempPassword: data.tempPassword! });
+      }
     } catch (e: unknown) {
       setMembersError(e instanceof Error ? e.message : "Could not reset password");
       setResetPasswordForId(null);
@@ -810,27 +849,24 @@ export function SettingsPage() {
     }
   }
 
-  const tabLinks = useMemo(
-    () =>
-      TABS.filter((id) => id !== "household" || canManageHousehold).map((id) => (
-        <button
-          key={id}
-          type="button"
-          className={`settings-tab ${tab === id ? "settings-tab--active" : ""}`}
-          onClick={() => setTab(id)}
-        >
-          {id === "profile"
-            ? "Profile"
-            : id === "household"
-              ? "Household"
-              : id === "accounts"
-                ? "Accounts"
-                : id === "notifications"
-                  ? "Notifications"
-                  : "Security"}
-        </button>
-      )),
-    [tab, setTab, canManageHousehold]
+  async function handleRemoveDismissed(override: RecurringOverride) {
+    const res = await apiFetch(`/recurring-overrides/${override.id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Failed to remove override (HTTP ${res.status})`);
+    setRecurringOverrides((prev) => prev.filter((row) => row.id !== override.id));
+  }
+
+  const confirmedOverrides = useMemo(
+    () => recurringOverrides.filter((o) => o.verdict === "confirmed"),
+    [recurringOverrides]
+  );
+  const dismissedOverrides = useMemo(
+    () => recurringOverrides.filter((o) => o.verdict === "dismissed"),
+    [recurringOverrides]
+  );
+
+  const visibleTabs = useMemo(
+    () => TABS.filter((id) => id !== "household" || canManageHousehold),
+    [canManageHousehold]
   );
 
   if (!token) {
@@ -838,187 +874,248 @@ export function SettingsPage() {
   }
 
   return (
-    <div>
-      <div className="card">
-        <h1>Settings</h1>
-        <p className="muted">
-          Profile, household, and connected accounts. Savings target edits also appear on <Link to="/">Home</Link>.
-        </p>
-        <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-          {tabLinks}
-        </div>
+    <Stack>
+      <Paper withBorder p="lg" radius="md">
+        <Title order={2}>Settings</Title>
+        <Tabs
+          value={tab}
+          onChange={(value) => value && setTab(value as SettingsTab)}
+          mt="md"
+          variant="pills"
+          radius="xl"
+          color="gray"
+          styles={{
+            list: { gap: 8, marginBottom: 8 },
+            tab: { padding: "6px 14px", fontWeight: 500 }
+          }}
+        >
+          <Tabs.List>
+            {visibleTabs.map((id) => (
+              <Tabs.Tab key={id} value={id}>
+                {id === "profile"
+                  ? "Profile"
+                  : id === "household"
+                    ? "Household"
+                    : id === "accounts"
+                      ? "Accounts"
+                      : id === "recurring"
+                        ? "Recurring"
+                        : "Data & Backup"}
+              </Tabs.Tab>
+            ))}
+          </Tabs.List>
 
         {tab === "profile" ? (
-          <div className="settings-panel" role="tabpanel">
-            <h2 className="settings-panel__title">Profile</h2>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Avatar is saved as <code>avatarKey</code> on your profile (preview below; header wiring may follow later).
-            </p>
-            <div className="row" style={{ alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
-              <div
-                className="settings-avatar-preview"
-                style={{
-                  width: "3rem",
-                  height: "3rem",
-                  borderRadius: "50%",
-                  background: "var(--muted-bg, #e8eaed)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "1.5rem",
-                  flexShrink: 0
-                }}
-                title={`avatarKey: ${profileDraft.avatarIconKey}`}
-                aria-label={`Avatar preview: ${profileDraft.avatarIconKey}`}
-              >
-                {avatarEmojiPreview(profileDraft.avatarIconKey)}
-              </div>
-            </div>
-            {profileError ? <p className="error">{profileError}</p> : null}
-            {profileSuccess ? <p className="success">{profileSuccess}</p> : null}
-            {loadingProfile ? <p className="muted">Loading…</p> : null}
+          <Stack mt="md">
+            <Title order={3}>Profile</Title>
+            <Paper
+              withBorder
+              radius="xl"
+              w={48}
+              h={48}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem" }}
+              title={`avatarKey: ${profileDraft.avatarIconKey}`}
+              aria-label={`Avatar preview: ${profileDraft.avatarIconKey}`}
+            >
+              {avatarEmojiPreview(profileDraft.avatarIconKey)}
+            </Paper>
+            {profileError ? <Alert color="red">{profileError}</Alert> : null}
+            {profileSuccess ? <Alert color="green">{profileSuccess}</Alert> : null}
+            {loadingProfile ? <Text c="dimmed">Loading…</Text> : null}
             {!loadingProfile ? (
-              <div className="settings-household-form" style={{ maxWidth: "none" }}>
-                <div className="row" style={{ gap: "0.75rem", flexWrap: "nowrap", justifyContent: "flex-start" }}>
-                  <label className="settings-field" style={{ flex: "0 0 14rem" }}>
-                    First name
-                    <input
-                      type="text"
-                      value={profileDraft.firstName}
-                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, firstName: e.target.value }))}
-                      disabled={savingProfile}
-                      placeholder="First name"
-                    />
-                  </label>
-                  <label className="settings-field" style={{ flex: "0 0 14rem" }}>
-                    Last name
-                    <input
-                      type="text"
-                      value={profileDraft.lastName}
-                      onChange={(e) => setProfileDraft((prev) => ({ ...prev, lastName: e.target.value }))}
-                      disabled={savingProfile}
-                      placeholder="Last name"
-                    />
-                  </label>
-                </div>
-                <label className="settings-field">
-                  Email
-                  <input
-                    type="email"
-                    value={profileDraft.email}
-                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, email: e.target.value }))}
+              <Stack>
+                <Group align="end" grow>
+                  <TextInput
+                    label="First name"
+                    value={profileDraft.firstName}
+                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, firstName: e.currentTarget.value }))}
                     disabled={savingProfile}
-                    placeholder="you@example.com"
+                    placeholder="First name"
                   />
-                </label>
-                <label className="settings-field">
-                  Phone
-                  <input
-                    type="tel"
-                    value={profileDraft.phone}
-                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, phone: e.target.value }))}
+                  <TextInput
+                    label="Last name"
+                    value={profileDraft.lastName}
+                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, lastName: e.currentTarget.value }))}
                     disabled={savingProfile}
-                    placeholder="+1 555 000 0000"
+                    placeholder="Last name"
                   />
-                </label>
-                <label className="settings-field">
-                  Avatar icon
-                  <select
-                    value={profileDraft.avatarIconKey}
-                    onChange={(e) => setProfileDraft((prev) => ({ ...prev, avatarIconKey: e.target.value }))}
-                    disabled={savingProfile}
-                  >
-                    {PROFILE_ICON_KEYS.map((iconKey) => (
-                      <option key={iconKey} value={iconKey}>
-                        {iconKey}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <h3
-                  className="settings-panel__title"
-                  style={{ fontSize: "1.05rem", marginBottom: 0, display: "flex", alignItems: "center", gap: "0.35rem" }}
-                >
-                  Employer Setup
-                  <span
-                    aria-label="Employer setup info"
-                    title="Use this section to set your employer name, salary deposit account, and payslip format mapping for import/upload."
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: "1rem",
-                      height: "1rem",
-                      borderRadius: "50%",
-                      border: "1px solid var(--color-border)",
-                      color: "var(--color-text-muted)",
-                      fontSize: "0.72rem",
-                      cursor: "help"
-                    }}
-                  >
-                    i
-                  </span>
-                </h3>
-                {profileDraft.employers.map((row, idx) => (
-                  <div
-                    key={idx}
-                    className="row"
-                    style={{ marginBottom: "0.5rem", alignItems: "flex-end", flexWrap: "nowrap", gap: "0.5rem" }}
-                  >
-                    <label className="settings-field" style={{ flex: "1 1 12rem" }}>
-                      Employers
-                      <input
-                        type="text"
-                        value={row.displayName}
-                        placeholder="e.g. Acme Corp"
-                        onChange={(e) => {
-                          const next = [...profileDraft.employers];
-                          next[idx] = { ...next[idx], displayName: e.target.value };
-                          setProfileDraft((prev) => ({ ...prev, employers: next }));
-                        }}
+                </Group>
+                <TextInput
+                  label="Email"
+                  type="email"
+                  value={profileDraft.email}
+                  onChange={(e) => setProfileDraft((prev) => ({ ...prev, email: e.currentTarget.value }))}
+                  disabled={savingProfile}
+                  placeholder="you@example.com"
+                />
+                <TextInput
+                  label="Phone"
+                  type="tel"
+                  value={profileDraft.phone}
+                  onChange={(e) => setProfileDraft((prev) => ({ ...prev, phone: e.currentTarget.value }))}
+                  disabled={savingProfile}
+                  placeholder="+1 555 000 0000"
+                />
+                <Select
+                  label="Avatar icon"
+                  value={profileDraft.avatarIconKey}
+                  onChange={(value) =>
+                    setProfileDraft((prev) => ({ ...prev, avatarIconKey: value ?? PROFILE_ICON_KEYS[0] }))
+                  }
+                  disabled={savingProfile}
+                  data={PROFILE_ICON_KEYS.map((iconKey) => ({ value: iconKey, label: iconKey }))}
+                  allowDeselect={false}
+                />
+                <Fieldset legend="Financial Profile" mt="sm">
+                  <Stack gap="sm">
+                    <Group align="end" grow>
+                      <NumberInput
+                        label="Age"
+                        min={1}
+                        max={129}
+                        value={profileDraft.age === "" ? undefined : Number(profileDraft.age)}
+                        onChange={(value) =>
+                          setProfileDraft((prev) => ({
+                            ...prev,
+                            age: typeof value === "number" && Number.isFinite(value) ? String(value) : ""
+                          }))
+                        }
+                        disabled={savingProfile}
+                        style={{ flex: "0 0 10rem" }}
+                      />
+                      <Select
+                        label="Sex"
+                        clearable
+                        value={profileDraft.sex || null}
+                        data={[
+                          { value: "male", label: "Male" },
+                          { value: "female", label: "Female" },
+                          { value: "nonbinary", label: "Non-binary" },
+                          { value: "prefer_not_to_say", label: "Prefer not to say" }
+                        ]}
+                        onChange={(value) =>
+                          setProfileDraft((prev) => ({ ...prev, sex: (value ?? "") as ProfileDraft["sex"] }))
+                        }
+                        disabled={savingProfile}
+                        style={{ flex: "0 0 14rem" }}
+                      />
+                      <NumberInput
+                        label="Individual gross annual income"
+                        description="Include base salary + regular bonuses + regular 1099 income. Exclude one-time items."
+                        prefix="$"
+                        thousandSeparator=","
+                        min={0}
+                        value={
+                          profileDraft.individualGrossIncomeUsd === ""
+                            ? undefined
+                            : Number(profileDraft.individualGrossIncomeUsd)
+                        }
+                        onChange={(value) =>
+                          setProfileDraft((prev) => ({
+                            ...prev,
+                            individualGrossIncomeUsd:
+                              typeof value === "number" && Number.isFinite(value) ? String(value) : ""
+                          }))
+                        }
+                        disabled={savingProfile}
+                        style={{ flex: "0 0 20rem" }}
+                      />
+                    </Group>
+                    <Stack gap={6}>
+                      <Text size="sm" mb={6}>Risk tolerance</Text>
+                      <SegmentedControl
+                        fullWidth
+                        value={profileDraft.riskTolerance || "moderate"}
+                        data={[
+                          { value: "conservative", label: "Conservative" },
+                          { value: "moderate", label: "Moderate" },
+                          { value: "aggressive", label: "Aggressive" }
+                        ]}
+                        onChange={(value) =>
+                          setProfileDraft((prev) => ({ ...prev, riskTolerance: value as ProfileDraft["riskTolerance"] }))
+                        }
                         disabled={savingProfile}
                       />
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 12rem" }}>
-                      Salary deposit account (optional)
-                      <select
-                        value={row.salaryDepositAccountId}
-                        onChange={(e) => {
-                          const next = [...profileDraft.employers];
-                          next[idx] = { ...next[idx], salaryDepositAccountId: e.target.value };
-                          setProfileDraft((prev) => ({ ...prev, employers: next }));
-                        }}
-                        disabled={savingProfile}
-                      >
-                        <option value="">— Not set —</option>
-                        {accounts
+                    </Stack>
+                    <MultiSelect
+                      label="Financial goals"
+                      data={[
+                        "Build emergency fund",
+                        "Pay off debt",
+                        "Save for home",
+                        "Invest for retirement",
+                        "Grow wealth",
+                        "Other"
+                      ]}
+                      value={profileDraft.financialGoals}
+                      onChange={(value) =>
+                        setProfileDraft((prev) => ({ ...prev, financialGoals: value.slice(0, 20) }))
+                      }
+                      maxValues={20}
+                      disabled={savingProfile}
+                    />
+                  </Stack>
+                </Fieldset>
+                <Title order={4} style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                  Employer Setup
+                  <Text
+                    span
+                    aria-label="Employer setup info"
+                    title="Use this section to set your employer name, salary deposit account, and payslip format mapping for import/upload."
+                    c="dimmed"
+                    ff="monospace"
+                  >
+                    i
+                  </Text>
+                </Title>
+                {profileDraft.employers.map((row, idx) => (
+                  <Group key={idx} align="end" grow>
+                    <TextInput
+                      label="Employers"
+                      value={row.displayName}
+                      placeholder="e.g. Acme Corp"
+                      onChange={(e) => {
+                        const next = [...profileDraft.employers];
+                        next[idx] = { ...next[idx], displayName: e.currentTarget.value };
+                        setProfileDraft((prev) => ({ ...prev, employers: next }));
+                      }}
+                      disabled={savingProfile}
+                    />
+                    <Select
+                      label="Salary deposit account (optional)"
+                      value={row.salaryDepositAccountId || ""}
+                      onChange={(value) => {
+                        const next = [...profileDraft.employers];
+                        next[idx] = { ...next[idx], salaryDepositAccountId: value ?? "" };
+                        setProfileDraft((prev) => ({ ...prev, employers: next }));
+                      }}
+                      disabled={savingProfile}
+                      data={[
+                        { value: "", label: "- Not set -" },
+                        ...accounts
                           .filter((a) => a.type !== "payslip")
-                          .map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {formatAccountForSelect(a)}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <label className="settings-field" style={{ flex: "1 1 11rem" }}>
-                      Payslip format
-                      <select
-                        value={row.parserProfileId}
-                        onChange={(e) => {
-                          const next = [...profileDraft.employers];
-                          next[idx] = { ...next[idx], parserProfileId: e.target.value };
-                          setProfileDraft((prev) => ({ ...prev, employers: next }));
-                        }}
-                        disabled={savingProfile}
-                      >
-                        <option value="ibm_pay_contributions_pdf">IBM Pay &amp; Contributions (PDF)</option>
-                        <option value="deloitte_payslip_pdf">Deloitte Pay Statement (PDF)</option>
-                        <option value="adp_payslip_pdf">ADP (PDF — not implemented)</option>
-                      </select>
-                    </label>
-                    <button
+                          .map((a) => ({ value: a.id, label: formatAccountForSelect(a) }))
+                      ]}
+                    />
+                    <Select
+                      label="Payslip format"
+                      value={row.parserProfileId}
+                      onChange={(value) => {
+                        const next = [...profileDraft.employers];
+                        next[idx] = { ...next[idx], parserProfileId: value ?? "ibm_pay_contributions_pdf" };
+                        setProfileDraft((prev) => ({ ...prev, employers: next }));
+                      }}
+                      disabled={savingProfile}
+                      allowDeselect={false}
+                      data={[
+                        { value: "ibm_pay_contributions_pdf", label: "IBM Pay & Contributions (PDF)" },
+                        { value: "deloitte_payslip_pdf", label: "Deloitte Pay Statement (PDF)" },
+                        { value: "adp_payslip_pdf", label: "ADP (PDF - not implemented)" }
+                      ]}
+                    />
+                    <Button
                       type="button"
-                      className="secondary"
+                      variant="default"
                       disabled={savingProfile || profileDraft.employers.length <= 1}
                       onClick={() =>
                         setProfileDraft((prev) => ({
@@ -1028,13 +1125,13 @@ export function SettingsPage() {
                       }
                     >
                       Remove
-                    </button>
-                  </div>
+                    </Button>
+                  </Group>
                 ))}
-                <div className="settings-household-actions" style={{ marginTop: "0.25rem" }}>
-                  <button
+                <Group mt={4}>
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="default"
                     disabled={savingProfile}
                     onClick={() =>
                       setProfileDraft((prev) => ({
@@ -1047,184 +1144,234 @@ export function SettingsPage() {
                     }
                   >
                     Add employer
-                  </button>
-                  <button type="button" disabled={savingProfile} onClick={() => void saveProfile()}>
+                  </Button>
+                  <Button type="button" loading={savingProfile} onClick={() => void saveProfile()}>
                     {savingProfile ? "Saving…" : "Save profile"}
-                  </button>
-                </div>
-              </div>
+                  </Button>
+                </Group>
+                <Divider mt="xl" mb="md" label="Security" labelPosition="left" />
+                {securityError ? <Alert color="red">{securityError}</Alert> : null}
+                {securitySuccess ? <Alert color="green">{securitySuccess}</Alert> : null}
+                <Box
+                  component="form"
+                  maw={480}
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void changePassword();
+                  }}
+                >
+                  <Stack>
+                    <PasswordInput
+                      label="Current password"
+                      value={passwordDraft.currentPassword}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setPasswordDraft((prev) => ({ ...prev, currentPassword: value }));
+                      }}
+                      disabled={changingPassword}
+                      autoComplete="current-password"
+                    />
+                    <PasswordInput
+                      label="New password"
+                      value={passwordDraft.newPassword}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setPasswordDraft((prev) => ({ ...prev, newPassword: value }));
+                      }}
+                      disabled={changingPassword}
+                      autoComplete="new-password"
+                    />
+                    <PasswordInput
+                      label="Confirm new password"
+                      value={passwordDraft.confirmPassword}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setPasswordDraft((prev) => ({ ...prev, confirmPassword: value }));
+                      }}
+                      disabled={changingPassword}
+                      autoComplete="new-password"
+                    />
+                    <Group>
+                      <Button type="submit" loading={changingPassword}>
+                        {changingPassword ? "Updating…" : "Change password"}
+                      </Button>
+                    </Group>
+                  </Stack>
+                </Box>
+
+                <Divider mt="xl" mb="md" label="Notifications" labelPosition="left" />
+                <Text c="dimmed">No notification service is configured. This section is reserved for future email and push notifications.</Text>
+              </Stack>
             ) : null}
-          </div>
+          </Stack>
         ) : null}
 
         {tab === "household" ? (
-          <div className="settings-panel" role="tabpanel">
-            <h2 className="settings-panel__title">Household</h2>
-            <p className="muted">Manage household members, roles, and relationships.</p>
-            <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: 0 }}>
-              Household members
-            </h3>
-            <p className="muted" style={{ marginTop: 0 }}>
-              Track household members for role and relationship context.
-            </p>
-            {membersError ? <p className="error">{membersError}</p> : null}
-            {membersSuccess ? <p className="success">{membersSuccess}</p> : null}
-            {loadingMembers ? <p className="muted">Loading members…</p> : null}
+          <Stack mt="md">
+            <Title order={3}>Household</Title>
+            <Text c="dimmed">Manage household members, roles, and relationships.</Text>
+            <Title order={4}>Household members</Title>
+            <Text c="dimmed">Track household members for role and relationship context.</Text>
+            {membersError ? <Alert color="red">{membersError}</Alert> : null}
+            {membersSuccess ? <Alert color="green">{membersSuccess}</Alert> : null}
+            {loadingMembers ? <Text c="dimmed">Loading members…</Text> : null}
             {!loadingMembers ? (
               <>
                 {memberDrafts.map((member, idx) => (
-                  <div
+                  <Paper
                     key={member.id ?? `draft-${idx}`}
-                    style={{ marginBottom: "0.85rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--color-border)" }}
+                    withBorder
+                    p="sm"
                   >
-                    <div className="row" style={{ alignItems: "flex-end", flexWrap: "wrap", gap: "0.5rem" }}>
-                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                        First name
-                        <input
-                          type="text"
+                    <Stack>
+                      <Group align="end" grow>
+                        <TextInput
+                          label="First name"
                           value={member.firstName}
                           placeholder="Alex"
                           onChange={(e) => {
                             const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], firstName: e.target.value };
+                            next[idx] = { ...next[idx], firstName: e.currentTarget.value };
                             setMemberDrafts(next);
                           }}
                           disabled={savingMemberIndex !== null}
                         />
-                      </label>
-                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                        Last name
-                        <input
-                          type="text"
+                        <TextInput
+                          label="Last name"
                           value={member.lastName}
                           placeholder="Doe"
                           onChange={(e) => {
                             const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], lastName: e.target.value };
+                            next[idx] = { ...next[idx], lastName: e.currentTarget.value };
                             setMemberDrafts(next);
                           }}
                           disabled={savingMemberIndex !== null}
                         />
-                      </label>
-                      <label className="settings-field" style={{ flex: "1 1 14rem" }}>
-                        Email
-                        <input
+                        <TextInput
+                          label="Email"
                           type="email"
                           value={member.email}
                           placeholder="alex@example.com"
                           onChange={(e) => {
                             const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], email: e.target.value };
+                            next[idx] = { ...next[idx], email: e.currentTarget.value };
                             setMemberDrafts(next);
                           }}
                           disabled={savingMemberIndex !== null}
                         />
-                      </label>
-                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                        Role
-                        <select
+                        <Select
+                          label="Role"
                           value={member.role}
-                          onChange={(e) => {
+                          onChange={(value) => {
                             const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], role: e.target.value };
+                            next[idx] = { ...next[idx], role: value ?? "member" };
                             setMemberDrafts(next);
                           }}
                           disabled={savingMemberIndex !== null}
-                        >
-                          <option value="head">Head</option>
-                          <option value="member">Member</option>
-                        </select>
-                      </label>
-                      <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                        Relationship
-                        <select
+                          allowDeselect={false}
+                          data={[
+                            { value: "head", label: "Head" },
+                            { value: "member", label: "Member" }
+                          ]}
+                        />
+                        <Select
+                          label="Relationship"
                           value={member.relationship}
-                          onChange={(e) => {
+                          onChange={(value) => {
                             const next = [...memberDrafts];
-                            next[idx] = { ...next[idx], relationship: e.target.value };
+                            next[idx] = { ...next[idx], relationship: value ?? "other" };
                             setMemberDrafts(next);
                           }}
                           disabled={savingMemberIndex !== null}
+                          allowDeselect={false}
+                          data={[
+                            { value: "self", label: "Self" },
+                            { value: "spouse", label: "Spouse" },
+                            { value: "child", label: "Child" },
+                            { value: "dependent", label: "Dependent" },
+                            { value: "other", label: "Other" }
+                          ]}
+                        />
+                        <Button
+                          type="button"
+                          title={member.id ? "Remove this household member" : "Discard unsaved row"}
+                          disabled={savingMemberIndex !== null}
+                          variant="default"
+                          color="red"
+                          onClick={() => {
+                            if (member.id) {
+                              void openRemoveMemberConfirm(member.id);
+                            } else {
+                              setMemberDrafts((prev) => prev.filter((_, i) => i !== idx));
+                            }
+                          }}
                         >
-                          <option value="self">Self</option>
-                          <option value="spouse">Spouse</option>
-                          <option value="child">Child</option>
-                          <option value="dependent">Dependent</option>
-                          <option value="other">Other</option>
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        title={member.id ? "Remove this household member" : "Discard unsaved row"}
-                        disabled={savingMemberIndex !== null}
-                        style={{ alignSelf: "flex-end", background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}
-                        onClick={() => {
-                          if (member.id) {
-                            void openRemoveMemberConfirm(member.id);
-                          } else {
-                            setMemberDrafts((prev) => prev.filter((_, i) => i !== idx));
-                          }
-                        }}
-                      >
-                        <IconTrash size={14} />
-                      </button>
-                    </div>
+                          <IconTrash size={14} />
+                        </Button>
+                      </Group>
                     {/* Login status row */}
-                    <div style={{ marginTop: "0.4rem", display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                      {member.id ? (
-                        member.linkedUserId ? (
-                          <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                            <span style={{ fontSize: "0.8rem", color: "var(--color-success, #15803d)", fontWeight: 600 }}>
+                      <Group>
+                        {member.id ? (
+                          member.linkedUserId ? (
+                            <Group>
+                              <Text size="sm" c="green" fw={600}>
                               ✓ Has login account
-                            </span>
-                            <button
-                              type="button"
-                              className="secondary"
-                              style={{ fontSize: "0.78rem", padding: "0.15rem 0.5rem" }}
-                              disabled={resetPasswordBusy}
-                              onClick={() => setResetPasswordForId(member.id!)}
-                            >
-                              Reset password
-                            </button>
-                          </span>
-                        ) : (
-                          <>
-                            <span style={{ fontSize: "0.8rem", color: "var(--color-text-muted)" }}>
+                              </Text>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="xs"
+                                disabled={resetPasswordBusy}
+                                onClick={() => setResetPasswordForId(member.id!)}
+                              >
+                                Reset password
+                              </Button>
+                            </Group>
+                          ) : (
+                            <>
+                              <Text size="sm" c="dimmed">
                               No login account
-                            </span>
-                            <button
-                              type="button"
-                              className="secondary"
-                              style={{ fontSize: "0.78rem", padding: "0.15rem 0.5rem" }}
-                              disabled={creatingLoginForId === member.id}
-                              onClick={() => void createLoginForExistingMember(member.id!)}
-                            >
-                              {creatingLoginForId === member.id ? "Creating…" : "Create login"}
-                            </button>
-                          </>
-                        )
-                      ) : (
-                        <label style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.82rem", cursor: "pointer", userSelect: "none" }}>
-                          <input
-                            type="checkbox"
+                              </Text>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="xs"
+                                disabled={creatingLoginForId === member.id}
+                                onClick={() => void createLoginForExistingMember(member.id!)}
+                              >
+                                {creatingLoginForId === member.id ? "Creating…" : "Create login"}
+                              </Button>
+                            </>
+                          )
+                        ) : (
+                          <Checkbox
                             checked={Boolean(member.createLogin)}
                             onChange={(e) => {
                               const next = [...memberDrafts];
-                              next[idx] = { ...next[idx], createLogin: e.target.checked };
+                              next[idx] = { ...next[idx], createLogin: e.currentTarget.checked };
                               setMemberDrafts(next);
                             }}
                             disabled={savingMemberIndex !== null}
+                            label={
+                              emailEnabled
+                                ? "Create login account (invite email will be sent)"
+                                : (
+                                  <>
+                                    Create login account (default password: <Text span ff="monospace">ChangeMe123!</Text>{" "}
+                                    - must change on first login)
+                                  </>
+                                )
+                            }
                           />
-                          Create login account (default password: <code>ChangeMe123!</code> — must change on first login)
-                        </label>
-                      )}
-                    </div>
-                  </div>
+                        )}
+                      </Group>
+                    </Stack>
+                  </Paper>
                 ))}
-                <div className="settings-household-actions" style={{ marginBottom: "1rem" }}>
-                  <button
+                <Group mb="md">
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="default"
                     disabled={savingMemberIndex !== null}
                     onClick={() =>
                       setMemberDrafts((prev) => [
@@ -1234,140 +1381,101 @@ export function SettingsPage() {
                     }
                   >
                     Add another row
-                  </button>
-                  <button type="button" disabled={savingMemberIndex !== null} onClick={() => void saveHouseholdMembers()}>
+                  </Button>
+                  <Button type="button" loading={savingMemberIndex !== null} onClick={() => void saveHouseholdMembers()}>
                     {savingMemberIndex !== null ? "Saving…" : "Save household"}
-                  </button>
-                </div>
+                  </Button>
+                </Group>
               </>
             ) : null}
-            {householdError ? <p className="error">{householdError}</p> : null}
-            {loadingHousehold ? <p className="muted">Loading…</p> : null}
+            {householdError ? <Alert color="red">{householdError}</Alert> : null}
+            {loadingHousehold ? <Text c="dimmed">Loading…</Text> : null}
             {!loadingHousehold ? (
-              <>
-                <div className="settings-household-form" style={{ marginBottom: "1.5rem" }}>
-                  <label className="settings-field">
-                    Monthly savings target (USD)
-                    <input
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      placeholder="e.g. 500"
-                      value={targetDraft}
-                      onChange={(e) => setTargetDraft(e.target.value)}
+              <Stack mb="xl">
+                <NumberInput
+                  label="Monthly savings target (USD)"
+                  min={0}
+                  step={0.01}
+                  placeholder="e.g. 500"
+                  value={targetDraft === "" ? "" : Number(targetDraft)}
+                  onChange={(value) => setTargetDraft(value === "" || value == null ? "" : String(value))}
+                  disabled={savingHousehold}
+                  maw={320}
+                />
+                <Fieldset legend="Household Demographics" mt="sm">
+                  <Stack gap="sm">
+                    <TextInput
+                      label="City"
+                      value={householdCityDraft}
+                      onChange={(e) => setHouseholdCityDraft(e.currentTarget.value)}
                       disabled={savingHousehold}
                     />
-                  </label>
-                  <div className="settings-household-actions">
-                    <button
-                      type="button"
+                    <TextInput
+                      label="State"
+                      maxLength={100}
+                      value={householdStateDraft}
+                      onChange={(e) => setHouseholdStateDraft(e.currentTarget.value)}
                       disabled={savingHousehold}
-                      onClick={() => {
-                        const t = targetDraft.trim();
-                        if (t === "") {
-                          void saveHouseholdTarget(null);
-                          return;
-                        }
-                        const n = Number(t);
-                        if (!Number.isFinite(n) || n < 0) {
-                          setHouseholdError("Enter a non-negative number or leave blank to clear.");
-                          return;
-                        }
-                        void saveHouseholdTarget(Math.round(n * 100) / 100);
-                      }}
-                    >
-                      {savingHousehold ? "Saving…" : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
+                    />
+                    <NumberInput
+                      label="Combined gross household income"
+                      description="Combined gross income for all earners: base salary + regular bonuses. Exclude one-time items."
+                      prefix="$"
+                      thousandSeparator=","
+                      min={0}
+                      value={householdIncomeDraft === "" ? undefined : Number(householdIncomeDraft)}
+                      onChange={(value) =>
+                        setHouseholdIncomeDraft(
+                          typeof value === "number" && Number.isFinite(value) ? String(value) : ""
+                        )
+                      }
                       disabled={savingHousehold}
-                      onClick={() => void saveHouseholdTarget(null)}
-                    >
-                      Clear target
-                    </button>
-                  </div>
-                </div>
-
-                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: "1.5rem" }}>
-                  Export data
-                </h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Download a full ZIP backup — accounts, transactions, net worth history, category rules, payslips, and more.
-                  Use this to migrate to a new host or keep an offline archive.
-                </p>
-                <p className="muted" style={{ marginTop: 0, fontSize: "0.875rem" }}>
-                  Export files are available for 48 hours after generation. Please download a local copy before then.
-                </p>
-                {exportZipMessage ? (
-                  <p className={exportZipJobId ? "success" : "error"} style={{ marginBottom: "0.5rem" }}>{exportZipMessage}</p>
-                ) : null}
-                {exportZipJobId ? (
-                  <p style={{ marginTop: 0, marginBottom: "0.75rem" }}>
-                    <button
-                      type="button"
-                      className="link-button"
-                      onClick={() => void downloadExportZip(exportZipJobId)}
-                    >
-                      Download household-export.zip
-                    </button>
-                  </p>
-                ) : null}
-                <button type="button" className="secondary" disabled={exportZipBusy} onClick={() => void runHouseholdZipExport()}>
-                  {exportZipBusy ? "Preparing export…" : "Start data export"}
-                </button>
-
-                <h3 className="settings-panel__title" style={{ fontSize: "1.05rem", marginTop: "2rem" }}>
-                  Restore from backup
-                </h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Upload a ZIP exported from this app to restore all household data on this instance.
-                </p>
-                <p className="error" style={{ marginTop: 0, fontSize: "0.9rem" }}>
-                  Warning: this will permanently replace all current accounts, transactions, rules, and net worth history.
-                  You will be signed out when the restore completes.
-                </p>
-                {importMessage ? (
-                  <p className={importSuccess ? "success" : "error"} style={{ marginBottom: "0.5rem" }}>
-                    {importMessage}
-                  </p>
-                ) : null}
-                {importStats ? (
-                  <p className="muted" style={{ marginTop: 0, fontSize: "0.85rem" }}>
-                    Restored: {Object.entries(importStats).map(([k, v]) => `${String(v)} ${k}`).join(", ")}
-                  </p>
-                ) : null}
-                <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-                  <input
-                    type="file"
-                    accept=".zip"
-                    disabled={importBusy}
-                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
-                  />
-                  <button
+                      maw={360}
+                    />
+                  </Stack>
+                </Fieldset>
+                <Group>
+                  <Button
                     type="button"
-                    className="danger"
-                    disabled={importBusy || !importFile}
-                    onClick={() => void runHouseholdRestore()}
+                    loading={savingHousehold}
+                    onClick={() => {
+                      const t = targetDraft.trim();
+                      if (t === "") {
+                        void saveHouseholdTarget(null);
+                        return;
+                      }
+                      const n = Number(t);
+                      if (!Number.isFinite(n) || n < 0) {
+                        setHouseholdError("Enter a non-negative number or leave blank to clear.");
+                        return;
+                      }
+                      void saveHouseholdTarget(Math.round(n * 100) / 100);
+                    }}
                   >
-                    {importBusy ? "Restoring…" : "Restore from backup"}
-                  </button>
-                </div>
-
-              </>
+                    {savingHousehold ? "Saving…" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="default"
+                    disabled={savingHousehold}
+                    onClick={() => void saveHouseholdTarget(null)}
+                  >
+                    Clear target
+                  </Button>
+                </Group>
+              </Stack>
             ) : null}
-          </div>
+          </Stack>
         ) : null}
 
         {tab === "accounts" ? (
-          <div className="settings-panel" role="tabpanel">
-            <h2 className="settings-panel__title">Connected accounts</h2>
-            <p className="muted">Link accounts for import. Parser is chosen from institution, account type, and file when you import.</p>
-            {accountError ? <p className="error">{accountError}</p> : null}
-            {accountSuccess ? <p className="success">{accountSuccess}</p> : null}
-            <div className="settings-household-form">
-              <label className="settings-field">
-                Institution
+          <Stack mt="md">
+            <Title order={3}>Connected accounts</Title>
+            <Text c="dimmed">Link accounts for import. Parser is chosen from institution, account type, and file when you import.</Text>
+            {accountError ? <Alert color="red">{accountError}</Alert> : null}
+            {accountSuccess ? <Alert color="green">{accountSuccess}</Alert> : null}
+            <Stack>
+              <Fieldset legend="Institution">
                 <HierarchicalSearchPicker
                   value={accountDraft.institution || null}
                   onChange={(v) => setAccountDraft((d) => ({ ...d, institution: v ?? "" }))}
@@ -1377,96 +1485,94 @@ export function SettingsPage() {
                   disabled={savingAccount}
                   clearable
                   footer={
-                    <div className="row" style={{ justifyContent: "flex-start" }}>
-                      <button
+                    <Group justify="flex-start">
+                      <Button
                         type="button"
-                        className="secondary"
+                        variant="default"
                         disabled={savingAccount}
                         onClick={() => void addCustomInstitutionName()}
                       >
                         Add institution name…
-                      </button>
-                    </div>
+                      </Button>
+                    </Group>
                   }
                 />
-              </label>
-              <div className="row">
-                <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                  Account type
-                  <select
-                    value={accountDraft.type}
-                    onChange={(e) => setAccountDraft((d) => ({ ...d, type: e.target.value }))}
-                    disabled={savingAccount}
-                  >
-                    <option value="checking">Checking</option>
-                    <option value="savings">Savings</option>
-                    <option value="credit_card">Credit card</option>
-                    <option value="loan">Loan</option>
-                    <option value="mortgage">Mortgage</option>
-                    <option value="investment">Investment</option>
-                    <option value="retirement">Retirement (401K / IRA / Pension)</option>
-                    <option value="payslip">Payslip</option>
-                  </select>
-                </label>
-                <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                  Account mask (optional)
-                  <input
-                    type="text"
-                    value={accountDraft.accountMask}
-                    onChange={(e) => setAccountDraft((d) => ({ ...d, accountMask: e.target.value }))}
-                    disabled={savingAccount}
-                    placeholder="1234"
-                  />
-                </label>
-              </div>
-              <div className="row">
-                <label className="settings-field" style={{ flex: "1 1 18rem" }}>
-                  Belongs-to
-                  <HierarchicalSearchPicker
-                    value={accountDraft.belongsTo}
-                    onChange={(v) => setAccountDraft((d) => ({ ...d, belongsTo: (v ?? "household") as BelongsToChoice }))}
-                    groups={buildBelongsToGroups(accountOwners)}
-                    placeholder="Select who this account belongs to"
-                    ariaLabel="Connected account belongs-to"
-                    disabled={savingAccount}
-                  />
-                </label>
-              </div>
+              </Fieldset>
+              <Group align="end" grow>
+                <Select
+                  label="Account type"
+                  value={accountDraft.type}
+                  onChange={(value) => value && setAccountDraft((d) => ({ ...d, type: value }))}
+                  disabled={savingAccount}
+                  data={[
+                    { value: "checking", label: "Checking" },
+                    { value: "savings", label: "Savings" },
+                    { value: "credit_card", label: "Credit card" },
+                    { value: "loan", label: "Loan" },
+                    { value: "mortgage", label: "Mortgage" },
+                    { value: "investment", label: "Investment" },
+                    { value: "retirement", label: "Retirement (401K / IRA / Pension)" },
+                    { value: "payslip", label: "Payslip" }
+                  ]}
+                />
+                <TextInput
+                  label="Account mask (optional)"
+                  value={accountDraft.accountMask}
+                  onChange={(e) => setAccountDraft((d) => ({ ...d, accountMask: e.currentTarget.value }))}
+                  disabled={savingAccount}
+                  placeholder="1234"
+                />
+              </Group>
+              <Fieldset legend="Belongs-to">
+                <HierarchicalSearchPicker
+                  value={accountDraft.belongsTo}
+                  onChange={(v) => setAccountDraft((d) => ({ ...d, belongsTo: (v ?? "household") as BelongsToChoice }))}
+                  groups={buildBelongsToGroups(accountOwners)}
+                  placeholder="Select who this account belongs to"
+                  ariaLabel="Connected account belongs-to"
+                  disabled={savingAccount}
+                />
+              </Fieldset>
               {!accountDraft.id ? (
-                <div className="row" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
-                  <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                    Starting balance (optional)
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={accountDraft.initialBalance}
-                      onChange={(e) => setAccountDraft((d) => ({ ...d, initialBalance: e.target.value }))}
-                      disabled={savingAccount}
-                      placeholder="0.00"
-                    />
-                  </label>
-                  <label className="settings-field" style={{ flex: "1 1 10rem" }}>
-                    Balance as of
-                    <input
-                      type="date"
-                      value={accountDraft.initialBalanceDate}
-                      onChange={(e) => setAccountDraft((d) => ({ ...d, initialBalanceDate: e.target.value }))}
-                      disabled={savingAccount}
-                    />
-                  </label>
-                  <p className="muted" style={{ margin: "0.2rem 0 0", fontSize: "0.82rem", width: "100%" }}>
-                    Optional starting point for net worth. Overwritten when statements are imported.
-                  </p>
-                </div>
+                <Group align="end" grow>
+                  <NumberInput
+                    label="Starting balance (optional)"
+                    value={accountDraft.initialBalance === "" ? "" : Number(accountDraft.initialBalance)}
+                    onChange={(value) =>
+                      setAccountDraft((d) => ({
+                        ...d,
+                        initialBalance: value === "" || value == null ? "" : String(value)
+                      }))
+                    }
+                    decimalScale={2}
+                    fixedDecimalScale={false}
+                    thousandSeparator=","
+                    disabled={savingAccount}
+                    placeholder="0.00"
+                    maw={280}
+                  />
+                  <TextInput
+                    label="Balance as of"
+                    type="date"
+                    value={accountDraft.initialBalanceDate}
+                    onChange={(e) => setAccountDraft((d) => ({ ...d, initialBalanceDate: e.currentTarget.value }))}
+                    disabled={savingAccount}
+                  />
+                </Group>
               ) : null}
-              <div className="settings-household-actions">
-                <button type="button" disabled={savingAccount} onClick={() => void saveConnectedAccount()}>
+              {!accountDraft.id ? (
+                <Text c="dimmed" size="sm">
+                  Optional starting point for net worth. Overwritten when statements are imported.
+                </Text>
+              ) : null}
+              <Group>
+                <Button type="button" loading={savingAccount} onClick={() => void saveConnectedAccount()}>
                   {savingAccount ? "Saving…" : accountDraft.id ? "Update account" : "Add account"}
-                </button>
+                </Button>
                 {accountDraft.id ? (
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="default"
                     disabled={savingAccount}
                     onClick={() =>
                       setAccountDraft({
@@ -1481,38 +1587,47 @@ export function SettingsPage() {
                     }
                   >
                     Cancel edit
-                  </button>
+                  </Button>
                 ) : null}
-              </div>
-            </div>
-            <div style={{ marginTop: "1rem", overflowX: "auto" }}>
-              <table className="ledger-table">
-                <thead>
-                  <tr>
-                    <th>Institution</th>
-                    <th>Type</th>
-                    <th>Mask</th>
-                    <th>Belongs-to</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
+              </Group>
+            </Stack>
+            <Table striped withTableBorder withColumnBorders mt="md">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Institution</Table.Th>
+                  <Table.Th>Type</Table.Th>
+                  <Table.Th>Mask</Table.Th>
+                  <Table.Th>Import freshness</Table.Th>
+                  <Table.Th>Belongs-to</Table.Th>
+                  <Table.Th />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                   {accounts.map((a) => (
-                    <tr key={a.id}>
-                      <td>{a.institution}</td>
-                      <td>{a.type}</td>
-                      <td>{a.account_mask ?? "—"}</td>
-                      <td>
+                    <Table.Tr key={a.id}>
+                      <Table.Td>{a.institution}</Table.Td>
+                      <Table.Td>{a.type}</Table.Td>
+                      <Table.Td>{a.account_mask ?? "—"}</Table.Td>
+                      <Table.Td>
+                        <Stack gap={2}>
+                          <Text size="xs" c="dimmed">Last upload</Text>
+                          <Text size="sm">{formatAccountFreshness(a).lastUpload}</Text>
+                          <Text size="xs" c="dimmed">Statement ending</Text>
+                          <Text size="sm">{formatAccountFreshness(a).statementEnding}</Text>
+                        </Stack>
+                      </Table.Td>
+                      <Table.Td>
                         {a.owner_scope === "person"
                           ? formatBelongsToLabel(
                               accountOwners.find((p) => p.id === a.owner_person_profile_id)?.label ?? "Member"
                             )
                           : "Household"}
-                      </td>
-                      <td>
-                        <button
+                      </Table.Td>
+                      <Table.Td>
+                        <Button
                           type="button"
-                          className="secondary"
+                          variant="default"
+                          size="xs"
                           onClick={() =>
                             setAccountDraft({
                               id: a.id,
@@ -1529,149 +1644,204 @@ export function SettingsPage() {
                           }
                         >
                           Edit
-                        </button>
-                      </td>
-                    </tr>
+                        </Button>
+                      </Table.Td>
+                    </Table.Tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+              </Table.Tbody>
+            </Table>
+          </Stack>
         ) : null}
 
-        {tab === "notifications" ? (
-          <div className="settings-panel" role="tabpanel">
-            <h2 className="settings-panel__title">Notifications</h2>
-            <p className="muted">No notification service is configured for the local MVP. This tab is reserved.</p>
-          </div>
+        {tab === "recurring" ? (
+          <Stack mt="md">
+            <Title order={3}>Recurring Payments</Title>
+            <Text c="dimmed">
+              Confirmed overrides always appear on the dashboard. Dismissed overrides suppress a merchant from the
+              heuristic suggestions permanently. Remove a dismissed override to let it resurface.
+            </Text>
+
+            {recurringLoading ? <Text c="dimmed">Loading…</Text> : null}
+            {recurringError ? <Alert color="red">{recurringError}</Alert> : null}
+
+            {!recurringLoading && !recurringError ? (
+              <>
+                <Title order={4} mt="lg" mb="xs">
+                  Confirmed ({confirmedOverrides.length})
+                </Title>
+                {confirmedOverrides.length === 0 ? (
+                  <Text c="dimmed" size="sm">
+                    No confirmed recurring payments yet. Mark a transaction as recurring from the{" "}
+                    <Anchor component={Link} to="/transactions">Transactions</Anchor> page.
+                  </Text>
+                ) : (
+                  <Table striped withTableBorder withColumnBorders>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Merchant key</Table.Th>
+                        <Table.Th>Display name</Table.Th>
+                        <Table.Th>Amount anchor</Table.Th>
+                        <Table.Th>Tolerance</Table.Th>
+                        <Table.Th />
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                        {confirmedOverrides.map((o) => (
+                          <Table.Tr key={o.id}>
+                            <Table.Td><Text ff="monospace">{o.merchantKey}</Text></Table.Td>
+                            <Table.Td>{o.displayName ?? <Text c="dimmed" span>—</Text>}</Table.Td>
+                            <Table.Td>{o.amountAnchor != null ? `$${o.amountAnchor.toFixed(2)}` : <Text c="dimmed" span>any</Text>}</Table.Td>
+                            <Table.Td>{o.amountTolerancePct}%</Table.Td>
+                            <Table.Td>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="xs"
+                                onClick={() => setEditingOverride(o)}
+                              >
+                                Edit
+                              </Button>
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                    </Table.Tbody>
+                  </Table>
+                )}
+
+                <Title order={4} mt="xl" mb="xs">
+                  Dismissed ({dismissedOverrides.length})
+                </Title>
+                {dismissedOverrides.length === 0 ? (
+                  <Text c="dimmed" size="sm">
+                    No dismissed suggestions. Dismiss a heuristic candidate from the dashboard to suppress it
+                    permanently.
+                  </Text>
+                ) : (
+                  <Table striped withTableBorder withColumnBorders>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Merchant key</Table.Th>
+                        <Table.Th />
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                        {dismissedOverrides.map((o) => (
+                          <Table.Tr key={o.id}>
+                            <Table.Td><Text ff="monospace">{o.merchantKey}</Text></Table.Td>
+                            <Table.Td>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="xs"
+                                onClick={() => void handleRemoveDismissed(o)}
+                              >
+                                Remove
+                              </Button>
+                            </Table.Td>
+                          </Table.Tr>
+                        ))}
+                    </Table.Tbody>
+                  </Table>
+                )}
+              </>
+            ) : null}
+
+            {editingOverride ? (
+              <RecurringTagModal
+                opened={editingOverride !== null}
+                onClose={() => setEditingOverride(null)}
+                txnMerchant={editingOverride.merchantKey}
+                txnAmount={editingOverride.amountAnchor ?? 0}
+                allTxns={[]}
+                existingOverride={editingOverride}
+                onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+                  const res = await apiFetch("/recurring-overrides", {
+                    method: "POST",
+                    body: JSON.stringify({ merchantKey, verdict: "confirmed", amountAnchor, amountTolerancePct })
+                  });
+                  if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`);
+                  const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");
+                  if (updated.ok) setRecurringOverrides(updated.data);
+                  setEditingOverride(null);
+                }}
+                onRemove={async () => {
+                  const delRes = await apiFetch(`/recurring-overrides/${editingOverride.id}`, { method: "DELETE" });
+                  if (!delRes.ok) throw new Error(`Failed to remove override (HTTP ${delRes.status})`);
+                  setRecurringOverrides((prev) => prev.filter((o) => o.id !== editingOverride.id));
+                  setEditingOverride(null);
+                }}
+              />
+            ) : null}
+          </Stack>
         ) : null}
 
-        {tab === "security" ? (
-          <div className="settings-panel" role="tabpanel">
-            <h2 className="settings-panel__title">Security</h2>
-            {securityError ? <p className="error">{securityError}</p> : null}
-            {securitySuccess ? <p className="success">{securitySuccess}</p> : null}
-            <div className="settings-household-form">
-              <label className="settings-field">
-                Current password
-                <input
-                  type="password"
-                  value={passwordDraft.currentPassword}
-                  onChange={(e) =>
-                    setPasswordDraft((prev) => ({ ...prev, currentPassword: e.target.value }))
-                  }
-                  disabled={changingPassword}
-                  autoComplete="current-password"
-                />
-              </label>
-              <label className="settings-field">
-                New password
-                <input
-                  type="password"
-                  value={passwordDraft.newPassword}
-                  onChange={(e) => setPasswordDraft((prev) => ({ ...prev, newPassword: e.target.value }))}
-                  disabled={changingPassword}
-                  autoComplete="new-password"
-                />
-              </label>
-              <label className="settings-field">
-                Confirm new password
-                <input
-                  type="password"
-                  value={passwordDraft.confirmPassword}
-                  onChange={(e) =>
-                    setPasswordDraft((prev) => ({ ...prev, confirmPassword: e.target.value }))
-                  }
-                  disabled={changingPassword}
-                  autoComplete="new-password"
-                />
-              </label>
-              <div className="settings-household-actions">
-                <button type="button" disabled={changingPassword} onClick={() => void changePassword()}>
-                  {changingPassword ? "Updating…" : "Change password"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </div>
+        <BackupRestoreSection authRole={authRole} active={tab === "data"} />
+        </Tabs>
+      </Paper>
       <ConfirmDialog
         opened={removeMemberConfirm !== null}
         title="Remove household member"
         message={
-          <div style={{ fontSize: "0.9rem" }}>
+          <Stack gap={0}>
+            {removeMemberError ? (
+              <Alert color="red" mb="sm">
+                {removeMemberError}
+              </Alert>
+            ) : null}
             {removeMemberDataCount && (removeMemberDataCount.transactions > 0 || removeMemberDataCount.payslips > 0) ? (
-              <div style={{ padding: "0.6rem 0.75rem", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, marginBottom: "0.75rem" }}>
+              <Alert color="yellow" mb="sm">
                 <strong>Warning:</strong> This member has{" "}
                 {removeMemberDataCount.transactions > 0 ? <><strong>{removeMemberDataCount.transactions}</strong> transaction(s)</> : null}
                 {removeMemberDataCount.transactions > 0 && removeMemberDataCount.payslips > 0 ? " and " : null}
                 {removeMemberDataCount.payslips > 0 ? <><strong>{removeMemberDataCount.payslips}</strong> payslip(s)</> : null}
                 {" "}assigned to them. Those records will remain but show no owner. Use <strong>Transactions → Belongs-to</strong> filter to reassign before deleting.
-              </div>
+              </Alert>
             ) : null}
-            <p style={{ margin: "0 0 0.75rem" }}>This member will be permanently removed from the household. This cannot be undone.</p>
+            <Text size="sm" mb="sm">This member will be permanently removed from the household. This cannot be undone.</Text>
             {memberDrafts.find((m) => m.id === removeMemberConfirm)?.linkedUserId ? (
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", userSelect: "none" }}>
-                <input
-                  type="checkbox"
-                  checked={removeMemberDeleteLogin}
-                  onChange={(e) => setRemoveMemberDeleteLogin(e.target.checked)}
-                />
-                Also delete their login account
-              </label>
+              <Checkbox
+                checked={removeMemberDeleteLogin}
+                onChange={(e) => setRemoveMemberDeleteLogin(e.currentTarget.checked)}
+                label="Also delete their login account"
+              />
             ) : null}
-          </div>
+          </Stack>
         }
         confirmLabel="Remove member"
         danger
-        onClose={() => { setRemoveMemberConfirm(null); setRemoveMemberDataCount(null); }}
+        onClose={() => { setRemoveMemberConfirm(null); setRemoveMemberDataCount(null); setRemoveMemberError(null); }}
         onConfirm={() => confirmRemoveHouseholdMember()}
       />
       <ConfirmDialog
         opened={resetPasswordForId !== null}
         title="Reset member password"
         message={
-          <p style={{ fontSize: "0.9rem", margin: 0 }}>
-            This will generate a new temporary password and immediately invalidate their current session.
-            They will be required to change it on next login.
-          </p>
+          <Text size="sm">
+            {emailEnabled
+              ? "A password reset link will be sent to their email address. Their current session will be invalidated immediately."
+              : "This will generate a new temporary password and immediately invalidate their current session. They will be required to change it on next login."}
+          </Text>
         }
         confirmLabel={resetPasswordBusy ? "Resetting…" : "Reset password"}
         onClose={() => setResetPasswordForId(null)}
         onConfirm={() => { if (resetPasswordForId) void confirmResetPassword(resetPasswordForId); }}
       />
-      {resetPasswordResult !== null ? (
-        <div style={{
-          position: "fixed", inset: 0, zIndex: 1000,
-          background: "rgba(0,0,0,0.45)",
-          display: "flex", alignItems: "center", justifyContent: "center"
-        }}>
-          <div style={{
-            background: "var(--color-surface, #fff)", borderRadius: 10, padding: "1.5rem 2rem",
-            maxWidth: 420, width: "90%", boxShadow: "0 8px 32px rgba(0,0,0,0.18)"
-          }}>
-            <h3 style={{ margin: "0 0 0.75rem", fontSize: "1.05rem" }}>Temporary password</h3>
-            <p style={{ margin: "0 0 1rem", fontSize: "0.9rem", color: "var(--color-text-muted)" }}>
-              Share this with the member. They must change it on first login.
-            </p>
-            <div style={{
-              fontFamily: "monospace", fontSize: "1.2rem", letterSpacing: "0.05em",
-              padding: "0.6rem 1rem", background: "var(--color-bg, #f5f5f5)",
-              border: "1px solid var(--color-border, #ddd)", borderRadius: 6,
-              userSelect: "all", marginBottom: "1.25rem"
-            }}>
-              {resetPasswordResult.tempPassword}
-            </div>
-            <button
-              type="button"
-              onClick={() => setResetPasswordResult(null)}
-              style={{ width: "100%" }}
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </div>
+      <Modal
+        opened={resetPasswordResult !== null}
+        onClose={() => setResetPasswordResult(null)}
+        title="Temporary password"
+        centered
+      >
+        <Text c="dimmed" size="sm" mb="md">
+          Share this with the member. They must change it on first login.
+        </Text>
+        <Paper withBorder p="sm" mb="md">
+          <Text ff="monospace" size="lg">
+            {resetPasswordResult?.tempPassword}
+          </Text>
+        </Paper>
+        <Button fullWidth onClick={() => setResetPasswordResult(null)}>Done</Button>
+      </Modal>
+    </Stack>
   );
 }

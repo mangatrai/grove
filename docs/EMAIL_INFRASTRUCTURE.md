@@ -1,6 +1,6 @@
 # Email Infrastructure — Decision Record
 
-**Status:** Decided, not yet implemented  
+**Status:** Implemented (CR-095b)  
 **Decided:** 2026-04-17  
 **Implements:** CR-095b (password reset), and shared foundation for CR-095a (invites), staff provisioning (§20), timesheet notifications, budget alerts (CR-102)
 

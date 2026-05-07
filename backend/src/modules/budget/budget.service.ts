@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { qAll, qExec, qGet, qBegin, sqlBind } from "../../db/query.js";
+import { qAll, qGet, qBegin, sqlBind } from "../../db/query.js";
 import { log } from "../../logger.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -82,14 +82,6 @@ function monthBounds(yyyyMm: string): { start: string; end: string } {
   const lastDay = new Date(Date.UTC(y, m, 0)); // month is 1-based; Date rolls back correctly
   const end = lastDay.toISOString().slice(0, 10);
   return { start, end };
-}
-
-/** Return the YYYY-MM string for the calendar month immediately before the given month. */
-function prevMonth(yyyyMm: string): string {
-  const [y, m] = yyyyMm.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1, 1)); // first of given month
-  d.setUTCMonth(d.getUTCMonth() - 1); // go back one month
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 /** Return a YYYY-MM that is `n` calendar months before the given month. */

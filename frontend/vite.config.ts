@@ -15,6 +15,7 @@ export default defineConfig({
     }
   },
   server: {
+    host: true,
     port: Number(process.env.FRONTEND_PORT ?? 3000),
     proxy: {
       "/auth": api,
@@ -27,7 +28,10 @@ export default defineConfig({
       "/health": api,
       "/household": api,
       "/exports": api,
-      "/budget": api
+      "/gdrive": api,
+      "/budget": api,
+      "/recurring-overrides": api,
+      "/insights": api
     }
   }
 });

@@ -1,6 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { IconChevronLeft, IconChevronRight, IconPencil } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronLeft, IconChevronRight, IconPencil, IconX } from "@tabler/icons-react";
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  NumberInput,
+  Paper,
+  Progress,
+  Select,
+  SimpleGrid,
+  Stack,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
 
 import { apiJson, useAuthToken } from "../api";
 import { HelpIcon } from "../components/HelpIcon";
@@ -195,47 +210,28 @@ function budgetCategoriesToGroups(
 
 function ProgressBar({ percent }: { percent: number }) {
   const clamped = Math.min(percent, 100);
-  const color = percent > 100 ? "var(--color-danger)" : percent >= 80 ? "var(--color-warning)" : "var(--color-success)";
+  const color = percent > 100 ? "red" : percent >= 80 ? "yellow" : "green";
+  return <Progress value={clamped} color={color} size={8} radius="sm" />;
+}
+
+// ── Amount input ──────────────────────────────────────────────────────────────
+
+function AmountInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <div style={{ background: "var(--color-border)", borderRadius: 4, height: 8, overflow: "hidden" }}>
-      <div style={{ width: `${clamped}%`, height: "100%", background: color, borderRadius: 4, transition: "width 0.3s" }} />
-    </div>
+    <NumberInput
+      value={parseFloat(value) || 0}
+      onChange={(v) => onChange(String(typeof v === "number" ? v : parseFloat(v as string) || 0))}
+      min={0}
+      step={1}
+      leftSection={<Text size="xs">$</Text>}
+      size="xs"
+      styles={{ input: { textAlign: "right" } }}
+      hideControls
+    />
   );
 }
 
 // ── Setup form ────────────────────────────────────────────────────────────────
-
-function AmountInput({
-  value,
-  onChange,
-  style
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 3 }}>
-      <span style={{ color: "var(--color-text-muted)" }}>$</span>
-      <input
-        type="number"
-        min={0}
-        step={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: 90,
-          textAlign: "right",
-          border: "1px solid var(--color-border)",
-          borderRadius: 4,
-          padding: "0.2rem 0.4rem",
-          fontSize: 14,
-          ...style
-        }}
-      />
-    </div>
-  );
-}
 
 type SetupFormProps = {
   month: string;
@@ -250,8 +246,7 @@ type SetupFormProps = {
 function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGroupsChange, onSaved }: SetupFormProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const selectRef = useRef<HTMLSelectElement>(null);
-  const [addSelected, setAddSelected] = useState("");
+  const [addSelected, setAddSelected] = useState<string | null>(null);
 
   const suggestionMap = new Map(suggestions.map((s) => [s.categoryId, s]));
   const catById = new Map(allCategories.map((c) => [c.id, c]));
@@ -343,7 +338,7 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
     if (!addSelected) return;
     const cat = allCategories.find((c) => c.id === addSelected);
     if (!cat) return;
-    setAddSelected("");
+    setAddSelected(null);
 
     if (!cat.parentId) {
       // Adding a parent category: default lump sum, populate leaves from suggestions
@@ -403,228 +398,183 @@ function SetupForm({ month, groups, allCategories, suggestions, dataAsOf, onGrou
     }
   }
 
-  const colW = { cat: "40%", ref: "20%", budget: "25%", act: "15%" };
-  const hintStyle: React.CSSProperties = { fontSize: "0.78rem", color: "var(--color-text-muted)" };
-
   const helpText = dataAsOf
     ? `Pre-filled from actual spend in ${monthLabel(dataAsOf)}. Expand a row to budget individual sub-categories, or keep the parent total.`
     : "No prior spend data found. Add categories below and set your budgets manually.";
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: "0.75rem" }}>
-        <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+    <Stack gap="md">
+      <Group gap={6}>
+        <Text size="sm" c="dimmed">
           {dataAsOf
-            ? <>Pre-filled from <strong>{monthLabel(dataAsOf)}</strong> spend.</>
+            ? <><strong>Pre-filled from {monthLabel(dataAsOf)} spend.</strong></>
             : <>No prior spend — add categories manually.</>
           }
-        </span>
+        </Text>
         <HelpIcon label={helpText} />
-      </div>
+      </Group>
 
-      <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-        <colgroup>
-          <col style={{ width: colW.cat }} />
-          <col style={{ width: colW.ref }} />
-          <col style={{ width: colW.budget }} />
-          <col style={{ width: colW.act }} />
-        </colgroup>
-        <thead>
-          <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "left" }}>
-            <th style={{ padding: "0.5rem 0.5rem 0.5rem 0" }}>Category</th>
-            <th style={{ padding: "0.5rem 0.5rem", textAlign: "right", ...hintStyle }}>Last month</th>
-            <th style={{ padding: "0.5rem 0.5rem", textAlign: "right" }}>Your budget</th>
-            <th style={{ padding: "0.5rem 0", width: 56 }}></th>
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((g) => {
-            const isDetailed = g.mode === "detailed";
-            // Reference figure: sum of suggestions (or nothing if adding manually)
-            const refTotal = g.leaves.reduce((s, l) => {
-              const sug = suggestionMap.get(l.categoryId);
-              return s + (sug?.lastMonthActual ?? 0);
-            }, 0);
-            const refHasThreeMonthAvg = g.leaves.some((l) => suggestionMap.get(l.categoryId)?.basis === "three_month_avg");
+      <Box style={{ overflowX: "auto" }}>
+        <Table style={{ tableLayout: "fixed", width: "100%" }} withRowBorders striped="odd" verticalSpacing={6}>
+          <colgroup>
+            <col style={{ width: "42%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "30%" }} />
+            <col style={{ width: "8%" }} />
+          </colgroup>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Category</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Last month</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Your budget</Table.Th>
+              <Table.Th />
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {groups.map((g) => {
+              const isDetailed = g.mode === "detailed";
+              const refTotal = g.leaves.reduce((s, l) => {
+                const sug = suggestionMap.get(l.categoryId);
+                return s + (sug?.lastMonthActual ?? 0);
+              }, 0);
+              const refHasThreeMonthAvg = g.leaves.some((l) => suggestionMap.get(l.categoryId)?.basis === "three_month_avg");
 
-            return [
-              // Parent / group header row
-              <tr
-                key={`group-${g.parentId}`}
-                style={{
-                  borderBottom: isDetailed ? "none" : "1px solid var(--color-border)",
-                  background: isDetailed ? "var(--color-surface-alt, #f8f9fa)" : undefined
-                }}
-              >
-                <td style={{ padding: "0.55rem 0.5rem 0.55rem 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {/* Expand/collapse toggle — only shown when leaves are available */}
-                    {(isDetailed || g.leaves.length > 0) ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleExpand(g)}
-                        title={isDetailed ? "Collapse to total" : "Expand sub-categories"}
-                        style={{
-                          background: "none",
-                          border: "1px solid var(--color-border)",
-                          borderRadius: 4,
-                          cursor: "pointer",
-                          fontSize: 11,
-                          lineHeight: 1,
-                          padding: "0.15rem 0.4rem",
-                          color: "var(--color-text-muted)",
-                          fontWeight: 600
-                        }}
-                      >
-                        {isDetailed ? "▲" : "▼"}
-                      </button>
-                    ) : <span style={{ width: 22, display: "inline-block" }} />}
-                    <span style={{ fontWeight: 600 }}>{g.parentName}</span>
-                  </div>
-                </td>
-                <td style={{ padding: "0.55rem 0.5rem", textAlign: "right", ...hintStyle }}>
-                  {refTotal > 0
-                    ? <>{fmtUSD(refTotal)}{refHasThreeMonthAvg ? <span title="Includes 3-month average for some sub-categories"> *</span> : null}</>
-                    : "—"}
-                </td>
-                <td style={{ padding: "0.55rem 0.5rem", textAlign: "right" }}>
-                  {isDetailed ? (
-                    <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
-                      {fmtUSD(g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0))}
-                    </span>
-                  ) : (
-                    <AmountInput value={g.lumpAmount} onChange={(v) => setLump(g.parentId, v)} />
-                  )}
-                </td>
-                <td style={{ padding: "0.25rem 0", textAlign: "center" }}>
-                  {!isDetailed && (
-                    <button
-                      type="button"
-                      title="Remove"
-                      onClick={() => removeGroup(g.parentId)}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", fontSize: 16, padding: "0.1rem 0.3rem" }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </td>
-              </tr>,
-
-              // Sub-category rows when expanded
-              ...(isDetailed ? g.leaves.map((leaf) => {
-                const sug = suggestionMap.get(leaf.categoryId);
-                return (
-                  <tr key={`leaf-${leaf.categoryId}`} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                    <td style={{ padding: "0.4rem 0.5rem 0.4rem 2.25rem", fontSize: 13 }}>
-                      {leaf.categoryName}
-                    </td>
-                    <td style={{ padding: "0.4rem 0.5rem", textAlign: "right", ...hintStyle }}>
-                      {sug
-                        ? sug.basis === "three_month_avg"
-                          ? <>{fmtUSD(sug.lastMonthActual)} <span title="3-month average">(avg {fmtUSD(sug.threeMonthAvg)})</span></>
-                          : fmtUSD(sug.lastMonthActual)
+              return [
+                // Parent / group header row
+                <Table.Tr key={`group-${g.parentId}`}>
+                  <Table.Td py="xs" pl={0}>
+                    <Group gap={6} wrap="nowrap">
+                      {(isDetailed || g.leaves.length > 0) ? (
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="xs"
+                          onClick={() => toggleExpand(g)}
+                          title={isDetailed ? "Collapse to total" : "Expand sub-categories"}
+                        >
+                          {isDetailed ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
+                        </ActionIcon>
+                      ) : <Box w={22} style={{ display: "inline-block" }} />}
+                      <Text fw={600} size="sm">{g.parentName}</Text>
+                    </Group>
+                  </Table.Td>
+                  <Table.Td style={{ textAlign: "right" }}>
+                    <Text size="xs" c="dimmed">
+                      {refTotal > 0
+                        ? <>{fmtUSD(refTotal)}{refHasThreeMonthAvg ? <Text span title="Includes 3-month average for some sub-categories"> *</Text> : null}</>
                         : "—"}
-                    </td>
-                    <td style={{ padding: "0.4rem 0.5rem", textAlign: "right" }}>
-                      <AmountInput value={leaf.amount} onChange={(v) => setLeafAmount(g.parentId, leaf.categoryId, v)} />
-                    </td>
-                    <td style={{ padding: "0.25rem 0", textAlign: "center" }}>
-                      <button
-                        type="button"
-                        title="Remove sub-category"
-                        onClick={() => removeLeaf(g.parentId, leaf.categoryId)}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", fontSize: 16, padding: "0.1rem 0.3rem" }}
+                    </Text>
+                  </Table.Td>
+                  <Table.Td style={{ textAlign: "right" }}>
+                    {isDetailed ? (
+                      <Text size="sm" c="dimmed">
+                        {fmtUSD(g.leaves.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0))}
+                      </Text>
+                    ) : (
+                      <AmountInput value={g.lumpAmount} onChange={(v) => setLump(g.parentId, v)} />
+                    )}
+                  </Table.Td>
+                  <Table.Td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                    {!isDetailed && (
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        onClick={() => removeGroup(g.parentId)}
+                        title="Remove"
                       >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                );
-              }) : [])
-            ];
-          })}
-        </tbody>
-        <tfoot>
-          <tr>
-            <td colSpan={4} style={{ paddingTop: "0.75rem", paddingBottom: "0.25rem" }}>
-              {availableToAdd.length > 0 && (
-                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-                  <select
-                    ref={selectRef}
-                    value={addSelected}
-                    onChange={(e) => setAddSelected(e.target.value)}
-                    style={{
-                      border: "1px solid var(--color-border)",
-                      borderRadius: 6,
-                      padding: "0.3rem 0.5rem",
-                      fontSize: 13,
-                      flex: 1,
-                      maxWidth: 340,
-                      color: addSelected ? "var(--color-text)" : "var(--color-text-muted)"
-                    }}
-                  >
-                    <option value="">+ Add a category…</option>
-                    {availableToAdd.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.parentId ? `${catById.get(c.parentId)?.name ?? ""} › ${c.name}` : c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAdd}
-                    disabled={!addSelected}
-                    style={{
-                      background: addSelected ? "var(--color-accent)" : "var(--color-border)",
-                      color: addSelected ? "#fff" : "var(--color-text-muted)",
-                      border: "none",
-                      borderRadius: 6,
-                      padding: "0.3rem 0.85rem",
-                      fontWeight: 600,
-                      fontSize: 13,
-                      cursor: addSelected ? "pointer" : "default"
-                    }}
-                  >
-                    Add
-                  </button>
-                </div>
-              )}
-            </td>
-          </tr>
-          <tr style={{ borderTop: "2px solid var(--color-border)", fontWeight: 600 }}>
-            <td style={{ padding: "0.75rem 0.5rem 0.5rem 0" }}>Total</td>
-            <td />
-            <td style={{ padding: "0.75rem 0.5rem 0.5rem", textAlign: "right" }}>{fmtUSD(total)}</td>
-            <td />
-          </tr>
-        </tfoot>
-      </table>
+                        <IconX size={14} />
+                      </ActionIcon>
+                    )}
+                  </Table.Td>
+                </Table.Tr>,
 
-      {error ? <p style={{ color: "#dc2626", marginTop: "0.75rem" }}>{error}</p> : null}
+                // Sub-category rows when expanded
+                ...(isDetailed ? g.leaves.map((leaf) => {
+                  const sug = suggestionMap.get(leaf.categoryId);
+                  return (
+                    <Table.Tr key={`leaf-${leaf.categoryId}`}>
+                      <Table.Td py="xs" pl={36}>
+                        <Text size="sm">{leaf.categoryName}</Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Text size="xs" c="dimmed">
+                          {sug
+                            ? sug.basis === "three_month_avg"
+                              ? <>{fmtUSD(sug.lastMonthActual)} <Text span size="xs" title="3-month average">(avg {fmtUSD(sug.threeMonthAvg)})</Text></>
+                              : fmtUSD(sug.lastMonthActual)
+                            : "—"}
+                        </Text>
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <AmountInput value={leaf.amount} onChange={(v) => setLeafAmount(g.parentId, leaf.categoryId, v)} />
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "center", verticalAlign: "middle" }}>
+                        <ActionIcon
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          onClick={() => removeLeaf(g.parentId, leaf.categoryId)}
+                          title="Remove sub-category"
+                        >
+                          <IconX size={14} />
+                        </ActionIcon>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                }) : [])
+              ];
+            })}
+          </Table.Tbody>
+          <Table.Tfoot>
+            <Table.Tr>
+              <Table.Td colSpan={4} pt="md" pb="xs">
+                {availableToAdd.length > 0 && (
+                  <Group gap="xs">
+                    <Select
+                      value={addSelected}
+                      onChange={setAddSelected}
+                      data={availableToAdd.map((c) => ({
+                        value: c.id,
+                        label: c.parentId ? `${catById.get(c.parentId)?.name ?? ""} › ${c.name}` : c.name
+                      }))}
+                      placeholder="+ Add a category…"
+                      size="xs"
+                      style={{ flex: 1, maxWidth: 340 }}
+                      clearable
+                    />
+                    <Button size="xs" onClick={handleAdd} disabled={!addSelected}>
+                      Add
+                    </Button>
+                  </Group>
+                )}
+              </Table.Td>
+            </Table.Tr>
+            <Table.Tr style={{ borderTop: "2px solid var(--mantine-color-gray-3)" }}>
+              <Table.Td pl={0} pt="md" pb="xs" fw={600}>Total</Table.Td>
+              <Table.Td />
+              <Table.Td style={{ textAlign: "right" }} pt="md" pb="xs" fw={600}>{fmtUSD(total)}</Table.Td>
+              <Table.Td />
+            </Table.Tr>
+          </Table.Tfoot>
+        </Table>
+      </Box>
 
-      <div style={{ marginTop: "1.25rem", display: "flex", gap: "0.75rem", alignItems: "center" }}>
-        <button
-          type="button"
+      {error && <Text c="red" size="sm">{error}</Text>}
+
+      <Group gap="md" align="center">
+        <Button
           onClick={() => void handleSave()}
           disabled={saving || groups.length === 0}
-          style={{
-            background: "var(--color-accent)",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            padding: "0.5rem 1.25rem",
-            fontWeight: 600,
-            cursor: saving || groups.length === 0 ? "default" : "pointer",
-            opacity: saving || groups.length === 0 ? 0.6 : 1
-          }}
+          loading={saving}
         >
           {saving ? "Saving…" : `Save budget for ${monthLabel(month)}`}
-        </button>
+        </Button>
         {groups.length === 0 && (
-          <span style={{ color: "var(--color-text-muted)", fontSize: 13 }}>Add at least one category to save.</span>
+          <Text size="sm" c="dimmed">Add at least one category to save.</Text>
         )}
-      </div>
-    </div>
+      </Group>
+    </Stack>
   );
 }
 
@@ -645,108 +595,116 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
     else grouped.push({ parentName: key, cats: [cat] });
   }
 
-  return (
-    <div>
-      {/* Summary KPI cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem", marginBottom: "1.5rem" }}>
-        {(
-          [
-            { label: "Budgeted", value: fmtUSD(summary.totalBudgeted), accent: "var(--color-text-muted)" },
-            { label: "Spent", value: fmtUSD(summary.totalSpent), accent: summary.totalSpent > summary.totalBudgeted ? "var(--color-danger)" : "var(--color-text)" },
-            {
-              label: summary.remaining >= 0 ? "Remaining" : "Over budget",
-              value: fmtUSD(Math.abs(summary.remaining)),
-              accent: summary.remaining < 0 ? "var(--color-danger)" : "var(--color-success)"
-            }
-          ] as const
-        ).map(({ label, value, accent }) => (
-          <div key={label} className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${accent}` }}>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: accent }}>{value}</div>
-          </div>
-        ))}
-      </div>
+  const kpiCards = [
+    {
+      label: "Budgeted",
+      value: fmtUSD(summary.totalBudgeted),
+      textColor: "var(--mantine-color-text)",
+      borderColor: "var(--mantine-color-gray-4)"
+    },
+    {
+      label: "Spent",
+      value: fmtUSD(summary.totalSpent),
+      textColor: summary.totalSpent > summary.totalBudgeted ? "var(--mantine-color-red-6)" : "var(--mantine-color-text)",
+      borderColor: summary.totalSpent > summary.totalBudgeted ? "var(--mantine-color-red-6)" : "var(--mantine-color-gray-4)"
+    },
+    {
+      label: summary.remaining >= 0 ? "Remaining" : "Over budget",
+      value: fmtUSD(Math.abs(summary.remaining)),
+      textColor: summary.remaining < 0 ? "var(--mantine-color-red-6)" : "var(--mantine-color-green-6)",
+      borderColor: summary.remaining < 0 ? "var(--mantine-color-red-6)" : "var(--mantine-color-green-6)"
+    }
+  ];
 
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr style={{ borderBottom: "2px solid var(--color-border)", textAlign: "left" }}>
-            <th style={{ padding: "0.5rem 0.75rem 0.5rem 0", minWidth: 140 }}>Category</th>
-            <th style={{ padding: "0.5rem 0.75rem", minWidth: 160 }}>Progress</th>
-            <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Spent</th>
-            <th style={{ padding: "0.5rem 0.75rem", textAlign: "right" }}>Budget</th>
-            <th style={{ padding: "0.5rem 0.25rem", textAlign: "right", minWidth: 80 }}>Left / Over</th>
-          </tr>
-        </thead>
-        <tbody>
-          {grouped.map(({ parentName, cats }) => {
-            const showParentHeader = cats.length > 1 && parentName !== null;
-            return cats.map((cat, i) => {
-              const txnUrl = `/transactions?categoryId=${cat.categoryId}&dateFrom=${monthStart}&dateTo=${lastDay}`;
-              const isOver = cat.remaining < 0;
-              const isParentEntry = cat.parentName === null; // budgeted at parent level (no parentName)
-              return (
-                <tr key={cat.categoryId} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                  <td style={{ padding: `${i === 0 && showParentHeader ? "0.85rem" : "0.6rem"} 0.75rem 0.6rem ${isParentEntry || !showParentHeader ? "0" : "1.5rem"}` }}>
-                    {i === 0 && showParentHeader && (
-                      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", marginBottom: 4 }}>
-                        {parentName}
-                      </div>
-                    )}
-                    <Link to={txnUrl} style={{ fontWeight: 500, textDecoration: "none", color: "var(--color-text)", fontSize: 14 }}>
-                      {cat.categoryName}
-                    </Link>
-                    {isParentEntry && cat.categoryName !== parentName && cat.categoryName && (
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 1 }}>all sub-categories</div>
-                    )}
-                  </td>
-                  <td style={{ padding: "0.6rem 0.75rem" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ flex: 1 }}><ProgressBar percent={cat.percentUsed} /></div>
-                      <span style={{ fontSize: 12, color: "var(--color-text-muted)", width: 42, textAlign: "right" }}>{cat.percentUsed}%</span>
-                    </div>
-                  </td>
-                  <td style={{ padding: "0.6rem 0.75rem", textAlign: "right" }}>{fmtUSD(cat.spent)}</td>
-                  <td style={{ padding: "0.6rem 0.75rem", textAlign: "right", color: "var(--color-text-muted)" }}>{fmtUSD(cat.budgeted)}</td>
-                  <td style={{ padding: "0.6rem 0.25rem", textAlign: "right", fontWeight: 600, color: isOver ? "var(--color-danger)" : "var(--color-success)" }}>
-                    {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
-                  </td>
-                </tr>
-              );
-            });
-          })}
-        </tbody>
-      </table>
+  return (
+    <Stack gap="md">
+      {/* Summary KPI cards */}
+      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+        {kpiCards.map(({ label, value, textColor, borderColor }) => (
+          <Paper key={label} p="md" withBorder radius="md" style={{ textAlign: "center", borderTop: `3px solid ${borderColor}` }}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={500} mb={4} style={{ letterSpacing: "0.04em" }}>{label}</Text>
+            <Text size="xl" fw={700} style={{ color: textColor }}>{value}</Text>
+          </Paper>
+        ))}
+      </SimpleGrid>
+
+      <Box style={{ overflowX: "auto" }}>
+        <Table withRowBorders striped="odd" verticalSpacing={6} style={{ width: "100%" }}>
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", minWidth: 140 }}>Category</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", minWidth: 160 }}>Progress</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Spent</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right" }}>Budget</Table.Th>
+              <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em", textAlign: "right", minWidth: 80 }}>Left / Over</Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {grouped.map(({ parentName, cats }) => {
+              const showParentHeader = cats.length > 1 && parentName !== null;
+              return cats.map((cat, i) => {
+                const txnUrl = `/transactions?categoryId=${cat.categoryId}&dateFrom=${monthStart}&dateTo=${lastDay}`;
+                const isOver = cat.remaining < 0;
+                const isParentEntry = cat.parentName === null;
+                return (
+                  <Table.Tr key={cat.categoryId}>
+                    <Table.Td
+                      pl={isParentEntry || !showParentHeader ? 0 : "xl"}
+                      pt={i === 0 && showParentHeader ? "sm" : "xs"}
+                      pb="xs"
+                    >
+                      {i === 0 && showParentHeader && (
+                        <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={4} style={{ letterSpacing: "0.04em" }}>
+                          {parentName}
+                        </Text>
+                      )}
+                      <Link to={txnUrl} style={{ fontWeight: 500, textDecoration: "none", color: "inherit", fontSize: 14 }}>
+                        {cat.categoryName}
+                      </Link>
+                      {isParentEntry && cat.categoryName !== parentName && cat.categoryName && (
+                        <Text size="xs" c="dimmed" mt={1}>all sub-categories</Text>
+                      )}
+                    </Table.Td>
+                    <Table.Td py="xs">
+                      <Group gap={8} wrap="nowrap">
+                        <Box style={{ flex: 1 }}><ProgressBar percent={cat.percentUsed} /></Box>
+                        <Text size="xs" c="dimmed" w={42} ta="right">{cat.percentUsed}%</Text>
+                      </Group>
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }}>
+                      <Text size="sm">{fmtUSD(cat.spent)}</Text>
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }}>
+                      <Text size="sm" c="dimmed">{fmtUSD(cat.budgeted)}</Text>
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }}>
+                      <Text size="sm" fw={600} c={isOver ? "red" : "green"}>
+                        {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              });
+            })}
+          </Table.Tbody>
+        </Table>
+      </Box>
 
       {summary.unbudgetedSpend > 0 && (
-        <p style={{ marginTop: "0.75rem", color: "var(--color-text-muted)", fontSize: 13 }}>
+        <Text size="sm" c="dimmed">
           +{fmtUSD(summary.unbudgetedSpend)} spent in categories not in this budget.{" "}
-          <Link to={`/transactions?dateFrom=${monthStart}&dateTo=${lastDay}`}>View transactions</Link>
-        </p>
+          <Link to={`/transactions?dateFrom=${monthStart}&dateTo=${lastDay}`} style={{ color: "var(--mantine-color-blue-6)" }}>
+            View transactions
+          </Link>
+        </Text>
       )}
 
-      <div style={{ marginTop: "1.25rem" }}>
-        <button
-          type="button"
-          onClick={onEdit}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            background: "none",
-            border: "1px solid var(--color-border)",
-            borderRadius: 6,
-            padding: "0.4rem 1rem",
-            cursor: "pointer",
-            fontSize: 14,
-            color: "var(--color-text)",
-            fontWeight: 500
-          }}
-        >
-          <IconPencil size={14} />
+      <Group>
+        <Button variant="default" leftSection={<IconPencil size={14} />} onClick={onEdit}>
           Edit budget
-        </button>
-      </div>
-    </div>
+        </Button>
+      </Group>
+    </Stack>
   );
 }
 
@@ -754,25 +712,9 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
 
 function NavBtn({ onClick, direction, title }: { onClick: () => void; direction: "prev" | "next"; title: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 6,
-        padding: "0.3rem 0.5rem",
-        cursor: "pointer",
-        color: "var(--color-text-secondary)",
-        lineHeight: 1
-      }}
-    >
+    <ActionIcon variant="default" onClick={onClick} title={title} size="md">
       {direction === "prev" ? <IconChevronLeft size={16} /> : <IconChevronRight size={16} />}
-    </button>
+    </ActionIcon>
   );
 }
 
@@ -869,27 +811,27 @@ export function BudgetPage() {
   const editReady = budget !== null && budget.exists && editMode;
 
   return (
-    <div style={{ padding: "1.5rem", maxWidth: 860, margin: "0 auto" }}>
+    <Stack style={{ padding: "1.5rem", maxWidth: 860, margin: "0 auto" }} gap="xl">
       {/* Page header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1.5rem", gap: "0.75rem", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Budget</h1>
+      <Group justify="space-between" wrap="wrap" gap="sm">
+        <Group gap={8}>
+          <Title order={2} size="h3">Budget</Title>
           <HelpIcon label="Set monthly spending targets per category. In setup mode, amounts are pre-filled from recent spend. Switch to Progress to track actuals vs. budget in real time." />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+        </Group>
+        <Group gap={4}>
           <NavBtn onClick={() => handleMonthNav(-1)} direction="prev" title="Previous month" />
-          <span style={{ fontWeight: 600, minWidth: 150, textAlign: "center", fontSize: 15 }}>{monthLabel(month)}</span>
+          <Text fw={600} w={150} ta="center" size="md">{monthLabel(month)}</Text>
           <NavBtn onClick={() => handleMonthNav(1)} direction="next" title="Next month" />
-        </div>
-      </div>
+        </Group>
+      </Group>
 
-      {loading && <p style={{ color: "var(--color-text-muted)" }}>Loading…</p>}
-      {error && <p style={{ color: "#dc2626" }}>{error}</p>}
+      {loading && <Text c="dimmed">Loading…</Text>}
+      {error && <Text c="red">{error}</Text>}
 
       {/* Setup: new budget for this month */}
       {!loading && !error && setupReady && (
-        <div className="card" style={{ marginBottom: 0 }}>
-          <h2 style={{ marginTop: 0, fontSize: 16, fontWeight: 600 }}>Set up budget — {monthLabel(month)}</h2>
+        <Paper p="md" withBorder radius="md">
+          <Title order={3} size="h5" mb="md">Set up budget — {monthLabel(month)}</Title>
           <SetupForm
             month={month}
             groups={groups}
@@ -899,13 +841,13 @@ export function BudgetPage() {
             onGroupsChange={setGroups}
             onSaved={handleSaved}
           />
-        </div>
+        </Paper>
       )}
 
       {/* Edit: update existing budget */}
       {!loading && !error && editReady && (
-        <div className="card" style={{ marginBottom: 0 }}>
-          <h2 style={{ marginTop: 0, fontSize: 16, fontWeight: 600 }}>Edit budget — {monthLabel(month)}</h2>
+        <Paper p="md" withBorder radius="md">
+          <Title order={3} size="h5" mb="md">Edit budget — {monthLabel(month)}</Title>
           <SetupForm
             month={month}
             groups={groups}
@@ -914,27 +856,29 @@ export function BudgetPage() {
             onGroupsChange={setGroups}
             onSaved={handleSaved}
           />
-          <button
-            type="button"
+          <Button
+            variant="subtle"
+            color="gray"
+            size="xs"
+            mt="xs"
             onClick={() => setEditMode(false)}
-            style={{ marginTop: "0.5rem", background: "none", border: "none", cursor: "pointer", color: "var(--color-text-muted)", fontSize: 13 }}
           >
             Cancel
-          </button>
-        </div>
+          </Button>
+        </Paper>
       )}
 
       {/* Progress view */}
       {!loading && !error && progressReady && (
-        <div className="card" style={{ marginBottom: 0 }}>
+        <Paper p="md" withBorder radius="md">
           <ProgressView budget={budget} onEdit={() => void handleEdit()} />
-        </div>
+        </Paper>
       )}
 
       {/* Waiting for suggestions */}
       {!loading && !error && budget !== null && !budget.exists && suggestions === null && (
-        <p style={{ color: "var(--color-text-muted)" }}>Loading suggestions…</p>
+        <Text c="dimmed">Loading suggestions…</Text>
       )}
-    </div>
+    </Stack>
   );
 }

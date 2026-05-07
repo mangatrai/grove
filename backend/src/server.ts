@@ -4,8 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import { buildApp } from "./app.js";
 import { env } from "./config/env.js";
+import { checkExportCoverage } from "./db/export-coverage-check.js";
 import { closeSql, getSql } from "./db/query.js";
 import { log } from "./logger.js";
+import { startBackupScheduler } from "./modules/gdrive/gdrive-scheduler.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
 
@@ -35,6 +37,10 @@ const port = Number(env.PORT);
 
 void (async () => {
   await getSql();
+  await checkExportCoverage();
+  if (env.MODE !== "TEST") {
+    startBackupScheduler();
+  }
   const server = app.listen(port, () => {
     log.info(`Backend listening on http://localhost:${port}`);
     log.info(`Postgres: ${env.DATABASE_HOST}:${env.DATABASE_PORT}/${env.DATABASE_NAME}`);

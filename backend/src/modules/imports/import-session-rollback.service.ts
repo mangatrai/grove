@@ -3,13 +3,7 @@ import type { TransactionSql } from "postgres";
 import { qBegin, qGet, sqlBind } from "../../db/query.js";
 
 export type RollbackImportSessionFailure =
-  | { ok: false; code: "NOT_FOUND"; message: string }
-  | {
-      ok: false;
-      code: "SESSION_NOT_REVIEW";
-      message: string;
-      currentStatus: string;
-    };
+  | { ok: false; code: "NOT_FOUND"; message: string };
 
 async function txAll<T extends object>(
   tx: TransactionSql<Record<string, unknown>>,
@@ -29,7 +23,7 @@ async function txExec(tx: TransactionSql<Record<string, unknown>>, sqlStr: strin
 /**
  * Remove ledger rows created from this import session (`source_ref = raw:<transaction_raw.id>`),
  * clear related transfer groups, and delete resolution items tied to those raw rows, session canonical rows,
- * or partner rows in the same transfer_group_id. Only allowed while session status is `review` (Epic 6.3).
+ * or partner rows in the same transfer_group_id regardless of session status.
  * Parsed `transaction_raw` rows remain so the user can run **canonicalize** again.
  */
 export async function rollbackImportSessionLedger(
@@ -39,23 +33,14 @@ export async function rollbackImportSessionLedger(
   | { ok: true; data: { deletedCanonicalRows: number; deletedResolutionItems: number } }
   | RollbackImportSessionFailure
 > {
-  const row = await qGet<{ id: string; status: string }>(
-    `SELECT id, status FROM import_session WHERE id = ? AND household_id = ?`,
+  const row = await qGet<{ id: string }>(
+    `SELECT id FROM import_session WHERE id = ? AND household_id = ?`,
     sessionId,
     householdId
   );
 
   if (!row) {
     return { ok: false, code: "NOT_FOUND", message: "Import session not found" };
-  }
-
-  if (row.status !== "review") {
-    return {
-      ok: false,
-      code: "SESSION_NOT_REVIEW",
-      message: "Undo import is only available while the session is in review (before finalize).",
-      currentStatus: row.status
-    };
   }
 
   const deleteResolutionSql = `

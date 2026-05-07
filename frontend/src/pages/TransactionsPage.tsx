@@ -1,13 +1,34 @@
-import { MultiSelect } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Group,
+  Modal,
+  Paper,
+  SimpleGrid,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+  Code,
+  Box,
+  ActionIcon,
+  Alert,
+  NativeSelect,
+  Radio,
+  MultiSelect
+} from "@mantine/core";
 import { IconArrowBackUp, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { RecurringTagModal } from "../components/RecurringTagModal";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
@@ -111,6 +132,25 @@ type AccountRow = {
   type: string;
   account_mask: string | null;
 };
+
+type RecurringOverride = {
+  id: string;
+  householdId: string;
+  merchantKey: string;
+  displayName: string | null;
+  verdict: "confirmed" | "dismissed";
+  amountAnchor: number | null;
+  amountTolerancePct: number;
+  taggedByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function findConfirmedOverride(merchant: string | null, overrides: RecurringOverride[]): RecurringOverride | null {
+  if (!merchant) return null;
+  const normalizedMerchant = merchant.toLowerCase();
+  return overrides.find((o) => o.verdict === "confirmed" && normalizedMerchant.includes(o.merchantKey.toLowerCase())) ?? null;
+}
 
 type OwnerProfileOption = { id: string; label: string };
 type BelongsToFilterValue = "" | "household" | `person:${string}`;
@@ -219,27 +259,27 @@ function CategoryClassificationHint({ meta }: { meta: TxClassificationMeta }) {
     return null;
   }
   return (
-    <div className="transactions-page__classify-hint muted" style={{ fontSize: "0.78rem", marginTop: "0.2rem", lineHeight: 1.35 }}>
-      <span title={title || undefined}>
-        {bits.length > 0 ? <span>{bits.join(" · ")}</span> : null}
+    <Text c="dimmed" size="xs" mt={4} lh={1.35}>
+      <Box component="span" title={title || undefined}>
+        {bits.length > 0 ? <Text span>{bits.join(" · ")}</Text> : null}
         {meta.reason?.trim() ? (
-          <span style={{ display: "block", marginTop: bits.length > 0 ? "0.1rem" : 0 }}>
+          <Text span component="span" display="block" mt={bits.length > 0 ? 2 : 0}>
             {meta.reason.length > 120 ? `${meta.reason.slice(0, 117)}…` : meta.reason}
-          </span>
+          </Text>
         ) : null}
-      </span>
+      </Box>
       {showBankCategory ? (
-        <span style={{ display: "block", marginTop: "0.15rem" }}>
+        <Text component="span" display="block" mt={3}>
           Bank suggested: <strong>{meta.bankCategory}</strong>
-        </span>
+        </Text>
       ) : null}
       {meta.source === "household" && meta.ruleId ? (
-        <span style={{ display: "block", marginTop: "0.15rem" }}>
+        <Text component="span" display="block" mt={3}>
           <Link to="/categories/rules">Household rules</Link>
-          <span className="muted"> · id {meta.ruleId.slice(0, 8)}…</span>
-        </span>
+          <Text span c="dimmed">{" · "}id {meta.ruleId.slice(0, 8)}…</Text>
+        </Text>
       ) : null}
-    </div>
+    </Text>
   );
 }
 
@@ -260,27 +300,17 @@ function formatSignedMoneyRaw(amount: number | null): string {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const cfg: Record<string, { label: string; bg: string; color: string }> = {
-    posted:    { label: "Posted",    bg: "var(--color-accent-subtle, #dcfce7)", color: "var(--color-accent)" },
-    trashed:   { label: "Trashed",   bg: "#fee2e2", color: "#dc2626" },
-    duplicate: { label: "Duplicate", bg: "#fef3c7", color: "#d97706" },
-    pending:   { label: "Pending",   bg: "var(--color-surface-alt, #f8fafc)", color: "var(--color-text-muted)" },
+  const cfg: Record<string, { label: string; color: string }> = {
+    posted:    { label: "Posted", color: "green" },
+    trashed:   { label: "Trashed", color: "red" },
+    duplicate: { label: "Duplicate", color: "yellow" },
+    pending:   { label: "Pending", color: "gray" },
   };
-  const c = cfg[status] ?? { label: status, bg: "var(--color-surface-alt, #f8fafc)", color: "var(--color-text-muted)" };
+  const c = cfg[status] ?? { label: status, color: "gray" };
   return (
-    <span style={{
-      display: "inline-block",
-      padding: "0.1rem 0.45rem",
-      borderRadius: 4,
-      fontSize: 11,
-      fontWeight: 600,
-      background: c.bg,
-      color: c.color,
-      letterSpacing: "0.02em",
-      whiteSpace: "nowrap"
-    }}>
+    <Badge size="xs" radius="sm" color={c.color} variant="light">
       {c.label}
-    </span>
+    </Badge>
   );
 }
 
@@ -294,6 +324,7 @@ export function TransactionsPage() {
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
   const trashTab = searchParams.get("trash") === "true";
+  const recurringOnlyFilter = searchParams.get("recurringOnly") === "true";
   const resolutionTypes = useMemo((): LedgerResolutionType[] => {
     const seen = new Set<LedgerResolutionType>();
     for (const r of searchParams.getAll("resolutionType")) {
@@ -326,6 +357,7 @@ export function TransactionsPage() {
   const [data, setData] = useState<ListResponse | null>(null);
   const [categories, setCategories] = useState<CategoryOption[]>([]);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -376,6 +408,7 @@ export function TransactionsPage() {
   const [patternPreview, setPatternPreview] = useState<{ matched: number; descriptions: string[] } | null>(null);
   const [patternPreviewLoading, setPatternPreviewLoading] = useState(false);
   const [patternResolving, setPatternResolving] = useState(false);
+  const [recurringModalTxn, setRecurringModalTxn] = useState<TxRow | null>(null);
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -492,14 +525,16 @@ export function TransactionsPage() {
         qs.set("amountMax", String(n));
       }
     }
-    const [txRes, catRes, acctRes] = await Promise.all([
+    const [txRes, catRes, acctRes, ovRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
       apiJson<{ categories: CategoryOption[] }>("/categories"),
-      apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+      apiJson<{ accounts: AccountRow[] }>("/imports/accounts"),
+      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides")
     ]);
     setData(txRes);
     setCategories(catRes.categories);
     setAccounts(acctRes.accounts);
+    setRecurringOverrides(ovRes.ok ? ovRes.data : []);
     if (ownerProfiles.length === 0) {
       try {
         const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
@@ -636,6 +671,13 @@ export function TransactionsPage() {
     return () => window.cancelAnimationFrame(id);
   }, [addOpen]);
 
+  const visibleTransactions = useMemo(() => {
+    if (!recurringOnlyFilter || !data?.transactions) {
+      return data?.transactions ?? [];
+    }
+    return data.transactions.filter((t) => findConfirmedOverride(t.merchant, recurringOverrides) !== null);
+  }, [data?.transactions, recurringOnlyFilter, recurringOverrides]);
+
   const selectedCount = selectedTxnIds.size;
 
   const openFlagCountInSelection = useMemo(() => {
@@ -659,9 +701,9 @@ export function TransactionsPage() {
   }, [data, selectedTxnIds]);
   const allVisibleSelected = useMemo(
     () =>
-      Boolean(data?.transactions.length) &&
-      data!.transactions.every((t) => selectedTxnIds.has(t.id)),
-    [data, selectedTxnIds]
+      Boolean(visibleTransactions.length) &&
+      visibleTransactions.every((t) => selectedTxnIds.has(t.id)),
+    [visibleTransactions, selectedTxnIds]
   );
 
   function toggleTxnSelected(txnId: string) {
@@ -677,29 +719,29 @@ export function TransactionsPage() {
   }
 
   function toggleSelectAllVisible() {
-    if (!data?.transactions.length) {
+    if (!visibleTransactions.length) {
       return;
     }
     if (allVisibleSelected) {
       setSelectedTxnIds(new Set());
     } else {
-      setSelectedTxnIds(new Set(data.transactions.map((t) => t.id)));
+      setSelectedTxnIds(new Set(visibleTransactions.map((t) => t.id)));
     }
   }
 
   const allVisibleAllSelected = useMemo(
     () =>
-      Boolean(data?.transactions.length) &&
-      data!.transactions.every((t) => selectedAllIds.has(t.id)),
-    [data, selectedAllIds]
+      Boolean(visibleTransactions.length) &&
+      visibleTransactions.every((t) => selectedAllIds.has(t.id)),
+    [visibleTransactions, selectedAllIds]
   );
 
   function toggleSelectAllTab() {
-    if (!data?.transactions.length) return;
+    if (!visibleTransactions.length) return;
     if (allVisibleAllSelected) {
       setSelectedAllIds(new Set());
     } else {
-      setSelectedAllIds(new Set(data.transactions.map((t) => t.id)));
+      setSelectedAllIds(new Set(visibleTransactions.map((t) => t.id)));
     }
   }
 
@@ -725,6 +767,26 @@ export function TransactionsPage() {
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Bulk category apply failed");
+    } finally {
+      setSavingBulkAll(false);
+    }
+  }
+
+  async function bulkTrashSelectedAll() {
+    const ids = data ? [...selectedAllIds].filter((id) => data.transactions.some((t) => t.id === id)) : [];
+    if (!ids.length) return;
+    setError(null);
+    setSavingBulkAll(true);
+    try {
+      await apiJson<{ trashed: number; skipped: number }>(
+        "/transactions/bulk-trash",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      );
+      setSelectedAllIds(new Set());
+      setBulkAllCategoryId("");
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Bulk trash failed");
     } finally {
       setSavingBulkAll(false);
     }
@@ -1153,7 +1215,8 @@ export function TransactionsPage() {
       resolutionTypes.length > 0 ||
       searchFromUrl ||
       amountMinUrl !== "" ||
-      amountMaxUrl !== ""
+      amountMaxUrl !== "" ||
+      recurringOnlyFilter
   );
 
   const canPageBack = pageOffset > 0;
@@ -1298,72 +1361,63 @@ export function TransactionsPage() {
   const categorySelectValue = uncategorizedOnly ? "__uncat__" : categoryFilter ?? "";
 
   return (
-    <div className="transactions-page">
-      <div className="card transactions-page__intro">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Transactions</h1>
+    <Stack gap="md">
+      <Paper withBorder radius="md" p="md">
+        <Group gap="xs" wrap="wrap">
+          <Title order={1} size="h3" m={0}>Transactions</Title>
           <HelpIcon label="Posted rows from your household ledger. Needs review includes uncategorized rows, non-posted status, or open duplicate/transfer flags. Categories can be set by rules or manually here." />
           {sessionFilter ? (
-            <span className="muted" style={{ fontSize: 13, marginLeft: 4 }}>
+            <Text c="dimmed" size="sm" ml={4}>
               Session: <code>{sessionFilter}</code>{" · "}
               <Link to={`/imports/${sessionFilter}`}>Workspace</Link>{" · "}
               <Link to="/transactions">All transactions</Link>
-            </span>
+            </Text>
           ) : null}
           {fromDashboard && returnTo ? (
-            <Link to={returnTo} style={{ fontSize: 13, marginLeft: "auto" }}>← Dashboard</Link>
+            <Text component={Link} to={returnTo} size="sm" ml="auto">← Dashboard</Text>
           ) : null}
-        </div>
-      </div>
+        </Group>
+      </Paper>
 
-      <div className="transactions-toolbar card transactions-page__control-band">
-        <div className="transactions-toolbar__tabs" role="tablist" aria-label="Transaction scope">
-          <button
+      <Paper withBorder radius="md" p="md">
+        <Group role="tablist" aria-label="Transaction scope" mb="sm">
+          <Button
             type="button"
             role="tab"
             aria-selected={!needsReviewTab && !trashTab}
-            className={`transactions-toolbar__tab${!needsReviewTab && !trashTab ? " transactions-toolbar__tab--active" : ""}`}
+            variant={!needsReviewTab && !trashTab ? "filled" : "default"}
             onClick={() => setTab("all")}
           >
             All
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             role="tab"
             aria-selected={needsReviewTab}
-            className={`transactions-toolbar__tab${needsReviewTab ? " transactions-toolbar__tab--active" : ""}`}
+            variant={needsReviewTab ? "filled" : "default"}
             onClick={() => setTab("review")}
           >
             Needs review
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             role="tab"
             aria-selected={trashTab}
-            className={`transactions-toolbar__tab${trashTab ? " transactions-toolbar__tab--active" : ""}`}
+            variant={trashTab ? "filled" : "default"}
             onClick={() => setTab("trash")}
           >
             Trash
-          </button>
-        </div>
+          </Button>
+        </Group>
         {needsReviewTab && (resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger ?? 0) > 0 ? (
-          <div
-            className="transactions-toolbar__orphan-banner"
-            style={{
-              padding: "0.65rem 0.85rem",
-              marginBottom: "0.75rem",
-              borderRadius: "8px",
-              border: "1px solid #fcd34d",
-              background: "#fffbeb"
-            }}
-          >
+          <Alert color="yellow" mb="sm">
             <strong>{resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger}</strong> near-duplicate item(s) flagged during import have no matching ledger row — they can be ignored or resolved by re-importing.
-          </div>
+          </Alert>
         ) : null}
-        <div className="transactions-toolbar__row">
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
           {needsReviewTab ? (
-            <label className="transactions-toolbar__field transactions-toolbar__field--grow">
-              <span className="transactions-toolbar__label">Review type</span>
+            <Box>
+              <Text size="sm" mb={4}>Review type</Text>
               <MultiSelect
                 placeholder="All types"
                 aria-label="Filter by open review item types"
@@ -1373,22 +1427,19 @@ export function TransactionsPage() {
                 clearable
                 searchable={false}
                 size="sm"
-                className="transactions-toolbar__resolution-multiselect"
               />
-            </label>
+            </Box>
           ) : null}
-          <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">Search</span>
-            <input
+            <TextInput
+              label="Search"
               type="search"
               placeholder="Merchant or memo"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
               autoComplete="off"
             />
-          </label>
-          <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">Account</span>
+          <Box>
+            <Text size="sm" mb={4}>Account</Text>
             <HierarchicalSearchPicker
               value={accountFilter ?? null}
               onChange={(v) =>
@@ -1403,45 +1454,35 @@ export function TransactionsPage() {
               ariaLabel="Filter by account"
               clearable
             />
-          </label>
-          <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">From</span>
-            <input
-              type="date"
-              value={dateFrom ?? ""}
-              onChange={(e) => {
-                mergeParams((n) => {
-                  n.set("offset", "0");
-                  const v = e.target.value;
-                  if (!v) {
-                    n.delete("dateFrom");
-                  } else {
-                    n.set("dateFrom", v);
-                  }
-                });
-              }}
-            />
-          </label>
-          <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">To</span>
-            <input
-              type="date"
-              value={dateTo ?? ""}
-              onChange={(e) => {
-                mergeParams((n) => {
-                  n.set("offset", "0");
-                  const v = e.target.value;
-                  if (!v) {
-                    n.delete("dateTo");
-                  } else {
-                    n.set("dateTo", v);
-                  }
-                });
-              }}
-            />
-          </label>
-          <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">Belongs-to</span>
+          </Box>
+          <TextInput
+            label="From"
+            type="date"
+            value={dateFrom ?? ""}
+            onChange={(e) => {
+              mergeParams((n) => {
+                n.set("offset", "0");
+                const v = e.target.value;
+                if (!v) n.delete("dateFrom");
+                else n.set("dateFrom", v);
+              });
+            }}
+          />
+          <TextInput
+            label="To"
+            type="date"
+            value={dateTo ?? ""}
+            onChange={(e) => {
+              mergeParams((n) => {
+                n.set("offset", "0");
+                const v = e.target.value;
+                if (!v) n.delete("dateTo");
+                else n.set("dateTo", v);
+              });
+            }}
+          />
+          <Box>
+            <Text size="sm" mb={4}>Belongs-to</Text>
             <HierarchicalSearchPicker
               value={belongsToFilterValue || null}
               onChange={(v) =>
@@ -1459,9 +1500,9 @@ export function TransactionsPage() {
               ariaLabel="Filter by belongs-to"
               clearable
             />
-          </label>
-          <label className="transactions-toolbar__field">
-            <span className="transactions-toolbar__label">Category</span>
+          </Box>
+          <Box>
+            <Text size="sm" mb={4}>Category</Text>
             <HierarchicalSearchPicker
               value={categorySelectValue || "__any__"}
               onChange={(v) => {
@@ -1478,149 +1519,160 @@ export function TransactionsPage() {
               placeholder="Any"
               ariaLabel="Filter by category"
             />
-          </label>
-          <div className="transactions-toolbar__actions">
+          </Box>
+        </SimpleGrid>
+        <Group mt="sm">
             {hasLedgerFilters ? (
-              <button
+              <Button
                 type="button"
-                className="secondary"
+                variant="default"
                 onClick={() => clearFilters()}
                 title="Reset to default view"
               >
                 Clear all filters
-              </button>
+              </Button>
             ) : null}
-            <button
+            <Button
               type="button"
-              className="button-primary"
               onClick={openAddModal}
-              style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+              leftSection={<IconPlus size={15} />}
             >
-              <IconPlus size={15} />
               Add transaction
-            </button>
-          </div>
-        </div>
-        <div className="transactions-toolbar__more" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <button
+            </Button>
+        </Group>
+        <Group align="center" gap={6} mt="sm">
+          <Button
             type="button"
-            className="transactions-toolbar__more-toggle"
+            variant="subtle"
             aria-expanded={moreFiltersOpen}
             onClick={() => setMoreFiltersOpen((o) => !o)}
           >
             {moreFiltersOpen ? "Fewer filters ▴" : "More filters ▾"}
-          </button>
+          </Button>
           <HelpIcon label="Search matches a substring in merchant + memo (multi-word = AND). Results sorted by date, newest first. Use amount min/max for signed amount range filtering." />
-        </div>
+        </Group>
         {moreFiltersOpen ? (
-          <div className="transactions-toolbar__more-panel row">
-            <label className="transactions-toolbar__field">
-              <span className="transactions-toolbar__label">Amount min (signed)</span>
-              <input
-                type="number"
-                step="any"
-                placeholder="e.g. -500"
-                value={amountMinDraft}
-                onChange={(e) => setAmountMinDraft(e.target.value)}
-              />
-            </label>
-            <label className="transactions-toolbar__field">
-              <span className="transactions-toolbar__label">Amount max (signed)</span>
-              <input
-                type="number"
-                step="any"
-                placeholder="e.g. 100"
-                value={amountMaxDraft}
-                onChange={(e) => setAmountMaxDraft(e.target.value)}
-              />
-            </label>
-            <button type="button" onClick={() => commitAmountFilters()}>
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm" mt="sm">
+            <TextInput
+              label="Amount min (signed)"
+              type="number"
+              step="any"
+              placeholder="e.g. -500"
+              value={amountMinDraft}
+              onChange={(e) => setAmountMinDraft(e.target.value)}
+            />
+            <TextInput
+              label="Amount max (signed)"
+              type="number"
+              step="any"
+              placeholder="e.g. 100"
+              value={amountMaxDraft}
+              onChange={(e) => setAmountMaxDraft(e.target.value)}
+            />
+            <Checkbox
+              label="Recurring only"
+              checked={recurringOnlyFilter}
+              onChange={(e) => {
+                setSearchParams((prev) => {
+                  const next = new URLSearchParams(prev);
+                  if (e.target.checked) {
+                    next.set("recurringOnly", "true");
+                  } else {
+                    next.delete("recurringOnly");
+                  }
+                  next.set("offset", "0");
+                  return next;
+                });
+              }}
+            />
+            <Button type="button" onClick={() => commitAmountFilters()}>
               Apply amounts
-            </button>
-          </div>
+            </Button>
+          </SimpleGrid>
         ) : null}
-      </div>
+      </Paper>
 
-      <div className="card">
+      <Paper withBorder radius="md" p="md">
         {hasLedgerFilters ? (
-          <p className="muted">
+          <Text c="dimmed" size="sm">
             Active filters:
             {needsReviewTab ? <> [needs review]</> : null}
             {resolutionTypes.length > 0 ? (
               <>
                 {" "}
                 [review types:{" "}
-                <code>{resolutionTypes.map((t) => RESOLUTION_TYPE_LABELS[t]).join(", ")}</code>]
+                <Code>{resolutionTypes.map((t) => RESOLUTION_TYPE_LABELS[t]).join(", ")}</Code>]
               </>
             ) : null}
             {categoryName ? (
               <>
                 {" "}
-                [category: <code>{categoryName}</code>]
+                [category: <Code>{categoryName}</Code>]
               </>
             ) : null}
             {uncategorizedOnly ? <> [uncategorized only]</> : null}
             {searchFromUrl ? (
               <>
                 {" "}
-                [search: <code>{searchFromUrl}</code>]
+                [search: <Code>{searchFromUrl}</Code>]
               </>
             ) : null}
             {dateFrom ? (
               <>
                 {" "}
-                [from <code>{dateFrom}</code>]
+                [from <Code>{dateFrom}</Code>]
               </>
             ) : null}
             {dateTo ? (
               <>
                 {" "}
-                [to <code>{dateTo}</code>]
+                [to <Code>{dateTo}</Code>]
               </>
             ) : null}
             {accountName ? (
               <>
                 {" "}
-                [account: <code>{accountName}</code>]
+                [account: <Code>{accountName}</Code>]
               </>
             ) : null}
             {ownerScopeFilter ? (
               <>
                 {" "}
                 [belongs-to:{" "}
-                <code>{lookupLabel(belongsToGroups, ownerScopeFilter) ?? ownerScopeFilter}</code>]
+                <Code>{lookupLabel(belongsToGroups, ownerScopeFilter) ?? ownerScopeFilter}</Code>]
               </>
             ) : null}
             {ownerPersonProfileFilter ? (
               <>
                 {" "}
                 [belongs-to:{" "}
-                <code>{lookupLabel(belongsToGroups, `person:${ownerPersonProfileFilter}`) ?? ownerPersonProfileFilter}</code>]
+                <Code>{lookupLabel(belongsToGroups, `person:${ownerPersonProfileFilter}`) ?? ownerPersonProfileFilter}</Code>]
               </>
             ) : null}
             {amountMinUrl !== "" ? (
               <>
                 {" "}
-                [min <code>{amountMinUrl}</code>]
+                [min <Code>{amountMinUrl}</Code>]
               </>
             ) : null}
             {amountMaxUrl !== "" ? (
               <>
                 {" "}
-                [max <code>{amountMaxUrl}</code>]
+                [max <Code>{amountMaxUrl}</Code>]
               </>
             ) : null}
-            . <button type="button" className="link-button" onClick={() => clearFilters()}>Clear filters</button>
-          </p>
+            {recurringOnlyFilter ? <> [recurring only]</> : null}
+            . <Button variant="subtle" size="compact-sm" onClick={() => clearFilters()}>Clear filters</Button>
+          </Text>
         ) : null}
         {needsReviewTab ? (
-          <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--color-surface, #fff)", paddingBottom: "0.25rem" }}>
+          <Box pos="sticky" top={0} style={{ zIndex: 10 }} bg="var(--color-surface, #fff)" pb={4}>
             {selectedCount > 0 ? (
-              <div className="transactions-bulk-bar row" role="status" aria-live="polite">
-                <span className="muted">
+              <Group role="status" aria-live="polite" wrap="wrap" align="center">
+                <Text c="dimmed" size="sm">
                   {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
-                </span>
-                <div style={{ marginBottom: 0, minWidth: "12rem", maxWidth: "20rem" }}>
+                </Text>
+                <Box miw="12rem" maw="20rem">
                   <LedgerCategoryPicker
                     categories={categories}
                     value={bulkCategoryId || null}
@@ -1629,89 +1681,64 @@ export function TransactionsPage() {
                     onCategoryCreated={() => void refreshCategories()}
                     ariaLabel="Bulk category"
                   />
-                </div>
-                <button
-                  type="button"
-                  disabled={savingBulk || !bulkCategoryId}
-                  onClick={() => void bulkAssignCategory()}
-                >
+                </Box>
+                <Button type="button" disabled={savingBulk || !bulkCategoryId} onClick={() => void bulkAssignCategory()}>
                   Apply category
-                </button>
+                </Button>
                 {openTransferCountInSelection > 0 ? (
-                  <button
+                  <Button
                     type="button"
                     disabled={savingBulk}
                     onClick={() => void bulkConfirmTransfers()}
                     title="Confirm selected transfer flags as real transfers — sets transfer_group_id on both legs and excludes them from cash flow"
                   >
                     Confirm transfers ({openTransferCountInSelection})
-                  </button>
+                  </Button>
                 ) : null}
                 {openFlagCountInSelection > 0 ? (
-                  <button
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="default"
                     disabled={savingBulk}
                     onClick={() => void bulkResolveFlags()}
                     title="Dismiss flags without pairing — use for coincidental amount matches that are NOT real transfers"
                   >
                     {openTransferCountInSelection > 0 ? `Not a transfer / dismiss (${openFlagCountInSelection})` : `Resolve flags (${openFlagCountInSelection})`}
-                  </button>
+                  </Button>
                 ) : null}
-                <button
+                <Button
                   type="button"
-                  className="secondary"
+                  variant="default"
                   disabled={savingBulk}
                   onClick={() => void bulkTrashSelected()}
                   title="Move selected rows to Trash"
                 >
                   Move to trash
-                </button>
-              </div>
+                </Button>
+              </Group>
             ) : null}
-          <div style={{ marginBottom: "0.5rem" }}>
+          <Box mb="sm">
             {!patternResolveOpen ? (
-              <button
-                type="button"
-                className="secondary"
-                style={{ fontSize: "0.85rem" }}
-                onClick={() => setPatternResolveOpen(true)}
-              >
+              <Button type="button" variant="default" size="xs" onClick={() => setPatternResolveOpen(true)}>
                 Resolve all by merchant name…
-              </button>
+              </Button>
             ) : (
-              <div
-                style={{
-                  padding: "0.75rem 1rem",
-                  border: "1px solid var(--color-border, #e5e7eb)",
-                  borderRadius: "8px",
-                  background: "var(--color-surface-alt, #f9fafb)"
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: "0.5rem", fontSize: "0.92rem" }}>
-                  Resolve all matching a merchant name
-                </div>
-                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "flex-start" }}>
-                  <div style={{ flex: "1 1 14rem" }}>
-                    <label style={{ fontSize: "0.82rem", display: "block", marginBottom: "0.2rem" }} htmlFor="pattern-input">
-                      Description contains (case-insensitive)
-                    </label>
-                    <input
-                      id="pattern-input"
-                      type="text"
-                      value={patternDraft}
-                      placeholder="e.g. WHOLEFDS or Amazon"
-                      style={{ width: "100%" }}
-                      onChange={(e) => {
-                        setPatternDraft(e.target.value);
-                        void fetchPatternPreview(e.target.value);
-                      }}
-                    />
-                  </div>
-                  <div style={{ flex: "1 1 14rem" }}>
-                    <label style={{ fontSize: "0.82rem", display: "block", marginBottom: "0.2rem" }}>
-                      Assign category
-                    </label>
+              <Paper withBorder radius="md" p="md" bg="var(--color-surface-alt, #f9fafb)">
+                <Text fw={600} size="sm" mb="sm">Resolve all matching a merchant name</Text>
+                <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+                  <TextInput
+                    id="pattern-input"
+                    label="Description contains (case-insensitive)"
+                    type="text"
+                    value={patternDraft}
+                    placeholder="e.g. WHOLEFDS or Amazon"
+                    onChange={(e) => {
+                      setPatternDraft(e.target.value);
+                      void fetchPatternPreview(e.target.value);
+                    }}
+                  />
+                  <Box>
+                    <Text size="xs" mb={4}>Assign category</Text>
                     <LedgerCategoryPicker
                       categories={categories}
                       value={patternCategoryId || null}
@@ -1719,35 +1746,35 @@ export function TransactionsPage() {
                       onChange={(id) => setPatternCategoryId(id ?? "")}
                       ariaLabel="Pattern resolve category"
                     />
-                  </div>
-                </div>
+                  </Box>
+                </SimpleGrid>
                 {patternPreviewLoading ? (
-                  <p className="muted" style={{ margin: "0.4rem 0 0", fontSize: "0.82rem" }}>Checking…</p>
+                  <Text c="dimmed" mt="xs" size="xs">Checking…</Text>
                 ) : patternPreview !== null ? (
-                  <p style={{ margin: "0.4rem 0 0", fontSize: "0.82rem" }}>
+                  <Text mt="xs" size="xs">
                     {patternPreview.matched === 0 ? (
-                      <span className="muted">No open uncategorized items match this pattern.</span>
+                      <Text span c="dimmed">No open uncategorized items match this pattern.</Text>
                     ) : (
                       <>
                         <strong>{patternPreview.matched}</strong> item{patternPreview.matched === 1 ? "" : "s"} will be resolved.
                         {patternPreview.descriptions.length > 0 ? (
-                          <span className="muted"> Examples: {patternPreview.descriptions.slice(0, 3).join(", ")}{patternPreview.descriptions.length > 3 ? "…" : ""}</span>
+                          <Text span c="dimmed"> Examples: {patternPreview.descriptions.slice(0, 3).join(", ")}{patternPreview.descriptions.length > 3 ? "…" : ""}</Text>
                         ) : null}
                       </>
                     )}
-                  </p>
+                  </Text>
                 ) : null}
-                <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.6rem" }}>
-                  <button
+                <Group gap="xs" mt="sm">
+                  <Button
                     type="button"
                     disabled={patternResolving || !patternDraft.trim() || !patternCategoryId || patternPreview?.matched === 0}
                     onClick={() => void applyPatternResolve()}
                   >
                     {patternResolving ? "Resolving…" : "Apply to all"}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="secondary"
+                    variant="default"
                     disabled={patternResolving}
                     onClick={() => {
                       setPatternResolveOpen(false);
@@ -1757,19 +1784,19 @@ export function TransactionsPage() {
                     }}
                   >
                     Cancel
-                  </button>
-                </div>
-              </div>
+                  </Button>
+                </Group>
+              </Paper>
             )}
-          </div>
-          </div>
+          </Box>
+          </Box>
         ) : null}
         {!needsReviewTab && !trashTab && selectedAllIds.size > 0 ? (
-          <div className="transactions-bulk-bar row" role="status" aria-live="polite">
-            <span className="muted">
+          <Group role="status" aria-live="polite" wrap="wrap" align="center">
+            <Text c="dimmed" size="sm">
               {selectedAllIds.size} row{selectedAllIds.size === 1 ? "" : "s"} selected
-            </span>
-            <div style={{ marginBottom: 0, minWidth: "12rem", maxWidth: "20rem" }}>
+            </Text>
+            <Box miw="12rem" maw="20rem">
               <LedgerCategoryPicker
                 categories={categories}
                 value={bulkAllCategoryId || null}
@@ -1778,53 +1805,60 @@ export function TransactionsPage() {
                 onCategoryCreated={() => void refreshCategories()}
                 ariaLabel="Bulk category (all tab)"
               />
-            </div>
-            <button
+            </Box>
+            <Button
               type="button"
               disabled={savingBulkAll || !bulkAllCategoryId}
               onClick={() => void bulkAssignCategoryAll()}
             >
               Apply category
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="secondary"
+              disabled={savingBulkAll}
+              onClick={() => void bulkTrashSelectedAll()}
+            >
+              Move to trash
+            </Button>
+            <Button
+              type="button"
+              variant="default"
               disabled={savingBulkAll}
               onClick={() => { setSelectedAllIds(new Set()); setBulkAllCategoryId(""); }}
             >
               Clear selection
-            </button>
-          </div>
+            </Button>
+          </Group>
         ) : null}
         {trashTab && selectedTrashIds.size > 0 ? (
-          <div className="transactions-bulk-bar row" role="status" aria-live="polite">
-            <span className="muted">
+          <Group role="status" aria-live="polite" wrap="wrap" align="center">
+            <Text c="dimmed" size="sm">
               {selectedTrashIds.size} row{selectedTrashIds.size === 1 ? "" : "s"} selected
-            </span>
-            <button
+            </Text>
+            <Button
               type="button"
               disabled={savingTrash}
               onClick={() => void bulkRestoreSelected()}
             >
               Restore ({selectedTrashIds.size})
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="secondary"
+              variant="default"
               disabled={savingTrash}
               onClick={() => void bulkHardDeleteSelected()}
               title="Permanently delete selected rows — cannot be undone"
             >
               Delete permanently ({selectedTrashIds.size})
-            </button>
-          </div>
+            </Button>
+          </Group>
         ) : null}
-        {error ? <p className="error">{error}</p> : null}
-        {loading ? <p className="muted">Loading…</p> : null}
+        {error ? <Alert color="red">{error}</Alert> : null}
+        {loading ? <Text c="dimmed">Loading…</Text> : null}
         {!loading && data ? (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-              <span className="muted" style={{ fontSize: "0.9rem" }}>
+            <Group gap="md" wrap="wrap" mb="xs">
+              <Text c="dimmed" size="sm">
                 {data.total > 0 ? (
                   <>
                     Showing <strong>{pageOffset + 1}–{pageOffset + data.transactions.length}</strong> of{" "}
@@ -1835,28 +1869,25 @@ export function TransactionsPage() {
                 ) : (
                   <>0 transaction(s){data.sessionId ? " for this import" : ""}.</>
                 )}
-              </span>
-              <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
-                <button type="button" disabled={!canPageBack} onClick={() => updatePaging(pageOffset - pageLimit)}>
+              </Text>
+              <Group gap="xs">
+                <Button type="button" variant="default" disabled={!canPageBack} onClick={() => updatePaging(pageOffset - pageLimit)}>
                   ← Previous
-                </button>
-                <button type="button" disabled={!canPageForward} onClick={() => updatePaging(pageOffset + pageLimit)}>
+                </Button>
+                <Button type="button" variant="default" disabled={!canPageForward} onClick={() => updatePaging(pageOffset + pageLimit)}>
                   Next →
-                </button>
-              </span>
-              <label style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.85rem" }}>
-                <span className="muted">Per page:</span>
-                <select
-                  value={pageLimit}
-                  onChange={(e) => mergeParams((n) => { n.set("limit", e.target.value); n.set("offset", "0"); })}
-                  style={{ fontSize: "0.85rem" }}
-                >
-                  {[25, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
-              </label>
-            </div>
-            {data.transactions.length === 0 ? (
-              <p className="muted">
+                </Button>
+              </Group>
+              <NativeSelect
+                label="Per page"
+                size="xs"
+                value={String(pageLimit)}
+                data={[25, 50, 100, 200].map((n) => ({ value: String(n), label: String(n) }))}
+                onChange={(e) => mergeParams((n) => { n.set("limit", e.target.value); n.set("offset", "0"); })}
+              />
+            </Group>
+            {visibleTransactions.length === 0 ? (
+              <Text c="dimmed">
                 {sessionFilter
                   ? "No posted rows for this session yet. Either parse/canonicalize has not finished, or all lines were flagged (duplicates / review queue)."
                   : hasLedgerFilters
@@ -1866,27 +1897,24 @@ export function TransactionsPage() {
                       : needsReviewTab
                         ? "Nothing needs review right now."
                         : "No transactions yet. Use New import in the header, then run import from the workspace, or add a row with + Add transaction."}
-              </p>
+              </Text>
             ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table className="ledger-table">
-                  <thead>
-                    <tr>
+              <Table withTableBorder withColumnBorders withRowBorders striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
                       {needsReviewTab ? (
-                        <th style={{ width: "2.5rem" }}>
-                          <input
-                            type="checkbox"
+                        <Table.Th w="2.5rem">
+                          <Checkbox
                             checked={allVisibleSelected}
                             onChange={() => toggleSelectAllVisible()}
                             disabled={savingBulk}
                             title="Select all rows on this page"
                             aria-label="Select all rows on this page"
                           />
-                        </th>
+                        </Table.Th>
                       ) : trashTab ? (
-                        <th style={{ width: "2.5rem" }}>
-                          <input
-                            type="checkbox"
+                        <Table.Th w="2.5rem">
+                          <Checkbox
                             checked={Boolean(data?.transactions.length) && data!.transactions.every((t) => selectedTrashIds.has(t.id))}
                             onChange={() => {
                               if (!data?.transactions.length) return;
@@ -1897,37 +1925,37 @@ export function TransactionsPage() {
                             title="Select all rows on this page"
                             aria-label="Select all rows on this page"
                           />
-                        </th>
+                        </Table.Th>
                       ) : (
-                        <th style={{ width: "2.5rem" }}>
-                          <input
-                            type="checkbox"
+                        <Table.Th w="2.5rem">
+                          <Checkbox
                             checked={allVisibleAllSelected}
                             onChange={() => toggleSelectAllTab()}
                             disabled={savingBulkAll}
                             title="Select all rows on this page"
                             aria-label="Select all rows on this page"
                           />
-                        </th>
+                        </Table.Th>
                       )}
                       {needsReviewTab ? (
-                        <th className="transactions-page__expand-th" scope="col">
+                        <Table.Th scope="col">
                           Context
-                        </th>
+                        </Table.Th>
                       ) : null}
-                      <th>Date</th>
-                      <th>Account</th>
-                      <th>Amount</th>
-                      <th>Description</th>
-                      {needsReviewTab ? <th>Why</th> : null}
-                      {needsReviewTab ? <th>Session</th> : null}
-                      {!trashTab ? <th>Belongs-to</th> : null}
-                      <th>Category</th>
-                      <th style={{ width: "1px", whiteSpace: "nowrap" }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.transactions.map((t) => {
+                      <Table.Th>Date</Table.Th>
+                      <Table.Th>Account</Table.Th>
+                      <Table.Th>Amount</Table.Th>
+                      <Table.Th>Description</Table.Th>
+                      <Table.Th w="5.5rem" ta="center">Recurring</Table.Th>
+                      {needsReviewTab ? <Table.Th>Why</Table.Th> : null}
+                      {needsReviewTab ? <Table.Th>Session</Table.Th> : null}
+                      {!trashTab ? <Table.Th>Belongs-to</Table.Th> : null}
+                      <Table.Th>Category</Table.Th>
+                      <Table.Th w={1}></Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {visibleTransactions.map((t) => {
                       const accountLabel = formatAccountForSelect({
                         institution: t.institution,
                         type: t.accountType,
@@ -1939,24 +1967,23 @@ export function TransactionsPage() {
                       const detailItems = reviewDetailByTxn[t.id];
                       const detailLoading = reviewDetailLoadingIds.has(t.id);
                       const detailError = reviewDetailErr[t.id];
-                      const colSpan = needsReviewTab ? 11 : trashTab ? 7 : 10;
+                      const colSpan = needsReviewTab ? 12 : trashTab ? 8 : 11;
+                      const confirmedRecurringOverride = findConfirmedOverride(t.merchant, recurringOverrides);
                       return (
                         <Fragment key={t.id}>
-                          <tr>
+                          <Table.Tr>
                             {needsReviewTab ? (
-                              <td>
-                                <input
-                                  type="checkbox"
+                              <Table.Td>
+                                <Checkbox
                                   checked={selectedTxnIds.has(t.id)}
                                   onChange={() => toggleTxnSelected(t.id)}
                                   disabled={savingBulk}
                                   aria-label={`Select row ${desc}`}
                                 />
-                              </td>
+                              </Table.Td>
                             ) : trashTab ? (
-                              <td>
-                                <input
-                                  type="checkbox"
+                              <Table.Td>
+                                <Checkbox
                                   checked={selectedTrashIds.has(t.id)}
                                   onChange={() => setSelectedTrashIds((prev) => {
                                     const next = new Set(prev);
@@ -1966,11 +1993,10 @@ export function TransactionsPage() {
                                   disabled={savingTrash}
                                   aria-label={`Select row ${desc}`}
                                 />
-                              </td>
+                              </Table.Td>
                             ) : (
-                              <td>
-                                <input
-                                  type="checkbox"
+                              <Table.Td>
+                                <Checkbox
                                   checked={selectedAllIds.has(t.id)}
                                   onChange={() => setSelectedAllIds((prev) => {
                                     const next = new Set(prev);
@@ -1980,95 +2006,110 @@ export function TransactionsPage() {
                                   disabled={savingBulkAll}
                                   aria-label={`Select row ${desc}`}
                                 />
-                              </td>
+                              </Table.Td>
                             )}
                             {needsReviewTab ? (
-                              <td className="transactions-page__expand-cell">
-                                <button
+                              <Table.Td>
+                                <Button
                                   type="button"
-                                  className="transactions-page__expand-btn"
+                                  variant="subtle"
+                                  size="compact-sm"
                                   aria-expanded={expanded}
                                   onClick={() => toggleTxnExpand(t.id)}
                                 >
                                   {expanded ? "Hide" : "Show"}
-                                </button>
-                              </td>
+                                </Button>
+                              </Table.Td>
                             ) : null}
-                            <td>{t.txnDate}</td>
-                            <td>{accountLabel}</td>
-                            <td style={{ whiteSpace: "nowrap" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                                {formatMoney(t.amount, t.direction)}
+                            <Table.Td>{t.txnDate}</Table.Td>
+                            <Table.Td>{accountLabel}</Table.Td>
+                            <Table.Td>
+                              <Group gap={5} wrap="nowrap">
+                                <Text>{formatMoney(t.amount, t.direction)}</Text>
                                 {t.status !== "posted" ? <StatusBadge status={t.status} /> : null}
-                              </div>
-                            </td>
-                            <td className="transactions-page__desc-cell">
-                              <span>{t.merchant || "—"}</span>
+                              </Group>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text>{t.merchant || "—"}</Text>
                               {trashTab ? (
                                 t.memo ? (
-                                  <div className="transactions-page__memo-line transactions-page__memo-line--has-memo">
-                                    <span style={{ fontStyle: "italic" }}>{t.memo}</span>
-                                  </div>
+                                  <Text fs="italic" size="sm">{t.memo}</Text>
                                 ) : null
                               ) : editingMemoId === t.id ? (
-                                <div
-                                  className="transactions-page__memo-edit"
+                                <Group
+                                  gap="xs"
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter") void saveMemo(t.id);
                                     if (e.key === "Escape") cancelMemoEdit();
                                   }}
                                 >
-                                  <input
-                                    type="text"
+                                  <TextInput
                                     value={memoDraft}
                                     onChange={(e) => setMemoDraft(e.target.value)}
                                     placeholder="Add memo…"
                                     autoFocus
                                     maxLength={500}
-                                    className="transactions-page__memo-input"
                                   />
-                                  <button type="button" onClick={() => void saveMemo(t.id)} title="Save" className="transactions-page__memo-btn">✓</button>
-                                  <button type="button" onClick={cancelMemoEdit} title="Cancel" className="transactions-page__memo-btn">✕</button>
-                                </div>
+                                  <ActionIcon type="button" onClick={() => void saveMemo(t.id)} title="Save" variant="default">✓</ActionIcon>
+                                  <ActionIcon type="button" onClick={cancelMemoEdit} title="Cancel" variant="default">✕</ActionIcon>
+                                </Group>
                               ) : (
-                                <div className={`transactions-page__memo-line${t.memo ? " transactions-page__memo-line--has-memo" : ""}`}>
-                                  <span style={{ fontStyle: t.memo ? "italic" : "normal" }}>
+                                <Group gap="xs" wrap="nowrap">
+                                  <Text fs={t.memo ? "italic" : "normal"} size="sm">
                                     {t.memo ?? "Add memo…"}
-                                  </span>
-                                  <button
+                                  </Text>
+                                  <ActionIcon
                                     type="button"
                                     onClick={() => startMemoEdit(t.id, t.memo)}
                                     title={t.memo ? "Edit memo" : "Add memo"}
-                                    className="transactions-page__memo-pencil"
+                                    variant="subtle"
+                                    size="sm"
                                   >
                                     <IconPencil size={11} />
-                                  </button>
-                                </div>
+                                  </ActionIcon>
+                                </Group>
                               )}
-                            </td>
+                            </Table.Td>
+                            <Table.Td ta="center">
+                              {t.status === "posted" && t.direction === "debit" ? (
+                                <Button
+                                  type="button"
+                                  title={confirmedRecurringOverride ? `Recurring: ${confirmedRecurringOverride.merchantKey}` : "Mark as recurring"}
+                                  onClick={() => setRecurringModalTxn(t)}
+                                  variant="subtle"
+                                  color={confirmedRecurringOverride ? "blue" : "gray"}
+                                  size="compact-xs"
+                                  aria-label={
+                                    confirmedRecurringOverride
+                                      ? `Edit recurring override for ${t.merchant ?? ""}`
+                                      : `Mark ${t.merchant ?? ""} as recurring`
+                                  }
+                                >
+                                  {confirmedRecurringOverride ? "●" : "○"}
+                                </Button>
+                              ) : null}
+                            </Table.Td>
                             {needsReviewTab ? (
-                              <td className="transactions-page__why-cell">
-                                <span className="transactions-page__why" title={reasons}>
-                                  {reasons}
-                                </span>
-                              </td>
+                              <Table.Td><Text title={reasons}>{reasons}</Text></Table.Td>
                             ) : null}
                             {needsReviewTab ? (
-                              <td style={{ whiteSpace: "nowrap", fontSize: "0.85rem" }}>
+                              <Table.Td>
                                 {t.importSessionId ? (
-                                  <Link
+                                  <Text
+                                    component={Link}
                                     to={`/transactions?needsReview=true&sessionId=${t.importSessionId}`}
-                                    className="muted"
+                                    c="dimmed"
+                                    size="sm"
                                   >
                                     Import session
-                                  </Link>
+                                  </Text>
                                 ) : (
-                                  <span className="muted">—</span>
+                                  <Text c="dimmed">—</Text>
                                 )}
-                              </td>
+                              </Table.Td>
                             ) : null}
                             {!trashTab ? (
-                              <td style={{ minWidth: "12rem" }}>
+                              <Table.Td miw="12rem">
                                 <HierarchicalSearchPicker
                                   value={t.ownerScope === "household" ? "household" : (`person:${t.ownerPersonProfileId ?? ""}` as const)}
                                   onChange={(v) => {
@@ -2084,11 +2125,11 @@ export function TransactionsPage() {
                                   ariaLabel={`Belongs-to for ${desc}`}
                                   disabled={savingId === t.id || savingBulk}
                                 />
-                              </td>
+                              </Table.Td>
                             ) : null}
-                            <td>
+                            <Table.Td>
                               {trashTab ? (
-                                <span className="muted" style={{ fontSize: "0.9rem" }}>{t.categoryName ?? "—"}</span>
+                                <Text c="dimmed" size="sm">{t.categoryName ?? "—"}</Text>
                               ) : (
                                 <>
                                   <LedgerCategoryPicker
@@ -2106,53 +2147,55 @@ export function TransactionsPage() {
                                   {needsReviewTab ? <CategoryClassificationHint meta={t.classificationMeta ?? null} /> : null}
                                 </>
                               )}
-                            </td>
-                            <td style={{ whiteSpace: "nowrap" }}>
+                            </Table.Td>
+                            <Table.Td>
                               {trashTab ? (
-                                <div style={{ display: "flex", gap: 4 }}>
-                                  <button
+                                <Group gap={4} wrap="nowrap">
+                                  <ActionIcon
                                     type="button"
                                     disabled={savingTrash}
                                     onClick={() => void restoreSingle(t.id)}
                                     title="Restore"
-                                    style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-success)" }}
+                                    variant="default"
+                                    color="green"
                                   >
                                     <IconArrowBackUp size={14} />
-                                  </button>
-                                  <button
+                                  </ActionIcon>
+                                  <ActionIcon
                                     type="button"
                                     disabled={savingTrash}
                                     onClick={() => void hardDeleteSingle(t.id)}
                                     title="Permanently delete — cannot be undone"
-                                    style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-danger, #dc2626)" }}
+                                    variant="default"
+                                    color="red"
                                   >
                                     <IconTrash size={14} />
-                                  </button>
-                                </div>
+                                  </ActionIcon>
+                                </Group>
                               ) : (
-                                <button
+                                <ActionIcon
                                   type="button"
                                   disabled={savingId === t.id || savingBulk}
                                   onClick={() => void trashSingle(t.id)}
                                   title="Move to Trash"
-                                  style={{ background: "none", border: "1px solid var(--color-border)", borderRadius: 4, cursor: "pointer", padding: "0.2rem 0.4rem", display: "inline-flex", alignItems: "center", color: "var(--color-text-muted)" }}
+                                  variant="default"
                                 >
                                   <IconTrash size={14} />
-                                </button>
+                                </ActionIcon>
                               )}
-                            </td>
-                          </tr>
+                            </Table.Td>
+                          </Table.Tr>
                           {needsReviewTab && expanded ? (
-                            <tr key={`${t.id}-ctx`} className="transactions-page__detail-row">
-                              <td colSpan={colSpan}>
-                                <div className="transactions-page__detail-panel">
-                                  {detailLoading ? <p className="muted">Loading review context…</p> : null}
-                                  {detailError ? <p className="error">{detailError}</p> : null}
+                            <Table.Tr key={`${t.id}-ctx`}>
+                              <Table.Td colSpan={colSpan}>
+                                <Stack gap="xs">
+                                  {detailLoading ? <Text c="dimmed">Loading review context…</Text> : null}
+                                  {detailError ? <Alert color="red">{detailError}</Alert> : null}
                                   {!detailLoading && !detailError && detailItems && detailItems.length === 0 ? (
-                                    <p className="muted" style={{ fontSize: "0.9rem", margin: 0 }}>
+                                    <Text c="dimmed" size="sm">
                                       This row is here because it has no category. Assign one using the picker
                                       in the row above to move it out of Needs review.
-                                    </p>
+                                    </Text>
                                   ) : null}
                                   {!detailLoading && !detailError && detailItems && detailItems.length > 0
                                     ? detailItems.map((it) => {
@@ -2172,18 +2215,18 @@ export function TransactionsPage() {
                                           Boolean(savingResolutionItemId) ||
                                           savingId === t.id;
                                         return (
-                                          <div key={it.id} className="transactions-page__review-block">
-                                            <div className="transactions-page__review-block-head">
-                                              <strong>{formatResolutionTypeLabel(it.type)}</strong>
-                                              <span className="muted" style={{ marginLeft: "0.5rem" }}>
+                                          <Paper key={it.id} withBorder radius="sm" p="sm">
+                                            <Group gap="xs">
+                                              <Text fw={700}>{formatResolutionTypeLabel(it.type)}</Text>
+                                              <Text c="dimmed">
                                                 {it.status}
-                                              </span>
-                                              <span className="muted" style={{ marginLeft: "0.5rem" }}>
+                                              </Text>
+                                              <Text c="dimmed">
                                                 · {it.createdAt}
-                                              </span>
-                                            </div>
-                                            <p className="muted" style={{ margin: "0.35rem 0 0.25rem" }}>
-                                              <span className="muted">File:</span>{" "}
+                                              </Text>
+                                            </Group>
+                                            <Text c="dimmed" mt={4} mb={2}>
+                                              <Text span c="dimmed">File:</Text>{" "}
                                               {it.context.fileName ?? "—"}{" "}
                                               {it.context.sessionId ? (
                                                 <>
@@ -2195,9 +2238,9 @@ export function TransactionsPage() {
                                                   </Link>
                                                 </>
                                               ) : null}
-                                            </p>
-                                            <p className="muted" style={{ margin: "0 0 0.35rem" }}>
-                                              <span className="muted">Raw preview:</span>{" "}
+                                            </Text>
+                                            <Text c="dimmed" mb={4}>
+                                              <Text span c="dimmed">Raw preview:</Text>{" "}
                                               {it.context.raw ? (
                                                 <>
                                                   {it.context.raw.txnDate ?? "—"} ·{" "}
@@ -2207,41 +2250,38 @@ export function TransactionsPage() {
                                               ) : (
                                                 "—"
                                               )}
-                                            </p>
-                                            <p style={{ margin: "0 0 0.35rem", fontSize: "0.9rem" }}>{summary}</p>
+                                            </Text>
+                                            <Text size="sm" mb={4}>{summary}</Text>
                                             {explainSource || explainConf || explainRule || explainReason ? (
-                                              <div className="resolution-explainability">
+                                              <Group gap="xs" wrap="wrap">
                                                 {explainSource ? (
-                                                  <span className="resolution-explainability__pill">{explainSource}</span>
+                                                  <Badge variant="light">{explainSource}</Badge>
                                                 ) : null}
                                                 {explainConf ? (
-                                                  <span className="resolution-explainability__pill">{explainConf}</span>
+                                                  <Badge variant="light">{explainConf}</Badge>
                                                 ) : null}
                                                 {explainRule ? (
-                                                  <span className="resolution-explainability__pill">
+                                                  <Badge variant="light">
                                                     ID {explainRule.slice(0, 8)}
-                                                  </span>
+                                                  </Badge>
                                                 ) : null}
                                                 {explainReason ? (
-                                                  <span className="resolution-explainability__reason">{explainReason}</span>
+                                                  <Text c="dimmed" size="sm">{explainReason}</Text>
                                                 ) : null}
-                                              </div>
+                                              </Group>
                                             ) : null}
                                             {it.context.classification?.ai ? (
-                                              <div
-                                                className="muted"
-                                                style={{ marginTop: "0.5rem", fontSize: "0.82rem", lineHeight: 1.4 }}
-                                              >
+                                              <Text c="dimmed" mt="xs" size="xs" lh={1.4}>
                                                 Legacy AI suggestion metadata is present on this ticket (older
                                                 canonicalize). New imports use rules-only classification.
-                                              </div>
+                                              </Text>
                                             ) : null}
-                                            <div className="transactions-page__review-block-actions row">
+                                            <Group mt="sm" wrap="wrap" align="flex-start">
                                               {it.type === "unknown_category" ? (
-                                                <div style={{ minWidth: "12rem", maxWidth: "16rem" }}>
-                                                  <span className="muted" style={{ fontSize: "0.78rem" }}>
+                                                <Box miw="12rem" maw="16rem">
+                                                  <Text c="dimmed" size="xs">
                                                     Set category
-                                                  </span>
+                                                  </Text>
                                                   <LedgerCategoryPicker
                                                     categories={categories}
                                                     value={null}
@@ -2277,24 +2317,24 @@ export function TransactionsPage() {
                                                     }}
                                                     ariaLabel={`Set category for transaction ${t.id}`}
                                                   />
-                                                </div>
+                                                </Box>
                                               ) : null}
-                                              <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
+                                              <Group gap="xs" wrap="wrap">
                                                 {it.status !== "resolved" ? (
                                                   <>
                                                     {it.type === "transfer_ambiguity" && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.debitId && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.creditId ? (
-                                                      <button
+                                                      <Button
                                                         type="button"
                                                         disabled={busy || savingResolutionItemId === it.id}
                                                         title="Link both transactions as a transfer pair — excludes them from cash flow reports"
                                                         onClick={() => void confirmTransferItem(t.id, it.id)}
                                                       >
                                                         {savingResolutionItemId === it.id ? "Confirming…" : "Confirm as transfer"}
-                                                      </button>
+                                                      </Button>
                                                     ) : null}
-                                                    <button
+                                                    <Button
                                                       type="button"
-                                                      className="secondary"
+                                                      variant="default"
                                                       disabled={busy || savingResolutionItemId === it.id}
                                                       title={it.type === "transfer_ambiguity" ? "Dismiss without pairing — use when this is NOT a real transfer" : undefined}
                                                       onClick={() =>
@@ -2302,157 +2342,151 @@ export function TransactionsPage() {
                                                       }
                                                     >
                                                       {it.type === "transfer_ambiguity" ? "Not a transfer" : "Resolve flag"}
-                                                    </button>
+                                                    </Button>
                                                   </>
                                                 ) : (
-                                                  <button
+                                                  <Button
                                                     type="button"
-                                                    className="secondary"
+                                                    variant="default"
                                                     disabled={busy || savingResolutionItemId === it.id}
                                                     onClick={() => void patchResolutionItemStatus(t.id, it.id, "open")}
                                                   >
                                                     Reopen
-                                                  </button>
+                                                  </Button>
                                                 )}
-                                                <button
+                                                <Button
                                                   type="button"
-                                                  className="secondary"
+                                                  variant="default"
                                                   disabled={busy}
                                                   onClick={() => void trashSingle(t.id)}
                                                   title="Move this transaction to Trash"
                                                 >
                                                   Move to trash
-                                                </button>
-                                              </div>
-                                            </div>
-                                          </div>
+                                                </Button>
+                                              </Group>
+                                            </Group>
+                                          </Paper>
                                         );
                                       })
                                     : null}
-                                </div>
-                              </td>
-                            </tr>
+                                </Stack>
+                              </Table.Td>
+                            </Table.Tr>
                           ) : null}
                         </Fragment>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
+                  </Table.Tbody>
+                </Table>
             )}
           </>
         ) : null}
-      </div>
+      </Paper>
 
-      {addOpen ? (
-        <div
-          className="transactions-modal-backdrop"
-          role="presentation"
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) {
-              setAddOpen(false);
+      <Modal opened={addOpen} onClose={() => setAddOpen(false)} title="Add transaction" centered>
+        <Stack gap="sm">
+          <Text c="dimmed" size="sm">Choose money direction first, then enter a positive amount.</Text>
+          {addError ? <Alert color="red">{addError}</Alert> : null}
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+            <NativeSelect
+              ref={addFirstFieldRef}
+              label="Account"
+              value={addAccountId}
+              onChange={(e) => setAddAccountId(e.target.value)}
+              data={[
+                { value: "", label: "Select…", disabled: true },
+                ...accounts.map((a) => ({ value: a.id, label: formatAccountForSelect(a) }))
+              ]}
+            />
+            <TextInput label="Date" type="date" value={addTxnDate} onChange={(e) => setAddTxnDate(e.target.value)} />
+            <Box>
+              <Text size="sm" mb={6}>Money flow</Text>
+              <Radio.Group value={addDirection} onChange={(v) => setAddDirection(v as "credit" | "debit")} name="add-direction">
+                <Group gap="md">
+                  <Radio value="credit" label="Money In" />
+                  <Radio value="debit" label="Money Out" />
+                </Group>
+              </Radio.Group>
+            </Box>
+            <TextInput
+              label="Amount"
+              type="number"
+              step="any"
+              min="0"
+              value={addAmount}
+              onChange={(e) => setAddAmount(e.target.value)}
+              placeholder="42.50"
+            />
+          </SimpleGrid>
+          <TextInput label="Description" value={addMerchant} onChange={(e) => setAddMerchant(e.target.value)} placeholder="Merchant or payee" />
+          <Box>
+            <Text size="sm" mb={6}>Belongs-to</Text>
+            <HierarchicalSearchPicker
+              value={addBelongsTo || null}
+              onChange={(v) => setAddBelongsTo((v ?? "") as BelongsToFilterValue)}
+              groups={belongsToGroups}
+              placeholder="Choose belongs-to..."
+              ariaLabel="Belongs-to for new transaction"
+            />
+          </Box>
+          <Box>
+            <Text size="sm" mb={6}>Category</Text>
+            <LedgerCategoryPicker
+              categories={categories}
+              value={addCategoryId}
+              disabled={addSaving}
+              onChange={(v) => setAddCategoryId(v)}
+              ariaLabel="Category for new transaction"
+            />
+          </Box>
+          <Group justify="flex-end">
+            <Button type="button" variant="default" disabled={addSaving} onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={addSaving} onClick={() => void submitManual()}>
+              {addSaving ? "Saving…" : "Save"}
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      {recurringModalTxn ? (
+        <RecurringTagModal
+          opened={recurringModalTxn !== null}
+          onClose={() => setRecurringModalTxn(null)}
+          txnMerchant={recurringModalTxn.merchant?.toLowerCase().trim() ?? ""}
+          txnAmount={Math.abs(recurringModalTxn.amount)}
+          allTxns={data?.transactions ?? []}
+          existingOverride={findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides)}
+          onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+            const postRes = await apiFetch("/recurring-overrides", {
+              method: "POST",
+              body: JSON.stringify({
+                merchantKey,
+                verdict: "confirmed",
+                amountAnchor,
+                amountTolerancePct
+              })
+            });
+            if (!postRes.ok) {
+              throw new Error(`Failed to save recurring override (HTTP ${postRes.status})`);
             }
+            const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");
+            if (updated.ok) {
+              setRecurringOverrides(updated.data);
+            }
+            setRecurringModalTxn(null);
           }}
-        >
-          <div className="transactions-modal card" role="dialog" aria-modal="true" aria-labelledby="add-txn-title">
-            <h2 id="add-txn-title">Add transaction</h2>
-            <p className="muted">
-              Choose money direction first, then enter a positive amount.
-            </p>
-            {addError ? <p className="error">{addError}</p> : null}
-            <div className="transactions-modal__grid">
-              <label>
-                Account
-                <select
-                  ref={addFirstFieldRef}
-                  value={addAccountId}
-                  onChange={(e) => setAddAccountId(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Select…
-                  </option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {formatAccountForSelect(a)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Date
-                <input type="date" value={addTxnDate} onChange={(e) => setAddTxnDate(e.target.value)} />
-              </label>
-              <fieldset className="transactions-modal__money-flow">
-                <legend>Money flow</legend>
-                <label className="transactions-modal__radio">
-                  <input
-                    type="radio"
-                    name="add-direction"
-                    checked={addDirection === "credit"}
-                    onChange={() => setAddDirection("credit")}
-                  />
-                  Money In
-                </label>
-                <label className="transactions-modal__radio">
-                  <input
-                    type="radio"
-                    name="add-direction"
-                    checked={addDirection === "debit"}
-                    onChange={() => setAddDirection("debit")}
-                  />
-                  Money Out
-                </label>
-              </fieldset>
-              <label>
-                Amount
-                <input
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={addAmount}
-                  onChange={(e) => setAddAmount(e.target.value)}
-                  placeholder="42.50"
-                />
-              </label>
-              <label className="transactions-modal__full">
-                Description
-                <input
-                  value={addMerchant}
-                  onChange={(e) => setAddMerchant(e.target.value)}
-                  placeholder="Merchant or payee"
-                />
-              </label>
-              <div className="transactions-modal__full">
-                <span className="transactions-modal__picker-label">Belongs-to</span>
-                <HierarchicalSearchPicker
-                  value={addBelongsTo || null}
-                  onChange={(v) => setAddBelongsTo((v ?? "") as BelongsToFilterValue)}
-                  groups={belongsToGroups}
-                  placeholder="Choose belongs-to..."
-                  ariaLabel="Belongs-to for new transaction"
-                />
-              </div>
-              <div className="transactions-modal__full">
-                <span className="transactions-modal__picker-label">Category</span>
-                <LedgerCategoryPicker
-                  categories={categories}
-                  value={addCategoryId}
-                  disabled={addSaving}
-                  onChange={(v) => setAddCategoryId(v)}
-                  ariaLabel="Category for new transaction"
-                />
-              </div>
-            </div>
-            <div className="transactions-modal__footer">
-              <button type="button" disabled={addSaving} onClick={() => setAddOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="button-primary" disabled={addSaving} onClick={() => void submitManual()}>
-                {addSaving ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
+          onRemove={async () => {
+            const existing = findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides);
+            if (existing) {
+              const delRes = await apiFetch(`/recurring-overrides/${existing.id}`, { method: "DELETE" });
+              if (!delRes.ok) throw new Error(`Failed to remove recurring override (HTTP ${delRes.status})`);
+              setRecurringOverrides((prev) => prev.filter((o) => o.id !== existing.id));
+            }
+            setRecurringModalTxn(null);
+          }}
+        />
       ) : null}
 
       <ConfirmDialog
@@ -2465,6 +2499,6 @@ export function TransactionsPage() {
         onClose={() => setRuleFromLedgerConfirm(null)}
         onConfirm={handleCreateRuleFromLedger}
       />
-    </div>
+    </Stack>
   );
 }

@@ -1,6 +1,6 @@
 # API: Import sessions and file intake (Epic 2.1–2.3)
 
-> **Undo before finalize:** **`POST .../undo-import`** (**CR-021**). See **`docs/CHANGE_HISTORY.md`** for full pipeline history.
+> **Undo import:** **`POST .../undo-import`** (**CR-021**, relaxed by CR-119). See **`docs/CHANGE_HISTORY.md`** for full pipeline history.
 
 Base path: `/imports`  
 Auth: `Authorization: Bearer <JWT>` (all routes require authentication).
@@ -76,7 +76,7 @@ Multipart form field: `files` (one or more files).
 **200:** `{ "sessionId", "status" }`  
 **404:** Not found / wrong household.  
 **409:** `INVALID_TRANSITION` with `from` / `to` in body.  
-**UI:** Import workspace (**CR-022**) exposes **Finalize session** when the session is in **`review`**, sending **`{ "status": "finalized" }`**.
+**UI:** Import workspace may transition session status via this endpoint; finalized sessions remain readable for audit.
 
 ---
 
@@ -136,7 +136,20 @@ items, and a derived “skipped” bucket. All per-file numbers come from one re
 
 Lists **financial accounts** for the caller’s household (for binding uploads before parse).
 
-**200:** `{ "accounts": [ { "id", "name", "institution", "accountType", "currency" } ] }`
+**200:** `{ "accounts": [ { ... } ] }`
+
+Each account row includes:
+
+- `id`
+- `type`
+- `institution`
+- `account_mask`
+- `currency`
+- `owner_scope`
+- `owner_person_profile_id`
+- `default_parser_profile_id`
+- `last_uploaded_at` (`date-time` or `null`) — latest **successfully parsed** statement upload timestamp for this account.
+- `last_statement_end_date` (`YYYY-MM-DD` or `null`) — latest statement period end detected from parsed statement metadata (`confidence_summary.statementBalances.asOfEnd`) for this account.
 
 ---
 
@@ -260,12 +273,11 @@ Fingerprint = `SHA-256` over `(household_id, account_id, normalized date, rounde
 
 ### `POST /imports/sessions/:sessionId/undo-import`
 
-**Epic 6.3 — undo before finalize.** Removes **ledger impact** of this import while the session is still in **`review`**: deletes **`transaction_canonical`** rows whose **`source_ref`** points at **`transaction_raw`** rows in this session; deletes related **`resolution_item`** rows (including near-duplicate flags on raw ids, unknown category / transfer items on those canonical ids, and items on **partner** rows sharing a **`transfer_group_id`** with session-posted rows); clears **`transfer_group_id`** on any row in those groups before deleting session canonicals. **`transaction_raw`** rows are **not** deleted — you can run **`POST .../canonicalize`** again.
+**Epic 6.3 (relaxed in CR-119).** Removes **ledger impact** of this import by deleting **`transaction_canonical`** rows whose **`source_ref`** points at **`transaction_raw`** rows in this session; deletes related **`resolution_item`** rows (including near-duplicate flags on raw ids, unknown category / transfer items on those canonical ids, and items on **partner** rows sharing a **`transfer_group_id`** with session-posted rows); clears **`transfer_group_id`** on any row in those groups before deleting session canonicals. **`transaction_raw`** rows are **not** deleted — you can run **`POST .../canonicalize`** again.
 
-**Allowed only** when session **`status`** is **`review`**. After **`finalized`**, returns **409** with `code: "SESSION_NOT_REVIEW"` and `currentStatus`.
+Allowed for sessions in any status. If a session has no posted rows yet, response is still success with zeros.
 
 **Body:** none (`{}` is fine).
 
 **200:** `{ "deletedCanonicalRows": number, "deletedResolutionItems": number }`  
-**404:** session not found / wrong household.  
-**409:** `SESSION_NOT_REVIEW` — session is `finalized`, `failed`, or not yet in `review`.
+**404:** session not found / wrong household.

@@ -20,6 +20,9 @@ tags:
   - name: payslips
   - name: exports
   - name: budget
+  - name: recurring
+  - name: insights
+  - name: gdrive
 paths:
   /health:
     get:
@@ -45,6 +48,17 @@ paths:
       responses:
         "200":
           description: Token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, forcePasswordChange]
+                properties:
+                  token:
+                    type: string
+                  forcePasswordChange:
+                    type: boolean
+                    description: When true, client should send the user through forced password reset before normal app use.
         "401":
           description: Invalid credentials
   /auth/me:
@@ -57,6 +71,126 @@ paths:
           description: User payload
         "401":
           description: Unauthorized
+  /auth/setup-forced-change-token:
+    post:
+      tags: [auth]
+      summary: Issue reset token for forced password change (signed-in users only)
+      description: |
+        When `force_password_change` is true for the authenticated user, creates a short-lived
+        password reset token (same mechanism as forgot-password) and returns the raw token so the
+        client can redirect to the reset-password UI. Returns 403 if no forced change is pending.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Raw one-time reset token (use with POST /auth/reset-password)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+                    minLength: 1
+        "401":
+          description: Unauthorized
+        "403":
+          description: User does not have a forced password change pending
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum: [NOT_FORCED]
+                  message:
+                    type: string
+                    example: No forced password change pending.
+  /auth/capabilities:
+    get:
+      tags: [auth]
+      summary: Public auth feature capabilities
+      responses:
+        "200":
+          description: Capability flags
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [emailEnabled]
+                properties:
+                  emailEnabled: { type: boolean }
+  /auth/forgot-password:
+    post:
+      tags: [auth]
+      summary: Request a password reset link (always responds 200)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Generic success response (same for known/unknown email)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message:
+                    type: string
+                    example: If that address is registered, a reset link is on its way.
+        "400":
+          description: Validation failure (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+  /auth/reset-password:
+    post:
+      tags: [auth]
+      summary: Reset password using one-time token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, newPassword]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                newPassword:
+                  type: string
+                  minLength: 12
+                  pattern: ^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{12,}$
+      responses:
+        "200":
+          description: Password updated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string, example: Password updated. Please sign in. }
+        "400":
+          description: Invalid/expired token, same password, or validation error
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/AuthResetInvalidTokenResponse'
+                  - $ref: '#/components/schemas/AuthResetSameAsCurrentResponse'
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
   /auth/change-password:
     post:
       tags: [auth]
@@ -72,45 +206,952 @@ paths:
       tags: [household]
       summary: Household-level settings (targets, salary deposit, employers)
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Settings payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdSettings'
+        "404":
+          description: Household not found
     patch:
       tags: [household]
       summary: Update household settings (restricted fields)
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdSettingsPatch'
+      responses:
+        "200":
+          description: Updated settings payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdSettings'
+        "400":
+          description: Validation or business error
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
+                  - $ref: '#/components/schemas/ServiceErrorResponse'
+        "404":
+          description: Household not found
   /household/profile:
     get:
       tags: [household]
       summary: Signed-in person profile
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Profile payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "404":
+          description: Profile not found
     patch:
       tags: [household]
       summary: Update profile
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdProfilePatch'
+      responses:
+        "200":
+          description: Updated profile payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "400":
+          description: Validation failure (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members:
     get:
       tags: [household]
       summary: List household members
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HouseholdProfile'
     post:
       tags: [household]
       summary: Create member (admin)
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdMemberCreate'
+      responses:
+        "201":
+          description: Member created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member:
+                    $ref: '#/components/schemas/HouseholdProfile'
+                  inviteSent:
+                    type: boolean
+        "400":
+          description: Validation failure or required-email business check
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
+                  - $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members/{memberId}:
     patch:
       tags: [household]
       summary: Update member
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HouseholdMemberPatch'
+      responses:
+        "200":
+          description: Member updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member:
+                    $ref: '#/components/schemas/HouseholdProfile'
+        "400":
+          description: Validation failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
     delete:
       tags: [household]
       summary: Remove member (admin). Deletes household_membership + person_profile. Returns 409 HAS_LOGIN_ACCOUNT when member has a linked login.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deleteLogin:
+                  type: boolean
+      responses:
+        "204":
+          description: Member removed
+        "400":
+          description: Invalid member id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Member has a linked login account (HAS_LOGIN_ACCOUNT)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /household/members/{memberId}/data-count:
+    get:
+      tags: [household]
+      summary: Count assigned transactions and payslips for member
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Assignment counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HouseholdMemberDataCount'
+        "400":
+          description: Invalid member id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+  /household/members/{memberId}/create-login:
+    post:
+      tags: [household]
+      summary: Create login account for existing member
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: Login account created or invite sent
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inviteSent]
+                properties:
+                  inviteSent:
+                    type: boolean
+        "400":
+          description: Invalid member id or missing member email
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ValidationErrorsResponse'
+                  - $ref: '#/components/schemas/ServiceErrorResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Member already has login or email conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
   /household/members/{memberId}/reset-password:
     post:
       tags: [household]
-      summary: Reset member login password (owner/admin). Generates temp password, sets force_password_change, invalidates existing JWTs.
+      summary: Reset member login password (owner/admin). Sends reset email when SMTP is configured; otherwise returns a temporary password.
       description: >-
-        Returns { tempPassword } once (plaintext, not stored). Member must change on next login.
+        When email is configured, sends a one-hour reset link and returns { emailSent: true }.
+        When email is not configured, returns { emailSent: false, tempPassword } once (plaintext, not stored).
         404 if member not found; 409 NO_LOGIN if member has no login account.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Reset initiated (email or temporary password fallback)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  emailSent: { type: boolean }
+                  tempPassword: { type: string }
+        "400":
+          description: Invalid member id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Member has no login account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+
+  /insights/financial:
+    get:
+      tags: [insights]
+      summary: Latest financial health analysis for caller scope
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Latest insight or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    nullable: true
+                    oneOf:
+                      - $ref: '#/components/schemas/InsightRecord'
+  /insights/financial/refresh:
+    post:
+      tags: [insights]
+      summary: Trigger asynchronous financial health analysis generation
+      security: [{ bearerAuth: [] }]
+      responses:
+        "202":
+          description: Job enqueued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  jobId: { type: string, format: uuid }
+        "429":
+          description: Refresh rate-limited (one request per household every 5 minutes)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: false }
+                  code: { type: string, example: RATE_LIMITED }
+                  message: { type: string }
+                  retryAfterMs: { type: integer, minimum: 1 }
+  /insights/financial/status/{jobId}:
+    get:
+      tags: [insights]
+      summary: Poll insight generation job status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Job status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/InsightJob'
+        "400":
+          description: Invalid path params (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /insights/financial/history:
+    get:
+      tags: [insights]
+      summary: List historical financial analyses for caller scope
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Insight history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/InsightRecord'
+  /insights/financial/{id}:
+    get:
+      tags: [insights]
+      summary: Retrieve a specific historical financial analysis
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Historical insight
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/InsightRecord'
+        "400":
+          description: Invalid path params (`{ errors: z.issues }`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationErrorsResponse'
+        "404":
+          description: Insight not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /gdrive/oauth/callback:
+    get:
+      tags: [gdrive]
+      summary: Google OAuth2 redirect callback (browser)
+      description: |
+        Public endpoint (no JWT). Google redirects here with `code` and `state` after user consent.
+        Exchanges the code for tokens, verifies folder access, persists `household_gdrive_config`, then redirects the
+        browser to the hash-router SPA (`…/#/settings?tab=data&gdrive=connected` or `gdrive=error&message=...`).
+        Redirect origin: `FRONTEND_APP_URL`, else `PUBLIC_BASE_URL`, else in `MODE=TEST` defaults to `http://localhost:3000`,
+        else relative to the API host (same-origin deployments).
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "302":
+          description: Redirect to SPA settings with query outcome
+        "400":
+          description: Missing code or state (implementation may still redirect with error query)
+  /gdrive/oauth/url:
+    get:
+      tags: [gdrive]
+      summary: Build Google OAuth consent URL for Drive folder connect
+      description: |
+        Owner only. Returns `{ "url": "..." }` for `window.location` redirect. Requires server env
+        `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: folderId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Consent URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveOAuthUrlResponse'
+        "400":
+          description: Missing folderId, Zod validation failure, or OAuth env not configured
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/GDriveOAuthNotConfiguredResponse'
+                  - type: object
+                    required: [message]
+                    properties:
+                      message: { type: string }
+                      issues:
+                        type: array
+                        items: { type: object }
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /gdrive/status:
+    get:
+      tags: [gdrive]
+      summary: Google Drive connection status (no secrets returned)
+      description: Owner or admin. Returns whether Drive OAuth is configured for the household; never includes tokens.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Disconnected or connected summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveStatusResponse'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Member role (insufficient permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /gdrive/connect:
+    post:
+      tags: [gdrive]
+      summary: Complete Google Drive connect via OAuth2 authorization code
+      description: |
+        Owner only. Exchanges the Google `code` for refresh/access tokens, verifies the Drive folder, then upserts
+        `household_gdrive_config` (scheduler fields are preserved on reconnect). Rate-limited outside TEST mode.
+        The primary browser flow uses `GET /gdrive/oauth/callback` instead; this endpoint supports programmatic exchange.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GDriveConnectRequest'
+      responses:
+        "200":
+          description: Connected; folder verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveConnectSuccessResponse'
+        "400":
+          description: Zod validation failure or OAuth env not configured on server
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/GDriveOAuthNotConfiguredResponse'
+                  - type: object
+                    required: [message]
+                    properties:
+                      message: { type: string }
+                      issues:
+                        type: array
+                        items: { type: object }
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner (insufficient permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "422":
+          description: Drive API connection test failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveConnectionFailedResponse'
+        "429":
+          description: Too many connect attempts in the rolling window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string }
+  /gdrive/disconnect:
+    delete:
+      tags: [gdrive]
+      summary: Disconnect Google Drive (remove stored credentials)
+      description: Owner only.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connected]
+                properties:
+                  connected:
+                    type: boolean
+                    enum: [false]
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner (insufficient permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+  /gdrive/backup:
+    post:
+      tags: [gdrive]
+      summary: Queue on-demand Google Drive backup (.hfb upload)
+      description: |
+        Owner only. Requires Google Drive to be connected (`household_gdrive_config`). Queues an async job that
+        builds a household `.hfb` on disk, uploads it to the configured folder using the stored OAuth refresh token,
+        then deletes the staging file. Rate-limited outside TEST mode.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "202":
+          description: Backup job started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJobStartResponse'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not configured for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+        "429":
+          description: Too many backup starts in the rolling window
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string }
+  /gdrive/backup/{jobId}:
+    get:
+      tags: [gdrive]
+      summary: Google Drive backup job status
+      description: Owner or admin. Returns status and Drive file metadata when complete.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Job found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJobStatusResponse'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Member role (insufficient permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "404":
+          description: Job not found for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJobNotFoundResponse'
+  /gdrive/settings:
+    patch:
+      tags: [gdrive]
+      summary: Update Google Drive automatic backup scheduler settings
+      description: |
+        Owner only. Updates `backup_frequency_hours` (0 = disabled; otherwise 12, 24, 48, 72, or 168) and
+        `backup_retention_count` (1–30 `.hfb` files kept in Drive after each successful upload; older files pruned).
+        Requires an existing `household_gdrive_config` row.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GDriveSchedulerSettingsRequest'
+      responses:
+        "200":
+          description: Updated settings (echo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveSchedulerSettingsResponse'
+        "400":
+          description: Zod validation failure
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string }
+                  issues:
+                    type: array
+                    items: { type: object }
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not configured for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+  /gdrive/backups/history:
+    get:
+      tags: [gdrive]
+      summary: List recent backup jobs (local `backup_job` rows)
+      description: |
+        Owner or admin. Returns up to 20 recent rows from `backup_job` for this household (upload attempts, including
+        automatic scheduler jobs with `triggeredByUserId` null). This is not the Drive file list; use `GET /gdrive/backups`
+        for the restore picker.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Job history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveBackupHistoryResponse'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Member role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+  /gdrive/backups:
+    get:
+      tags: [gdrive]
+      summary: List recent .hfb backups in the connected Drive folder
+      description: |
+        Owner or admin. Calls the Drive API `files.list` for the configured folder (names containing `.hfb`, not trashed),
+        newest first, page size 20. Returns an empty array when there are no matching files.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: File list (may be empty)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveBackupsListResponse'
+        "401":
+          description: Unauthorized
+        "403":
+          description: Member role (insufficient permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not connected for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+        "502":
+          description: Drive API failure (list request)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveListFailedResponse'
+  /gdrive/backups/{fileId}/preview:
+    post:
+      tags: [gdrive]
+      summary: Preview a Drive backup file manifest
+      description: |
+        Owner only. Downloads the Drive file identified by `fileId` into a temporary staging path, reads the `.hfb`
+        manifest via the shared `readHfbManifestFromFile()` helper, and returns a preview object. The temp file is
+        always deleted. Returns the same shape as `POST /exports/preview`.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Google Drive file ID
+      responses:
+        "200":
+          description: Backup manifest preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupPreviewResponse'
+        "400":
+          description: File is not a valid .hfb
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "403":
+          description: Drive permission denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "404":
+          description: Drive file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "409":
+          description: Google Drive not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+        "422":
+          description: Backup is encrypted and no BACKUP_ENCRYPTION_KEY is configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+        "502":
+          description: Drive download failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessageResponse'
+  /gdrive/restore:
+    post:
+      tags: [gdrive]
+      summary: Restore household from a Drive backup file
+      description: |
+        Owner only. Downloads the given Drive file into staging, then queues the same async restore pipeline as
+        `POST /exports/household/import`. Poll `GET /exports/import/{jobId}` until terminal status; JWTs may be
+        invalidated after success (same as local restore).
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GDriveRestoreRequest'
+      responses:
+        "202":
+          description: Restore job started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveRestoreStartedResponse'
+        "400":
+          description: Invalid JSON body (Zod validation failure)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { type: string }
+                  issues:
+                    type: array
+                    items: { type: object }
+        "401":
+          description: Unauthorized
+        "403":
+          description: Non-owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceErrorResponse'
+        "409":
+          description: Google Drive not connected for this household
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GDriveNotConfiguredResponse'
+        "502":
+          description: Failed to download the file from Drive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriveDownloadFailedResponse'
   /categories:
     get:
       tags: [categories]
@@ -219,6 +1260,36 @@ paths:
       tags: [imports]
       summary: List financial accounts
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Household financial accounts with import freshness metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { type: string }
+                        institution: { type: string }
+                        account_mask: { type: string, nullable: true }
+                        currency: { type: string }
+                        owner_scope: { type: string, enum: [household, person] }
+                        owner_person_profile_id: { type: string, format: uuid, nullable: true }
+                        default_parser_profile_id: { type: string, nullable: true }
+                        last_uploaded_at:
+                          type: string
+                          format: date-time
+                          nullable: true
+                          description: Latest successfully parsed statement upload for this account.
+                        last_statement_end_date:
+                          type: string
+                          nullable: true
+                          description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
     post:
       tags: [imports]
       summary: Create connected account
@@ -243,6 +1314,70 @@ paths:
       tags: [imports]
       summary: Add household custom institution name
       security: [{ bearerAuth: [] }]
+  /imports/upload:
+    post:
+      tags: [imports]
+      summary: One-shot import upload (bank or payslip)
+      description: Upload a single file and run the end-to-end import flow for bank transactions or payslips.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [importType, file]
+              properties:
+                importType:
+                  type: string
+                  enum: [bank, payslip]
+                financialAccountId:
+                  type: string
+                  format: uuid
+                  description: Required when importType is bank
+                employerId:
+                  type: string
+                  format: uuid
+                  description: Optional when importType is payslip
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Bank import uploaded and canonicalized
+        "201":
+          description: Payslip upload parsed and inserted
+        "409":
+          description: Duplicate payslip upload
+        "422":
+          description: Business validation failure (parser inference, parse, employer, etc.)
+  /imports/history:
+    get:
+      tags: [imports]
+      summary: Unified recent import history (bank sessions + payslip uploads)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Recent merged import items (newest first, max 50)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        type: { type: string, enum: [bank, payslip] }
+                        accountType: { type: string, nullable: true, description: Bank account type context when available (e.g. checking, credit_card) }
+                        createdAt: { type: string, format: date-time }
+                        label: { type: string }
+                        status: { type: string }
+                        addedCount: { type: number, nullable: true }
+                        duplicateCount: { type: number, nullable: true }
+                        canUndo: { type: boolean }
   /imports/sessions:
     get:
       tags: [imports]
@@ -325,6 +1460,15 @@ paths:
     post:
       tags: [imports]
       summary: Roll back session ledger effects — members restricted to own sessions
+      description: >
+        Removes canonical ledger rows and related resolution items tied to this import session.
+        This operation is allowed regardless of session status (created, processing, review, finalized, failed).
+        Returns 200 even when there is nothing to remove.
+      responses:
+        "200":
+          description: Undo completed
+        "404":
+          description: Import session not found for household
       security: [{ bearerAuth: [] }]
   /transactions:
     get:
@@ -866,12 +2010,12 @@ paths:
   /exports/household/import:
     post:
       tags: [exports]
-      summary: Restore household from export ZIP (async, destructive)
+      summary: Restore household from exported .hfb backup (async, destructive)
       description: |
-        `multipart/form-data` with field **`file`** (`.zip` only). Queues **wipe-then-restore** for the
+        `multipart/form-data` with field **`file`** (`.hfb` only). Queues **wipe-then-restore** for the
         authenticated household. Poll **`GET /exports/import/{jobId}`** until `status` is terminal.
         Successful restore increments **`app_user.token_version`** (all JWTs for that household’s users
-        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 3** (manifest + one JSON
+        become invalid). Max upload **500 MB**. Bundle format **`exportVersion` 4** (manifest + one JSON
         per table); v1/v2 monolithic bundles are still accepted. See `docs/API_EXPORTS.md`.
       security: [{ bearerAuth: [] }]
       requestBody:
@@ -885,7 +2029,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: ZIP produced by export job download
+                  description: .hfb backup produced by export job download
       responses:
         "202":
           description: Restore job accepted; poll import job status
@@ -900,9 +2044,40 @@ paths:
                   message:
                     type: string
         "400":
-          description: Missing `file` field or not a `.zip`
+          description: Missing `file` field or not a `.hfb`
         "413":
           description: File exceeds upload limit (500 MB)
+  /exports/preview:
+    post:
+      tags: [exports]
+      summary: Preview .hfb backup contents before restore (read-only)
+      description: |
+        `multipart/form-data` with field **`file`** (`.hfb` only). Reads manifest metadata and table row counts,
+        decrypting with `BACKUP_ENCRYPTION_KEY` when needed. Does not query or modify database tables.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: .hfb backup produced by export job download
+      responses:
+        "200":
+          description: Preview summary from backup manifest
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupPreviewResponse'
+        "400":
+          description: Missing file, invalid extension, unsupported version, or unreadable backup
+        "422":
+          description: Backup is encrypted but BACKUP_ENCRYPTION_KEY is not configured
   /exports/import/{jobId}:
     get:
       tags: [exports]
@@ -946,7 +2121,7 @@ paths:
   /exports/household:
     post:
       tags: [exports]
-      summary: Queue asynchronous household ZIP export
+      summary: Queue asynchronous household .hfb export
       security: [{ bearerAuth: [] }]
       responses:
         "202":
@@ -956,15 +2131,15 @@ paths:
   /exports/{jobId}/download:
     get:
       tags: [exports]
-      summary: Download completed export ZIP
+      summary: Download completed export .hfb backup
       security: [{ bearerAuth: [] }]
       responses:
         "200":
-          description: application/zip download
+          description: Binary download (`household-export-{jobId}.hfb`)
         "404":
           description: Job not ready, file missing, or job not found
         "410":
-          description: Export expired — ZIP was auto-deleted after 48-hour retention window (EXPORT_EXPIRED)
+          description: Export expired — backup file was auto-deleted after 48-hour retention window (EXPORT_EXPIRED)
   /exports/{jobId}:
     get:
       tags: [exports]
@@ -1121,6 +2296,91 @@ paths:
           description: Saved budget with actuals (same shape as GET /budget/:month)
         "400":
           description: Invalid month param or invalid body
+  /recurring-overrides:
+    get:
+      tags: [recurring]
+      summary: List recurring merchant overrides for household
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Overrides list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RecurringOverride'
+        "401":
+          description: Unauthorized
+    post:
+      tags: [recurring]
+      summary: Upsert recurring merchant override (confirm or dismiss)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merchantKey, verdict]
+              properties:
+                merchantKey:
+                  type: string
+                  minLength: 1
+                displayName:
+                  type: string
+                verdict:
+                  type: string
+                  enum: [confirmed, dismissed]
+                amountAnchor:
+                  type: number
+                amountTolerancePct:
+                  type: number
+                  default: 15
+      responses:
+        "200":
+          description: Upserted override
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  data:
+                    $ref: '#/components/schemas/RecurringOverride'
+        "400":
+          description: Invalid request payload
+        "401":
+          description: Unauthorized
+  /recurring-overrides/{id}:
+    delete:
+      tags: [recurring]
+      summary: Delete recurring merchant override
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          description: Unauthorized
+        "404":
+          description: Override not found
 components:
   securitySchemes:
     bearerAuth:
@@ -1128,6 +2388,81 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ExportBundleManifest:
+      type: object
+      description: Manifest JSON embedded in the exported .hfb backup payload.
+      properties:
+        exportVersion:
+          type: integer
+          example: 4
+        exportedAt:
+          type: string
+          format: date-time
+        householdId:
+          type: string
+          format: uuid
+        format:
+          type: string
+          example: zip-split-v4
+        encrypted:
+          type: boolean
+          example: true
+        scope:
+          type: string
+          nullable: true
+          example: household
+        personProfileId:
+          type: string
+          format: uuid
+          nullable: true
+        tables:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              file:
+                type: string
+              rows:
+                type: integer
+          example:
+            app_user: { file: app_user.json, rows: 2 }
+            household: { file: household.json, rows: 1 }
+            budget_category: { file: budget_category.json, rows: 3 }
+            payslip_line_item: { file: payslip_line_item.json, rows: 6 }
+            recurring_merchant_override: { file: recurring_merchant_override.json, rows: 1 }
+            resolution_item: { file: resolution_item.json, rows: 4 }
+            household_ai_insight: { file: household_ai_insight.json, rows: 2 }
+    BackupPreviewResponse:
+      type: object
+      required: [exportVersion, exportedAt, encrypted, scope, format, tables, totalRows]
+      properties:
+        exportVersion:
+          type: integer
+          enum: [1, 2, 3, 4]
+        exportedAt:
+          type: string
+        encrypted:
+          type: boolean
+        scope:
+          type: string
+          enum: [household, member]
+        personProfileId:
+          type: string
+          nullable: true
+        format:
+          type: string
+        tables:
+          type: object
+          additionalProperties:
+            type: object
+            required: [rows]
+            properties:
+              rows:
+                type: integer
+                minimum: 0
+        totalRows:
+          type: integer
+          minimum: 0
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)
@@ -1197,3 +2532,347 @@ components:
         validationWarnings:
           type: array
           items: { $ref: '#/components/schemas/ValidationWarning' }
+    RecurringOverride:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        merchantKey: { type: string }
+        displayName: { type: string, nullable: true }
+        verdict: { type: string, enum: [confirmed, dismissed] }
+        amountAnchor: { type: number, nullable: true }
+        amountTolerancePct: { type: number }
+        taggedByUserId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    HouseholdSettings:
+      type: object
+      properties:
+        monthlySavingsTargetUsd: { type: number, nullable: true }
+        salaryDepositFinancialAccountId: { type: string, format: uuid, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        combinedGrossIncomeUsd: { type: number, nullable: true }
+        employers:
+          type: array
+          items:
+            type: object
+    HouseholdSettingsPatch:
+      type: object
+      properties:
+        monthlySavingsTargetUsd: { type: number, nullable: true }
+        city: { type: string, nullable: true, maxLength: 100 }
+        state: { type: string, nullable: true, maxLength: 100 }
+        combinedGrossIncomeUsd: { type: number, nullable: true }
+    HouseholdProfile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        linkedUserId: { type: string, format: uuid, nullable: true }
+        fullName: { type: string }
+        email: { type: string, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarKey: { type: string, nullable: true }
+        role: { type: string, enum: [head, member] }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+        age: { type: integer, nullable: true }
+        sex: { type: string, nullable: true, enum: [male, female, nonbinary, prefer_not_to_say] }
+        individualGrossIncomeUsd: { type: number, nullable: true }
+        riskTolerance: { type: string, nullable: true, enum: [conservative, moderate, aggressive] }
+        financialGoals:
+          type: array
+          items: { type: string }
+    HouseholdProfilePatch:
+      type: object
+      properties:
+        age: { type: integer, nullable: true, minimum: 1, maximum: 129 }
+        sex: { type: string, nullable: true, enum: [male, female, nonbinary, prefer_not_to_say] }
+        individualGrossIncomeUsd: { type: number, nullable: true }
+        riskTolerance: { type: string, nullable: true, enum: [conservative, moderate, aggressive] }
+        financialGoals:
+          type: array
+          items: { type: string }
+    HouseholdMemberCreate:
+      type: object
+      required: [role, relationship]
+      properties:
+        firstName: { type: string, nullable: true }
+        lastName: { type: string, nullable: true }
+        fullName: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarKey: { type: string, nullable: true }
+        role: { type: string, enum: [head, member] }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+        createLogin: { type: boolean }
+    HouseholdMemberPatch:
+      type: object
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        fullName: { type: string }
+        email: { type: string, format: email, nullable: true }
+        phoneNumber: { type: string, nullable: true }
+        avatarKey: { type: string, nullable: true }
+        role: { type: string, enum: [head, member] }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+    HouseholdMemberDataCount:
+      type: object
+      properties:
+        transactions: { type: integer }
+        payslips: { type: integer }
+    InsightPayload:
+      type: object
+      properties:
+        healthRating: { type: string, enum: [strong, on_track, needs_attention, at_risk] }
+        healthRationale: { type: string }
+        localBenchmark: { type: string }
+        nationalBenchmark: { type: string }
+        whatsWorking: { type: array, items: { type: string } }
+        concerns: { type: array, items: { type: string } }
+        spendingAnalysis: { type: array, items: { type: string } }
+        investmentGaps: { type: array, items: { type: string } }
+        nextSteps: { type: array, items: { type: string } }
+    InsightRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        scope: { type: string, enum: [household, personal] }
+        userId: { type: string, format: uuid, nullable: true }
+        generatedAt: { type: string, format: date-time }
+        provider: { type: string }
+        model: { type: string }
+        promptVersion: { type: string }
+        payload:
+          $ref: '#/components/schemas/InsightPayload'
+    InsightJob:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, complete, failed] }
+        insightId: { type: string, format: uuid, nullable: true }
+        errorText: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    ValidationErrorsResponse:
+      type: object
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+    AuthResetInvalidTokenResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [INVALID_TOKEN]
+        message:
+          type: string
+          example: This link has expired or already been used.
+    AuthResetSameAsCurrentResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [SAME_AS_CURRENT]
+        message:
+          type: string
+          example: New password must be different from your current password.
+    GDriveConnectRequest:
+      type: object
+      required: [code, folderId]
+      properties:
+        code:
+          type: string
+          description: Authorization code returned by Google after user consent (same as `GET /gdrive/oauth/callback` query `code`).
+        folderId:
+          type: string
+          description: Google Drive folder ID from the folder URL
+    GDriveOAuthUrlResponse:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Google accounts OAuth consent URL; open in the browser (full redirect).
+    GDriveOAuthNotConfiguredResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [OAUTH_NOT_CONFIGURED]
+        message:
+          type: string
+    GDriveStatusResponse:
+      type: object
+      required: [connected]
+      properties:
+        connected: { type: boolean }
+        folderId: { type: string }
+        folderName: { type: string, nullable: true }
+        connectedAt: { type: string, format: date-time }
+        connectedByUserId:
+          type: string
+          nullable: true
+          description: User who connected; null if that app_user row was removed (ON DELETE SET NULL).
+        lastVerifiedAt: { type: string, format: date-time, nullable: true }
+        lastError: { type: string, nullable: true }
+        backupFrequencyHours:
+          type: integer
+          description: Hours between automatic backups; 0 = disabled. Present when connected.
+          enum: [0, 12, 24, 48, 72, 168]
+        backupRetentionCount:
+          type: integer
+          minimum: 1
+          maximum: 30
+          description: Number of `.hfb` files to retain in Drive after each successful upload.
+        lastScheduledBackupAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the server last queued an automatic backup (scheduler heartbeat).
+    GDriveSchedulerSettingsRequest:
+      type: object
+      required: [backupFrequencyHours, backupRetentionCount]
+      properties:
+        backupFrequencyHours:
+          type: integer
+          enum: [0, 12, 24, 48, 72, 168]
+        backupRetentionCount:
+          type: integer
+          minimum: 1
+          maximum: 30
+    GDriveSchedulerSettingsResponse:
+      type: object
+      required: [backupFrequencyHours, backupRetentionCount]
+      properties:
+        backupFrequencyHours: { type: integer, enum: [0, 12, 24, 48, 72, 168] }
+        backupRetentionCount: { type: integer, minimum: 1, maximum: 30 }
+    BackupJobHistoryEntry:
+      type: object
+      required: [id, householdId, status, createdAt]
+      properties:
+        id: { type: string }
+        householdId: { type: string }
+        status:
+          type: string
+          enum: [queued, running, complete, failed]
+        driveFileId: { type: string, nullable: true }
+        driveFileName: { type: string, nullable: true }
+        sizeBytes: { type: integer, nullable: true }
+        errorText: { type: string, nullable: true }
+        triggeredByUserId:
+          type: string
+          nullable: true
+          description: Null when the job was queued by the automatic scheduler.
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    GDriveBackupHistoryResponse:
+      type: object
+      required: [jobs]
+      properties:
+        jobs:
+          type: array
+          items:
+            $ref: '#/components/schemas/BackupJobHistoryEntry'
+    GDriveConnectSuccessResponse:
+      type: object
+      required: [connected, folderId, folderName]
+      properties:
+        connected: { type: boolean, enum: [true] }
+        folderId: { type: string }
+        folderName: { type: string }
+    GDriveConnectionFailedResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [DRIVE_CONNECTION_FAILED] }
+        message: { type: string }
+    GDriveNotConfiguredResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [GDRIVE_NOT_CONFIGURED] }
+        message: { type: string }
+    BackupJobStartResponse:
+      type: object
+      required: [jobId, message]
+      properties:
+        jobId: { type: string }
+        message: { type: string }
+    BackupJobStatusResponse:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string }
+        status:
+          type: string
+          enum: [queued, running, complete, failed]
+        driveFileId: { type: string, nullable: true }
+        driveFileName: { type: string, nullable: true }
+        sizeBytes: { type: integer, nullable: true }
+        errorText: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time, nullable: true }
+    BackupJobNotFoundResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [BACKUP_JOB_NOT_FOUND] }
+        message: { type: string }
+    DriveBackupEntry:
+      type: object
+      required: [fileId, fileName, createdAt]
+      properties:
+        fileId: { type: string }
+        fileName: { type: string }
+        sizeBytes: { type: integer, nullable: true }
+        createdAt: { type: string }
+    DriveBackupsListResponse:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/DriveBackupEntry'
+    DriveListFailedResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [DRIVE_LIST_FAILED] }
+        message: { type: string }
+    DriveDownloadFailedResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string, enum: [DRIVE_DOWNLOAD_FAILED] }
+        message: { type: string }
+    GDriveRestoreRequest:
+      type: object
+      required: [fileId]
+      properties:
+        fileId:
+          type: string
+          minLength: 1
+          description: Google Drive file id to download and import as .hfb
+    DriveRestoreStartedResponse:
+      type: object
+      required: [jobId, message]
+      properties:
+        jobId: { type: string }
+        message: { type: string }
+    ServiceErrorResponse:
+      type: object
+      properties:
+        ok: { type: boolean, enum: [false] }
+        code: { type: string }
+        message: { type: string }

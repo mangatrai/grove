@@ -59,6 +59,20 @@ const envSchema = z.object({
   ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  BACKUP_ENCRYPTION_KEY: z
+    .string()
+    .regex(/^[0-9a-fA-F]{64}$/, "BACKUP_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)")
+    .optional(),
+  LLM_PROVIDER: z.enum(["openai", "anthropic"]).default("openai"),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: optionalIntEnv(587, 1, 65535),
+  SMTP_SECURE: optionalBoolEnv(false),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  PUBLIC_BASE_URL: z.string().url().optional().or(z.literal("")),
   /**
    * Minimum severity emitted to stdout/stderr (`debug` = most verbose, `silent` = none).
    * Used by `backend/src/logger.ts`; set in repo root `.env`.
@@ -79,10 +93,28 @@ const envSchema = z.object({
   /** Min milliseconds between background polls for async LLM payslip import (default 2 min). */
   PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
   /** Max inclusive span (days) for `GET /reports/cash-summary` when `dateFrom`+`dateTo` are set. Default ~3 years. */
-  CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS: optionalIntEnv(1096, 31, 4000)
+  CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS: optionalIntEnv(1096, 31, 4000),
+  /** Google OAuth2 (Drive) — optional; required for GDrive connect / backup when using user-delegated auth. */
+  GOOGLE_CLIENT_ID: z.string().default(""),
+  GOOGLE_CLIENT_SECRET: z.string().default(""),
+  /** Full redirect URI registered in Google Cloud Console, e.g. http://127.0.0.1:4000/gdrive/oauth/callback */
+  GOOGLE_REDIRECT_URI: z.string().default(""),
+  /**
+   * SPA origin for Google Drive OAuth return redirects when the API and UI differ (e.g. http://localhost:3000).
+   * If unset: uses `PUBLIC_BASE_URL` when set; in `MODE=TEST` defaults to `http://localhost:3000`; in `MODE=PROD`
+   * with neither set, redirects are relative to the API host (same-origin deployments only).
+   */
+  FRONTEND_APP_URL: z.string().default("")
 });
 
 export const env = envSchema.parse(process.env);
+
+if (
+  env.MODE === "PROD" &&
+  env.JWT_SECRET === "local-dev-jwt-secret-do-not-use-in-prod-change-me!"
+) {
+  throw new Error("JWT_SECRET must be set to a unique secret in PROD mode — do not use the default value");
+}
 
 function resolveConfiguredPath(filePath: string): string {
   if (path.isAbsolute(filePath)) {
@@ -97,4 +129,19 @@ export function resolveLogFilePath(): string | undefined {
     return undefined;
   }
   return resolveConfiguredPath(env.LOG_FILE.trim());
+}
+
+export function isEmailConfigured(): boolean {
+  const smtpHost = env.SMTP_HOST?.trim() ?? "";
+  const smtpUser = env.SMTP_USER?.trim() ?? "";
+  const smtpPass = env.SMTP_PASS?.trim() ?? "";
+  const smtpFrom = env.SMTP_FROM?.trim() ?? "";
+  const publicBaseUrl = env.PUBLIC_BASE_URL?.trim() ?? "";
+  return (
+    smtpHost.length > 0 &&
+    smtpUser.length > 0 &&
+    smtpPass.length > 0 &&
+    smtpFrom.length > 0 &&
+    publicBaseUrl.length > 0
+  );
 }

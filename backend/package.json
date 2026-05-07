@@ -15,6 +15,7 @@
     "extract-payslip-llm": "tsx scripts/extract-payslip-llm.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.91.1",
     "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "cheerio": "^1.2.0",
@@ -22,9 +23,12 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "express-rate-limit": "^8.3.2",
+    "googleapis": "^171.4.0",
+    "gaxios": "^7.1.4",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "nodemailer": "^8.0.7",
     "openai": "^4.77.0",
     "pdf-parse": "^1.1.1",
     "postgres": "^3.4.8",
@@ -39,6 +43,7 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/multer": "^2.0.0",
     "@types/node": "^22.8.1",
+    "@types/nodemailer": "^8.0.0",
     "@types/pdf-parse": "^1.1.4",
     "@types/unzipper": "^0.10.11",
     "@typescript-eslint/eslint-plugin": "^8.8.1",

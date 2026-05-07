@@ -12,13 +12,16 @@ import { budgetRouter } from "./modules/budget/budget.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
 import { exportsRouter } from "./modules/export/exports.routes.js";
+import { gdriveRouter } from "./modules/gdrive/gdrive.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { householdRouter } from "./modules/household/household.routes.js";
+import { insightsRouter } from "./modules/insights/insights.routes.js";
 import { importsRouter } from "./modules/imports/imports.routes.js";
 import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
 import { payslipRouter } from "./modules/payslip/payslip.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
+import { recurringRouter } from "./modules/recurring/recurring.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -58,7 +61,10 @@ const API_PATH_PREFIXES = [
   "/reports",
   "/payslips",
   "/exports",
-  "/budget"
+  "/gdrive",
+  "/budget",
+  "/recurring-overrides",
+  "/insights"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -106,7 +112,10 @@ export function buildApp() {
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
   app.use("/exports", exportsRouter);
+  app.use("/gdrive", gdriveRouter);
   app.use("/budget", budgetRouter);
+  app.use("/recurring-overrides", recurringRouter);
+  app.use("/insights", insightsRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
 import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { sqlStmt } from "./pg-stmt.js";
 
 process.env.OPENAI_API_KEY ??= "test-key-for-payslip-upload-tests";
 
@@ -391,6 +393,106 @@ describe("GET /payslips/:id", () => {
     expect(one.body.lineItems.tax_deductions[0].name).toBe("Federal Withholding");
     expect(one.body.lineItems.post_tax_deductions).toEqual([]);
     expect(one.body.lineItems.other_information).toEqual([]);
+    // matchedDeposits is always present — empty array when no canonical credits match
+    expect(Array.isArray(one.body.matchedDeposits)).toBe(true);
+    // validationWarnings is always present
+    expect(Array.isArray(one.body.validationWarnings)).toBe(true);
+  });
+});
+
+// ─── matchedDeposits (CR-068) ─────────────────────────────────────────────────
+
+describe("GET /payslips/:id — matchedDeposits", () => {
+  const SEEDED_HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
+
+  async function loginToken(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  it("matchedDeposits finds a canonical credit deposit within ±3 days and 1% of net pay", async () => {
+    const token = await loginToken();
+
+    // The mock LLM always returns payDate="2026-01-15" and netPayCurrent=4000.
+    // Insert a canonical credit transaction that should match.
+    const txnId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
+       VALUES (?, ?, ?, '2026-01-14', 4000, 'credit', 'ACH Payroll Deposit', 'posted', ?, CURRENT_TIMESTAMP)`
+    ).run(txnId, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `matched-deposit-fp-${txnId}`);
+
+    try {
+      const base = readFileSync(ibmFixture);
+      const buf = Buffer.concat([base, Buffer.from(`\ndeposit-match-${Date.now()}`)]);
+
+      const up = await request(app)
+        .post("/payslips/upload")
+        .set("authorization", `Bearer ${token}`)
+        .attach("file", buf, "deposit-match.pdf");
+      expect(up.status).toBe(201);
+      const id = up.body.snapshot.id as string;
+
+      const one = await request(app)
+        .get(`/payslips/${id}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(one.status).toBe(200);
+      expect(Array.isArray(one.body.matchedDeposits)).toBe(true);
+
+      // Our inserted transaction must appear in matchedDeposits
+      const match = (one.body.matchedDeposits as Array<{ id: string; direction: string; amount: number; txnDate: string; accountId: string; institution: string; accountType: string }>)
+        .find((d) => d.id === txnId);
+      expect(match).toBeDefined();
+      expect(match!.direction).toBe("credit");
+      expect(match!.amount).toBe(4000);
+      expect(match!.txnDate).toBe("2026-01-14");
+      expect(match!.accountId).toBe(SEED_BOA_CHECKING);
+      expect(match!.institution).toBeDefined();
+      expect(match!.accountType).toBeDefined();
+    } finally {
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
+    }
+  });
+
+  it("matchedDeposits excludes credits outside the ±3-day window", async () => {
+    const token = await loginToken();
+
+    // Insert a credit transaction 5 days before pay date — outside the ±3-day window
+    const txnId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
+       VALUES (?, ?, ?, '2026-01-10', 4000, 'credit', 'OutOfWindow Deposit', 'posted', ?, CURRENT_TIMESTAMP)`
+    ).run(txnId, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `out-of-window-fp-${txnId}`);
+
+    try {
+      const base = readFileSync(ibmFixture);
+      const buf = Buffer.concat([base, Buffer.from(`\nout-of-window-${Date.now()}`)]);
+
+      const up = await request(app)
+        .post("/payslips/upload")
+        .set("authorization", `Bearer ${token}`)
+        .attach("file", buf, "out-of-window.pdf");
+      expect(up.status).toBe(201);
+      const id = up.body.snapshot.id as string;
+
+      const one = await request(app)
+        .get(`/payslips/${id}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(one.status).toBe(200);
+      expect(Array.isArray(one.body.matchedDeposits)).toBe(true);
+
+      // Our out-of-window transaction must NOT appear in matchedDeposits
+      const ids = (one.body.matchedDeposits as Array<{ id: string }>).map((d) => d.id);
+      expect(ids).not.toContain(txnId);
+    } finally {
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
+    }
   });
 });
 

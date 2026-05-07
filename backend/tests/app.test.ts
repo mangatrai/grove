@@ -5,9 +5,12 @@ import path from "node:path";
 import bcrypt from "bcryptjs";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import unzipper from "unzipper";
 import * as XLSX from "xlsx";
 
 import { buildApp } from "../src/app.js";
+import { env } from "../src/config/env.js";
+import { decryptBackup, isEncryptedBackup } from "../src/modules/export/backup-crypto.js";
 import { resolveDataPath } from "../src/paths.js";
 import { sqlStmt } from "./pg-stmt.js";
 
@@ -25,6 +28,574 @@ describe("app health", () => {
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ status: "ok" });
   });
+});
+
+describe("exports/imports roundtrip (CR-125)", () => {
+  it("exports manifest v4 with full registry tables and restores missing parity tables", async () => {
+    const originalBackupKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerEmail = `cr125-owner-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerProfileId = crypto.randomUUID();
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'CR-125 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'CR-125 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+
+    const login = await request(app).post("/auth/login").send({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const category = await sqlStmt(
+      `SELECT id FROM category WHERE household_id IS NULL ORDER BY id LIMIT 1`
+    ).get() as { id: string };
+
+    const budgetId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO budget_category (id, household_id, category_id, month, amount)
+       VALUES (?, ?, ?, '2030-01', 250.00)`
+    ).run(budgetId, householdId, category.id);
+
+    const resolutionId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+       VALUES (?, ?, 'unknown_category', ?, 'CR-125 test seed', 'open')`
+    ).run(resolutionId, householdId, crypto.randomUUID());
+
+    const payslipId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO payslip_snapshot (
+         id, household_id, file_name, file_checksum, parser_profile_id, pay_date,
+         owner_scope, owner_person_profile_id
+       ) VALUES (?, ?, 'cr125-test.pdf', ?, 'manual', '2030-01-15', 'person', ?)`
+    ).run(payslipId, householdId, crypto.randomUUID(), ownerProfileId);
+    await sqlStmt(
+      `INSERT INTO payslip_line_item (
+         id, payslip_snapshot_id, household_id, section, sort_order, name, amount_current, amount_ytd
+       ) VALUES (?, ?, ?, 'earnings', 0, 'Base salary', 100.00, 100.00)`
+    ).run(crypto.randomUUID(), payslipId, householdId);
+    await sqlStmt(
+      `INSERT INTO recurring_merchant_override (
+         id, household_id, merchant_key, display_name, verdict, amount_anchor, amount_tolerance_pct, tagged_by_user_id
+       ) VALUES (?, ?, 'cr125-merchant', 'CR-125 Merchant', 'confirmed', 42.00, 15.00, ?)`
+    ).run(crypto.randomUUID(), householdId, ownerUserId);
+    await sqlStmt(
+      `INSERT INTO household_ai_insight (
+         id, household_id, scope, user_id, provider, model, prompt_version, payload_json
+       ) VALUES (?, ?, 'household', ?, 'openai', 'gpt-4o-mini', 'v1', ?::jsonb)`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      ownerUserId,
+      JSON.stringify({ healthRating: "on_track", notes: ["CR-125 seeded"] })
+    );
+    const ephemeralAccountId = crypto.randomUUID();
+    const importSessionId = crypto.randomUUID();
+    const importFileId = crypto.randomUUID();
+    const transactionRawId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, type, institution, owner_scope)
+       VALUES (?, ?, 'checking', 'CR-125 Ephemeral Bank', 'household')`
+    ).run(ephemeralAccountId, householdId);
+    await sqlStmt(
+      `INSERT INTO import_session (id, household_id, source_type, status)
+       VALUES (?, ?, 'upload', 'review')`
+    ).run(importSessionId, householdId);
+    await sqlStmt(
+      `INSERT INTO import_file (
+         id, session_id, file_name, checksum, status, confidence_summary, stored_path, financial_account_id
+       ) VALUES (?, ?, 'ephemeral.csv', ?, 'parsed', '{}', '/tmp/ephemeral.csv', ?)`
+    ).run(importFileId, importSessionId, crypto.randomUUID(), ephemeralAccountId);
+    await sqlStmt(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, 0, '{}', 1.0)`
+    ).run(transactionRawId, importFileId);
+
+    const startExport = await request(app)
+      .post("/exports/household")
+      .set("authorization", `Bearer ${token}`);
+    expect(startExport.status).toBe(202);
+    const exportJobId = startExport.body.jobId as string;
+
+    let exportStatus = "queued";
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app)
+        .get(`/exports/${exportJobId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(poll.status).toBe(200);
+      exportStatus = poll.body.status as string;
+      if (exportStatus === "complete") break;
+    }
+    expect(exportStatus).toBe("complete");
+
+    const exportRow = await sqlStmt(
+      `SELECT storage_path FROM export_job WHERE id = ? AND household_id = ?`
+    ).get(exportJobId, householdId) as { storage_path: string };
+    const zipBuffer = readFileSync(exportRow.storage_path);
+
+    const zip = await unzipper.Open.buffer(zipBuffer);
+    const manifestEntry = zip.files.find((f) => f.path === "manifest.json");
+    expect(manifestEntry).toBeDefined();
+    const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as {
+      exportVersion: number;
+      tables: Record<string, { file: string; rows: number }>;
+    };
+
+    expect(manifest.exportVersion).toBe(4);
+    expect(manifest.tables["budget_category"]).toBeDefined();
+    expect(manifest.tables["payslip_line_item"]).toBeDefined();
+    expect(manifest.tables["recurring_merchant_override"]).toBeDefined();
+    expect(manifest.tables["resolution_item"]).toBeDefined();
+    expect(manifest.tables["household_ai_insight"]).toBeDefined();
+
+    const restoreStart = await request(app)
+      .post("/exports/household/import")
+      .set("authorization", `Bearer ${token}`)
+      .attach("file", zipBuffer, "cr125-bundle.hfb");
+    expect(restoreStart.status).toBe(202);
+    const importJobId = restoreStart.body.jobId as string;
+
+    let importStatus = "queued";
+    let importToken = token;
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app)
+        .get(`/exports/import/${importJobId}`)
+        .set("authorization", `Bearer ${importToken}`);
+      if (poll.status === 401) {
+        const relogin = await request(app).post("/auth/login").send({
+          email: ownerEmail,
+          password: ownerPassword
+        });
+        expect(relogin.status).toBe(200);
+        importToken = relogin.body.token as string;
+        continue;
+      }
+      expect(poll.status).toBe(200);
+      importStatus = poll.body.status as string;
+      if (importStatus === "complete") break;
+    }
+    expect(importStatus).toBe("complete");
+
+    const budgetCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM budget_category WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(budgetCount.c).toBeGreaterThan(0);
+
+    const resolutionCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM resolution_item WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(resolutionCount.c).toBeGreaterThan(0);
+
+    const payslipCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM payslip_snapshot WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    if (payslipCount.c > 0) {
+      const lineItemCount = await sqlStmt(
+        `SELECT COUNT(*)::int AS c FROM payslip_line_item WHERE household_id = ?`
+      ).get(householdId) as { c: number };
+      expect(lineItemCount.c).toBeGreaterThan(0);
+    }
+    const recurringOverrideCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM recurring_merchant_override WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(recurringOverrideCount.c).toBeGreaterThan(0);
+    const insightCount = await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM household_ai_insight WHERE household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(insightCount.c).toBeGreaterThan(0);
+
+    const leftoverImportFiles = await sqlStmt(
+      `SELECT COUNT(*)::int AS c
+       FROM import_file f
+       JOIN import_session s ON s.id = f.session_id
+       WHERE s.household_id = ?`
+    ).get(householdId) as { c: number };
+    expect(leftoverImportFiles.c).toBe(0);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalBackupKey;
+    }
+  }, 120_000);
+});
+
+describe("backup encryption (CR-126)", () => {
+  async function createOwnerContext(seed: string): Promise<{
+    householdId: string;
+    ownerUserId: string;
+    ownerProfileId: string;
+    ownerEmail: string;
+    ownerPassword: string;
+    token: string;
+  }> {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerProfileId = crypto.randomUUID();
+    const ownerEmail = `cr126-owner-${seed}-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'CR-126 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'CR-126 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+
+    const login = await request(app).post("/auth/login").send({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    expect(login.status).toBe(200);
+    return {
+      householdId,
+      ownerUserId,
+      ownerProfileId,
+      ownerEmail,
+      ownerPassword,
+      token: login.body.token as string
+    };
+  }
+
+  async function waitForExportComplete(jobId: string, token: string): Promise<void> {
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app).get(`/exports/${jobId}`).set("authorization", `Bearer ${token}`);
+      if (poll.status !== 200) throw new Error(`Export poll got HTTP ${poll.status} on attempt ${i + 1}`);
+      if ((poll.body.status as string) === "complete") return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("Export did not complete in time");
+  }
+
+  async function waitForImportTerminal(
+    jobId: string,
+    token: string,
+    relogin?: { email: string; password: string }
+  ): Promise<{ status: string; error: string | null }> {
+    let authToken = token;
+    for (let i = 0; i < 60; i += 1) {
+      const poll = await request(app).get(`/exports/import/${jobId}`).set("authorization", `Bearer ${authToken}`);
+      if (poll.status === 401 && relogin) {
+        const login = await request(app).post("/auth/login").send({
+          email: relogin.email,
+          password: relogin.password
+        });
+        expect(login.status).toBe(200);
+        authToken = login.body.token as string;
+        continue;
+      }
+      expect(poll.status).toBe(200);
+      const status = poll.body.status as string;
+      if (status === "complete" || status === "failed") {
+        return { status, error: (poll.body.error as string | null) ?? null };
+      }
+    }
+    throw new Error("Import did not reach terminal state in time");
+  }
+
+  it("unencrypted roundtrip: export produces valid .hfb, restore succeeds", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const owner = await createOwnerContext("unencrypted");
+      const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+
+      await waitForExportComplete(exportJobId, owner.token);
+
+      const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+        storage_path: string;
+      };
+      expect(exportRow.storage_path.endsWith(".hfb")).toBe(true);
+      const fileBuffer = readFileSync(exportRow.storage_path);
+      expect(isEncryptedBackup(fileBuffer)).toBe(false);
+
+      const zip = await unzipper.Open.buffer(fileBuffer);
+      const manifestEntry = zip.files.find((f) => f.path === "manifest.json");
+      expect(manifestEntry).toBeDefined();
+      const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as { encrypted?: boolean };
+      expect(manifest.encrypted).toBe(false);
+
+      const restoreStart = await request(app)
+        .post("/exports/household/import")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr126-unencrypted.hfb");
+      expect(restoreStart.status).toBe(202);
+
+      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+        email: owner.ownerEmail,
+        password: owner.ownerPassword
+      });
+      expect(result.status).toBe("complete");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("encrypted roundtrip: export encrypts file, restore decrypts and succeeds", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    const TEST_KEY = "a".repeat(64);
+    env.BACKUP_ENCRYPTION_KEY = TEST_KEY;
+    try {
+      const owner = await createOwnerContext("encrypted");
+      const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+      await waitForExportComplete(exportJobId, owner.token);
+
+      const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+        storage_path: string;
+      };
+      const fileBuffer = readFileSync(exportRow.storage_path);
+      expect(isEncryptedBackup(fileBuffer)).toBe(true);
+
+      const zipBuffer = decryptBackup(fileBuffer, TEST_KEY);
+      const zip = await unzipper.Open.buffer(zipBuffer);
+      const manifestEntry = zip.files.find((f) => f.path === "manifest.json");
+      expect(manifestEntry).toBeDefined();
+      const manifest = JSON.parse((await manifestEntry!.buffer()).toString("utf-8")) as { encrypted?: boolean };
+      expect(manifest.encrypted).toBe(true);
+
+      const restoreStart = await request(app)
+        .post("/exports/household/import")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr126-encrypted.hfb");
+      expect(restoreStart.status).toBe(202);
+
+      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+        email: owner.ownerEmail,
+        password: owner.ownerPassword
+      });
+      expect(result.status).toBe("complete");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("restore fails with clear error when encrypted backup but no key configured", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    const TEST_KEY = "a".repeat(64);
+    env.BACKUP_ENCRYPTION_KEY = TEST_KEY;
+    try {
+      const owner = await createOwnerContext("missing-key");
+      const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${owner.token}`);
+      expect(startExport.status).toBe(202);
+      const exportJobId = startExport.body.jobId as string;
+      await waitForExportComplete(exportJobId, owner.token);
+      const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+        storage_path: string;
+      };
+      const encryptedBuffer = readFileSync(exportRow.storage_path);
+      expect(isEncryptedBackup(encryptedBuffer)).toBe(true);
+
+      env.BACKUP_ENCRYPTION_KEY = undefined;
+
+      const restoreStart = await request(app)
+        .post("/exports/household/import")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", encryptedBuffer, "cr126-encrypted-no-key.hfb");
+      expect(restoreStart.status).toBe(202);
+
+      const result = await waitForImportTerminal(restoreStart.body.jobId as string, owner.token, {
+        email: owner.ownerEmail,
+        password: owner.ownerPassword
+      });
+      expect(result.status).toBe("failed");
+      expect(result.error ?? "").toContain("encrypted");
+      expect(result.error ?? "").toContain("BACKUP_ENCRYPTION_KEY");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+});
+
+describe("backup preview (CR-127)", () => {
+  async function createOwnerContext(seed: string): Promise<{
+    householdId: string;
+    ownerEmail: string;
+    ownerPassword: string;
+    token: string;
+  }> {
+    const householdId = crypto.randomUUID();
+    const ownerUserId = crypto.randomUUID();
+    const ownerProfileId = crypto.randomUUID();
+    const accountId = crypto.randomUUID();
+    const ownerEmail = `cr127-owner-${seed}-${Date.now()}@example.com`;
+    const ownerPassword = "ChangeMe123!";
+    const ownerPasswordHash = await bcrypt.hash(ownerPassword, 10);
+
+    await sqlStmt(
+      `INSERT INTO household (id, name, owner_user_id, employers_json)
+       VALUES (?, 'CR-127 Household', NULL, '[]')`
+    ).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'own')`
+    ).run(ownerUserId, householdId, ownerEmail, ownerPasswordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(ownerUserId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name, financial_goals_json)
+       VALUES (?, ?, ?, 'CR-127 Owner', '[]')`
+    ).run(ownerProfileId, householdId, ownerUserId);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, type, institution, owner_scope)
+       VALUES (?, ?, 'checking', 'CR-127 Test Bank', 'household')`
+    ).run(accountId, householdId);
+
+    const defaultCategory = await sqlStmt(
+      `SELECT id FROM category WHERE household_id IS NULL ORDER BY id LIMIT 1`
+    ).get() as { id: string };
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, source_ref, txn_date, amount, direction, merchant, category_id, status, fingerprint
+       ) VALUES (?, ?, ?, ?, '2030-01-20', 25.50, 'debit', 'CR-127 Coffee', ?, 'posted', ?)`
+    ).run(
+      crypto.randomUUID(),
+      householdId,
+      accountId,
+      `cr127-seed:${seed}`,
+      defaultCategory.id,
+      crypto.randomUUID()
+    );
+
+    const login = await request(app).post("/auth/login").send({
+      email: ownerEmail,
+      password: ownerPassword
+    });
+    expect(login.status).toBe(200);
+    return { householdId, ownerEmail, ownerPassword, token: login.body.token as string };
+  }
+
+  async function waitForExportComplete(jobId: string, token: string): Promise<void> {
+    for (let i = 0; i < 40; i += 1) {
+      const poll = await request(app).get(`/exports/${jobId}`).set("authorization", `Bearer ${token}`);
+      if (poll.status !== 200) throw new Error(`Export poll got HTTP ${poll.status} on attempt ${i + 1}`);
+      if ((poll.body.status as string) === "complete") return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("Export did not complete in time");
+  }
+
+  async function exportBackupBuffer(token: string): Promise<Buffer> {
+    const startExport = await request(app).post("/exports/household").set("authorization", `Bearer ${token}`);
+    expect(startExport.status).toBe(202);
+    const exportJobId = startExport.body.jobId as string;
+    await waitForExportComplete(exportJobId, token);
+    const exportRow = await sqlStmt(`SELECT storage_path FROM export_job WHERE id = ?`).get(exportJobId) as {
+      storage_path: string;
+    };
+    return readFileSync(exportRow.storage_path);
+  }
+
+  it("preview returns manifest summary for unencrypted .hfb", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const owner = await createOwnerContext("unencrypted-preview");
+      const fileBuffer = await exportBackupBuffer(owner.token);
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-unencrypted.hfb");
+
+      expect(preview.status).toBe(200);
+      expect(preview.body.exportVersion).toBe(4);
+      expect(preview.body.encrypted).toBe(false);
+      expect(preview.body.scope).toBe("household");
+      expect(preview.body.totalRows).toBeGreaterThan(0);
+      expect(Object.keys(preview.body.tables ?? {}).length).toBeGreaterThanOrEqual(5);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("preview returns manifest summary for encrypted .hfb", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = "a".repeat(64);
+    try {
+      const owner = await createOwnerContext("encrypted-preview");
+      const fileBuffer = await exportBackupBuffer(owner.token);
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-encrypted.hfb");
+
+      expect(preview.status).toBe(200);
+      expect(preview.body.encrypted).toBe(true);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("preview returns 422 for encrypted backup when no key configured", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = "a".repeat(64);
+    try {
+      const owner = await createOwnerContext("encrypted-no-key");
+      const fileBuffer = await exportBackupBuffer(owner.token);
+      env.BACKUP_ENCRYPTION_KEY = undefined;
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-encrypted-no-key.hfb");
+
+      expect(preview.status).toBe(422);
+      expect(String(preview.body.message ?? "").toLowerCase()).toContain("encrypted");
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
+
+  it("preview does not modify any database rows", async () => {
+    const originalKey = env.BACKUP_ENCRYPTION_KEY;
+    env.BACKUP_ENCRYPTION_KEY = undefined;
+    try {
+      const owner = await createOwnerContext("readonly-preview");
+      const before = await sqlStmt(
+        `SELECT COUNT(*)::int AS c FROM transaction_canonical WHERE household_id = ?`
+      ).get(owner.householdId) as { c: number };
+      const fileBuffer = await exportBackupBuffer(owner.token);
+
+      const preview = await request(app)
+        .post("/exports/preview")
+        .set("authorization", `Bearer ${owner.token}`)
+        .attach("file", fileBuffer, "cr127-readonly.hfb");
+      expect(preview.status).toBe(200);
+
+      const after = await sqlStmt(
+        `SELECT COUNT(*)::int AS c FROM transaction_canonical WHERE household_id = ?`
+      ).get(owner.householdId) as { c: number };
+      expect(after.c).toBe(before.c);
+    } finally {
+      env.BACKUP_ENCRYPTION_KEY = originalKey;
+    }
+  }, 120_000);
 });
 
 describe("auth and rbac baseline", () => {
@@ -698,6 +1269,164 @@ describe("import sessions and file intake", () => {
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
 
+  it("routes same-import same-fingerprint different-FITID rows to Needs Review", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const tag = `energy-ogre-${Date.now()}`;
+    const txnDate = "2024-05-29";
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},ENERGY OGRE HOUSTON TX ${tag},-10.00,FITID001-${tag}`,
+      `${txnDate},ENERGY OGRE HOUSTON TX ${tag},-10.00,FITID002-${tag}`,
+      `${txnDate},ENERGY OGRE HOUSTON TX ${tag},-10.00,FITID003-${tag}`
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "energy-ogre.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.duplicates).toBe(2);
+
+    const statusCounts = (await sqlStmt(
+      `SELECT status, COUNT(*)::int AS c
+       FROM transaction_canonical
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND merchant LIKE ?
+       GROUP BY status`
+    ).all(sessionId, `%ENERGY OGRE HOUSTON TX ${tag}%`)) as Array<{ status: string; c: number }>;
+    const postedCount = statusCounts.find((r) => r.status === "posted")?.c ?? 0;
+    const dupCount = statusCounts.find((r) => r.status === "duplicate")?.c ?? 0;
+    expect(postedCount).toBe(1);
+    expect(dupCount).toBe(2);
+
+    const dupResolutions = (await sqlStmt(
+      `SELECT reason
+       FROM resolution_item
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND type = 'duplicate_ambiguity'
+         AND status = 'open'
+         AND reason LIKE ?
+       ORDER BY created_at DESC`
+    ).all(sessionId, `%different bank transaction ID%`)) as Array<{ reason: string }>;
+    expect(dupResolutions.length).toBeGreaterThanOrEqual(2);
+
+    const needsReview = await request(app)
+      .get(`/transactions?needsReview=true&sessionId=${sessionId}&limit=100`)
+      .set("authorization", `Bearer ${token}`);
+    expect(needsReview.status).toBe(200);
+    const duplicateRows = (needsReview.body.transactions as Array<{ status: string; merchant: string | null }>).filter(
+      (t) => t.status === "duplicate" && String(t.merchant ?? "").includes(`ENERGY OGRE HOUSTON TX ${tag}`)
+    );
+    expect(duplicateRows.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("routes same-import same-FITID rows to Needs Review with FITID duplicate messaging", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const tag = `same-fitid-${Date.now()}`;
+    const txnDate = "2024-06-03";
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},DUP FITID TEST ${tag},-12.00,FITIDSAME-${tag}`,
+      `${txnDate},DUP FITID TEST ${tag},-12.00,FITIDSAME-${tag}`
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "dup-fitid.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.duplicates).toBe(1);
+
+    const statusCounts = (await sqlStmt(
+      `SELECT status, COUNT(*)::int AS c
+       FROM transaction_canonical
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND merchant LIKE ?
+       GROUP BY status`
+    ).all(sessionId, `%DUP FITID TEST ${tag}%`)) as Array<{ status: string; c: number }>;
+    const postedCount = statusCounts.find((r) => r.status === "posted")?.c ?? 0;
+    const dupCount = statusCounts.find((r) => r.status === "duplicate")?.c ?? 0;
+    expect(postedCount).toBe(1);
+    expect(dupCount).toBe(1);
+
+    const fitidReason = (await sqlStmt(
+      `SELECT reason
+       FROM resolution_item
+       WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?)
+         AND type = 'duplicate_ambiguity'
+         AND status = 'open'
+         AND reason LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 1`
+    ).get(sessionId, `%Duplicate bank transaction ID%`)) as { reason: string } | undefined;
+    expect(fitidReason).toBeTruthy();
+
+    const needsReview = await request(app)
+      .get(`/transactions?needsReview=true&sessionId=${sessionId}&limit=100`)
+      .set("authorization", `Bearer ${token}`);
+    expect(needsReview.status).toBe(200);
+    const duplicateRows = (needsReview.body.transactions as Array<{ status: string; merchant: string | null }>).filter(
+      (t) => t.status === "duplicate" && String(t.merchant ?? "").includes(`DUP FITID TEST ${tag}`)
+    );
+    expect(duplicateRows.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("CR-080: exact duplicate from a second import creates status=duplicate canonical and resolution_item", async () => {
     const token = await loginAndGetToken();
 
@@ -835,7 +1564,7 @@ describe("import sessions and file intake", () => {
     60_000
   );
 
-  it("returns 409 for undo-import when session is finalized", async () => {
+  it("allows undo-import when session is finalized", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
       .post("/imports/sessions")
@@ -860,8 +1589,9 @@ describe("import sessions and file intake", () => {
       .post(`/imports/sessions/${sessionId}/undo-import`)
       .set("authorization", `Bearer ${token}`)
       .send({});
-    expect(undoRes.status).toBe(409);
-    expect(undoRes.body.code).toBe("SESSION_NOT_REVIEW");
+    expect(undoRes.status).toBe(200);
+    expect(undoRes.body.deletedCanonicalRows).toBe(0);
+    expect(undoRes.body.deletedResolutionItems).toBe(0);
   });
 
   it("returns 409 when canonicalize runs before parse (no transaction_raw)", async () => {

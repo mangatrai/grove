@@ -18,6 +18,902 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## SEC-155 (2026-05-07): GDrive OAuth scope narrowed to drive.file + drive.metadata.readonly
+
+**Why:** Post-review analysis confirmed all backup files are app-created (.hfb uploaded by the app itself). `drive.file` covers create/list/download/delete on app-created files. The only non-app-owned resource is the user-supplied folder — `files.get(folderId)` to verify it exists needs `drive.metadata.readonly` (metadata only, no file content). Together these are significantly narrower than the original `drive` scope.
+
+**What:**
+- OAuth consent URL scope changed from `["drive"]` to `["drive.file", "drive.metadata.readonly"]`.
+- Code comment explains the scope split and what each covers.
+- Existing refresh tokens issued under the old `drive` scope remain functional at the Google API level; new OAuth flows will request the narrower pair. Users can disconnect and reconnect via Settings → Data to downgrade to the narrower token.
+
+**Post-merge backlog created:** `docs/SECURITY_HARDENING_BACKLOG.md` — tracks remaining deferred items from the pre-merge review (insight cooldown, token cleanup, Drive query escaping, etc.).
+
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `docs/SECURITY_HARDENING_BACKLOG.md`, `docs/EXPORT_IMPORT_BACKLOG.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## SEC-154 (2026-05-06): GDrive refresh token encrypted at rest; OAuth scope corrected
+
+**Why:** Pre-merge review identified two related risks: (1) the OAuth refresh token was stored as plaintext in `household_gdrive_config`; (2) the scope was too broad (`drive`). A scope change to `drive.file` was initially applied but reverted — `drive.file` only covers files the app created via the API and cannot access arbitrary user-supplied folders. The correct mitigation is encrypting the long-lived token, not restricting scope to a value that breaks functionality.
+
+**What:**
+- **Refresh token encrypted at rest** — `connectGDrive` now encrypts the token with AES-256-GCM before storing it. `getGDriveCredentials` decrypts on read. Format: `base64(iv[12] || authTag[16] || ciphertext)`. Key is `SHA-256("household-finance:gdrive-token:" || JWT_SECRET)` — dedicated purpose, separate from `BACKUP_ENCRYPTION_KEY`. (`backend/src/modules/gdrive/gdrive.service.ts`)
+- **Graceful fallback for pre-encryption deployments** — if decryption fails (e.g. a plaintext token from before this change), `getGDriveCredentials` returns `null` (Drive shown as "not configured"). The user reconnects Drive; no data is lost.
+- **OAuth scope `drive` retained with comment** — scope narrowing to `drive.file` was reverted because the app reads/writes an existing user-supplied folder, which requires `drive`. A comment in the source explains why and points to token encryption as the blast-radius mitigation.
+- **Test updated** — `gdrive.test.ts` now asserts the stored token is not the raw plaintext (is non-empty and differs from the input), which is the correct post-encryption invariant.
+
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/tests/gdrive.test.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## SEC-153 (2026-05-06): Pre-merge security and hardening fixes
+
+**Why:** Pre-merge review of v2 identified several security and correctness issues before merging to main.
+
+**What:**
+- **Drive OAuth scope narrowed** — changed from `drive` (full Drive access) to `drive.file` (only files the app creates). Limits blast radius if the refresh token is ever compromised. (`backend/src/modules/gdrive/gdrive.service.ts`)
+- **`storagePath` removed from export download error response** — the 404 JSON for a missing/not-ready export was leaking an absolute server filesystem path to API clients. Removed. (`backend/src/modules/export/exports.routes.ts`)
+- **`generateTempPassword` uses `crypto.randomBytes`** — replaced `Math.random()` with `randomBytes(4)` per group; consistent with how `createPasswordResetToken` uses `webcrypto`. (`backend/src/modules/household/household.service.ts`)
+- **JWT_SECRET default rejected in PROD** — added a startup guard that throws if `MODE=PROD` and `JWT_SECRET` is still the hardcoded dev default. Prevents silent insecure deployments. (`backend/src/config/env.ts`)
+- **Recurring overrides require admin/owner role** — `POST /recurring-overrides` and `DELETE /recurring-overrides/:id` now require `requireRole(['owner', 'admin'])`. Read (`GET`) remains accessible to all authenticated members. (`backend/src/modules/recurring/recurring.routes.ts`)
+- **Lint: 3 unused imports/vars in tests** — removed unused `beforeAll` from `category-rule-learning.test.ts`, unused `afterAll` from `payslip-upload.test.ts`, and unused `SEED_BOA_CHECKING` constant from `rbac.test.ts`.
+- **Test: `waitForExportComplete` hardened** — replaced inner `expect(poll.status).toBe(200)` with a throw (gives a clearer error on 401/5xx) and added a 50ms inter-poll delay to reduce ordering sensitivity in the full suite. (`backend/tests/app.test.ts`)
+- **CLAUDE.md: Anthropic SDK note** — clarified that `@anthropic-ai/sdk` is retained for the AI insights pipeline (`LLM_PROVIDER=anthropic`), not just for categorization (which was removed). Prevents future sessions from incorrectly removing the dependency.
+- **CHANGE_HISTORY UX-151: remove stale "still to migrate" note** — UX-152 completed the work; the stale bullet has been removed.
+
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/config/env.ts`, `backend/src/modules/recurring/recurring.routes.ts`, `backend/tests/category-rule-learning.test.ts`, `backend/tests/payslip-upload.test.ts`, `backend/tests/rbac.test.ts`, `backend/tests/app.test.ts`, `CLAUDE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-152 (2026-05-06): SettingsPage ConfirmDialog messages migrated to Mantine
+
+**Why:** The remove-member and reset-password confirmation dialogs still rendered `message` content with raw HTML (`<div>/<p>` plus inline style objects), which diverged from the Mantine-only UI surface target.
+
+**What:**
+- Replaced remove-member dialog `message` wrapper from raw `<div style={...}>` to Mantine `Stack`.
+- Replaced custom red/amber styled warning blocks with Mantine `Alert color="red"` and `Alert color="yellow"`.
+- Replaced confirmation text `<p style={...}>` with Mantine `Text size="sm"`.
+- Replaced reset-password dialog `message` `<p style={...}>` with Mantine `Text size="sm"`.
+- Kept all logic/state/handlers/API behavior unchanged (UI-surface-only change).
+
+**Files:** `frontend/src/pages/SettingsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-151 (2026-05-06): Mantine migration — codified intentional non-Mantine exceptions
+
+**Why:** After the full Mantine migration pass (UX-145–UX-150) an audit flagged several patterns as "remaining native HTML." Some are legitimate exceptions that should not be migrated; documenting them here prevents future sessions from treating them as bugs.
+
+**Codified exceptions (do not migrate):**
+
+| Location | Pattern | Reason |
+|---|---|---|
+| `HomePage.tsx` — `home-landing__*` classes | Branded landing shell: `.home-landing`, `.home-landing__glow`, `.home-landing__grid`, `.home-landing__hero`, `.home-landing__pills`, etc. | Custom designed marketing/branding layout. CSS-driven glow animation, two-column hero grid, and pill badges are intentional visual design. The interactive auth surface (sign-in card, forgot-password) is fully Mantine. Do not replace with Mantine `Grid`/`Stack`. |
+| `ImportWorkspacePage.tsx` — `<input type="file" multiple>` | Native file input element | No Mantine equivalent that preserves multi-file OS picker UX. `FileButton` changes the interaction model. Keep as bare `<input>`. |
+| Any `Box` or layout element — `style={{ zIndex: N }}` | Inline z-index | Mantine v7 `Box` has no `zIndex` prop; `style={{ zIndex }}` is the correct approach. |
+| `Box style={{ overflowX: "auto" }}` wrappers | Overflow containers for tables | Mantine has no overflow prop on layout primitives; `style=` is correct here. |
+| `Table.Th style={{ letterSpacing }}` | Letter-spacing on headers | `lts` is a Mantine v7 style prop; either form is acceptable. `style={{ letterSpacing }}` is not a migration miss. |
+| `Table.Td style={{ minWidth }}` | Column min-widths | `miw=` is the Mantine equivalent but `style={{ minWidth }}` is not a structural native-HTML issue; either is acceptable. |
+
+**Files:** `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-150 (2026-05-06): ImportWorkspacePage — full Mantine migration (2080 lines, 0% → 100%)
+
+**Why:** Largest frontend page, entirely native HTML — `.card`, `.muted`, custom `<dl>/<dt>/<dd>`, `<table className="ledger-table">`, `<details>/<summary>`, `<button>`, `<select>`, `<input>` throughout. No Mantine imports at start.
+
+**What:**
+- Added full Mantine import block: `ActionIcon`, `Alert`, `Anchor`, `Badge`, `Box`, `Button`, `Code`, `Collapse`, `Group`, `List`, `Paper`, `Select`, `SimpleGrid`, `Skeleton`, `Stack`, `Table`, `Text`, `TextInput`, `Title`.
+- Added `@tabler/icons-react` icons: `IconArrowBackUp`, `IconChevronDown`, `IconChevronRight`, `IconPlayerPlay`, `IconTrash`, `IconUpload`.
+- Replaced `SessionStatusBadge` with Mantine `Badge` (color map: created/gray, processing/blue, review/yellow, finalized/green, failed/red).
+- Added `StatRow` helper component for key/value stat display using `Group`/`Text`.
+- Added `showPayslipHelp` and `showSeparateSteps` state for controlled `Collapse` toggles.
+- **Hub view (no sessionId):** `<div>/<h1>/<h2>/<ul>/<li>` → `Stack > Paper > Group/Title/Alert/Button` for header + session list rows with `Code`/`SessionStatusBadge`/`Anchor`.
+- **Session control band:** `<div className="card">` → `Paper` with `Group`/`Title`/`Code`/`Button`/`Alert`.
+- **Last import summary:** `<div className="card">` → `Paper` with `List`/`List.Item`/`Text`/`Anchor`.
+- **Upload files:** `<div className="card">` → `Paper`; native `<input type="file">` kept (no Mantine equivalent).
+- **Files & account table:** `<details>/<summary>` payslip help → `Collapse` + `Anchor` toggle; `<table>` → Mantine `Table withRowBorders`; `<select>` employer → `Select`; advanced format `<select>` → `Select`; OFX hints `<div>/<p>` → `Stack`/`Text`/`Anchor`; inline create-account form `<div style={{ grid }}>` → `Paper withBorder` + `Group`/`Select`/`TextInput`/`Button`; `<button>` remove → `ActionIcon`.
+- **Outcomes by file:** `<dl className="import-file-outcome-stats">` → `Stack` with `StatRow` entries; `<div className="import-file-outcomes">` → `SimpleGrid cols={{ base:1, sm:2, lg:3 }}`; `<div className="import-file-outcome-card">` → `Paper withBorder`.
+- **Generic tabular mapping:** `<div className="row">/<label>/<input>` → `Group` with 4 `TextInput` components.
+- **Run import:** `<button>` → `Button leftSection={<IconPlayerPlay>}`; `<details>/<summary>` separate steps → `Collapse` with `Anchor` toggle + `showSeparateSteps` state; secondary `<button>` → `Button variant="default"`.
+- **Classification matcher preview:** `<button>` → `Button variant="default"`; `<span className="muted">` → `Text c="dimmed"`; `<table className="ledger-table">` → Mantine `Table`; `<code>` → `Code fz="xs"`.
+- **Undo ledger posting:** `<button className="secondary">` → `Button variant="default" leftSection={<IconArrowBackUp>}`.
+- Outer session view `</div>` → `</Stack>`.
+
+**Files:** `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-149 (2026-05-06): DashboardPageLegacy — remove dead code, clean up V2 toggle
+
+**Why:** The classic view toggle was removed from the UI in a recent commit. `DashboardPageLegacy` was no longer reachable from any UI path. Keeping it added dead weight (1425 lines at 0% Mantine) and a stale import.
+
+**What:**
+- Deleted `frontend/src/pages/DashboardPageLegacy.tsx`.
+- Removed `DashboardPageLegacy` import from `DashboardPageV2.tsx`.
+- Removed `useClassicView` state and all guards from `loadCashSummary`, `loadAll`, and `useEffect`.
+- Removed the `if (useClassicView) { return <DashboardPageLegacy /> }` render branch and "Switch to new view" button.
+- Removed stale TODO comment referencing the toggle cleanup.
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/DashboardPageLegacy.tsx` (deleted)
+
+---
+
+## UX-148 (2026-05-06): ResolutionQueuePage — full Mantine migration
+
+**Why:** Page had zero Mantine imports — entirely native HTML (`.card`, `.muted`, `.error`, native `<table>`, `<p>`, `<div>`).
+
+**What:**
+- Replaced page wrapper with `Stack` + `Paper withBorder`.
+- Replaced `<h1>` with `Title`, `<p className="muted">` with `Text c="dimmed"`, `<p className="error">` with `Alert color="red"`.
+- Loading state replaced with `Skeleton`.
+- Replaced native `<table>/<thead>/<tbody>/<tr>/<th>/<td>` with Mantine `Table` primitives with uppercase dimmed headers.
+- Replaced `<Link>` with `<Anchor component={Link}>` throughout.
+- Overflow wrapper `<div>` → `Box`.
+
+**Files:** `frontend/src/pages/ResolutionQueuePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-147 (2026-05-06): PayslipsPage — migrate custom list rows to Mantine
+
+**Why:** Page shell was Mantine but every payslip list row was a hand-rolled div/span nest with raw CSS vars, inline flex layout, and custom border/padding styles.
+
+**What:**
+- Removed `className="payslips-page"` from `Stack`.
+- Replaced KPI card `style={{ color: accent }}` with Mantine `c=` color prop and Mantine color tokens for `borderTop`.
+- Replaced belongs-to filter `<div>` wrapper with `Box`.
+- Replaced entire list row section: `div/span` nest → `Paper withBorder` + `Group`/`Box`/`Text` with Mantine size/fw/c props.
+- Actions `<div>` gap wrapper → `Group gap={6}`.
+
+**Files:** `frontend/src/pages/PayslipsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-146 (2026-05-06): HomePage — migrate sign-in form and auth links to Mantine
+
+**Why:** Sign-in card used native `<input type="email">`, `<input type="password">`, `<label>`, `<button>` (forgot password), raw error `<p className="error">`, and a bare `<div>` auth-links container. Branded hero section intentionally stays custom CSS.
+
+**What:**
+- Replaced sign-in card outer `<div className="home-landing__card card">` with `Paper withBorder`.
+- Replaced native email input with `TextInput`, password input with `PasswordInput` (shows inline error).
+- Removed separate `<p className="error">` — error now passed to `PasswordInput error=` prop.
+- `<Button>` already Mantine; removed `className="home-landing__submit"` and `disabled={loading}` → `loading={loading}`.
+- Replaced native `<button>` "Forgot password?" links with `<Anchor component="button">`.
+- Replaced inline `<div style={...}>` tip box with `Paper withBorder`.
+- Replaced `<a>` request-access link with `<Anchor>`.
+- Replaced auth-links `<div>/<span>` layout with `Text size="xs"` inline.
+- Forgot-password form wrapper `<div>/<form style=...>` → `Stack component="form"`.
+- Sign-in form `<form className="...">` → `Stack component="form"`.
+
+**Files:** `frontend/src/pages/HomePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-145 (2026-05-06): BudgetPage + NetWorthPage — Mantine polish pass
+
+**Why:** Both pages had no `className=` but accumulated native `<div>`, `<span>`, `<form>` remnants from earlier migrations, plus raw CSS var color strings instead of Mantine color props.
+
+**BudgetPage changes:**
+- Added `Box` to imports.
+- Overflow `<div style={{ overflowX: "auto" }}>` (×2) → `Box`.
+- Spacer `<span style={{ width: 22 }}>` → `Box w={22}`.
+- Inline `<span title="...">` annotations → `Text span`.
+- `leftSection={<span>$</span>}` → `Text size="xs"`.
+- Progress bar `<div style={{ flex: 1 }}>` → `Box`.
+- Bottom Edit button wrapper `<div>` → `Group`.
+
+**NetWorthPage changes:**
+- Chart container `<div style={{ width: "100%", height: 340 }}>` → `Box`.
+- Both overflow `<div style={{ overflowX: "auto" }}>` → `Box`.
+- Both inline-edit `<form onSubmit={saveRow}>` → `Group component="form" onSubmit={saveRow}` (no wrapper needed).
+- Recharts tooltip `<div>/<span>` → `Text`/`Text span` with Mantine size/fw props.
+- Top-assets/liabilities section `<div>/<div style=...>` header → `Box` + `Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed"`.
+
+**Files:** `frontend/src/pages/BudgetPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-146 (2026-05-06): Transactions page — full Mantine UI migration
+
+**Why:** `TransactionsPage` still relied on mixed native controls and class/style-driven wrappers in key interaction areas, which diverged from the Mantine-first visual system and led to inconsistent theming.
+
+**What:**
+- Replaced remaining native/class-based sections with Mantine primitives across the full page surface: bulk bars, action rows, ledger table cells/actions, expanded review detail panels, and add-transaction modal.
+- Replaced native form/table controls with Mantine components (`TextInput`, `NativeSelect`, `Checkbox`, `Radio.Group`, `Button`, `ActionIcon`, `Table.*`, `Modal`, `Alert`, `Badge`, layout `Stack/Group/Box/SimpleGrid/Paper`).
+- Removed remaining `muted/error/card` class-based rendering on `TransactionsPage` and reduced inline styles to unavoidable cases.
+- Preserved all logic, handlers, state transitions, API calls, and routing/query-param behavior.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-144 (2026-05-06): Payslip detail page — Mantine-only body migration
+
+**Why:** `PayslipDetailPage` had a Mantine shell but the core interaction surface (summary inline edits, line-item edit/delete flows, section tables, matched deposit table, diagnostics toggles) still used native HTML controls and custom inline/class styling, causing inconsistent theming behavior.
+
+**What:**
+- Replaced native `<input>/<select>/<button>` in the detail body with Mantine `TextInput`, `NumberInput`, `Select`, `Button`, and `ActionIcon`.
+- Replaced all native table markup in the detail body with Mantine `Table` primitives (`Table.Thead`, `Table.Tbody`, `Table.Tr`, `Table.Th`, `Table.Td`).
+- Replaced raw layout wrappers and class/style-driven text with Mantine `Stack`, `Group`, `Box`, `Text`, `Alert`, and `Code`.
+- Replaced native disclosure blocks (`details/summary`) with controlled Mantine button toggles for line-item sections and parser diagnostics.
+- Preserved all existing state, handlers, API calls, and routing behavior.
+
+**Files:** `frontend/src/pages/PayslipDetailPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-143 (2026-05-06): Payslip manual entry page — Mantine-only UI migration
+
+**Why:** `PayslipManualPage` still used native form controls (`input`, `select`, `table`, `details`) and mixed custom layout/styling patterns, which prevented consistent theme/dark-mode behavior and diverged from the Mantine-only frontend direction.
+
+**What:**
+- Replaced native form controls with Mantine components (`TextInput`, `NumberInput`, `Select`, `Button`, `ActionIcon`).
+- Replaced native table markup with Mantine `Table` primitives for both summary amounts and optional line-item rows.
+- Replaced raw layout containers with Mantine layout primitives (`Stack`, `Group`, `Box`) and removed class-based/error-muted text rendering in favor of Mantine `Text`/`Alert`.
+- Replaced `<form>` wrapper with Mantine form wrapper (`<Stack component="form">`).
+- Replaced `<details>/<summary>` line-item section with controlled Mantine toggle UI and retained all existing data/submit behavior.
+
+**Files:** `frontend/src/pages/PayslipManualPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-142 (2026-05-06): BudgetPage — full Mantine migration + setup table UX fixes
+
+**Why:** BudgetPage had zero Mantine usage — all layout was raw HTML with inline styles and two custom CSS classes (`budget-kpi-grid`, `card`). Setup table had three UX issues: input box was left-aligned in its column, the × remove button felt visually detached from its row, and the ►/▲ expand chevrons used the wrong convention (▼ on a collapsed row is ambiguous).
+
+**What:**
+- **Full Mantine migration:** Replaced all raw `<button>`, `<input>`, `<select>`, `<table>`, `<h1/h2>`, layout `<div>` elements with Mantine equivalents (`Button`, `ActionIcon`, `NumberInput`, `Select`, `Table.*`, `Title`, `Stack`, `Group`, `SimpleGrid`, `Paper`, `Progress`, `Text`).
+- **Custom CSS removed:** `budget-kpi-grid` block (and its `@media` rule) removed from `index.css`; replaced by `<SimpleGrid cols={{ base: 1, sm: 3 }}>`.
+- **`card` className removed:** Replaced by `<Paper p="md" withBorder radius="md">` throughout.
+- **Setup table — 4→3 columns:** Merged the separate action column into the "Your budget" column. Input + × icon now sit together in a right-aligned `<Group justify="flex-end">`, so the remove button is adjacent to the value it deletes.
+- **Input alignment fixed:** `NumberInput` now right-aligns within the cell via `Group justify="flex-end"`.
+- **Chevron semantics fixed:** Expand/collapse button changed from text ▼/▲ to `IconChevronRight` (collapsed) / `IconChevronDown` (expanded) — standard tree/accordion convention.
+- **`ProgressBar` component:** Replaced custom div with Mantine `<Progress>`.
+- **`AmountInput` component:** Replaced raw `<input type="number">` with Mantine `<NumberInput hideControls>`.
+- **`NavBtn` component:** Replaced raw `<button>` with `<ActionIcon variant="default">`.
+
+**Files:** `frontend/src/pages/BudgetPage.tsx`, `frontend/src/index.css`
+
+---
+
+## UX-141 (2026-05-06): Category accordion layout + deletion UX fixes + remove Classic view link
+
+**Why:** The flat parent/child table required heavy scrolling and made hierarchy ambiguous. Deleting a parent category with subcategories silently failed (409 in devtools, no visible error — error rendered behind the ConfirmDialog or at the top of a long page). Dashboard "Classic view" button was kept alive past its useful life.
+
+**What:**
+- **Accordion layout:** "All categories" section replaced flat `<Table>` with a Mantine `<Accordion multiple>`. Each parent group is one collapsible item; its label shows name + source badge + subcategory count + edit/delete actions. Children are listed in a compact table inside the panel. Dramatically reduces page scroll.
+- **Parent with children — blocked delete modal:** Delete button pre-checks `categoryHasChildren()` client-side; if true, opens a focused `<Modal>` ("Delete or move all subcategories first") instead of the silent 409 or a page-level error behind the old dialog.
+- **Error visibility:** Removed `throw err` from `confirmDeleteCategory` — errors now surface on the page after the dialog closes.
+- **Page-level error close button:** Added `withCloseButton` to the top-level `<Alert>` so errors can be dismissed.
+- **Classic view button removed:** `DashboardPageV2.tsx` no longer renders the "Classic view" toggle. `DashboardPageLegacy` and `useClassicView` state retained for future cleanup (TODO comment added).
+
+**Files:** `frontend/src/pages/CategoriesPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-140 (2026-05-06): Mantine migration + bug fixes — CategoriesPage and CategoryRulesPage
+
+**Why:** Both pages retained custom CSS, hand-rolled dialogs, and raw HTML form elements. Bugs: permission gap where `member`-role users could see delete buttons on household child categories; dead ternary code; inline rule editing collapsed multi-line patterns; CSV file input didn't reset after import; `runTest` fired on empty input; `<details>` collapsed on every `load()` re-render.
+
+**What:**
+- **Permission gap (CategoriesPage):** Child delete button now gates on `c.householdScoped && canManageCategories` (was missing `canManageCategories`).
+- **Dead code (CategoriesPage):** Two dead ternaries and `canEditBuiltIns` tautology alias removed.
+- **Inline edit pattern corruption (CategoryRulesPage):** Changed from `<input>` to `<Textarea autosize>` — multi-line patterns no longer collapsed on edit.
+- **File input reset (CategoryRulesPage):** Controlled `selectedFile` state; `<FileInput>` cleared on successful import.
+- **`runTest` guard:** Rejects empty description before hitting the API.
+- **`<details>` state reset:** Replaced with controlled `<Accordion multiple value={openedSections}>` — open state survives `load()` re-renders.
+- **Mantine migration:** `Modal`, `Badge`, `Radio.Group`, `Select`, `TextInput`, `Table` (+`ScrollContainer`), `ActionIcon`, `Paper`, `Accordion`, `FileInput`, `Textarea`, `NumberInput`, `Checkbox`, `Code`, `Alert`, `Skeleton`, `Anchor`.
+- **CSS cleanup:** Removed all `categories-page__*` and `category-rules-page__*` classes including dark-mode overrides.
+
+**Files:** `frontend/src/pages/CategoriesPage.tsx`, `frontend/src/pages/CategoryRulesPage.tsx`, `frontend/src/index.css`
+
+---
+
+## UX-139 (2026-05-06): Net Worth page — remove misleading account links, fix type labels, full Mantine migration
+
+**Why:** Account names in the Assets/Liabilities tables were wrapped in `<Link>` that drilled to `/transactions` filtered to a single as-of date, which almost always returned zero results. The "Transactions from import file" sub-link had the same problem. The Type column surfaced raw DB enum values (`credit_card`, `investment`) instead of human-readable labels. Several non-Mantine patterns remained: raw `<table>`, custom `<button>` with hand-rolled CSS, raw `<input type="date">`, and a `<details>/<summary>` for the bulk re-date section.
+
+**What:**
+- **Account names** are now plain text — no link.
+- **"Transactions from import file"** sub-link removed entirely.
+- **`transactionsHref`** helper removed (no longer used on this page).
+- **Type column** now displays human-readable labels via `formatAccountType()` (`credit_card` → "Credit Card", `checking` → "Checking", etc.).
+- **Tables** migrated from `<table className="ledger-table">` to Mantine `Table` with `withTableBorder` + `withRowBorders`.
+- **Edit icon** migrated from `<button className="net-worth-page__edit-icon">` to Mantine `ActionIcon variant="subtle"`.
+- **Inline edit form** migrated from `<form className="row">` to `<form>` with Mantine `Group`.
+- **Date inputs** (snapshot date, custom range, inline edit, bulk re-date) migrated from raw `<input type="date">` to Mantine `TextInput type="date"`.
+- **Bulk re-date section** migrated from `<details>/<summary>` to Mantine `Collapse` with a toggle `Button`.
+- **CSS** — removed `net-worth-page`, `net-worth-page__edit-icon`, `net-worth-page__edit-icon:hover`, `net-worth-page__bulk-asof > summary` rules from `index.css`; removed orphaned `.net-worth-page__edit-icon` entry from the `@media (hover: none)` block.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/index.css`
+
+---
+
+## FIX-138 (2026-05-05): v2 doc accuracy + restore hardening (Claude/Cursor punch list)
+
+**Why:** Operators and future sessions were misled by stale **ZIP / exportVersion 3** copy, missing **CHECKPOINT/MVP** pointers on the archived PRD, backlog headers that contradicted shipped mobile/recurring/import work, and two small restore hygiene gaps called out in **`docs/EXPORT_IMPORT_BACKLOG.md`**.
+
+**What:**
+- **Docs:** **`docs/RUNBOOK.md`** — `.hfb`, **`exportVersion` 4**, Settings → **Data**; **`CLAUDE.md`** export row; **`docs/API_GDRIVE.md`** preview example; **`docs/archive/FINANCE_APP_PRD.md`** — implementation-status line + **§19** backup format (**.hfb** / v4) instead of removed CHECKPOINT/MVP pointers and stale ZIP/v3 copy; **`docs/USER_GUIDE.md`** backup bullet; **`docs/DATABASE_ARCHITECTURE.md`** — **DB-136** squashed baseline + archive pointer; **`docs/MOBILE_UX_BACKLOG.md`**, **`docs/RECURRING_PAYMENTS_BACKLOG.md`**, **`docs/IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md`**, **`docs/EXPORT_IMPORT_BACKLOG.md`** — status headers aligned with shipped reality.
+- **Code:** **`restore-insert-validation.ts`** — enforce lowercase snake_case column keys before dynamic `INSERT` during restore; **`exports.routes.ts`** — **`unlinkSync`** on **`POST /exports/household/import`** when extension is not `.hfb`.
+- **Tests:** **`backend/tests/restore-insert-validation.test.ts`**.
+
+**Files:** `backend/src/modules/export/restore-insert-validation.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/tests/restore-insert-validation.test.ts`, `docs/RUNBOOK.md`, `CLAUDE.md`, `docs/API_GDRIVE.md`, `docs/archive/FINANCE_APP_PRD.md`, `docs/USER_GUIDE.md`, `docs/DATABASE_ARCHITECTURE.md`, `docs/MOBILE_UX_BACKLOG.md`, `docs/RECURRING_PAYMENTS_BACKLOG.md`, `docs/IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md`, `docs/EXPORT_IMPORT_BACKLOG.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-137 (2026-05-06): Expand test coverage — rule learning, RBAC, payslip deposits, ledger filters, recurring overrides
+
+**Why:** Pre-release coverage audit identified five gaps: (1) category rule learning endpoints had zero tests; (2) RBAC was only tested at the coarse "member blocked from household routes" level with no admin role tests and no positive member permission tests; (3) `matchedDeposits` on `GET /payslips/:id` (CR-068) was shipped but never asserted in tests; (4) ledger filter parameters (dateFrom/dateTo, accountId, amountMin/Max, trashOnly) were exercised only implicitly via the full import pipeline tests; (5) recurring override validation and household isolation had no dedicated tests.
+
+**What:**
+- `backend/tests/category-rule-learning.test.ts` — 9 new tests: auth guard + 404 + invalid body + classification preview happy path (verifies PAYROLL classifies as Salary) + cross-household isolation; `from-ledger` auth/RBAC/404/parent-category/happy-path
+- `backend/tests/rbac.test.ts` — 15 new tests covering: member CAN read transactions/cash-summary/budget/categories; member CANNOT call rule write endpoints (PATCH/DELETE/recategorize/from-ledger/household-clear) or bulk-reassign-owner; admin CAN manage members/settings/rules/gdrive-status; admin CANNOT restore/export-preview/gdrive-connect/gdrive-disconnect
+- `backend/tests/ledger-filters.test.ts` — 11 new tests using an isolated test household: dateFrom, dateTo, dateFrom+dateTo, accountId (two accounts), amountMin, amountMax, amountMin+amountMax, trashOnly (include/exclude), combined accountId+dateFrom, and two input-validation 400 errors
+- `backend/tests/payslip-upload.test.ts` — updated existing "returns full snapshot after upload" to assert `matchedDeposits` and `validationWarnings` are arrays; added 2 new tests verifying deposit match within ±3 days/1% tolerance and exclusion outside the window
+- `backend/tests/recurring-overrides.test.ts` — added 4 validation tests (missing merchantKey, missing verdict, invalid verdict enum, whitespace merchantKey) and 2 household isolation tests
+
+**Result:** Tests grow from ~397 to 422 backend tests; all pass.
+
+---
+
+## DB-136 (2026-05-05): Squash 33 migrations into single baseline
+
+**Why:** 33 migration files had accumulated since v1, including redundant constraint-drop/re-add patterns, 3 dead columns (0003 `unstructured_*` — zero code references), 3 data migrations already covered by bootstrap, and one pure no-op (0039). Squashing simplifies fresh-install setup and makes the schema readable in one place.
+
+**What:**
+- Replaced `backend/db/migrations/0001_baseline.sql` with a single squashed file representing the complete final schema post-0039.
+- Archived `0002–0039` to `backend/db/migrations/archive/` — not deleted, preserved for historical reference.
+- **Squash decisions applied:**
+  - `transaction_canonical.status`: final form (includes `'trashed'`)
+  - `uq_transaction_canonical_fingerprint`: partial index (`WHERE status NOT IN ('duplicate', 'trashed')`)
+  - `financial_account.type`: final form (includes `'retirement'`)
+  - `export_job.status`: final form (includes `'expired'`)
+  - `household_gdrive_config`: final form — `connected_by_user_id` nullable ON DELETE SET NULL, scheduler columns, `oauth2_refresh_token` only (no `service_account_json`)
+  - 0003 `unstructured_*` columns on `import_file`: omitted (confirmed dead — zero references in backend/src/)
+  - 0013/0014/0015 category INSERTs: omitted (already in `0001_bootstrap.sql`)
+  - 0032 index: folded into `insight_job` table definition
+  - 0039 DROP COLUMN: omitted (columns `oauth2_access_token*` were never added by any migration)
+  - All 9 performance indexes from 0021 included
+- **Existing DBs:** safe — migration runner tracks by filename; `0001_baseline.sql` is already recorded in `schema_migrations`, so it is skipped. Files 0002–0039 are gone from the active directory and are not re-evaluated.
+- **Verified:** `npm run db:reset:dev` applied the squashed baseline cleanly (26 tables); `npm run test -w backend` — 371/371 tests passed.
+
+**Files:** `backend/db/migrations/0001_baseline.sql`, `backend/db/migrations/archive/` (0002–0039), `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-135 (2026-05-05): Unified Backup & Restore UI + Drive file preview endpoint
+**Why:** Manual (device) backup/restore and Google Drive backup/restore were two separate UI flows with duplicated logic. Device restore had a preview step; Drive restore did not — users had to restore blind. Unifying into one component gives a consistent preview-then-confirm flow for both paths.
+**What:**
+- **New endpoint `POST /gdrive/backups/:fileId/preview`** (owner only): downloads the named Drive file to a temp path, calls the shared `readHfbManifestFromFile()`, returns the same preview shape as `POST /exports/preview`, always deletes the temp file. Errors: 409 if not connected, 404/403/502 for Drive download failures, 422 for encrypted-no-key.
+- **`readHfbManifestFromFile(filePath)`** extracted to `import-household-bundle.service.ts` as a named export (decrypts if encrypted, unzips, reads `manifest.json`, returns `HfbManifestPreview`). Both `/exports/preview` and the new Drive preview route share it.
+- **`BackupRestoreSection`** new component (`frontend/src/pages/settings/BackupRestoreSection.tsx`): owns all backup/restore state. "Create Backup" section covers device download and Drive upload. "Restore" section has a `SegmentedControl` to switch between device file and Drive file restore — both paths go through the same preview modal before confirming. Compact Drive footer shows connection status, scheduler settings, connect/disconnect.
+- **`SettingsPage`** refactored: data tab replaced with `<BackupRestoreSection authRole={authRole} active={tab === "data"} />`. Removed ~500 lines of backup/gdrive state, effects, handlers, and UI. Added back `Table`, `Modal`, `SegmentedControl` imports; removed `Badge`, unused backup-only symbols.
+- **OAuth callback redirect fix**: `buildSettingsGdriveRedirectUrl` now builds `/settings?tab=data&gdrive=connected` (BrowserRouter path) instead of `/#/settings?…` (which BrowserRouter ignored, always rendering the home route). Meta-refresh HTML used instead of inline script (CSP-safe).
+**Files:** `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/tests/gdrive.test.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`, `frontend/src/pages/SettingsPage.tsx`, `openapi/openapi.yaml`, `docs/API_GDRIVE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-134 (2026-05-04): GDrive OAuth return URL + MODE-scoped backup folder on Drive
+**Why:** OAuth **`Location`** was relative (`/#/settings?…`), so the browser resolved it on the **API** host (e.g. :4000) instead of the Vite SPA (:3000). Backups also needed to live under **`{configuredFolder}/TEST/`** or **`/PROD/`** per server **`MODE`** so environments do not mix in Drive.
+**What:** **`FRONTEND_APP_URL`** env (optional); **`resolveSpaOriginForGdriveRedirect()`** picks **`FRONTEND_APP_URL` → `PUBLIC_BASE_URL` → `http://localhost:3000` in `MODE=TEST` → else relative** for **`buildSettingsGdriveRedirectUrl`**. **`gdrive-backup.service`**: **`ensureDriveBackupEnvSubfolderId`** lists/creates **`TEST`** or **`PROD`** under the configured folder; list/upload/prune use that id.
+**Files:** `backend/src/config/env.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/tests/gdrive.test.ts`, `backend/tests/gdrive-backup.test.ts`, `backend/tests/gdrive-restore.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `.env.example`, `openapi/openapi.yaml`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-133 (2026-05-04): Replace GDrive service account auth with OAuth2 user-delegated auth
+**Why:** Service accounts have no Drive storage quota; uploads to a personal Gmail user’s folder fail with **`storageQuotaExceeded`** (403). OAuth2 with a user refresh token stores backups under the user’s quota.
+**What:** Migration **`0038_gdrive_oauth2.sql`** drops **`service_account_json`**, adds **`oauth2_refresh_token`** only. Backend env **`GOOGLE_CLIENT_ID`**, **`GOOGLE_CLIENT_SECRET`**, **`GOOGLE_REDIRECT_URI`**. **`gdrive.service`** implements **`buildOAuth2Client`**, signed **`encodeGDriveOAuthState` / `decodeGDriveOAuthState`**, **`buildOAuthConsentUrl`**, **`exchangeAndConnect`**, **`buildSettingsGdriveRedirectUrl`**, **`assertOwnerOfHousehold`**. **`gdrive.routes`**: public **`GET /gdrive/oauth/callback`**, owner **`GET /gdrive/oauth/url`**, **`POST /gdrive/connect`** body **`{ code, folderId }`**. Backup/restore/prune use OAuth. Frontend Settings: folder ID + **Connect with Google Drive** (redirect flow); hash query **`gdrive=connected|error`** handling. Vitest sets **`GOOGLE_*`** in **`vitest.config.ts`**. OpenAPI + **`docs/API_GDRIVE.md`**, **`docs/API_INDEX.md`**, **`docs/ENVIRONMENT_VARIABLES.md`**, **`.env.example`** updated.
+**Files:** `backend/db/migrations/0038_gdrive_oauth2.sql`, `backend/src/config/env.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/vitest.config.ts`, `backend/tests/gdrive.test.ts`, `backend/tests/gdrive-backup.test.ts`, `backend/tests/gdrive-restore.test.ts`, `backend/tests/gdrive-scheduler.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `openapi/openapi.yaml`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `docs/ENVIRONMENT_VARIABLES.md`, `.env.example`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-133a (2026-05-04): GDrive OAuth error query encoding + drop unused access token columns
+- **Type:** FIX / polish
+- **What:** OAuth error redirect passes the raw **`message`** into **`URLSearchParams`** (no **`encodeURIComponent`**); Settings reads **`searchParams.get("message")`** without **`decodeURIComponent`**. Removed never-read **`oauth2_access_token`** / **`oauth2_access_token_expires_at`** from persistence (**`connectGDrive`** only stores **`oauth2_refresh_token`**); migration **`0039`** drops those columns for DBs that received them from an earlier **`0038`** revision; current **`0038`** only adds **`oauth2_refresh_token`**.
+- **Files:** `backend/db/migrations/0038_gdrive_oauth2.sql`, `backend/db/migrations/0039_drop_gdrive_oauth_access_columns.sql`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-132b (2026-05-04): Log full Google Drive API error body on server
+- **Type:** FIX / ops
+- **What:** On any **`GaxiosError`** from the Drive API (connect **`files.get`**, backup **`files.create`**, list/download/prune), the backend now logs **`httpStatus`**, **`httpStatusText`**, **`responseBody`**, and **`message`** via **`logGoogleDriveApiError`** (`log.warn` for connection test, **`log.error`** elsewhere). User-facing strings and **`backup_job.error_text`** are unchanged.
+- **Files:** `backend/src/modules/gdrive/log-google-drive-api-error.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `docs/API_GDRIVE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-132a (2026-05-03): CR-132 follow-up — staleness anchor, PATCH 409, prune wrapper
+- **Type:** FIX / polish
+- **What:** Drive **staleness banner** in Settings now keys off the latest **`complete`** row from **`GET /gdrive/backups/history`** (`completed_at`) instead of **`lastScheduledBackupAt`**, so a manual success clears the alert and a failed “recent” queue no longer hides overdue gaps. **`PATCH /gdrive/settings`** returns **409** **`GDRIVE_NOT_CONFIGURED`** (same as other GDrive routes), not **404**. Removed a dead **`try/catch`** around **`pruneOldDriveBackups`** in **`runBackupJob`** because pruning already swallows errors internally.
+- **Files:** `frontend/src/pages/SettingsPage.tsx`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/tests/gdrive.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-132 (2026-05-03): Automated Google Drive backup scheduler + backup history
+**Files:** `backend/db/migrations/0037_gdrive_scheduler_settings.sql`, `backend/src/server.ts`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/gdrive/gdrive-scheduler.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/tests/gdrive-scheduler.test.ts`, `backend/tests/gdrive-backup.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** Migration adds **`backup_frequency_hours`**, **`backup_retention_count`**, and **`last_scheduled_backup_at`** on **`household_gdrive_config`**. A server-side heartbeat (**30s** grace, then **every 30 minutes**, skipped when **`MODE=TEST`**) calls **`checkAndQueueDueBackups`**: for each household with frequency greater than 0, queues **`backup_job`** with **`triggered_by_user_id` null** when the last **complete** job is older than the interval (or no complete job ever), skips when a **queued/running** job exists, updates **`last_scheduled_backup_at`**, and in **PROD** logs a **staleness warning** if the last success is older than twice the interval. **`runBackupJob`** prunes excess **`.hfb`** files on Drive after each successful upload (**`pruneOldDriveBackups`**; delete failures are warn-only). **`PATCH /gdrive/settings`** (owner), **`GET /gdrive/backups/history`** (owner/admin), extended **`GET /gdrive/status`**. Settings **Data & Backup** adds automatic backup controls, staleness **Alert**, and a **Recent backup history** table.
+
+---
+
+## FIX-131a (2026-05-03): CR-131 review — backups list status, download settle guard
+- **Type:** FIX / polish
+- **What:** `downloadDriveFile` uses a **`settled`** guard so `writeStream.destroy()` after a read/write error does not also invoke **`resolve()`** from the **`close`** listener (Promise only settles once, but the double callback was misleading). **`mapDriveListError`** no longer duplicates Gaxios 403/404 branches already handled in **`listDriveBackups`**. **`GET /gdrive/backups`** returns **409** **`GDRIVE_NOT_CONFIGURED`** when Drive is not connected, and **502** **`DRIVE_LIST_FAILED`** only for upstream Drive API failures.
+- **Files:** `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/tests/gdrive-restore.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-131 (2026-05-03): Restore from Google Drive
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive-restore.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** Owners (and admins for listing) can **`GET /gdrive/backups`** to list recent `.hfb` files in the connected folder (Drive `files.list`, max 20). Owners can **`POST /gdrive/restore`** with a Drive `fileId`; the server streams the file via `files.get` alt=media into `data/gdrive-backup-staging/`, then **`queueHouseholdImport`** renames it into `data/imports-restore/` and runs the existing import job processor. Settings **Data & Backup** adds **Restore from Drive** (load/refresh list, confirm, poll **`GET /exports/import/:jobId`**). **`STAGING_DIR`** and **`ServiceAccountKey`** are exported for reuse; **`downloadDriveFile`** cleans partial files on error. **`transaction_canonical` `onExport`** strips generated **`search_document`** so `.hfb` round-trips and Drive restores do not fail inserts.
+
+---
+
+## FIX-130a (2026-05-03): CR-130 review — backup job error paths + polish
+- **Type:** FIX / polish
+- **What:** `runBackupJob` now loads Drive credentials inside the same `try` as `buildHfbFile` / upload so a DB failure cannot leave the row stuck in `running`; not-configured uses `throw` and the shared failure `UPDATE`. Removed redundant `mkdirSync` in `runBackupJob` (staging dir still ensured in `queueBackupJob`). Export-ready email HTML drops duplicate headline copy; plain-text lead line aligned. Settings disconnect clears backup UI state only after a successful API call. Backup integration test asserts `sizeBytes > 0` on success. Restored `qGet` import in `gdrive-backup.service.ts` (`getBackupJob` still depends on it — a missing import caused runtime failures on `GET /gdrive/backup/:jobId`).
+- **Files:** `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/mailer/templates/export-ready.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive-backup.test.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-130 (2026-05-03): On-demand Google Drive backup + export-ready email
+**Files:** `backend/db/migrations/0036_backup_job.sql`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/mailer/templates/export-ready.ts`, `backend/tests/gdrive-backup.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_GDRIVE.md`, `docs/API_EXPORTS.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** (1) **Google Drive backup** — `backup_job` table; `POST /gdrive/backup` (owner, rate-limited) queues an async job that writes a temp `.hfb` under `data/gdrive-backup-staging/`, streams it to Drive via `files.create`, then deletes the temp file in `finally`. `GET /gdrive/backup/:jobId` (owner or admin) returns status and Drive metadata. Settings **Data & Backup** adds **Back up now** when Drive is connected. (2) **Export email** — after a local export job completes, a fire-and-forget email notifies the requester with expiry text and a link to Settings → Data when `PUBLIC_BASE_URL` is set. Shared **`buildHfbFile`** in `export-job.service.ts` is used by both HTTP exports and Drive backups.
+
+---
+
+## FIX-129c (2026-05-02): Vite dev proxy missing `/gdrive`
+- **Type:** FIX
+- **Issue:** `POST /gdrive/connect` from the Vite dev server (port 3000) returned **404** because only other API path prefixes were proxied to the backend; requests never reached Express.
+- **Fix:** Added `"/gdrive"` to `server.proxy` in `frontend/vite.config.ts`.
+- **Files:** `frontend/vite.config.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-129b (2026-05-02): GDrive connect — parse response body safely
+- **Type:** FIX
+- **Issue:** `handleGDriveConnect` called `Response.json()` on every response; empty or non-JSON bodies (e.g. proxy/gateway, odd status codes) threw `Unexpected end of JSON input` and masked the real failure.
+- **Fix:** Read `res.text()`, `JSON.parse` only when non-empty, then rely on `GET /gdrive/status` for success state and the success toast message.
+- **Files:** `frontend/src/pages/SettingsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-129a (2026-05-02): GDrive review — FK, errors, admin UI, tests, API doc
+- **Type:** FIX / engineering
+- **What:** `connected_by_user_id` is now nullable with `ON DELETE SET NULL` (migration `0035`) so removing an `app_user` does not block deletes. `testDriveConnection` maps HTTP **403/404** via `GaxiosError.response.status` instead of substring checks on the message. Settings **Data & Backup** shows Google Drive status to **admins** (read-only) as well as owners. Added `docs/API_GDRIVE.md`, `backend/tests/gdrive.test.ts` (mocked `googleapis`, no real network), and explicit `gaxios` dependency for typed errors. `household_gdrive_config` is listed in `EXPORT_EPHEMERAL_TABLES` so `.hfb` exports never embed the service account key.
+- **Files:** `backend/db/migrations/0035_gdrive_connected_by_set_null.sql`, `backend/package.json`, `backend/package-lock.json`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/export-registry.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/gdrive.test.ts`, `docs/API_GDRIVE.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-129 — Google Drive Service Account Connection
+**Date:** 2026-05-01
+**Files:** `backend/db/migrations/0034_gdrive_config.sql`, `backend/package.json`, `backend/package-lock.json`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/app.ts`, `frontend/src/pages/SettingsPage.tsx`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+**What:** Google Drive Service Account connection. New `household_gdrive_config` table stores the service account JSON, folder ID, folder name (cached), and connection metadata. Three new endpoints: `GET /gdrive/status`, `POST /gdrive/connect` (validates key format + pings Drive API to confirm access), `DELETE /gdrive/disconnect`. Data & Backup settings tab gains a Connect/Disconnect UI (owner only). `getGDriveCredentials()` exported for use by CR-130 upload service.
+
+---
+
+## UX-128b — Forced password change via reset-password handoff
+**Date:** 2026-05-01
+**Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/password-reset.test.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_INDEX.md`, `openapi/openapi.yaml`
+**What:** Replaced the forced-password-change gate (settings-only tabs + yellow banners + `Navigate` to settings) with a full-page redirect to the existing reset-password flow. New `POST /auth/setup-forced-change-token` issues a short-lived reset token for authenticated users with `force_password_change = true`. `ShellLayout` detects the flag from `/auth/me`, calls the endpoint, clears `localStorage` JWT, and uses `window.location.replace` to `/reset-password?token=...` (pathname; matches `BrowserRouter`), reusing `ResetPasswordPage` and `POST /auth/reset-password` (which already clears the flag, bumps `token_version`, and sends the password-changed email). Removed dead `securityOnlyMode` logic from Settings.
+
+## FIX-128f (2026-05-02): No dashboard flash on first-login forced password reset
+- **Type:** FIX
+- **Issue:** After sign-in, `/auth/me` ran asynchronously so one frame could render the authed shell and dashboard before `forcePasswordChange` was applied.
+- **Fix:** `POST /auth/login` now returns `forcePasswordChange` (read with the credential check). `HomePage` sets a one-shot `sessionStorage` hint before storing the JWT; `ShellLayout` treats the hint like the forced flag for the shell gate and for starting the setup-token redirect, and clears the hint when `/auth/me` completes or the session ends.
+- **Files changed:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/auth/auth.routes.ts`, `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/HomePage.tsx`, `docs/API_INDEX.md`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`.
+
+---
+
+## FIX-128e (2026-05-02): Forced-change redirect URL must use pathname (BrowserRouter)
+- **Type:** FIX
+- **Issue:** `window.location.replace('/#/reset-password?token=...')` left `location.pathname` as `/`, so React Router matched `HomeRoute` (sign-in) instead of `ResetPasswordPage`.
+- **Fix:** Redirect to `/reset-password?token=...`. ResetPasswordPage “Back to sign in” anchors now use `href="/"` instead of `/#/`.
+- **Files changed:** `frontend/src/layout/ShellLayout.tsx`, `frontend/src/pages/ResetPasswordPage.tsx`, `docs/CHANGE_HISTORY.md`.
+
+---
+
+## FIX-128d (2026-05-02): ShellLayout forced-change redirect polish
+- **Type:** FIX
+- **What:** Reset `setupRedirecting` when JWT is cleared so a later sign-in cannot skip the setup-token effect. While `forcePasswordChange` is true (before `location.replace`), return `null` instead of rendering the full authed shell to avoid a brief sidebar flash.
+- **Files changed:** `frontend/src/layout/ShellLayout.tsx`, `docs/CHANGE_HISTORY.md`.
+
+---
+
+## CR-128 — Settings five tabs + dashboard financial health history
+**Date:** 2026-05-01
+**Files:** `frontend/src/pages/SettingsPage.tsx`, `frontend/src/components/FinancialHealthCard.tsx`
+**What:** Collapsed Settings to five tabs (`profile`, `household`, `accounts`, `recurring`, `data`): removed stub Notifications and Insights tabs; folded change-password and notifications copy into Profile; moved export/restore to **Data & Backup**. Dashboard **Financial Health** card replaces “View history →” settings link with a Mantine modal listing past analyses (re-fetch after new analysis via cache bust on `loadInsight`).
+
+---
+
+## FIX-128c (2026-05-01): Export preview read path and CR-127 backup test FK
+- **Type:** FIX
+- **What:** Moved `.hfb` extension validation inside the preview `try` so a rejected extension does not leave a dangling temp upload file. Use `Buffer` from `fs.readFileSync` / `decryptBackup` without redundant `Buffer.from` wrapping.
+- **Tests:** Backup preview integration seed now inserts a `financial_account` row and binds the import file to that account id (avoids FK issues vs a hardcoded BoA fixture id).
+- **Files changed:** `backend/src/modules/export/exports.routes.ts`, `backend/tests/app.test.ts`.
+
+---
+
+## CR-127 — Backup Preview Before Restore
+**Date:** 2026-04-30
+**Files:** `backend/src/modules/export/exports.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/app.test.ts`, `docs/API_EXPORTS.md`, `docs/CHANGE_HISTORY.md`, `openapi/openapi.yaml`
+**What:** Added `POST /exports/preview` so the server can read a `.hfb` backup (including decrypting it when `BACKUP_ENCRYPTION_KEY` is configured) and return manifest metadata/table row counts without touching the database. Updated Household Settings restore UX to a two-step flow: user uploads `.hfb`, clicks **Preview & Restore**, reviews export timestamp/encryption/scope/per-table rows in a modal, and only then confirms destructive restore.
+
+---
+
+## FIX-126a (2026-04-30): Restore FK-safe delete order for import metadata
+- **Type:** FIX
+- **Issue:** Household restore could fail with `import_file_financial_account_id_fkey` when existing `import_file` rows referenced `financial_account` rows that restore was about to delete.
+- **Fix:** In restore transaction, clear ephemeral import pipeline tables for the household in FK-safe order (`transaction_raw` → `import_file` → `import_session`) before deleting export-registry tables.
+- **Regression coverage:** Extended export/import roundtrip test to seed `import_session` + `import_file` + `transaction_raw` rows and assert restore completes with those rows cleared.
+- **Files changed:** `backend/src/modules/export/import-household-bundle.service.ts`, `backend/tests/app.test.ts`.
+
+---
+
+## CR-126 — .hfb Format + Backup Encryption
+**Date:** 2026-04-30
+**Files:** `backend/src/modules/export/backup-crypto.ts` (new), `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/config/env.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/tests/app.test.ts`, `docs/ENVIRONMENT_VARIABLES.md`, `docs/API_EXPORTS.md`
+**What:** All backup files now use the `.hfb` extension (Household Finance Backup). Added optional AES-256-GCM encryption via `BACKUP_ENCRYPTION_KEY` env var (64-char hex = 32-byte key). Encrypted files are prefixed with `HFB1` magic bytes + IV + auth tag. Restore auto-detects encrypted files and decrypts before processing. If a backup is encrypted and `BACKUP_ENCRYPTION_KEY` is absent, restore fails with a clear error message. Frontend FileInput now accepts `.hfb` only, and download filenames now use `.hfb`.
+
+---
+
+## CR-125 — Export/Import Parity (exportVersion 4)
+**Date:** 2026-04-30
+**Files:** `backend/src/modules/export/export-registry.ts` (new), `backend/src/modules/export/export-household-bundle.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/server.ts`, `backend/src/db/export-coverage-check.ts`, `backend/tests/app.test.ts`
+**What:** Introduced `EXPORT_REGISTRY` as the single source of truth for backed-up tables. Export now uses `SELECT *` with no hardcoded column lists. Added five missing tables: `budget_category`, `payslip_line_item`, `recurring_merchant_override`, `resolution_item`, `household_ai_insight`. Fixed silently missing columns on `household`, `person_profile`, and `payslip_snapshot` (added by migrations 0022 and 0031 but absent from prior hardcoded SELECT lists). Added startup coverage check that warns if any non-ephemeral DB table is absent from the registry. Bumped `exportVersion` to 4. Import service handles v1/v2/v3 bundles with graceful skip for absent table keys.
+
+---
+
+## UX-127 (2026-04-30): Surface account freshness dates in Settings and Import workspace
+- **Type:** UX
+- **What changed:** Added `Last upload` and `Statement ending` account freshness context in two high-use UI surfaces.
+- **Settings UI:** Connected Accounts table now includes an `Import freshness` column with both dates per account.
+- **Import UI:** Account picker keeps compact account labels; freshness dates are shown below the selected account row (not inside picker option labels).
+- **Display behavior:** Missing upload is shown as `Never`; missing statement end date is shown as `Not detected`.
+- **Files changed:** `frontend/src/import/accountDisplay.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/ImportWorkspacePage.tsx`.
+
+---
+
+## CR-127 (2026-04-30): Account import freshness metadata on `/imports/accounts`
+- **Type:** CR
+- **What changed:** `GET /imports/accounts` now returns per-account freshness metadata: `last_uploaded_at` (latest parsed upload timestamp) and `last_statement_end_date` (latest detected statement period end date).
+- **Backend behavior:** Freshness is derived from parsed `import_file` rows; statement end date is read from parser metadata (`confidence_summary.statementBalances.asOfEnd`) when available.
+- **Test coverage:** Added backend integration assertion that `/imports/accounts` includes freshness fields after a successful upload.
+- **Files changed:** `backend/src/modules/imports/import-file-binding.service.ts`, `backend/tests/import-upload-flow.test.ts`, `docs/API_IMPORT_SESSIONS.md`, `openapi/openapi.yaml`.
+
+---
+
+## FIX-095e (2026-04-30): Disable outbound email delivery in TEST mode
+- **Type:** FIX
+- **Issue:** Invite/password-reset integration tests set SMTP env fields to exercise token/invite flows, which allowed real email delivery attempts when transport resolved.
+- **Fix:** `sendMail()` now hard-stops outbound delivery when `MODE=TEST`, returning `DELIVERY_DISABLED_IN_TEST` after logging a skip message.
+- **Behavior impact:** Auth/member invite flows still execute and generate reset tokens during tests; only SMTP transmission is suppressed.
+- **Files changed:** `backend/src/modules/mailer/mailer.service.ts`.
+
+---
+
+## CR-095d (2026-04-29): Password-changed security notification email
+- **Type:** CR
+- **What changed:** `POST /auth/change-password` now sends a security notification email after a successful password update.
+- **When email configured:** `changePassword()` fires `sendMail()` as fire-and-forget after DB update succeeds.
+- **When not configured:** No-op; existing behavior remains unchanged.
+- **New template:** Added `backend/src/modules/mailer/templates/password-changed.ts`.
+- **Files changed:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/mailer/templates/password-changed.ts`, `backend/tests/password-reset.test.ts`.
+
+---
+
+## UX-095c (2026-04-29): Explain guarded member delete in remove dialog
+- **Type:** UX
+- **Issue:** When removing a member with a linked login and leaving "Also delete their login account" unchecked, backend correctly returned `409 HAS_LOGIN_ACCOUNT` but the dialog showed no inline feedback.
+- **Fix:** Added explicit inline error messaging inside the remove-member confirmation dialog so users understand why deletion was blocked and what action is required.
+- **Files changed:** `frontend/src/pages/SettingsPage.tsx`.
+
+---
+
+## FIX-095c (2026-04-29): Household member delete/login guard correctness
+- **Type:** FIX
+- **Issue:** Deleting a member with `deleteLogin=true` failed with FK violation (`person_profile.linked_user_id -> app_user.id`) because delete order removed `app_user` first.
+- **Issue:** Deleting with `deleteLogin=false` still removed members even when a linked login existed, contrary to intended guard behavior.
+- **Fix:** `deleteHouseholdMember` now returns `HAS_LOGIN_ACCOUNT` when a linked login exists and `deleteLogin` is false, and when `deleteLogin` is true it deletes `household_membership` + `person_profile` before deleting `app_user`.
+- **Route mapping:** `DELETE /household/members/:memberId` now maps `HAS_LOGIN_ACCOUNT` to HTTP 409.
+- **Regression test:** Added backend coverage for both guarded delete (409) and full delete with login removal (204 + user row removed).
+- **Files changed:** `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/tests/member-invite.test.ts`, `openapi/openapi.yaml`.
+
+---
+
+## CR-095c (2026-04-29): Member invite email + admin reset-password email
+- **Type:** CR
+- **What changed:** Wired member login creation and admin-triggered member password reset to SMTP email infrastructure using existing `password_reset_token` flow (no new tables, no new routes).
+- **Create login (email configured):** `createHouseholdMember` and `createLoginForMember` now set an unguessable hash and send invite email with a 24-hour reset link (`inviteSent: true`).
+- **Create login (no email):** Existing `ChangeMe123!` + force-change fallback remains unchanged (`inviteSent: false`).
+- **Admin reset (email configured):** `resetMemberPassword` now invalidates session (`token_version` bump), creates a 1-hour reset token, sends reset email, and does not expose temp password.
+- **Admin reset (no email):** Existing temporary password flow and modal fallback remains unchanged.
+- **New template:** Added `backend/src/modules/mailer/templates/member-invite.ts`.
+- **Files changed:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/src/modules/mailer/templates/member-invite.ts`, `openapi/openapi.yaml`, `backend/tests/member-invite.test.ts`.
+
+---
+
+## CR-095b-fix (2026-04-29): Password reset regressions (link, capabilities, login UX)
+- **Type:** FIX
+- **Reset link:** `requestPasswordReset` now builds `PUBLIC_BASE_URL/reset-password?token=...` for BrowserRouter instead of `/#/reset-password` (HashRouter). File: `backend/src/modules/auth/auth.service.ts`.
+- **Email readiness:** `isEmailConfigured()` now requires a non-empty `PUBLIC_BASE_URL` so reset links are always buildable when the UI reports email enabled. File: `backend/src/config/env.ts`.
+- **Forgot password UX:** When email is enabled, the reset form is gated behind a "Forgot password?" click (`showForgotForm`) instead of showing immediately. File: `frontend/src/pages/HomePage.tsx`.
+- **Tests:** `backend/tests/password-reset.test.ts` sets `PUBLIC_BASE_URL` in the SMTP test harness so integration tests still exercise token creation after the stricter `isEmailConfigured()` check; `beforeEach` clears email-related `env` fields so `GET /auth/capabilities` stays deterministic when the repo `.env` defines SMTP for local dev.
+
+## CR-095b (2026-04-29): Email infrastructure + self-service password reset
+- **Type:** CR
+- **Motivation:** Introduce production-ready email infrastructure and end-user password reset without exposing account enumeration, while keeping the existing admin reset path as fallback.
+- **Database:** Added migration `backend/db/migrations/0033_password_reset_token.sql` with `password_reset_token` table (`token_hash`, one-hour expiry, single-use via `used_at`) plus `idx_prt_user`.
+- **Backend mailer module:** Added `backend/src/modules/mailer/` with typed payloads (`mailer.types.ts`), reusable HTML wrapper (`templates/layout.ts`), password reset template (`templates/password-reset.ts`), and lazy singleton SMTP transport (`mailer.service.ts`) using nodemailer.
+- **Backend auth APIs:** Added `GET /auth/capabilities`, `POST /auth/forgot-password`, and `POST /auth/reset-password` in `auth.routes.ts` with Zod validation, TEST-mode-aware rate limits, and invariant `200` response for forgot-password.
+- **Auth service logic:** Added reset token issuance/rotation, SHA-256 token hashing, one-hour expiry, single-use token consumption in transaction, password change with bcrypt cost 12, and `token_version` bump to revoke prior JWTs.
+- **Config/env:** Added SMTP and public URL env vars in `backend/src/config/env.ts`, `.env.example`, and docs (`docs/ENVIRONMENT_VARIABLES.md`), including Resend and Gmail App Password examples.
+- **Frontend UX:** Added public `ResetPasswordPage` route (`/#/reset-password?token=...`) and updated `HomePage` to fetch `/auth/capabilities`; shows legacy admin tip when email is disabled and an inline forgot-password form when enabled; adds `?reset=1` success alert after reset.
+- **Contract docs:** Updated `openapi/openapi.yaml` with full schemas for the three new auth endpoints and error shapes; updated `docs/EMAIL_INFRASTRUCTURE.md` status to implemented.
+- **Tests:** Added `backend/tests/password-reset.test.ts` covering capabilities, forgot-password invariants, token lifecycle, reset success + JWT invalidation, invalid/expired/used token handling, weak password validation, and same-password rejection.
+
+---
+
+## UX-126 (2026-04-29): Net Worth page — Mantine migration + layout redesign
+- **Type:** UX
+- **Motivation:** Net Worth page was the last major page on the old `.card`/raw-div layout, inconsistent with the Mantine-first standard established by Dashboard V2 (UX-120). Layout was also flat — KPI totals were buried inside a section rather than promoted to the top.
+- **KPI hero strip:** Assets / Liabilities / Net Worth promoted to a `SimpleGrid` (3-col on sm+, stacked on mobile) at the top of the page. Each tile is a `Paper` with a color-coded top border (`--color-success` for assets, `--color-warm` for liabilities, accent/danger adaptive for net worth sign). Values use tabular-numeral font variant for alignment.
+- **Delta chips:** Period summary section now renders three delta chips (ASSETS, LIABILITIES, NET WORTH) showing signed change (`+$X` / `–$X`) over the selected trend window with green/red backgrounds keyed to financial direction (liabilities decreasing = green).
+- **`formatSignedDelta` helper:** New utility formats a signed numeric delta with `+`/`–` prefix and `$` amount — used exclusively by the delta chips.
+- **Period preset pills:** 3M / 6M / 12M / 2Y / 3Y / YTD / Custom controls retained but styled via existing CSS variables (pending full Mantine `SegmentedControl` migration in a later pass).
+- **Balance sheet table split:** Assets and Liabilities account tables now rendered as separate `Paper` sections rather than interleaved. Clarifies the two-sided structure.
+- **Mantine 7 migration:** All layout shells migrated — `Paper` (with `withBorder shadow="sm"`), `Stack`, `Group`, `SimpleGrid`, `Title`, `Text`, `Anchor`, `Alert`, `Skeleton`, `Button`, `Select`, `Divider`, `Box`. Chart tooltip shell converted to `Paper`.
+- **Recharts `Legend` removed:** Replaced with a manual legend using `Text`/`Group` Mantine primitives to match the visual language of the rest of the page.
+- **CSS delta:** 136 Net Worth-specific utility classes added mid-migration then fully removed once Mantine tokens replaced them — net zero CSS delta.
+- **No backend or API changes.** Pure presentation migration.
+- **Files changed:** `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/index.css` (net zero).
+
+---
+
+## UX-125 (2026-04-29): Forest Studio design theme + 3-way OS-aware color scheme toggle
+- **Type:** UX
+- **Motivation:** App was visually monotonous (single green everywhere) and "harsh on eyes" due to cold blue-gray backgrounds and neon accent colors. Dark mode used cold navy blacks. Theme toggle had no "Auto (follow OS)" option despite Mantine already supporting it.
+- **Palette redesign: "Forest Studio"** — warm neutrals throughout, mature Pantone-forest greens, forest-night chrome. Grounded in UX research on warm vs cold color perception for extended use.
+  - **Light mode:** Page background changed from cold `#f0f4f8` → warm linen `#efebe3`. Surface from pure white → warm `#fdfcfb`. All borders warm stone-toned. Text warm stone-900 (`#1c1917`) instead of cold slate-900.
+  - **Dark mode:** Page bg changed from cold navy `#0f1420` → warm brown-black `#131009`. Surfaces warm brown-dark. Eliminates the "electric navy" look that's harsh at night.
+  - **Sidebar chrome:** Changed from cold navy (`#1a2540`) → dark forest night (`#1a2b1f`). Now has a clear semantic relationship to the forest green identity instead of feeling like a different app.
+  - **Active accent:** Changed from neon lime `#4ade80` → soothing mint teal `#6ee7b7`. Less fatiguing, more refined.
+  - **Primary color ramp:** Replaced with mature Pantone Forest family — `#2d6a4f` as default shade. Not aggressive lime-green, but sophisticated earthy forest.
+  - **Shadows:** Warm-tinted (rgba warm stone) instead of cold blue-tinted.
+- **3-way theme switcher** in `AppTopBar`: replaced the 2-state sun/moon toggle with a compact Sun | Monitor | Moon segmented control. "Monitor" sets `'auto'` which follows OS preference via `useMantineColorScheme({ setColorScheme('auto') })`. User preference persists in localStorage (`hf_color_scheme`). OS-auto was already wired in `main.tsx` via `defaultColorScheme="auto"` — this exposes it in the UI.
+- **Component updates:** KPI cards, KPI delta chips, table headers, category picker flyout, hs-picker, transaction toolbar, dashboard scope bar, bulk action bar, settings tabs, category rules section — all updated to use CSS variables instead of hardcoded cold blue-grays.
+- **KPI income/expense colors:** `kpi-in` and `kpi-out` now use `--color-success` and `--color-expense` (warm terracotta) instead of harsh hardcoded greens/reds.
+- **Files changed:** `frontend/src/theme.ts`, `frontend/src/index.css`, `frontend/src/layout/AppTopBar.tsx`, `frontend/src/pages/PayslipsPage.tsx` (fixed pre-existing unused import).
+
+## CR-124 (2026-04-28): AI Financial Health Analysis (on-demand)
+- **Type:** CR + DB
+- Added migration `backend/db/migrations/0031_ai_financial_insight.sql` with new demographic fields on `household` (`city`, `state`, `combined_gross_income_usd`) and `person_profile` (`age`, `sex`, `individual_gross_income_usd`, `risk_tolerance`, `financial_goals_json`), plus new `household_ai_insight` and `insight_job` tables.
+- Added backend insights module under `backend/src/modules/insights/` with 5 routes: `GET /insights/financial`, `POST /insights/financial/refresh`, `GET /insights/financial/status/:jobId`, `GET /insights/financial/history`, `GET /insights/financial/:id`.
+- Added LLM provider abstraction in `llm-provider.service.ts` with `LLM_PROVIDER=openai|anthropic` and Anthropic SDK support.
+- Extended household/profile APIs and services to read/write demographics and financial profile fields.
+- Added dashboard financial health card (`frontend/src/components/FinancialHealthCard.tsx`) and integrated into `DashboardPageV2`; added Settings `insights` history tab plus new profile/household demographic form fields.
+- Added integration coverage in `backend/tests/insights.test.ts` for insights refresh/status and new household/profile fields.
+- Completed strict Mantine 7 sweep for `frontend/src/pages/SettingsPage.tsx` (all legacy tab controls migrated to Mantine components across profile, household, accounts, recurring, security, notifications, and insights sections).
+- Normalized validation error shape to `400 { errors: z.issues }` in household and insights route validators; aligned insights service/route envelope behavior and OpenAPI/docs response contracts.
+- Expanded OpenAPI household contract to match runtime handlers for `/household/members/{memberId}/data-count` and `/household/members/{memberId}/create-login`, plus detailed request/response/error mappings across household settings/profile/member endpoints.
+- Final UI polish pass: refined Settings tab/header density, restored pill-shaped top-bar controls, moved AI card below core dashboard KPIs, improved compact AI card presentation, prevented duplicate insight refresh triggers, fixed Security tab crash on password input, and enforced Security-only tab access during forced first-login password change.
+- Added migration `backend/db/migrations/0032_insight_job_household_index.sql` to index `insight_job(household_id)` for faster household-scoped job lookups.
+- Added server-side refresh rate limit in `backend/src/modules/insights/insights.routes.ts` (one refresh per household per 5 minutes, `429 RATE_LIMITED`), with test-mode bypass to keep integration tests deterministic.
+- Refactored `overBudgetCategories` in `backend/src/modules/insights/insight-prompt.service.ts` to replace per-budget-row spend lookups with a single grouped aggregate query (removes N+1 query pattern).
+- Expanded user and API docs for insights behavior and contracts: `docs/USER_GUIDE.md`, `docs/API_INSIGHTS.md`, and `openapi/openapi.yaml` (including `429` response contract).
+- Fixed desktop sidebar behavior so Settings/collapse controls stay visible within viewport-height navigation on long pages (`frontend/src/index.css` sidebar now viewport-anchored with internal nav scrolling).
+- Added All-tab bulk action parity in Transactions by wiring "Move to trash" into the existing household bulk-trash flow (`frontend/src/pages/TransactionsPage.tsx`).
+- Improved restore upload affordance in Settings with clearer Mantine `FileInput` presentation (placeholder, upload icon, full-width input, explicit action button width) while retaining disabled restore safety until a ZIP is selected (`frontend/src/pages/SettingsPage.tsx`).
+- Normalized landing sign-in CTA to Mantine `Button` so the first-page auth action follows the app theme contract and no longer renders as a legacy gray control (`frontend/src/pages/HomePage.tsx`).
+- Migrated Payslips list and Add-manual payslip pages toward Mantine-first presentation by replacing legacy card/header/action/button primitives with Mantine `Paper`/`Title`/`Text`/`Button`/`ActionIcon`/`Alert` wrappers while preserving existing backend/API behavior (`frontend/src/pages/PayslipsPage.tsx`, `frontend/src/pages/PayslipManualPage.tsx`).
+- Continued payslip Mantine pass on detail and confirmation UX: `frontend/src/pages/PayslipDetailPage.tsx` now uses Mantine layout shells (`Paper`/`Stack`/`Title`/`Text`/`Alert`/`Anchor`) for key sections, and shared delete confirmations were upgraded to Mantine buttons in `frontend/src/components/ConfirmDialog.tsx`.
+- Fixed visual alignment of Add-manual payslip field rows (`Who / employer`, `Salary / rate`) by normalizing row layout and control heights in `frontend/src/pages/PayslipManualPage.tsx`.
+- Fixed Add-manual line-item crash on environments without `crypto.randomUUID()` by adding a safe draft-id fallback generator in `frontend/src/pages/PayslipManualPage.tsx`.
+- Replaced remaining legacy Add-row controls in payslip detail line-item section with Mantine buttons (`frontend/src/pages/PayslipDetailPage.tsx`), reducing mixed button styling.
+
+---
+
+## FIX-123 (2026-04-28): Recurring overrides — hardening fixes across Phase 1/2/3
+- **Backend validation gap (whitespace key):** `merchantKey` Zod schema in `recurring.routes.ts` changed from `z.string().min(1)` to `z.string().trim().min(1)` — a single-space input like `" "` previously passed the `min(1)` check and reached the service where `.trim()` produced an empty string that could be persisted. Now rejected at the boundary with a 400.
+- **Case normalization:** `recurring.service.ts` now lowercases `merchantKey` before insert/upsert (was trim-only). The DB `UNIQUE (household_id, merchant_key)` constraint is case-sensitive; without this, `"Netflix"` and `"netflix"` created two separate rows with ambiguous matching behaviour. The frontend modal was already lowercasing client-side, but the API is now the authoritative normalizer.
+- **DELETE response not checked (Phase 2/3):** Three sites updated to throw on non-2xx DELETE responses instead of silently updating UI state as if the request succeeded:
+  - `TransactionsPage.tsx` — `onRemove` in the recurring modal wiring
+  - `SettingsPage.tsx` — `handleRemoveDismissed` inline handler
+  - `SettingsPage.tsx` — `onRemove` in the settings modal wiring
+  Errors now propagate to the modal's catch block and are surfaced to the user.
+- Files: `backend/src/modules/recurring/recurring.routes.ts`, `backend/src/modules/recurring/recurring.service.ts`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+## CR-123 (2026-04-28): Recurring overrides management tab in Settings (Phase 3)
+- Added a new `Recurring` tab to `frontend/src/pages/SettingsPage.tsx` with:
+  - Separate confirmed and dismissed override tables.
+  - Confirmed row edit action wired to `RecurringTagModal` (save/remove).
+  - Dismissed row remove action for unsuppressing merchants.
+- Added recurring tab state/effects to fetch and maintain override data via existing API calls only (`GET`, `POST`, `DELETE` on `/recurring-overrides`).
+- Updated recurring API documentation in `docs/API_RECURRING.md` with a Phase 3 Settings management section.
+- Why: Phase 3 provides a centralized management surface for recurring tagging decisions so users can audit and adjust overrides without returning to dashboard suggestions or individual transaction rows.
+
+---
+
+## CR-122 (2026-04-28): Recurring payments hybrid tagging Phase 2 in transactions view
+- Added recurring tagging UX to `frontend/src/pages/TransactionsPage.tsx`:
+  - Loads recurring overrides alongside transactions/categories/accounts.
+  - Adds per-row recurring icon for posted debit transactions (`○` untagged, `●` confirmed) and opens a tagging modal.
+  - Adds client-side `recurringOnly=true` URL filter in More filters and includes it in active-filter/clear-filter behavior.
+- Added new modal component `frontend/src/components/RecurringTagModal.tsx` for confirm/edit/remove recurring overrides, including:
+  - Editable merchant match key, amount anchor, tolerance %, and live match count against loaded transactions.
+  - Confirm via existing `POST /recurring-overrides` and remove via existing `DELETE /recurring-overrides/:id`.
+- Updated recurring API doc `docs/API_RECURRING.md` with frontend tagging flow notes so future work understands how the transactions page consumes existing endpoints without backend changes.
+- Why: Phase 2 wires the already-shipped recurring override backend into day-to-day transaction triage, letting users tag and filter recurring debits directly where they review ledger rows.
+
+---
+
+## CR-121 (2026-04-28): Recurring payments hybrid tagging Phase 1 override store + dashboard dismiss flow
+- Added migration `backend/db/migrations/0030_recurring_merchant_override.sql` introducing `recurring_merchant_override` with household-scoped unique `(household_id, merchant_key)` rows and confirm/dismiss verdict support.
+- Added new backend recurring module (`backend/src/modules/recurring/recurring.service.ts`, `backend/src/modules/recurring/recurring.routes.ts`, `backend/src/modules/recurring/recurring.types.ts`) and registered router in `backend/src/app.ts` for:
+  - `GET /recurring-overrides` (list)
+  - `POST /recurring-overrides` (upsert confirmed/dismissed override)
+  - `DELETE /recurring-overrides/:id` (delete by id in household scope)
+- Updated dashboard recurring module (`frontend/src/pages/DashboardPageV2.tsx`) to:
+  - Fetch recurring overrides with other dashboard data.
+  - Persist dismiss actions via `POST /recurring-overrides` and optimistically hide dismissed heuristic candidates.
+  - Render confirmed overrides above heuristic suggestions, while filtering suggestions against confirmed/dismissed overrides.
+- Added backend test coverage in `backend/tests/recurring-overrides.test.ts` for CRUD upsert behavior, conflict update semantics, list responses, delete/not-found behavior, and auth guards.
+- Added docs/API updates for recurring endpoints: `docs/API_RECURRING.md` (new), `docs/API_INDEX.md`, `openapi/openapi.yaml`.
+
+---
+
+## FIX-120d (2026-04-28): Expand recurring category lists and treat checking as liability in account trend arrows
+- Updated `DashboardPageV2` recurring-payment constants to broaden category gating coverage: `EXCLUDE_CATEGORIES` now includes food/coffee/snacks, expanded shopping variants, travel/parking/taxi, entertainment/movies, gifts, and tax-related tokens; `ALLOW_CATEGORIES` now includes utility subtypes, housing/hoa, subscriptions/streaming/software, fitness, and childcare/tuition.
+- Updated `LIABILITY_ACCOUNT_TYPES` in the same file to include `checking` so the By Account MoM arrow color logic treats checking accounts with the liability color policy.
+- Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+## FIX-120c (2026-04-28): Recurring category gate now uses substring token matching
+- `detectRecurring` category gate in `DashboardPageV2` previously used exact `Set.has()` checks for `EXCLUDE_CATEGORIES` / `ALLOW_CATEGORIES`, which missed common variants (for example names with suffixes/prefixes).
+- Fix: switched both gates to substring token checks (`[...SET].some((token) => cat.includes(token))`) so exclusion/allow logic still uses the same token lists but matches normalized category strings more reliably.
+- Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+## FIX-120b (2026-04-27): Net-worth sparkline never rendered — API shape mismatch
+- `NetWorthHistoryPoint` type in DashboardPageV2 declared `{ date, netWorth }` but `/reports/balance-sheet/history` returns `{ asOf, totals: { netWorth } }`. The sparkline filter checked `p.date` and `p.netWorth` — both `undefined` on every point — so the gate (`points.length < 2`) always failed and the sparkline never rendered.
+- Fix: corrected the `apiJson` generic to match the real response shape (`Array<{ asOf: string; totals: { netWorth: number | null } }>`), then mapped `asOf → date` and `totals.netWorth → netWorth` before setting state. Frontend display type unchanged.
+- Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+## UX-120 (2026-04-27): Dashboard Mantine reference + pulse breakdown, tighter recurring, per-account module, net-worth sparkline
+- DashboardPageV2 migrated entirely to Mantine 7 primitives (Paper, Stack, Group, SimpleGrid, Text, Title, Button, Progress, Badge, Anchor, Box, Skeleton). This is the project's first reference page for the Mantine pattern; all other pages remain on the existing project CSS classes (`.card`, `.muted`, `.secondary`, `.dashboard-page` in `frontend/src/index.css`). The dashboard's hard-coded greys/borders are now Mantine tokens (`c="dimmed"`, `Paper withBorder`), so the dashboard now follows the `data-mantine-color-scheme` dark/light flip that `index.css` already wires up. Recharts strokes/fills keep hex literals — Recharts does not read Mantine theme.
+- Pulse hero card: added inflow/outflow breakdown line under the headline net number (green ↑ inflow, red ↓ outflow).
+- `detectRecurring`: 3-layer filter — Layer 1 drops merchants whose name contains TRANSFER / E-PAYMENT / AUTOPAY / PAYDOWN / PAYMENT / DIRECT DEP / DIRECT DEPOSIT / REFUND; Layer 2 requires CV<0.25 amount stability; Layer 3 modal-category gate drops groceries/dining/restaurant/gas/fuel/shopping/entertainment buckets and relaxes the CV cap to 0.5 for utilities/subscriptions/insurance/rent/mortgage/loan. Section renamed "Monthly Commitments" → "Recurring Payments" with microcopy "Estimated from repeated charges".
+- New "By Account — This Month" card in the responsive SimpleGrid (top 5 accounts by `activeMonth` outflow, MoM arrow with 5% threshold, account-type-aware color: liability accounts (`credit_card`/`loan`/`mortgage`) ↑=red ↓=green, asset accounts ↑=orange ↓=green, → for flat or insufficient prior data; arrow omitted when prior month has fewer than 3 txns; whole module hidden when `recentTxns` is null or has fewer than 5 rows).
+- Net-worth card: headline 1.7rem→1.5rem, sub-lines (assets/liabilities and as-of) normalised to `size="sm"`, sparkline color now compares first vs last (green/red/gray) instead of absolute sign, height 48px (was 52), only renders with ≥2 distinct non-zero points.
+- LedgerRow type widened to surface `accountId`, `institution`, `accountType`, `accountMask`, `categoryName` fields the `/transactions` API already returns — no new API calls, no backend changes.
+- Follow-ups deferred (not in this PR): (a) audit of `frontend/src/pages` and `frontend/src/components` for Mantine vs `index.css` usage; (b) `docs/backlog/PRD-mantine-migration.md` describing the rollout pattern and migrate-when-touched rule; (c) cleanup of orphaned `.dashboard-page` / `.dashboard-page__hero` rules in `frontend/src/index.css` once no other file references them.
+Files: frontend/src/pages/DashboardPageV2.tsx, docs/CHANGE_HISTORY.md
+
+---
+
+## FIX-120a (2026-04-27): Fix dashboard home-page crash loop on net worth history sort
+- Fixed `DashboardPageV2` crash when a net worth history point has missing/invalid `date` by validating rows before sparkline sort (`localeCompare`) and render.
+- Prevented V2 data fetch effects from running while classic view is active, avoiding background fetch churn under legacy fallback mode.
+Files: frontend/src/pages/DashboardPageV2.tsx, docs/CHANGE_HISTORY.md
+
+---
+
+## CR-120 (2026-04-27): Home screen overhaul with legacy fallback
+- Rebuilt the home screen into a new three-zone dashboard layout (Pulse, Action Items, Summary Cards, and 6-month trend) with month navigation and partial data rendering.
+- Added `DashboardPageLegacy.tsx` as a preserved one-click fallback and introduced `dashboard_classic` localStorage toggle between classic and new views.
+- Rewired `DashboardPage.tsx` to transparently export the new implementation (`DashboardPageV2`) without route changes.
+Files: frontend/src/pages/DashboardPageLegacy.tsx, frontend/src/pages/DashboardPageV2.tsx, frontend/src/pages/DashboardPage.tsx, docs/CHANGE_HISTORY.md
+
+---
+
+## FIX-119 (2026-04-27): Route silent duplicate drops to Needs Review with FITID-aware messaging
+- canonical-ingest.service.ts: in-session FITID dedup and in-session fingerprint dedup no longer silently drop transactions
+- Both paths now call insertExactDuplicateForReview: status='duplicate' canonical row + resolution_item created, visible in Transactions -> Needs Review
+- Cross-import fingerprint check now compares FITIDs: different FITID + same fingerprint shows "likely legitimate separate charge" message; same/missing FITID shows "exact duplicate"
+- Root cause: CitiCard OFX file had 3 charges (ENERGY OGRE, 2024-05-29, $10) with unique FITIDs but identical fingerprints — 2 were silently lost
+Files: backend/src/modules/canonical/canonical-ingest.service.ts, backend/tests/app.test.ts
+
+---
+
+## CR-119b (2026-04-26): Fix sticky regression and extend inline account creation
+- Removed all localStorage sticky account logic from ImportWorkspacePage (dead for CSV/PDF and regression-prone for OFX shared profile key).
+- Extended inline `create new account` flow to non-OFX file rows (CSV/PDF/XLSX), reusing the existing in-row OFX create-account form/state and save path.
+- No backend or API changes.
+Files: frontend/src/pages/ImportWorkspacePage.tsx, docs/CHANGE_HISTORY.md
+
+---
+
+## CR-119 (2026-04-26): Kill ImportPage, restore workspace as primary import UX
+- Deleted frontend/src/pages/ImportPage.tsx
+- /imports and /import routes now redirect to /imports/workspace
+- Removed Finalize button and finalize flow from ImportWorkspacePage
+- Undo is now available on any session regardless of status (removed status=review guard from rollback service)
+- Added sticky last-used account per parser profile (localStorage) in workspace file binding
+- Backend CR-118 endpoints (POST /imports/upload, GET /imports/history) retained for API use
+Files: frontend/src/App.tsx, frontend/src/layout/AppTopBar.tsx, frontend/src/pages/ImportWorkspacePage.tsx, backend/src/modules/imports/import-session-rollback.service.ts, backend/src/modules/imports/imports.routes.ts, backend/tests/app.test.ts, docs/API_IMPORT_SESSIONS.md, CLAUDE.md, openapi/openapi.yaml
+
+---
+
+## CR-118c — Import parity upgrades on `/imports`
+Date: 2026-04-26
+Files: backend/src/modules/imports/import-upload.service.ts, backend/src/modules/imports/imports.routes.ts, frontend/src/pages/ImportPage.tsx, openapi/openapi.yaml, docs/CHANGE_HISTORY.md
+What:
+- **Backend:** Persist `import_session.stats_json` after successful canonicalize on `POST /imports/sessions/:sessionId/ofx-confirm` and `POST /imports/sessions/:sessionId/canonicalize`; add `accountType` on `GET /imports/history` bank items.
+- **Frontend:** Session-based multi-file bank and payslip import on `/imports`; Add account from picker (type list aligned with Advanced Import); lazy expandable per-import details from session summary; Needs Review link for duplicate triage; payslip employer UX for 0/1/many employers.
+Why: CR-118b hid outcomes and dropped multi-file and add-account parity relative to Advanced Import.
+
+---
+
+## CR-118b — ImportPage complete rebuild with Mantine UI + full feature parity
+Date: 2026-04-26
+Files: frontend/src/pages/ImportPage.tsx (complete rewrite)
+What: Full Mantine UI, OFX detection using existing session API (create session + upload + ofx-suggestion + ofx-confirm), inline account creation, belongs-to assignment, client-side format inference label, import history with undo. No new backend endpoints.
+Why: CR-118 initial build used plain HTML and dropped OFX detection, belongs-to, and account creation.
+
+---
+
+## 2026-04-26 (CR-118 import simplification — v2)
+
+### CR-118 — One-shot import upload, unified history, and primary Import page
+
+- **Type:** CR / feature
+- **What:**
+  1. Added `POST /imports/upload` to run one-shot upload flows for both bank and payslip files, reusing existing parse/canonical/payslip services and returning `{ ok, data/code, message }` service-style outcomes.
+  2. Added `GET /imports/history` to merge recent bank import sessions and payslip uploads into a single latest-first feed with undo affordance metadata.
+  3. Added schema migration `0023_import_session_stats.sql` to store canonicalize summary counts in `import_session.stats_json`; upload flow writes `{ addedCount, duplicateCount }`.
+  4. Added new frontend primary page `ImportPage` at `/imports` with one-shot form, success/error alerts, unified history table, and undo actions; kept `/imports/workspace` and `/imports/:sessionId` for advanced/manual flow.
+  5. Added backend coverage in `backend/tests/import-upload-flow.test.ts` for bank happy path, duplicate behavior, inference failure, history, and undo impact.
+- **Why:** CR-118 requires collapsing import UX into a simpler primary path while preserving advanced workspace behavior and existing backend pipelines.
+- **Files:** `backend/db/migrations/0023_import_session_stats.sql`, `backend/src/modules/imports/import-upload.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/tests/import-upload-flow.test.ts`, `frontend/src/pages/ImportPage.tsx`, `frontend/src/App.tsx`, `openapi/openapi.yaml`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## 2026-04-25 (mobile UX — v2)
+
+### UX-R01 through UX-R06 + UX-P01/P02/P03 — Mobile responsive fixes + PWA baseline
+
+- **Type:** UX / mobile
+- **What:**
+  1. **Budget page** — `ProgressView` KPI bar converted from hard-coded
+     `repeat(3, 1fr)` to `.budget-kpi-grid` class with `@media (max-width: 640px)`
+     single-column fallback. Both budget tables (setup/suggestion and progress)
+     wrapped in `overflowX: auto` containers.
+  2. **Import Workspace** — file-binding table wrapped in `overflowX: auto`.
+  3. **Transaction toolbar** — `@media (max-width: 640px)` reduces padding and
+     makes filter fields flex-wrap cleanly at 50% width pairs.
+  4. **Payslip Detail** — pencil/edit buttons converted to `.payslip-inline-edit-btn`
+     CSS class; `@media (hover: none)` rule forces full opacity on touch devices.
+  5. **Settings page** — audit confirmed the only `ledger-table` instance is already
+     wrapped; no change needed.
+  6. **app-main padding** — reduced to `0.75rem` side padding on ≤640px viewports.
+  7. **PWA manifest** — `frontend/public/manifest.json` created with `display:
+     standalone`, matching app theme colors.
+  8. **PWA meta tags** — `frontend/index.html` updated with manifest link,
+     Apple PWA tags, and `theme-color`.
+  9. **PWA icons** — `frontend/public/icons/icon-192.png` and `icon-512.png`
+     created (HF initials on dark navy).
+- **Why:** App is live and primary access is from phone browser. Viewport audit
+  (UX-R01) found three broken pages (Budget, Import Workspace broken; Payslip
+  edit controls invisible on touch). Mobile nav drawer was already implemented.
+  PWA baseline enables iOS/Android "Add to Home Screen."
+- **Files:** `frontend/src/pages/BudgetPage.tsx`,
+  `frontend/src/pages/ImportWorkspacePage.tsx`,
+  `frontend/src/pages/PayslipDetailPage.tsx`,
+  `frontend/src/index.css`,
+  `frontend/index.html`,
+  `frontend/public/manifest.json`,
+  `frontend/public/icons/icon-192.png`,
+  `frontend/public/icons/icon-512.png`
+
+---
+
 ## 2026-04-21 (docs + backlog)
 
 ### DOC-020 — OCI Always Free deployment guide + mobile UX backlog

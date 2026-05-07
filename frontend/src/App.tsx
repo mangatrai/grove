@@ -12,6 +12,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PayslipDetailPage } from "./pages/PayslipDetailPage";
 import { PayslipManualPage } from "./pages/PayslipManualPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
 export function App() {
@@ -20,6 +21,7 @@ export function App() {
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route element={<ShellLayout />}>
         <Route path="/" element={<HomeRoute />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route element={<RequireAuth />}>
           <Route path="/budget" element={<BudgetPage />} />
           <Route path="/categories/rules" element={<CategoryRulesPage />} />
@@ -32,8 +34,9 @@ export function App() {
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
-          <Route path="/import" element={<Navigate to="/imports" replace />} />
-          <Route path="/imports" element={<ImportWorkspacePage />} />
+          <Route path="/import" element={<Navigate to="/imports/workspace" replace />} />
+          <Route path="/imports" element={<Navigate to="/imports/workspace" replace />} />
+          <Route path="/imports/workspace" element={<ImportWorkspacePage />} />
           <Route path="/imports/:sessionId" element={<ImportWorkspacePage />} />
         </Route>
         <Route path="/dashboard" element={<Navigate to="/" replace />} />

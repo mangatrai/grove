@@ -1,6 +1,6 @@
-# API: Household export and restore (ZIP)
+# API: Household export and restore (.hfb)
 
-Authenticated household backup as a **ZIP** (async job), and **destructive** restore from that ZIP (async job). Operator-oriented behavior (rate limits, bundle contents, staging paths) is summarized in [`RUNBOOK.md`](RUNBOOK.md) §11.
+Authenticated household backup as a **`.hfb`** file (async job), and **destructive** restore from that `.hfb` file (async job). Operator-oriented behavior (rate limits, bundle contents, staging paths) is summarized in [`RUNBOOK.md`](RUNBOOK.md) §11.
 
 ## `POST /exports/household`
 
@@ -14,7 +14,9 @@ Authenticated household backup as a **ZIP** (async job), and **destructive** res
 | `member` (with linked profile) | Personal export — transactions/accounts/payslips/balance_snapshots filtered to their `owner_person_profile_id`. Shared reference data (categories, rules, custom institutions) included. Users and household rows omitted for privacy. |
 | `member` (no profile) | 403. |
 
-Queues an **export** job. Response is immediate (**202**); the ZIP is built in the background.
+Queues an **export** job. Response is immediate (**202**); the `.hfb` backup is built in the background.
+
+When the job reaches **`complete`**, the server sends a **fire-and-forget** email to the requesting user (if SMTP is configured and the user has an email): subject *Your Household Finance export is ready*, with the file expiry time and either a **Settings → Data** link (`PUBLIC_BASE_URL` set) or instructions to open the app. Mail failures do not change the job status.
 
 **429:** Rolling window limit — **10 export starts per user per hour** (see `exports.routes.ts`).
 
@@ -24,7 +26,7 @@ Queues an **export** job. Response is immediate (**202**); the ZIP is built in t
 {
   "jobId": "uuid",
   "scope": "household",
-  "message": "Export started. Poll GET /exports/:jobId until status is complete, then GET /exports/:jobId/download for the ZIP."
+  "message": "Export started. Poll GET /exports/:jobId until status is complete, then GET /exports/:jobId/download for the .hfb backup."
 }
 ```
 
@@ -46,19 +48,19 @@ Poll **export** job status until `status` indicates completion (exact strings ma
 
 **Auth:** Bearer JWT.
 
-Returns **`application/zip`** when the job finished successfully and the file exists on disk.
+Returns the backup file as a binary attachment when the job finished successfully and the file exists on disk.
 
-**200:** `application/zip` stream.
+**200:** binary file stream (`household-export-{jobId}.hfb`).
 
 **404:** Export not ready, file missing, or job not found (payload includes `code`, `jobStatus`, `storagePath` for diagnostics).
 
-**410 Gone:** `{ "code": "EXPORT_EXPIRED", "message": "..." }` — the ZIP was automatically deleted after the 48-hour retention window. Start a new export.
+**410 Gone:** `{ "code": "EXPORT_EXPIRED", "message": "..." }` — the backup file was automatically deleted after the 48-hour retention window. Start a new export.
 
 ## `POST /exports/household/import`
 
 **Auth:** Bearer JWT. **Role:** `owner` only (admins and members receive 403). Restore wipes all household data — owner-only by design.
 
-**Content-Type:** `multipart/form-data` with a single field **`file`** — must be a **`.zip`** export bundle (from download above or a compatible older bundle).
+**Content-Type:** `multipart/form-data` with a single field **`file`** — must be a **`.hfb`** backup bundle (from download above).
 
 Queues a **restore** job: **wipe household-scoped data in FK-safe order**, then reload from the bundle (remapping bundle `householdId` to the current household). **`import_file`** rows are not restored; **`import_file_id`** on balance snapshots and payslips is cleared (**NULL**) where those tables are restored.
 
@@ -71,9 +73,37 @@ Queues a **restore** job: **wipe household-scoped data in FK-safe order**, then 
 }
 ```
 
-**400:** No file, or file is not accepted as ZIP (extension / MIME check).
+**400:** No file, or file is not accepted as `.hfb`.
 
 **413:** Upload over **500 MB** (multer limit).
+
+## Preview endpoint
+
+`POST /exports/preview`
+
+**Auth:** Bearer token. **Role:** `owner` only.
+
+**Content-Type:** `multipart/form-data` with field **`file`** set to a `.hfb` backup file.
+
+Returns **200** with:
+
+- `exportVersion`
+- `exportedAt`
+- `encrypted`
+- `scope`
+- `personProfileId` (optional)
+- `format`
+- `tables` (`tableKey -> { rows }`)
+- `totalRows`
+
+**422:** backup is encrypted but `BACKUP_ENCRYPTION_KEY` is not configured.
+
+**400:** missing file, wrong extension, unsupported export version, missing manifest, or unreadable ZIP/JSON payload.
+
+Behavior guarantees:
+
+- Preview does **not** modify the database.
+- Temp upload file is always deleted after request completion.
 
 ## `GET /exports/import/{jobId}`
 
@@ -87,10 +117,70 @@ Poll **import (restore)** job status.
 
 ## Bundle format notes
 
-- Current exports use **`exportVersion` 3**: `manifest.json` plus **one JSON file per table** (see **CR-078 v2** in [`CHANGE_HISTORY.md`](CHANGE_HISTORY.md)).
-- Restore accepts **v3** and legacy **v1/v2** (`household-bundle.json`).
-- **Categories / rules** in the ZIP are **household** rows only (global built-ins are not duplicated in the bundle).
+- Current exports use **`exportVersion` 4**: `manifest.json` plus **one JSON file per table**.
+- Restore accepts **v4/v3** and legacy **v1/v2** (`household-bundle.json`).
+- **Categories / rules** in the backup are **household** rows only (global built-ins are not duplicated in the bundle).
 - **Member-scoped exports** set `scope: "member"` and `personProfileId` in `manifest.json`. Only the member's own data is included — these bundles are not suitable for full household restore.
+- Export now uses **`SELECT *`** for all backed-up tables, so all columns present in the database at export time are captured automatically.
+- Startup now runs an **export coverage check** that warns if any non-ephemeral DB table is missing from `EXPORT_REGISTRY` / `EXPORT_EPHEMERAL_TABLES`.
+
+### Manifest schema (`manifest.json`)
+
+```json
+{
+  "exportVersion": 4,
+  "exportedAt": "2026-04-30T00:00:00.000Z",
+  "householdId": "uuid",
+  "format": "zip-split-v4",
+  "encrypted": true,
+  "tables": {
+    "transaction_canonical": { "file": "transaction_canonical.json", "rows": 1234 }
+  }
+}
+```
+
+`encrypted` is `true` when `BACKUP_ENCRYPTION_KEY` is configured on the exporting server, otherwise `false`.
+
+## Encryption
+
+When `BACKUP_ENCRYPTION_KEY` is unset, `.hfb` files are unencrypted ZIP bytes.
+
+When `BACKUP_ENCRYPTION_KEY` is set (64 hex characters, 32 bytes), export encrypts ZIP bytes using AES-256-GCM and writes the encrypted payload to the same `.hfb` file.
+
+Encrypted `.hfb` binary layout:
+
+- Bytes `0..3`: ASCII magic `HFB1`
+- Bytes `4..15`: 12-byte random IV
+- Bytes `16..31`: 16-byte GCM auth tag
+- Bytes `32..N`: ciphertext (encrypted ZIP bytes)
+
+Restore auto-detects encrypted files by checking the `HFB1` magic prefix.
+
+Error scenarios:
+
+- **Missing key:** If backup is encrypted but `BACKUP_ENCRYPTION_KEY` is not configured on restore server, import fails with a clear key-required message.
+- **Wrong key / corrupted file:** If key does not match (or payload integrity fails), decrypt step throws and the import job fails with decryption error text.
+
+## Tables in exportVersion 4
+
+| Table key | Included in household export | Included in member export |
+|------|-------------|-------------|
+| `app_user` | Yes | No |
+| `household` | Yes | No |
+| `household_custom_institution` | Yes | No |
+| `financial_account` | Yes | Yes (member-owned only) |
+| `category` | Yes | Yes |
+| `person_profile` | Yes | Yes (self only) |
+| `household_membership` | Yes | No |
+| `category_rule` | Yes | Yes |
+| `budget_category` | Yes | No |
+| `transaction_canonical` | Yes | Yes (member-owned only) |
+| `account_balance_snapshot` | Yes | Yes (member-owned accounts only) |
+| `payslip_snapshot` | Yes | Yes (member-owned only) |
+| `payslip_line_item` | Yes | Yes (for member-owned payslips only) |
+| `recurring_merchant_override` | Yes | No |
+| `resolution_item` | Yes | No |
+| `household_ai_insight` | Yes | No |
 
 ## After restore
 

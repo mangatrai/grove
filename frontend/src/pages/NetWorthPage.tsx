@@ -1,4 +1,23 @@
 import { IconPencil } from "@tabler/icons-react";
+import {
+  ActionIcon,
+  Alert,
+  Anchor,
+  Box,
+  Button,
+  Collapse,
+  Divider,
+  Group,
+  Paper,
+  Select,
+  SimpleGrid,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title
+} from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
@@ -8,7 +27,6 @@ import {
   BarChart,
   CartesianGrid,
   LabelList,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -105,6 +123,13 @@ function formatMoney(n: number | null | undefined): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function formatSignedDelta(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) {
+    return "—";
+  }
+  return `${value >= 0 ? "+" : "–"}${formatMoney(Math.abs(value))}`;
+}
+
 /** Display-only: liabilities negative, assets positive (matches net-worth intuition). */
 function signedDisplayBalance(row: Pick<BalanceSheetAccountRow, "side" | "balance">): number | null {
   if (row.balance == null || !Number.isFinite(row.balance)) {
@@ -120,6 +145,21 @@ function storageAmountFromInput(raw: number, side: "asset" | "liability"): numbe
   return Math.abs(raw);
 }
 
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  checking: "Checking",
+  savings: "Savings",
+  credit_card: "Credit Card",
+  investment: "Investment",
+  retirement: "Retirement",
+  loan: "Loan",
+  mortgage: "Mortgage",
+  payslip: "Payslip",
+};
+
+function formatAccountType(type: string): string {
+  return ACCOUNT_TYPE_LABELS[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void {
   if (belongsTo === "household") {
     qs.set("ownerScope", "household");
@@ -132,29 +172,6 @@ function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void
   }
 }
 
-function transactionsHref(opts: {
-  accountId?: string;
-  dateFrom?: string;
-  dateTo?: string;
-  /** Ledger filter: transactions posted from this import file. */
-  fileId?: string;
-}): string {
-  const q = new URLSearchParams();
-  if (opts.accountId) {
-    q.set("accountId", opts.accountId);
-  }
-  if (opts.dateFrom) {
-    q.set("dateFrom", opts.dateFrom);
-  }
-  if (opts.dateTo) {
-    q.set("dateTo", opts.dateTo);
-  }
-  if (opts.fileId) {
-    q.set("fileId", opts.fileId);
-  }
-  const s = q.toString();
-  return s ? `/transactions?${s}` : "/transactions";
-}
 
 export function NetWorthPage() {
   const token = useAuthToken();
@@ -193,6 +210,7 @@ export function NetWorthPage() {
   const [rowSaving, setRowSaving] = useState(false);
 
   const [bulkAsOfDraft, setBulkAsOfDraft] = useState(() => tableAsOf);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkWorking, setBulkWorking] = useState(false);
   const [bulkSummary, setBulkSummary] = useState<string | null>(null);
   const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
@@ -520,56 +538,97 @@ export function NetWorthPage() {
   }
 
   return (
-    <div className="net-worth-page">
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Net worth</h1>
-          <HelpIcon label="Balances show the most recent known value — manual entry or import, whichever is more current. Liabilities show as negative so net worth reads clearly. Manage accounts in Settings → Accounts." />
-          <Link to="/settings?tab=accounts" style={{ marginLeft: "auto", fontSize: 13 }}>Manage accounts</Link>
-        </div>
-      </div>
+    <Stack gap="md">
+      <Paper withBorder shadow="sm" radius="md" p="md">
+        <Group justify="space-between" align="center">
+          <Group gap={8} align="center">
+            <Title order={2} style={{ fontSize: 22, fontWeight: 700 }}>Net worth</Title>
+            <HelpIcon label="Balances show the most recent known value — manual entry or import, whichever is more current. Liabilities show as negative so net worth reads clearly. Manage accounts in Settings → Accounts." />
+          </Group>
+          <Anchor component={Link} to="/settings?tab=accounts" size="sm">
+            Manage accounts
+          </Anchor>
+        </Group>
+      </Paper>
 
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Trend</h2>
+      <Stack gap={4}>
+        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+          <Paper withBorder shadow="sm" radius="md" p="md" style={{ textAlign: "center", borderTop: "3px solid var(--color-success)" }}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={600} lts="0.06em" mb={4}>Assets</Text>
+            <Text size="xl" fw={700} style={{ color: "var(--color-success)", fontVariantNumeric: "tabular-nums" }}>
+              {loading || !data ? "—" : formatMoney(data.totals.assets)}
+            </Text>
+          </Paper>
+          <Paper withBorder shadow="sm" radius="md" p="md" style={{ textAlign: "center", borderTop: "3px solid var(--color-warm)" }}>
+            <Text size="xs" c="dimmed" tt="uppercase" fw={600} lts="0.06em" mb={4}>Liabilities</Text>
+            <Text size="xl" fw={700} style={{ color: "var(--color-warm)", fontVariantNumeric: "tabular-nums" }}>
+              {loading || !data ? "—" : formatMoney(data.totals.liabilities)}
+            </Text>
+          </Paper>
+          <Paper
+            withBorder
+            shadow="sm"
+            radius="md"
+            style={{
+              textAlign: "center",
+              borderTop: `4px solid ${loading || !data ? "var(--color-border)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}`,
+              padding: "1rem 1rem 1.05rem"
+            }}
+          >
+            <Text size="xs" c="dimmed" tt="uppercase" fw={600} lts="0.06em" mb={4}>Net worth</Text>
+            <Text fw={700} style={{ fontSize: 28, color: loading || !data ? "var(--color-text-muted)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)", fontVariantNumeric: "tabular-nums" }}>
+              {loading || !data ? "—" : formatMoney(data.totals.netWorth)}
+            </Text>
+          </Paper>
+        </SimpleGrid>
+        <Text size="xs" c="dimmed" ta="right" mt={4}>Balances as of {tableAsOf}</Text>
+      </Stack>
+
+      <Paper withBorder shadow="sm" radius="md" p="md">
+        <Group gap={8} align="center" mb="sm">
+          <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Trend</Title>
           <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
-        </div>
-        <div className="row net-worth__control-band" style={{ alignItems: "flex-end", gap: "1rem", flexWrap: "wrap" }}>
-          <label className="field" style={{ marginBottom: 0 }}>
-            <span>Period</span>
-            <select value={periodPreset} onChange={(ev) => onPresetChange(ev.target.value as PeriodPreset)}>
-              <option value="3m">Last 3 months</option>
-              <option value="6m">Last 6 months</option>
-              <option value="12m">Last 12 months</option>
-              <option value="2y">Last 2 years</option>
-              <option value="3y">Last 3 years</option>
-              <option value="ytd">Year to date</option>
-              <option value="custom">Custom</option>
-            </select>
-          </label>
-          {periodPreset === "custom" ? (
-            <>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>From</span>
-                <input type="date" value={customFrom} onChange={(ev) => setCustomFrom(ev.target.value)} />
-              </label>
-              <label className="field" style={{ marginBottom: 0 }}>
-                <span>To</span>
-                <input type="date" value={customTo} onChange={(ev) => setCustomTo(ev.target.value)} />
-              </label>
-            </>
-          ) : null}
-          <label className="field" style={{ marginBottom: 0 }}>
-            <span>Interval</span>
-            <select value={histInterval} onChange={(ev) => setHistInterval(ev.target.value as "month" | "quarter" | "week" | "day")}>
-              <option value="month">Month-end</option>
-              <option value="quarter">Quarter-end</option>
-              <option value="week">Every 7 days</option>
-              <option value="day">Daily (max 120 points)</option>
-            </select>
-          </label>
-          <label className="field" style={{ marginBottom: 0, minWidth: "12rem" }}>
-            <span>Belongs to</span>
+        </Group>
+        <Group gap={6} wrap="wrap" role="group" aria-label="Trend period preset">
+          {(["3m", "6m", "12m", "2y", "3y", "ytd", "custom"] as const).map((p) => (
+            <Button
+              key={p}
+              type="button"
+              size="xs"
+              radius="xl"
+              variant={periodPreset === p ? "filled" : "default"}
+              color={periodPreset === p ? "green" : undefined}
+              style={periodPreset === p ? { background: "var(--color-accent)", borderColor: "var(--color-accent)" } : undefined}
+              onClick={() => onPresetChange(p)}
+            >
+              {p.toUpperCase()}
+            </Button>
+          ))}
+        </Group>
+        {periodPreset === "custom" ? (
+          <Group align="flex-end" gap="sm" mt="sm" wrap="wrap">
+            <TextInput type="date" size="sm" label="From" value={customFrom} onChange={(ev) => setCustomFrom(ev.target.value)} />
+            <TextInput type="date" size="sm" label="To" value={customTo} onChange={(ev) => setCustomTo(ev.target.value)} />
+          </Group>
+        ) : null}
+        <Group align="flex-end" gap="md" mt="sm" wrap="wrap">
+          <Box>
+            <Text size="xs" c="dimmed" mb={4}>Interval</Text>
+            <Select
+              size="sm"
+              style={{ minWidth: "11rem" }}
+              value={histInterval}
+              onChange={(v) => setHistInterval((v ?? "month") as "month" | "quarter" | "week" | "day")}
+              data={[
+                { value: "month", label: "Month-end" },
+                { value: "quarter", label: "Quarter-end" },
+                { value: "week", label: "Every 7 days" },
+                { value: "day", label: "Daily (max 120 points)" }
+              ]}
+            />
+          </Box>
+          <Box style={{ minWidth: "12rem" }}>
+            <Text size="xs" c="dimmed" mb={4}>Scope</Text>
             <HierarchicalSearchPicker
               value={belongsTo || null}
               onChange={(v) => setBelongsTo((v ?? "") as BelongsToFilter)}
@@ -578,311 +637,311 @@ export function NetWorthPage() {
               ariaLabel="Balance sheet owner filter"
               clearable
             />
-          </label>
-        </div>
+          </Box>
+        </Group>
 
         {(loadError || historyError) ? (
-          <div className="net-worth__retry-band" style={{ marginTop: "0.75rem" }}>
-            {historyError ? <p className="error" style={{ marginTop: 0 }}>{historyError}</p> : null}
-            <div className="row" style={{ alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-              <button type="button" className="secondary" onClick={() => void reloadAll()} disabled={loading || historyLoading}>
+          <Stack gap="xs" mt="sm">
+            {historyError ? <Alert color="red" variant="light" radius="md">{historyError}</Alert> : null}
+            <Group align="center" gap="sm">
+              <Button variant="default" size="sm" onClick={() => void reloadAll()} disabled={loading || historyLoading}>
                 {loading || historyLoading ? "Loading…" : "Retry load"}
-              </button>
-              <span className="muted" style={{ fontSize: "0.9rem" }}>
-                Refetches the balance sheet and trend chart.
-              </span>
-            </div>
-          </div>
+              </Button>
+              <Text size="sm" c="dimmed">Refetches the balance sheet and trend chart.</Text>
+            </Group>
+          </Stack>
         ) : null}
 
-        {periodSummary ? (
-          <div style={{ marginTop: "1rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.6rem" }}>
-              <h3 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)" }}>Period summary</h3>
-              <HelpIcon label="Start and end snapshots in the selected range." />
-            </div>
-            <div style={{ overflowX: "auto" }}>
-              <table className="ledger-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Assets</th>
-                    <th scope="col">Liabilities</th>
-                    <th scope="col">Net worth</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <th scope="row" style={{ fontWeight: 500 }}>Start ({periodSummary.startLabel})</th>
-                    <td>{formatMoney(periodSummary.start.assets)}</td>
-                    <td>{formatMoney(periodSummary.start.liabilities)}</td>
-                    <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.start.net)}</td>
-                  </tr>
-                  <tr>
-                    <th scope="row" style={{ fontWeight: 500 }}>End ({periodSummary.endLabel})</th>
-                    <td>{formatMoney(periodSummary.end.assets)}</td>
-                    <td>{formatMoney(periodSummary.end.liabilities)}</td>
-                    <td style={{ fontWeight: 600 }}>{formatMoney(periodSummary.end.net)}</td>
-                  </tr>
-                  {periodSummary.delta ? (
-                    <tr style={{ borderTop: "2px solid var(--color-border)" }}>
-                      <th scope="row" style={{ fontWeight: 600, color: "var(--color-text-muted)", fontSize: 12 }}>Change</th>
-                      <td style={{ color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.assets)}</td>
-                      <td style={{ color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 600 }}>{formatMoney(periodSummary.delta.liabilities)}</td>
-                      <td style={{ color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)", fontWeight: 700 }}>{formatMoney(periodSummary.delta.net)}</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        {periodSummary?.delta ? (
+          <Group gap="sm" wrap="wrap" mt="md">
+            <Paper radius="md" p="sm" style={{ background: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)", minWidth: "13rem" }}>
+              <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">ASSETS</Text>
+              <Text fw={700} style={{ fontSize: "1.05rem", color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
+                {formatSignedDelta(periodSummary.delta.assets)}
+              </Text>
+              <Text size="xs" c="dimmed">{periodSummary.startLabel} → {periodSummary.endLabel}</Text>
+            </Paper>
+            <Paper radius="md" p="sm" style={{ background: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)", minWidth: "13rem" }}>
+              <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">LIABILITIES</Text>
+              <Text fw={700} style={{ fontSize: "1.05rem", color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
+                {formatSignedDelta(periodSummary.delta.liabilities)}
+              </Text>
+              <Text size="xs" c="dimmed">{periodSummary.startLabel} → {periodSummary.endLabel}</Text>
+            </Paper>
+            <Paper radius="md" p="sm" style={{ background: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)", minWidth: "13rem" }}>
+              <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">NET WORTH</Text>
+              <Text fw={700} style={{ fontSize: "1.05rem", color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
+                {formatSignedDelta(periodSummary.delta.net)}
+              </Text>
+              <Text size="xs" c="dimmed">{periodSummary.startLabel} → {periodSummary.endLabel}</Text>
+            </Paper>
+          </Group>
         ) : null}
-        {historyLoading ? <p className="muted">Loading chart…</p> : null}
+
+        {historyLoading ? <Skeleton height={340} radius="md" mt="sm" animate /> : null}
         {!historyLoading && chartRows.length > 0 ? (
-          <div style={{ width: "100%", height: 340, marginTop: "0.75rem" }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <defs>
-                  <linearGradient id="nwGradientGreen" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#15803d" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#15803d" stopOpacity={0.02} />
-                  </linearGradient>
-                  <linearGradient id="nwGradientAmber" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.18} />
-                    <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                <XAxis dataKey="asOf" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={52} />
-                <YAxis
-                  tick={{ fontSize: 11 }}
-                  tickFormatter={(v: number) =>
-                    `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                  }
-                />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (!active || !payload?.length) {
-                      return null;
+          <Box mt="sm">
+            <Group gap="sm" wrap="wrap" align="center" style={{ fontSize: "0.82rem" }}>
+              <Group gap={6} align="center">
+                <Box w={8} h={8} style={{ borderRadius: "50%", background: "var(--color-accent)" }} />
+                <Text size="xs" fw={600}>Net worth</Text>
+              </Group>
+              <Group gap={6} align="center">
+                <Box w={8} h={8} style={{ borderRadius: "50%", background: "#22c55e" }} />
+                <Text size="xs" c="dimmed">Assets</Text>
+              </Group>
+              <Group gap={6} align="center">
+                <Box w={8} h={8} style={{ borderRadius: "50%", background: "#f59e0b" }} />
+                <Text size="xs" c="dimmed">Liabilities</Text>
+              </Group>
+            </Group>
+            <Box style={{ width: "100%", height: 340, marginTop: "0.5rem" }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
+                  <defs>
+                    <linearGradient id="nwGrad_netWorth" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#2d6a4f" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#2d6a4f" stopOpacity={0.03} />
+                    </linearGradient>
+                    <linearGradient id="nwGrad_assets" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.12} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.01} />
+                    </linearGradient>
+                    <linearGradient id="nwGrad_liabilities" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="asOf" tick={{ fontSize: 11 }} angle={-25} textAnchor="end" height={52} />
+                  <YAxis
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={(v: number) =>
+                      `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                     }
-                    const asOf = String(label ?? "");
-                    return (
-                      <div className="card" style={{ padding: "0.5rem 0.75rem", fontSize: "0.85rem" }}>
-                        <div style={{ fontWeight: 600 }}>{asOf}</div>
-                        {payload.map((p) => (
-                          <div key={String(p.name ?? p.dataKey)}>
-                            <span style={{ color: String(p.color ?? "inherit") }}>{p.name}</span>:{" "}
-                            {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-                <Legend />
-                <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" fill="url(#nwGradientGreen)" strokeWidth={1.5} dot={false} connectNulls />
-                <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" fill="url(#nwGradientAmber)" strokeWidth={1.5} dot={false} connectNulls />
-                <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="#15803d" fill="url(#nwGradientGreen)" strokeWidth={2.5} dot={false} connectNulls />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+                  />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) {
+                        return null;
+                      }
+                      const asOf = String(label ?? "");
+                      return (
+                        <Paper withBorder shadow="sm" radius="md" p="xs">
+                          <Text size="xs" fw={600} mb={2}>{asOf}</Text>
+                          {payload.map((p) => (
+                            <Text size="xs" key={String(p.name ?? p.dataKey)}>
+                              <Text span size="xs" style={{ color: String(p.color ?? "inherit") }}>{p.name}</Text>:{" "}
+                              {p.value == null || !Number.isFinite(Number(p.value)) ? "—" : formatMoney(Number(p.value))}
+                            </Text>
+                          ))}
+                        </Paper>
+                      );
+                    }}
+                  />
+                  <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.6} fill="url(#nwGrad_assets)" dot={false} connectNulls />
+                  <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" strokeWidth={1} strokeOpacity={0.5} fill="url(#nwGrad_liabilities)" dot={false} connectNulls />
+                  <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="var(--color-accent)" strokeWidth={2.5} fill="url(#nwGrad_netWorth)" dot={false} connectNulls />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Box>
+          </Box>
         ) : null}
         {!historyLoading && chartRows.length === 0 && !historyError ? (
-          <p className="muted">No history points in this range (add manual or import balances to see a line).</p>
+          <Text c="dimmed" size="sm" mt="sm">No history points in this range (add manual or import balances to see a line).</Text>
         ) : null}
 
-        {!loading && (topAssets.length > 0 || topLiabilities.length > 0) ? (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem", marginTop: "1.5rem", paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
+      </Paper>
+
+      <Paper withBorder shadow="sm" radius="md" p="md">
+        <Group gap={8} align="center" mb="sm">
+          <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Balance sheet</Title>
+          <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
+        </Group>
+        <Box mb="sm" style={{ maxWidth: "12rem" }}>
+          <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
+        </Box>
+        {loading ? <Skeleton height={120} radius="md" animate /> : null}
+        {!loading && data && data.assets.length > 0 ? (
+          <Box style={{ overflowX: "auto" }}>
+            {editDirty ? (
+              <Text size="sm" c="dimmed" mb="xs" style={{ maxWidth: "40rem" }}>
+                Unsaved balance changes — use <strong>Save</strong> or <strong>Cancel</strong> before leaving this page. Closing
+                or refreshing the tab may show a browser warning.
+              </Text>
+            ) : null}
+            <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Assets</Text>
+            <Table withTableBorder withRowBorders striped="odd" verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Account</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Type</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Balance</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>As of</Table.Th>
+                  <Table.Th aria-label="Actions" />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {data.assets.map((r) => {
+                  const signed = signedDisplayBalance(r);
+                  const isEditing = editingId === r.financialAccountId;
+                  return (
+                    <Table.Tr key={r.financialAccountId}>
+                      <Table.Td>
+                        <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{formatAccountType(r.type)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {isEditing ? (
+                          <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow}>
+                            <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                            <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                          </Group>
+                        ) : formatMoney(signed)}
+                      </Table.Td>
+                      <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
+                      <Table.Td>
+                        {!isEditing ? (
+                          <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance">
+                            <IconPencil size={15} />
+                          </ActionIcon>
+                        ) : null}
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+                <Table.Tr>
+                  <Table.Td><Text size="sm" fw={700} c="green">Total Assets</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td><Text size="sm" fw={700} c="green">{formatMoney(data.totals.assets)}</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td />
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+          </Box>
+        ) : null}
+        {!loading && data && data.liabilities.length > 0 ? (
+          <>
+            {!loading && data && data.assets.length > 0 ? <Divider my="md" /> : null}
+            <Box style={{ overflowX: "auto", marginTop: "1rem" }}>
+              <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Liabilities</Text>
+            <Table withTableBorder withRowBorders striped="odd" verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Account</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Type</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Balance</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>As of</Table.Th>
+                  <Table.Th aria-label="Actions" />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {data.liabilities.map((r) => {
+                  const signed = signedDisplayBalance(r);
+                  const isEditing = editingId === r.financialAccountId;
+                  return (
+                    <Table.Tr key={r.financialAccountId}>
+                      <Table.Td>
+                        <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{formatAccountType(r.type)}</Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {isEditing ? (
+                          <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow}>
+                            <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                            <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                          </Group>
+                        ) : formatMoney(signed)}
+                      </Table.Td>
+                      <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
+                      <Table.Td>
+                        {!isEditing ? (
+                          <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance">
+                            <IconPencil size={15} />
+                          </ActionIcon>
+                        ) : null}
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+                <Table.Tr>
+                  <Table.Td><Text size="sm" fw={700} style={{ color: "var(--color-warm)" }}>Total Liabilities</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td><Text size="sm" fw={700} style={{ color: "var(--color-warm)" }}>{formatMoney(data.totals.liabilities)}</Text></Table.Td>
+                  <Table.Td />
+                  <Table.Td />
+                </Table.Tr>
+              </Table.Tbody>
+            </Table>
+            </Box>
+          </>
+        ) : null}
+        {rowSaveError ? <Alert color="red" variant="light" radius="md" mt="sm">{rowSaveError}</Alert> : null}
+        {!loading && data && (topAssets.length > 0 || topLiabilities.length > 0) ? (
+          <SimpleGrid cols={2} spacing="lg" mt="md" style={{ paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
             {topAssets.length > 0 ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Assets</div>
+              <Box>
+                <Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed" mb={6}>Top Assets</Text>
                 <ResponsiveContainer width="100%" height={topAssets.length * 34 + 8}>
                   <BarChart layout="vertical" data={topAssets} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <XAxis type="number" hide domain={[0, "dataMax"]} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={130}
-                      tick={{ fontSize: 11, fill: "var(--color-text)" }}
-                      tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v}
-                    />
+                    <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "var(--color-text)" }} tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v} />
                     <Bar dataKey="balance" fill="#22c55e" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-                      <LabelList
-                        dataKey="balance"
-                        position="right"
-                        formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                        style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }}
-                      />
+                      <LabelList dataKey="balance" position="right" formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+              </Box>
             ) : null}
             {topLiabilities.length > 0 ? (
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--color-text-muted)", marginBottom: "0.5rem" }}>Top Liabilities</div>
+              <Box>
+                <Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed" mb={6}>Top Liabilities</Text>
                 <ResponsiveContainer width="100%" height={topLiabilities.length * 34 + 8}>
                   <BarChart layout="vertical" data={topLiabilities} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <XAxis type="number" hide domain={[0, "dataMax"]} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={130}
-                      tick={{ fontSize: 11, fill: "var(--color-text)" }}
-                      tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v}
-                    />
+                    <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "var(--color-text)" }} tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v} />
                     <Bar dataKey="balance" fill="#f59e0b" radius={[0, 3, 3, 0]} isAnimationActive={false}>
-                      <LabelList
-                        dataKey="balance"
-                        position="right"
-                        formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-                        style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }}
-                      />
+                      <LabelList dataKey="balance" position="right" formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
-              </div>
+              </Box>
             ) : null}
-          </div>
+          </SimpleGrid>
         ) : null}
-      </div>
-
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Balance sheet</h2>
-          <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
-        </div>
-        <div style={{ marginBottom: "0.75rem" }}>
-          <label className="field" style={{ marginBottom: 0, maxWidth: "12rem" }}>
-            <span>Snapshot date</span>
-            <input type="date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
-          </label>
-        </div>
-        <details className="net-worth-page__bulk-asof" style={{ marginBottom: "0.75rem" }}>
-          <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: "0.9rem" }}>Re-date all manual balances</summary>
-          <p className="muted" style={{ fontSize: "0.85rem", marginTop: "0.35rem", marginBottom: 0, maxWidth: "36rem" }}>
-            Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
-          </p>
-          <div className="row" style={{ alignItems: "flex-end", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.5rem" }}>
-            <label className="field" style={{ marginBottom: 0 }}>
-              <span>New as-of date</span>
-              <input type="date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
-            </label>
-            <button
-              type="button"
-              className="secondary"
-              disabled={bulkWorking || allTableRows.length === 0}
-              onClick={() => setBulkConfirmOpen(true)}
-            >
-              {bulkWorking ? "Applying…" : "Apply to all rows"}
-            </button>
-          </div>
-        </details>
-        {bulkSummary ? <p className="muted">{bulkSummary}</p> : null}
-        {loadError ? <p className="error">{loadError}</p> : null}
-        {loading ? <p className="muted">Loading…</p> : null}
-        {!loading && data ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.75rem", marginBottom: "1rem" }}>
-            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: "3px solid var(--color-success)" }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Assets</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-success)" }}>{formatMoney(data.totals.assets)}</div>
-            </div>
-            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: "3px solid var(--color-warm)" }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Liabilities</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: "var(--color-warm-dark, #d97706)" }}>{formatMoney(data.totals.liabilities)}</div>
-            </div>
-            <div className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${(data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}` }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>Net worth</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)" }}>{formatMoney(data.totals.netWorth)}</div>
-            </div>
-          </div>
-        ) : null}
-
-        {!loading && data ? (
-          <div style={{ overflowX: "auto" }}>
-            {editDirty ? (
-              <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.5rem", maxWidth: "40rem" }}>
-                Unsaved balance changes — use <strong>Save</strong> or <strong>Cancel</strong> before leaving this page. Closing
-                or refreshing the tab may show a browser warning.
-              </p>
-            ) : null}
-            <table className="ledger-table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Type</th>
-                  <th>Balance</th>
-                  <th>As of</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {allTableRows.map((r) => {
-                  const signed = signedDisplayBalance(r);
-                  const drill = transactionsHref({
-                    accountId: r.financialAccountId,
-                    dateFrom: r.balanceAsOf ?? tableAsOf,
-                    dateTo: r.balanceAsOf ?? tableAsOf
-                  });
-                  const isEditing = editingId === r.financialAccountId;
-                  return (
-                    <tr key={r.financialAccountId}>
-                      <td>
-                        <Link to={drill}>{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Link>
-                        {r.importFileId ? (
-                          <span className="muted" style={{ fontSize: "0.8rem", display: "block", marginTop: "0.2rem" }}>
-                            <Link to={transactionsHref({ fileId: r.importFileId })}>Transactions from import file</Link>
-                          </span>
-                        ) : null}
-                      </td>
-                      <td>
-                        <code style={{ fontSize: "0.8rem" }}>{r.type}</code>
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <form className="row" style={{ gap: "0.35rem", alignItems: "center", flexWrap: "wrap" }} onSubmit={saveRow}>
-                            <input
-                              style={{ width: "7rem" }}
-                              inputMode="decimal"
-                              value={editAmount}
-                              onChange={(ev) => setEditAmount(ev.target.value)}
-                              aria-label="Balance amount"
-                            />
-                            <input type="date" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                            <button type="submit" className="primary" disabled={rowSaving}>
-                              Save
-                            </button>
-                            <button type="button" className="secondary" onClick={cancelEdit}>
-                              Cancel
-                            </button>
-                          </form>
-                        ) : (
-                          formatMoney(signed)
-                        )}
-                      </td>
-                      <td>{r.balanceAsOf ?? "—"}</td>
-                      <td>
-                        {!isEditing ? (
-                          <button
-                            type="button"
-                            className="net-worth-page__edit-icon"
-                            onClick={() => startEdit(r)}
-                            aria-label="Edit balance"
-                            title="Edit balance"
-                          >
-                            <IconPencil size={15} />
-                          </button>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {rowSaveError ? <p className="error">{rowSaveError}</p> : null}
-          </div>
-        ) : null}
-      </div>
+        <Box mt="md">
+          <Button
+            variant="subtle"
+            size="xs"
+            color="gray"
+            onClick={() => setBulkOpen((v) => !v)}
+          >
+            {bulkOpen ? "Hide" : "Re-date all manual balances"}
+          </Button>
+          <Collapse in={bulkOpen}>
+            <Text size="sm" c="dimmed" mt="xs" mb={0} style={{ maxWidth: "36rem" }}>
+              Set the same as-of on every manual snapshot without changing amounts — useful when aligning reporting dates.
+            </Text>
+            <Group align="flex-end" gap="sm" wrap="wrap" mt="sm">
+              <TextInput type="date" size="sm" label="New as-of date" value={bulkAsOfDraft} onChange={(ev) => setBulkAsOfDraft(ev.target.value)} />
+              <Button type="button" variant="default" size="sm" disabled={bulkWorking || allTableRows.length === 0} onClick={() => setBulkConfirmOpen(true)} style={{ alignSelf: "flex-end" }}>
+                {bulkWorking ? "Applying…" : "Apply to all rows"}
+              </Button>
+            </Group>
+          </Collapse>
+        </Box>
+        {bulkSummary ? <Text size="sm" c="dimmed" mt="xs">{bulkSummary}</Text> : null}
+        {loadError ? <Alert color="red" variant="light" radius="md" mt="sm">{loadError}</Alert> : null}
+      </Paper>
 
       <ConfirmDialog
         opened={bulkConfirmOpen}
@@ -893,6 +952,6 @@ export function NetWorthPage() {
         onClose={() => setBulkConfirmOpen(false)}
         onConfirm={runBulkAsOf}
       />
-    </div>
+    </Stack>
   );
 }

@@ -50,8 +50,64 @@ See [`RUNBOOK.md`](RUNBOOK.md) §11 for Postgres connection details and operator
 | `TRANSFER_*` | Transfer matcher thresholds (see `env.ts`). |
 | `OPENAI_API_KEY` | API key for OpenAI (**required** for **IBM** and **Deloitte** payslip PDF extraction — upload, import parse, and Deloitte async reconcile). |
 | `OPENAI_MODEL` | Chat completion model id (default `gpt-4o-mini`). Used by payslip extraction and any other OpenAI-backed features. |
+| `BACKUP_ENCRYPTION_KEY` | Optional. Exactly 64 hex characters (32 bytes). If set, all exported `.hfb` backups are encrypted with AES-256-GCM before being written to disk. |
 | `PAYSLIP_ASYNC_POLL_INTERVAL_MS` | Minimum milliseconds between background polls for queued Deloitte LLM extraction during import (default `120000`). |
 | `CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS` | Max **inclusive** day span for **`GET /reports/cash-summary`** when both **`dateFrom`** and **`dateTo`** are set (default `1096`, min `31`, max `4000`). |
+| `GOOGLE_CLIENT_ID` | Google OAuth2 Web client ID (Drive backup / restore). Empty = GDrive connect disabled (`OAUTH_NOT_CONFIGURED`). |
+| `GOOGLE_CLIENT_SECRET` | OAuth client secret (paired with `GOOGLE_CLIENT_ID`). |
+| `GOOGLE_REDIRECT_URI` | Full redirect URI registered in Google Cloud Console, e.g. `http://127.0.0.1:4000/gdrive/oauth/callback` (must match exactly). |
+| `FRONTEND_APP_URL` | Optional SPA origin for **Google Drive OAuth** return redirects (e.g. `http://localhost:3000`). If unset, falls back to **`PUBLIC_BASE_URL`**; in **`MODE=TEST`** defaults to `http://localhost:3000`; in **`MODE=PROD`** with neither set, redirects are relative to the API (same-origin only). |
+
+```bash
+BACKUP_ENCRYPTION_KEY=   # Optional. 64 hex characters (32 bytes).
+                         # If set, all .hfb exports are encrypted with
+                         # AES-256-GCM before being written to disk.
+                         # Backups produced without a key can still be
+                         # restored without setting this variable.
+                         # Encrypted backups cannot be restored without
+                         # the matching key — store it safely alongside
+                         # JWT_SECRET.
+                         # Generate: node -e "console.log(require('crypto')
+                         #   .randomBytes(32).toString('hex'))"
+```
+
+## Email / SMTP (optional)
+
+Used by self-service password reset and future invite/notification flows.
+
+| Variable | Notes |
+|----------|-------|
+| `SMTP_HOST` | SMTP hostname (e.g. `smtp.gmail.com`, `smtp.resend.com`). |
+| `SMTP_PORT` | SMTP port (default `587`). |
+| `SMTP_SECURE` | `1` for SSL (typically port `465`), `0` for STARTTLS (typically `587`). |
+| `SMTP_USER` | SMTP login username (`resend` for Resend, Gmail address for Gmail). |
+| `SMTP_PASS` | SMTP password (Resend API key or Gmail App Password). |
+| `SMTP_FROM` | Display sender value, e.g. `Household Finance <you@gmail.com>`. |
+| `PUBLIC_BASE_URL` | Public app URL (e.g. `https://finance.example.com`) used in email links and OAuth callbacks. |
+
+**Resend SMTP example**
+
+```bash
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=465
+SMTP_SECURE=1
+SMTP_USER=resend
+SMTP_PASS=re_xxxxxxxxx
+SMTP_FROM=Household Finance <onboarding@resend.dev>
+PUBLIC_BASE_URL=https://finance.example.com
+```
+
+**Gmail App Password example**
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=0
+SMTP_USER=you@gmail.com
+SMTP_PASS=your-16-char-app-password
+SMTP_FROM=Household Finance <you@gmail.com>
+PUBLIC_BASE_URL=https://finance.example.com
+```
 
 ## Frontend (Vite)
 

@@ -46,7 +46,7 @@ Send **at least one** field. Updates the current user’s linked `person_profile
 
 **200:** `{ "profile": { … } }`
 
-**400** — invalid payload
+**400** — invalid payload (`{ "errors": z.issues }`)
 
 **401** — missing or invalid token
 

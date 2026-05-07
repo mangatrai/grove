@@ -33,20 +33,26 @@ householdRouter.get("/settings", async (req: AuthenticatedRequest, res) => {
   res.status(200).json({
     monthlySavingsTargetUsd: full.monthlySavingsTargetUsd,
     salaryDepositFinancialAccountId: full.salaryDepositFinancialAccountId,
-    employers: full.employers
+    employers: full.employers,
+    city: full.city,
+    state: full.state,
+    combinedGrossIncomeUsd: full.combinedGrossIncomeUsd
   });
 });
 
 const patchSchema = z
   .object({
-    monthlySavingsTargetUsd: z.union([z.number().min(0).max(1_000_000_000), z.null()]).optional()
+    monthlySavingsTargetUsd: z.union([z.number().min(0).max(1_000_000_000), z.null()]).optional(),
+    city: z.string().max(100).nullable().optional(),
+    state: z.string().max(100).nullable().optional(),
+    combinedGrossIncomeUsd: z.union([z.number().min(0).max(100_000_000), z.null()]).optional()
   })
   .refine((b) => Object.keys(b).length > 0, { message: "At least one field required" });
 
 householdRouter.patch("/settings", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = patchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({ message: "Invalid payload", issues: parsed.error.flatten() });
+    res.status(400).json({ errors: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
@@ -63,7 +69,10 @@ householdRouter.patch("/settings", requireRole(["owner", "admin"]), async (req: 
   res.status(200).json({
     monthlySavingsTargetUsd: full.monthlySavingsTargetUsd,
     salaryDepositFinancialAccountId: full.salaryDepositFinancialAccountId,
-    employers: full.employers
+    employers: full.employers,
+    city: full.city,
+    state: full.state,
+    combinedGrossIncomeUsd: full.combinedGrossIncomeUsd
   });
 });
 
@@ -79,7 +88,12 @@ const profilePatchSchema = z
     phoneNumber: z.string().max(30).nullable().optional(),
     avatarKey: z.string().max(500).nullable().optional(),
     salaryDepositFinancialAccountId: z.union([z.string().uuid(), z.null()]).optional(),
-    employers: z.array(employerInputSchema).max(20).optional()
+    employers: z.array(employerInputSchema).max(20).optional(),
+    age: z.union([z.number().int().min(1).max(129), z.null()]).optional(),
+    sex: z.enum(["male", "female", "nonbinary", "prefer_not_to_say"]).nullable().optional(),
+    individualGrossIncomeUsd: z.union([z.number().min(0).max(100_000_000), z.null()]).optional(),
+    riskTolerance: z.enum(["conservative", "moderate", "aggressive"]).nullable().optional(),
+    financialGoals: z.array(z.string().max(100)).max(20).optional()
   })
   .refine((body) => Object.keys(body).length > 0, { message: "At least one field required" });
 
@@ -98,10 +112,7 @@ householdRouter.get("/profile", async (req: AuthenticatedRequest, res) => {
 householdRouter.patch("/profile", async (req: AuthenticatedRequest, res) => {
   const parsed = profilePatchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({
-      message: "Invalid payload",
-      issues: parsed.error.flatten()
-    });
+    res.status(400).json({ errors: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
@@ -150,10 +161,7 @@ const createMemberSchema = z
 householdRouter.post("/members", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = createMemberSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    res.status(400).json({
-      message: "Invalid payload",
-      issues: parsed.error.flatten()
-    });
+    res.status(400).json({ errors: parsed.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
@@ -166,7 +174,7 @@ householdRouter.post("/members", requireRole(["owner", "admin"]), async (req: Au
     res.status(409).json({ message: "Email already in use", code: out.code });
     return;
   }
-  res.status(201).json({ member: out.member });
+  res.status(201).json({ member: out.member, inviteSent: out.inviteSent });
 });
 
 const patchMemberSchema = z
@@ -185,15 +193,12 @@ const patchMemberSchema = z
 householdRouter.patch("/members/:memberId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ message: "Invalid member id", issues: params.error.flatten() });
+    res.status(400).json({ errors: params.error.issues });
     return;
   }
   const body = patchMemberSchema.safeParse(req.body ?? {});
   if (!body.success) {
-    res.status(400).json({
-      message: "Invalid payload",
-      issues: body.error.flatten()
-    });
+    res.status(400).json({ errors: body.error.issues });
     return;
   }
 
@@ -213,7 +218,7 @@ householdRouter.patch("/members/:memberId", requireRole(["owner", "admin"]), asy
 householdRouter.get("/members/:memberId/data-count", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ message: "Invalid member id" });
+    res.status(400).json({ errors: params.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
@@ -224,7 +229,7 @@ householdRouter.get("/members/:memberId/data-count", requireRole(["owner", "admi
 householdRouter.post("/members/:memberId/create-login", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ message: "Invalid member id" });
+    res.status(400).json({ errors: params.error.issues });
     return;
   }
   const householdId = req.authUser!.householdId;
@@ -233,15 +238,15 @@ householdRouter.post("/members/:memberId/create-login", requireRole(["owner", "a
     if (out.code === "NOT_FOUND") { res.status(404).json({ message: "Member not found", code: out.code }); return; }
     if (out.code === "ALREADY_HAS_LOGIN") { res.status(409).json({ message: "Member already has a login account", code: out.code }); return; }
     if (out.code === "EMAIL_REQUIRED") { res.status(400).json({ message: "Member must have an email to create a login", code: out.code }); return; }
-    if (out.code === "EMAIL_CONFLICT") { res.status(409).json({ message: "Email already in use by another account", code: out.code }); return; }
+    res.status(409).json({ message: "Email already in use by another account", code: out.code }); return;
   }
-  res.status(201).json({ message: "Login account created. Default password: ChangeMe123!" });
+  res.status(201).json({ inviteSent: out.inviteSent });
 });
 
 householdRouter.post("/members/:memberId/reset-password", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ message: "Invalid member id" });
+    res.status(400).json({ errors: params.error.issues });
     return;
   }
   const out = await resetMemberPassword(req.authUser!.householdId, params.data.memberId);
@@ -253,7 +258,11 @@ householdRouter.post("/members/:memberId/reset-password", requireRole(["owner", 
     res.status(404).json({ message: "Member not found", code: out.code });
     return;
   }
-  res.status(200).json({ tempPassword: out.tempPassword });
+  if (out.emailSent) {
+    res.status(200).json({ emailSent: true });
+    return;
+  }
+  res.status(200).json({ emailSent: false, tempPassword: out.tempPassword });
 });
 
 const deleteMemberBodySchema = z.object({
@@ -263,7 +272,7 @@ const deleteMemberBodySchema = z.object({
 householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const params = z.object({ memberId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ message: "Invalid member id", issues: params.error.flatten() });
+    res.status(400).json({ errors: params.error.issues });
     return;
   }
   const body = deleteMemberBodySchema.safeParse(req.body ?? {});
@@ -272,6 +281,10 @@ householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), as
     deleteLogin: body.success ? body.data.deleteLogin : false
   });
   if (!out.ok) {
+    if (out.code === "HAS_LOGIN_ACCOUNT") {
+      res.status(409).json({ message: "Member has a linked login account", code: out.code });
+      return;
+    }
     res.status(404).json({ message: "Member not found", code: out.code });
     return;
   }

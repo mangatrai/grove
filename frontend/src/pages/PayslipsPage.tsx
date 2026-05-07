@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActionIcon, Alert, Badge, Box, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
 import { IconEye, IconFilePlus, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
 
@@ -159,54 +160,46 @@ export function PayslipsPage() {
   const latest = data?.items[0] ?? null;
 
   return (
-    <div className="payslips-page">
+    <Stack>
       {/* Page header */}
-      <div className="card">
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Payslips</h1>
+      <Paper withBorder p="lg">
+        <Group align="center" gap={8} wrap="wrap">
+          <Title order={2} m={0}>Payslips</Title>
           <HelpIcon label="Add payslip PDFs via New Import, or add a manual stub with no PDF. Manage employers in Settings → Profile." />
-          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-            <Link
-              to="/imports"
-              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "0.3rem 0.75rem", border: "1px solid var(--color-border)", borderRadius: 6, fontSize: 13, textDecoration: "none", color: "var(--color-text)" }}
-            >
-              <IconFilePlus size={14} />
+          <Group ml="auto" gap={8}>
+            <Button component={Link} to="/imports" variant="default" leftSection={<IconFilePlus size={14} />}>
               Import PDF
-            </Link>
-            <Link
-              to="/payslips/new"
-              style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "0.3rem 0.75rem", background: "var(--color-accent)", color: "#fff", border: "none", borderRadius: 6, fontSize: 13, textDecoration: "none", fontWeight: 600 }}
-            >
-              <IconPlus size={14} />
+            </Button>
+            <Button component={Link} to="/payslips/new" leftSection={<IconPlus size={14} />}>
               Add manually
-            </Link>
-          </div>
-        </div>
-      </div>
+            </Button>
+          </Group>
+        </Group>
+      </Paper>
 
       {/* Hero KPI cards — latest payslip stats */}
       {latest ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "0.75rem", marginTop: "1rem" }}>
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
           {([
-            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), accent: "var(--color-accent)" },
-            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   accent: "var(--color-success, #16a34a)" },
-            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     accent: "var(--color-text-muted)" },
-            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       accent: "var(--color-text-muted)" },
-          ] as const).map(({ label, value, accent }) => (
-            <div key={label} className="card" style={{ marginBottom: 0, textAlign: "center", borderTop: `3px solid ${accent}` }}>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>{label}</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: accent }}>{value}</div>
-            </div>
+            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), borderColor: "var(--mantine-color-blue-5)", c: "blue" },
+            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   borderColor: "var(--mantine-color-green-6)", c: "green" },
+            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     borderColor: "var(--mantine-color-gray-4)", c: "dimmed" },
+            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       borderColor: "var(--mantine-color-gray-4)", c: "dimmed" },
+          ] as const).map(({ label, value, borderColor, c }) => (
+            <Paper key={label} withBorder p="md" ta="center" style={{ borderTop: `3px solid ${borderColor}` }}>
+              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={4}>{label}</Text>
+              <Text size="xl" fw={700} c={c}>{value}</Text>
+            </Paper>
           ))}
-        </div>
+        </SimpleGrid>
       ) : null}
 
       {/* Belongs-to filter */}
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <label style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap" }}>Belongs-to</label>
+      <Paper withBorder p="lg">
+        <Group align="center" gap={8}>
+          <Text size="sm" fw={500}>Belongs-to</Text>
           <HelpIcon label="Household: shared payslips only. Member: that person’s payslips. Clear to include everyone." />
-          <div style={{ flex: 1, maxWidth: 260 }}>
+          <Box style={{ flex: 1, maxWidth: 260 }}>
             <HierarchicalSearchPicker
               value={ownerFilter}
               onChange={(v) => setOwnerFilter(v)}
@@ -215,79 +208,82 @@ export function PayslipsPage() {
               ariaLabel="Filter payslips by belongs-to"
               clearable
             />
-          </div>
-        </div>
-      </div>
+          </Box>
+        </Group>
+      </Paper>
 
       {/* Income charts */}
       {!loading && data && data.items.length > 0 ? (
-        <div className="card" style={{ marginTop: "1rem" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
-            <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Income &amp; payroll</h2>
+        <Paper withBorder p="lg">
+          <Group align="center" gap={8} mb="md">
+            <Title order={4} m={0}>Income &amp; payroll</Title>
             <HelpIcon label="Charts derived from all payslips matching the current filter. Area chart shows gross vs net over time. Bar chart shows monthly breakdown." />
-          </div>
+          </Group>
           <PayslipIncomeCharts items={data.items} />
-        </div>
+        </Paper>
       ) : null}
 
       {/* Payslip list */}
-      <div className="card" style={{ marginTop: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.75rem" }}>
-          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Saved stubs</h2>
-          {data ? <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{data.total} total</span> : null}
-        </div>
-        {loadError ? <p className="error">{loadError}</p> : null}
-        {loading ? <p className="muted">Loading…</p> : null}
+      <Paper withBorder p="lg">
+        <Group align="center" gap={8} mb="md">
+          <Title order={4} m={0}>Saved stubs</Title>
+          {data ? <Badge variant="light">{data.total} total</Badge> : null}
+        </Group>
+        {loadError ? <Alert color="red" mb="sm">{loadError}</Alert> : null}
+        {loading ? <Text c="dimmed">Loading…</Text> : null}
         {!loading && data && data.items.length === 0 ? (
-          <p className="muted">No payslips yet. Use "Import PDF" or "Add manually" above.</p>
+          <Text c="dimmed">No payslips yet. Use "Import PDF" or "Add manually" above.</Text>
         ) : null}
         {!loading && data && data.items.length > 0 ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          <Stack gap={6}>
             {data.items.map((r) => (
-              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "0.65rem 0.75rem", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-surface)" }}>
-                {/* Period badge */}
-                <div style={{ minWidth: 90, fontSize: 13, fontWeight: 600 }}>
-                  {r.payPeriodStart ?? "—"}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)", flex: 1 }}>
-                  {r.payPeriodEnd ? `→ ${r.payPeriodEnd}` : ""}
-                  {r.payDate ? <span style={{ marginLeft: 8 }}>· paid {r.payDate}</span> : null}
-                </div>
-                {/* Gross / Net */}
-                <div style={{ display: "flex", gap: "1.5rem", fontSize: 13 }}>
-                  <div>
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block" }}>Gross</span>
-                    <span style={{ fontWeight: 600 }}>{formatMoney(r.grossPayCurrent)}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)", display: "block" }}>Net</span>
-                    <span style={{ fontWeight: 600, color: "var(--color-success, #16a34a)" }}>{formatMoney(r.netPayCurrent)}</span>
-                  </div>
-                </div>
-                {/* Actions */}
-                <div style={{ display: "flex", gap: 6 }}>
-                  <Link
-                    to={`/payslips/${r.id}`}
-                    title="View payslip"
-                    style={{ display: "inline-flex", alignItems: "center", padding: "0.25rem 0.5rem", border: "1px solid var(--color-border)", borderRadius: 4, color: "var(--color-text-muted)" }}
-                  >
-                    <IconEye size={14} />
-                  </Link>
-                  <button
-                    type="button"
-                    title="Delete payslip"
-                    disabled={deletingId === r.id}
-                    onClick={() => setDeleteConfirmId(r.id)}
-                    style={{ display: "inline-flex", alignItems: "center", padding: "0.25rem 0.5rem", border: "1px solid var(--color-border)", borderRadius: 4, background: "none", cursor: "pointer", color: "var(--color-danger, #dc2626)" }}
-                  >
-                    <IconTrash size={14} />
-                  </button>
-                </div>
-              </div>
+              <Paper key={r.id} withBorder p="xs" radius="sm">
+                <Group gap="md" wrap="nowrap" align="center">
+                  {/* Period */}
+                  <Text size="sm" fw={600} style={{ minWidth: 90 }}>
+                    {r.payPeriodStart ?? "—"}
+                  </Text>
+                  <Text size="xs" c="dimmed" style={{ flex: 1 }}>
+                    {r.payPeriodEnd ? `→ ${r.payPeriodEnd}` : ""}
+                    {r.payDate ? ` · paid ${r.payDate}` : null}
+                  </Text>
+                  {/* Gross / Net */}
+                  <Group gap="xl">
+                    <Box>
+                      <Text size="xs" c="dimmed" lh={1.2}>Gross</Text>
+                      <Text size="sm" fw={600}>{formatMoney(r.grossPayCurrent)}</Text>
+                    </Box>
+                    <Box>
+                      <Text size="xs" c="dimmed" lh={1.2}>Net</Text>
+                      <Text size="sm" fw={600} c="green">{formatMoney(r.netPayCurrent)}</Text>
+                    </Box>
+                  </Group>
+                  {/* Actions */}
+                  <Group gap={6} wrap="nowrap">
+                    <ActionIcon
+                      component={Link}
+                      to={`/payslips/${r.id}`}
+                      title="View payslip"
+                      variant="default"
+                    >
+                      <IconEye size={14} />
+                    </ActionIcon>
+                    <ActionIcon
+                      title="Delete payslip"
+                      disabled={deletingId === r.id}
+                      onClick={() => setDeleteConfirmId(r.id)}
+                      variant="default"
+                      color="red"
+                    >
+                      <IconTrash size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Group>
+              </Paper>
             ))}
-          </div>
+          </Stack>
         ) : null}
-      </div>
+      </Paper>
 
       <ConfirmDialog
         opened={deleteConfirmId !== null}
@@ -298,6 +294,6 @@ export function PayslipsPage() {
         onClose={() => setDeleteConfirmId(null)}
         onConfirm={() => deletePayslip(deleteConfirmId!)}
       />
-    </div>
+    </Stack>
   );
 }

@@ -1,9 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 
 import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
+import { env } from "../../config/env.js";
 
 import { isParserProfileId } from "../imports/profiles/profile-ids.js";
+import { createPasswordResetToken } from "../auth/auth.service.js";
+import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
+import { renderMemberInviteTemplate } from "../mailer/templates/member-invite.js";
+import { renderPasswordResetTemplate } from "../mailer/templates/password-reset.js";
 import {
   employersPayloadSchema,
   type EmployerInput,
@@ -32,11 +37,22 @@ export type HouseholdSettings = {
   monthlySavingsTargetUsd: number | null;
   salaryDepositFinancialAccountId: string | null;
   employers: EmployerStub[];
+  city: string | null;
+  state: string | null;
+  combinedGrossIncomeUsd: number | null;
 };
 
 export async function getHouseholdSettings(householdId: string, userId?: string): Promise<HouseholdSettings | null> {
-  const base = await qGet<{ monthlySavingsTargetUsd: number | null }>(
-    `SELECT monthly_savings_target_usd AS "monthlySavingsTargetUsd"
+  const base = await qGet<{
+    monthlySavingsTargetUsd: number | null;
+    city: string | null;
+    state: string | null;
+    combinedGrossIncomeUsd: number | null;
+  }>(
+    `SELECT monthly_savings_target_usd AS "monthlySavingsTargetUsd",
+            city,
+            state,
+            combined_gross_income_usd AS "combinedGrossIncomeUsd"
          FROM household WHERE id = ?`,
     householdId
   );
@@ -86,10 +102,21 @@ export async function getHouseholdSettings(householdId: string, userId?: string)
     }
   }
 
+  let combinedGrossIncomeUsd: number | null = null;
+  if (base.combinedGrossIncomeUsd != null && Number.isFinite(Number(base.combinedGrossIncomeUsd))) {
+    const g = Number(base.combinedGrossIncomeUsd);
+    if (g >= 0) {
+      combinedGrossIncomeUsd = Math.round(g * 100) / 100;
+    }
+  }
+
   return {
     monthlySavingsTargetUsd,
     salaryDepositFinancialAccountId,
-    employers
+    employers,
+    city: base.city?.trim() ? String(base.city) : null,
+    state: base.state?.trim() ? String(base.state) : null,
+    combinedGrossIncomeUsd
   };
 }
 
@@ -119,6 +146,9 @@ export async function updateHouseholdMonthlySavingsTarget(
 
 export type PatchHouseholdSettingsInput = {
   monthlySavingsTargetUsd?: number | null;
+  city?: string | null;
+  state?: string | null;
+  combinedGrossIncomeUsd?: number | null;
 };
 
 export type PatchHouseholdSettingsFailure = { ok: false; code: "INVALID_AMOUNT" };
@@ -132,6 +162,23 @@ export async function patchHouseholdSettings(
     if (!out.ok) {
       return out;
     }
+  }
+
+  if (input.city !== undefined) {
+    await qExec(`UPDATE household SET city = ? WHERE id = ?`, input.city, householdId);
+  }
+  if (input.state !== undefined) {
+    await qExec(`UPDATE household SET state = ? WHERE id = ?`, input.state, householdId);
+  }
+  if (input.combinedGrossIncomeUsd !== undefined) {
+    if (input.combinedGrossIncomeUsd !== null) {
+      if (!Number.isFinite(input.combinedGrossIncomeUsd) || input.combinedGrossIncomeUsd < 0) {
+        return { ok: false, code: "INVALID_AMOUNT" };
+      }
+    }
+    const v =
+      input.combinedGrossIncomeUsd === null ? null : Math.round(input.combinedGrossIncomeUsd * 100) / 100;
+    await qExec(`UPDATE household SET combined_gross_income_usd = ? WHERE id = ?`, v, householdId);
   }
 
   return { ok: true };
@@ -152,6 +199,11 @@ export type HouseholdMemberProfile = {
   avatarKey: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  age: number | null;
+  sex: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
+  individualGrossIncomeUsd: number | null;
+  riskTolerance: "conservative" | "moderate" | "aggressive" | null;
+  financialGoals: string[];
 };
 
 type MemberProfileRow = {
@@ -164,12 +216,44 @@ type MemberProfileRow = {
   avatar_key: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  age: number | null;
+  sex: string | null;
+  individual_gross_income_usd: number | null;
+  risk_tolerance: string | null;
+  financial_goals_json: string | null;
 };
+
+function parseFinancialGoalsJson(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) {
+    return [];
+  }
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v)) {
+      return [];
+    }
+    return v.filter((x): x is string => typeof x === "string");
+  } catch {
+    return [];
+  }
+}
 
 function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile {
   const parts = row.full_name.trim().split(/\s+/);
   const firstName = parts[0] ?? "";
   const lastName = parts.slice(1).join(" ");
+  const sexVal = row.sex;
+  const validSex =
+    sexVal === "male" || sexVal === "female" || sexVal === "nonbinary" || sexVal === "prefer_not_to_say"
+      ? sexVal
+      : null;
+  const rt = row.risk_tolerance;
+  const validRt =
+    rt === "conservative" || rt === "moderate" || rt === "aggressive" ? rt : null;
+  const ig =
+    row.individual_gross_income_usd != null && Number.isFinite(Number(row.individual_gross_income_usd))
+      ? Math.round(Number(row.individual_gross_income_usd) * 100) / 100
+      : null;
   return {
     id: row.id,
     householdId: row.household_id,
@@ -181,7 +265,12 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
     phoneNumber: row.phone_number,
     avatarKey: row.avatar_key,
     role: row.role,
-    relationship: row.relationship
+    relationship: row.relationship,
+    age: row.age != null && Number.isFinite(Number(row.age)) ? Number(row.age) : null,
+    sex: validSex,
+    individualGrossIncomeUsd: ig,
+    riskTolerance: validRt,
+    financialGoals: parseFinancialGoalsJson(row.financial_goals_json)
   };
 }
 
@@ -194,6 +283,11 @@ export type PatchProfileInput = {
   avatarKey?: string | null;
   salaryDepositFinancialAccountId?: string | null;
   employers?: EmployerInput[];
+  age?: number | null;
+  sex?: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
+  individualGrossIncomeUsd?: number | null;
+  riskTolerance?: "conservative" | "moderate" | "aggressive" | null;
+  financialGoals?: string[];
 };
 
 export type CreateMemberInput = {
@@ -227,7 +321,8 @@ async function ensureCurrentUserProfile(
 ): Promise<HouseholdMemberProfile | null> {
   const existing = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -287,7 +382,8 @@ async function ensureCurrentUserProfile(
 
   const created = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -319,7 +415,8 @@ export async function patchCurrentUserProfile(
   const existing = ensured
     ? await qGet<MemberProfileRow>(
         `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -394,6 +491,41 @@ export async function patchCurrentUserProfile(
     }
   }
 
+  if (input.age !== undefined) {
+    await qExec(`UPDATE person_profile SET age = ? WHERE household_id = ? AND linked_user_id = ?`, input.age, householdId, userId);
+  }
+  if (input.sex !== undefined) {
+    await qExec(`UPDATE person_profile SET sex = ? WHERE household_id = ? AND linked_user_id = ?`, input.sex, householdId, userId);
+  }
+  if (input.individualGrossIncomeUsd !== undefined) {
+    const v =
+      input.individualGrossIncomeUsd === null
+        ? null
+        : Math.round(input.individualGrossIncomeUsd * 100) / 100;
+    await qExec(
+      `UPDATE person_profile SET individual_gross_income_usd = ? WHERE household_id = ? AND linked_user_id = ?`,
+      v,
+      householdId,
+      userId
+    );
+  }
+  if (input.riskTolerance !== undefined) {
+    await qExec(
+      `UPDATE person_profile SET risk_tolerance = ? WHERE household_id = ? AND linked_user_id = ?`,
+      input.riskTolerance,
+      householdId,
+      userId
+    );
+  }
+  if (input.financialGoals !== undefined) {
+    await qExec(
+      `UPDATE person_profile SET financial_goals_json = ? WHERE household_id = ? AND linked_user_id = ?`,
+      JSON.stringify(input.financialGoals),
+      householdId,
+      userId
+    );
+  }
+
   const nextPhone = input.phoneNumber !== undefined ? input.phoneNumber : existing.phone_number;
   const nextAvatar = input.avatarKey !== undefined ? input.avatarKey : existing.avatar_key;
 
@@ -418,7 +550,8 @@ export async function patchCurrentUserProfile(
 
   const updated = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -438,7 +571,8 @@ export async function patchCurrentUserProfile(
 export async function listHouseholdMembers(householdId: string): Promise<HouseholdMemberProfile[]> {
   const rows = await qAll<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM household_membership m
   JOIN person_profile p
     ON p.id = m.person_profile_id
@@ -456,7 +590,9 @@ const DEFAULT_MEMBER_PASSWORD = "ChangeMe123!";
 export async function createHouseholdMember(
   householdId: string,
   input: CreateMemberInput
-): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "EMAIL_CONFLICT" | "EMAIL_REQUIRED" }> {
+): Promise<
+  { ok: true; member: HouseholdMemberProfile; inviteSent: boolean } | { ok: false; code: "EMAIL_CONFLICT" | "EMAIL_REQUIRED" }
+> {
   const profileId = randomUUID();
   const membershipId = randomUUID();
   const email = input.email ?? null;
@@ -472,7 +608,13 @@ export async function createHouseholdMember(
     [input.firstName?.trim() ?? "", input.lastName?.trim() ?? ""].filter(Boolean).join(" ").trim();
 
   const userId = input.createLogin ? randomUUID() : null;
-  const passwordHash = input.createLogin ? await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12) : null;
+  const emailConfigured = isEmailConfigured();
+  const useInviteFlow = Boolean(input.createLogin && emailConfigured);
+  const passwordHash = input.createLogin
+    ? useInviteFlow
+      ? await bcrypt.hash(randomUUID(), 12)
+      : await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12)
+    : null;
 
   try {
     await qBegin(async (tx) => {
@@ -507,7 +649,8 @@ export async function createHouseholdMember(
 
   const created = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -521,7 +664,15 @@ export async function createHouseholdMember(
   if (!created) {
     throw new Error("Created member could not be loaded");
   }
-  return { ok: true, member: toHouseholdMemberProfile(created) };
+  if (userId && useInviteFlow) {
+    const rawToken = await createPasswordResetToken(userId, 24);
+    const resetLink = `${env.PUBLIC_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    void sendMail({
+      to: email!,
+      ...renderMemberInviteTemplate({ resetLink })
+    });
+  }
+  return { ok: true, member: toHouseholdMemberProfile(created), inviteSent: Boolean(userId && useInviteFlow) };
 }
 
 export async function patchHouseholdMember(
@@ -531,7 +682,8 @@ export async function patchHouseholdMember(
 ): Promise<{ ok: true; member: HouseholdMemberProfile } | { ok: false; code: "NOT_FOUND" | "EMAIL_CONFLICT" }> {
   const existing = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -583,7 +735,8 @@ export async function patchHouseholdMember(
 
   const updated = await qGet<MemberProfileRow>(
     `
-  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship
+  SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
+         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -626,7 +779,7 @@ export async function deleteHouseholdMember(
   householdId: string,
   memberId: string,
   opts: { deleteLogin?: boolean } = {}
-): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
+): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "HAS_LOGIN_ACCOUNT" }> {
   const existing = await qGet<{ id: string; linked_user_id: string | null }>(
     `
   SELECT p.id, p.linked_user_id
@@ -643,13 +796,10 @@ export async function deleteHouseholdMember(
   if (!existing) {
     return { ok: false, code: "NOT_FOUND" };
   }
+  if (existing.linked_user_id && !opts.deleteLogin) {
+    return { ok: false, code: "HAS_LOGIN_ACCOUNT" };
+  }
   await qBegin(async (tx) => {
-    if (opts.deleteLogin && existing.linked_user_id) {
-      await tx.unsafe(`DELETE FROM app_user WHERE id = $1 AND household_id = $2`, [
-        existing.linked_user_id,
-        householdId
-      ] as never[]);
-    }
     await tx.unsafe(`DELETE FROM household_membership WHERE household_id = $1 AND person_profile_id = $2`, [
       householdId,
       memberId
@@ -658,6 +808,12 @@ export async function deleteHouseholdMember(
       householdId,
       memberId
     ] as never[]);
+    if (opts.deleteLogin && existing.linked_user_id) {
+      await tx.unsafe(`DELETE FROM app_user WHERE id = $1 AND household_id = $2`, [
+        existing.linked_user_id,
+        householdId
+      ] as never[]);
+    }
   });
   return { ok: true };
 }
@@ -665,7 +821,9 @@ export async function deleteHouseholdMember(
 export async function createLoginForMember(
   householdId: string,
   memberId: string
-): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" | "ALREADY_HAS_LOGIN" | "EMAIL_REQUIRED" | "EMAIL_CONFLICT" }> {
+): Promise<
+  { ok: true; inviteSent: boolean } | { ok: false; code: "NOT_FOUND" | "ALREADY_HAS_LOGIN" | "EMAIL_REQUIRED" | "EMAIL_CONFLICT" }
+> {
   const existing = await qGet<{ id: string; linked_user_id: string | null; email: string | null }>(
     `
   SELECT p.id, p.linked_user_id, p.email
@@ -682,7 +840,10 @@ export async function createLoginForMember(
   if (!existing.email?.trim()) return { ok: false, code: "EMAIL_REQUIRED" };
 
   const userId = randomUUID();
-  const passwordHash = await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12);
+  const inviteEnabled = isEmailConfigured();
+  const passwordHash = inviteEnabled
+    ? await bcrypt.hash(randomUUID(), 12)
+    : await bcrypt.hash(DEFAULT_MEMBER_PASSWORD, 12);
   try {
     await qBegin(async (tx) => {
       await tx.unsafe(
@@ -700,7 +861,15 @@ export async function createLoginForMember(
     if (isPgUniqueViolation(err)) return { ok: false, code: "EMAIL_CONFLICT" };
     throw err;
   }
-  return { ok: true };
+  if (inviteEnabled) {
+    const rawToken = await createPasswordResetToken(userId, 24);
+    const resetLink = `${env.PUBLIC_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    void sendMail({
+      to: existing.email,
+      ...renderMemberInviteTemplate({ resetLink })
+    });
+  }
+  return { ok: true, inviteSent: inviteEnabled };
 }
 
 /**
@@ -709,7 +878,7 @@ export async function createLoginForMember(
  */
 function generateTempPassword(): string {
   const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const pick = () => Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const pick = () => Array.from(randomBytes(4), (b) => chars[b % chars.length]).join("");
   let pw: string;
   do {
     pw = `${pick()}-${pick()}-${pick()}`;
@@ -720,10 +889,15 @@ function generateTempPassword(): string {
 export async function resetMemberPassword(
   householdId: string,
   memberId: string
-): Promise<{ ok: true; tempPassword: string } | { ok: false; code: "NOT_FOUND" | "NO_LOGIN" }> {
-  const row = await qGet<{ linked_user_id: string | null }>(
-    `SELECT p.linked_user_id
+): Promise<
+  | { ok: true; emailSent: true }
+  | { ok: true; emailSent: false; tempPassword: string }
+  | { ok: false; code: "NOT_FOUND" | "NO_LOGIN" }
+> {
+  const row = await qGet<{ linked_user_id: string | null; login_email: string | null }>(
+    `SELECT p.linked_user_id, u.email AS login_email
      FROM person_profile p
+     LEFT JOIN app_user u ON u.id = p.linked_user_id AND u.household_id = p.household_id
      WHERE p.household_id = ? AND p.id = ?
      LIMIT 1`,
     householdId,
@@ -731,6 +905,25 @@ export async function resetMemberPassword(
   );
   if (!row) return { ok: false, code: "NOT_FOUND" };
   if (!row.linked_user_id) return { ok: false, code: "NO_LOGIN" };
+  if (!row.login_email?.trim()) return { ok: false, code: "NO_LOGIN" };
+  const emailConfigured = isEmailConfigured();
+
+  if (emailConfigured) {
+    await qExec(
+      `UPDATE app_user
+       SET token_version = token_version + 1
+       WHERE id = ? AND household_id = ?`,
+      row.linked_user_id,
+      householdId
+    );
+    const rawToken = await createPasswordResetToken(row.linked_user_id, 1);
+    const resetLink = `${env.PUBLIC_BASE_URL}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    void sendMail({
+      to: row.login_email,
+      ...renderPasswordResetTemplate({ resetLink })
+    });
+    return { ok: true, emailSent: true };
+  }
 
   const tempPassword = generateTempPassword();
   const passwordHash = await bcrypt.hash(tempPassword, 12);
@@ -742,5 +935,5 @@ export async function resetMemberPassword(
     row.linked_user_id,
     householdId
   );
-  return { ok: true, tempPassword };
+  return { ok: true, emailSent: false, tempPassword };
 }

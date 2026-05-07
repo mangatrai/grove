@@ -4,6 +4,7 @@ import { useMantineColorScheme } from "@mantine/core";
 import {
   IconSun,
   IconMoon,
+  IconDeviceDesktop,
   IconUpload,
   IconMenu2,
 } from "@tabler/icons-react";
@@ -32,8 +33,7 @@ type ProfileResponse = {
 export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   const token = useAuthToken();
   const navigate = useNavigate();
-  const { colorScheme, toggleColorScheme } = useMantineColorScheme();
-  const isDark = colorScheme === "dark";
+  const { colorScheme, setColorScheme } = useMantineColorScheme();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuLabel, setMenuLabel] = useState("Account");
@@ -84,7 +84,7 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   }, [token]);
 
   function onNewImport() {
-    navigate("/imports");
+    navigate("/imports/workspace");
   }
 
   function logout() {
@@ -116,20 +116,39 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
         <div className="app-topbar__spacer" aria-hidden />
 
         <div className="app-topbar__actions">
-          {/* Dark mode toggle */}
-          <button
-            type="button"
-            className="app-topbar__icon-btn"
-            aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            title={isDark ? "Switch to light mode" : "Switch to dark mode"}
-            onClick={() => toggleColorScheme()}
-          >
-            {isDark ? (
-              <IconSun size={18} color="#cbd5e1" />
-            ) : (
-              <IconMoon size={18} color="#cbd5e1" />
-            )}
-          </button>
+          {/* Theme switcher: Light | Auto (OS) | Dark */}
+          <div className="theme-switcher" role="group" aria-label="Color scheme">
+            <button
+              type="button"
+              className={`theme-switcher__btn${colorScheme === "light" ? " theme-switcher__btn--active" : ""}`}
+              onClick={() => setColorScheme("light")}
+              title="Light mode"
+              aria-label="Light mode"
+              aria-pressed={colorScheme === "light"}
+            >
+              <IconSun size={13} />
+            </button>
+            <button
+              type="button"
+              className={`theme-switcher__btn${colorScheme === "auto" ? " theme-switcher__btn--active" : ""}`}
+              onClick={() => setColorScheme("auto")}
+              title="Auto — follow OS setting"
+              aria-label="Auto (follow OS)"
+              aria-pressed={colorScheme === "auto"}
+            >
+              <IconDeviceDesktop size={13} />
+            </button>
+            <button
+              type="button"
+              className={`theme-switcher__btn${colorScheme === "dark" ? " theme-switcher__btn--active" : ""}`}
+              onClick={() => setColorScheme("dark")}
+              title="Dark mode"
+              aria-label="Dark mode"
+              aria-pressed={colorScheme === "dark"}
+            >
+              <IconMoon size={13} />
+            </button>
+          </div>
 
           {/* Import button */}
           <button
