@@ -39,7 +39,9 @@ export async function readHfbManifestFromFile(filePath: string): Promise<HfbMani
         { code: "ENCRYPTED_NO_KEY" }
       );
     }
-    buffer = decryptBackup(buffer, env.BACKUP_ENCRYPTION_KEY);
+    // Buffer.from() ensures the result is Buffer<ArrayBuffer> (NonSharedBuffer), which is
+    // required by unzipper and compatible across Node 20–24 type definitions.
+    buffer = Buffer.from(decryptBackup(buffer, env.BACKUP_ENCRYPTION_KEY));
   }
 
   let manifest: Record<string, unknown>;
