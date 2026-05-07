@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## SEC-155 (2026-05-07): GDrive OAuth scope narrowed to drive.file + drive.metadata.readonly
+
+**Why:** Post-review analysis confirmed all backup files are app-created (.hfb uploaded by the app itself). `drive.file` covers create/list/download/delete on app-created files. The only non-app-owned resource is the user-supplied folder — `files.get(folderId)` to verify it exists needs `drive.metadata.readonly` (metadata only, no file content). Together these are significantly narrower than the original `drive` scope.
+
+**What:**
+- OAuth consent URL scope changed from `["drive"]` to `["drive.file", "drive.metadata.readonly"]`.
+- Code comment explains the scope split and what each covers.
+- Existing refresh tokens issued under the old `drive` scope remain functional at the Google API level; new OAuth flows will request the narrower pair. Users can disconnect and reconnect via Settings → Data to downgrade to the narrower token.
+
+**Post-merge backlog created:** `docs/SECURITY_HARDENING_BACKLOG.md` — tracks remaining deferred items from the pre-merge review (insight cooldown, token cleanup, Drive query escaping, etc.).
+
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `docs/SECURITY_HARDENING_BACKLOG.md`, `docs/EXPORT_IMPORT_BACKLOG.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## SEC-154 (2026-05-06): GDrive refresh token encrypted at rest; OAuth scope corrected
 
 **Why:** Pre-merge review identified two related risks: (1) the OAuth refresh token was stored as plaintext in `household_gdrive_config`; (2) the scope was too broad (`drive`). A scope change to `drive.file` was initially applied but reverted — `drive.file` only covers files the app created via the API and cannot access arbitrary user-supplied folders. The correct mitigation is encrypting the long-lived token, not restricting scope to a value that breaks functionality.
