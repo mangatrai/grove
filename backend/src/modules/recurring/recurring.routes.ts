@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { requireRole } from "../rbac/rbac.middleware.js";
 import { deleteOverride, listOverrides, upsertOverride } from "./recurring.service.js";
 
 const upsertOverrideSchema = z.object({
@@ -22,7 +23,7 @@ recurringRouter.get("/", async (req: AuthenticatedRequest, res) => {
   res.status(200).json({ ok: true, data });
 });
 
-recurringRouter.post("/", async (req: AuthenticatedRequest, res) => {
+recurringRouter.post("/", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const parsed = upsertOverrideSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     res.status(400).json({ errors: parsed.error.issues });
@@ -34,7 +35,7 @@ recurringRouter.post("/", async (req: AuthenticatedRequest, res) => {
   res.status(200).json({ ok: true, data });
 });
 
-recurringRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
+recurringRouter.delete("/:id", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
   const householdId = req.authUser!.householdId;
   const result = await deleteOverride(householdId, req.params.id);
   if (!result.found) {

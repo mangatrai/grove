@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 
 import { isPgUniqueViolation, qAll, qBegin, qExec, qGet } from "../../db/query.js";
@@ -878,7 +878,7 @@ export async function createLoginForMember(
  */
 function generateTempPassword(): string {
   const chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  const pick = () => Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const pick = () => Array.from(randomBytes(4), (b) => chars[b % chars.length]).join("");
   let pw: string;
   do {
     pw = `${pick()}-${pick()}-${pick()}`;

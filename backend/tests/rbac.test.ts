@@ -15,7 +15,6 @@ import { sqlStmt } from "./pg-stmt.js";
 const app = buildApp();
 
 const SEEDED_HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
-const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
 
 /** bcrypt hash of "ChangeMe123!" */
 const HASH = "$2a$10$Tg2KSaLf8qB4az.7LdyCvuQclHikol6qgE2ZWMJt5/chBWCfMO6eO";

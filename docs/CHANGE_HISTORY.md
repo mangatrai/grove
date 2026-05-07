@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## SEC-153 (2026-05-06): Pre-merge security and hardening fixes
+
+**Why:** Pre-merge review of v2 identified several security and correctness issues before merging to main.
+
+**What:**
+- **Drive OAuth scope narrowed** — changed from `drive` (full Drive access) to `drive.file` (only files the app creates). Limits blast radius if the refresh token is ever compromised. (`backend/src/modules/gdrive/gdrive.service.ts`)
+- **`storagePath` removed from export download error response** — the 404 JSON for a missing/not-ready export was leaking an absolute server filesystem path to API clients. Removed. (`backend/src/modules/export/exports.routes.ts`)
+- **`generateTempPassword` uses `crypto.randomBytes`** — replaced `Math.random()` with `randomBytes(4)` per group; consistent with how `createPasswordResetToken` uses `webcrypto`. (`backend/src/modules/household/household.service.ts`)
+- **JWT_SECRET default rejected in PROD** — added a startup guard that throws if `MODE=PROD` and `JWT_SECRET` is still the hardcoded dev default. Prevents silent insecure deployments. (`backend/src/config/env.ts`)
+- **Recurring overrides require admin/owner role** — `POST /recurring-overrides` and `DELETE /recurring-overrides/:id` now require `requireRole(['owner', 'admin'])`. Read (`GET`) remains accessible to all authenticated members. (`backend/src/modules/recurring/recurring.routes.ts`)
+- **Lint: 3 unused imports/vars in tests** — removed unused `beforeAll` from `category-rule-learning.test.ts`, unused `afterAll` from `payslip-upload.test.ts`, and unused `SEED_BOA_CHECKING` constant from `rbac.test.ts`.
+- **Test: `waitForExportComplete` hardened** — replaced inner `expect(poll.status).toBe(200)` with a throw (gives a clearer error on 401/5xx) and added a 50ms inter-poll delay to reduce ordering sensitivity in the full suite. (`backend/tests/app.test.ts`)
+- **CLAUDE.md: Anthropic SDK note** — clarified that `@anthropic-ai/sdk` is retained for the AI insights pipeline (`LLM_PROVIDER=anthropic`), not just for categorization (which was removed). Prevents future sessions from incorrectly removing the dependency.
+- **CHANGE_HISTORY UX-151: remove stale "still to migrate" note** — UX-152 completed the work; the stale bullet has been removed.
+
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/exports.routes.ts`, `backend/src/modules/household/household.service.ts`, `backend/src/config/env.ts`, `backend/src/modules/recurring/recurring.routes.ts`, `backend/tests/category-rule-learning.test.ts`, `backend/tests/payslip-upload.test.ts`, `backend/tests/rbac.test.ts`, `backend/tests/app.test.ts`, `CLAUDE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-152 (2026-05-06): SettingsPage ConfirmDialog messages migrated to Mantine
 
 **Why:** The remove-member and reset-password confirmation dialogs still rendered `message` content with raw HTML (`<div>/<p>` plus inline style objects), which diverged from the Mantine-only UI surface target.
@@ -47,9 +66,6 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 | `Box style={{ overflowX: "auto" }}` wrappers | Overflow containers for tables | Mantine has no overflow prop on layout primitives; `style=` is correct here. |
 | `Table.Th style={{ letterSpacing }}` | Letter-spacing on headers | `lts` is a Mantine v7 style prop; either form is acceptable. `style={{ letterSpacing }}` is not a migration miss. |
 | `Table.Td style={{ minWidth }}` | Column min-widths | `miw=` is the Mantine equivalent but `style={{ minWidth }}` is not a structural native-HTML issue; either is acceptable. |
-
-**Still to migrate (genuine miss):**
-- `SettingsPage.tsx` lines ~1785–1824: confirm-dialog `message` prop contains raw `<div style={...}>` error/warning boxes and `<p style={...}>` — should be `Alert`/`Stack`/`Text`.
 
 **Files:** `docs/CHANGE_HISTORY.md`
 

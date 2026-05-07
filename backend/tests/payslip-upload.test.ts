@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import crypto from "node:crypto";
 
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { sqlStmt } from "./pg-stmt.js";
 
 process.env.OPENAI_API_KEY ??= "test-key-for-payslip-upload-tests";

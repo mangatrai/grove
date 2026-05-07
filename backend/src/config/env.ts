@@ -109,6 +109,13 @@ const envSchema = z.object({
 
 export const env = envSchema.parse(process.env);
 
+if (
+  env.MODE === "PROD" &&
+  env.JWT_SECRET === "local-dev-jwt-secret-do-not-use-in-prod-change-me!"
+) {
+  throw new Error("JWT_SECRET must be set to a unique secret in PROD mode — do not use the default value");
+}
+
 function resolveConfiguredPath(filePath: string): string {
   if (path.isAbsolute(filePath)) {
     return filePath;

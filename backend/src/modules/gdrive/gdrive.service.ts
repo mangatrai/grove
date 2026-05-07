@@ -117,7 +117,7 @@ export function buildOAuthConsentUrl(householdId: string, userId: string, folder
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/drive"],
+    scope: ["https://www.googleapis.com/auth/drive.file"],
     state
   });
 }

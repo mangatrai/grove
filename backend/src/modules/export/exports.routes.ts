@@ -199,8 +199,7 @@ exportsRouter.get("/:jobId/download", async (req: AuthenticatedRequest, res) => 
     res.status(404).json({
       code: file.code,
       message: human,
-      jobStatus: file.jobStatus ?? null,
-      storagePath: file.storagePath
+      jobStatus: file.jobStatus ?? null
     });
     return;
   }

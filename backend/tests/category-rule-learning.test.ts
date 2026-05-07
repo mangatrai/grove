@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
 import { sqlStmt } from "./pg-stmt.js";

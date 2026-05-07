@@ -282,8 +282,9 @@ describe("backup encryption (CR-126)", () => {
   async function waitForExportComplete(jobId: string, token: string): Promise<void> {
     for (let i = 0; i < 40; i += 1) {
       const poll = await request(app).get(`/exports/${jobId}`).set("authorization", `Bearer ${token}`);
-      expect(poll.status).toBe(200);
+      if (poll.status !== 200) throw new Error(`Export poll got HTTP ${poll.status} on attempt ${i + 1}`);
       if ((poll.body.status as string) === "complete") return;
+      await new Promise((r) => setTimeout(r, 50));
     }
     throw new Error("Export did not complete in time");
   }
@@ -491,8 +492,9 @@ describe("backup preview (CR-127)", () => {
   async function waitForExportComplete(jobId: string, token: string): Promise<void> {
     for (let i = 0; i < 40; i += 1) {
       const poll = await request(app).get(`/exports/${jobId}`).set("authorization", `Bearer ${token}`);
-      expect(poll.status).toBe(200);
+      if (poll.status !== 200) throw new Error(`Export poll got HTTP ${poll.status} on attempt ${i + 1}`);
       if ((poll.body.status as string) === "complete") return;
+      await new Promise((r) => setTimeout(r, 50));
     }
     throw new Error("Export did not complete in time");
   }

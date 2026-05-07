@@ -171,7 +171,7 @@ When adding a new adapter: create a file in `profiles/`, register its ID in the 
 
 Rule schema: `pattern` (regex), `categoryId`, `amountScope` (any | credit_only | debit_only), `priority`.
 
-> **Note:** AI/LLM-based transaction categorization (Anthropic API) was explored and fully removed. Classification is rule-based only. OpenAI is used exclusively for payslip PDF extraction.
+> **Note:** AI/LLM-based transaction categorization (Anthropic API) was explored and fully removed. Classification is rule-based only. OpenAI is used for payslip PDF extraction. The `@anthropic-ai/sdk` remains in the dependency tree for the optional AI insights pipeline (`LLM_PROVIDER=anthropic`); do not remove it.
 
 ---
 
