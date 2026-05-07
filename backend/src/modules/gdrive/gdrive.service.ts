@@ -159,11 +159,16 @@ export function buildOAuthConsentUrl(householdId: string, userId: string, folder
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    // `drive` (full-access) is required because the app accesses an existing user-supplied
-    // folder (identified by ID) rather than a folder it created itself. `drive.file` only
-    // covers files/folders created by the app via the API and cannot see arbitrary folders.
-    // Mitigation: the refresh token is encrypted at rest in the DB (see encryptToken/decryptToken).
-    scope: ["https://www.googleapis.com/auth/drive"],
+    // Minimal scope combination:
+    // - drive.file: create/list/download/delete the .hfb files the app itself creates.
+    //   files.list only returns app-created files; files.create/get/delete work on those.
+    // - drive.metadata.readonly: read metadata (id, name, mimeType) on the user-supplied
+    //   folder to verify it exists and is a folder. Grants no access to file content.
+    //   This is the only call touching a resource the app did not create.
+    scope: [
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive.metadata.readonly"
+    ],
     state
   });
 }
