@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## SEC-154 (2026-05-06): GDrive refresh token encrypted at rest; OAuth scope corrected
+
+**Why:** Pre-merge review identified two related risks: (1) the OAuth refresh token was stored as plaintext in `household_gdrive_config`; (2) the scope was too broad (`drive`). A scope change to `drive.file` was initially applied but reverted — `drive.file` only covers files the app created via the API and cannot access arbitrary user-supplied folders. The correct mitigation is encrypting the long-lived token, not restricting scope to a value that breaks functionality.
+
+**What:**
+- **Refresh token encrypted at rest** — `connectGDrive` now encrypts the token with AES-256-GCM before storing it. `getGDriveCredentials` decrypts on read. Format: `base64(iv[12] || authTag[16] || ciphertext)`. Key is `SHA-256("household-finance:gdrive-token:" || JWT_SECRET)` — dedicated purpose, separate from `BACKUP_ENCRYPTION_KEY`. (`backend/src/modules/gdrive/gdrive.service.ts`)
+- **Graceful fallback for pre-encryption deployments** — if decryption fails (e.g. a plaintext token from before this change), `getGDriveCredentials` returns `null` (Drive shown as "not configured"). The user reconnects Drive; no data is lost.
+- **OAuth scope `drive` retained with comment** — scope narrowing to `drive.file` was reverted because the app reads/writes an existing user-supplied folder, which requires `drive`. A comment in the source explains why and points to token encryption as the blast-radius mitigation.
+- **Test updated** — `gdrive.test.ts` now asserts the stored token is not the raw plaintext (is non-empty and differs from the input), which is the correct post-encryption invariant.
+
+**Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/tests/gdrive.test.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## SEC-153 (2026-05-06): Pre-merge security and hardening fixes
 
 **Why:** Pre-merge review of v2 identified several security and correctness issues before merging to main.

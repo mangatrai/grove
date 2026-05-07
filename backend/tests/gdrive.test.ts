@@ -324,7 +324,9 @@ describe("gdrive API", () => {
     const row = await sqlStmt("SELECT oauth2_refresh_token, folder_id FROM household_gdrive_config WHERE household_id = ?").get(
       HOUSEHOLD_ID
     );
-    expect(row?.oauth2_refresh_token).toBe("mock-refresh-token");
+    // Token is encrypted at rest — the stored value must not be the raw plaintext.
+    expect(row?.oauth2_refresh_token).not.toBe("mock-refresh-token");
+    expect(row?.oauth2_refresh_token).toBeTruthy(); // non-empty / non-null
     expect(row?.folder_id).toBe("folder-callback-ok");
     await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
   });

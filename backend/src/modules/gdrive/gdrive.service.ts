@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { GaxiosError } from "gaxios";
 import { google } from "googleapis";
@@ -8,6 +8,48 @@ import { qExec, qGet } from "../../db/query.js";
 import { logGoogleDriveApiError } from "./log-google-drive-api-error.js";
 
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
+
+// ---------------------------------------------------------------------------
+// Refresh token encryption at rest
+// Stored format: base64( iv[12] || authTag[16] || ciphertext )
+// Key: SHA-256( "household-finance:gdrive-token:" || JWT_SECRET ) — dedicated
+// purpose, separate from BACKUP_ENCRYPTION_KEY.
+// ---------------------------------------------------------------------------
+
+function deriveTokenKey(): Buffer {
+  return createHash("sha256").update(`household-finance:gdrive-token:${env.JWT_SECRET}`).digest();
+}
+
+function encryptToken(plaintext: string): string {
+  const key = deriveTokenKey();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, encrypted]).toString("base64");
+}
+
+/**
+ * Decrypt a token encrypted by `encryptToken`.
+ * Returns `null` when decryption fails — the token is either plaintext from a
+ * pre-encryption deployment or corrupt. Callers should treat `null` as
+ * "credentials unavailable; re-authentication required."
+ */
+function decryptToken(stored: string): string | null {
+  try {
+    const buf = Buffer.from(stored, "base64");
+    if (buf.length < 28) return null; // too short to be a valid envelope
+    const iv = buf.subarray(0, 12);
+    const tag = buf.subarray(12, 28);
+    const encrypted = buf.subarray(28);
+    const key = deriveTokenKey();
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+  } catch {
+    return null;
+  }
+}
 
 export type GDriveStatus = {
   folderId: string;
@@ -117,7 +159,11 @@ export function buildOAuthConsentUrl(householdId: string, userId: string, folder
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: ["https://www.googleapis.com/auth/drive.file"],
+    // `drive` (full-access) is required because the app accesses an existing user-supplied
+    // folder (identified by ID) rather than a folder it created itself. `drive.file` only
+    // covers files/folders created by the app via the API and cannot see arbitrary folders.
+    // Mitigation: the refresh token is encrypted at rest in the DB (see encryptToken/decryptToken).
+    scope: ["https://www.googleapis.com/auth/drive"],
     state
   });
 }
@@ -186,7 +232,7 @@ export async function connectGDrive(
        last_verified_at                  = NOW(),
        last_error                        = NULL`,
     householdId,
-    refreshToken,
+    encryptToken(refreshToken),
     folderId,
     folderName,
     userId
@@ -233,7 +279,11 @@ export async function getGDriveCredentials(householdId: string): Promise<GDriveC
     householdId
   );
   if (!r) return null;
-  const rt = typeof r.oauth2_refresh_token === "string" ? r.oauth2_refresh_token.trim() : "";
+  const stored = typeof r.oauth2_refresh_token === "string" ? r.oauth2_refresh_token.trim() : "";
+  if (!stored) return null;
+  const rt = decryptToken(stored);
+  // null means the stored value failed decryption (plaintext from a pre-encryption deployment
+  // or a corrupt value). Treat as "not configured" so the UI prompts re-auth.
   if (!rt) return null;
   return {
     refreshToken: rt,
