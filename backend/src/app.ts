@@ -83,7 +83,12 @@ function requestLoggerMiddleware(): express.RequestHandler {
       // Skip static asset noise (JS chunks, CSS, images, favicon, etc.)
       if (/\.[a-z0-9]{1,6}$/i.test(req.path)) return;
       const ms = Date.now() - start;
-      log.info(`${req.method} ${req.path} ${res.statusCode} ${ms}ms`);
+      const msg = `${req.method} ${req.path} ${res.statusCode} ${ms}ms`;
+      if (res.statusCode >= 400) {
+        log.error(msg);
+      } else {
+        log.info(msg);
+      }
     });
     next();
   };

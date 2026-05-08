@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-156 (2026-05-07): Request logger now uses correct log level per HTTP status code
+
+**Why:** `requestLoggerMiddleware` in `app.ts` called `log.info()` for every HTTP response unconditionally. 5xx responses (including proxy 504s) were logged at INFO, making them invisible when `LOG_LEVEL=warn` or `LOG_LEVEL=error`. Errors were effectively silent at the HTTP layer.
+
+**What:** Added status-code-based log level selection in `requestLoggerMiddleware`:
+- `>= 400` (4xx and 5xx) → `log.error` — visible at production `LOG_LEVEL=error`
+- `2xx` / `3xx` → `log.info` (unchanged)
+
+**Files:** `backend/src/app.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## SEC-155 (2026-05-07): GDrive OAuth scope narrowed to drive.file + drive.metadata.readonly
 
 **Why:** Post-review analysis confirmed all backup files are app-created (.hfb uploaded by the app itself). `drive.file` covers create/list/download/delete on app-created files. The only non-app-owned resource is the user-supplied folder — `files.get(folderId)` to verify it exists needs `drive.metadata.readonly` (metadata only, no file content). Together these are significantly narrower than the original `drive` scope.
