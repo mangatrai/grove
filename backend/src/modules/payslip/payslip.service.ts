@@ -476,7 +476,7 @@ export async function listPayslipSnapshots(
   const rows = await qAll<Record<string, unknown>>(
     `SELECT * FROM payslip_snapshot
        WHERE ${where.join(" AND ")}
-       ORDER BY created_at DESC, id DESC
+       ORDER BY pay_period_end DESC NULLS LAST, pay_period_start DESC NULLS LAST, created_at DESC, id DESC
        LIMIT ? OFFSET ?`,
     ...params,
     opts.limit,

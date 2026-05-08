@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-157 (2026-05-08): Payslip list sorted by pay period, not upload time
+
+**Why:** `GET /payslips` returned stubs sorted by `created_at DESC` (upload order). Payslips uploaded out of chronological order (backfilling older stubs, re-uploads) appeared randomly interspersed with recent ones.
+
+**What:** Changed `ORDER BY` in `listPayslipSnapshots` to `pay_period_end DESC NULLS LAST, pay_period_start DESC NULLS LAST, created_at DESC, id DESC`. Pay period end date is the primary sort; start date breaks ties (mid-period vs end-of-period stubs); upload time is the final tiebreaker. `NULLS LAST` keeps stubs with no period dates at the bottom rather than the top.
+
+**Files:** `backend/src/modules/payslip/payslip.service.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-156 (2026-05-07): Request logger now uses correct log level per HTTP status code
 
 **Why:** `requestLoggerMiddleware` in `app.ts` called `log.info()` for every HTTP response unconditionally. 5xx responses (including proxy 504s) were logged at INFO, making them invisible when `LOG_LEVEL=warn` or `LOG_LEVEL=error`. Errors were effectively silent at the HTTP layer.
