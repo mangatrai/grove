@@ -494,7 +494,7 @@ export function ImportWorkspacePage() {
         const sug = suggestMap[f.id];
         if (sug?.matchedAccountId) {
           try {
-            const matchedAccount = accounts.find((a) => a.id === sug.matchedAccountId);
+            const matchedAccount = accRes.accounts.find((a) => a.id === sug.matchedAccountId);
             const ofxOwnerScope: "household" | "person" =
               matchedAccount?.owner_scope ?? (currentRole === "member" && currentPersonProfileId ? "person" : "household");
             const ofxOwnerPersonProfileId =
@@ -530,7 +530,7 @@ export function ImportWorkspacePage() {
         }
       }
     }
-  }, [sessionId, currentRole, currentPersonProfileId, accounts]);
+  }, [sessionId, currentRole, currentPersonProfileId]);
 
   const openUndoConfirm = useCallback(() => {
     if (!sessionId || (sessionSummary?.totals.canonicalRows ?? 0) === 0) {
@@ -1221,8 +1221,8 @@ export function ImportWorkspacePage() {
       const freshAccount = accRes.accounts.find((a) => a.id === result.id);
       const fileForBinding = files.find((f) => f.id === fileId);
       const inferred = inferParserProfile(freshAccount as FinancialAccountLike | undefined, fileForBinding?.file_name, incomeInference);
-      const ownerScope = drafts[fileId]?.ownerScope ?? "household";
-      const ownerPersonProfileId = drafts[fileId]?.ownerPersonProfileId ?? "";
+      const ownerScope = freshAccount?.owner_scope ?? drafts[fileId]?.ownerScope ?? "household";
+      const ownerPersonProfileId = freshAccount?.owner_person_profile_id ?? drafts[fileId]?.ownerPersonProfileId ?? "";
       if (inferred) {
         setDrafts((d) => ({
           ...d,
