@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-159 (2026-05-08): LedgerCategoryPicker Mantine footer/error migration + subcategory enablement fix
+
+**Why:** `LedgerCategoryPicker` still rendered footer actions and error text with custom CSS classes, and the "Add subcategory" action was permanently disabled in Needs Review when `value` was `null`. The disable logic only looked at `value`-derived parent state, so hovering a parent in the two-pane picker never enabled the button.
+
+**What:**
+- Migrated `LedgerCategoryPicker` wrapper/footer/error UI from custom HTML/CSS classes to Mantine primitives: `Box`, `Group`, `Button variant="default" size="xs"`, and `Text c="red" size="xs" mt={4}`.
+- Added optional `onActiveParentChange` callback to `HierarchicalSearchPicker`; it now emits active parent changes (including initial active parent resolution and hover-driven updates).
+- Added `activeParentIdFromPicker` local state in `LedgerCategoryPicker`, wired from `onActiveParentChange`.
+- Updated subcategory creation/disable logic to use `activeParentIdFromPicker ?? selectedParentId`, so users can add a subcategory under the currently active parent even when no category is pre-selected.
+
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/LedgerCategoryPicker.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-158 (2026-05-08): Import "Belongs To" now auto-set from account's owner when account is selected
 
 **Why:** In the import binding table, selecting a financial account did not update the "Belongs To" (owner scope) field. Four separate code paths all read `ownerScope` from the existing draft state or from the user's role instead of from the selected/matched account's own `owner_scope`. Accounts scoped to a specific person were silently ignored — the field defaulted to "Household" every time, requiring a manual correction.

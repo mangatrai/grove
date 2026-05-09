@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Box, Button, Group, Text } from "@mantine/core";
 
 import { apiJson } from "../api";
 import { buildCategoryAssignmentGroups, type CategoryOption } from "./categoryPickerGroups";
@@ -24,6 +25,7 @@ export function LedgerCategoryPicker({
 }) {
   const [savingCreate, setSavingCreate] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeParentIdFromPicker, setActiveParentIdFromPicker] = useState<string | null>(null);
   const byId = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const groups: HierarchicalPickerGroup[] = useMemo(
     () => buildCategoryAssignmentGroups(categories, value),
@@ -35,6 +37,8 @@ export function LedgerCategoryPicker({
     if (!selected) return null;
     return selected.parentId ?? selected.id;
   }, [value, byId]);
+  const subcategoryParentId = activeParentIdFromPicker ?? selectedParentId;
+
   async function createParentGroup() {
     if (disabled) return;
     const name = window.prompt("New top-level group name:");
@@ -55,8 +59,8 @@ export function LedgerCategoryPicker({
     }
   }
   async function createSubcategory() {
-    if (disabled || !selectedParentId) return;
-    const parent = byId.get(selectedParentId);
+    if (disabled || !subcategoryParentId) return;
+    const parent = byId.get(subcategoryParentId);
     if (!parent) return;
     const name = window.prompt(`New subcategory under ${parent.name}:`);
     if (!name?.trim()) return;
@@ -77,34 +81,40 @@ export function LedgerCategoryPicker({
   }
 
   return (
-    <div>
+    <Box>
       <HierarchicalSearchPicker
         value={value}
         onChange={(next) => void onChange(next)}
+        onActiveParentChange={setActiveParentIdFromPicker}
         groups={groups}
         placeholder="Uncategorized"
         ariaLabel={ariaLabel}
         clearable
         disabled={disabled || savingCreate}
         footer={
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-            <button type="button" className="secondary" onClick={() => void createParentGroup()} disabled={disabled || savingCreate}>
+          <Group justify="space-between">
+            <Button type="button" variant="default" size="xs" onClick={() => void createParentGroup()} disabled={disabled || savingCreate}>
               Add group
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="secondary"
+              variant="default"
+              size="xs"
               onClick={() => void createSubcategory()}
-              disabled={disabled || savingCreate || !selectedParentId}
-              title={selectedParentId ? "Add subcategory under selected group" : "Select a group first"}
+              disabled={disabled || savingCreate || !subcategoryParentId}
+              title={subcategoryParentId ? "Add subcategory under selected group" : "Select a group first"}
             >
               Add subcategory
-            </button>
-          </div>
+            </Button>
+          </Group>
         }
       />
-      {error ? <p className="error" style={{ marginTop: "0.25rem" }}>{error}</p> : null}
-    </div>
+      {error ? (
+        <Text c="red" size="xs" mt={4}>
+          {error}
+        </Text>
+      ) : null}
+    </Box>
   );
 }
 
