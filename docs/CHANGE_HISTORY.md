@@ -18,6 +18,93 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-163 (2026-05-08): Net Worth — remove period delta cards re-introduced by Cursor
+
+**Why:** The three ASSETS/LIABILITIES/NET WORTH delta summary cards (period-over-period change) were removed in the V2 design pass. Cursor's CR-161 commit left them in the file — they had always been present in the source but never rendered before because the user had no full 3-month history with non-null values at both endpoints. Once real balance history existed, they re-appeared. User confirmed they should be gone.
+
+**What:** Removed `periodSummary` useMemo and its three-card JSX block. Also removed the now-unused `formatSignedDelta` helper.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+## FIX-162 (2026-05-08): Net Worth — per-account balance history chart expand now works correctly
+
+**Why:** Cursor's CR-161 implementation had three bugs that made the expand-on-click feature completely non-functional: (1) the API call was missing the required `from` and `to` query params, so every request returned 400 and every account landed in the failed state showing "No balance history available". (2) The data mapping read `p.month` (undefined) instead of the actual field `p.asOf` for the X-axis label. (3) A fabricated `AccountHistoryResponse` type was used instead of the existing `BalanceSheetHistoryResponse`. A fourth UX issue: `showNoHistory` fired immediately on first expand (before loading started) because it only checked `historyPoints.length === 0`, not whether a fetch had completed.
+
+**What:**
+- `loadAccountHistory`: added `from` (12-month lookback) and `to` (today) to the query params.
+- Changed mapping from `p.month` → `p.asOf` for chart X-axis.
+- Changed `p.accounts?.[0]?.balance` lookup to `p.accounts?.find(a => a.financialAccountId === accountId)?.balance` (correct field, correct account lookup).
+- Removed fabricated `AccountHistoryPoint` and `AccountHistoryResponse` types; now uses existing `BalanceSheetHistoryResponse`.
+- `showNoHistory` guard now only triggers after a fetch has actually settled (`hasFetched = accountHistoryById.has(id) || accountHistoryFailedIds.has(id)`).
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+## FIX-160 (2026-05-08): Marcus Online Savings PDF — ACH deposits and summary block now parsed correctly
+
+**Why:** `pdf-parse` does not reconstruct columnar layout. Wrapped ACH deposit lines split across two output lines (date+description on line 1, dollar amounts on line 2), causing all ACH deposits to be silently dropped. The pre-activity summary block (Beginning Balance, Ending Balance, Statement Period) was also not captured.
+
+**What:**
+- Added a **pre-scan pass** over the full PDF text to extract `Beginning Balance`, `Ending Balance`, and `Statement Period` date range before entering the activity table.
+- Added a **`pendingLine` state machine** in the activity loop: when a date-prefixed line carries fewer than 2 dollar amounts, it is saved as a pending line. The next line that carries ≥2 amounts is joined with the pending line and parsed as one combined row. Extra description-only continuation lines (e.g. "account ****3560") are appended to the pending line and kept accumulating.
+- Added `buildStatementBalances()` helper to construct the `BoaStatementBalances` result; table-extracted ending balance / date takes precedence over the summary block values.
+- Added 4 new unit tests in `backend/tests/pdf-parsers.test.ts` covering: wrapped ACH deposit rows, multiple wraps in one statement, summary block extraction (beginning/ending/period), and no spurious balance rows emitted.
+
+**Files:** `backend/src/modules/imports/profiles/marcus-online-savings-pdf.ts`, `backend/tests/pdf-parsers.test.ts`
+
+---
+
+## CR-161 (2026-05-08): Net Worth account rows now expand inline to show per-account balance history
+
+**Why:** Net Worth provided only aggregate trend context. Users needed quick account-level history without leaving the page, especially when validating balance changes account-by-account.
+
+**What:**
+- Added expand/collapse support on individual asset/liability rows in `NetWorthPage` using chevron toggles and per-row expanded state (multiple rows can stay open).
+- Implemented lazy per-account history loading on first expand via `GET /reports/balance-sheet/history?accountIds=<id>&interval=month`.
+- Added in-memory cache for fetched account history so repeated expands do not refetch.
+- Rendered an inline 120px `LineChart` in an expanded `<tr>` (`colSpan=5`) with month axis, currency-formatted y-axis/tooltip, and balance line series.
+- Added expanded-row fallback states: loading `Skeleton`, and dimmed `No balance history available` message for empty/error responses.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-159 (2026-05-09): LedgerCategoryPicker Mantine migration + Add Group/Subcategory fully fixed
+
+**Why:** `LedgerCategoryPicker` had three bugs introduced during partial migration:
+1. Footer actions and error text still used custom CSS (`className="row"`, `className="secondary"`, `className="error"`).
+2. "Add group" and "Add subcategory" both called `window.prompt()` — a browser native dialog that doesn't respect the app's Mantine theme.
+3. "Add subcategory" was permanently disabled in Needs Review where `value={null}`, AND even when enabled it did nothing — `onActiveParentChange` emitted the picker's internal label-derived key (e.g. `"food & dining"`) rather than the category UUID, so `byId.get(activeParentIdFromPicker)` always returned `undefined` and the create call silently exited.
+
+**What:**
+- Migrated `LedgerCategoryPicker` footer and error from custom CSS to Mantine: `Box`, `Group justify="space-between"`, `Button variant="default" size="xs"`, `Text c="red" size="xs" mt={4}`.
+- Replaced both `window.prompt()` calls with a Mantine `Modal` + `TextInput`. "Add group" and "Add subcategory" open the modal; Enter key or "Create" button submits; loading state shown on the button during API call.
+- Fixed `HierarchicalSearchPicker.onActiveParentChange` to emit `activeParent?.selectableValue` (the actual category UUID) instead of `activeParentId` (the internal lowercased label key). `selectableValue` is populated from "General" group items in `buildCategoryAssignmentGroups` and is always the database UUID.
+- "Add subcategory" enabled state and parent resolution now use `activeParentIdFromPicker ?? selectedParentId`, so hovering any parent group enables the button and targets the correct parent regardless of whether a category is pre-selected.
+
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/LedgerCategoryPicker.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-158 (2026-05-08): Import "Belongs To" now auto-set from account's owner when account is selected
+
+**Why:** In the import binding table, selecting a financial account did not update the "Belongs To" (owner scope) field. Four separate code paths all read `ownerScope` from the existing draft state or from the user's role instead of from the selected/matched account's own `owner_scope`. Accounts scoped to a specific person were silently ignored — the field defaulted to "Household" every time, requiring a manual correction.
+
+**What:**
+- Added `owner_scope` and `owner_person_profile_id` to the frontend `FinancialAccount` type (fields already returned by `GET /imports/accounts` but missing from the type).
+- **`onAccountChange` — three branches** (inferred profile, payslip + multi-employer, fallthrough): `nextOwnerScope` and `nextOwnerPersonProfileId` now read from `account.owner_scope` / `account.owner_person_profile_id` first, falling back to the existing draft.
+- **OFX auto-bind block**: looks up the matched account from `accRes.accounts` (the locally fetched array, not the `accounts` state variable — adding state to the `loadDetail` dep array caused an infinite re-render loop) and uses its `owner_scope` / `owner_person_profile_id`; falls back to role-based logic only when the account is not found.
+- **Inline account creation flow**: after creating a new account, `ownerScope` now reads from `freshAccount.owner_scope` / `freshAccount.owner_person_profile_id` rather than the stale draft, so "Belongs To" is correctly set for newly created accounts too.
+
+**Behaviour after fix:** Selecting or creating any account with `owner_scope: "person"` in the import binding table immediately sets "Belongs To" to that person. OFX auto-detect honours the matched account's owner. Household-scoped accounts continue to default to "Household". User can still override manually.
+
+**Files:** `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-157 (2026-05-08): Payslip list sorted by pay period, not upload time
 
 **Why:** `GET /payslips` returned stubs sorted by `created_at DESC` (upload order). Payslips uploaded out of chronological order (backfilling older stubs, re-uploads) appeared randomly interspersed with recent ones.

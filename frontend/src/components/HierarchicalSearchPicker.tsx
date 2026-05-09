@@ -105,7 +105,8 @@ export function HierarchicalSearchPicker({
   ariaLabel,
   clearable = false,
   disabled = false,
-  footer
+  footer,
+  onActiveParentChange
 }: {
   value: string | null;
   onChange: (value: string | null) => void;
@@ -115,6 +116,7 @@ export function HierarchicalSearchPicker({
   clearable?: boolean;
   disabled?: boolean;
   footer?: ReactNode;
+  onActiveParentChange?: (parentId: string | null) => void;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -137,6 +139,24 @@ export function HierarchicalSearchPicker({
   }, [parents, search]);
   const selectedLabel = useMemo(() => lookupTriggerLabel(groups, value), [groups, value]);
   const activeParent = filtered.find((p) => p.id === activeParentId) ?? filtered[0] ?? null;
+
+  useEffect(() => {
+    if (filtered.length === 0) {
+      if (activeParentId !== null) {
+        setActiveParentId(null);
+      }
+      return;
+    }
+    if (!activeParentId || !filtered.some((p) => p.id === activeParentId)) {
+      setActiveParentId(filtered[0]!.id);
+    }
+  }, [filtered, activeParentId]);
+
+  useEffect(() => {
+    // Emit the category UUID (selectableValue), not the picker's internal label-derived id.
+    // byId lookups in LedgerCategoryPicker are keyed by UUID, not by label.
+    onActiveParentChange?.(activeParent?.selectableValue ?? null);
+  }, [activeParent, onActiveParentChange]);
 
   useEffect(() => {
     if (!open) return;
