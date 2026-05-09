@@ -1,4 +1,4 @@
-import { IconPencil } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconPencil } from "@tabler/icons-react";
 import {
   ActionIcon,
   Alert,
@@ -18,7 +18,7 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   Area,
@@ -27,6 +27,8 @@ import {
   BarChart,
   CartesianGrid,
   LabelList,
+  Line,
+  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -90,6 +92,18 @@ type BalanceSheetHistoryResponse = {
     };
     accounts?: BalanceSheetHistoryAccountSlice[];
   }>;
+};
+
+type AccountHistoryPoint = {
+  month: string;
+  accounts: Array<{
+    accountId: string;
+    balance: number;
+  }>;
+};
+
+type AccountHistoryResponse = {
+  points: AccountHistoryPoint[];
 };
 
 type PeriodPreset = "3m" | "6m" | "12m" | "2y" | "3y" | "ytd" | "custom";
@@ -202,6 +216,12 @@ export function NetWorthPage() {
   const [historyData, setHistoryData] = useState<BalanceSheetHistoryResponse | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
+  const [accountHistoryById, setAccountHistoryById] = useState<Map<string, Array<{ month: string; balance: number }>>>(
+    new Map()
+  );
+  const [accountHistoryLoadingIds, setAccountHistoryLoadingIds] = useState<Set<string>>(new Set());
+  const [accountHistoryFailedIds, setAccountHistoryFailedIds] = useState<Set<string>>(new Set());
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -512,6 +532,62 @@ export function NetWorthPage() {
     await loadHistoryImmediate();
   }, [allTableRows, bulkAsOfDraft, data, loadHistoryImmediate, loadSheet]);
 
+  const loadAccountHistory = useCallback(async (accountId: string) => {
+    if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId) || accountHistoryFailedIds.has(accountId)) {
+      return;
+    }
+    setAccountHistoryLoadingIds((prev) => {
+      const next = new Set(prev);
+      next.add(accountId);
+      return next;
+    });
+    try {
+      const qs = new URLSearchParams({
+        accountIds: accountId,
+        interval: "month"
+      });
+      const res = await apiJson<AccountHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+      const chartPoints = (res.points ?? []).map((p) => ({
+        month: p.month,
+        balance: Number(p.accounts?.[0]?.balance ?? Number.NaN)
+      })).filter((p) => Number.isFinite(p.balance));
+      setAccountHistoryById((prev) => {
+        const next = new Map(prev);
+        next.set(accountId, chartPoints);
+        return next;
+      });
+    } catch {
+      setAccountHistoryFailedIds((prev) => {
+        const next = new Set(prev);
+        next.add(accountId);
+        return next;
+      });
+    } finally {
+      setAccountHistoryLoadingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(accountId);
+        return next;
+      });
+    }
+  }, [accountHistoryById, accountHistoryFailedIds, accountHistoryLoadingIds]);
+
+  const toggleAccountExpanded = useCallback((accountId: string) => {
+    let willExpand = false;
+    setExpandedAccountIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(accountId)) {
+        next.delete(accountId);
+      } else {
+        next.add(accountId);
+        willExpand = true;
+      }
+      return next;
+    });
+    if (willExpand) {
+      void loadAccountHistory(accountId);
+    }
+  }, [loadAccountHistory]);
+
   const onPresetChange = (next: PeriodPreset) => {
     setPeriodPreset(next);
     if (next !== "custom") {
@@ -785,33 +861,79 @@ export function NetWorthPage() {
                 {data.assets.map((r) => {
                   const signed = signedDisplayBalance(r);
                   const isEditing = editingId === r.financialAccountId;
+                  const isExpanded = expandedAccountIds.has(r.financialAccountId);
+                  const isHistoryLoading = accountHistoryLoadingIds.has(r.financialAccountId);
+                  const historyPoints = accountHistoryById.get(r.financialAccountId) ?? [];
+                  const showNoHistory = !isHistoryLoading && (accountHistoryFailedIds.has(r.financialAccountId) || historyPoints.length === 0);
                   return (
-                    <Table.Tr key={r.financialAccountId}>
-                      <Table.Td>
-                        <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm">{formatAccountType(r.type)}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        {isEditing ? (
-                          <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow}>
-                            <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
-                            <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
-                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                    <Fragment key={r.financialAccountId}>
+                      <Table.Tr onClick={() => toggleAccountExpanded(r.financialAccountId)} style={{ cursor: "pointer" }}>
+                        <Table.Td>
+                          <Group gap={6} wrap="nowrap">
+                            <ActionIcon variant="subtle" color="gray" size="sm" aria-hidden tabIndex={-1}>
+                              {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+                            </ActionIcon>
+                            <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
                           </Group>
-                        ) : formatMoney(signed)}
-                      </Table.Td>
-                      <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
-                      <Table.Td>
-                        {!isEditing ? (
-                          <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance">
-                            <IconPencil size={15} />
-                          </ActionIcon>
-                        ) : null}
-                      </Table.Td>
-                    </Table.Tr>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{formatAccountType(r.type)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow} onClick={(e) => e.stopPropagation()}>
+                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                              <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                              <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                              <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                            </Group>
+                          ) : formatMoney(signed)}
+                        </Table.Td>
+                        <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
+                        <Table.Td>
+                          {!isEditing ? (
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEdit(r);
+                              }}
+                              aria-label="Edit balance"
+                              title="Edit balance"
+                            >
+                              <IconPencil size={15} />
+                            </ActionIcon>
+                          ) : null}
+                        </Table.Td>
+                      </Table.Tr>
+                      <Table.Tr>
+                        <Table.Td colSpan={5} style={{ paddingTop: 0, paddingBottom: 0 }}>
+                          <Collapse in={isExpanded}>
+                            <Box py="xs">
+                              {isHistoryLoading ? <Skeleton height={120} /> : null}
+                              {!isHistoryLoading && !showNoHistory ? (
+                                <Box style={{ width: "100%", height: 120 }}>
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={historyPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
+                                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                                      <Tooltip
+                                        formatter={(v: number | string) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                                        labelFormatter={(label) => `Month: ${String(label)}`}
+                                      />
+                                      <Line type="monotone" dataKey="balance" stroke="var(--color-accent)" strokeWidth={2} dot={false} />
+                                    </LineChart>
+                                  </ResponsiveContainer>
+                                </Box>
+                              ) : null}
+                              {showNoHistory ? <Text c="dimmed" size="xs">No balance history available</Text> : null}
+                            </Box>
+                          </Collapse>
+                        </Table.Td>
+                      </Table.Tr>
+                    </Fragment>
                   );
                 })}
                 <Table.Tr>
@@ -844,33 +966,79 @@ export function NetWorthPage() {
                 {data.liabilities.map((r) => {
                   const signed = signedDisplayBalance(r);
                   const isEditing = editingId === r.financialAccountId;
+                  const isExpanded = expandedAccountIds.has(r.financialAccountId);
+                  const isHistoryLoading = accountHistoryLoadingIds.has(r.financialAccountId);
+                  const historyPoints = accountHistoryById.get(r.financialAccountId) ?? [];
+                  const showNoHistory = !isHistoryLoading && (accountHistoryFailedIds.has(r.financialAccountId) || historyPoints.length === 0);
                   return (
-                    <Table.Tr key={r.financialAccountId}>
-                      <Table.Td>
-                        <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        <Text size="sm">{formatAccountType(r.type)}</Text>
-                      </Table.Td>
-                      <Table.Td>
-                        {isEditing ? (
-                          <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow}>
-                            <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
-                            <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
-                            <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
-                            <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                    <Fragment key={r.financialAccountId}>
+                      <Table.Tr onClick={() => toggleAccountExpanded(r.financialAccountId)} style={{ cursor: "pointer" }}>
+                        <Table.Td>
+                          <Group gap={6} wrap="nowrap">
+                            <ActionIcon variant="subtle" color="gray" size="sm" aria-hidden tabIndex={-1}>
+                              {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+                            </ActionIcon>
+                            <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
                           </Group>
-                        ) : formatMoney(signed)}
-                      </Table.Td>
-                      <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
-                      <Table.Td>
-                        {!isEditing ? (
-                          <ActionIcon variant="subtle" color="gray" size="sm" onClick={() => startEdit(r)} aria-label="Edit balance" title="Edit balance">
-                            <IconPencil size={15} />
-                          </ActionIcon>
-                        ) : null}
-                      </Table.Td>
-                    </Table.Tr>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{formatAccountType(r.type)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {isEditing ? (
+                            <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow} onClick={(e) => e.stopPropagation()}>
+                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                              <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
+                              <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
+                              <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
+                            </Group>
+                          ) : formatMoney(signed)}
+                        </Table.Td>
+                        <Table.Td><Text size="sm">{r.balanceAsOf ?? "—"}</Text></Table.Td>
+                        <Table.Td>
+                          {!isEditing ? (
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                startEdit(r);
+                              }}
+                              aria-label="Edit balance"
+                              title="Edit balance"
+                            >
+                              <IconPencil size={15} />
+                            </ActionIcon>
+                          ) : null}
+                        </Table.Td>
+                      </Table.Tr>
+                      <Table.Tr>
+                        <Table.Td colSpan={5} style={{ paddingTop: 0, paddingBottom: 0 }}>
+                          <Collapse in={isExpanded}>
+                            <Box py="xs">
+                              {isHistoryLoading ? <Skeleton height={120} /> : null}
+                              {!isHistoryLoading && !showNoHistory ? (
+                                <Box style={{ width: "100%", height: 120 }}>
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={historyPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
+                                      <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                                      <Tooltip
+                                        formatter={(v: number | string) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                                        labelFormatter={(label) => `Month: ${String(label)}`}
+                                      />
+                                      <Line type="monotone" dataKey="balance" stroke="var(--color-accent)" strokeWidth={2} dot={false} />
+                                    </LineChart>
+                                  </ResponsiveContainer>
+                                </Box>
+                              ) : null}
+                              {showNoHistory ? <Text c="dimmed" size="xs">No balance history available</Text> : null}
+                            </Box>
+                          </Collapse>
+                        </Table.Td>
+                      </Table.Tr>
+                    </Fragment>
                   );
                 })}
                 <Table.Tr>

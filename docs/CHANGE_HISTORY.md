@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-161 (2026-05-08): Net Worth account rows now expand inline to show per-account balance history
+
+**Why:** Net Worth provided only aggregate trend context. Users needed quick account-level history without leaving the page, especially when validating balance changes account-by-account.
+
+**What:**
+- Added expand/collapse support on individual asset/liability rows in `NetWorthPage` using chevron toggles and per-row expanded state (multiple rows can stay open).
+- Implemented lazy per-account history loading on first expand via `GET /reports/balance-sheet/history?accountIds=<id>&interval=month`.
+- Added in-memory cache for fetched account history so repeated expands do not refetch.
+- Rendered an inline 120px `LineChart` in an expanded `<tr>` (`colSpan=5`) with month axis, currency-formatted y-axis/tooltip, and balance line series.
+- Added expanded-row fallback states: loading `Skeleton`, and dimmed `No balance history available` message for empty/error responses.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-159 (2026-05-09): LedgerCategoryPicker Mantine migration + Add Group/Subcategory fully fixed
 
 **Why:** `LedgerCategoryPicker` had three bugs introduced during partial migration:
