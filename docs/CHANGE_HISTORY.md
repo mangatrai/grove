@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-158 (2026-05-08): Import "Belongs To" now auto-set from account's owner when account is selected
+
+**Why:** In the import binding table, selecting a financial account did not update the "Belongs To" (owner scope) field. All three branches of `onAccountChange` read `ownerScope` from the existing draft state instead of from the account object returned by the API. OFX auto-detect had the same bug: it derived `ownerScope` from the user's role, not from the matched account's own `owner_scope`. Accounts scoped to a specific person (`owner_scope: "person"`) were silently ignored — the field defaulted to "Household" and required a manual correction every time.
+
+**What:**
+- Added `owner_scope` and `owner_person_profile_id` to the frontend `FinancialAccount` type (these fields were already returned by `GET /imports/accounts` but missing from the type).
+- In all three branches of `onAccountChange` (inferred profile path, payslip + multi-employer path, fallthrough path): `nextOwnerScope` and `nextOwnerPersonProfileId` now read from `account.owner_scope` / `account.owner_person_profile_id` first, falling back to the existing draft only if the account fields are absent.
+- In the OFX auto-bind block: looks up the matched account from the loaded accounts list and uses its `owner_scope` / `owner_person_profile_id`; falls back to role-based logic only when the account is not found.
+- Added `accounts` to the `loadDetail` `useCallback` dependency array (OFX auto-bind now reads from it).
+
+**Behaviour after fix:** Selecting any account with `owner_scope: "person"` in the import binding table immediately sets "Belongs To" to that person. OFX auto-detect honours the matched account's owner. Household-scoped accounts continue to default to "Household". User can still override the auto-set value manually.
+
+**Files:** `frontend/src/pages/ImportWorkspacePage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-157 (2026-05-08): Payslip list sorted by pay period, not upload time
 
 **Why:** `GET /payslips` returned stubs sorted by `created_at DESC` (upload order). Payslips uploaded out of chronological order (backfilling older stubs, re-uploads) appeared randomly interspersed with recent ones.

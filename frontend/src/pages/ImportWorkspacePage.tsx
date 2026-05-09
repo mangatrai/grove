@@ -74,6 +74,8 @@ type FinancialAccount = {
   institution: string;
   account_mask: string | null;
   currency: string;
+  owner_scope: "household" | "person";
+  owner_person_profile_id: string | null;
   last_uploaded_at?: string | null;
   last_statement_end_date?: string | null;
 };
@@ -492,10 +494,11 @@ export function ImportWorkspacePage() {
         const sug = suggestMap[f.id];
         if (sug?.matchedAccountId) {
           try {
+            const matchedAccount = accounts.find((a) => a.id === sug.matchedAccountId);
             const ofxOwnerScope: "household" | "person" =
-              currentRole === "member" && currentPersonProfileId ? "person" : "household";
+              matchedAccount?.owner_scope ?? (currentRole === "member" && currentPersonProfileId ? "person" : "household");
             const ofxOwnerPersonProfileId =
-              currentRole === "member" && currentPersonProfileId ? currentPersonProfileId : null;
+              matchedAccount?.owner_person_profile_id ?? (currentRole === "member" && currentPersonProfileId ? currentPersonProfileId : null);
             await apiJson(`/imports/sessions/${sessionId}/files/${f.id}`, {
               method: "PATCH",
               body: JSON.stringify({
@@ -527,7 +530,7 @@ export function ImportWorkspacePage() {
         }
       }
     }
-  }, [sessionId, currentRole, currentPersonProfileId]);
+  }, [sessionId, currentRole, currentPersonProfileId, accounts]);
 
   const openUndoConfirm = useCallback(() => {
     if (!sessionId || (sessionSummary?.totals.canonicalRows ?? 0) === 0) {
@@ -768,8 +771,8 @@ export function ImportWorkspacePage() {
 
       const inferred = inferParserProfile(account as FinancialAccountLike, file?.file_name, incomeInference);
       if (inferred) {
-        const nextOwnerScope = drafts[fileId]?.ownerScope ?? "household";
-        const nextOwnerPersonProfileId = drafts[fileId]?.ownerPersonProfileId ?? "";
+        const nextOwnerScope = account?.owner_scope ?? drafts[fileId]?.ownerScope ?? "household";
+        const nextOwnerPersonProfileId = account?.owner_person_profile_id ?? drafts[fileId]?.ownerPersonProfileId ?? "";
         let employerId = "";
         if (PAYSLIP_PARSER_IDS.has(inferred) && householdEmployers.length === 1) {
           employerId = householdEmployers[0]!.id;
@@ -800,8 +803,8 @@ export function ImportWorkspacePage() {
       if (accountType === "payslip" && householdEmployers.length > 1) {
         const emp0 = householdEmployers[0]!;
         const defaultProfile = emp0.parserProfileId ?? "ibm_pay_contributions_pdf";
-        const nextOwnerScope = drafts[fileId]?.ownerScope ?? "household";
-        const nextOwnerPersonProfileId = drafts[fileId]?.ownerPersonProfileId ?? "";
+        const nextOwnerScope = account?.owner_scope ?? drafts[fileId]?.ownerScope ?? "household";
+        const nextOwnerPersonProfileId = account?.owner_person_profile_id ?? drafts[fileId]?.ownerPersonProfileId ?? "";
         setDrafts((d) => ({
           ...d,
           [fileId]: {
@@ -829,8 +832,8 @@ export function ImportWorkspacePage() {
           accountId,
           profileId: "",
           employerId: "",
-          ownerScope: drafts[fileId]?.ownerScope ?? "household",
-          ownerPersonProfileId: drafts[fileId]?.ownerPersonProfileId ?? ""
+          ownerScope: account?.owner_scope ?? drafts[fileId]?.ownerScope ?? "household",
+          ownerPersonProfileId: account?.owner_person_profile_id ?? drafts[fileId]?.ownerPersonProfileId ?? ""
         }
       }));
       const hint = showAdvanced
