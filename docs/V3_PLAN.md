@@ -57,7 +57,7 @@ ACH deposits with wrapped description text are lost. Only single-line entries (I
 
 ---
 
-### B-5: Import "Belongs To" not auto-set when account is selected
+### ~~B-5: Import "Belongs To" not auto-set when account is selected~~ ✓ DELIVERED (FIX-158, 2026-05-08)
 `onAccountChange` reads `ownerScope` from draft state instead of from the selected account object. OFX auto-detect has the same bug (uses role-based logic, ignores account's own `owner_scope`).
 
 **Fix (frontend-only, already fully diagnosed):** In `onAccountChange` at all three branches (~lines 771, 803, 826) and the OFX auto-bind block (~line 495): read `account.owner_scope` / `account.owner_person_profile_id` first; fall back to draft.
@@ -335,7 +335,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | B-2 | Dismissed transfers re-surface on next import | P1 | Bug + DB | — |
 | B-3 | Multi-day same-amount transfer cross-match | P1 | Bug | — |
 | B-4 | Marcus PDF ACH deposits silently dropped | P1 | Bug | — |
-| B-5 | Import "Belongs To" not auto-set from account | P1 | Bug (FE only) | — |
+| ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | B-6 | Transactions page: incomplete Mantine + broken subcategory picker | P1 | Bug + UX | — |
 | B-7 | AI insight cooldown: in-memory → DB-backed | P1 | Security | — |
 | F-1 | Account enrichment (memo, sub_type, liquidity, linked_account_id) | P2 | Feature | — |
