@@ -136,7 +136,7 @@ Computed from `liquidity` field on `financial_account` (F-1 prerequisite). Accou
 
 ---
 
-### F-4: Net worth — per-account balance history chart (expand-on-click)
+### ~~F-4: Net worth — per-account balance history chart (expand-on-click)~~ ✓ DELIVERED (CR-161, 2026-05-09)
 Click an account row in the net worth table → inline expand reveals a Recharts LineChart of that account's balance over time. Backend API (`GET /reports/balance-sheet/history?accountIds=X`) already fully built. Frontend-only feature.
 
 Edge cases: 1-2 snapshots → flat line or placeholder; 0 snapshots → no expand offered.
@@ -166,17 +166,8 @@ Current dynamic-only model loses the confirmed match on every load; flaky for ed
 
 ---
 
-### F-6: Async payslip upload (fix 504 on OpenAI calls)
-`POST /payslips/upload` for IBM-style payslips awaits OpenAI vision API synchronously (15–40s). Koyeb proxy timeout is 30–60s → 504 risk is high.
-
-**Fix:** Apply the existing export/restore async pattern:
-- `POST /payslips/upload` → 202 Accepted + `{ jobId }` (immediately)
-- `GET /payslips/jobs/:jobId` → `{ status: pending|processing|done|failed, data? }`
-- Background worker does the OpenAI call + DB write
-
-Follow the `export_job` / `import_job` pattern already proven in this codebase.
-
-**Files:** `payslip.routes.ts`, `payslip-parse.service.ts`, new `payslip_job` migration or reuse existing job table, `PayslipDetailPage.tsx` / upload page polling
+### ~~F-6: Async payslip upload (fix 504 on OpenAI calls)~~ → moved to P3 (see I-2)
+The import session flow is already async and stateful. The 504 risk on IBM payslip upload is real but has not surfaced as an active problem in practice. Deprioritised in favour of higher-value P2 features. The fix pattern (202/poll using the existing export_job model) is documented in I-2 alongside the import parse/canonicalize case and can be implemented together when the time comes.
 
 ---
 
@@ -239,14 +230,15 @@ Extend flow classification (F-7) from AI insights to the app's own reports:
 
 ---
 
-### I-2: Async import parse + canonicalize (lower 504 risk)
-Same 202/poll pattern as F-6 but for:
+### I-2: Async payslip upload + import parse/canonicalize (504 resilience)
+Apply the existing 202/poll pattern (proven in export/restore) to the remaining synchronous long-running operations:
+- `POST /payslips/upload` (IBM path) — awaits OpenAI synchronously; 504 risk on slow responses
 - `POST /imports/sessions/:id/parse` → 202 + jobId
 - `POST /imports/sessions/:id/canonicalize` → 202 + jobId
 
-Import session state machine already handles in-progress state; frontend polls session status naturally. Lower urgency than payslip upload (F-6) — large CSVs are less likely to hit 30s than OpenAI calls.
+Import session state machine already handles in-progress state; frontend polls session status naturally. Implement together as a single pass when 504s become a live issue.
 
-**Files:** `import-session.service.ts`, `import-parser.service.ts`, new migration (parse/canonicalize job rows)
+**Files:** `payslip.routes.ts`, `payslip-parse.service.ts`, `import-session.service.ts`, `import-parser.service.ts`, new job migration
 
 ---
 
@@ -341,9 +333,9 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | F-1 | Account enrichment (memo, sub_type, liquidity, linked_account_id) | P2 | Feature | — |
 | F-2 | Real estate account type + home equity display | P2 | Feature | F-1 |
 | F-3 | Net worth liquidity breakdown | P2 | Feature | F-1 |
-| F-4 | Per-account balance history chart (FE only) | P2 | Feature | — |
+| ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
 | F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
-| F-6 | Async payslip upload (fix 504 on OpenAI) | P2 | Reliability | — |
+| ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
 | F-7 | AI insights: fix transfer/flow pollution | P2 | Feature | — |
 | F-8 | Money flow classification in reports | P2 | Feature | F-7 |
 | F-9 | Date of birth encrypted at rest, computed age | P2 | Feature + Security | — |
