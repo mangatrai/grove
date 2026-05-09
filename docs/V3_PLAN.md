@@ -73,12 +73,12 @@ Category picker still uses custom CSS. Group/sub-group alert uses custom class. 
 
 ---
 
-### B-7 (Security P1): AI insight cooldown — in-memory → DB-backed
+### ~~B-7 (Security P1): AI insight cooldown — in-memory → DB-backed~~ ✓ DELIVERED (FIX-164, 2026-05-09)
 Rate-limit `Map<householdId, timestamp>` resets on every process restart. Allows unbounded API cost on frequent restarts.
 
-**Fix:** Replace Map check with DB query: `SELECT created_at FROM insight_job WHERE household_id = ? ORDER BY created_at DESC LIMIT 1`. Return 429 if within 5 minutes. Also creates the foundation for a proper `insight_job` table (async insight status, history).
+**Fix:** `insight_job` table already existed. Replaced Map with a query for the most recent `created_at` for the household; remaining cooldown computed from that. No migration needed.
 
-**Files:** `backend/src/modules/insights/insights.routes.ts`, new migration for `insight_job` table
+**Files:** `backend/src/modules/insights/insights.routes.ts`
 
 ---
 
@@ -327,7 +327,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~B-4~~ | ~~Marcus PDF ACH deposits silently dropped~~ | ✓ Done | Bug | — |
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
-| B-7 | AI insight cooldown: in-memory → DB-backed | P1 | Security | — |
+| ~~B-7~~ | ~~AI insight cooldown: in-memory → DB-backed~~ | ✓ Done | Security | — |
 | F-1 | Account enrichment (memo, sub_type, liquidity, linked_account_id) | P2 | Feature | — |
 | F-2 | Real estate account type + home equity display | P2 | Feature | F-1 |
 | F-3 | Net worth liquidity breakdown | P2 | Feature | F-1 |

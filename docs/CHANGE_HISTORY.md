@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-164 (2026-05-09): AI insight cooldown — in-memory Map replaced with DB query (SEC)
+
+**Why:** The per-household cooldown Map reset on every process restart, allowing unbounded OpenAI API calls if the process was restarted frequently. `insight_job` already existed and records every job with `created_at`, making it the authoritative source of truth.
+
+**What:** Replaced `insightRefreshLastByHousehold: Map<string, number>` and the synchronous `refreshCooldownRemainingMs()` with an async DB query against `insight_job` — selects the most recent `created_at` for the household and computes remaining cooldown from that. Removed the post-enqueue `Map.set()` call (no longer needed; the DB row itself is the record). `TEST` mode bypass retained.
+
+**Files:** `backend/src/modules/insights/insights.routes.ts`
+
+---
+
 ## FIX-163 (2026-05-08): Net Worth — remove period delta cards re-introduced by Cursor
 
 **Why:** The three ASSETS/LIABILITIES/NET WORTH delta summary cards (period-over-period change) were removed in the V2 design pass. Cursor's CR-161 commit left them in the file — they had always been present in the source but never rendered before because the user had no full 3-month history with non-null values at both endpoints. Once real balance history existed, they re-appeared. User confirmed they should be gone.

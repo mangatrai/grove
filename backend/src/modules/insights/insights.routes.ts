@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { env } from "../../config/env.js";
+import { qGet } from "../../db/query.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import {
@@ -17,17 +18,19 @@ export const insightsRouter = Router();
 insightsRouter.use(requireAuth);
 
 const INSIGHT_REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
-const insightRefreshLastByHousehold = new Map<string, number>();
 
-function refreshCooldownRemainingMs(householdId: string): number {
+async function refreshCooldownRemainingMs(householdId: string): Promise<number> {
   if (env.MODE === "TEST") {
     return 0;
   }
-  const last = insightRefreshLastByHousehold.get(householdId);
-  if (!last) {
+  const row = await qGet<{ created_at: Date }>(
+    `SELECT created_at FROM insight_job WHERE household_id = ? ORDER BY created_at DESC LIMIT 1`,
+    householdId
+  );
+  if (!row) {
     return 0;
   }
-  const elapsed = Date.now() - last;
+  const elapsed = Date.now() - new Date(row.created_at).getTime();
   if (elapsed >= INSIGHT_REFRESH_COOLDOWN_MS) {
     return 0;
   }
@@ -46,7 +49,7 @@ insightsRouter.post("/financial/refresh", async (req: AuthenticatedRequest, res)
   const { householdId, userId, role } = req.authUser!;
   const scope = role === "owner" || role === "admin" ? "household" : "personal";
   const targetUserId = scope === "personal" ? userId : null;
-  const cooldownRemaining = refreshCooldownRemainingMs(householdId);
+  const cooldownRemaining = await refreshCooldownRemainingMs(householdId);
   if (cooldownRemaining > 0) {
     res.status(429).json({
       ok: false,
@@ -62,7 +65,6 @@ insightsRouter.post("/financial/refresh", async (req: AuthenticatedRequest, res)
     res.status(500).json(jobResult);
     return;
   }
-  insightRefreshLastByHousehold.set(householdId, Date.now());
   void runInsightJob(jobResult.data, householdId);
   res.status(202).json({ ok: true, jobId: jobResult.data });
 });
