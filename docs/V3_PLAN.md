@@ -66,7 +66,7 @@ ACH deposits with wrapped description text are lost. Only single-line entries (I
 
 ---
 
-### B-6: Transactions page — incomplete Mantine migration + non-clickable subcategory picker
+### ~~B-6: Transactions page — incomplete Mantine migration + non-clickable subcategory picker~~ ✓ DELIVERED (FIX-159, 2026-05-08)
 Category picker still uses custom CSS. Group/sub-group alert uses custom class. In Needs Review tab, "Add subcategory" is not clickable (z-index / pointer-events / focus-trap bug from partial migration).
 
 **Fix:** Complete Mantine migration on TransactionsPage (category picker → Mantine `Select`/`Combobox`, alert → Mantine `Alert`). Diagnose and fix the non-clickable subcategory picker in Needs Review.
@@ -336,7 +336,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | B-3 | Multi-day same-amount transfer cross-match | P1 | Bug | — |
 | B-4 | Marcus PDF ACH deposits silently dropped | P1 | Bug | — |
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
-| B-6 | Transactions page: incomplete Mantine + broken subcategory picker | P1 | Bug + UX | — |
+| ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
 | B-7 | AI insight cooldown: in-memory → DB-backed | P1 | Security | — |
 | F-1 | Account enrichment (memo, sub_type, liquidity, linked_account_id) | P2 | Feature | — |
 | F-2 | Real estate account type + home equity display | P2 | Feature | F-1 |
