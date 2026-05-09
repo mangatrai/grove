@@ -94,18 +94,6 @@ type BalanceSheetHistoryResponse = {
   }>;
 };
 
-type AccountHistoryPoint = {
-  month: string;
-  accounts: Array<{
-    accountId: string;
-    balance: number;
-  }>;
-};
-
-type AccountHistoryResponse = {
-  points: AccountHistoryPoint[];
-};
-
 type PeriodPreset = "3m" | "6m" | "12m" | "2y" | "3y" | "ytd" | "custom";
 
 type BelongsToFilter = "" | "household" | `person:${string}`;
@@ -533,35 +521,31 @@ export function NetWorthPage() {
   }, [allTableRows, bulkAsOfDraft, data, loadHistoryImmediate, loadSheet]);
 
   const loadAccountHistory = useCallback(async (accountId: string) => {
-    if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId) || accountHistoryFailedIds.has(accountId)) {
+    if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId)) {
       return;
     }
-    setAccountHistoryLoadingIds((prev) => {
-      const next = new Set(prev);
-      next.add(accountId);
-      return next;
-    });
+    // Use a 12-month lookback window for per-account mini-charts.
+    const to = todayIso();
+    const fromDate = new Date();
+    fromDate.setUTCMonth(fromDate.getUTCMonth() - 12);
+    const from = fromDate.toISOString().slice(0, 10);
+
+    setAccountHistoryLoadingIds((prev) => new Set(prev).add(accountId));
     try {
-      const qs = new URLSearchParams({
-        accountIds: accountId,
-        interval: "month"
-      });
-      const res = await apiJson<AccountHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
-      const chartPoints = (res.points ?? []).map((p) => ({
-        month: p.month,
-        balance: Number(p.accounts?.[0]?.balance ?? Number.NaN)
-      })).filter((p) => Number.isFinite(p.balance));
-      setAccountHistoryById((prev) => {
-        const next = new Map(prev);
-        next.set(accountId, chartPoints);
-        return next;
-      });
+      const qs = new URLSearchParams({ from, to, accountIds: accountId, interval: "month" });
+      const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+      const chartPoints = (res.points ?? [])
+        .map((p) => {
+          const acct = p.accounts?.find((a) => a.financialAccountId === accountId);
+          const bal = acct?.balance ?? null;
+          return { month: p.asOf, balance: bal };
+        })
+        .filter((p): p is { month: string; balance: number } =>
+          p.balance !== null && Number.isFinite(p.balance)
+        );
+      setAccountHistoryById((prev) => new Map(prev).set(accountId, chartPoints));
     } catch {
-      setAccountHistoryFailedIds((prev) => {
-        const next = new Set(prev);
-        next.add(accountId);
-        return next;
-      });
+      setAccountHistoryFailedIds((prev) => new Set(prev).add(accountId));
     } finally {
       setAccountHistoryLoadingIds((prev) => {
         const next = new Set(prev);
@@ -569,7 +553,7 @@ export function NetWorthPage() {
         return next;
       });
     }
-  }, [accountHistoryById, accountHistoryFailedIds, accountHistoryLoadingIds]);
+  }, [accountHistoryById, accountHistoryLoadingIds]);
 
   const toggleAccountExpanded = useCallback((accountId: string) => {
     let willExpand = false;
@@ -864,7 +848,8 @@ export function NetWorthPage() {
                   const isExpanded = expandedAccountIds.has(r.financialAccountId);
                   const isHistoryLoading = accountHistoryLoadingIds.has(r.financialAccountId);
                   const historyPoints = accountHistoryById.get(r.financialAccountId) ?? [];
-                  const showNoHistory = !isHistoryLoading && (accountHistoryFailedIds.has(r.financialAccountId) || historyPoints.length === 0);
+                  const hasFetched = accountHistoryById.has(r.financialAccountId) || accountHistoryFailedIds.has(r.financialAccountId);
+                  const showNoHistory = !isHistoryLoading && hasFetched && (accountHistoryFailedIds.has(r.financialAccountId) || historyPoints.length === 0);
                   return (
                     <Fragment key={r.financialAccountId}>
                       <Table.Tr onClick={() => toggleAccountExpanded(r.financialAccountId)} style={{ cursor: "pointer" }}>
@@ -969,7 +954,8 @@ export function NetWorthPage() {
                   const isExpanded = expandedAccountIds.has(r.financialAccountId);
                   const isHistoryLoading = accountHistoryLoadingIds.has(r.financialAccountId);
                   const historyPoints = accountHistoryById.get(r.financialAccountId) ?? [];
-                  const showNoHistory = !isHistoryLoading && (accountHistoryFailedIds.has(r.financialAccountId) || historyPoints.length === 0);
+                  const hasFetched = accountHistoryById.has(r.financialAccountId) || accountHistoryFailedIds.has(r.financialAccountId);
+                  const showNoHistory = !isHistoryLoading && hasFetched && (accountHistoryFailedIds.has(r.financialAccountId) || historyPoints.length === 0);
                   return (
                     <Fragment key={r.financialAccountId}>
                       <Table.Tr onClick={() => toggleAccountExpanded(r.financialAccountId)} style={{ cursor: "pointer" }}>

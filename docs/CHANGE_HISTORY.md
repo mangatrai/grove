@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-162 (2026-05-08): Net Worth — per-account balance history chart expand now works correctly
+
+**Why:** Cursor's CR-161 implementation had three bugs that made the expand-on-click feature completely non-functional: (1) the API call was missing the required `from` and `to` query params, so every request returned 400 and every account landed in the failed state showing "No balance history available". (2) The data mapping read `p.month` (undefined) instead of the actual field `p.asOf` for the X-axis label. (3) A fabricated `AccountHistoryResponse` type was used instead of the existing `BalanceSheetHistoryResponse`. A fourth UX issue: `showNoHistory` fired immediately on first expand (before loading started) because it only checked `historyPoints.length === 0`, not whether a fetch had completed.
+
+**What:**
+- `loadAccountHistory`: added `from` (12-month lookback) and `to` (today) to the query params.
+- Changed mapping from `p.month` → `p.asOf` for chart X-axis.
+- Changed `p.accounts?.[0]?.balance` lookup to `p.accounts?.find(a => a.financialAccountId === accountId)?.balance` (correct field, correct account lookup).
+- Removed fabricated `AccountHistoryPoint` and `AccountHistoryResponse` types; now uses existing `BalanceSheetHistoryResponse`.
+- `showNoHistory` guard now only triggers after a fetch has actually settled (`hasFetched = accountHistoryById.has(id) || accountHistoryFailedIds.has(id)`).
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
 ## FIX-160 (2026-05-08): Marcus Online Savings PDF — ACH deposits and summary block now parsed correctly
 
 **Why:** `pdf-parse` does not reconstruct columnar layout. Wrapped ACH deposit lines split across two output lines (date+description on line 1, dollar amounts on line 2), causing all ACH deposits to be silently dropped. The pre-activity summary block (Beginning Balance, Ending Balance, Statement Period) was also not captured.
