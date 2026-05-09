@@ -276,6 +276,19 @@ Two small items from `EXPORT_IMPORT_BACKLOG.md`:
 
 ---
 
+### I-8: Playwright end-to-end test suite exploration
+The app has 400+ backend integration tests (Vitest + supertest) but no browser-level test coverage. UI bugs like the ones found in V3 (broken subcategory picker, delta cards, broken expand chart) would be caught earlier with E2E tests that drive a real browser.
+
+**Scope for exploration:**
+- Evaluate [Playwright](https://github.com/microsoft/playwright) (Microsoft, TypeScript-native, supports Chromium/Firefox/WebKit, built-in trace viewer)
+- Spike: auth flow, import session creation, ledger category assignment, net worth balance entry
+- Decision point: how to handle local Postgres setup (reuse Docker Compose) and whether to run in CI or locally only
+- Timebox to a spike — full coverage is a multi-sprint effort; the goal is proving out the framework and toolchain before committing
+
+**Why P3 (not deferred):** Reliability gap is visible in V3. Worth scheduling once P1/P2 are stable rather than post-V3.
+
+---
+
 ### I-7: Recurring payments — remaining backlog (Phases 4+)
 Phases 1–3 shipped (CR-121/122/123). Remaining deferred items:
 - **Annual subscription detection:** Current CV + 2-month gate misses annual charges. Detect single-annual-charge pattern separately.
@@ -344,6 +357,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | I-5 | Export/restore housekeeping (staging file, GDrive warning) | P3 | Maintenance | — |
 | I-6 | Drive query string escaping | P3 | Security hygiene | — |
 | I-7 | Recurring payments: annual detection, prediction, per-tx exclusion | P3 | Enhancement | — |
+| I-8 | Playwright E2E test suite exploration (spike) | P3 | Testing | — |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
 | D-2 | Real estate auto-valuation (market value API) | Deferred | Enhancement | F-2 |
 | D-3 | Rental income tracking | Deferred | Feature | F-2 |

@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-165 (2026-05-09): AI insight refresh — surface rate-limit message with retry countdown
+
+**Why:** When the cooldown 429 fired, the frontend showed the raw string "HTTP 429". The `retryAfterMs` field in the response body was never read.
+
+**What:** `startRefresh` now reads the response body before throwing. On `status === 429` / `code === "RATE_LIMITED"`, it formats a human-readable message: "Analysis was refreshed recently — try again in X minutes." using `retryAfterMs` from the payload (falls back to 5 minutes if absent).
+
+**Files:** `frontend/src/components/FinancialHealthCard.tsx`
+
+---
+
 ## FIX-164 (2026-05-09): AI insight cooldown — in-memory Map replaced with DB query (SEC)
 
 **Why:** The per-household cooldown Map reset on every process restart, allowing unbounded OpenAI API calls if the process was restarted frequently. `insight_job` already existed and records every job with `created_at`, making it the authoritative source of truth.

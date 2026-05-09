@@ -205,9 +205,15 @@ export function FinancialHealthCard() {
     setJobError(null);
     try {
       const res = await apiFetch("/insights/financial/refresh", { method: "POST" });
-      const body = (await res.json()) as { ok?: boolean; jobId?: string };
+      const body = (await res.json()) as { ok?: boolean; jobId?: string; code?: string; retryAfterMs?: number };
+      if (res.status === 429 || body.code === "RATE_LIMITED") {
+        const mins = body.retryAfterMs != null
+          ? Math.ceil(body.retryAfterMs / 60_000)
+          : 5;
+        throw new Error(`Analysis was refreshed recently — try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
+      }
       if (!res.ok || !body.jobId) {
-        throw new Error(`HTTP ${res.status}`);
+        throw new Error("Could not start analysis. Please try again.");
       }
       void pollJob(body.jobId);
     } catch (e: unknown) {
