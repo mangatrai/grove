@@ -18,15 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## FIX-159 (2026-05-08): LedgerCategoryPicker Mantine footer/error migration + subcategory enablement fix
+## FIX-159 (2026-05-09): LedgerCategoryPicker Mantine migration + Add Group/Subcategory fully fixed
 
-**Why:** `LedgerCategoryPicker` still rendered footer actions and error text with custom CSS classes, and the "Add subcategory" action was permanently disabled in Needs Review when `value` was `null`. The disable logic only looked at `value`-derived parent state, so hovering a parent in the two-pane picker never enabled the button.
+**Why:** `LedgerCategoryPicker` had three bugs introduced during partial migration:
+1. Footer actions and error text still used custom CSS (`className="row"`, `className="secondary"`, `className="error"`).
+2. "Add group" and "Add subcategory" both called `window.prompt()` — a browser native dialog that doesn't respect the app's Mantine theme.
+3. "Add subcategory" was permanently disabled in Needs Review where `value={null}`, AND even when enabled it did nothing — `onActiveParentChange` emitted the picker's internal label-derived key (e.g. `"food & dining"`) rather than the category UUID, so `byId.get(activeParentIdFromPicker)` always returned `undefined` and the create call silently exited.
 
 **What:**
-- Migrated `LedgerCategoryPicker` wrapper/footer/error UI from custom HTML/CSS classes to Mantine primitives: `Box`, `Group`, `Button variant="default" size="xs"`, and `Text c="red" size="xs" mt={4}`.
-- Added optional `onActiveParentChange` callback to `HierarchicalSearchPicker`; it now emits active parent changes (including initial active parent resolution and hover-driven updates).
-- Added `activeParentIdFromPicker` local state in `LedgerCategoryPicker`, wired from `onActiveParentChange`.
-- Updated subcategory creation/disable logic to use `activeParentIdFromPicker ?? selectedParentId`, so users can add a subcategory under the currently active parent even when no category is pre-selected.
+- Migrated `LedgerCategoryPicker` footer and error from custom CSS to Mantine: `Box`, `Group justify="space-between"`, `Button variant="default" size="xs"`, `Text c="red" size="xs" mt={4}`.
+- Replaced both `window.prompt()` calls with a Mantine `Modal` + `TextInput`. "Add group" and "Add subcategory" open the modal; Enter key or "Create" button submits; loading state shown on the button during API call.
+- Fixed `HierarchicalSearchPicker.onActiveParentChange` to emit `activeParent?.selectableValue` (the actual category UUID) instead of `activeParentId` (the internal lowercased label key). `selectableValue` is populated from "General" group items in `buildCategoryAssignmentGroups` and is always the database UUID.
+- "Add subcategory" enabled state and parent resolution now use `activeParentIdFromPicker ?? selectedParentId`, so hovering any parent group enables the button and targets the correct parent regardless of whether a category is pre-selected.
 
 **Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/LedgerCategoryPicker.tsx`, `docs/CHANGE_HISTORY.md`
 

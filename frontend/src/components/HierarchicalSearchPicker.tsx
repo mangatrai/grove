@@ -153,8 +153,10 @@ export function HierarchicalSearchPicker({
   }, [filtered, activeParentId]);
 
   useEffect(() => {
-    onActiveParentChange?.(activeParentId);
-  }, [activeParentId, onActiveParentChange]);
+    // Emit the category UUID (selectableValue), not the picker's internal label-derived id.
+    // byId lookups in LedgerCategoryPicker are keyed by UUID, not by label.
+    onActiveParentChange?.(activeParent?.selectableValue ?? null);
+  }, [activeParent, onActiveParentChange]);
 
   useEffect(() => {
     if (!open) return;
