@@ -208,6 +208,63 @@ Streamline your savings growth
     const descs = rows.map((r) => r.description);
     expect(descs.every((d) => !/balance/i.test(d))).toBe(true);
   });
+
+  // pdf-parse does not understand columnar layout. When an ACH deposit description
+  // wraps within its cell, pdf-parse emits the date+partial-desc on one line and
+  // the amounts on the next line — with no amounts on the first line.
+  // This simulates the actual pdf-parse output for a Marcus statement with two
+  // ACH deposits whose descriptions wrap, plus a single-line Interest Paid row.
+  const wrappedSnippet = `
+Statement Period 03/01/2026 to 03/31/2026
+Beginning Balance $476.38
+Ending Balance $8,480.98
+
+ACCOUNT ACTIVITY
+DateDescriptionCreditsDebitsBalance
+03/31/2026 Interest Paid $4.60 $8,480.98
+03/23/2026 ACH Deposit Internet transfer from BANK OF AMERICA, N.A. DDA
+$3,000.00 $3,476.38
+account ****************3560
+03/10/2026 ACH Deposit Internet transfer from BANK OF AMERICA, N.A. DDA
+$5,000.00 $476.38
+account ****************3560
+03/31/2026 Ending Balance $8,480.98
+Streamline your savings growth
+`;
+
+  it("parses ACH deposits whose descriptions wrap onto the next line", () => {
+    const { rows } = parseMarcusOnlineSavingsFromText(wrappedSnippet);
+    expect(rows.length).toBe(3);
+    const achRows = rows.filter((r) => /ACH Deposit/i.test(r.description));
+    expect(achRows.length).toBe(2);
+    expect(achRows[0]!.amount).toBe(3000);
+    expect(achRows[0]!.txn_date).toBe("2026-03-23");
+    expect(achRows[1]!.amount).toBe(5000);
+    expect(achRows[1]!.txn_date).toBe("2026-03-10");
+  });
+
+  it("parses interest paid alongside wrapped ACH deposits", () => {
+    const { rows } = parseMarcusOnlineSavingsFromText(wrappedSnippet);
+    const interest = rows.find((r) => /Interest Paid/i.test(r.description));
+    expect(interest).toBeDefined();
+    expect(interest!.amount).toBe(4.6);
+    expect(interest!.txn_date).toBe("2026-03-31");
+  });
+
+  it("extracts ending balance and period dates from the SUMMARY block (no date prefix)", () => {
+    const { statementBalances } = parseMarcusOnlineSavingsFromText(wrappedSnippet);
+    expect(statementBalances).not.toBeNull();
+    expect(statementBalances!.ending).toBe(8480.98);
+    expect(statementBalances!.beginning).toBe(476.38);
+    expect(statementBalances!.asOfEnd).toBe("2026-03-31");
+    expect(statementBalances!.asOfStart).toBe("2026-03-01");
+  });
+
+  it("does not emit rows for wrapped Beginning Balance or Ending Balance lines", () => {
+    const { rows } = parseMarcusOnlineSavingsFromText(wrappedSnippet);
+    const descs = rows.map((r) => r.description);
+    expect(descs.every((d) => !/balance/i.test(d))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

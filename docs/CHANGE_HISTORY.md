@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-160 (2026-05-08): Marcus Online Savings PDF — ACH deposits and summary block now parsed correctly
+
+**Why:** `pdf-parse` does not reconstruct columnar layout. Wrapped ACH deposit lines split across two output lines (date+description on line 1, dollar amounts on line 2), causing all ACH deposits to be silently dropped. The pre-activity summary block (Beginning Balance, Ending Balance, Statement Period) was also not captured.
+
+**What:**
+- Added a **pre-scan pass** over the full PDF text to extract `Beginning Balance`, `Ending Balance`, and `Statement Period` date range before entering the activity table.
+- Added a **`pendingLine` state machine** in the activity loop: when a date-prefixed line carries fewer than 2 dollar amounts, it is saved as a pending line. The next line that carries ≥2 amounts is joined with the pending line and parsed as one combined row. Extra description-only continuation lines (e.g. "account ****3560") are appended to the pending line and kept accumulating.
+- Added `buildStatementBalances()` helper to construct the `BoaStatementBalances` result; table-extracted ending balance / date takes precedence over the summary block values.
+- Added 4 new unit tests in `backend/tests/pdf-parsers.test.ts` covering: wrapped ACH deposit rows, multiple wraps in one statement, summary block extraction (beginning/ending/period), and no spurious balance rows emitted.
+
+**Files:** `backend/src/modules/imports/profiles/marcus-online-savings-pdf.ts`, `backend/tests/pdf-parsers.test.ts`
+
+---
+
 ## CR-161 (2026-05-08): Net Worth account rows now expand inline to show per-account balance history
 
 **Why:** Net Worth provided only aggregate trend context. Users needed quick account-level history without leaving the page, especially when validating balance changes account-by-account.

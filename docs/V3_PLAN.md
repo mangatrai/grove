@@ -46,14 +46,12 @@ Also implement: **"Dissolve transfer pair"** action in ledger (when `transfer_gr
 
 ---
 
-### B-4: Marcus PDF parser — ACH deposits silently dropped
+### ~~B-4: Marcus PDF parser — ACH deposits silently dropped~~ ✓ DELIVERED (FIX-160, 2026-05-08)
 ACH deposits with wrapped description text are lost. Only single-line entries (Interest Paid) parse correctly. Root cause: `pdf-parse` doesn't understand columnar layout — description wrapping interleaves with amount columns.
 
-**Fix (pragmatic):** Heuristic reassembly — detect date+partial-description line with no amount, accumulate continuation lines until amount found, then emit combined row.
+**Fix:** `pendingLine` state machine accumulates date+description lines until ≥2 dollar amounts arrive on a continuation line, then joins and parses. Pre-scan pass extracts Beginning/Ending Balance and Statement Period from the summary block above ACCOUNT ACTIVITY.
 
-**Bonus:** Extract `Beginning Balance` / `Ending Balance` from the SUMMARY block and emit as `account_balance_snapshot` (keyed to statement end date). Currently wasted.
-
-**Files:** Marcus PDF adapter (`imports/profiles/`), `pdf-parsers.test.ts` (add fixture + test cases)
+**Files:** `backend/src/modules/imports/profiles/marcus-online-savings-pdf.ts`, `backend/tests/pdf-parsers.test.ts`
 
 ---
 
@@ -326,7 +324,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | B-1 | Transfer confirm button missing after partial dismissal | P1 | Bug | — |
 | B-2 | Dismissed transfers re-surface on next import | P1 | Bug + DB | — |
 | B-3 | Multi-day same-amount transfer cross-match | P1 | Bug | — |
-| B-4 | Marcus PDF ACH deposits silently dropped | P1 | Bug | — |
+| ~~B-4~~ | ~~Marcus PDF ACH deposits silently dropped~~ | ✓ Done | Bug | — |
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
 | B-7 | AI insight cooldown: in-memory → DB-backed | P1 | Security | — |
