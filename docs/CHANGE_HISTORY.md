@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-163 (2026-05-08): Net Worth — remove period delta cards re-introduced by Cursor
+
+**Why:** The three ASSETS/LIABILITIES/NET WORTH delta summary cards (period-over-period change) were removed in the V2 design pass. Cursor's CR-161 commit left them in the file — they had always been present in the source but never rendered before because the user had no full 3-month history with non-null values at both endpoints. Once real balance history existed, they re-appeared. User confirmed they should be gone.
+
+**What:** Removed `periodSummary` useMemo and its three-card JSX block. Also removed the now-unused `formatSignedDelta` helper.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
 ## FIX-162 (2026-05-08): Net Worth — per-account balance history chart expand now works correctly
 
 **Why:** Cursor's CR-161 implementation had three bugs that made the expand-on-click feature completely non-functional: (1) the API call was missing the required `from` and `to` query params, so every request returned 400 and every account landed in the failed state showing "No balance history available". (2) The data mapping read `p.month` (undefined) instead of the actual field `p.asOf` for the X-axis label. (3) A fabricated `AccountHistoryResponse` type was used instead of the existing `BalanceSheetHistoryResponse`. A fourth UX issue: `showNoHistory` fired immediately on first expand (before loading started) because it only checked `historyPoints.length === 0`, not whether a fetch had completed.

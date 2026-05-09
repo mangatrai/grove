@@ -125,12 +125,6 @@ function formatMoney(n: number | null | undefined): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function formatSignedDelta(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value)) {
-    return "—";
-  }
-  return `${value >= 0 ? "+" : "–"}${formatMoney(Math.abs(value))}`;
-}
 
 /** Display-only: liabilities negative, assets positive (matches net-worth intuition). */
 function signedDisplayBalance(row: Pick<BalanceSheetAccountRow, "side" | "balance">): number | null {
@@ -345,31 +339,6 @@ export function NetWorthPage() {
       })),
     [historyData?.points]
   );
-
-  const periodSummary = useMemo(() => {
-    const pts = historyData?.points ?? [];
-    if (pts.length === 0) {
-      return null;
-    }
-    const first = pts[0]!;
-    const last = pts[pts.length - 1]!;
-    const fa = first.totals.assets;
-    const fl = first.totals.liabilities;
-    const fn = first.totals.netWorth;
-    const la = last.totals.assets;
-    const ll = last.totals.liabilities;
-    const ln = last.totals.netWorth;
-    return {
-      startLabel: first.asOf,
-      endLabel: last.asOf,
-      start: { assets: fa, liabilities: fl, net: fn },
-      end: { assets: la, liabilities: ll, net: ln },
-      delta:
-        fa != null && la != null
-          ? { assets: la - fa, liabilities: (ll ?? 0) - (fl ?? 0), net: (ln ?? 0) - (fn ?? 0) }
-          : null
-    };
-  }, [historyData?.points]);
 
   const allTableRows = useMemo(() => {
     const a = data?.assets ?? [];
@@ -710,32 +679,6 @@ export function NetWorthPage() {
               <Text size="sm" c="dimmed">Refetches the balance sheet and trend chart.</Text>
             </Group>
           </Stack>
-        ) : null}
-
-        {periodSummary?.delta ? (
-          <Group gap="sm" wrap="wrap" mt="md">
-            <Paper radius="md" p="sm" style={{ background: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)", minWidth: "13rem" }}>
-              <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">ASSETS</Text>
-              <Text fw={700} style={{ fontSize: "1.05rem", color: (periodSummary.delta.assets ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
-                {formatSignedDelta(periodSummary.delta.assets)}
-              </Text>
-              <Text size="xs" c="dimmed">{periodSummary.startLabel} → {periodSummary.endLabel}</Text>
-            </Paper>
-            <Paper radius="md" p="sm" style={{ background: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)", minWidth: "13rem" }}>
-              <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">LIABILITIES</Text>
-              <Text fw={700} style={{ fontSize: "1.05rem", color: (periodSummary.delta.liabilities ?? 0) <= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
-                {formatSignedDelta(periodSummary.delta.liabilities)}
-              </Text>
-              <Text size="xs" c="dimmed">{periodSummary.startLabel} → {periodSummary.endLabel}</Text>
-            </Paper>
-            <Paper radius="md" p="sm" style={{ background: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success-subtle)" : "var(--color-danger-subtle)", minWidth: "13rem" }}>
-              <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">NET WORTH</Text>
-              <Text fw={700} style={{ fontSize: "1.05rem", color: (periodSummary.delta.net ?? 0) >= 0 ? "var(--color-success)" : "var(--color-danger)" }}>
-                {formatSignedDelta(periodSummary.delta.net)}
-              </Text>
-              <Text size="xs" c="dimmed">{periodSummary.startLabel} → {periodSummary.endLabel}</Text>
-            </Paper>
-          </Group>
         ) : null}
 
         {historyLoading ? <Skeleton height={340} radius="md" mt="sm" animate /> : null}
