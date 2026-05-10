@@ -43,6 +43,13 @@ type ResolutionDetailItem = {
   reasonDetail: { kind?: string; message?: string; existingCanonicalId?: string; rawId?: string } | null;
   status: "open" | "in_review" | "resolved";
   createdAt: string;
+  transferCandidates?: {
+    id: string;
+    txnDate: string;
+    amount: number;
+    description: string;
+    accountName: string;
+  }[];
   context: {
     sessionId: string | null;
     fileId: string | null;
@@ -1136,11 +1143,14 @@ export function TransactionsPage() {
     }
   }
 
-  async function confirmTransferItem(txnId: string, itemId: string) {
+  async function confirmTransferItem(txnId: string, itemId: string, creditId: string) {
     setError(null);
     setSavingResolutionItemId(itemId);
     try {
-      await apiJson(`/resolution/${itemId}/confirm-transfer`, { method: "POST", body: "{}" });
+      await apiJson(`/resolution/${itemId}/confirm-transfer`, {
+        method: "POST",
+        body: JSON.stringify({ creditId })
+      });
       forgetReviewDetail(txnId);
       await load();
     } catch (e: unknown) {
@@ -2319,19 +2329,62 @@ export function TransactionsPage() {
                                                   />
                                                 </Box>
                                               ) : null}
+                                              {it.type === "transfer_ambiguity" ? (
+                                                <Stack gap={6} w="100%">
+                                                  {it.transferCandidates != null && it.transferCandidates.length > 0 ? (
+                                                    <Stack gap={4}>
+                                                      {it.transferCandidates.map((c) => {
+                                                        const rawDesc = c.description ?? "";
+                                                        const descShort =
+                                                          rawDesc.length > 40 ? `${rawDesc.slice(0, 40)}…` : rawDesc;
+                                                        const amt = `$${Number(c.amount).toLocaleString(undefined, {
+                                                          minimumFractionDigits: 2,
+                                                          maximumFractionDigits: 2
+                                                        })}`;
+                                                        return (
+                                                          <Group
+                                                            key={c.id}
+                                                            gap="xs"
+                                                            wrap="nowrap"
+                                                            justify="space-between"
+                                                            align="center"
+                                                          >
+                                                            <Group gap={6} wrap="wrap" style={{ flex: 1, minWidth: 0 }}>
+                                                              <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
+                                                                {c.txnDate}
+                                                              </Text>
+                                                              <Text size="xs" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>
+                                                                {amt}
+                                                              </Text>
+                                                              <Text size="xs">{c.accountName}</Text>
+                                                              <Text size="xs" c="dimmed" title={rawDesc || undefined}>
+                                                                {descShort}
+                                                              </Text>
+                                                            </Group>
+                                                            <Button
+                                                              type="button"
+                                                              variant="light"
+                                                              size="xs"
+                                                              disabled={busy || savingResolutionItemId === it.id}
+                                                              title="Link this transaction with the other leg as a transfer pair"
+                                                              onClick={() => void confirmTransferItem(t.id, it.id, c.id)}
+                                                            >
+                                                              {savingResolutionItemId === it.id ? "Confirming…" : "Confirm as Transfer"}
+                                                            </Button>
+                                                          </Group>
+                                                        );
+                                                      })}
+                                                    </Stack>
+                                                  ) : it.transferCandidates != null ? (
+                                                    <Text c="dimmed" size="xs">
+                                                      No matching candidates — may resolve on next import.
+                                                    </Text>
+                                                  ) : null}
+                                                </Stack>
+                                              ) : null}
                                               <Group gap="xs" wrap="wrap">
                                                 {it.status !== "resolved" ? (
                                                   <>
-                                                    {it.type === "transfer_ambiguity" && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.debitId && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.creditId ? (
-                                                      <Button
-                                                        type="button"
-                                                        disabled={busy || savingResolutionItemId === it.id}
-                                                        title="Link both transactions as a transfer pair — excludes them from cash flow reports"
-                                                        onClick={() => void confirmTransferItem(t.id, it.id)}
-                                                      >
-                                                        {savingResolutionItemId === it.id ? "Confirming…" : "Confirm as transfer"}
-                                                      </Button>
-                                                    ) : null}
                                                     <Button
                                                       type="button"
                                                       variant="default"

@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-162 (2026-05-09): Needs Review — transfer ambiguity candidate list + confirm body
+
+**Why:** Backend `transfer_ambiguity` resolution items now expose `transferCandidates` so the user can pick the correct other-leg transaction instead of a single implicit pair from `reasonDetail`.
+
+**What:** Extended `ResolutionDetailItem` with optional `transferCandidates`. Replaced the old single “Confirm as transfer” button (gated on `reasonDetail` debit/credit IDs) with a compact Mantine list: date, currency-formatted amount, account name, truncated description, per-candidate `Button variant="light" size="xs"` calling `POST /resolution/:id/confirm-transfer` with `{ creditId: candidate.id }`. Empty array shows a dimmed hint; missing field leaves confirm UI absent (legacy queue). “Not a transfer” dismiss unchanged. Bulk confirm path untouched.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-165 (2026-05-09): AI insight refresh — surface rate-limit message with retry countdown
 
 **Why:** When the cooldown 429 fired, the frontend showed the raw string "HTTP 429". The `retryAfterMs` field in the response body was never read.
