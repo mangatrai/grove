@@ -644,85 +644,36 @@ See `reports.routes.ts` lines 99–194 and `balance-sheet.service.ts` `BalanceSh
 
 ---
 
-## Real Estate / Property Accounts — Scope & Equity Linkage
+## ~~Real Estate / Property Accounts — Scope & Equity Linkage~~ → Delivered (CR-169, 2026-05-10)
 
-### Scope (explicitly settled)
-**In scope**: onboard a property as an asset account, enter current market value manually, link it to an existing mortgage/loan account, display equity inline in the net worth table.
+**Delivered approach — simpler than originally planned (no `real_estate` account type):**
 
-**Out of scope (deferred indefinitely)**: rental income tracking, expense tracking, ROI calculation. The app is not a property management tool.
+The original design added a `real_estate` account type, which created an institution identity problem (properties have no bank). The implemented design instead attaches property data to the mortgage account via a dedicated `property` table.
 
-### How the math works (already correct)
-If you add a real estate account (asset, e.g. $1.2M) and a mortgage account (liability, e.g. $790K), the net worth calculation already gives you the right answer — assets − liabilities. No special logic needed. The linkage is purely a **display/UX feature**, not a calculation requirement.
+### What shipped (migration 0041)
+- `property` table: `address_line1`, `city`, `state`, `zip`, `country`, `property_use` (`primary`/`rental`/`vacation`), `api_provider`, `api_property_id`
+- `property_value_snapshot` table: time-series market values; `UNIQUE(property_id, as_of_date)`, upserts on same date
+- `financial_account.property_id FK → property(id)` — links a mortgage loan account to its property record
+- `financial_account.linked_account_id FK → financial_account(id)` — self-referential, wired for future use (HELOC→mortgage)
+- `mortgage` top-level type removed; all mortgages are now `type='loan'` with `sub_type='mortgage_primary|investment|vacation'`
+- Routes: `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
+- UI: `+ Property` / `Property` button on mortgage accounts in Settings; modal with address fields + market value (creates first snapshot)
 
-### What the linkage adds
-Without it: the net worth table shows property and mortgage as unrelated rows. Users have to mentally do `$1.2M − $790K = $410K equity`.
-
-With `linked_account_id` (mortgage → property):
+### What remains (F-2 display work — still needed)
+The data is stored. The net worth equity callout is not yet implemented:
 ```
 Assets
-  Primary Residence         $1,200,000
-    └─ Mortgage            -$790,000        ← indented under property
-    └─ Equity               $410,000        ← computed callout
+  Primary Residence         $1,200,000    ← from property_value_snapshot (latest)
+    └─ Mortgage            -$790,000      ← from account_balance_snapshot (loan account)
+    └─ Equity               $410,000      ← computed: property value − loan balance
 
 Liabilities
-  (mortgage excluded — already shown under its property)
+  (mortgage excluded from standalone list when linked to property)
 ```
-The mortgage is shown nested under its property in the asset section and excluded from the standalone liabilities list to avoid double-counting in the display. The underlying math (assets − liabilities) doesn't change — just the presentation.
+This requires updating `balance-sheet.service.ts` to join `property` + `property_value_snapshot` and `NetWorthPage.tsx` to render the grouped equity display.
 
-### Schema needed
-```sql
--- Already planned in account enrichment migration:
-linked_account_id TEXT REFERENCES financial_account(id) ON DELETE SET NULL
-
--- New type:
--- ALTER TABLE financial_account DROP CONSTRAINT financial_account_type_check;
--- ALTER TABLE financial_account ADD CONSTRAINT financial_account_type_check
---   CHECK (type IN ('checking','savings','credit_card','loan','mortgage',
---                   'investment','retirement','payslip','real_estate'));
-
--- property_use field (primary | rental | vacation):
-property_use TEXT CHECK (property_use IN ('primary', 'rental', 'vacation'))
-```
-
-### Onboarding flow in UI
-
-When user selects `type: Real Estate`, the account form changes:
-
-- **Institution name** field becomes a display label only — pre-filled with "Real Estate" or "House". No need to enter a bank name.
-- **Sub-type** (`property_use`) shown as a required toggle: `Primary` | `Rental` | `Vacation`.
-- **Structured address fields** appear (hidden for all other account types), collected as separate inputs:
-  - Street address
-  - City
-  - State
-  - ZIP code
-- **Link to mortgage/loan** — optional dropdown of existing loan/mortgage accounts in the household.
-- User enters initial market value as a manual balance snapshot at creation time.
-- Net worth table immediately shows equity callout if a mortgage is linked.
-
-### Address storage and API identifier mapping
-
-When the user saves the address, we do an **address lookup/validation call** against the chosen real estate API (RealtyAPI or similar). The API returns a canonical property identifier (a property ID or standardized address key unique to that listing in their system). We store:
-
-```sql
--- Additional columns on financial_account for real_estate type:
-property_address_json   TEXT   -- structured: { street, city, state, zip }
-property_api_provider   TEXT   -- e.g. 'realtyapi' | 'freewebapi'
-property_api_id         TEXT   -- canonical property ID from provider; used for subsequent valuation calls
-```
-
-The `property_api_id` is the key that makes monthly auto-updates cheap and reliable — no need to re-search by address each time, just hit the valuation endpoint with the stored ID.
-
-If address validation/API lookup fails (API down, property not found), fall back to storing the raw address and flagging as manual-only until resolved.
-
-### Balance updates — manual and automated
-
-**Manual**: market value entered as a balance snapshot at any time. User always has full control.
-
-**Automated**: monthly background job fetches latest valuation from the stored `property_api_id` and writes a new `account_balance_snapshot` row.
-
-Candidate APIs (both have generous free tiers, include address search + valuation endpoints):
-- https://www.realtyapi.io/
-- https://freewebapi.com/data-apis/real-estate-api/#free-real-estate-api-getting-started
+### Valuation API integration (deferred → D-2)
+`api_provider` and `api_property_id` columns exist. Manual entry covers the use case for V3. API integration (RealtyAPI / ATTOM / similar) deferred until real need arises.
 
 Implementation design:
 - **Cadence**: monthly. Values don't move meaningfully week to week.

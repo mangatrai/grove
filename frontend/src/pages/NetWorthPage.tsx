@@ -147,8 +147,9 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
   credit_card: "Credit Card",
   investment: "Investment",
   retirement: "Retirement",
+  health: "Health",
+  education: "Education",
   loan: "Loan",
-  mortgage: "Mortgage",
   payslip: "Payslip",
 };
 

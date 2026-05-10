@@ -18,6 +18,37 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-169 / DB-041 (2026-05-10): Account enrichment + Property entity (F-1/F-2)
+
+**Why:** Accounts lacked sub-classification (HSA vs FSA vs 401k), free-text context for AI insights, and a structured way to track property assets linked to mortgages. Net worth was also missing health/education account types.
+
+**What changed:**
+
+- **Migration `0041_v3_account_enrichment.sql`:**
+  - New columns on `financial_account`: `sub_type TEXT`, `memo TEXT`, `liquidity TEXT CHECK('liquid','semi_liquid','restricted')`, `linked_account_id` (self-referential FK, for future HELOC→mortgage pairing), `property_id FK → property`
+  - New `property` table: address fields, property use, API provider/ID for future valuation API
+  - New `property_value_snapshot` table: time-series market values per property (mirrors `account_balance_snapshot` pattern); unique index on `(property_id, as_of_date)`
+  - Migrated all existing `type='mortgage'` rows → `type='loan', sub_type='mortgage_primary'`
+  - Widened `type` CHECK: added `health`, `education`; removed `mortgage`
+  - `defaultLiquidity()` auto-sets liquidity at create/update time based on type+subtype (user can override)
+
+- **Backend:**
+  - `import-file-binding.service.ts`: `listHouseholdFinancialAccounts`, `createHouseholdFinancialAccount`, `updateHouseholdFinancialAccount` — all updated for new fields; `defaultLiquidity()` exported helper
+  - `imports.routes.ts`: `accountUpsertSchema` updated — `mortgage` removed, `health`/`education` added, `subType`/`memo`/`liquidity` added
+  - `household/property.service.ts` (new): `createProperty`, `getProperty`, `listPropertiesForHousehold`, `updateProperty`, `addPropertyValueSnapshot`, `listPropertyValueSnapshots`
+  - `household.routes.ts`: property CRUD routes — `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
+  - `balance-sheet.service.ts`: `accountSide()` — added `health`/`education` as assets, removed `mortgage` from liabilities
+  - `insight-prompt.service.ts`: removed `mortgage` from loan liability aggregation
+
+- **Frontend:**
+  - `SettingsPage.tsx`: flat `Select` for account type replaced with `HierarchicalSearchPicker` (type → subtype two-pane picker); added memo `Textarea`; added liquidity override `Select`; added `+ Property` button for mortgage accounts opening a property details `Modal` (address + market value snapshot); accounts table shows formatted type·subtype label + memo preview
+  - `NetWorthPage.tsx`: `ACCOUNT_TYPE_LABELS` — added `health`/`education`, removed `mortgage`
+  - `DashboardPageV2.tsx`: `LIABILITY_ACCOUNT_TYPES` — removed `mortgage`
+
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/household/property.service.ts` (new), `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ## FIX-168 / DB-040 (2026-05-10): Transfer ambiguity — debit-only items, excluded flag, live candidates (B-1/B-2/B-3)
 
 **Why:** Three interconnected transfer detection bugs blocked users from resolving ambiguous transfer pairs:

@@ -71,38 +71,39 @@ Rate-limit `Map<householdId, timestamp>` resets on every process restart. Allows
 
 ## P2 — High-Value Features
 
-### F-1: Account enrichment — memo, sub_type, liquidity
-Adds three nullable columns to `financial_account`:
-- `memo TEXT` — free-form note (fed into AI insights for account context)
-- `sub_type TEXT` — descriptive sub-classification (UI suggests per type: `401k`, `roth_ira`, `hsa`, `brokerage`, `529`, `able`, `hysa`, `crypto`, etc.)
-- `liquidity TEXT CHECK ('liquid','semi_liquid','restricted')` — behavioral tag; inferred by default from type, user-overridable
+### ~~F-1: Account enrichment — memo, sub_type, liquidity~~ ✓ DELIVERED (CR-169, 2026-05-10)
 
-Liquidity defaults: checking/savings → `liquid`; investment → `semi_liquid`; retirement/real_estate → `restricted`. HSA critical case: `investment + restricted`.
+**Delivered (expanded from original plan):**
+- `sub_type TEXT` — comprehensive two-level hierarchy (9 top-level types × up to 13 subtypes). New types added: `health` (HSA/FSA/HRA/ABLE) and `education` (529/Coverdell/UGMA-UTMA). `mortgage` top-level type removed — now `loan/mortgage_primary|investment|vacation`.
+- `memo TEXT` — free-form note fed to AI insights
+- `liquidity TEXT CHECK('liquid','semi_liquid','restricted')` — `defaultLiquidity()` auto-sets from type+subtype at save; user can override. Correct edge cases: savings/cd → semi_liquid; investment/stock_options → restricted; health/hsa → semi_liquid.
+- `linked_account_id TEXT FK → financial_account(id)` — self-referential, wired for future HELOC→mortgage pairing
+- `property_id TEXT FK → property(id)` — links mortgage accounts to property entity (see F-2)
+- **UI:** flat `Select` replaced with `HierarchicalSearchPicker` (type → subtype two-pane picker); memo `Textarea`; liquidity override `Select` (clearable, auto label when empty)
+- **Data migration:** existing `mortgage` rows → `type='loan', sub_type='mortgage_primary'`
+- `balance-sheet.service.ts` + `insight-prompt.service.ts` updated: `health`/`education` classified as assets; `mortgage` references removed
 
-**Also adds:** `linked_account_id TEXT FK → financial_account(id)` (mortgage → property pairing) and `property_use TEXT CHECK ('primary','rental','vacation')` for real_estate.
-
-**DB:** Single migration adding all enrichment columns.
-
-**UI:** Account create/edit form gains memo textarea, sub_type select (suggestions per type), liquidity override toggle.
-
-**Files:** New migration, `household.service.ts`, account-related routes, account form in frontend
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`
 
 ---
 
-### F-2: Real estate account type + home equity display
-Add `real_estate` to the `type` CHECK constraint. Onboarding flow: structured address fields, property_use toggle, link-to-mortgage dropdown, initial market value entry.
+### ~~F-2: Real estate account type + home equity display~~ ✓ DELIVERED (structural, CR-169, 2026-05-10)
 
-Net worth table equity callout: when a mortgage has `linked_account_id` pointing to a real_estate account, show:
-```
-Primary Residence    $1,200,000
-  └─ Mortgage       -$790,000
-  └─ Equity          $410,000
-```
-Mortgage excluded from standalone liabilities to avoid double-counting in display (math unchanged).
+**Delivered approach (simpler than originally planned — no `real_estate` account type):**
 
-**Optional (store the intent, implement later):** Monthly auto-valuation from RealtyAPI/FreeWebAPI. Requires `property_api_provider` + `property_api_id` columns and `REALTY_API_KEY` env var. Degrades gracefully to manual if absent.
+Original plan added a `real_estate` account type, which created an institution identity problem (no bank = no natural institution). Revised design: property data lives on a dedicated `property` table linked to the mortgage account via FK. No separate asset account needed.
 
-**Files:** New migration (type constraint + real_estate columns), `household.service.ts`, `NetWorthPage.tsx`, account form
+- **`property` table:** `address_line1`, `city`, `state`, `zip`, `country`, `property_use` (`primary`/`rental`/`vacation`), `api_provider`, `api_property_id` (for future valuation API)
+- **`property_value_snapshot` table:** time-series market values — mirrors `account_balance_snapshot` pattern. Unique index on `(property_id, as_of_date)`. Upserts on same date rather than creating duplicates.
+- **Backend:** `property.service.ts` (new) — full CRUD + value snapshot CRUD. Routes at `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
+- **UI:** mortgage accounts in Settings table show a `+ Property` / `Property` button opening a modal with address fields + market value entry. Value creates first snapshot in the time series.
+
+**Not yet implemented (remaining F-2 work):**
+- Net worth equity callout (`Primary Residence → Mortgage → Equity` display in `NetWorthPage.tsx`) — property data is stored, backend query needs to join and surface it
+- Property value history chart (expand-on-click, same pattern as F-4 per-account chart)
+- Real estate auto-valuation API integration (deferred → D-2)
+
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/household/property.service.ts` (new), `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`
 
 ---
 
@@ -354,9 +355,9 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
 | ~~B-7~~ | ~~AI insight cooldown: in-memory → DB-backed~~ | ✓ Done | Security | — |
-| F-1 | Account enrichment (memo, sub_type, liquidity, linked_account_id) | P2 | Feature | — |
-| F-2 | Real estate account type + home equity display | P2 | Feature | F-1 |
-| F-3 | Net worth liquidity breakdown | P2 | Feature | F-1 |
+| ~~F-1~~ | ~~Account enrichment (sub_type, memo, liquidity, linked_account_id, health/education types)~~ | ✓ Done | Feature | — |
+| ~~F-2~~ | ~~Property entity + value time-series (structural; equity display remaining)~~ | ✓ Partial | Feature | F-1 |
+| F-3 | Net worth liquidity breakdown | P2 | Feature | F-1 ✓ |
 | ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
 | F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
@@ -381,4 +382,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-10. All P1 bugs (B-1 through B-7) delivered. P2 features next.*
+*Last updated: 2026-05-10. All P1 bugs done. F-1 done; F-2 structural done (equity display + value chart remaining). Next: F-3 (liquidity breakdown), F-9 (DOB), or remaining F-2 display work.*

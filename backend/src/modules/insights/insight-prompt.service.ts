@@ -137,7 +137,7 @@ async function buildNetWorthBlock(householdId: string): Promise<InsightPromptInp
     const b = Math.abs(l.balance ?? 0);
     if (l.type === "credit_card") {
       creditCardLiabilities += b;
-    } else if (l.type === "loan" || l.type === "mortgage") {
+    } else if (l.type === "loan") {
       loanLiabilities += b;
     }
   }
