@@ -867,42 +867,6 @@ export function TransactionsPage() {
     }
   }
 
-  async function bulkConfirmTransfers() {
-    const ids: string[] = [];
-    if (!data) return;
-    for (const t of data.transactions) {
-      if (!selectedTxnIds.has(t.id)) continue;
-      for (const item of t.openReviewItems ?? []) {
-        if (item.type === "transfer_ambiguity") ids.push(item.id);
-      }
-    }
-    const uniqueIds = [...new Set(ids)];
-    if (uniqueIds.length === 0) {
-      setError("No transfer ambiguity flags found in selected rows.");
-      return;
-    }
-    setError(null);
-    setSavingBulk(true);
-    try {
-      const res = await apiJson<{ confirmed: { itemId: string }[]; errors: { itemId: string; code: string; message: string }[] }>(
-        "/resolution/bulk-confirm-transfers",
-        { method: "POST", body: JSON.stringify({ ids: uniqueIds }) }
-      );
-      if (res.errors.length > 0) {
-        setError(`Paired ${res.confirmed.length} transfer(s); ${res.errors.length} could not be confirmed.`);
-      }
-      setSelectedTxnIds(new Set());
-      reviewDetailLoadedRef.current.clear();
-      setReviewDetailByTxn({});
-      setReviewDetailErr({});
-      await load();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Bulk confirm transfers failed");
-    } finally {
-      setSavingBulk(false);
-    }
-  }
-
   async function trashSingle(id: string) {
     setError(null);
     try {
@@ -1695,16 +1659,6 @@ export function TransactionsPage() {
                 <Button type="button" disabled={savingBulk || !bulkCategoryId} onClick={() => void bulkAssignCategory()}>
                   Apply category
                 </Button>
-                {openTransferCountInSelection > 0 ? (
-                  <Button
-                    type="button"
-                    disabled={savingBulk}
-                    onClick={() => void bulkConfirmTransfers()}
-                    title="Confirm selected transfer flags as real transfers — sets transfer_group_id on both legs and excludes them from cash flow"
-                  >
-                    Confirm transfers ({openTransferCountInSelection})
-                  </Button>
-                ) : null}
                 {openFlagCountInSelection > 0 ? (
                   <Button
                     type="button"
