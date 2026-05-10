@@ -10,6 +10,7 @@ export type BalanceSheetAccountRow = {
   accountMask: string | null;
   type: string;
   currency: string;
+  liquidity: "liquid" | "semi_liquid" | "restricted" | null;
   side: BalanceSheetSide;
   balance: number | null;
   balanceAsOf: string | null;
@@ -17,10 +18,24 @@ export type BalanceSheetAccountRow = {
   importFileId: string | null;
 };
 
+export type PropertySheetRow = {
+  propertyId: string;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  propertyUse: "primary" | "rental" | "vacation" | null;
+  marketValue: number | null;
+  marketValueAsOf: string | null;
+  linkedMortgageAccountId: string | null;
+  linkedMortgageBalance: number | null;
+  linkedMortgageAsOf: string | null;
+};
+
 export type BalanceSheetResult = {
   asOf: string;
   assets: BalanceSheetAccountRow[];
   liabilities: BalanceSheetAccountRow[];
+  properties: PropertySheetRow[];
   totals: {
     assets: number | null;
     liabilities: number | null;
@@ -214,7 +229,7 @@ export async function getBalanceSheet(
 ): Promise<BalanceSheetResult> {
   const own = financialAccountOwnerFragment(options);
   const accounts = await qAll<Record<string, unknown>>(
-    `SELECT id, institution, account_mask, type, currency
+    `SELECT id, institution, account_mask, type, currency, liquidity
        FROM financial_account
       WHERE household_id = ?
         AND type <> 'payslip'${own.fragment}
@@ -289,6 +304,7 @@ export async function getBalanceSheet(
       accountMask: a.account_mask == null ? null : String(a.account_mask),
       type,
       currency: String(a.currency ?? "USD"),
+      liquidity: a.liquidity == null ? null : (String(a.liquidity) as "liquid" | "semi_liquid" | "restricted"),
       side,
       balance,
       balanceAsOf,
@@ -311,10 +327,82 @@ export async function getBalanceSheet(
     }
   }
 
+  // --- Properties ---
+  const propertyRows = await qAll<Record<string, unknown>>(
+    `SELECT p.id, p.address_line1, p.city, p.state, p.property_use,
+            pvs.market_value_usd::text AS market_value_usd,
+            pvs.as_of_date::text       AS market_value_as_of
+       FROM property p
+       LEFT JOIN LATERAL (
+         SELECT market_value_usd, as_of_date
+           FROM property_value_snapshot
+          WHERE property_id = p.id
+            AND as_of_date <= ?::date
+          ORDER BY as_of_date DESC
+          LIMIT 1
+       ) pvs ON true
+      WHERE p.household_id = ?
+      ORDER BY p.created_at`,
+    asOf,
+    householdId
+  );
+
+  const properties: PropertySheetRow[] = [];
+
+  for (const pr of propertyRows) {
+    const propertyId = String(pr.id);
+    const rawMv = pr.market_value_usd;
+    const marketValue = rawMv != null ? Number(rawMv) : null;
+    const marketValueAsOf =
+      pr.market_value_as_of != null ? String(pr.market_value_as_of).slice(0, 10) : null;
+
+    const mortgageAcct = await qGet<{ id: string }>(
+      `SELECT id FROM financial_account
+        WHERE property_id = ? AND household_id = ? AND type = 'loan'
+        LIMIT 1`,
+      propertyId,
+      householdId
+    );
+
+    let linkedMortgageBalance: number | null = null;
+    let linkedMortgageAsOf: string | null = null;
+    const linkedMortgageAccountId = mortgageAcct ? mortgageAcct.id : null;
+
+    if (linkedMortgageAccountId) {
+      const liabRow = liabilities.find((l) => l.financialAccountId === linkedMortgageAccountId);
+      if (liabRow) {
+        linkedMortgageBalance = liabRow.balance;
+        linkedMortgageAsOf = liabRow.balanceAsOf;
+      }
+    }
+
+    if (marketValue != null && Number.isFinite(marketValue)) {
+      assetSum += marketValue;
+      assetHasAny = true;
+    }
+
+    properties.push({
+      propertyId,
+      addressLine1: pr.address_line1 != null ? String(pr.address_line1) : null,
+      city: pr.city != null ? String(pr.city) : null,
+      state: pr.state != null ? String(pr.state) : null,
+      propertyUse:
+        pr.property_use != null
+          ? (String(pr.property_use) as "primary" | "rental" | "vacation")
+          : null,
+      marketValue,
+      marketValueAsOf,
+      linkedMortgageAccountId,
+      linkedMortgageBalance,
+      linkedMortgageAsOf
+    });
+  }
+
   return {
     asOf,
     assets,
     liabilities,
+    properties,
     totals: {
       assets: assetHasAny ? assetSum : null,
       liabilities: liabilityHasAny ? liabilitySum : null,

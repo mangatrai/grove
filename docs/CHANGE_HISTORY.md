@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-171 / UX-171 (2026-05-10): F-2 display complete + F-3 liquidity breakdown + OpenAPI doc remediation (CR-169 gap)
+
+**Why:** Properties stored in DB since CR-169 but invisible on NetWorthPage — market values excluded from totals and no UI display. OpenAPI spec and API_HOUSEHOLD.md were not updated in CR-169 commit (doc gap). F-3 (liquidity breakdown) is a natural extension of the same page once liquidity field is surfaced from the backend.
+
+**What changed:**
+
+- `balance-sheet.service.ts`: SELECT now includes `liquidity` column from `financial_account`. New property query runs after accounts loop — LEFT JOIN LATERAL to latest `property_value_snapshot` ≤ asOf, then finds linked mortgage via `financial_account.property_id`. Property market values added to `assetSum`/`assetHasAny`. Result includes `properties[]` array and `PropertySheetRow` type. `BalanceSheetAccountRow` now includes `liquidity` field.
+- `reports.routes.ts`: `properties` forwarded in GET /reports/balance-sheet response.
+- `NetWorthPage.tsx`:
+  - F-2: property rows folded into Assets table under a "Real Estate" sub-label. Each row shows address, property use type, market value, equity sub-text (market value − mortgage balance). Pencil edit posts new market value snapshot to POST /household/properties/:id/values. Expand-on-click shows Recharts LineChart of value history from GET /household/properties/:id/values.
+  - F-3: Liquidity breakdown Paper section added between KPI cards and Trend chart. Groups asset balances by liquidity tier (liquid/semi_liquid/restricted/uncategorized). Property market values always count as restricted. Uncategorized row shows link to Settings → Accounts. Only rendered when at least one account has a liquidity tag or a property has a value.
+- `openapi/openapi.yaml`: Added all 6 /household/properties routes. Added PropertyRecord and PropertyValueSnapshot component schemas. Updated account create/update schemas with sub_type, memo, liquidity, linked_account_id, property_id and corrected type enum (health/education added, mortgage removed). Updated /reports/balance-sheet response schema with properties[] and liquidity on account rows.
+- `docs/API_HOUSEHOLD.md`: Added Property routes section and Account enrichment fields section.
+- `docs/API_INDEX.md`: Added property route entries.
+- `docs/API_BALANCE_SHEET.md`: Documented `liquidity`, `properties[]`, and corrected account-type lists for the balance sheet response.
+- `import-file-binding.service.ts`: `GET /imports/accounts` list rows now include `linked_account_id` (OpenAPI parity).
+
+**Files:** `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/reports/reports.routes.ts`, `backend/src/modules/imports/import-file-binding.service.ts`, `frontend/src/pages/NetWorthPage.tsx`, `openapi/openapi.yaml`, `docs/API_HOUSEHOLD.md`, `docs/API_INDEX.md`, `docs/API_BALANCE_SHEET.md`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`
+
 ## CR-169 / DB-041 (2026-05-10): Account enrichment + Property entity (F-1/F-2)
 
 **Why:** Accounts lacked sub-classification (HSA vs FSA vs 401k), free-text context for AI insights, and a structured way to track property assets linked to mortgages. Net worth was also missing health/education account types.

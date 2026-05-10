@@ -184,6 +184,7 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     sub_type: string | null;
     memo: string | null;
     liquidity: string | null;
+    linked_account_id: string | null;
     property_id: string | null;
     institution: string;
     account_mask: string | null;
@@ -201,6 +202,7 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     sub_type: string | null;
     memo: string | null;
     liquidity: string | null;
+    linked_account_id: string | null;
     property_id: string | null;
     institution: string;
     account_mask: string | null;
@@ -215,6 +217,7 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
             fa.sub_type,
             fa.memo,
             fa.liquidity,
+            fa.linked_account_id,
             fa.property_id,
             fa.institution,
             fa.account_mask,
@@ -228,7 +231,7 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
          ON f.financial_account_id = fa.id
         AND f.status = 'parsed'
       WHERE fa.household_id = ?
-      GROUP BY fa.id, fa.type, fa.sub_type, fa.memo, fa.liquidity, fa.property_id,
+      GROUP BY fa.id, fa.type, fa.sub_type, fa.memo, fa.liquidity, fa.linked_account_id, fa.property_id,
                fa.institution, fa.account_mask, fa.currency, fa.owner_scope,
                fa.owner_person_profile_id, fa.default_parser_profile_id
       ORDER BY CASE WHEN fa.type = 'payslip' THEN 0 ELSE 1 END, fa.institution, fa.type`,

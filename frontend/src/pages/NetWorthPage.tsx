@@ -46,6 +46,8 @@ type BalanceSheetAccountRow = {
   accountMask: string | null;
   type: string;
   currency: string;
+  /** Present when API returns F-1 enrichment; missing balances bucket as uncategorized in liquidity breakdown. */
+  liquidity?: "liquid" | "semi_liquid" | "restricted" | null;
   side: "asset" | "liability";
   balance: number | null;
   balanceAsOf: string | null;
@@ -53,10 +55,24 @@ type BalanceSheetAccountRow = {
   importFileId: string | null;
 };
 
+type PropertySheetRow = {
+  propertyId: string;
+  addressLine1: string | null;
+  city: string | null;
+  state: string | null;
+  propertyUse: "primary" | "rental" | "vacation" | null;
+  marketValue: number | null;
+  marketValueAsOf: string | null;
+  linkedMortgageAccountId: string | null;
+  linkedMortgageBalance: number | null;
+  linkedMortgageAsOf: string | null;
+};
+
 type BalanceSheetResponse = {
   asOf: string;
   assets: BalanceSheetAccountRow[];
   liabilities: BalanceSheetAccountRow[];
+  properties?: PropertySheetRow[];
   totals: {
     assets: number | null;
     liabilities: number | null;
@@ -157,6 +173,33 @@ function formatAccountType(type: string): string {
   return ACCOUNT_TYPE_LABELS[type] ?? type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function propertyLabel(row: PropertySheetRow): string {
+  const parts: string[] = [];
+  if (row.addressLine1) {
+    parts.push(row.addressLine1);
+  }
+  if (row.city) {
+    parts.push(row.city);
+  }
+  if (row.state) {
+    parts.push(row.state);
+  }
+  return parts.length > 0 ? parts.join(", ") : "Unnamed property";
+}
+
+function propertyUseLabel(use: PropertySheetRow["propertyUse"]): string {
+  if (use === "primary") {
+    return "Primary residence";
+  }
+  if (use === "rental") {
+    return "Rental";
+  }
+  if (use === "vacation") {
+    return "Vacation";
+  }
+  return "Real estate";
+}
+
 function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void {
   if (belongsTo === "household") {
     qs.set("ownerScope", "household");
@@ -205,6 +248,18 @@ export function NetWorthPage() {
   );
   const [accountHistoryLoadingIds, setAccountHistoryLoadingIds] = useState<Set<string>>(new Set());
   const [accountHistoryFailedIds, setAccountHistoryFailedIds] = useState<Set<string>>(new Set());
+
+  const [expandedPropertyIds, setExpandedPropertyIds] = useState<Set<string>>(new Set());
+  const [propertyHistoryById, setPropertyHistoryById] = useState<Map<string, Array<{ asOf: string; value: number }>>>(
+    new Map()
+  );
+  const [propertyHistoryLoadingIds, setPropertyHistoryLoadingIds] = useState<Set<string>>(new Set());
+  const [propertyHistoryFailedIds, setPropertyHistoryFailedIds] = useState<Set<string>>(new Set());
+  const [editingPropertyId, setEditingPropertyId] = useState<string | null>(null);
+  const [editPropertyAmount, setEditPropertyAmount] = useState("");
+  const [editPropertyAsOf, setEditPropertyAsOf] = useState("");
+  const [propertyRowSaving, setPropertyRowSaving] = useState(false);
+  const [propertyRowSaveError, setPropertyRowSaveError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -375,6 +430,46 @@ export function NetWorthPage() {
     [data?.liabilities]
   );
 
+  const liquidityTiers = useMemo(() => {
+    if (!data) {
+      return null;
+    }
+    let liquid = 0;
+    let semiLiquid = 0;
+    let restricted = 0;
+    let uncategorized = 0;
+    let hasAnyTagged = false;
+    for (const r of data.assets ?? []) {
+      if (r.balance == null || !Number.isFinite(r.balance)) {
+        continue;
+      }
+      const liq = r.liquidity;
+      if (liq === "liquid") {
+        liquid += r.balance;
+        hasAnyTagged = true;
+      } else if (liq === "semi_liquid") {
+        semiLiquid += r.balance;
+        hasAnyTagged = true;
+      } else if (liq === "restricted") {
+        restricted += r.balance;
+        hasAnyTagged = true;
+      } else {
+        uncategorized += r.balance;
+      }
+    }
+    for (const p of data.properties ?? []) {
+      if (p.marketValue == null || !Number.isFinite(p.marketValue)) {
+        continue;
+      }
+      restricted += p.marketValue;
+      hasAnyTagged = true;
+    }
+    if (!hasAnyTagged && uncategorized === 0) {
+      return null;
+    }
+    return { liquid, semiLiquid, restricted, uncategorized, hasUncategorized: uncategorized > 0 };
+  }, [data]);
+
   useEffect(() => {
     setBulkAsOfDraft(tableAsOf);
   }, [tableAsOf]);
@@ -542,6 +637,118 @@ export function NetWorthPage() {
     }
   }, [loadAccountHistory]);
 
+  const loadPropertyHistory = useCallback(
+    async (propertyId: string, opts?: { force?: boolean }) => {
+      if (
+        !opts?.force &&
+        (propertyHistoryById.has(propertyId) || propertyHistoryLoadingIds.has(propertyId))
+      ) {
+        return;
+      }
+      setPropertyHistoryLoadingIds((prev) => new Set(prev).add(propertyId));
+      try {
+        const res = await apiJson<{ snapshots: Array<{ asOfDate: string; marketValueUsd: number }> }>(
+          `/household/properties/${propertyId}/values`
+        );
+        const points = (res.snapshots ?? []).map((s) => ({ asOf: s.asOfDate, value: s.marketValueUsd }));
+        setPropertyHistoryById((prev) => new Map(prev).set(propertyId, points));
+      } catch {
+        setPropertyHistoryFailedIds((prev) => new Set(prev).add(propertyId));
+      } finally {
+        setPropertyHistoryLoadingIds((prev) => {
+          const n = new Set(prev);
+          n.delete(propertyId);
+          return n;
+        });
+      }
+    },
+    [propertyHistoryById, propertyHistoryLoadingIds]
+  );
+
+  const togglePropertyExpanded = useCallback(
+    (propertyId: string) => {
+      let willExpand = false;
+      setExpandedPropertyIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(propertyId)) {
+          next.delete(propertyId);
+        } else {
+          next.add(propertyId);
+          willExpand = true;
+        }
+        return next;
+      });
+      if (willExpand) {
+        void loadPropertyHistory(propertyId);
+      }
+    },
+    [loadPropertyHistory]
+  );
+
+  const startPropertyEdit = useCallback(
+    (row: PropertySheetRow) => {
+      setEditingPropertyId(row.propertyId);
+      setPropertyRowSaveError(null);
+      setEditPropertyAmount(row.marketValue != null ? String(row.marketValue) : "");
+      setEditPropertyAsOf(row.marketValueAsOf ?? tableAsOf);
+    },
+    [tableAsOf]
+  );
+
+  const cancelPropertyEdit = useCallback(() => {
+    setEditingPropertyId(null);
+    setEditPropertyAmount("");
+    setEditPropertyAsOf("");
+    setPropertyRowSaveError(null);
+  }, []);
+
+  const savePropertyMarketValue = useCallback(
+    async (e: FormEvent, propertyId: string) => {
+      e.preventDefault();
+      const amount = Number(String(editPropertyAmount).replace(/,/g, ""));
+      if (!editPropertyAsOf || !Number.isFinite(amount) || amount < 0) {
+        setPropertyRowSaveError("Enter a valid amount and date.");
+        return;
+      }
+      setPropertyRowSaving(true);
+      setPropertyRowSaveError(null);
+      try {
+        await apiJson<{ id: string }>(`/household/properties/${propertyId}/values`, {
+          method: "POST",
+          body: JSON.stringify({
+            marketValueUsd: amount,
+            asOfDate: editPropertyAsOf,
+            source: "manual"
+          })
+        });
+        cancelPropertyEdit();
+        await loadSheet();
+        await loadHistoryImmediate();
+        if (propertyHistoryById.has(propertyId)) {
+          setPropertyHistoryById((prev) => {
+            const n = new Map(prev);
+            n.delete(propertyId);
+            return n;
+          });
+          void loadPropertyHistory(propertyId, { force: true });
+        }
+      } catch (err: unknown) {
+        setPropertyRowSaveError(err instanceof Error ? err.message : "Could not save value");
+      } finally {
+        setPropertyRowSaving(false);
+      }
+    },
+    [
+      cancelPropertyEdit,
+      editPropertyAmount,
+      editPropertyAsOf,
+      loadHistoryImmediate,
+      loadPropertyHistory,
+      loadSheet,
+      propertyHistoryById
+    ]
+  );
+
   const onPresetChange = (next: PeriodPreset) => {
     setPeriodPreset(next);
     if (next !== "custom") {
@@ -613,6 +820,38 @@ export function NetWorthPage() {
         </SimpleGrid>
         <Text size="xs" c="dimmed" ta="right" mt={4}>Balances as of {tableAsOf}</Text>
       </Stack>
+
+      {liquidityTiers ? (
+        <Paper withBorder shadow="sm" radius="md" p="md">
+          <Group gap={8} align="center" mb="sm">
+            <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Liquidity breakdown</Title>
+            <HelpIcon label="Liquid: accessible same day. Semi-liquid: marketable assets, days to settle. Restricted: retirement, HSA, property — penalty or time to access. Tag accounts in Settings → Accounts to see this breakdown." />
+          </Group>
+          <Stack gap={4} style={{ maxWidth: "28rem" }}>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">Liquid</Text>
+              <Text size="sm" fw={600} style={{ color: "var(--color-success)" }}>{formatMoney(liquidityTiers.liquid)}</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">Semi-liquid</Text>
+              <Text size="sm" fw={600}>{formatMoney(liquidityTiers.semiLiquid)}</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" c="dimmed">Restricted</Text>
+              <Text size="sm" fw={600}>{formatMoney(liquidityTiers.restricted)}</Text>
+            </Group>
+            {liquidityTiers.hasUncategorized ? (
+              <Group justify="space-between">
+                <Group gap={4}>
+                  <Text size="sm" c="dimmed">Uncategorized</Text>
+                  <Anchor component={Link} to="/settings?tab=accounts" size="xs">Tag accounts</Anchor>
+                </Group>
+                <Text size="sm" c="dimmed">{formatMoney(liquidityTiers.uncategorized)}</Text>
+              </Group>
+            ) : null}
+          </Stack>
+        </Paper>
+      ) : null}
 
       <Paper withBorder shadow="sm" radius="md" p="md">
         <Group gap={8} align="center" mb="sm">
@@ -766,7 +1005,7 @@ export function NetWorthPage() {
           <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
         </Box>
         {loading ? <Skeleton height={120} radius="md" animate /> : null}
-        {!loading && data && data.assets.length > 0 ? (
+        {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
           <Box style={{ overflowX: "auto" }}>
             {editDirty ? (
               <Text size="sm" c="dimmed" mb="xs" style={{ maxWidth: "40rem" }}>
@@ -865,6 +1104,151 @@ export function NetWorthPage() {
                     </Fragment>
                   );
                 })}
+                {(data.properties ?? []).length > 0 ? (
+                  <>
+                    <Table.Tr>
+                      <Table.Td colSpan={5} style={{ paddingTop: "0.75rem", paddingBottom: "0.25rem" }}>
+                        <Text size="xs" fw={700} tt="uppercase" lts="0.07em" c="dimmed">Real Estate</Text>
+                      </Table.Td>
+                    </Table.Tr>
+                    {(data.properties ?? []).map((p) => {
+                      const label = propertyLabel(p);
+                      const isExpanded = expandedPropertyIds.has(p.propertyId);
+                      const isEditing = editingPropertyId === p.propertyId;
+                      const isHistLoading = propertyHistoryLoadingIds.has(p.propertyId);
+                      const histPoints = propertyHistoryById.get(p.propertyId) ?? [];
+                      const hasFetched =
+                        propertyHistoryById.has(p.propertyId) || propertyHistoryFailedIds.has(p.propertyId);
+                      const showNoHistory =
+                        !isHistLoading &&
+                        hasFetched &&
+                        (propertyHistoryFailedIds.has(p.propertyId) || histPoints.length === 0);
+                      const equity =
+                        p.marketValue != null && p.linkedMortgageBalance != null
+                          ? p.marketValue - p.linkedMortgageBalance
+                          : p.marketValue;
+
+                      return (
+                        <Fragment key={p.propertyId}>
+                          <Table.Tr
+                            onClick={() => togglePropertyExpanded(p.propertyId)}
+                            style={{ cursor: "pointer" }}
+                          >
+                            <Table.Td>
+                              <Group gap={6} wrap="nowrap">
+                                <ActionIcon variant="subtle" color="gray" size="sm" aria-hidden tabIndex={-1}>
+                                  {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+                                </ActionIcon>
+                                <Box>
+                                  <Text size="sm">{label}</Text>
+                                  {p.linkedMortgageBalance != null && equity != null ? (
+                                    <Text size="xs" c="dimmed">Equity: {formatMoney(equity)}</Text>
+                                  ) : null}
+                                </Box>
+                              </Group>
+                            </Table.Td>
+                            <Table.Td>
+                              <Text size="sm">{propertyUseLabel(p.propertyUse)}</Text>
+                            </Table.Td>
+                            <Table.Td>
+                              {isEditing ? (
+                                <Group
+                                  gap={4}
+                                  wrap="wrap"
+                                  align="center"
+                                  component="form"
+                                  onSubmit={(ev: FormEvent) => {
+                                    void savePropertyMarketValue(ev, p.propertyId);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <TextInput
+                                    size="xs"
+                                    style={{ width: "7rem" }}
+                                    inputMode="decimal"
+                                    value={editPropertyAmount}
+                                    onChange={(ev) => setEditPropertyAmount(ev.target.value)}
+                                    aria-label="Market value"
+                                  />
+                                  <TextInput
+                                    type="date"
+                                    size="xs"
+                                    value={editPropertyAsOf}
+                                    onChange={(ev) => setEditPropertyAsOf(ev.target.value)}
+                                    aria-label="As-of date"
+                                  />
+                                  <Button type="submit" size="xs" disabled={propertyRowSaving}>Save</Button>
+                                  <Button type="button" variant="default" size="xs" onClick={cancelPropertyEdit}>Cancel</Button>
+                                </Group>
+                              ) : (
+                                formatMoney(p.marketValue)
+                              )}
+                            </Table.Td>
+                            <Table.Td><Text size="sm">{p.marketValueAsOf ?? "—"}</Text></Table.Td>
+                            <Table.Td>
+                              {!isEditing ? (
+                                <ActionIcon
+                                  variant="subtle"
+                                  color="gray"
+                                  size="sm"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startPropertyEdit(p);
+                                  }}
+                                  aria-label="Edit market value"
+                                  title="Edit market value"
+                                >
+                                  <IconPencil size={15} />
+                                </ActionIcon>
+                              ) : null}
+                            </Table.Td>
+                          </Table.Tr>
+                          <Table.Tr>
+                            <Table.Td colSpan={5} style={{ paddingTop: 0, paddingBottom: 0 }}>
+                              <Collapse in={isExpanded}>
+                                <Box py="xs">
+                                  {isHistLoading ? <Skeleton height={120} /> : null}
+                                  {!isHistLoading && !showNoHistory && histPoints.length > 0 ? (
+                                    <Box style={{ width: "100%", height: 120 }}>
+                                      <ResponsiveContainer width="100%" height="100%">
+                                        <LineChart data={histPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
+                                          <XAxis dataKey="asOf" tick={{ fontSize: 11 }} />
+                                          <YAxis
+                                            tick={{ fontSize: 11 }}
+                                            tickFormatter={(v: number) =>
+                                              `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                            }
+                                          />
+                                          <Tooltip
+                                            formatter={(v: number | string) => [
+                                              `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+                                              "Market value"
+                                            ]}
+                                            labelFormatter={(lbl) => `Date: ${String(lbl)}`}
+                                          />
+                                          <Line
+                                            type="monotone"
+                                            dataKey="value"
+                                            stroke="var(--color-accent)"
+                                            strokeWidth={2}
+                                            dot={false}
+                                          />
+                                        </LineChart>
+                                      </ResponsiveContainer>
+                                    </Box>
+                                  ) : null}
+                                  {showNoHistory ? (
+                                    <Text c="dimmed" size="xs">No value history — add market value snapshots to see a chart.</Text>
+                                  ) : null}
+                                </Box>
+                              </Collapse>
+                            </Table.Td>
+                          </Table.Tr>
+                        </Fragment>
+                      );
+                    })}
+                  </>
+                ) : null}
                 <Table.Tr>
                   <Table.Td><Text size="sm" fw={700} c="green">Total Assets</Text></Table.Td>
                   <Table.Td />
@@ -878,7 +1262,9 @@ export function NetWorthPage() {
         ) : null}
         {!loading && data && data.liabilities.length > 0 ? (
           <>
-            {!loading && data && data.assets.length > 0 ? <Divider my="md" /> : null}
+            {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
+              <Divider my="md" />
+            ) : null}
             <Box style={{ overflowX: "auto", marginTop: "1rem" }}>
               <Text size="xs" fw={700} tt="uppercase" lts="0.06em" c="dimmed" mb={6}>Liabilities</Text>
             <Table withTableBorder withRowBorders striped="odd" verticalSpacing="xs">
@@ -984,6 +1370,9 @@ export function NetWorthPage() {
           </>
         ) : null}
         {rowSaveError ? <Alert color="red" variant="light" radius="md" mt="sm">{rowSaveError}</Alert> : null}
+        {propertyRowSaveError ? (
+          <Alert color="red" variant="light" radius="md" mt="sm">{propertyRowSaveError}</Alert>
+        ) : null}
         {!loading && data && (topAssets.length > 0 || topLiabilities.length > 0) ? (
           <SimpleGrid cols={2} spacing="lg" mt="md" style={{ paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
             {topAssets.length > 0 ? (

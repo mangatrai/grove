@@ -550,6 +550,174 @@ paths:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
 
+  /household/properties:
+    get:
+      summary: List all properties for the household
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of properties
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  properties:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PropertyRecord'
+    post:
+      summary: Create a property and optionally link to a mortgage account
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressLine1: { type: string, nullable: true, maxLength: 200 }
+                city: { type: string, nullable: true, maxLength: 100 }
+                state: { type: string, nullable: true, maxLength: 100 }
+                zip: { type: string, nullable: true, maxLength: 20 }
+                propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+                accountId:
+                  type: string
+                  format: uuid
+                  description: Financial account to link (mortgage)
+                initialValueUsd: { type: number, nullable: true, minimum: 0 }
+                initialValueAsOf: { type: string, format: date, nullable: true }
+      responses:
+        "201":
+          description: Property created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        "400":
+          description: Validation error
+        "404":
+          description: Account not found (ACCOUNT_NOT_FOUND)
+
+  /household/properties/{propertyId}:
+    get:
+      summary: Get a single property
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Property record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  property:
+                    $ref: '#/components/schemas/PropertyRecord'
+        "404":
+          description: Not found
+    patch:
+      summary: Update property address or use
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressLine1: { type: string, nullable: true }
+                city: { type: string, nullable: true }
+                state: { type: string, nullable: true }
+                zip: { type: string, nullable: true }
+                propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: boolean }
+        "400":
+          description: Validation error
+        "404":
+          description: Not found
+
+  /household/properties/{propertyId}/values:
+    get:
+      summary: List all market value snapshots for a property (ASC date order)
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Value snapshot list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PropertyValueSnapshot'
+        "404":
+          description: Not found
+    post:
+      summary: Add or upsert a market value snapshot (upserts on same date)
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [marketValueUsd, asOfDate]
+              properties:
+                marketValueUsd: { type: number, minimum: 0 }
+                asOfDate: { type: string, format: date }
+                source: { type: string, enum: [manual, api], default: manual }
+      responses:
+        "201":
+          description: Snapshot created/updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        "400":
+          description: Validation error or INVALID_VALUE
+        "404":
+          description: Property not found
+
   /insights/financial:
     get:
       tags: [insights]
@@ -1271,34 +1439,49 @@ paths:
                   accounts:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id: { type: string, format: uuid }
-                        type: { type: string }
-                        institution: { type: string }
-                        account_mask: { type: string, nullable: true }
-                        currency: { type: string }
-                        owner_scope: { type: string, enum: [household, person] }
-                        owner_person_profile_id: { type: string, format: uuid, nullable: true }
-                        default_parser_profile_id: { type: string, nullable: true }
-                        last_uploaded_at:
-                          type: string
-                          format: date-time
-                          nullable: true
-                          description: Latest successfully parsed statement upload for this account.
-                        last_statement_end_date:
-                          type: string
-                          nullable: true
-                          description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
+                      $ref: '#/components/schemas/FinancialAccountListItem'
     post:
       tags: [imports]
       summary: Create connected account
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportAccountUpsertRequest'
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        "400":
+          description: Validation error
   /imports/accounts/{accountId}:
     patch:
       tags: [imports]
       summary: Update connected account
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportAccountUpsertRequest'
+      responses:
+        "200":
+          description: Updated
+        "400":
+          description: Validation error
   /imports/parser-profiles:
     get:
       tags: [imports]
@@ -1636,10 +1819,33 @@ paths:
       tags: [reports]
       summary: Balance sheet / net worth snapshot (optional ownerScope filters by account belongs-to)
       description: >-
-        Assets: checking, savings, investment, retirement. Liabilities: credit_card, loan, mortgage.
+        Assets: checking, savings, investment, retirement, health, education. Liabilities: credit_card, loan.
+        Property market values (latest snapshot ≤ asOf) are included in asset totals and in the `properties` array.
         Liability balances stored as positive magnitudes (what you owe); netWorth = assetSum − liabilitySum.
         Statement-ending balances auto-persisted from bank parsers (OFX, BoA CSV/PDF, Marcus PDF, Wealthfront PDF).
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: ownerScope
+          in: query
+          required: false
+          schema: { type: string, enum: [household, person] }
+        - name: ownerPersonProfileId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Snapshot rows and totals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceSheetSnapshotResponse'
+        "400":
+          description: Invalid query (e.g. ownerScope=person without ownerPersonProfileId)
   /reports/balance-sheet/history:
     get:
       tags: [reports]
@@ -2870,6 +3076,168 @@ components:
       properties:
         jobId: { type: string }
         message: { type: string }
+
+    FinancialAccountListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [checking, savings, credit_card, loan, investment, retirement, payslip, health, education]
+        sub_type: { type: string, nullable: true, maxLength: 50 }
+        memo: { type: string, nullable: true, maxLength: 500 }
+        liquidity:
+          type: string
+          nullable: true
+          enum: [liquid, semi_liquid, restricted]
+        linked_account_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Self-referential FK for future pairing (e.g., HELOC → mortgage).
+        property_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Links this account to a property entity (for mortgage accounts).
+        institution: { type: string }
+        account_mask: { type: string, nullable: true }
+        currency: { type: string }
+        owner_scope: { type: string, enum: [household, person] }
+        owner_person_profile_id: { type: string, format: uuid, nullable: true }
+        default_parser_profile_id: { type: string, nullable: true }
+        last_uploaded_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Latest successfully parsed statement upload for this account.
+        last_statement_end_date:
+          type: string
+          nullable: true
+          description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
+
+    ImportAccountUpsertRequest:
+      type: object
+      required: [type, institution]
+      properties:
+        type:
+          type: string
+          enum: [checking, savings, credit_card, loan, investment, retirement, payslip, health, education]
+        subType:
+          type: string
+          nullable: true
+          maxLength: 50
+        memo:
+          type: string
+          nullable: true
+          maxLength: 500
+        liquidity:
+          type: string
+          nullable: true
+          enum: [liquid, semi_liquid, restricted]
+          description: Defaults to auto-computed value from type+subType. Override only if needed.
+        linkedAccountId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Self-referential FK for future pairing (e.g., HELOC → mortgage).
+        propertyId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Links this account to a property entity (for mortgage accounts).
+        institution: { type: string, minLength: 1, maxLength: 120 }
+        accountMask: { type: string, nullable: true, maxLength: 20 }
+        ownerScope: { type: string, enum: [household, person], default: household }
+        ownerPersonProfileId: { type: string, format: uuid, nullable: true }
+        defaultParserProfileId: { type: string, nullable: true }
+        initialBalance: { type: number, nullable: true }
+        initialBalanceDate: { type: string, format: date, nullable: true }
+
+    BalanceSheetAccountRow:
+      type: object
+      properties:
+        financialAccountId: { type: string, format: uuid }
+        institution: { type: string }
+        accountMask: { type: string, nullable: true }
+        type: { type: string }
+        currency: { type: string }
+        liquidity:
+          type: string
+          nullable: true
+          enum: [liquid, semi_liquid, restricted]
+        side: { type: string, enum: [asset, liability] }
+        balance: { type: number, nullable: true }
+        balanceAsOf: { type: string, nullable: true, format: date }
+        balanceSource: { type: string, nullable: true, enum: [manual, import] }
+        importFileId: { type: string, format: uuid, nullable: true }
+
+    BalanceSheetPropertyRow:
+      type: object
+      properties:
+        propertyId: { type: string, format: uuid }
+        addressLine1: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+        marketValue: { type: number, nullable: true }
+        marketValueAsOf: { type: string, nullable: true, format: date }
+        linkedMortgageAccountId: { type: string, nullable: true, format: uuid }
+        linkedMortgageBalance: { type: number, nullable: true }
+        linkedMortgageAsOf: { type: string, nullable: true, format: date }
+
+    BalanceSheetSnapshotResponse:
+      type: object
+      properties:
+        asOf: { type: string, format: date }
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceSheetAccountRow'
+        liabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceSheetAccountRow'
+        properties:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceSheetPropertyRow'
+        totals:
+          type: object
+          properties:
+            assets: { type: number, nullable: true }
+            liabilities: { type: number, nullable: true }
+            netWorth: { type: number, nullable: true }
+
+    PropertyRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        addressLine1: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        zip: { type: string, nullable: true }
+        country: { type: string }
+        propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+        apiProvider: { type: string, nullable: true }
+        apiPropertyId: { type: string, nullable: true }
+        latestValueUsd: { type: number, nullable: true }
+        latestValueAsOf: { type: string, format: date, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    PropertyValueSnapshot:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        asOfDate: { type: string, format: date }
+        marketValueUsd: { type: number }
+        source: { type: string, enum: [manual, api] }
+        apiProvider: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
     ServiceErrorResponse:
       type: object
       properties:

@@ -87,7 +87,7 @@ Rate-limit `Map<householdId, timestamp>` resets on every process restart. Allows
 
 ---
 
-### ~~F-2: Real estate account type + home equity display~~ ✓ DELIVERED (structural, CR-169, 2026-05-10)
+### ~~F-2: Real estate account type + home equity display~~ ✓ DELIVERED (CR-169 structural + CR-171 display, 2026-05-10)
 
 **Delivered approach (simpler than originally planned — no `real_estate` account type):**
 
@@ -96,27 +96,18 @@ Original plan added a `real_estate` account type, which created an institution i
 - **`property` table:** `address_line1`, `city`, `state`, `zip`, `country`, `property_use` (`primary`/`rental`/`vacation`), `api_provider`, `api_property_id` (for future valuation API)
 - **`property_value_snapshot` table:** time-series market values — mirrors `account_balance_snapshot` pattern. Unique index on `(property_id, as_of_date)`. Upserts on same date rather than creating duplicates.
 - **Backend:** `property.service.ts` (new) — full CRUD + value snapshot CRUD. Routes at `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
-- **UI:** mortgage accounts in Settings table show a `+ Property` / `Property` button opening a modal with address fields + market value entry. Value creates first snapshot in the time series.
+- **UI (CR-169):** mortgage accounts in Settings table show a `+ Property` / `Property` button opening a modal with address fields + market value entry. Value creates first snapshot in the time series.
+- **UI + API (CR-171):** `GET /reports/balance-sheet` includes `properties[]`, rolls property market values into `totals.assets` / `netWorth`, resolves linked loan balance for equity sub-text. Net worth page shows a **Real Estate** subsection with expand-on-click value history (Recharts) and inline edit for new snapshots.
 
-**Not yet implemented (remaining F-2 work):**
-- Net worth equity callout (`Primary Residence → Mortgage → Equity` display in `NetWorthPage.tsx`) — property data is stored, backend query needs to join and surface it
-- Property value history chart (expand-on-click, same pattern as F-4 per-account chart)
-- Real estate auto-valuation API integration (deferred → D-2)
+**Deferred:** Real estate auto-valuation API integration → **D-2**.
 
-**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/household/property.service.ts` (new), `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/household/property.service.ts` (new), `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/src/modules/reports/balance-sheet.service.ts`, `frontend/src/pages/NetWorthPage.tsx`
 
 ---
 
-### F-3: Net worth — liquidity breakdown
-Adds a liquidity tier summary beneath the net worth total:
-```
-Net Worth:     $XXX,XXX
-  Liquid:       $XX,XXX   (checking, savings)
-  Semi-liquid:  $XX,XXX   (brokerage — days to settle)
-  Restricted:   $XX,XXX   (retirement, HSA, 529, real estate)
-  Liabilities: -$XX,XXX
-```
-Computed from `liquidity` field on `financial_account` (F-1 prerequisite). Accounts with no `liquidity` set fall into an "Uncategorized" bucket to prompt tagging.
+### ~~F-3: Net worth — liquidity breakdown~~ ✓ DELIVERED (CR-171, 2026-05-10)
+
+Adds a liquidity tier summary on the net worth page (between KPI cards and trend chart): **Liquid**, **Semi-liquid**, **Restricted**, and **Uncategorized** (with link to Settings → Accounts). Computed from `liquidity` on each asset row returned by the balance sheet API; property market values are always counted as **restricted**. Shown when at least one asset has a non-null liquidity tag or any property has a market value.
 
 **Files:** `balance-sheet.service.ts`, `NetWorthPage.tsx`
 
@@ -356,8 +347,8 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
 | ~~B-7~~ | ~~AI insight cooldown: in-memory → DB-backed~~ | ✓ Done | Security | — |
 | ~~F-1~~ | ~~Account enrichment (sub_type, memo, liquidity, linked_account_id, health/education types)~~ | ✓ Done | Feature | — |
-| ~~F-2~~ | ~~Property entity + value time-series (structural; equity display remaining)~~ | ✓ Partial | Feature | F-1 |
-| F-3 | Net worth liquidity breakdown | P2 | Feature | F-1 ✓ |
+| ~~F-2~~ | ~~Real estate equity display + value history chart~~ | ✓ Done | Feature | F-1 |
+| ~~F-3~~ | ~~Net worth liquidity breakdown~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
 | F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
@@ -382,4 +373,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-10. All P1 bugs done. F-1 done; F-2 structural done (equity display + value chart remaining). Next: F-3 (liquidity breakdown), F-9 (DOB), or remaining F-2 display work.*
+*Last updated: 2026-05-10. All P1 bugs done. F-1, F-2, and F-3 done. Next: F-5 (payslip deposit stored pairing), F-7 (AI insights pollution fix), or F-9 (DOB encrypted).*
