@@ -409,6 +409,8 @@ export function TransactionsPage() {
   const [savingBulkAll, setSavingBulkAll] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
+  // Selected candidate per transfer_ambiguity resolution item (itemId → candidateId).
+  const [selectedTransferCandidates, setSelectedTransferCandidates] = useState<Record<string, string>>({});
   const [patternResolveOpen, setPatternResolveOpen] = useState(false);
   const [patternDraft, setPatternDraft] = useState("");
   const [patternCategoryId, setPatternCategoryId] = useState("");
@@ -2164,10 +2166,12 @@ export function TransactionsPage() {
                                   {!detailLoading && !detailError && detailItems && detailItems.length > 0
                                     ? detailItems.map((it) => {
                                         const summary =
-                                          it.reasonDetail?.message ??
-                                          (it.reasonDetail?.kind === "near_duplicate"
-                                            ? "Possible duplicate of an existing transaction."
-                                            : it.reason.slice(0, 200));
+                                          it.type === "transfer_ambiguity"
+                                            ? null // handled by dedicated candidate UI below
+                                            : it.reasonDetail?.message ??
+                                              (it.reasonDetail?.kind === "near_duplicate"
+                                                ? "Possible duplicate of an existing transaction."
+                                                : it.reason.slice(0, 200));
                                         const explainSource = prettyClassificationSource(
                                           it.context.classification?.source
                                         );
@@ -2189,56 +2193,60 @@ export function TransactionsPage() {
                                                 · {it.createdAt}
                                               </Text>
                                             </Group>
-                                            <Text c="dimmed" mt={4} mb={2}>
-                                              <Text span c="dimmed">File:</Text>{" "}
-                                              {it.context.fileName ?? "—"}{" "}
-                                              {it.context.sessionId ? (
-                                                <>
-                                                  ·{" "}
-                                                  <Link
-                                                    to={`/transactions?needsReview=true&sessionId=${it.context.sessionId}`}
-                                                  >
-                                                    Session rows
-                                                  </Link>
-                                                </>
-                                              ) : null}
-                                            </Text>
-                                            <Text c="dimmed" mb={4}>
-                                              <Text span c="dimmed">Raw preview:</Text>{" "}
-                                              {it.context.raw ? (
-                                                <>
-                                                  {it.context.raw.txnDate ?? "—"} ·{" "}
-                                                  {formatSignedMoneyRaw(it.context.raw.amount)} ·{" "}
-                                                  {it.context.raw.description ?? "—"}
-                                                </>
-                                              ) : (
-                                                "—"
-                                              )}
-                                            </Text>
-                                            <Text size="sm" mb={4}>{summary}</Text>
-                                            {explainSource || explainConf || explainRule || explainReason ? (
-                                              <Group gap="xs" wrap="wrap">
-                                                {explainSource ? (
-                                                  <Badge variant="light">{explainSource}</Badge>
+                                            {it.type !== "transfer_ambiguity" ? (
+                                              <>
+                                                <Text c="dimmed" mt={4} mb={2}>
+                                                  <Text span c="dimmed">File:</Text>{" "}
+                                                  {it.context.fileName ?? "—"}{" "}
+                                                  {it.context.sessionId ? (
+                                                    <>
+                                                      ·{" "}
+                                                      <Link
+                                                        to={`/transactions?needsReview=true&sessionId=${it.context.sessionId}`}
+                                                      >
+                                                        Session rows
+                                                      </Link>
+                                                    </>
+                                                  ) : null}
+                                                </Text>
+                                                <Text c="dimmed" mb={4}>
+                                                  <Text span c="dimmed">Raw preview:</Text>{" "}
+                                                  {it.context.raw ? (
+                                                    <>
+                                                      {it.context.raw.txnDate ?? "—"} ·{" "}
+                                                      {formatSignedMoneyRaw(it.context.raw.amount)} ·{" "}
+                                                      {it.context.raw.description ?? "—"}
+                                                    </>
+                                                  ) : (
+                                                    "—"
+                                                  )}
+                                                </Text>
+                                                {summary ? <Text size="sm" mb={4}>{summary}</Text> : null}
+                                                {explainSource || explainConf || explainRule || explainReason ? (
+                                                  <Group gap="xs" wrap="wrap">
+                                                    {explainSource ? (
+                                                      <Badge variant="light">{explainSource}</Badge>
+                                                    ) : null}
+                                                    {explainConf ? (
+                                                      <Badge variant="light">{explainConf}</Badge>
+                                                    ) : null}
+                                                    {explainRule ? (
+                                                      <Badge variant="light">
+                                                        ID {explainRule.slice(0, 8)}
+                                                      </Badge>
+                                                    ) : null}
+                                                    {explainReason ? (
+                                                      <Text c="dimmed" size="sm">{explainReason}</Text>
+                                                    ) : null}
+                                                  </Group>
                                                 ) : null}
-                                                {explainConf ? (
-                                                  <Badge variant="light">{explainConf}</Badge>
+                                                {it.context.classification?.ai ? (
+                                                  <Text c="dimmed" mt="xs" size="xs" lh={1.4}>
+                                                    Legacy AI suggestion metadata is present on this ticket (older
+                                                    canonicalize). New imports use rules-only classification.
+                                                  </Text>
                                                 ) : null}
-                                                {explainRule ? (
-                                                  <Badge variant="light">
-                                                    ID {explainRule.slice(0, 8)}
-                                                  </Badge>
-                                                ) : null}
-                                                {explainReason ? (
-                                                  <Text c="dimmed" size="sm">{explainReason}</Text>
-                                                ) : null}
-                                              </Group>
-                                            ) : null}
-                                            {it.context.classification?.ai ? (
-                                              <Text c="dimmed" mt="xs" size="xs" lh={1.4}>
-                                                Legacy AI suggestion metadata is present on this ticket (older
-                                                canonicalize). New imports use rules-only classification.
-                                              </Text>
+                                              </>
                                             ) : null}
                                             <Group mt="sm" wrap="wrap" align="flex-start">
                                               {it.type === "unknown_category" ? (
@@ -2284,55 +2292,59 @@ export function TransactionsPage() {
                                                 </Box>
                                               ) : null}
                                               {it.type === "transfer_ambiguity" ? (
-                                                <Stack gap={6} w="100%">
+                                                <Stack gap="xs" w="100%" mt={4}>
                                                   {it.transferCandidates != null && it.transferCandidates.length > 0 ? (
-                                                    <Stack gap={4}>
-                                                      {it.transferCandidates.map((c) => {
-                                                        const rawDesc = c.description ?? "";
-                                                        const descShort =
-                                                          rawDesc.length > 40 ? `${rawDesc.slice(0, 40)}…` : rawDesc;
-                                                        const amt = `$${Number(c.amount).toLocaleString(undefined, {
-                                                          minimumFractionDigits: 2,
-                                                          maximumFractionDigits: 2
-                                                        })}`;
-                                                        return (
-                                                          <Group
-                                                            key={c.id}
-                                                            gap="xs"
-                                                            wrap="nowrap"
-                                                            justify="space-between"
-                                                            align="center"
-                                                          >
-                                                            <Group gap={6} wrap="wrap" style={{ flex: 1, minWidth: 0 }}>
-                                                              <Text size="xs" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
-                                                                {c.txnDate}
-                                                              </Text>
-                                                              <Text size="xs" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>
-                                                                {amt}
-                                                              </Text>
-                                                              <Text size="xs">{c.accountName}</Text>
-                                                              <Text size="xs" c="dimmed" title={rawDesc || undefined}>
-                                                                {descShort}
-                                                              </Text>
-                                                            </Group>
-                                                            <Button
-                                                              type="button"
-                                                              variant="light"
-                                                              size="xs"
-                                                              disabled={busy || savingResolutionItemId === it.id}
-                                                              title="Link this transaction with the other leg as a transfer pair"
-                                                              onClick={() => void confirmTransferItem(t.id, it.id, c.id)}
-                                                            >
-                                                              {savingResolutionItemId === it.id ? "Confirming…" : "Confirm as Transfer"}
-                                                            </Button>
-                                                          </Group>
-                                                        );
-                                                      })}
-                                                    </Stack>
+                                                    <>
+                                                      <Text size="xs" c="dimmed">Select the matching credit to pair with this debit:</Text>
+                                                      <Radio.Group
+                                                        value={selectedTransferCandidates[it.id] ?? ""}
+                                                        onChange={(val) =>
+                                                          setSelectedTransferCandidates((prev) => ({ ...prev, [it.id]: val }))
+                                                        }
+                                                      >
+                                                        <Stack gap={6}>
+                                                          {it.transferCandidates.map((c) => {
+                                                            const rawDesc = c.description ?? "";
+                                                            const descShort = rawDesc.length > 48 ? `${rawDesc.slice(0, 48)}…` : rawDesc;
+                                                            const amt = `+$${Number(c.amount).toLocaleString(undefined, {
+                                                              minimumFractionDigits: 2,
+                                                              maximumFractionDigits: 2
+                                                            })}`;
+                                                            return (
+                                                              <Radio
+                                                                key={c.id}
+                                                                value={c.id}
+                                                                disabled={busy}
+                                                                label={
+                                                                  <Group gap={8} wrap="nowrap">
+                                                                    <Text size="xs" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>{amt}</Text>
+                                                                    <Text size="xs" c="dimmed">{c.txnDate}</Text>
+                                                                    <Text size="xs">{c.accountName}</Text>
+                                                                    <Text size="xs" c="dimmed" title={rawDesc || undefined}>{descShort}</Text>
+                                                                  </Group>
+                                                                }
+                                                              />
+                                                            );
+                                                          })}
+                                                        </Stack>
+                                                      </Radio.Group>
+                                                      <Button
+                                                        type="button"
+                                                        size="xs"
+                                                        variant="filled"
+                                                        disabled={busy || !selectedTransferCandidates[it.id]}
+                                                        loading={savingResolutionItemId === it.id}
+                                                        onClick={() => {
+                                                          const creditId = selectedTransferCandidates[it.id];
+                                                          if (creditId) void confirmTransferItem(t.id, it.id, creditId);
+                                                        }}
+                                                        style={{ alignSelf: "flex-start" }}
+                                                      >
+                                                        Confirm transfer pair
+                                                      </Button>
+                                                    </>
                                                   ) : it.transferCandidates != null ? (
-                                                    <Text c="dimmed" size="xs">
-                                                      No matching candidates — may resolve on next import.
-                                                    </Text>
+                                                    <Text c="dimmed" size="xs">No matching candidates — may resolve on next import.</Text>
                                                   ) : null}
                                                 </Stack>
                                               ) : null}

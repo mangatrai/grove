@@ -295,10 +295,14 @@ async function buildResolutionItemRow(r: ResolutionDbListRow, householdId: strin
     } else if (typeof detail?.creditId === "string") {
       candidateIds.push(detail.creditId);
     }
+    // Guard: legacy credit-side resolution items (pre-FIX-168) have creditId === target_id,
+    // meaning the credit was flagged with a reference to itself. Exclude self-referential IDs
+    // so the item shows "no candidates" rather than offering the transaction as its own pair.
+    const filteredCandidateIds = candidateIds.filter((id) => id !== r.targetId);
 
-    if (candidateIds.length > 0) {
+    if (filteredCandidateIds.length > 0) {
       // Query only candidates that are still posted and unpaired — live state, not stale JSON.
-      const placeholders = candidateIds.map(() => "?").join(", ");
+      const placeholders = filteredCandidateIds.map(() => "?").join(", ");
       const rows = await qAll<{
         id: string;
         txnDate: string;
@@ -316,7 +320,7 @@ async function buildResolutionItemRow(r: ResolutionDbListRow, householdId: strin
             AND tc.household_id = ?
             AND tc.status = 'posted'
             AND tc.transfer_group_id IS NULL`,
-        ...candidateIds,
+        ...filteredCandidateIds,
         householdId
       );
       transferCandidates = rows.map((row) => ({
