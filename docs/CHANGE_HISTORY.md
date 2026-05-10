@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-172 (2026-05-10): OpenAPI — `property_id` / `linked_account_id` not account-upsert inputs
+
+**Why:** CR-171 OpenAPI listed **`linkedAccountId`** and **`propertyId`** on **`ImportAccountUpsertRequest`**, implying the importer account PATCH/POST could set them. **`property_id`** is set only when **`POST /household/properties`** includes **`accountId`**; **`linked_account_id`** is reserved for future HELOC pairing (**D-5**) and is not writable via account upsert.
+
+**What changed:** Removed those two properties from **`ImportAccountUpsertRequest`** in **`openapi/openapi.yaml`**; documented **`linked_account_id`** and **`property_id`** on **`FinancialAccountListItem`** with **`readOnly: true`** and clarifying descriptions. **`docs/API_HOUSEHOLD.md`** account-enrichment prose aligned (writable: `subType`, `memo`, `liquidity` only).
+
+**Files:** `openapi/openapi.yaml`, `docs/API_HOUSEHOLD.md`, `docs/CHANGE_HISTORY.md`
+
 ## CR-171 / UX-171 (2026-05-10): F-2 display complete + F-3 liquidity breakdown + OpenAPI doc remediation (CR-169 gap)
 
 **Why:** Properties stored in DB since CR-169 but invisible on NetWorthPage — market values excluded from totals and no UI display. OpenAPI spec and API_HOUSEHOLD.md were not updated in CR-169 commit (doc gap). F-3 (liquidity breakdown) is a natural extension of the same page once liquidity field is surfaced from the backend.
@@ -29,7 +37,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - `NetWorthPage.tsx`:
   - F-2: property rows folded into Assets table under a "Real Estate" sub-label. Each row shows address, property use type, market value, equity sub-text (market value − mortgage balance). Pencil edit posts new market value snapshot to POST /household/properties/:id/values. Expand-on-click shows Recharts LineChart of value history from GET /household/properties/:id/values.
   - F-3: Liquidity breakdown Paper section added between KPI cards and Trend chart. Groups asset balances by liquidity tier (liquid/semi_liquid/restricted/uncategorized). Property market values always count as restricted. Uncategorized row shows link to Settings → Accounts. Only rendered when at least one account has a liquidity tag or a property has a value.
-- `openapi/openapi.yaml`: Added all 6 /household/properties routes. Added PropertyRecord and PropertyValueSnapshot component schemas. Updated account create/update schemas with sub_type, memo, liquidity, linked_account_id, property_id and corrected type enum (health/education added, mortgage removed). Updated /reports/balance-sheet response schema with properties[] and liquidity on account rows.
+- `openapi/openapi.yaml`: Added all 6 /household/properties routes. Added PropertyRecord and PropertyValueSnapshot component schemas. Updated account upsert request with sub_type, memo, liquidity (camelCase) and corrected type enum (health/education added, mortgage removed); account list response documents read-only `linked_account_id` / `property_id` (see **FIX-172** for input-schema correction). Updated /reports/balance-sheet response schema with properties[] and liquidity on account rows.
 - `docs/API_HOUSEHOLD.md`: Added Property routes section and Account enrichment fields section.
 - `docs/API_INDEX.md`: Added property route entries.
 - `docs/API_BALANCE_SHEET.md`: Documented `liquidity`, `properties[]`, and corrected account-type lists for the balance sheet response.

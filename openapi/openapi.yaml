@@ -3094,12 +3094,16 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: Self-referential FK for future pairing (e.g., HELOC → mortgage).
+          readOnly: true
+          description: >-
+            Read-only. Self-referential FK for future HELOC→mortgage pairing (D-5); not writable via account upsert.
         property_id:
           type: string
           format: uuid
           nullable: true
-          description: Links this account to a property entity (for mortgage accounts).
+          readOnly: true
+          description: >-
+            Read-only. Set when a property is created with `accountId` (POST /household/properties); not writable via account upsert.
         institution: { type: string }
         account_mask: { type: string, nullable: true }
         currency: { type: string }
@@ -3136,16 +3140,6 @@ components:
           nullable: true
           enum: [liquid, semi_liquid, restricted]
           description: Defaults to auto-computed value from type+subType. Override only if needed.
-        linkedAccountId:
-          type: string
-          format: uuid
-          nullable: true
-          description: Self-referential FK for future pairing (e.g., HELOC → mortgage).
-        propertyId:
-          type: string
-          format: uuid
-          nullable: true
-          description: Links this account to a property entity (for mortgage accounts).
         institution: { type: string, minLength: 1, maxLength: 120 }
         accountMask: { type: string, nullable: true, maxLength: 20 }
         ownerScope: { type: string, enum: [household, person], default: household }

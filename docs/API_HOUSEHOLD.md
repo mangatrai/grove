@@ -153,10 +153,10 @@ These columns live on **`financial_account`** (see migration **`0041`**) and app
 | **`sub_type`** | Subtype key from the account type hierarchy (e.g. `mortgage_primary` under `loan`). |
 | **`memo`** | Free-text note; surfaced to AI insights context. |
 | **`liquidity`** | `liquid` \| `semi_liquid` \| `restricted` — auto-set by `defaultLiquidity()` from type+subtype at save unless the user overrides (nullable for liability types). |
-| **`linked_account_id`** | Self-referential UUID FK to another **`financial_account`** (reserved for future HELOC ↔ mortgage pairing). |
-| **`property_id`** | UUID FK to **`property`**; used on mortgage/loan accounts tied to a property. |
+| **`linked_account_id`** | Self-referential UUID FK to another **`financial_account`** (future HELOC ↔ mortgage pairing, **D-5**). Read-only from the API today; not writable on **`POST/PATCH /imports/accounts`**. |
+| **`property_id`** | UUID FK to **`property`** on mortgage/loan accounts. Set only via **`POST /household/properties`** with **`accountId`** — not writable on account upsert. |
 
-Create/update payloads use camelCase (`subType`, `linkedAccountId`, `propertyId`) on **`POST/PATCH /imports/accounts`**.
+**`POST/PATCH /imports/accounts`** writable enrichment: camelCase **`subType`**, **`memo`**, **`liquidity`** (plus existing account fields). **`property_id`** and **`linked_account_id`** appear on **`GET /imports/accounts`** as read-only columns when present.
 
 ---
 
