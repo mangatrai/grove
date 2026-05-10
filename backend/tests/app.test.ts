@@ -2159,10 +2159,18 @@ describe("import sessions and file intake", () => {
       target_id: string;
       reason: string;
     }>;
-    expect(ambiguityRows.length).toBe(3);
+    // B-1/B-3 fix: only the debit gets a resolution item (not the credit candidates).
+    expect(ambiguityRows.length).toBe(1);
     const parsedReason = JSON.parse(ambiguityRows[0]!.reason) as {
+      debitId?: string;
+      creditCandidateIds?: string[];
       matcherTelemetry?: { candidateScores?: Array<{ score: number }> };
     };
+    // Resolution item targets the debit row.
+    expect(ambiguityRows[0]!.target_id).toBe(parsedReason.debitId);
+    // Both credit candidates are listed in the reason JSON for the UI picker.
+    expect(Array.isArray(parsedReason.creditCandidateIds)).toBe(true);
+    expect(parsedReason.creditCandidateIds?.length).toBe(2);
     expect(Array.isArray(parsedReason.matcherTelemetry?.candidateScores)).toBe(true);
   });
 

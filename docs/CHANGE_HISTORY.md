@@ -18,6 +18,27 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-168 / DB-040 (2026-05-10): Transfer ambiguity — debit-only items, excluded flag, live candidates (B-1/B-2/B-3)
+
+**Why:** Three interconnected transfer detection bugs blocked users from resolving ambiguous transfer pairs:
+- **B-1:** "Confirm as transfer" button never appeared — confirm logic required `creditId` (singular) in reason JSON, but ingest always wrote `creditCandidateIds` (plural array). Additionally, resolution items were created for every involved transaction (debit + all credits) creating queue noise.
+- **B-2:** Dismissed "Not a transfer" items re-surfaced on every new import — canonical row had no memory of the dismissal decision.
+- **B-3:** Two same-amount transfers on consecutive days each claimed the same two credit candidates — impossible to resolve even if the button had worked.
+
+**What (backend):**
+- **Migration 0040:** `transfer_excluded BOOLEAN NOT NULL DEFAULT FALSE` on `transaction_canonical`. Partial index on excluded rows.
+- **Ingest (all three ambiguity paths):** Changed to create resolution items for the **debit only** (not the credit candidates). Credits are shown as selectable candidates in the UI instead. `creditCandidateIds` stays in the reason JSON as candidate hints. `transfer_excluded` rows skipped from candidate query so dismissed rows never re-surface. Low-pair-score path now also uses `creditCandidateIds: [credit.id]` (unified shape). Credit→multiple-debits path now creates one item per debit with the credit as the single candidate.
+- **`confirmTransferPairForHousehold`:** Accepts explicit `creditId` from caller (user-selected) instead of reading from reason JSON. Validates: credit is posted, unpaired, household matches, abs amounts match within 1¢.
+- **`buildResolutionItemRow`:** For `transfer_ambiguity` items, live-queries candidate transactions (`status = posted`, `transfer_group_id IS NULL`) and returns them as `transferCandidates[]` (`id`, `txnDate`, `amount`, `description`, `accountName`). Handles both legacy `creditId` and current `creditCandidateIds` shapes.
+- **Dismiss path (`updateResolutionStatusForHousehold` + bulk):** On `resolved` for `transfer_ambiguity`, sets `transfer_excluded = TRUE` on the target canonical row. Prevents re-detection on future imports.
+- **`bulkConfirmTransferPairsForHousehold`:** Returns descriptive error for all items — bulk confirm is not supported for ambiguous pairs that require user candidate selection.
+- **Route:** `POST /resolution/:id/confirm-transfer` now requires `{ creditId: string (UUID) }` in body (validated with Zod).
+- **Tests:** Updated `app.test.ts` to assert debit-only item creation (1 item instead of 3) and verify `creditCandidateIds` shape and target alignment.
+
+**Files:** `backend/db/migrations/0040_transfer_excluded.sql`, `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/src/modules/resolution/resolution.service.ts`, `backend/src/modules/resolution/resolution.routes.ts`, `backend/tests/app.test.ts`
+
+---
+
 ## CR-162 (2026-05-09): Needs Review — transfer ambiguity candidate list + confirm body
 
 **Why:** Backend `transfer_ambiguity` resolution items now expose `transferCandidates` so the user can pick the correct other-leg transaction instead of a single implicit pair from `reasonDetail`.

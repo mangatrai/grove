@@ -865,6 +865,7 @@ export async function canonicalizeImportSession(
      WHERE household_id = ?
        AND status = 'posted'
        AND transfer_group_id IS NULL
+       AND NOT transfer_excluded
        AND txn_date >= ? AND txn_date <= ?`,
       householdId,
       windowStart,
@@ -953,13 +954,14 @@ export async function canonicalizeImportSession(
 
         if (matchingCredits.length !== 1) {
           // Ambiguous: this debit matches multiple credit candidates.
+          // Create ONE resolution item for the debit only — credits are shown as selectable
+          // candidates in the UI. User picks the correct credit and confirms the pair.
           const candidateScores = matchingCredits
             .map((c) => ({
               creditId: c.id,
               score: transferPairScore(debit.label, c.label, debit.txnDate, c.txnDate, dateDiffDays)
             }))
             .sort((a, b) => b.score - a.score);
-          const involvedTargetIds = new Set<string>([debit.id, ...matchingCredits.map((c) => c.id)]);
           const reason = JSON.stringify({
             kind: "transfer_ambiguity",
             debitId: debit.id,
@@ -973,8 +975,7 @@ export async function canonicalizeImportSession(
             }
           });
 
-          for (const targetId of involvedTargetIds) {
-            if (insertedAmbiguityTargets.has(targetId)) continue;
+          if (!insertedAmbiguityTargets.has(debit.id)) {
             const exists = await txGet<{ ok: number }>(
               `SELECT 1 AS ok
      FROM resolution_item
@@ -984,18 +985,19 @@ export async function canonicalizeImportSession(
        AND target_id = ?
      LIMIT 1`,
               householdId,
-              targetId
+              debit.id
             );
-            if (exists) continue;
-            await txExec(
-              `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+            if (!exists) {
+              await txExec(
+                `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
      VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`,
-              crypto.randomUUID(),
-              householdId,
-              targetId,
-              reason
-            );
-            insertedAmbiguityTargets.add(targetId);
+                crypto.randomUUID(),
+                householdId,
+                debit.id,
+                reason
+              );
+            }
+            insertedAmbiguityTargets.add(debit.id);
           }
           continue;
         }
@@ -1040,11 +1042,12 @@ export async function canonicalizeImportSession(
           );
           if (pairScore < env.TRANSFER_MIN_AUTO_PAIR_SCORE) {
             // Amount/date/account pairing alone is not enough — avoids false positives when memos are unrelated.
+            // Create ONE resolution item for the debit; the credit is listed as the single candidate.
             const reason = JSON.stringify({
               kind: "transfer_ambiguity",
               phase: "low_pair_score",
               debitId: debit.id,
-              creditId: credit.id,
+              creditCandidateIds: [credit.id],
               pairScore,
               minAutoScore: env.TRANSFER_MIN_AUTO_PAIR_SCORE,
               debitLabel: debit.label,
@@ -1056,8 +1059,7 @@ export async function canonicalizeImportSession(
                   "One-to-one amount/date match across accounts, but description pairing score is below the auto-match threshold."
               }
             });
-            for (const targetId of [debit.id, credit.id] as const) {
-              if (insertedAmbiguityTargets.has(targetId)) continue;
+            if (!insertedAmbiguityTargets.has(debit.id)) {
               const exists = await txGet<{ ok: number }>(
                 `SELECT 1 AS ok
      FROM resolution_item
@@ -1067,18 +1069,19 @@ export async function canonicalizeImportSession(
        AND target_id = ?
      LIMIT 1`,
                 householdId,
-                targetId
+                debit.id
               );
-              if (exists) continue;
-              await txExec(
-                `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+              if (!exists) {
+                await txExec(
+                  `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
      VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`,
-                crypto.randomUUID(),
-                householdId,
-                targetId,
-                reason
-              );
-              insertedAmbiguityTargets.add(targetId);
+                  crypto.randomUUID(),
+                  householdId,
+                  debit.id,
+                  reason
+                );
+              }
+              insertedAmbiguityTargets.add(debit.id);
             }
             continue;
           }
@@ -1104,31 +1107,22 @@ export async function canonicalizeImportSession(
         }
 
         // Ambiguous: this credit matches multiple debits (mutual one-to-one requirement failed).
-        const candidateScores = matchingDebitsForCredit
-          .map((d) => ({
-            debitId: d.id,
-            score: transferPairScore(d.label, credit.label, d.txnDate, credit.txnDate, dateDiffDays)
-          }))
-          .sort((a, b) => b.score - a.score);
-        const involvedTargetIds = new Set<string>([
-          credit.id,
-          ...matchingDebitsForCredit.map((d) => d.id)
-        ]);
-        const reason = JSON.stringify({
-          kind: "transfer_ambiguity",
-          creditId: credit.id,
-          debitCandidateIds: matchingDebitsForCredit.map((d) => d.id),
-          dateWindow: { start: windowStart, end: windowEnd },
-          closeDateToleranceDays: 2,
-          matcherTelemetry: {
-            phase: "credit_to_debits",
-            creditLabel: credit.label,
-            candidateScores
-          }
-        });
-
-        for (const targetId of involvedTargetIds) {
-          if (insertedAmbiguityTargets.has(targetId)) continue;
+        // Create ONE resolution item per debit — credit is shown as the single candidate in each.
+        // The first debit to confirm the pair claims the credit; others will see no candidates.
+        for (const debitCandidate of matchingDebitsForCredit) {
+          if (insertedAmbiguityTargets.has(debitCandidate.id)) continue;
+          const reason = JSON.stringify({
+            kind: "transfer_ambiguity",
+            debitId: debitCandidate.id,
+            creditCandidateIds: [credit.id],
+            dateWindow: { start: windowStart, end: windowEnd },
+            closeDateToleranceDays: 2,
+            matcherTelemetry: {
+              phase: "credit_to_debits",
+              creditLabel: credit.label,
+              debitLabel: debitCandidate.label
+            }
+          });
           const exists = await txGet<{ ok: number }>(
             `SELECT 1 AS ok
      FROM resolution_item
@@ -1138,18 +1132,19 @@ export async function canonicalizeImportSession(
        AND target_id = ?
      LIMIT 1`,
             householdId,
-            targetId
+            debitCandidate.id
           );
-          if (exists) continue;
-          await txExec(
-            `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+          if (!exists) {
+            await txExec(
+              `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
      VALUES (?, ?, 'transfer_ambiguity', ?, ?, 'open')`,
-            crypto.randomUUID(),
-            householdId,
-            targetId,
-            reason
-          );
-          insertedAmbiguityTargets.add(targetId);
+              crypto.randomUUID(),
+              householdId,
+              debitCandidate.id,
+              reason
+            );
+          }
+          insertedAmbiguityTargets.add(debitCandidate.id);
         }
       }
     });
