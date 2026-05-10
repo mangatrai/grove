@@ -248,13 +248,14 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     householdId
   );
 
+  // Keep the MAXIMUM statement end date per account (YYYY-MM-DD strings compare correctly).
+  // Do NOT break early — a file uploaded later may have an older statement period.
   const lastStatementEndByAccount = new Map<string, string>();
   for (const row of statementRows) {
-    if (lastStatementEndByAccount.has(row.financial_account_id)) {
-      continue;
-    }
     const asOfEnd = parseStatementEndDate(row.confidence_summary);
-    if (asOfEnd) {
+    if (!asOfEnd) continue;
+    const existing = lastStatementEndByAccount.get(row.financial_account_id);
+    if (!existing || asOfEnd > existing) {
       lastStatementEndByAccount.set(row.financial_account_id, asOfEnd);
     }
   }

@@ -694,17 +694,25 @@ export function SettingsPage() {
         body.initialBalance = parsedInitialBalance;
         body.initialBalanceDate = accountDraft.initialBalanceDate || new Date().toISOString().slice(0, 10);
       }
+      let newAccountId: string | null = null;
       if (accountDraft.id) {
         await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
           method: "PATCH",
           body: JSON.stringify(body)
         });
       } else {
-        await apiJson("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiJson<{ id: string }>("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
+        newAccountId = created.id;
       }
       const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
       setAccounts(r.accounts);
       setAccountSuccess(accountDraft.id ? "Account updated." : "Account created.");
+
+      // Auto-open property modal when a mortgage account is newly created
+      const [typeVal2, subTypeVal2] = accountDraft.typeSubtype.split("/");
+      const justCreatedMortgage = !accountDraft.id && newAccountId
+        && typeVal2 === "loan" && MORTGAGE_SUBTYPES.has(subTypeVal2 ?? "");
+
       setAccountDraft({
         id: "",
         typeSubtype: "checking",
@@ -716,10 +724,56 @@ export function SettingsPage() {
         initialBalance: "",
         initialBalanceDate: new Date().toISOString().slice(0, 10)
       });
+
+      if (justCreatedMortgage) {
+        setPropertyModal({
+          open: true, accountId: newAccountId!, propertyId: null,
+          addressLine1: "", city: "", state: "", zip: "", propertyUse: "",
+          marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
+          saving: false, error: null
+        });
+      }
     } catch (e: unknown) {
       setAccountError(e instanceof Error ? e.message : "Could not save account");
     } finally {
       setSavingAccount(false);
+    }
+  }
+
+  async function openPropertyModal(a: AccountRow) {
+    const base = {
+      open: true, accountId: a.id, propertyId: a.property_id,
+      addressLine1: "", city: "", state: "", zip: "",
+      propertyUse: "" as "" | "primary" | "rental" | "vacation",
+      marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
+      saving: false, error: null
+    };
+    if (a.property_id) {
+      try {
+        const r = await apiJson<{
+          property: {
+            addressLine1: string | null; city: string | null;
+            state: string | null; zip: string | null;
+            propertyUse: string | null; latestValueUsd: number | null;
+            latestValueAsOf: string | null;
+          }
+        }>(`/household/properties/${encodeURIComponent(a.property_id)}`);
+        const p = r.property;
+        setPropertyModal({
+          ...base,
+          addressLine1: p.addressLine1 ?? "",
+          city: p.city ?? "",
+          state: p.state ?? "",
+          zip: p.zip ?? "",
+          propertyUse: (p.propertyUse ?? "") as typeof base.propertyUse,
+          marketValueUsd: p.latestValueUsd != null ? String(p.latestValueUsd) : "",
+          asOfDate: p.latestValueAsOf ?? base.asOfDate
+        });
+      } catch {
+        setPropertyModal(base);
+      }
+    } else {
+      setPropertyModal(base);
     }
   }
 
@@ -1865,20 +1919,9 @@ export function SettingsPage() {
                               variant="light"
                               color={a.property_id ? "teal" : "blue"}
                               size="xs"
-                              onClick={() =>
-                                setPropertyModal({
-                                  open: true,
-                                  accountId: a.id,
-                                  propertyId: a.property_id,
-                                  addressLine1: "", city: "", state: "", zip: "",
-                                  propertyUse: "",
-                                  marketValueUsd: "",
-                                  asOfDate: new Date().toISOString().slice(0, 10),
-                                  saving: false, error: null
-                                })
-                              }
+                              onClick={() => void openPropertyModal(a)}
                             >
-                              {a.property_id ? "Property" : "+ Property"}
+                              {a.property_id ? "Property ✓" : "+ Property"}
                             </Button>
                           ) : null}
                         </Group>
