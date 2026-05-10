@@ -98,7 +98,7 @@ type BalanceSheetHistoryAccountSlice = {
 type BalanceSheetHistoryResponse = {
   from: string;
   to: string;
-  interval: "month" | "week" | "day";
+  interval: "month" | "quarter" | "week" | "day";
   points: Array<{
     asOf: string;
     totals: {
