@@ -12,37 +12,24 @@
 
 ## P1 — Bugs & Correctness
 
-### B-1: Transfer ambiguity — confirm button missing after partial candidate dismissal
-When a resolution item has `creditCandidateIds` (plural array) and the user dismisses one, the surviving candidate never gets promoted to `creditId` (singular). Confirm button never appears; pair is unresolvable from the UI.
+### ~~B-1: Transfer ambiguity — confirm button missing after partial candidate dismissal~~ ✓ DELIVERED (FIX-168, 2026-05-10)
+Confirm button never appeared because it required `creditId` (singular) in reason JSON but ingest always wrote `creditCandidateIds` (plural array).
 
-**Three gaps:**
-- Gap 1: After dismissal of one candidate, update surviving item's reason JSON from array → singular `creditId`
-- Gap 2: Bulk confirm must handle single-entry `creditCandidateIds` as unambiguous; surface error for multi-entry instead of silently failing
-- Gap 3: Bulk confirm gives zero user feedback on failure — toast "Could not confirm X transfers" at minimum
-
-**Files:** `resolution.service.ts`, `canonical-ingest.service.ts`, resolution queue frontend page
+**Delivered approach (simpler than originally planned):** Replaced the broken `creditId`-in-JSON confirm path entirely. Ingest now creates resolution items for the **debit only** (not all candidates). `buildResolutionItemRow` live-queries candidate transactions and returns `transferCandidates[]`. UI presents a radio picker — user selects the correct credit, clicks "Confirm transfer pair". One confirm button per item regardless of candidate count. Bulk confirm removed (dead after this redesign). Legacy credit-side items handled gracefully (self-referential candidates filtered out).
 
 ---
 
-### B-2: Dismissed transfer items re-surface on every new import
-Dismissing "Not a transfer" only closes the resolution item. The canonical row has no memory of the decision. Next import re-detects the same pair and creates a new resolution item. User must re-dismiss on every import cycle.
+### ~~B-2: Dismissed transfer items re-surface on every new import~~ ✓ DELIVERED (FIX-168, 2026-05-10)
+Canonical row had no memory of the dismissal decision.
 
-**Fix:** Add `transfer_excluded BOOLEAN NOT NULL DEFAULT FALSE` to `transaction_canonical`. Set it on dismissal. Transfer detection skips rows where `transfer_excluded = TRUE`. Also add a ledger-level "re-include as transfer candidate" action for corrections.
-
-**DB change:** New migration for `transfer_excluded` column.
-
-**Files:** `canonical-ingest.service.ts`, `resolution.service.ts`, new migration
+**Delivered:** Migration 0040 adds `transfer_excluded BOOLEAN NOT NULL DEFAULT FALSE` to `transaction_canonical`. Dismiss path (`updateResolutionStatusForHousehold` + bulk) sets `transfer_excluded = TRUE` on the debit row. Ingest candidate query adds `AND NOT transfer_excluded`. Note: "re-include as transfer candidate" action not implemented (deferred — uncommon edge case).
 
 ---
 
-### B-3: Multi-day same-amount transfers create cross-match ambiguity
-Two $10k transfers on consecutive days each claim the same two credit candidates. Both produce `transfer_ambiguity` items with identical candidate arrays — even a working Confirm button can't resolve which debit pairs with which credit.
+### ~~B-3: Multi-day same-amount transfers create cross-match ambiguity~~ ✓ DELIVERED (FIX-168, 2026-05-10)
+Two same-amount transfers on consecutive days each claimed the same two credit candidates.
 
-**Fix:** Greedy closest-date pre-assignment pass during ingest. Score all (debit, credit) pairs by date proximity; greedily assign best pairs; remaining ambiguous items get singular `creditId` for one-click confirm. Keep detection window at ±3 days (ACH float). Output is single-candidate confirm, not silent auto-pair.
-
-Also implement: **"Dissolve transfer pair"** action in ledger (when `transfer_group_id IS NOT NULL`) — sets both legs back to `NULL`, re-opens as candidates. Safer than perfecting the algorithm.
-
-**Files:** `canonical-ingest.service.ts`
+**Delivered approach (simpler than originally planned):** No greedy algorithm. The debit-only resolution item model solves this naturally — each debit gets its own item with the full candidate list, and the radio picker lets the user assign the correct credit. First debit to confirm claims the credit; the other debit's item shows "no candidates" on next load. "Dissolve transfer pair" action not implemented (deferred).
 
 ---
 
@@ -289,6 +276,32 @@ The app has 400+ backend integration tests (Vitest + supertest) but no browser-l
 
 ---
 
+### UX-166: Consistent currency display — comma-separated thousands everywhere
+All dollar values displayed in the app use inconsistent formatting today. `NetWorthPage` already uses `toLocaleString()` (commas present); `PayslipsPage`, `DashboardPageV2`, `ImportWorkspacePage`, `SettingsPage` use raw `toFixed(2)` with no comma separator (e.g. `7305.84` instead of `7,305.84`).
+
+**Fix:** Create a shared `formatUsd(n: number): string` utility (using `toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })`). Replace all bare `toFixed(2)` dollar-value calls across ~8 files. Chart tick/tooltip formatters updated in the same pass.
+
+**Note:** Non-dollar `toFixed` calls (KB file sizes, confidence scores, priority values, tolerance percentages) are intentionally excluded.
+
+**Files:** New `frontend/src/utils/format.ts`, `PayslipsPage.tsx`, `DashboardPageV2.tsx`, `ImportWorkspacePage.tsx`, `SettingsPage.tsx`, `PayslipIncomeCharts.tsx`, `PayslipDetailPage.tsx`, `PayslipManualPage.tsx`
+
+---
+
+### UX-167: Cash register input — decimal-first dollar entry
+Dollar amount inputs across the app require the user to manually type the decimal point. A fat-finger omission (typing `1002` when intending `100.20`) silently submits the wrong value.
+
+**Fix:** Add `react-currency-input-field` (battle-tested, TypeScript-native, zero custom hook work). Create a thin `CurrencyInput` wrapper that applies Mantine styling. Cash-register behavior (right-to-left digit shifting, always 2 decimal places) comes from the library config — `decimalsLimit={2}` + `fixedDecimalLength={2}`.
+
+**Scope:** Apply only to dollar-value inputs. Excluded: priority, confidence, tolerance percentage, file size, and other non-dollar numeric fields.
+
+**Dollar inputs to update:** manual balance entry (NetWorthPage), salary / initial balance fields (SettingsPage ~5 instances), budget amounts (BudgetPage), payslip manual entry (PayslipManualPage), manual transaction amount (TransactionsPage).
+
+**Prereq:** UX-166 (do in same pass — same files touched).
+
+**Files:** `react-currency-input-field` (new dep), new `frontend/src/components/CurrencyInput.tsx`, `NetWorthPage.tsx`, `SettingsPage.tsx`, `BudgetPage.tsx`, `PayslipManualPage.tsx`, `TransactionsPage.tsx`
+
+---
+
 ### I-7: Recurring payments — remaining backlog (Phases 4+)
 Phases 1–3 shipped (CR-121/122/123). Remaining deferred items:
 - **Annual subscription detection:** Current CV + 2-month gate misses annual charges. Detect single-annual-charge pattern separately.
@@ -334,9 +347,9 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 | ID | Title | Priority | Type | Prereqs |
 |---|---|---|---|---|
-| B-1 | Transfer confirm button missing after partial dismissal | P1 | Bug | — |
-| B-2 | Dismissed transfers re-surface on next import | P1 | Bug + DB | — |
-| B-3 | Multi-day same-amount transfer cross-match | P1 | Bug | — |
+| ~~B-1~~ | ~~Transfer confirm button missing after partial dismissal~~ | ✓ Done | Bug | — |
+| ~~B-2~~ | ~~Dismissed transfers re-surface on next import~~ | ✓ Done | Bug + DB | — |
+| ~~B-3~~ | ~~Multi-day same-amount transfer cross-match~~ | ✓ Done | Bug | — |
 | ~~B-4~~ | ~~Marcus PDF ACH deposits silently dropped~~ | ✓ Done | Bug | — |
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
@@ -356,6 +369,8 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | I-4 | Password reset token periodic cleanup | P3 | Maintenance | — |
 | I-5 | Export/restore housekeeping (staging file, GDrive warning) | P3 | Maintenance | — |
 | I-6 | Drive query string escaping | P3 | Security hygiene | — |
+| UX-166 | Consistent currency display (comma thousands separator) | P3 | UX polish | — |
+| UX-167 | Cash register input for dollar amount fields | P3 | UX polish | UX-166 |
 | I-7 | Recurring payments: annual detection, prediction, per-tx exclusion | P3 | Enhancement | — |
 | I-8 | Playwright E2E test suite exploration (spike) | P3 | Testing | — |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
@@ -366,4 +381,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-08. Compiled from all backlog sources at start of v3 planning.*
+*Last updated: 2026-05-10. All P1 bugs (B-1 through B-7) delivered. P2 features next.*
