@@ -1,4 +1,5 @@
 import { qAll, qGet } from "../../db/query.js";
+import { computeAgeFromDob, decryptDob } from "../household/dob-crypto.js";
 import { getBalanceSheet } from "../reports/balance-sheet.service.js";
 
 export interface InsightPromptInput {
@@ -75,6 +76,7 @@ async function loadHouseholdDemographics(householdId: string): Promise<{
 type ProfileRow = {
   relationship: string;
   age: number | null;
+  date_of_birth_encrypted: string | null;
   sex: string | null;
   risk_tolerance: string | null;
   financial_goals_json: string | null;
@@ -85,6 +87,7 @@ async function loadProfileRows(householdId: string): Promise<ProfileRow[]> {
   return qAll<ProfileRow>(
     `SELECT m.relationship,
             p.age,
+            p.date_of_birth_encrypted,
             p.sex,
             p.risk_tolerance,
             p.financial_goals_json,
@@ -96,6 +99,19 @@ async function loadProfileRows(householdId: string): Promise<ProfileRow[]> {
       ORDER BY p.created_at ASC`,
     householdId
   );
+}
+
+/** Compute effective age from a profile-like row: decrypted DOB first, manual age fallback. */
+function effectiveAgeFromRow(row: { age: number | null; date_of_birth_encrypted: string | null } | undefined | null): number | null {
+  if (!row) return null;
+  if (row.date_of_birth_encrypted != null) {
+    const dob = decryptDob(String(row.date_of_birth_encrypted));
+    if (dob != null) {
+      const computed = computeAgeFromDob(dob);
+      if (computed != null) return computed;
+    }
+  }
+  return row.age != null && Number.isFinite(Number(row.age)) ? Number(row.age) : null;
 }
 
 function parseGoals(json: string | null): string[] {
@@ -333,13 +349,13 @@ export async function assembleHouseholdPromptInput(householdId: string): Promise
   const spouse = profiles.find((p) => p.relationship === "spouse");
 
   const headOfHousehold = {
-    age: self?.age != null ? Number(self.age) : null,
+    age: effectiveAgeFromRow(self),
     sex: self?.sex != null ? String(self.sex) : null
   };
   const spouseBlock =
     spouse != null
       ? {
-          age: spouse.age != null ? Number(spouse.age) : null,
+          age: effectiveAgeFromRow(spouse),
           sex: spouse.sex != null ? String(spouse.sex) : null
         }
       : null;
@@ -381,12 +397,13 @@ export async function assemblePersonalPromptInput(householdId: string, userId: s
   const demo = await loadHouseholdDemographics(householdId);
   const row = await qGet<{
     age: number | null;
+    date_of_birth_encrypted: string | null;
     sex: string | null;
     risk_tolerance: string | null;
     financial_goals_json: string | null;
     individual_gross_income_usd: number | null;
   }>(
-    `SELECT p.age, p.sex, p.risk_tolerance, p.financial_goals_json, p.individual_gross_income_usd
+    `SELECT p.age, p.date_of_birth_encrypted, p.sex, p.risk_tolerance, p.financial_goals_json, p.individual_gross_income_usd
        FROM person_profile p
       WHERE p.household_id = ? AND p.linked_user_id = ?
       LIMIT 1`,
@@ -412,7 +429,7 @@ export async function assemblePersonalPromptInput(householdId: string, userId: s
 
   return {
     headOfHousehold: {
-      age: row?.age != null ? Number(row.age) : null,
+      age: effectiveAgeFromRow(row),
       sex: row?.sex != null ? String(row.sex) : null
     },
     spouse: null,

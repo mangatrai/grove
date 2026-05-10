@@ -69,7 +69,10 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 6,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
-    memberScopeFilter: (profileId) => ({ sql: "id = ?", params: [profileId] })
+    memberScopeFilter: (profileId) => ({ sql: "id = ?", params: [profileId] }),
+    // F-9: DOB is encrypted with an instance-derived key; strip from .hfb exports.
+    // Re-enter date of birth after restore (the source key won't match in another instance).
+    onExport: (rows) => rows.map(({ date_of_birth_encrypted: _dob, ...rest }) => rest)
   },
   {
     tableKey: "household_membership",

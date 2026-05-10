@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-173 / DB-042 (2026-05-10): F-9 — Date of birth encrypted at rest, computed age
+
+**Why:** Manually-entered age is a stale value requiring yearly updates. Storing DOB allows the app to compute current age automatically. DOB is PII and must not be stored plaintext.
+
+**What changed:**
+
+- Migration **0042**: `date_of_birth_encrypted TEXT` column added to **`person_profile`**.
+- **`backend/src/modules/household/dob-crypto.ts`** (new): `encryptDob`, `decryptDob`, `computeAgeFromDob`. Key = SHA-256(`"household-finance:dob:" + JWT_SECRET`) — same derivation pattern as gdrive OAuth token encryption. Format: base64(`iv[12] || tag[16] || ciphertext`).
+- **`household.service.ts`**: all profile SELECT queries now include `date_of_birth_encrypted`. Profile row mapping computes effective age from DOB when present, with manual age fallback. Single mapper (`toHouseholdMemberProfile`) keeps `dateOfBirth: null` for safety; an own-profile helper (`toOwnProfile`) reveals the decrypted DOB. `patchCurrentUserProfile` accepts `dateOfBirth?: string | null` — setting clears manual age; clearing leaves manual age input editable. Own-profile responses include decrypted `dateOfBirth`. Member-list/detail responses include `hasDob` + computed `age` but NOT raw `dateOfBirth`.
+- **`household.routes.ts`**: `profilePatchSchema` accepts `dateOfBirth` (`YYYY-MM-DD` regex, nullable, optional).
+- **`insight-prompt.service.ts`**: selects `date_of_birth_encrypted`, computes effective age (DOB-first, manual fallback) for both `assembleHouseholdPromptInput` (head + spouse) and `assemblePersonalPromptInput` before building AI prompt context.
+- **`export-registry.ts`**: `person_profile` entry gets `onExport` hook stripping `date_of_birth_encrypted` before `.hfb` export. Restore notice should say: "Date of birth must be re-entered after restore."
+- **`SettingsPage.tsx`**: profile edit replaces the age `NumberInput` with a DOB date picker. When DOB set: date input + computed age display + "Clear DOB" button. When DOB unset: date picker placeholder + manual age fallback input. Save unconditionally sends `dateOfBirth`; manual `age` is only sent when no DOB is set.
+
+**Files:** `backend/db/migrations/0042_person_profile_dob.sql` (new), `backend/src/modules/household/dob-crypto.ts` (new), `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `backend/src/modules/export/export-registry.ts`, `frontend/src/pages/SettingsPage.tsx`, `openapi/openapi.yaml`, `docs/API_HOUSEHOLD_PROFILE.md`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`
+
+---
+
 ## FIX-172 (2026-05-10): OpenAPI — `property_id` / `linked_account_id` not account-upsert inputs
 
 **Why:** CR-171 OpenAPI listed **`linkedAccountId`** and **`propertyId`** on **`ImportAccountUpsertRequest`**, implying the importer account PATCH/POST could set them. **`property_id`** is set only when **`POST /household/properties`** includes **`accountId`**; **`linked_account_id`** is reserved for future HELOC pairing (**D-5**) and is not writable via account upsert.

@@ -177,18 +177,20 @@ Extend flow classification (F-7) from AI insights to the app's own reports:
 
 ---
 
-### F-9: Date of birth — encrypted at rest, computed age
-`person_profile.age` is a manually-entered integer the user must update every year. Store encrypted DOB instead; compute age automatically.
+### ~~F-9: Date of birth — encrypted at rest, computed age~~ ✓ Done (CR-173, 2026-05-10)
+`person_profile.age` was a manually-entered integer the user had to update every year. DOB is now stored encrypted and age is computed on read.
 
-**Schema:** Add `date_of_birth_encrypted TEXT` to `person_profile`. Keep `age INTEGER` as nullable fallback for profiles without DOB. API never returns raw DOB — only `hasDob: boolean` and computed `age: number | null`.
+**Schema:** Migration **0042** adds `date_of_birth_encrypted TEXT` to `person_profile`. The existing `age INTEGER` column stays as a fallback for profiles without DOB. Own-profile responses (`GET/PATCH /household/profile`) return decrypted `dateOfBirth`; member-list/detail responses return only `hasDob: boolean` and computed `age: number | null`.
 
-**Encryption:** AES-256-GCM, same pattern as `gdrive.service.ts`. Key derived from `JWT_SECRET` via `crypto.scryptSync`. Format: `base64(iv[12] + authTag[16] + ciphertext)`.
+**Encryption:** AES-256-GCM in **`backend/src/modules/household/dob-crypto.ts`**. Key = `SHA-256("household-finance:dob:" + JWT_SECRET)` — same derivation pattern as `gdrive.service.ts` token encryption. Format: `base64(iv[12] || authTag[16] || ciphertext)`. `decryptDob` returns `null` on any failure.
 
-**UI:** Date picker in profile edit. Age field becomes read-only + auto-computed once DOB is set. Clear DOB returns to manual age input.
+**UI:** **`SettingsPage.tsx`** profile tab swaps the age `NumberInput` for a DOB date picker. When DOB is set: date input + computed age display + "Clear DOB" button. When DOB is unset: date picker placeholder + manual age fallback input. Save sends `dateOfBirth` unconditionally; manual `age` is only sent when no DOB is set.
 
-**Export:** DOB excluded from `.hfb` exports (PII encrypted with instance-specific key). Restore completion notice should say: "Date of birth for each person must be re-entered."
+**Export:** **`export-registry.ts`** has an `onExport` hook on the `person_profile` entry that strips `date_of_birth_encrypted` before `.hfb` export. The encryption key is instance-specific (depends on `JWT_SECRET`), so re-entering DOBs after a restore is required.
 
-**Files:** `household.service.ts`, `insight-prompt.service.ts`, new migration, profile settings UI
+**AI insights:** **`insight-prompt.service.ts`** decrypts DOB and computes effective age (DOB-first, manual fallback) for both household-level (head + spouse) and personal prompt input.
+
+**Files:** `backend/db/migrations/0042_person_profile_dob.sql` (new), `backend/src/modules/household/dob-crypto.ts` (new), `household.service.ts`, `household.routes.ts`, `insight-prompt.service.ts`, `export-registry.ts`, `SettingsPage.tsx`
 
 ---
 
@@ -354,7 +356,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
 | F-7 | AI insights: fix transfer/flow pollution | P2 | Feature | — |
 | F-8 | Money flow classification in reports | P2 | Feature | F-7 |
-| F-9 | Date of birth encrypted at rest, computed age | P2 | Feature + Security | — |
+| ~~F-9~~ | ~~Date of birth encrypted at rest, computed age~~ | ✓ Done | Feature + Security | — |
 | I-1 | Personal loan tracker | P3 | Feature | F-8 |
 | I-2 | Async import parse + canonicalize | P3 | Reliability | — |
 | I-3 | Category / reimbursements taxonomy cleanup | P3 | Improvement | F-7/F-8 |
@@ -373,4 +375,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-10. All P1 bugs done. F-1, F-2, and F-3 done. Next: F-5 (payslip deposit stored pairing), F-7 (AI insights pollution fix), or F-9 (DOB encrypted).*
+*Last updated: 2026-05-10. All P1 bugs done. F-1, F-2, F-3, and F-9 done. Next: F-5 (payslip deposit stored pairing) or F-7 (AI insights pollution fix).*

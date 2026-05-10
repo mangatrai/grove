@@ -100,6 +100,7 @@ const profilePatchSchema = z
     salaryDepositFinancialAccountId: z.union([z.string().uuid(), z.null()]).optional(),
     employers: z.array(employerInputSchema).max(20).optional(),
     age: z.union([z.number().int().min(1).max(129), z.null()]).optional(),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").nullable().optional(),
     sex: z.enum(["male", "female", "nonbinary", "prefer_not_to_say"]).nullable().optional(),
     individualGrossIncomeUsd: z.union([z.number().min(0).max(100_000_000), z.null()]).optional(),
     riskTolerance: z.enum(["conservative", "moderate", "aggressive"]).nullable().optional(),

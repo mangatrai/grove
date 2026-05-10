@@ -9,6 +9,7 @@ import { createPasswordResetToken } from "../auth/auth.service.js";
 import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
 import { renderMemberInviteTemplate } from "../mailer/templates/member-invite.js";
 import { renderPasswordResetTemplate } from "../mailer/templates/password-reset.js";
+import { computeAgeFromDob, decryptDob, encryptDob } from "./dob-crypto.js";
 import {
   employersPayloadSchema,
   type EmployerInput,
@@ -199,7 +200,12 @@ export type HouseholdMemberProfile = {
   avatarKey: string | null;
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
+  /** Effective age — computed from DOB if set, otherwise the manual age column. */
   age: number | null;
+  /** Decrypted YYYY-MM-DD. Only populated for own-profile responses; null otherwise. */
+  dateOfBirth: string | null;
+  /** True if a DOB has been set. Safe to return for any member. */
+  hasDob: boolean;
   sex: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
   individualGrossIncomeUsd: number | null;
   riskTolerance: "conservative" | "moderate" | "aggressive" | null;
@@ -217,6 +223,7 @@ type MemberProfileRow = {
   role: HouseholdMemberRole;
   relationship: HouseholdRelationship;
   age: number | null;
+  date_of_birth_encrypted: string | null;
   sex: string | null;
   individual_gross_income_usd: number | null;
   risk_tolerance: string | null;
@@ -254,6 +261,12 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
     row.individual_gross_income_usd != null && Number.isFinite(Number(row.individual_gross_income_usd))
       ? Math.round(Number(row.individual_gross_income_usd) * 100) / 100
       : null;
+  // Effective age: computed from DOB when present (always fresh), manual fallback otherwise.
+  const rawDob =
+    row.date_of_birth_encrypted != null ? decryptDob(String(row.date_of_birth_encrypted)) : null;
+  const computedAge = rawDob != null ? computeAgeFromDob(rawDob) : null;
+  const manualAge =
+    row.age != null && Number.isFinite(Number(row.age)) ? Number(row.age) : null;
   return {
     id: row.id,
     householdId: row.household_id,
@@ -266,12 +279,26 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
     avatarKey: row.avatar_key,
     role: row.role,
     relationship: row.relationship,
-    age: row.age != null && Number.isFinite(Number(row.age)) ? Number(row.age) : null,
+    age: computedAge ?? manualAge,
+    dateOfBirth: null,
+    hasDob: rawDob != null,
     sex: validSex,
     individualGrossIncomeUsd: ig,
     riskTolerance: validRt,
     financialGoals: parseFinancialGoalsJson(row.financial_goals_json)
   };
+}
+
+/**
+ * Same as toHouseholdMemberProfile but reveals the decrypted DOB. Use ONLY for
+ * own-profile responses (the authenticated user's own profile). Other members'
+ * raw DOBs must never leak through admin/list endpoints.
+ */
+function toOwnProfile(row: MemberProfileRow): HouseholdMemberProfile {
+  const base = toHouseholdMemberProfile(row);
+  const rawDob =
+    row.date_of_birth_encrypted != null ? decryptDob(String(row.date_of_birth_encrypted)) : null;
+  return { ...base, dateOfBirth: rawDob };
 }
 
 export type PatchProfileInput = {
@@ -284,6 +311,8 @@ export type PatchProfileInput = {
   salaryDepositFinancialAccountId?: string | null;
   employers?: EmployerInput[];
   age?: number | null;
+  /** YYYY-MM-DD or null. Setting clears manual age; clearing keeps manual age input editable again. */
+  dateOfBirth?: string | null;
   sex?: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
   individualGrossIncomeUsd?: number | null;
   riskTolerance?: "conservative" | "moderate" | "aggressive" | null;
@@ -322,7 +351,7 @@ async function ensureCurrentUserProfile(
   const existing = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -334,7 +363,7 @@ async function ensureCurrentUserProfile(
     userId
   );
   if (existing) {
-    return toHouseholdMemberProfile(existing);
+    return toOwnProfile(existing);
   }
 
   const user = await qGet<{ email: string; role: "owner" | "admin" | "member" }>(
@@ -383,7 +412,7 @@ async function ensureCurrentUserProfile(
   const created = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -394,7 +423,7 @@ async function ensureCurrentUserProfile(
     householdId,
     userId
   );
-  return created ? toHouseholdMemberProfile(created) : null;
+  return created ? toOwnProfile(created) : null;
 }
 
 export async function getCurrentUserProfile(
@@ -416,7 +445,7 @@ export async function patchCurrentUserProfile(
     ? await qGet<MemberProfileRow>(
         `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -494,6 +523,25 @@ export async function patchCurrentUserProfile(
   if (input.age !== undefined) {
     await qExec(`UPDATE person_profile SET age = ? WHERE household_id = ? AND linked_user_id = ?`, input.age, householdId, userId);
   }
+  if (input.dateOfBirth !== undefined) {
+    if (input.dateOfBirth === null) {
+      // Clear DOB — manual age becomes editable again.
+      await qExec(
+        `UPDATE person_profile SET date_of_birth_encrypted = NULL WHERE household_id = ? AND linked_user_id = ?`,
+        householdId,
+        userId
+      );
+    } else {
+      // Set DOB — encrypt and store; clear manual age (computed age replaces it).
+      const encrypted = encryptDob(input.dateOfBirth);
+      await qExec(
+        `UPDATE person_profile SET date_of_birth_encrypted = ?, age = NULL WHERE household_id = ? AND linked_user_id = ?`,
+        encrypted,
+        householdId,
+        userId
+      );
+    }
+  }
   if (input.sex !== undefined) {
     await qExec(`UPDATE person_profile SET sex = ? WHERE household_id = ? AND linked_user_id = ?`, input.sex, householdId, userId);
   }
@@ -551,7 +599,7 @@ export async function patchCurrentUserProfile(
   const updated = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -565,14 +613,14 @@ export async function patchCurrentUserProfile(
   if (!updated) {
     return { ok: false, code: "NOT_FOUND" };
   }
-  return { ok: true, profile: toHouseholdMemberProfile(updated) };
+  return { ok: true, profile: toOwnProfile(updated) };
 }
 
 export async function listHouseholdMembers(householdId: string): Promise<HouseholdMemberProfile[]> {
   const rows = await qAll<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM household_membership m
   JOIN person_profile p
     ON p.id = m.person_profile_id
@@ -650,7 +698,7 @@ export async function createHouseholdMember(
   const created = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -683,7 +731,7 @@ export async function patchHouseholdMember(
   const existing = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id
@@ -736,7 +784,7 @@ export async function patchHouseholdMember(
   const updated = await qGet<MemberProfileRow>(
     `
   SELECT p.id, p.household_id, p.linked_user_id, p.full_name, p.email, p.phone_number, p.avatar_key, m.role, m.relationship,
-         p.age, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
+         p.age, p.date_of_birth_encrypted, p.sex, p.individual_gross_income_usd, p.risk_tolerance, p.financial_goals_json
   FROM person_profile p
   JOIN household_membership m
     ON m.person_profile_id = p.id

@@ -221,6 +221,8 @@ type HouseholdProfileResponse = {
     role: "head" | "member";
     relationship: "self" | "spouse" | "child" | "dependent" | "other";
     age: number | null;
+    dateOfBirth: string | null;
+    hasDob: boolean;
     sex: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
     individualGrossIncomeUsd: number | null;
     riskTolerance: "conservative" | "moderate" | "aggressive" | null;
@@ -253,12 +255,25 @@ type ProfileDraft = {
   phone: string;
   avatarIconKey: string;
   age: string;
+  /** YYYY-MM-DD or "" when not set. Setting this auto-computes age. */
+  dateOfBirth: string;
   sex: "" | "male" | "female" | "nonbinary" | "prefer_not_to_say";
   individualGrossIncomeUsd: string;
   riskTolerance: "" | "conservative" | "moderate" | "aggressive";
   financialGoals: string[];
   employers: EmployerDraft[];
 };
+
+/** Compute display-friendly age from a YYYY-MM-DD string. Returns "—" on invalid. */
+function computeAgeDisplay(dob: string): string {
+  const birth = new Date(`${dob}T12:00:00.000Z`);
+  if (isNaN(birth.getTime())) return "—";
+  const today = new Date();
+  let age = today.getUTCFullYear() - birth.getUTCFullYear();
+  const m = today.getUTCMonth() - birth.getUTCMonth();
+  if (m < 0 || (m === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
+  return age >= 0 && age <= 150 ? String(age) : "—";
+}
 
 type HouseholdMemberDraft = {
   id?: string;
@@ -302,6 +317,7 @@ function normalizeProfileDraft(payload: HouseholdProfileResponse): ProfileDraft 
     phone: (p.phoneNumber ?? "").trim(),
     avatarIconKey: (p.avatarKey ?? PROFILE_ICON_KEYS[0]).trim() || PROFILE_ICON_KEYS[0],
     age: p.age == null ? "" : String(p.age),
+    dateOfBirth: p.dateOfBirth ?? "",
     sex: p.sex ?? "",
     individualGrossIncomeUsd: p.individualGrossIncomeUsd == null ? "" : String(p.individualGrossIncomeUsd),
     riskTolerance: p.riskTolerance ?? "",
@@ -356,6 +372,7 @@ export function SettingsPage() {
     phone: "",
     avatarIconKey: PROFILE_ICON_KEYS[0],
     age: "",
+    dateOfBirth: "",
     sex: "",
     individualGrossIncomeUsd: "",
     riskTolerance: "",
@@ -871,43 +888,53 @@ export function SettingsPage() {
       const iconKey = profileDraft.avatarIconKey.trim() || PROFILE_ICON_KEYS[0];
       const ageTrim = profileDraft.age.trim();
       const incomeTrim = profileDraft.individualGrossIncomeUsd.trim();
+      const dobTrim = profileDraft.dateOfBirth.trim();
       const age = ageTrim === "" ? null : Number(ageTrim);
       const individualIncome = incomeTrim === "" ? null : Number(incomeTrim);
       if (age !== null && (!Number.isInteger(age) || age < 1 || age > 129)) {
         throw new Error("Age must be an integer between 1 and 129.");
       }
+      if (dobTrim !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(dobTrim)) {
+        throw new Error("Date of birth must be a valid YYYY-MM-DD value.");
+      }
       if (individualIncome !== null && (!Number.isFinite(individualIncome) || individualIncome < 0)) {
         throw new Error("Individual gross annual income must be a non-negative number.");
       }
+      const body: Record<string, unknown> = {
+        firstName: profileDraft.firstName.trim(),
+        lastName: profileDraft.lastName.trim(),
+        email: profileDraft.email.trim() || null,
+        phoneNumber: profileDraft.phone.trim() || null,
+        avatarKey: iconKey,
+        sex: profileDraft.sex || null,
+        individualGrossIncomeUsd: individualIncome,
+        riskTolerance: profileDraft.riskTolerance || null,
+        financialGoals: profileDraft.financialGoals,
+        dateOfBirth: dobTrim === "" ? null : dobTrim,
+        salaryDepositFinancialAccountId:
+          profileDraft.employers[0]?.salaryDepositAccountId &&
+          profileDraft.employers[0].salaryDepositAccountId !== ""
+            ? profileDraft.employers[0].salaryDepositAccountId
+            : null,
+        employers: profileDraft.employers
+          .map((e) => ({
+            id: e.id,
+            displayName: e.displayName.trim(),
+            parserProfileId: e.parserProfileId,
+            parserMapping: {} as Record<string, unknown>,
+            salaryDepositFinancialAccountId:
+              e.salaryDepositAccountId === "" ? null : e.salaryDepositAccountId
+          }))
+          .filter((e) => e.displayName.length > 0)
+      };
+      // Only include manual age in payload when DOB is unset (manual age mode).
+      // When DOB is set, the backend auto-clears age and computes it on read.
+      if (dobTrim === "") {
+        body.age = age;
+      }
       await apiJson<HouseholdProfileResponse>("/household/profile", {
         method: "PATCH",
-        body: JSON.stringify({
-          firstName: profileDraft.firstName.trim(),
-          lastName: profileDraft.lastName.trim(),
-          email: profileDraft.email.trim() || null,
-          phoneNumber: profileDraft.phone.trim() || null,
-          avatarKey: iconKey,
-          age,
-          sex: profileDraft.sex || null,
-          individualGrossIncomeUsd: individualIncome,
-          riskTolerance: profileDraft.riskTolerance || null,
-          financialGoals: profileDraft.financialGoals,
-          salaryDepositFinancialAccountId:
-            profileDraft.employers[0]?.salaryDepositAccountId &&
-            profileDraft.employers[0].salaryDepositAccountId !== ""
-              ? profileDraft.employers[0].salaryDepositAccountId
-              : null,
-          employers: profileDraft.employers
-            .map((e) => ({
-              id: e.id,
-              displayName: e.displayName.trim(),
-              parserProfileId: e.parserProfileId,
-              parserMapping: {} as Record<string, unknown>,
-              salaryDepositFinancialAccountId:
-                e.salaryDepositAccountId === "" ? null : e.salaryDepositAccountId
-            }))
-            .filter((e) => e.displayName.length > 0)
-        })
+        body: JSON.stringify(body)
       });
       setProfileSuccess("Profile saved.");
       await loadProfile();
@@ -1209,21 +1236,65 @@ export function SettingsPage() {
                 />
                 <Fieldset legend="Financial Profile" mt="sm">
                   <Stack gap="sm">
+                    {profileDraft.dateOfBirth ? (
+                      <Box>
+                        <Text size="sm" fw={500} mb={4}>Date of birth</Text>
+                        <Group gap="sm" align="center">
+                          <TextInput
+                            type="date"
+                            size="sm"
+                            value={profileDraft.dateOfBirth}
+                            onChange={(e) =>
+                              setProfileDraft((prev) => ({ ...prev, dateOfBirth: e.currentTarget.value }))
+                            }
+                            disabled={savingProfile}
+                            aria-label="Date of birth"
+                          />
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            color="red"
+                            size="xs"
+                            disabled={savingProfile}
+                            onClick={() => setProfileDraft((prev) => ({ ...prev, dateOfBirth: "" }))}
+                          >
+                            Clear DOB
+                          </Button>
+                        </Group>
+                        <Text size="xs" c="dimmed" mt={4}>
+                          Age: {computeAgeDisplay(profileDraft.dateOfBirth)}
+                        </Text>
+                      </Box>
+                    ) : (
+                      <Box>
+                        <Text size="sm" fw={500} mb={4}>Date of birth</Text>
+                        <TextInput
+                          type="date"
+                          size="sm"
+                          placeholder="Set to auto-compute age"
+                          value={profileDraft.dateOfBirth}
+                          onChange={(e) =>
+                            setProfileDraft((prev) => ({ ...prev, dateOfBirth: e.currentTarget.value }))
+                          }
+                          disabled={savingProfile}
+                          aria-label="Date of birth"
+                        />
+                        <Text size="xs" c="dimmed" mt={4}>Or enter age manually:</Text>
+                        <TextInput
+                          size="sm"
+                          inputMode="numeric"
+                          placeholder="Age"
+                          style={{ width: "6rem", marginTop: "0.25rem" }}
+                          value={profileDraft.age}
+                          onChange={(e) =>
+                            setProfileDraft((prev) => ({ ...prev, age: e.currentTarget.value }))
+                          }
+                          disabled={savingProfile}
+                          aria-label="Age (manual)"
+                        />
+                      </Box>
+                    )}
                     <Group align="end" grow>
-                      <NumberInput
-                        label="Age"
-                        min={1}
-                        max={129}
-                        value={profileDraft.age === "" ? undefined : Number(profileDraft.age)}
-                        onChange={(value) =>
-                          setProfileDraft((prev) => ({
-                            ...prev,
-                            age: typeof value === "number" && Number.isFinite(value) ? String(value) : ""
-                          }))
-                        }
-                        disabled={savingProfile}
-                        style={{ flex: "0 0 10rem" }}
-                      />
                       <Select
                         label="Sex"
                         clearable
