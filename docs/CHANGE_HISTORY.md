@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-174 / UX-174 (2026-05-10): Forest Studio — Phase 1 design tokens + chart palette
+
+**Why:** Establish a single extended palette (forest / terracotta / sage / clay, etc.) for upcoming UI refactors without changing visuals yet.
+
+**Phase 1 — what changed:** Added CSS custom properties under `:root` and dark-scheme overrides in `[data-mantine-color-scheme="dark"]`. Added `frontend/src/theme/chartPalette.ts` with hex mirrors for Recharts (cannot read CSS variables).
+
+**Files:** `frontend/src/index.css`, `frontend/src/theme/chartPalette.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-173 / DB-042 (2026-05-10): F-9 — Date of birth encrypted at rest, computed age
 
 **Why:** Manually-entered age is a stale value requiring yearly updates. Storing DOB allows the app to compute current age automatically. DOB is PII and must not be stored plaintext.

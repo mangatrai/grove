@@ -49,6 +49,30 @@
   /* Expense/outflow — warm terracotta, less harsh than pure red */
   --color-expense: #8b3a26;
 
+  /* ── Forest Studio extended palette ── */
+  --fs-forest: #2d6a4f; /* primary, == --color-accent */
+  --fs-forest-2: #4a8a6e; /* lighter forest for secondary chart series */
+  --fs-gold: #c8860a; /* warm accent, == --color-warm */
+  --fs-gold-2: #e0a83a;
+  --fs-terracotta: #8b3a26; /* expense / outflow / over-budget, == --color-expense */
+  --fs-clay: #b86b4a; /* liabilities, secondary expense */
+  --fs-sage: #7a8a6e; /* assets line, soft positive */
+  --fs-taupe: #8a7a68; /* neutral chart series */
+  --fs-stone: #6b6358; /* neutral chart series */
+
+  /* Earthy categorical palette for charts (pie, stacked bars, etc.) */
+  --fs-cat-1: var(--fs-forest);
+  --fs-cat-2: var(--fs-clay);
+  --fs-cat-3: var(--fs-gold);
+  --fs-cat-4: var(--fs-sage);
+  --fs-cat-5: var(--fs-taupe);
+  --fs-cat-6: var(--fs-stone);
+  --fs-cat-7: var(--fs-terracotta);
+
+  /* Sidebar active accent — replaces mint-teal #6ee7b7 */
+  --fs-sidebar-active: #f0e9d8; /* warm cream */
+  --fs-sidebar-active-bg: rgba(240, 233, 216, 0.12);
+
   /* Layout */
   --app-max-width: 1100px;
   --radius: 10px;
@@ -109,6 +133,14 @@
   --color-danger: #e07563;
   --color-danger-subtle: rgba(224, 117, 99, 0.14);
   --color-expense: #c9705e;
+
+  /* Forest Studio — dark mode chart / accent relationships */
+  --fs-forest-2: #6fae8c;
+  --fs-clay: #c98763;
+  --fs-sage: #97a78b;
+  --fs-taupe: #a99988;
+  --fs-stone: #8b8378;
+  --fs-sidebar-active: #f0e9d8;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
   --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.4);
