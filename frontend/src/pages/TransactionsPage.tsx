@@ -308,9 +308,9 @@ function formatSignedMoneyRaw(amount: number | null): string {
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; color: string }> = {
-    posted:    { label: "Posted", color: "green" },
-    trashed:   { label: "Trashed", color: "red" },
-    duplicate: { label: "Duplicate", color: "yellow" },
+    posted:    { label: "Posted", color: "fsForest" },
+    trashed:   { label: "Trashed", color: "fsTerracotta" },
+    duplicate: { label: "Duplicate", color: "fsGold" },
     pending:   { label: "Pending", color: "gray" },
   };
   const c = cfg[status] ?? { label: status, color: "gray" };

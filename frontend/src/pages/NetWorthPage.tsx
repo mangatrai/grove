@@ -39,6 +39,7 @@ import { apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { FS_CLAY, FS_FOREST, FS_SAGE } from "../theme/chartPalette";
 
 type BalanceSheetAccountRow = {
   financialAccountId: string;
@@ -808,12 +809,12 @@ export function NetWorthPage() {
             radius="md"
             style={{
               textAlign: "center",
-              borderTop: `4px solid ${loading || !data ? "var(--color-border)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)"}`,
+              borderTop: `4px solid ${loading || !data ? "var(--color-border)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--fs-terracotta)"}`,
               padding: "1rem 1rem 1.05rem"
             }}
           >
             <Text size="xs" c="dimmed" tt="uppercase" fw={600} lts="0.06em" mb={4}>Net worth</Text>
-            <Text fw={700} style={{ fontSize: 28, color: loading || !data ? "var(--color-text-muted)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--color-danger)", fontVariantNumeric: "tabular-nums" }}>
+            <Text fw={700} style={{ fontSize: 28, color: loading || !data ? "var(--color-text-muted)" : (data.totals.netWorth ?? 0) >= 0 ? "var(--color-accent)" : "var(--fs-terracotta)", fontVariantNumeric: "tabular-nums" }}>
               {loading || !data ? "—" : formatMoney(data.totals.netWorth)}
             </Text>
           </Paper>
@@ -930,11 +931,11 @@ export function NetWorthPage() {
                 <Text size="xs" fw={600}>Net worth</Text>
               </Group>
               <Group gap={6} align="center">
-                <Box w={8} h={8} style={{ borderRadius: "50%", background: "#22c55e" }} />
+                <Box w={8} h={8} style={{ borderRadius: "50%", background: FS_SAGE }} />
                 <Text size="xs" c="dimmed">Assets</Text>
               </Group>
               <Group gap={6} align="center">
-                <Box w={8} h={8} style={{ borderRadius: "50%", background: "#f59e0b" }} />
+                <Box w={8} h={8} style={{ borderRadius: "50%", background: FS_CLAY }} />
                 <Text size="xs" c="dimmed">Liabilities</Text>
               </Group>
             </Group>
@@ -947,12 +948,12 @@ export function NetWorthPage() {
                       <stop offset="95%" stopColor="#2d6a4f" stopOpacity={0.03} />
                     </linearGradient>
                     <linearGradient id="nwGrad_assets" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.12} />
-                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.01} />
+                      <stop offset="5%" stopColor="#7a8a6e" stopOpacity={0.18} />
+                      <stop offset="95%" stopColor="#7a8a6e" stopOpacity={0.01} />
                     </linearGradient>
                     <linearGradient id="nwGrad_liabilities" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.0} />
+                      <stop offset="5%" stopColor="#b86b4a" stopOpacity={0.18} />
+                      <stop offset="95%" stopColor="#b86b4a" stopOpacity={0.0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
@@ -982,8 +983,8 @@ export function NetWorthPage() {
                       );
                     }}
                   />
-                  <Area type="monotone" dataKey="assets" name="Assets" stroke="#22c55e" strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.6} fill="url(#nwGrad_assets)" dot={false} connectNulls />
-                  <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke="#f59e0b" strokeWidth={1} strokeOpacity={0.5} fill="url(#nwGrad_liabilities)" dot={false} connectNulls />
+                  <Area type="monotone" dataKey="assets" name="Assets" stroke={FS_SAGE} strokeWidth={1} strokeDasharray="4 3" strokeOpacity={0.6} fill="url(#nwGrad_assets)" dot={false} connectNulls />
+                  <Area type="monotone" dataKey="liabilities" name="Liabilities" stroke={FS_CLAY} strokeWidth={1} strokeOpacity={0.5} fill="url(#nwGrad_liabilities)" dot={false} connectNulls />
                   <Area type="monotone" dataKey="netWorth" name="Net worth" stroke="var(--color-accent)" strokeWidth={2.5} fill="url(#nwGrad_netWorth)" dot={false} connectNulls />
                 </AreaChart>
               </ResponsiveContainer>
@@ -1250,9 +1251,9 @@ export function NetWorthPage() {
                   </>
                 ) : null}
                 <Table.Tr>
-                  <Table.Td><Text size="sm" fw={700} c="green">Total Assets</Text></Table.Td>
+                  <Table.Td><Text size="sm" fw={700} style={{ color: "var(--fs-forest)" }}>Total Assets</Text></Table.Td>
                   <Table.Td />
-                  <Table.Td><Text size="sm" fw={700} c="green">{formatMoney(data.totals.assets)}</Text></Table.Td>
+                  <Table.Td><Text size="sm" fw={700} style={{ color: "var(--fs-forest)" }}>{formatMoney(data.totals.assets)}</Text></Table.Td>
                   <Table.Td />
                   <Table.Td />
                 </Table.Tr>
@@ -1382,7 +1383,7 @@ export function NetWorthPage() {
                   <BarChart layout="vertical" data={topAssets} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <XAxis type="number" hide domain={[0, "dataMax"]} />
                     <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "var(--color-text)" }} tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v} />
-                    <Bar dataKey="balance" fill="#22c55e" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                    <Bar dataKey="balance" fill={FS_FOREST} radius={[0, 3, 3, 0]} isAnimationActive={false}>
                       <LabelList dataKey="balance" position="right" formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }} />
                     </Bar>
                   </BarChart>
@@ -1396,7 +1397,7 @@ export function NetWorthPage() {
                   <BarChart layout="vertical" data={topLiabilities} margin={{ top: 0, right: 72, left: 0, bottom: 0 }} barCategoryGap="25%">
                     <XAxis type="number" hide domain={[0, "dataMax"]} />
                     <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11, fill: "var(--color-text)" }} tickFormatter={(v: string) => v.length > 18 ? `${v.slice(0, 17)}…` : v} />
-                    <Bar dataKey="balance" fill="#f59e0b" radius={[0, 3, 3, 0]} isAnimationActive={false}>
+                    <Bar dataKey="balance" fill={FS_CLAY} radius={[0, 3, 3, 0]} isAnimationActive={false}>
                       <LabelList dataKey="balance" position="right" formatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} style={{ fontSize: 11, fill: "var(--color-text-muted)", fontWeight: 600 }} />
                     </Bar>
                   </BarChart>

@@ -18,13 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## CR-174 / UX-174 (2026-05-10): Forest Studio — Phase 1 design tokens + chart palette
+## CR-174 / UX-174 (2026-05-10): Forest Studio — design tokens, money palette, nav grouping
 
-**Why:** Establish a single extended palette (forest / terracotta / sage / clay, etc.) for upcoming UI refactors without changing visuals yet.
+**Why:** Align the UI with the Forest Studio palette: reserve pure red for destructive actions only, use terracotta for financial “down / over,” earthy Recharts colors, grouped sidebar, and warm-cream active states instead of mint.
 
-**Phase 1 — what changed:** Added CSS custom properties under `:root` and dark-scheme overrides in `[data-mantine-color-scheme="dark"]`. Added `frontend/src/theme/chartPalette.ts` with hex mirrors for Recharts (cannot read CSS variables).
+**Phase 1 — tokens:** CSS `--fs-*` custom properties (light + dark overrides) and `frontend/src/theme/chartPalette.ts` for Recharts.
 
-**Files:** `frontend/src/index.css`, `frontend/src/theme/chartPalette.ts`, `docs/CHANGE_HISTORY.md`
+**Phase 2 — money / charts:** Mantine theme colors `fsForest`, `fsTerracotta`, `fsGold`. Budget progress and KPI borders; Net worth trend gradients and top bars; dashboard pie (`FS_CAT_PALETTE`), 6‑month trend bars, hero net/outflow, budget strip, sparkline stroke, account trend arrows; transactions status badges; payslip KPI cards (gross forest / net gold) and list net color; payslip breakdown slice colors. `.kpi-delta-chip--down` uses terracotta. Removed shim `DashboardPage.tsx` — `HomeRoute` imports `DashboardPageV2` directly.
+
+**Phase 3 — chrome:** `AppSidebar` nav grouped Daily / Reports / Setup; collapsed mode shows dividers between groups; `--color-sidebar-active` → cream via `--fs-sidebar-active`; guest landing logo gradient (`--fs-gold` → `--fs-forest`); theme switcher, import button, user menu hover, landing check/pill, and dark auth links use cream/forest instead of mint.
+
+**Files:** `frontend/src/index.css`, `frontend/src/theme.ts`, `frontend/src/theme/chartPalette.ts`, `frontend/src/layout/AppSidebar.tsx`, `frontend/src/pages/HomeRoute.tsx`, `frontend/src/pages/BudgetPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/PayslipsPage.tsx`, `frontend/src/payslip/payslipChartsModel.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md` (deleted `frontend/src/pages/DashboardPage.tsx`)
 
 ---
 

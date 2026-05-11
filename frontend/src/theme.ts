@@ -36,6 +36,43 @@ export const appTheme: MantineThemeOverride = createTheme({
       "#6C4205", // 8
       "#3E2403", // 9
     ],
+    /** Forest Studio — semantic money colors (Progress, Badge); mirrors `index.css` tokens */
+    fsForest: [
+      "#F2F7F4",
+      "#E2EEE7",
+      "#C3DDCA",
+      "#97C4A5",
+      "#6BA984",
+      "#4A9464",
+      "#3A7D52",
+      "#2D6A4F",
+      "#1F5038",
+      "#153828",
+    ],
+    fsTerracotta: [
+      "#fdf5f3",
+      "#fce9e5",
+      "#fad2cb",
+      "#f0aea3",
+      "#e08575",
+      "#cc5c47",
+      "#8b3a26",
+      "#6d2e1e",
+      "#4a1f14",
+      "#2d130c",
+    ],
+    fsGold: [
+      "#fefbf3",
+      "#fef6e4",
+      "#fdecc8",
+      "#f5d08a",
+      "#e8b855",
+      "#d4a020",
+      "#c8860a",
+      "#9a6108",
+      "#6c4205",
+      "#3e2403",
+    ],
   },
 
   components: {

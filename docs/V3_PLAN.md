@@ -281,6 +281,14 @@ All dollar values displayed in the app use inconsistent formatting today. `NetWo
 
 ---
 
+### ~~UX-174: Forest Studio — design tokens, terracotta money semantics, grouped nav~~ ✓ DELIVERED (CR-174, 2026-05-10)
+
+**Delivered:** CSS `--fs-*` palette + `chartPalette.ts`; Mantine `fsForest` / `fsTerracotta` / `fsGold`; dashboard / net worth / budget / payslips / transactions badge colors updated; sidebar **Daily / Reports / Setup** groups; warm-cream active nav and topbar accents (replacing mint teal); removed `DashboardPage.tsx` shim in favor of direct `DashboardPageV2` import.
+
+**Files:** `frontend/src/index.css`, `frontend/src/theme.ts`, `frontend/src/theme/chartPalette.ts`, `frontend/src/layout/AppSidebar.tsx`, `HomeRoute.tsx`, `BudgetPage.tsx`, `NetWorthPage.tsx`, `DashboardPageV2.tsx`, `TransactionsPage.tsx`, `PayslipsPage.tsx`, `payslipChartsModel.ts`
+
+---
+
 ### UX-167: Cash register input — decimal-first dollar entry
 Dollar amount inputs across the app require the user to manually type the decimal point. A fat-finger omission (typing `1002` when intending `100.20`) silently submits the wrong value.
 

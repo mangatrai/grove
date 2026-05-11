@@ -1,4 +1,5 @@
 import type { PayslipSnapshotDetail } from "./types";
+import { FS_FOREST, FS_GOLD, FS_TERRACOTTA } from "../theme/chartPalette";
 
 function sortTime(r: PayslipSnapshotDetail): number {
   const s = r.payDate ?? r.payPeriodEnd ?? r.payPeriodStart ?? r.createdAt;
@@ -142,10 +143,10 @@ export function latestSnapshotForBreakdown(
 }
 
 const BREAKDOWN_COLORS = {
-  net: "#16a34a",
-  taxes: "#d97706",
+  net: FS_FOREST,
+  taxes: FS_GOLD,
   preTax: "#7c3aed",
-  postTax: "#dc2626"
+  postTax: FS_TERRACOTTA
 };
 
 export function payslipBreakdownSlices(r: PayslipSnapshotDetail): BreakdownSlice[] {

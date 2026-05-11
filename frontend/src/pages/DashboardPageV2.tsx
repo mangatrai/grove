@@ -32,6 +32,7 @@ import {
 
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
 
 type CashSummaryResponse = {
   range: { start: string; end: string; label: string };
@@ -107,7 +108,6 @@ type AccountBucket = {
   priorMonthTxnCount: number;
 };
 
-const PIE_COLORS = ["#3b82f6", "#f59e0b", "#22c55e", "#e11d48", "#8b5cf6", "#64748b"];
 
 // Named for the field it actually checks (LedgerRow.merchant), not the brief's "description".
 const EXCLUDE_MERCHANT_TOKENS = [
@@ -342,8 +342,8 @@ function accountArrow(b: AccountBucket): { char: string; color: string } | null 
   const liability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
   if (b.priorMonthOutflow === 0) return { char: "→", color: "dimmed" };
   const delta = (b.thisMonthOutflow - b.priorMonthOutflow) / b.priorMonthOutflow;
-  if (delta > 0.05) return { char: "↑", color: liability ? "red" : "orange" };
-  if (delta < -0.05) return { char: "↓", color: "green" };
+  if (delta > 0.05) return { char: "↑", color: liability ? "fsTerracotta" : "fsGold" };
+  if (delta < -0.05) return { char: "↓", color: "fsForest" };
   return { char: "→", color: "dimmed" };
 }
 
@@ -529,9 +529,9 @@ export function DashboardPageV2() {
   const netColor =
     cashData && cashData !== "error"
       ? cashData.household.net > 0
-        ? "green"
+        ? "fsForest"
         : cashData.household.net < 0
-          ? "red"
+          ? "fsTerracotta"
           : "dimmed"
       : "dimmed";
 
@@ -540,9 +540,9 @@ export function DashboardPageV2() {
       ? cashData.household.transactionCount === 0
         ? "dimmed"
         : cashData.household.net < 0
-          ? "red"
+          ? "fsTerracotta"
           : cashData.spendingPower.savingsRate !== null && cashData.spendingPower.savingsRate > 0.2
-            ? "green"
+            ? "fsForest"
             : "dimmed"
       : "dimmed";
 
@@ -594,10 +594,10 @@ export function DashboardPageV2() {
               {cashData.household.net >= 0 ? "+" : "−"}${formatNoCents(Math.abs(cashData.household.net))}
             </Text>
             <Group justify="center" gap="lg" mt={2} mb={4}>
-              <Text size="sm" c="green">
+              <Text size="sm" c="fsForest">
                 ↑ ${formatNoCents(cashData.household.inflows)} inflow
               </Text>
-              <Text size="sm" c="red">
+              <Text size="sm" c="fsTerracotta">
                 ↓ ${formatNoCents(cashData.household.outflows)} outflow
               </Text>
             </Group>
@@ -622,16 +622,16 @@ export function DashboardPageV2() {
               size="sm"
               color={
                 budgetData.summary.totalSpent >= budgetData.summary.totalBudgeted
-                  ? "red"
+                  ? "fsTerracotta"
                   : budgetData.summary.totalSpent / budgetData.summary.totalBudgeted >= 0.8
-                    ? "yellow"
-                    : "green"
+                    ? "fsGold"
+                    : "fsForest"
               }
             />
             <Group justify="space-between" mt={6}>
               <Text
                 size="sm"
-                c={budgetData.summary.totalSpent > budgetData.summary.totalBudgeted ? "red" : "dimmed"}
+                c={budgetData.summary.totalSpent > budgetData.summary.totalBudgeted ? "fsTerracotta" : "dimmed"}
               >
                 {budgetData.summary.totalSpent > budgetData.summary.totalBudgeted
                   ? `Over budget by $${formatNoCents(budgetData.summary.totalSpent - budgetData.summary.totalBudgeted)}`
@@ -731,7 +731,7 @@ export function DashboardPageV2() {
                   <PieChart>
                     <Pie data={slices} dataKey="outflows" nameKey="categoryName" innerRadius={44} outerRadius={72}>
                       {slices.map((_, i) => (
-                        <Cell key={String(i)} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
+                        <Cell key={String(i)} fill={FS_CAT_PALETTE[i % FS_CAT_PALETTE.length]!} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(v: number) => `$${v.toFixed(2)}`} />
@@ -745,7 +745,7 @@ export function DashboardPageV2() {
                       <Box
                         w={6}
                         h={6}
-                        style={{ borderRadius: "999px", background: PIE_COLORS[idx % PIE_COLORS.length] }}
+                        style={{ borderRadius: "999px", background: FS_CAT_PALETTE[idx % FS_CAT_PALETTE.length] }}
                       />
                       <Text size="sm" component="span">
                         {slice.categoryName}
@@ -797,8 +797,8 @@ export function DashboardPageV2() {
                   netWorthData?.totals.netWorth == null
                     ? undefined
                     : netWorthData.totals.netWorth >= 0
-                      ? "green"
-                      : "red"
+                      ? "fsForest"
+                      : "fsTerracotta"
                 }
               >
                 {netWorthData?.totals.netWorth == null ? "—" : `$${formatNoCents(netWorthData.totals.netWorth)}`}
@@ -826,7 +826,7 @@ export function DashboardPageV2() {
                 if (points.length < 2 || distinctNonZero < 2) return null;
                 const first = points[0]!.netWorth;
                 const last = points[points.length - 1]!.netWorth;
-                const stroke = last > first ? "#16a34a" : last < first ? "#dc2626" : "#6b7280";
+                const stroke = last > first ? FS_FOREST : last < first ? FS_TERRACOTTA : "#6b7280";
                 return (
                   <Box w="100%" h={48} mt="xs">
                     <ResponsiveContainer width="100%" height="100%">
@@ -977,8 +977,8 @@ export function DashboardPageV2() {
               <YAxis tickFormatter={(v) => (trendUseK ? `$${(Number(v) / 1000).toFixed(0)}k` : `$${Number(v).toFixed(0)}`)} />
               <Tooltip formatter={(v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
               <Legend />
-              <Bar dataKey="inflows" fill="#22c55e" name="Income" />
-              <Bar dataKey="outflows" fill="#f97316" name="Spending" />
+              <Bar dataKey="inflows" fill={FS_FOREST} name="Income" />
+              <Bar dataKey="outflows" fill={FS_TERRACOTTA} name="Spending" />
             </BarChart>
           </ResponsiveContainer>
         </Box>

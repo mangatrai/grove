@@ -4,6 +4,12 @@ This document tracks features, design decisions, and open questions for the v3 r
 
 ---
 
+## Forest Studio UI polish (delivered CR-174, 2026-05-10)
+
+Shipped as a **non-functional** visual pass: extended `--fs-*` tokens, terracotta instead of pure red for money-negative / over-budget (red kept for delete/errors), earthy Recharts fills, sidebar section labels **Daily / Reports / Setup**, warm-cream active link state replacing mint teal on chrome + guest landing. Tracked in `docs/CHANGE_HISTORY.md` **CR-174 / UX-174**.
+
+---
+
 ## Personal Loan Tracking — Informal Lending to Friends/Family
 
 ### The problem

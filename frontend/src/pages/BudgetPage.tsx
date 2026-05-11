@@ -210,7 +210,7 @@ function budgetCategoriesToGroups(
 
 function ProgressBar({ percent }: { percent: number }) {
   const clamped = Math.min(percent, 100);
-  const color = percent > 100 ? "red" : percent >= 80 ? "yellow" : "green";
+  const color = percent > 100 ? "fsTerracotta" : percent >= 80 ? "fsGold" : "fsForest";
   return <Progress value={clamped} color={color} size={8} radius="sm" />;
 }
 
@@ -605,14 +605,14 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
     {
       label: "Spent",
       value: fmtUSD(summary.totalSpent),
-      textColor: summary.totalSpent > summary.totalBudgeted ? "var(--mantine-color-red-6)" : "var(--mantine-color-text)",
-      borderColor: summary.totalSpent > summary.totalBudgeted ? "var(--mantine-color-red-6)" : "var(--mantine-color-gray-4)"
+      textColor: summary.totalSpent > summary.totalBudgeted ? "var(--fs-terracotta)" : "var(--mantine-color-text)",
+      borderColor: summary.totalSpent > summary.totalBudgeted ? "var(--fs-terracotta)" : "var(--mantine-color-gray-4)"
     },
     {
       label: summary.remaining >= 0 ? "Remaining" : "Over budget",
       value: fmtUSD(Math.abs(summary.remaining)),
-      textColor: summary.remaining < 0 ? "var(--mantine-color-red-6)" : "var(--mantine-color-green-6)",
-      borderColor: summary.remaining < 0 ? "var(--mantine-color-red-6)" : "var(--mantine-color-green-6)"
+      textColor: summary.remaining < 0 ? "var(--fs-terracotta)" : "var(--fs-forest)",
+      borderColor: summary.remaining < 0 ? "var(--fs-terracotta)" : "var(--fs-forest)"
     }
   ];
 
@@ -678,7 +678,11 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
                       <Text size="sm" c="dimmed">{fmtUSD(cat.budgeted)}</Text>
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }}>
-                      <Text size="sm" fw={600} c={isOver ? "red" : "green"}>
+                      <Text
+                        size="sm"
+                        fw={600}
+                        style={{ color: isOver ? "var(--fs-terracotta)" : "var(--fs-forest)" }}
+                      >
                         {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
                       </Text>
                     </Table.Td>

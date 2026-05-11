@@ -181,10 +181,10 @@ export function PayslipsPage() {
       {latest ? (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
           {([
-            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), borderColor: "var(--mantine-color-blue-5)", c: "blue" },
-            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   borderColor: "var(--mantine-color-green-6)", c: "green" },
-            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     borderColor: "var(--mantine-color-gray-4)", c: "dimmed" },
-            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       borderColor: "var(--mantine-color-gray-4)", c: "dimmed" },
+            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), borderColor: "var(--fs-forest)", c: "fsForest" as const },
+            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   borderColor: "var(--fs-gold)", c: "fsGold" as const },
+            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     borderColor: "var(--mantine-color-gray-4)", c: "dimmed" as const },
+            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       borderColor: "var(--mantine-color-gray-4)", c: "dimmed" as const },
           ] as const).map(({ label, value, borderColor, c }) => (
             <Paper key={label} withBorder p="md" ta="center" style={{ borderTop: `3px solid ${borderColor}` }}>
               <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={4}>{label}</Text>
@@ -255,7 +255,7 @@ export function PayslipsPage() {
                     </Box>
                     <Box>
                       <Text size="xs" c="dimmed" lh={1.2}>Net</Text>
-                      <Text size="sm" fw={600} c="green">{formatMoney(r.netPayCurrent)}</Text>
+                      <Text size="sm" fw={600} style={{ color: "var(--fs-forest)" }}>{formatMoney(r.netPayCurrent)}</Text>
                     </Box>
                   </Group>
                   {/* Actions */}
