@@ -30,6 +30,12 @@ import {
   YAxis
 } from "recharts";
 
+import {
+  IconAlertCircle,
+  IconArrowsExchange,
+  IconCopy,
+} from "@tabler/icons-react";
+
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
@@ -668,12 +674,13 @@ export function DashboardPageV2() {
               component={Link}
               to="/transactions?needsReview=true&resolutionType=unknown_category"
               variant="light"
-              color="yellow"
+              color="gray"
               size="lg"
               radius="xl"
+              leftSection={<IconAlertCircle size={14} stroke={1.75} />}
               style={{ textDecoration: "none", cursor: "pointer" }}
             >
-              ⚠ {resolutionData.openByType.unknown_category} uncategorized
+              {resolutionData.openByType.unknown_category} uncategorized
             </Badge>
           ) : null}
           {(resolutionData.openByType.transfer_ambiguity ?? 0) > 0 ? (
@@ -681,12 +688,13 @@ export function DashboardPageV2() {
               component={Link}
               to="/transactions?needsReview=true&resolutionType=transfer_ambiguity"
               variant="light"
-              color="yellow"
+              color="gray"
               size="lg"
               radius="xl"
+              leftSection={<IconArrowsExchange size={14} stroke={1.75} />}
               style={{ textDecoration: "none", cursor: "pointer" }}
             >
-              ⟳ {resolutionData.openByType.transfer_ambiguity} transfer
+              {resolutionData.openByType.transfer_ambiguity} transfer
               {resolutionData.openByType.transfer_ambiguity === 1 ? "" : "s"} to pair
             </Badge>
           ) : null}
@@ -695,12 +703,13 @@ export function DashboardPageV2() {
               component={Link}
               to="/transactions?needsReview=true&resolutionType=duplicate_ambiguity"
               variant="light"
-              color="yellow"
+              color="gray"
               size="lg"
               radius="xl"
+              leftSection={<IconCopy size={14} stroke={1.75} />}
               style={{ textDecoration: "none", cursor: "pointer" }}
             >
-              ◑ {resolutionData.openByType.duplicate_ambiguity} possible duplicate
+              {resolutionData.openByType.duplicate_ambiguity} possible duplicate
               {resolutionData.openByType.duplicate_ambiguity === 1 ? "" : "s"}
             </Badge>
           ) : null}

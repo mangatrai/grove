@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-175 / UX-175 (2026-05-11): Forest Studio prompt #2 — dashboard polish & status colors
+
+**Phase A — dashboard resolution badges:** Replaced bright yellow Mantine badges and unicode glyphs (⚠ ⟳ ◑) with neutral `color="gray"` badges plus Tabler icons (`IconAlertCircle`, `IconArrowsExchange`, `IconCopy`); same `Link` targets and query strings.
+
+**Files (Phase A):** `frontend/src/pages/DashboardPageV2.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-174 / UX-174 (2026-05-10): Forest Studio — design tokens, money palette, nav grouping
 
 **Why:** Align the UI with the Forest Studio palette: reserve pure red for destructive actions only, use terracotta for financial “down / over,” earthy Recharts colors, grouped sidebar, and warm-cream active states instead of mint.
