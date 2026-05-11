@@ -36,6 +36,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 **Files (Phase D):** `frontend/src/layout/AppSidebar.tsx`, `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`
 
+**Phase E — spending card ranked bars:** Replaced Recharts pie + legend on the Home dashboard “spending this month” card with a descending horizontal bar list (same `slices` data, links preserved). Added `--color-track` for bar track contrast in light/dark. Removed unused `Pie` / `PieChart` / `Cell` imports.
+
+**Files (Phase E):** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
 ---
 
 ## CR-174 / UX-174 (2026-05-10): Forest Studio — design tokens, money palette, nav grouping

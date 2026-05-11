@@ -281,6 +281,14 @@ All dollar values displayed in the app use inconsistent formatting today. `NetWo
 
 ---
 
+### ~~UX-175: Forest Studio prompt #2 — dashboard badges, fsForest sweep, fsGold alerts, sidebar brand, ranked spending bars~~ ✓ DELIVERED (CR-175, 2026-05-11)
+
+**Delivered:** Dashboard resolution pills → gray + Tabler icons (no unicode); positive-status `c="green"` / non-banner greens → `fsForest` / CSS var; informational yellow alerts → `fsGold variant="light"` (member-remove data warning stays yellow); collapsed sidebar hides brand entirely; spending card → ranked horizontal bars + `--color-track`.
+
+**Files:** `DashboardPageV2.tsx`, `HomePage.tsx`, `ImportWorkspacePage.tsx`, `PayslipManualPage.tsx`, `PayslipDetailPage.tsx`, `SettingsPage.tsx`, `ResetPasswordPage.tsx`, `TransactionsPage.tsx`, `settings/BackupRestoreSection.tsx`, `AppSidebar.tsx`, `index.css`
+
+---
+
 ### ~~UX-174: Forest Studio — design tokens, terracotta money semantics, grouped nav~~ ✓ DELIVERED (CR-174, 2026-05-10)
 
 **Delivered:** CSS `--fs-*` palette + `chartPalette.ts`; Mantine `fsForest` / `fsTerracotta` / `fsGold`; dashboard / net worth / budget / payslips / transactions badge colors updated; sidebar **Daily / Reports / Setup** groups; warm-cream active nav and topbar accents (replacing mint teal); removed `DashboardPage.tsx` shim in favor of direct `DashboardPageV2` import.

@@ -18,12 +18,9 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -718,9 +715,6 @@ export function DashboardPageV2() {
 
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" mt="lg">
         <Paper component="section" withBorder p="md" radius="md">
-          <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
-            Spending This Month
-          </Text>
           {loading ? (
             <Text size="sm" c="dimmed">
               Loading…
@@ -735,55 +729,84 @@ export function DashboardPageV2() {
             </Text>
           ) : (
             <>
-              <Box w="100%" h={180}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={slices} dataKey="outflows" nameKey="categoryName" innerRadius={44} outerRadius={72}>
-                      {slices.map((_, i) => (
-                        <Cell key={String(i)} fill={FS_CAT_PALETTE[i % FS_CAT_PALETTE.length]!} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => `$${v.toFixed(2)}`} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Box>
-              <Stack gap={4} mt="xs">
-                {slices.map((slice, idx) => {
-                  const swatch = (
-                    <Group gap={6} wrap="nowrap">
-                      <Box
-                        w={6}
-                        h={6}
-                        style={{ borderRadius: "999px", background: FS_CAT_PALETTE[idx % FS_CAT_PALETTE.length] }}
-                      />
-                      <Text size="sm" component="span">
-                        {slice.categoryName}
-                      </Text>
-                    </Group>
-                  );
-                  const href =
-                    slice.categoryName === "Other"
-                      ? null
-                      : slice.categoryId
-                        ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
-                        : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
-                  return (
-                    <Group key={`${slice.categoryName}-${idx}`} justify="space-between" gap={4} wrap="nowrap">
-                      {href ? (
-                        <Anchor component={Link} to={href} underline="hover">
-                          {swatch}
-                        </Anchor>
-                      ) : (
-                        swatch
-                      )}
-                      <Text size="sm">${formatNoCents(slice.outflows)}</Text>
-                    </Group>
-                  );
-                })}
-              </Stack>
-              <Text mt="xs" size="sm" c="dimmed">
-                ${formatNoCents(totalOutflows)} total outflows
+              <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb={4} style={{ letterSpacing: "0.06em" }}>
+                Where money went · this month
               </Text>
+              <Text fw={700} size="lg" mb="sm" style={{ fontVariantNumeric: "tabular-nums" }}>
+                ${formatNoCents(totalOutflows)}
+              </Text>
+              <Stack gap={8} mt="xs">
+                {(() => {
+                  const sortedSlices = [...slices].sort((a, b) => b.outflows - a.outflows);
+                  const maxOut = Math.max(...sortedSlices.map((s) => s.outflows), 1);
+                  return sortedSlices.map((slice, idx) => {
+                    const pct = (slice.outflows / maxOut) * 100;
+                    const color = FS_CAT_PALETTE[idx % FS_CAT_PALETTE.length]!;
+                    const href =
+                      slice.categoryName === "Other"
+                        ? null
+                        : slice.categoryId
+                          ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
+                          : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    return (
+                      <Box
+                        key={`${slice.categoryName}-${idx}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(80px, 110px) 1fr 72px",
+                          alignItems: "center",
+                          gap: 10,
+                          fontSize: 12.5,
+                        }}
+                      >
+                        <Box style={{ minWidth: 0 }}>
+                          {href ? (
+                            <Anchor
+                              component={Link}
+                              to={href}
+                              size="sm"
+                              underline="hover"
+                              style={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {slice.categoryName}
+                            </Anchor>
+                          ) : (
+                            <Text size="sm" truncate title={slice.categoryName}>
+                              {slice.categoryName}
+                            </Text>
+                          )}
+                        </Box>
+                        <Box
+                          style={{
+                            height: 10,
+                            background: "var(--color-track)",
+                            borderRadius: 999,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Box
+                            style={{
+                              height: "100%",
+                              width: `${pct}%`,
+                              background: color,
+                              borderRadius: 999,
+                              transition: "width 240ms ease",
+                            }}
+                          />
+                        </Box>
+                        <Text size="sm" ta="right" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
+                          ${formatNoCents(slice.outflows)}
+                        </Text>
+                      </Box>
+                    );
+                  });
+                })()}
+              </Stack>
             </>
           )}
         </Paper>

@@ -10,6 +10,12 @@ Shipped as a **non-functional** visual pass: extended `--fs-*` tokens, terracott
 
 ---
 
+## Forest Studio prompt #2 (delivered CR-175, 2026-05-11)
+
+Follow-up UX pass: dashboard resolution badges (icons, no yellow), application-wide positive green text routed to forest tones, informational yellow → `fsGold`, collapsed sidebar without HF/brand row, Home spending card changed from pie chart to ranked horizontal bars (`--color-track`). **CR-175 / UX-175** in `docs/CHANGE_HISTORY.md`.
+
+---
+
 ## Personal Loan Tracking — Informal Lending to Friends/Family
 
 ### The problem
