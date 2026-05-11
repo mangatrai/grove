@@ -22,6 +22,78 @@ Authed app **main** content column max-width **1500px** (centered); **Inter Tigh
 
 ---
 
+## Transaction Aggregation Strip (CR-177) — Design Notes
+
+### Background
+The app previously had a dedicated Reports page with arbitrary filter + aggregate. That page was dropped. The Home dashboard only shows top categories for the current month. There is no way today to answer "how much did I spend on streaming this year?" or "what did we spend at Costco in Q1?"
+
+We are not bringing back a separate Reports page. The Transactions page already has every filter the user needs — the aggregation strip lives there, updates live as filters change.
+
+### Pagination discovery (2026-05-10)
+The original spec (claude-design/SPEC_aggregation.md) proposed client-side aggregation via `useMemo` over `filteredTransactions`, deferring a backend endpoint "until pagination forces it." This was wrong: the Transactions page **already uses true server-side pagination** (limit/offset, default 100 rows per page, max 200). The client never has the full filtered set — client-side aggregation would compute totals over the visible page only and show wrong numbers.
+
+**Decision:** A backend aggregate endpoint is required from day one, not deferred.
+
+### Backend endpoint shape
+```
+GET /ledger/aggregate?<same filter params as GET /ledger>
+→ {
+    count: number,
+    net: number,
+    inflows: number,
+    outflows: number,
+    avgAbsolute: number,
+    byCategory: Array<{ label: string; value: number; categoryId: string | null }>,
+    byMerchant: Array<{ label: string; value: number }>,
+    byAccount: Array<{ label: string; value: number; accountId: string }>,
+    byMonth: Array<{ label: string; value: number; net: number }>,
+    dateFirst: string | null,
+    dateLast: string | null
+  }
+```
+
+Filter params are identical to `GET /ledger` — no new query vocabulary. The endpoint has no limit/offset; it always aggregates the full filtered set. A single SQL query with GROUP BY per breakdown dimension (category, merchant, account, YYYY-MM) is sufficient — no materialized views, no background jobs.
+
+### Frontend — useQuery not useMemo
+The strip calls `useQuery` keyed on the current filter state (same key shape as the transactions list query). It does NOT compute from the current page's rows. The two queries (list + aggregate) run in parallel; the strip can render independently of table pagination.
+
+### Multi-select filters — design decision (2026-05-10)
+
+Category, account, and belongs-to are currently single-select (`HierarchicalSearchPicker`, single value in URL params). This makes the aggregation strip useless for cross-category questions (e.g. tax filing: "show me all Taxes > Federal + State + Property transactions for 2025").
+
+**Approach: extend the existing `HierarchicalSearchPicker`**
+The app already has a custom two-pane picker (`frontend/src/components/HierarchicalSearchPicker.tsx`, ~328 lines). The hard parts — portal positioning, search, data normalization — are already built. The multi-select delta is surgical: `value` becomes an array, child buttons toggle with checkmarks, parent shows a count badge, trigger renders chips. Mantine 7 has no native hierarchical picker (its `MultiSelect` supports visual group labels only). External libraries exist (`react-dropdown-tree-select`) but would need full re-styling to match Forest Studio.
+
+**Parent-click behavior — design review note (2026-05-11, not locked):**
+Recommendation is Option A: click parent → selects all children immediately; right pane stays open showing all children checked so the user can uncheck individually. Parent is the fast path, right pane is the granular undo surface. Option C (parent checkbox + hover) rejected: two hit targets per row, indeterminate state weight, touch-hostile. Option B (hover only, no parent select-all) rejected: too many clicks for the primary use case.
+
+Left pane: no checkbox on parent row — just a count chip `Taxes (2/3)` via `<Badge size="xs" color="fsForest" variant="light">` when children are selected. Right pane: inline `<Checkbox size="xs">` per child row, stays open. Trigger: comma-separated labels or `"3 categories"` when count > 2.
+
+**`multiSelect?: boolean` prop** — gate all new behavior behind this flag so existing single-select callers are unaffected.
+
+**Locked interaction model (2026-05-11) — post-implementation iteration expected after testing:**
+
+Parent categories are assignable directly to transactions (e.g. bare "Travel" on a one-off expense). Clicking the parent in the left pane is a "select all children" shortcut — it does **not** auto-include bare parent-tagged transactions. The right pane always shows a `Travel (direct)` row first (representing the parent category ID), unchecked by default. User explicitly checks it to include bare parent transactions.
+
+SQL is a flat `category_id = ANY($checkedIds)` — no subquery, no parent expansion. The picker owns the ID set; the backend just filters on whatever IDs arrive. Count chip on the parent row counts all checked items (children + "direct" if checked): `Travel · 2`, `Travel · 1`, or no chip when nothing is selected under that parent.
+
+### "No active filters" signal
+Filters are already in URL search params. The existing `clearFilters()` function has the right signal implicitly. A `hasActiveFilters` boolean derived from search params drives collapse/expand behavior. The component already does this kind of check for the "Active filters:" label.
+
+### byMerchant normalization
+Normalize merchant strings before bucketing (trim, lowercase, collapse whitespace) so "Netflix.com" and "NETFLIX.COM " don't produce two rows. If `formatMerchant()` doesn't exist, add `normalizeMerchant()` in the aggregate query or service layer. Do this server-side (not client) since aggregation is now server-side.
+
+### Performance
+Single SQL pass per filter change. The aggregate query can reuse the same WHERE clause as the list query. The byMonth bucket is a GROUP BY DATE_TRUNC('month', txn_date). No new indexes needed — the list query's existing indexes cover the filter columns.
+
+### Out of scope for CR-177
+- Saved aggregation views / "save this report"
+- Sparklines per category
+- Year-over-year compare
+- Export to CSV
+
+---
+
 ## Personal Loan Tracking — Informal Lending to Friends/Family
 
 ### The problem
