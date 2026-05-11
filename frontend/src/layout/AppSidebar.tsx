@@ -85,19 +85,18 @@ export function AppSidebar({
           .join(" ")}
         aria-label="Main navigation"
       >
-        {/* Brand */}
+        {/* Brand — hidden when collapsed (icons only) */}
         <div className="app-sidebar__top">
-          <Link
-            to="/"
-            className="app-sidebar__brand"
-            onClick={onCloseMobile}
-            title="Household Finance"
-          >
-            <span className="app-sidebar__brand-abbr" aria-hidden>
-              HF
-            </span>
-            <span className="app-sidebar__brand-text">Household Finance</span>
-          </Link>
+          {!isCollapsed ? (
+            <Link
+              to="/"
+              className="app-sidebar__brand"
+              onClick={onCloseMobile}
+              title="Household Finance"
+            >
+              <span className="app-sidebar__brand-text">Household Finance</span>
+            </Link>
+          ) : null}
         </div>
 
         {/* Main nav */}

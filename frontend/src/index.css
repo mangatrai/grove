@@ -241,25 +241,10 @@ a {
   color: var(--color-sidebar-active);
 }
 
-.app-sidebar__brand-abbr {
-  display: none;
-  width: 2rem;
-  height: 2rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  background: var(--color-sidebar-active-bg);
-  color: var(--color-sidebar-active);
-  font-size: 0.75rem;
-  font-weight: 800;
-}
-
-.app-sidebar--collapsed .app-sidebar__brand-abbr {
-  display: flex;
-}
-
-.app-sidebar--collapsed .app-sidebar__brand-text {
-  display: none;
+.app-sidebar--collapsed .app-sidebar__top {
+  min-height: 16px;
+  padding-top: 0.75rem;
+  padding-bottom: 0.35rem;
 }
 
 .app-sidebar__brand-text {

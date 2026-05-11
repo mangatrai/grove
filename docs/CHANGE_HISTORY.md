@@ -32,6 +32,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 **Files (Phase C):** `BackupRestoreSection.tsx`, `SettingsPage.tsx`, `TransactionsPage.tsx`, `PayslipManualPage.tsx`, `PayslipDetailPage.tsx`, `docs/CHANGE_HISTORY.md`
 
+**Phase D — collapsed sidebar brand:** Removed HF abbreviation and full brand row when `collapsed && !mobileOpen`; mobile drawer still shows brand. Removed unused `.app-sidebar__brand-abbr` CSS; added collapsed `.app-sidebar__top` spacing.
+
+**Files (Phase D):** `frontend/src/layout/AppSidebar.tsx`, `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`
+
 ---
 
 ## CR-174 / UX-174 (2026-05-10): Forest Studio — design tokens, money palette, nav grouping
