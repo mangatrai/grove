@@ -880,7 +880,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                 <Group justify="space-between" wrap="nowrap" align="flex-start">
                   <Stack gap={4}>
                     <Group gap="xs">
-                      <Badge color="green" variant="light">Connected</Badge>
+                      <Badge color="fsForest" variant="light">Connected</Badge>
                       <Text size="sm" fw={500}>{gdriveStatus?.folderName ?? gdriveStatus?.folderId}</Text>
                     </Group>
                     {gdriveStatus?.connectedAt ? (
@@ -958,7 +958,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                         Save
                       </Button>
                       {gdriveSchedulerSavedFlash ? (
-                        <Text size="sm" c="green" fw={500}>Saved</Text>
+                        <Text size="sm" style={{ color: "var(--fs-forest)" }} fw={500}>Saved</Text>
                       ) : null}
                     </Group>
                   </Box>

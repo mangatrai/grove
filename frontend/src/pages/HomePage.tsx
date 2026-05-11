@@ -227,7 +227,7 @@ export function HomePage() {
                     type="submit"
                     fullWidth
                     radius="sm"
-                    color="green"
+                    color="fsForest"
                     loading={loading}
                   >
                     Sign in

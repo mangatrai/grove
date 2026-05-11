@@ -22,7 +22,11 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 **Phase A — dashboard resolution badges:** Replaced bright yellow Mantine badges and unicode glyphs (⚠ ⟳ ◑) with neutral `color="gray"` badges plus Tabler icons (`IconAlertCircle`, `IconArrowsExchange`, `IconCopy`); same `Link` targets and query strings.
 
+**Phase B — positive status text → forest:** Replaced `c="green"` on status `<Text>` with `style={{ color: "var(--fs-forest)" }}`; `Badge` / `Button` / `ActionIcon` positives use `color="fsForest"`. Post-action success `<Alert color="green">` unchanged. Inline import session `<Alert>` uses `color="fsForest" variant="light"`.
+
 **Files (Phase A):** `frontend/src/pages/DashboardPageV2.tsx`, `docs/CHANGE_HISTORY.md`
+
+**Files (Phase B):** `frontend/src/pages/HomePage.tsx`, `ImportWorkspacePage.tsx`, `PayslipManualPage.tsx`, `SettingsPage.tsx`, `settings/BackupRestoreSection.tsx`, `TransactionsPage.tsx`, `ResetPasswordPage.tsx`, `docs/CHANGE_HISTORY.md`
 
 ---
 

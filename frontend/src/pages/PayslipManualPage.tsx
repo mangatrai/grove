@@ -464,7 +464,7 @@ export function PayslipManualPage() {
                 Line items
               </Button>
               <Text size="sm" c="dimmed">optional - individual earnings and deduction rows</Text>
-              {draftLineItems.length > 0 ? <Text size="sm" c="green">({draftLineItems.length} added)</Text> : null}
+              {draftLineItems.length > 0 ? <Text size="sm" style={{ color: "var(--fs-forest)" }}>({draftLineItems.length} added)</Text> : null}
             </Group>
           </Group>
           {lineItemsOpen ? (

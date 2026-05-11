@@ -2123,7 +2123,7 @@ export function TransactionsPage() {
                                     onClick={() => void restoreSingle(t.id)}
                                     title="Restore"
                                     variant="default"
-                                    color="green"
+                                    color="fsForest"
                                   >
                                     <IconArrowBackUp size={14} />
                                   </ActionIcon>

@@ -1626,7 +1626,7 @@ export function SettingsPage() {
                         {member.id ? (
                           member.linkedUserId ? (
                             <Group>
-                              <Text size="sm" c="green" fw={600}>
+                              <Text size="sm" style={{ color: "var(--fs-forest)" }} fw={600}>
                               ✓ Has login account
                               </Text>
                               <Button

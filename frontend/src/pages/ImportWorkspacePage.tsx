@@ -1364,7 +1364,7 @@ export function ImportWorkspacePage() {
           </Group>
         </Group>
         {error ? <Alert color="red" mt="xs">{error}</Alert> : null}
-        {message ? <Alert color="green" variant="light" mt="xs">{message}</Alert> : null}
+        {message ? <Alert color="fsForest" variant="light" mt="xs">{message}</Alert> : null}
       </Paper>
 
       {lastImportSummary ? (
@@ -1505,7 +1505,7 @@ export function ImportWorkspacePage() {
                       {friendlyParserLabel(profileForRow)} — not supported yet, file will not be imported
                     </Text>
                   ) : inferred && savedProfile && profilesEquivalent(inferred, savedProfile) ? (
-                    <Text size="sm" c="green" span>Ready: {friendlyParserLabel(inferred)}</Text>
+                    <Text size="sm" style={{ color: "var(--fs-forest)" }} span>Ready: {friendlyParserLabel(inferred)}</Text>
                   ) : savedProfile ? (
                     <Text size="sm" span>{friendlyParserLabel(savedProfile)}</Text>
                   ) : (
@@ -1555,7 +1555,7 @@ export function ImportWorkspacePage() {
                                 <Text size="xs" c="dimmed">
                                   {sug.acctIdLast4 ? `OFX account: ...${sug.acctIdLast4}` : "OFX"}
                                   {sug.normalizedAcctType ? ` · ${sug.normalizedAcctType}` : ""}
-                                  {sug.matchedAccountId ? <Text span size="xs" c="green"> ✓ matched</Text> : null}
+                                  {sug.matchedAccountId ? <Text span size="xs" style={{ color: "var(--fs-forest)" }}> ✓ matched</Text> : null}
                                 </Text>
                                 {sug.ledgerBalance !== null && sug.ledgerBalanceDate ? (
                                   <Text size="xs" c="dimmed">
