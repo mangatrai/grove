@@ -289,6 +289,14 @@ All dollar values displayed in the app use inconsistent formatting today. `NetWo
 
 ---
 
+### ~~UX-176: Forest Studio Phase F — authed shell width cap + Inter Tight typography~~ ✓ DELIVERED (CR-176, 2026-05-11)
+
+**Delivered:** Main column content capped at **1500px** centered under `app-shell-main` while sidebar/topbar layout unchanged; **Inter Tight** on Google Fonts + `--font-heading` for `h1`–`h4` / Mantine `Title` + larger `.kpi-value`; `theme.ts` `headings.sizes` aligned with global CSS.
+
+**Files:** `frontend/index.html`, `frontend/src/index.css`, `frontend/src/theme.ts`
+
+---
+
 ### ~~UX-174: Forest Studio — design tokens, terracotta money semantics, grouped nav~~ ✓ DELIVERED (CR-174, 2026-05-10)
 
 **Delivered:** CSS `--fs-*` palette + `chartPalette.ts`; Mantine `fsForest` / `fsTerracotta` / `fsGold`; dashboard / net worth / budget / payslips / transactions badge colors updated; sidebar **Daily / Reports / Setup** groups; warm-cream active nav and topbar accents (replacing mint teal); removed `DashboardPage.tsx` shim in favor of direct `DashboardPageV2` import.

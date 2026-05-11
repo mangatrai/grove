@@ -16,6 +16,12 @@ Follow-up UX pass: dashboard resolution badges (icons, no yellow), application-w
 
 ---
 
+## Forest Studio Phase F — layout + typography (delivered CR-176, 2026-05-11)
+
+Authed app **main** content column max-width **1500px** (centered); **Inter Tight** for headings and bumped **`.kpi-value`** sizing; Mantine theme `headings` block. Documented as **CR-176 / UX-176** in `docs/CHANGE_HISTORY.md`.
+
+---
+
 ## Personal Loan Tracking — Informal Lending to Friends/Family
 
 ### The problem

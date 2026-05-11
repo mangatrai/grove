@@ -8,6 +8,17 @@ export const appTheme: MantineThemeOverride = createTheme({
     '"Inter", "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
   fontFamilyMonospace: '"JetBrains Mono", "Fira Code", ui-monospace, monospace',
 
+  headings: {
+    fontFamily:
+      '"Inter Tight", "Inter", "DM Sans", system-ui, sans-serif',
+    fontWeight: "600",
+    sizes: {
+      h1: { fontSize: "1.625rem", lineHeight: "1.25", fontWeight: "700" },
+      h2: { fontSize: "1.25rem", lineHeight: "1.3", fontWeight: "600" },
+      h3: { fontSize: "1.0625rem", lineHeight: "1.35", fontWeight: "600" },
+    },
+  },
+
   colors: {
     // Earthy, mature forest greens — Pantone Forest family (not the juvenile lime ramp)
     // Each shade is slightly warm-tinted to complement the warm neutral surfaces.

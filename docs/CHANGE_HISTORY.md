@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-176 / UX-176 (2026-05-11): Forest Studio Phase F — authed layout cap + Inter Tight headings
+
+**Why:** Wide monitors stretched route content edge-to-edge; headings and KPI numerals read small and generic next to the Forest Studio chrome.
+
+**What changed:** `max-width: 1500px` + horizontal centering on `.app-shell-main > main.app-main` (and fallbacks for `.app-content` / `[role="main"]`) so sidebar/topbar column stays full width while page body caps. Google Fonts link adds **Inter Tight**; `:root` gains `--font-heading`; global rules for `h1`–`h4`, `.mantine-Title-root`, and `.kpi-value`; Mantine `createTheme({ headings: … })` aligns `<Title>` sizes. No TSX logic or inline hero KPI edits.
+
+**Files:** `frontend/index.html`, `frontend/src/index.css`, `frontend/src/theme.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
 ## CR-175 / UX-175 (2026-05-11): Forest Studio prompt #2 — dashboard polish & status colors
 
 **Phase A — dashboard resolution badges:** Replaced bright yellow Mantine badges and unicode glyphs (⚠ ⟳ ◑) with neutral `color="gray"` badges plus Tabler icons (`IconAlertCircle`, `IconArrowsExchange`, `IconCopy`); same `Link` targets and query strings.
