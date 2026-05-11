@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import crypto from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 import { env } from "../../config/env.js";
 
@@ -15,8 +14,8 @@ function dobKey(): Buffer {
 /** Encrypts a YYYY-MM-DD string. Returns base64(iv[12] || authTag[16] || ciphertext). */
 export function encryptDob(dob: string): string {
   const key = dobKey();
-  const iv = crypto.randomBytes(IV_LENGTH);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const iv = randomBytes(IV_LENGTH);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
   const ciphertext = Buffer.concat([cipher.update(dob, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, ciphertext]).toString("base64");
@@ -31,7 +30,7 @@ export function decryptDob(stored: string): string | null {
     const iv = buf.subarray(0, IV_LENGTH);
     const tag = buf.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
     const ciphertext = buf.subarray(IV_LENGTH + TAG_LENGTH);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
   } catch {

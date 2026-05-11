@@ -245,7 +245,15 @@ function parseFinancialGoalsJson(raw: string | null | undefined): string[] {
   }
 }
 
-function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile {
+/**
+ * Map a person_profile row to the API response shape.
+ *
+ * `revealDob` defaults to `false` so admin/member-list endpoints cannot leak
+ * other members' raw DOBs by accident. Only own-profile call sites should
+ * pass `true` (see `toOwnProfile`). DOB is decrypted exactly once per call —
+ * the result drives both `hasDob`/`age` and (when revealed) `dateOfBirth`.
+ */
+function toHouseholdMemberProfile(row: MemberProfileRow, revealDob = false): HouseholdMemberProfile {
   const parts = row.full_name.trim().split(/\s+/);
   const firstName = parts[0] ?? "";
   const lastName = parts.slice(1).join(" ");
@@ -280,7 +288,7 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
     role: row.role,
     relationship: row.relationship,
     age: computedAge ?? manualAge,
-    dateOfBirth: null,
+    dateOfBirth: revealDob ? rawDob : null,
     hasDob: rawDob != null,
     sex: validSex,
     individualGrossIncomeUsd: ig,
@@ -295,10 +303,7 @@ function toHouseholdMemberProfile(row: MemberProfileRow): HouseholdMemberProfile
  * raw DOBs must never leak through admin/list endpoints.
  */
 function toOwnProfile(row: MemberProfileRow): HouseholdMemberProfile {
-  const base = toHouseholdMemberProfile(row);
-  const rawDob =
-    row.date_of_birth_encrypted != null ? decryptDob(String(row.date_of_birth_encrypted)) : null;
-  return { ...base, dateOfBirth: rawDob };
+  return toHouseholdMemberProfile(row, true);
 }
 
 export type PatchProfileInput = {
@@ -630,7 +635,7 @@ export async function listHouseholdMembers(householdId: string): Promise<Househo
 `,
     householdId
   );
-  return rows.map(toHouseholdMemberProfile);
+  return rows.map((row) => toHouseholdMemberProfile(row));
 }
 
 const DEFAULT_MEMBER_PASSWORD = "ChangeMe123!";
