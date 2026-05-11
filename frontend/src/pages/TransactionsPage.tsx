@@ -1386,7 +1386,7 @@ export function TransactionsPage() {
           </Button>
         </Group>
         {needsReviewTab && (resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger ?? 0) > 0 ? (
-          <Alert color="yellow" mb="sm">
+          <Alert color="fsGold" variant="light" mb="sm">
             <strong>{resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger}</strong> near-duplicate item(s) flagged during import have no matching ledger row — they can be ignored or resolved by re-importing.
           </Alert>
         ) : null}

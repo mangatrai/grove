@@ -573,10 +573,10 @@ export function PayslipManualPage() {
         <Paper withBorder p="lg">
           {submitError ? <Alert color="red" mb="sm">{submitError}</Alert> : null}
           {validationWarnings.length > 0 ? (
-            <Alert color="yellow" mb="sm">
+            <Alert color="fsGold" variant="light" mb="sm">
               <Stack gap={4}>
                 {validationWarnings.map((w, i) => (
-                  <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "yellow"}>
+                  <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "dimmed"}>
                     {w.message}
                   </Text>
                 ))}

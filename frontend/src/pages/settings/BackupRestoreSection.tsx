@@ -691,7 +691,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
         ) : null}
 
         {showStaleness ? (
-          <Alert color="yellow" variant="light" mt="sm">
+          <Alert color="fsGold" variant="light" mt="sm">
             Last successful backup was over{" "}
             {Math.floor((Date.now() - new Date(gdriveLastCompletedJob!.completedAt!).getTime()) / 3600000)}{" "}
             hours ago. The server may have been sleeping and missed scheduled backups.

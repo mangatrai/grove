@@ -135,11 +135,11 @@ function sectionHasAuthority(rows: PayslipLineItemRow[]): boolean {
 function ValidationWarningsBanner({ warnings }: { warnings: ValidationWarning[] }) {
   if (warnings.length === 0) return null;
   return (
-    <Alert color="yellow" mb="sm">
+    <Alert color="fsGold" variant="light" mb="sm">
       <Stack gap={4}>
         <Text fw={600} size="sm">Data quality issues</Text>
         {warnings.map((w, i) => (
-          <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "yellow"}>
+          <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "dimmed"}>
             {w.message}
           </Text>
         ))}

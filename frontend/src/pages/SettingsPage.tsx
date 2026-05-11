@@ -2227,13 +2227,16 @@ export function SettingsPage() {
               </Alert>
             ) : null}
             {removeMemberDataCount && (removeMemberDataCount.transactions > 0 || removeMemberDataCount.payslips > 0) ? (
-              <Alert color="yellow" mb="sm">
+              <>
+                {/* True warning: assigned records lose owner context if member is removed without reassignment */}
+                <Alert color="yellow" mb="sm">
                 <strong>Warning:</strong> This member has{" "}
                 {removeMemberDataCount.transactions > 0 ? <><strong>{removeMemberDataCount.transactions}</strong> transaction(s)</> : null}
                 {removeMemberDataCount.transactions > 0 && removeMemberDataCount.payslips > 0 ? " and " : null}
                 {removeMemberDataCount.payslips > 0 ? <><strong>{removeMemberDataCount.payslips}</strong> payslip(s)</> : null}
                 {" "}assigned to them. Those records will remain but show no owner. Use <strong>Transactions → Belongs-to</strong> filter to reassign before deleting.
               </Alert>
+              </>
             ) : null}
             <Text size="sm" mb="sm">This member will be permanently removed from the household. This cannot be undone.</Text>
             {memberDrafts.find((m) => m.id === removeMemberConfirm)?.linkedUserId ? (

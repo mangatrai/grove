@@ -28,6 +28,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 **Files (Phase B):** `frontend/src/pages/HomePage.tsx`, `ImportWorkspacePage.tsx`, `PayslipManualPage.tsx`, `SettingsPage.tsx`, `settings/BackupRestoreSection.tsx`, `TransactionsPage.tsx`, `ResetPasswordPage.tsx`, `docs/CHANGE_HISTORY.md`
 
+**Phase C — informational yellow → fsGold:** Softened non-destructive hints (backup staleness, import duplicate note, payslip validation banners) to `Alert color="fsGold" variant="light"`. Remove-member dialog data-loss warning stays `color="yellow"` with an inline comment.
+
+**Files (Phase C):** `BackupRestoreSection.tsx`, `SettingsPage.tsx`, `TransactionsPage.tsx`, `PayslipManualPage.tsx`, `PayslipDetailPage.tsx`, `docs/CHANGE_HISTORY.md`
+
 ---
 
 ## CR-174 / UX-174 (2026-05-10): Forest Studio — design tokens, money palette, nav grouping
