@@ -1,6 +1,6 @@
 {
   "name": "household-finance-app",
-  "version": "0.1.0",
+  "version": "3.0.0",
   "private": true,
   "engines": {
     "node": ">=20.0.0"
@@ -25,6 +25,7 @@
     "db:cleanup": "bash scripts/db-cleanup.sh --yes",
     "db:reset": "bash scripts/db-cleanup.sh --yes",
     "db:reset:dev": "bash scripts/db-cleanup.sh --yes --with-dev-seeds",
+    "db:generate:dev-ledger": "node scripts/generate-dev-ledger-seed.mjs",
     "build": "npm run build -w backend && npm run build -w frontend",
     "test": "npm run test -w backend && npm run test -w frontend",
     "lint": "npm run lint -w backend && npm run lint -w frontend",

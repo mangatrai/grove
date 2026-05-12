@@ -5,7 +5,7 @@
 - **`migrations/0001_baseline.sql`** — Application schema (tables, indexes, generated `tsvector` for ledger search).
 - **`migrations/0002_*.sql` …** — Ordered additive migrations.
 - **`seeds/0001_bootstrap.sql`** — Default household, owner user, global categories, `category_rule_global` (`ON CONFLICT DO NOTHING`).
-- **`seeds/dev/*.sql`** — Sample `financial_account` rows for local dev/tests (use `scripts/db.sh --dev-seeds`).
+- **`seeds/dev/*.sql`** — Sample accounts, member profiles, and ~520 posted ledger rows for local dev/tests (`scripts/db.sh --dev-seeds` or `npm run db:seed:dev`). Regenerate ledger SQL: `npm run db:generate:dev-ledger`.
 
 **Runner:** [`scripts/db.sh`](../../scripts/db.sh) → [`scripts/db-pg.mjs`](../../scripts/db-pg.mjs) using **`DATABASE_*`** env vars. The API also applies pending migrations on startup. See [`docs/RUNBOOK.md`](../../docs/RUNBOOK.md) §11 for Postgres connection details.
 

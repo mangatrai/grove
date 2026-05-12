@@ -10,3 +10,4 @@ coverage
 .runtime/
 oci/oci-retry.sh
 docs/claude-design/
+docs/cursor-prompts/
