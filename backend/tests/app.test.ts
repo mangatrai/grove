@@ -4272,6 +4272,70 @@ describe("member ownership closure", () => {
     expect(sum.status).toBe(200);
     expect(sum.body.household.inflows).toBeGreaterThan(0);
   });
+
+  it("updates transaction ownership via PATCH with person profile UUID", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const householdId = "10000000-0000-0000-0000-000000000001";
+    const ownerUserId = "20000000-0000-0000-0000-000000000001";
+    const ownerProfile = (await sqlStmt(`SELECT id FROM person_profile WHERE linked_user_id = ?`).get(
+      ownerUserId
+    )) as { id: string };
+    const txnId = crypto.randomUUID();
+    const catId = "30000000-0000-0000-0000-000000000004";
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status, owner_scope, owner_person_profile_id
+       ) VALUES (?, ?, ?, NULL, ?, ?, ?, 'debit', 'owner-patch-target', NULL, NULL, ?, 'manual:owner-patch', 'posted', 'household', NULL)`
+    ).run(
+      txnId,
+      householdId,
+      SEED_BOA_CHECKING,
+      catId,
+      "2026-03-21",
+      -12,
+      crypto.randomBytes(32).toString("hex")
+    );
+
+    const assignPerson = await request(app)
+      .patch(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        categoryId: catId,
+        ownerScope: "person",
+        ownerPersonProfileId: ownerProfile.id
+      });
+    expect(assignPerson.status).toBe(200);
+
+    const listed = await request(app)
+      .get(`/transactions?search=${encodeURIComponent("owner-patch-target")}&limit=5`)
+      .set("authorization", `Bearer ${token}`);
+    expect(listed.status).toBe(200);
+    const row = listed.body.transactions.find((t: { id: string }) => t.id === txnId);
+    expect(row).toBeDefined();
+    expect(row.ownerScope).toBe("person");
+    expect(row.ownerPersonProfileId).toBe(ownerProfile.id);
+
+    const assignHousehold = await request(app)
+      .patch(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        categoryId: catId,
+        ownerScope: "household",
+        ownerPersonProfileId: null
+      });
+    expect(assignHousehold.status).toBe(200);
+
+    const stored = (await sqlStmt(
+      `SELECT owner_scope, owner_person_profile_id FROM transaction_canonical WHERE id = ?`
+    ).get(txnId)) as { owner_scope: string; owner_person_profile_id: string | null };
+    expect(stored.owner_scope).toBe("household");
+    expect(stored.owner_person_profile_id).toBeNull();
+  });
 });
 
 describe("GET /transactions/aggregate (CR-177)", () => {

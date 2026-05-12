@@ -34,13 +34,13 @@ Transactions uses true server-side pagination; the client never holds the full f
 
 ### Multi-select filters (shipped)
 - **Category + account:** repeated `categoryIds` / `accountIds`; legacy singular params still work; single parent `categoryId` still expands children server-side.
-- **Belongs-to:** repeated **`belongsTo`** (`household` and/or person profile UUIDs). Backend `belongsTo` takes precedence over legacy `ownerScope` / `ownerPersonProfileId(s)`; mixed household + person IDs use OR semantics. Row-level belongs-to editor on the table still uses `person:<uuid>` encoding — filter picker only.
+- **Belongs-to:** repeated **`belongsTo`** (`household` and/or person profile UUIDs). Backend `belongsTo` takes precedence over legacy `ownerScope` / `ownerPersonProfileId(s)`; mixed household + person IDs use OR semantics. On **Transactions**, filter, row editor, and manual-entry pickers share raw UUID values (`household` or profile id); **`person:<uuid>`** remains on other surfaces (Net Worth, payslips, import binding, Settings).
 - **`HierarchicalSearchPicker`:** `multiSelect` gated; other pages stay single-select.
 
 ### Picker interaction (corrective pass — locked 2026-05-11)
 - Left-pane parent click toggles **parent selectable value + all children**; menu stays open.
 - **No** right-pane “(direct)” row; **no** Mantine `Checkbox` in the menu — inline **✓** + `hs-picker__child--active`.
-- Parent count chip when any child/parent value under that parent is selected; trigger shows one/two labels or `N <categories|accounts|members>`.
+- Parent count chip when any child/parent value under that parent is selected; trigger shows one/two labels or `N <categories|accounts|selections>` on Transactions belongs-to filter (active-filter chip uses `formatActiveBelongsToSummary` when household and members are mixed).
 
 ### Summary strip UX (shipped)
 `TransactionAggregateSummary` above the table: collapsible **Summary (N transactions)** header; headline **Net / Inflows / Outflows / Avg / Date span** (no duplicate Count cell); plain `$` on inflows/outflows; `title` tooltips on labels; context row (category/account/month counts when `count > 1`); breakdown tabs from one aggregate response (no refetch on tab change); **By month** tab when **>1** month in data, **last 6** months shown with cap notice. Strip mounts for **server-backed** filters only (`recurringOnly` remains client-side on the current page).

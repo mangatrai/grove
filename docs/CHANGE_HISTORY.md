@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-181 (2026-05-11): CR-177 backlog sync and row ownership PATCH test
+
+**Why:** `V3_BACKLOG.md` still described Transactions row belongs-to as `person:<uuid>` and belongs-to filter triggers as `N members` after FIX-180. Row ownership persistence had only frontend helper unit tests.
+
+**What changed:** Backlog text matches Transactions raw UUID picker values and `selections` / summary chip copy. `app.test.ts` asserts `PATCH /transactions/:id` assigns and clears `ownerScope` / `ownerPersonProfileId` via the ledger API.
+
+**Files:** `docs/V3_BACKLOG.md`, `backend/tests/app.test.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## UX-180 (2026-05-11): Hierarchical picker child row alignment
 
 **Why:** Multi-select child rows inherited `justify-content: space-between` from the shared parent/child button rule, pushing labels toward the right pane edge away from the parent column.
