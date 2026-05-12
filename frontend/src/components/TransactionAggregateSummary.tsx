@@ -43,14 +43,6 @@ function formatUsdAbs(value: number): string {
   return `$${Math.abs(value).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-function formatDateLabel(iso: string): string {
-  const [y, m, d] = iso.split("-").map((x) => Number(x));
-  if (!y || !m || !d) return iso;
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(
-    new Date(y, m - 1, d)
-  );
-}
-
 function formatDateSpan(first: string | null, last: string | null): string {
   if (!first || !last) return "—";
   const [fy, fm, fd] = first.split("-").map((x) => Number(x));

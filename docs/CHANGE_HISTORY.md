@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-182 (2026-05-12): CR-177 post-review cleanup
+
+**Why:** Code review after CR-177/FIX-177 found two small issues.
+
+1. `multiSelectLabel="selections"` on the belongs-to picker — trigger showed "3 selections" instead of "3 members" when 3+ members selected. Changed to `"members"`.
+2. `formatDateLabel` in `TransactionAggregateSummary.tsx` was defined but never called (dead code). Removed.
+
+Note: `byMerchant` normalization and `byMonth` ascending-order tests were confirmed present in `app.test.ts` (lines 4452, 4490) — no new tests needed.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/components/TransactionAggregateSummary.tsx`
+
+---
+
+## FIX-B8 (2026-05-12): Settings add institution Mantine modal
+
+**Why:** The Connected accounts institution picker used `window.prompt` for custom institution names.
+
+**What changed:** Settings → Accounts → Add institution prompt replaced with a Mantine modal. State: `institutionModalOpen` / `institutionModalName` / `institutionModalSaving` / `institutionModalError`.
+
+**Files:** `frontend/src/pages/SettingsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-181 (2026-05-11): CR-177 backlog sync and row ownership PATCH test
 
 **Why:** `V3_BACKLOG.md` still described Transactions row belongs-to as `person:<uuid>` and belongs-to filter triggers as `N members` after FIX-180. Row ownership persistence had only frontend helper unit tests.

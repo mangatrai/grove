@@ -1463,7 +1463,7 @@ export function TransactionsPage() {
               groups={belongsToGroups}
               placeholder="All household activity"
               ariaLabel="Filter by belongs-to"
-              multiSelectLabel="selections"
+              multiSelectLabel="members"
               clearable
             />
           </Box>
