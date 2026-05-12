@@ -1800,18 +1800,18 @@ export function SettingsPage() {
                   ariaLabel="Financial institution"
                   disabled={savingAccount}
                   clearable
-                  footer={
+                  footer={(close) => (
                     <Group justify="flex-start">
                       <Button
                         type="button"
                         variant="default"
                         disabled={savingAccount}
-                        onClick={() => openAddInstitutionModal()}
+                        onClick={() => { close(); openAddInstitutionModal(); }}
                       >
                         Add institution name…
                       </Button>
                     </Group>
-                  }
+                  )}
                 />
               </Fieldset>
               <Fieldset legend="Account type">

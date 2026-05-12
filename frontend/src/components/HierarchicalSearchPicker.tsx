@@ -37,7 +37,7 @@ type PickerProps = {
   ariaLabel: string;
   clearable?: boolean;
   disabled?: boolean;
-  footer?: ReactNode;
+  footer?: ReactNode | ((close: () => void) => ReactNode);
   onActiveParentChange?: (parentId: string | null) => void;
 } & (
   | {
@@ -402,7 +402,7 @@ export function HierarchicalSearchPicker(props: PickerProps) {
           )}
         </div>
       </div>
-      {footer ? <div className="hs-picker__footer">{footer}</div> : null}
+      {footer ? <div className="hs-picker__footer">{typeof footer === "function" ? footer(() => { setOpen(false); setSearch(""); }) : footer}</div> : null}
     </div>
   ) : null;
 
