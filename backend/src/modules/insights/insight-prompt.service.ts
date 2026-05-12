@@ -141,7 +141,7 @@ async function buildNetWorthBlock(householdId: string): Promise<InsightPromptInp
 
   for (const a of sheet.assets) {
     const b = a.balance ?? 0;
-    if (a.type === "checking" || a.type === "savings") {
+    if (a.type === "checking" || a.type === "savings" || a.type === "cash") {
       checkingSavingsTotal += b;
     } else if (a.type === "investment") {
       investmentTotal += b;

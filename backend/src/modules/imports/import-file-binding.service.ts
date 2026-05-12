@@ -372,6 +372,8 @@ export function defaultLiquidity(
       return subType === "hsa" ? "semi_liquid" : "restricted";
     case "education":
       return "restricted";
+    case "cash":
+      return "liquid";
     default:
       // credit_card, loan, payslip — not classified for liquidity
       return null;

@@ -18,6 +18,75 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-183 (2026-05-12): Cash On Hand account type (F-11)
+
+**Why:** Users keep physical cash (e.g. a $1,000 home emergency fund) with no bank account to track it against. Manual ledger entries required an account; there was no suitable type for physical cash.
+
+**What changed:**
+- Migration `0043` widens `financial_account_type_check` to include `'cash'`.
+- `accountUpsertSchema` in `imports.routes.ts` accepts `"cash"` as a valid type.
+- `defaultLiquidity("cash")` returns `"liquid"`.
+- `accountSide("cash")` returns `"asset"` — cash accounts appear on the net worth balance sheet.
+- AI insights `buildNetWorthBlock` rolls cash balances into `checkingSavingsTotal`.
+- `"Cash & Wallet"` added to both institution catalogs as a built-in suggestion (no custom institution needed).
+- `SettingsPage` type picker adds a Cash entry with searchText `cash on hand wallet petty cash liquid`.
+
+**Flow:** Settings → Accounts → Add account → Institution: "Cash & Wallet" → Type: Cash → set initial balance → record payments as manual debit transactions.
+
+**Files:** `backend/db/migrations/0043_cash_account_type.sql`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `backend/src/modules/imports/institution-catalog.ts`, `frontend/src/import/institutionCatalog.ts`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+## UX-167 (2026-05-12): Cash register dollar amount inputs
+
+**Why:** Dollar fields used Mantine `NumberInput` or plain numeric text without consistent decimal-first entry.
+
+**What changed:** Added `react-currency-input-field` and `CurrencyInput` (Mantine `Input.Wrapper` styling, two fixed decimals). Wired into net worth manual balance, Settings salary/balance fields, budget amounts, payslip manual dollar fields, and manual transaction amount.
+
+**Files:** `frontend/package.json`, `frontend/src/components/CurrencyInput.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/BudgetPage.tsx`, `frontend/src/pages/PayslipManualPage.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## UX-166 (2026-05-12): Consistent USD display formatting
+
+**Why:** Dollar amounts used bare `toFixed(2)` without thousands separators.
+
+**What changed:** Added `formatUsd` (`en-US`, two decimals) and replaced dollar `toFixed(2)` display in payslips, dashboard, import reconciliation, settings recurring anchor, and payslip charts/detail/manual views.
+
+**Files:** `frontend/src/utils/format.ts`, `frontend/src/pages/PayslipsPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/ImportWorkspacePage.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/payslip/PayslipIncomeCharts.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/pages/PayslipManualPage.tsx`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## I-6 (2026-05-12): Drive folderId query guard
+
+**Why:** `folderId` is interpolated into Drive API `q` strings; validate DB-sourced IDs before use.
+
+**What changed:** `listHfbFilesInFolder` rejects `folderId` values that are not `[\w-]+`.
+
+**Files:** `backend/src/modules/export/gdrive-backup.service.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/SECURITY_HARDENING_BACKLOG.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## I-5 (2026-05-12): Export/restore housekeeping
+
+**Why:** Completed restore jobs left staging `.hfb` files on disk; successful restore did not warn that Google Drive must be reconnected.
+
+**What changed:** `runImportJob` deletes the uploaded staging file in `finally`. Restore success UI shows a yellow alert to reconnect Drive under Settings → Data → Backup.
+
+**Files:** `backend/src/modules/export/import-household-bundle.service.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/EXPORT_IMPORT_BACKLOG.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## I-4 (2026-05-12): Password reset token periodic cleanup
+
+**Why:** Used and expired `password_reset_token` rows were never purged outside per-user token rotation.
+
+**What changed:** `purgeStalePasswordResetTokens` deletes rows with `used_at` set or `expires_at` in the past; called from the existing hourly export purge schedule (no new timer).
+
+**Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/export/export-job.service.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/SECURITY_HARDENING_BACKLOG.md`, `docs/V3_BACKLOG.md`
+
+---
+
 ## FIX-182 (2026-05-12): CR-177 post-review cleanup
 
 **Why:** Code review after CR-177/FIX-177 found two small issues.

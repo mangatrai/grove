@@ -12,7 +12,6 @@ import {
   Group,
   Modal,
   MultiSelect,
-  NumberInput,
   Paper,
   PasswordInput,
   SegmentedControl,
@@ -33,6 +32,8 @@ import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../compo
 import { RecurringTagModal, type RecurringOverride } from "../components/RecurringTagModal";
 import { formatAccountForSelect, formatAccountFreshness } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
+import { CurrencyInput } from "../components/CurrencyInput";
+import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 
 const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
@@ -87,6 +88,7 @@ const ACCOUNT_TYPE_GROUPS: HierarchicalPickerGroup[] = [
       { value: "education",   label: "Education",   searchText: "529 college coverdell" },
       { value: "credit_card", label: "Credit Card", searchText: "liability revolving" },
       { value: "loan",        label: "Loan",        searchText: "mortgage auto debt liability" },
+      { value: "cash",        label: "Cash",        searchText: "cash on hand wallet petty cash liquid" },
       { value: "payslip",     label: "Payslip",     searchText: "income payroll" }
     ]
   },
@@ -162,7 +164,7 @@ const SUBTYPE_LABELS: Record<string, string> = {
 const TYPE_LABELS: Record<string, string> = {
   checking: "Checking", savings: "Savings", investment: "Investment",
   retirement: "Retirement", health: "Health", education: "Education",
-  credit_card: "Credit Card", loan: "Loan", payslip: "Payslip"
+  credit_card: "Credit Card", loan: "Loan", cash: "Cash", payslip: "Payslip"
 };
 
 function formatAccountTypeLabel(type: string, subType: string | null): string {
@@ -1323,12 +1325,9 @@ export function SettingsPage() {
                         disabled={savingProfile}
                         style={{ flex: "0 0 14rem" }}
                       />
-                      <NumberInput
+                      <CurrencyInput
                         label="Individual gross annual income"
                         description="Include base salary + regular bonuses + regular 1099 income. Exclude one-time items."
-                        prefix="$"
-                        thousandSeparator=","
-                        min={0}
                         value={
                           profileDraft.individualGrossIncomeUsd === ""
                             ? undefined
@@ -1338,7 +1337,7 @@ export function SettingsPage() {
                           setProfileDraft((prev) => ({
                             ...prev,
                             individualGrossIncomeUsd:
-                              typeof value === "number" && Number.isFinite(value) ? String(value) : ""
+                              value == null ? "" : String(value)
                           }))
                         }
                         disabled={savingProfile}
@@ -1716,15 +1715,13 @@ export function SettingsPage() {
             {loadingHousehold ? <Text c="dimmed">Loading…</Text> : null}
             {!loadingHousehold ? (
               <Stack mb="xl">
-                <NumberInput
+                <CurrencyInput
                   label="Monthly savings target (USD)"
-                  min={0}
-                  step={0.01}
                   placeholder="e.g. 500"
-                  value={targetDraft === "" ? "" : Number(targetDraft)}
-                  onChange={(value) => setTargetDraft(value === "" || value == null ? "" : String(value))}
+                  value={targetDraft === "" ? undefined : Number(targetDraft)}
+                  onChange={(value) => setTargetDraft(value == null ? "" : String(value))}
                   disabled={savingHousehold}
-                  maw={320}
+                  style={{ maxWidth: 320 }}
                 />
                 <Fieldset legend="Household Demographics" mt="sm">
                   <Stack gap="sm">
@@ -1741,20 +1738,15 @@ export function SettingsPage() {
                       onChange={(e) => setHouseholdStateDraft(e.currentTarget.value)}
                       disabled={savingHousehold}
                     />
-                    <NumberInput
+                    <CurrencyInput
                       label="Combined gross household income"
                       description="Combined gross income for all earners: base salary + regular bonuses. Exclude one-time items."
-                      prefix="$"
-                      thousandSeparator=","
-                      min={0}
                       value={householdIncomeDraft === "" ? undefined : Number(householdIncomeDraft)}
                       onChange={(value) =>
-                        setHouseholdIncomeDraft(
-                          typeof value === "number" && Number.isFinite(value) ? String(value) : ""
-                        )
+                        setHouseholdIncomeDraft(value == null ? "" : String(value))
                       }
                       disabled={savingHousehold}
-                      maw={360}
+                      style={{ maxWidth: 360 }}
                     />
                   </Stack>
                 </Fieldset>
@@ -1876,21 +1868,18 @@ export function SettingsPage() {
               </Fieldset>
               {!accountDraft.id ? (
                 <Group align="end" grow>
-                  <NumberInput
+                  <CurrencyInput
                     label="Starting balance (optional)"
-                    value={accountDraft.initialBalance === "" ? "" : Number(accountDraft.initialBalance)}
+                    value={accountDraft.initialBalance === "" ? undefined : Number(accountDraft.initialBalance)}
                     onChange={(value) =>
                       setAccountDraft((d) => ({
                         ...d,
-                        initialBalance: value === "" || value == null ? "" : String(value)
+                        initialBalance: value == null ? "" : String(value)
                       }))
                     }
-                    decimalScale={2}
-                    fixedDecimalScale={false}
-                    thousandSeparator=","
                     disabled={savingAccount}
                     placeholder="0.00"
-                    maw={280}
+                    style={{ maxWidth: 280 }}
                   />
                   <TextInput
                     label="Balance as of"
@@ -2106,13 +2095,10 @@ export function SettingsPage() {
               ]}
             />
             <Group grow align="end">
-              <NumberInput
+              <CurrencyInput
                 label="Market value (USD)"
-                value={propertyModal.marketValueUsd === "" ? "" : Number(propertyModal.marketValueUsd)}
-                onChange={(v) => setPropertyModal((m) => ({ ...m, marketValueUsd: v === "" || v == null ? "" : String(v) }))}
-                decimalScale={2}
-                thousandSeparator=","
-                prefix="$"
+                value={propertyModal.marketValueUsd === "" ? undefined : Number(propertyModal.marketValueUsd)}
+                onChange={(v) => setPropertyModal((m) => ({ ...m, marketValueUsd: v == null ? "" : String(v) }))}
                 placeholder="0.00"
                 disabled={propertyModal.saving}
               />
@@ -2175,7 +2161,7 @@ export function SettingsPage() {
                           <Table.Tr key={o.id}>
                             <Table.Td><Text ff="monospace">{o.merchantKey}</Text></Table.Td>
                             <Table.Td>{o.displayName ?? <Text c="dimmed" span>—</Text>}</Table.Td>
-                            <Table.Td>{o.amountAnchor != null ? `$${o.amountAnchor.toFixed(2)}` : <Text c="dimmed" span>any</Text>}</Table.Td>
+                            <Table.Td>{o.amountAnchor != null ? `$${formatUsd(o.amountAnchor)}` : <Text c="dimmed" span>any</Text>}</Table.Td>
                             <Table.Td>{o.amountTolerancePct}%</Table.Td>
                             <Table.Td>
                               <Button

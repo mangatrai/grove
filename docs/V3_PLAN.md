@@ -188,12 +188,15 @@ Live **Summary of filtered results** on Transactions: server-backed totals and b
 
 ---
 
-### F-11: Record cash payments (manual ledger entry)
-Manual ledger entry requires an **account**; cash outside bank/card imports has no first-class target today.
+### ~~F-11: Record cash payments (manual ledger entry)~~ ✓ DELIVERED (CR-183, 2026-05-12)
 
-**Groom before build:** placeholder cash `financial_account` vs explicit **cash** type on enriched accounts (F-1) vs folding into broader multi-account / institution UX. Decide net-worth and cash-summary treatment and whether cash is household-wide or per person.
+**Delivered:** New `cash` account type — reuses the existing account + manual ledger entry + `account_balance_snapshot` stack.
+- `"Cash & Wallet"` built into the institution catalog (no custom institution needed)
+- `type='cash'` → `defaultLiquidity='liquid'`; `accountSide='asset'` → appears on net worth balance sheet
+- AI insights rolls cash into `checkingSavingsTotal`
+- Flow: Settings → Add account → Institution: "Cash & Wallet" → Type: Cash → set initial balance → record payments as manual debit transactions
 
-**Files (TBD):** likely `financial_account` model/seeds, manual transaction UI (`TransactionsPage` / ledger API), possibly `SettingsPage` account creation.
+**Files:** `backend/db/migrations/0043_cash_account_type.sql`, `imports.routes.ts`, `import-file-binding.service.ts`, `balance-sheet.service.ts`, `insight-prompt.service.ts`, `institution-catalog.ts` (both), `SettingsPage.tsx`
 
 ---
 
@@ -263,28 +266,26 @@ Import session state machine already handles in-progress state; frontend polls s
 
 ---
 
-### I-4: Security — password reset token cleanup
-`createPasswordResetToken` deletes *unused* tokens for user before insert. Used/expired tokens are never purged — slow table growth over time.
+### ~~I-4: Security — password reset token cleanup~~ ✓ DELIVERED (I-4, 2026-05-12)
 
-**Fix:** Add periodic cleanup (inside `purgeExpiredExports` or separate cron):
-`DELETE FROM password_reset_token WHERE used_at IS NOT NULL OR expires_at < NOW()`
+`purgeStalePasswordResetTokens` runs on the existing hourly export purge schedule.
 
-**Files:** `auth.service.ts`
+**Files:** `auth.service.ts`, `export-job.service.ts`
 
 ---
 
-### I-5: Export/restore housekeeping
-Two small items from `EXPORT_IMPORT_BACKLOG.md`:
-- **Restore staging file not deleted:** Add `fs.unlink(storagePath)` in `finally` block of `runImportJob` after job completion/failure (mirrors `runBackupJob` which already does this).
-- **Restore completion UI:** Warn user that GDrive connection is lost after restore (expected — `household_gdrive_config` excluded from `.hfb`). Add notice to restore success message: "Settings → Data → Reconnect Google Drive."
+### ~~I-5: Export/restore housekeeping~~ ✓ DELIVERED (I-5, 2026-05-12)
 
-**Files:** `import-household-bundle.service.ts`, restore success UI
+- Restore staging `.hfb` deleted in `runImportJob` `finally`.
+- Successful restore UI warns to reconnect Google Drive under Settings → Data → Backup.
+
+**Files:** `import-household-bundle.service.ts`, `BackupRestoreSection.tsx`
 
 ---
 
-### I-6: Drive query string escaping
-`folderId` interpolated directly into Drive API `q` parameter. DB-sourced so low exploitability, but add guard:
-`if (!/^[\w-]+$/.test(folderId)) throw new Error(...)`
+### ~~I-6: Drive query string escaping~~ ✓ DELIVERED (I-6, 2026-05-12)
+
+`listHfbFilesInFolder` validates `folderId` with `^[\w-]+$` before Drive `q` interpolation.
 
 **Files:** `gdrive-backup.service.ts`
 
@@ -303,14 +304,19 @@ The app has 400+ backend integration tests (Vitest + supertest) but no browser-l
 
 ---
 
-### UX-166: Consistent currency display — comma-separated thousands everywhere
-All dollar values displayed in the app use inconsistent formatting today. `NetWorthPage` already uses `toLocaleString()` (commas present); `PayslipsPage`, `DashboardPageV2`, `ImportWorkspacePage`, `SettingsPage` use raw `toFixed(2)` with no comma separator (e.g. `7305.84` instead of `7,305.84`).
+### ~~UX-166: Consistent currency display — comma-separated thousands everywhere~~ ✓ DELIVERED (UX-166, 2026-05-12)
 
-**Fix:** Create a shared `formatUsd(n: number): string` utility (using `toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })`). Replace all bare `toFixed(2)` dollar-value calls across ~8 files. Chart tick/tooltip formatters updated in the same pass.
+**Delivered:** Shared `formatUsd` utility; dollar `toFixed(2)` display replaced in payslips, dashboard, import reconciliation, settings recurring anchor, and payslip chart/detail/manual views.
 
-**Note:** Non-dollar `toFixed` calls (KB file sizes, confidence scores, priority values, tolerance percentages) are intentionally excluded.
+**Files:** `frontend/src/utils/format.ts`, `PayslipsPage.tsx`, `DashboardPageV2.tsx`, `ImportWorkspacePage.tsx`, `SettingsPage.tsx`, `PayslipIncomeCharts.tsx`, `PayslipDetailPage.tsx`, `PayslipManualPage.tsx`
 
-**Files:** New `frontend/src/utils/format.ts`, `PayslipsPage.tsx`, `DashboardPageV2.tsx`, `ImportWorkspacePage.tsx`, `SettingsPage.tsx`, `PayslipIncomeCharts.tsx`, `PayslipDetailPage.tsx`, `PayslipManualPage.tsx`
+---
+
+### ~~UX-167: Cash register input — decimal-first dollar entry~~ ✓ DELIVERED (UX-167, 2026-05-12)
+
+**Delivered:** `CurrencyInput` wrapper around `react-currency-input-field` (two fixed decimals, Mantine `Input.Wrapper`); wired into net worth balance, Settings dollar fields, budget amounts, payslip manual dollar fields, and manual transaction amount.
+
+**Files:** `frontend/src/components/CurrencyInput.tsx`, `NetWorthPage.tsx`, `SettingsPage.tsx`, `BudgetPage.tsx`, `PayslipManualPage.tsx`, `TransactionsPage.tsx`
 
 ---
 
@@ -335,21 +341,6 @@ All dollar values displayed in the app use inconsistent formatting today. `NetWo
 **Delivered:** CSS `--fs-*` palette + `chartPalette.ts`; Mantine `fsForest` / `fsTerracotta` / `fsGold`; dashboard / net worth / budget / payslips / transactions badge colors updated; sidebar **Daily / Reports / Setup** groups; warm-cream active nav and topbar accents (replacing mint teal); removed `DashboardPage.tsx` shim in favor of direct `DashboardPageV2` import.
 
 **Files:** `frontend/src/index.css`, `frontend/src/theme.ts`, `frontend/src/theme/chartPalette.ts`, `frontend/src/layout/AppSidebar.tsx`, `HomeRoute.tsx`, `BudgetPage.tsx`, `NetWorthPage.tsx`, `DashboardPageV2.tsx`, `TransactionsPage.tsx`, `PayslipsPage.tsx`, `payslipChartsModel.ts`
-
----
-
-### UX-167: Cash register input — decimal-first dollar entry
-Dollar amount inputs across the app require the user to manually type the decimal point. A fat-finger omission (typing `1002` when intending `100.20`) silently submits the wrong value.
-
-**Fix:** Add `react-currency-input-field` (battle-tested, TypeScript-native, zero custom hook work). Create a thin `CurrencyInput` wrapper that applies Mantine styling. Cash-register behavior (right-to-left digit shifting, always 2 decimal places) comes from the library config — `decimalsLimit={2}` + `fixedDecimalLength={2}`.
-
-**Scope:** Apply only to dollar-value inputs. Excluded: priority, confidence, tolerance percentage, file size, and other non-dollar numeric fields.
-
-**Dollar inputs to update:** manual balance entry (NetWorthPage), salary / initial balance fields (SettingsPage ~5 instances), budget amounts (BudgetPage), payslip manual entry (PayslipManualPage), manual transaction amount (TransactionsPage).
-
-**Prereq:** UX-166 (do in same pass — same files touched).
-
-**Files:** `react-currency-input-field` (new dep), new `frontend/src/components/CurrencyInput.tsx`, `NetWorthPage.tsx`, `SettingsPage.tsx`, `BudgetPage.tsx`, `PayslipManualPage.tsx`, `TransactionsPage.tsx`
 
 ---
 
@@ -412,7 +403,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
 | F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
 | ~~F-10~~ | ~~Transaction aggregation strip (CR-177 + FIX-177)~~ | ✓ Done | Feature | — |
-| F-11 | Record cash payments (manual ledger entry) | P2 | Feature | F-1 (groom) |
+| ~~F-11~~ | ~~Record cash payments (manual ledger entry)~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
 | F-7 | AI insights: fix transfer/flow pollution | P2 | Feature | — |
 | F-8 | Money flow classification in reports | P2 | Feature | F-7 |
@@ -420,11 +411,11 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | I-1 | Personal loan tracker | P3 | Feature | F-8 |
 | I-2 | Async import parse + canonicalize | P3 | Reliability | — |
 | I-3 | Category / reimbursements taxonomy cleanup | P3 | Improvement | F-7/F-8 |
-| I-4 | Password reset token periodic cleanup | P3 | Maintenance | — |
-| I-5 | Export/restore housekeeping (staging file, GDrive warning) | P3 | Maintenance | — |
-| I-6 | Drive query string escaping | P3 | Security hygiene | — |
-| UX-166 | Consistent currency display (comma thousands separator) | P3 | UX polish | — |
-| UX-167 | Cash register input for dollar amount fields | P3 | UX polish | UX-166 |
+| ~~I-4~~ | ~~Password reset token periodic cleanup~~ | ✓ Done | Maintenance | — |
+| ~~I-5~~ | ~~Export/restore housekeeping (staging file, GDrive warning)~~ | ✓ Done | Maintenance | — |
+| ~~I-6~~ | ~~Drive query string escaping~~ | ✓ Done | Security hygiene | — |
+| ~~UX-166~~ | ~~Consistent currency display (comma thousands separator)~~ | ✓ Done | UX polish | — |
+| ~~UX-167~~ | ~~Cash register input for dollar amount fields~~ | ✓ Done | UX polish | UX-166 |
 | I-7 | Recurring payments: annual detection, prediction, per-tx exclusion | P3 | Enhancement | — |
 | I-8 | Playwright E2E test suite exploration (spike) | P3 | Testing | — |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
@@ -435,4 +426,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-11. All P1 bugs done. F-1, F-2, F-3, F-9, and F-10 (CR-177 + FIX-177) done. Queued: **B-8** (institution add prompt → modal), **F-11** (cash payment recording — groom first). Next: F-5 (payslip deposit stored pairing) or F-7 (AI insights pollution fix).*
+*Last updated: 2026-05-12. I-4–I-6, UX-166/UX-167, F-11 (CR-183) delivered. B-8 done. All P1 bugs done. Next: **F-5** (payslip deposit stored pairing) or **F-7** (AI insights pollution fix).*

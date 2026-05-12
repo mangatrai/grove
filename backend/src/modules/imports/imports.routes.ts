@@ -80,7 +80,7 @@ const fileBindingSchema = z.object({
 });
 
 const accountUpsertSchema = z.object({
-  type: z.enum(["checking", "savings", "credit_card", "loan", "investment", "retirement", "payslip", "health", "education"]),
+  type: z.enum(["checking", "savings", "credit_card", "loan", "investment", "retirement", "payslip", "health", "education", "cash"]),
   subType: z.string().max(50).nullable().optional(),
   memo: z.string().max(500).nullable().optional(),
   liquidity: z.enum(["liquid", "semi_liquid", "restricted"]).nullable().optional(),
