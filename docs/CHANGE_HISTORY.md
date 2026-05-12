@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-B8 (2026-05-12): Settings — Add institution modal stacking fix
+
+**Why:** The "Add institution name…" button lives inside the `HierarchicalSearchPicker` footer, which renders its dropdown in a `createPortal` at `zIndex: 1300`. Clicking the button opened the Mantine modal without closing the picker first, so the modal appeared behind the picker overlay regardless of the modal's own z-index.
+
+**What changed:**
+- `frontend/src/components/HierarchicalSearchPicker.tsx` — `footer` prop now accepts `ReactNode | ((close: () => void) => ReactNode)`. When a render function is provided, it receives a `close` callback that calls `setOpen(false)` + `setSearch("")`. Existing `ReactNode` usages are unaffected.
+- `frontend/src/pages/SettingsPage.tsx` — institution picker `footer` updated to the render-function form; button handler calls `close()` before `openAddInstitutionModal()`, ensuring the picker dismisses before the modal mounts.
+
+---
+
 ## UX-167b (2026-05-12): CurrencyInput — custom cash-register implementation
 
 **Why:** `react-currency-input-field` v4 does not have a right-to-left digit-shifting (cash register) mode — `fixedDecimalLength` only pads decimals on blur. Controlled-value round-trips also reset the library's internal cursor state on every keystroke, preventing any digit-shift behavior.

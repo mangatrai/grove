@@ -179,12 +179,12 @@ Live **Summary of filtered results** on Transactions: server-backed totals and b
 
 ---
 
-### B-8: Settings — Add custom institution uses `window.prompt`
+### ~~B-8: Settings — Add custom institution uses `window.prompt`~~ ✓ DELIVERED (FIX-B8, 2026-05-12)
 **Settings → Accounts → Institutions → Add institution** still uses a native browser prompt for the name. Rest of the app uses custom modals and Mantine forms.
 
-**Fix:** Inline modal or form consistent with other Settings flows; same validation and household-scoped save behavior.
+**Delivered:** Cursor replaced `window.prompt` with a Mantine modal. Follow-up fix: modal was rendering behind the `HierarchicalSearchPicker` dropdown portal (`zIndex: 1300`). Fixed by extending `HierarchicalSearchPicker`'s `footer` prop to accept a render function `(close: () => void) => ReactNode`; the "Add institution" button now calls `close()` before opening the modal, dismissing the picker overlay first.
 
-**Files:** `frontend/src/pages/SettingsPage.tsx`
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/pages/SettingsPage.tsx`
 
 ---
 
@@ -396,7 +396,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
 | ~~B-7~~ | ~~AI insight cooldown: in-memory → DB-backed~~ | ✓ Done | Security | — |
-| B-8 | Settings: Add institution uses `window.prompt` | P2 | Bug + UX | — |
+| ~~B-8~~ | ~~Settings: Add institution uses `window.prompt`~~ | ✓ Done | Bug + UX | — |
 | ~~F-1~~ | ~~Account enrichment (sub_type, memo, liquidity, linked_account_id, health/education types)~~ | ✓ Done | Feature | — |
 | ~~F-2~~ | ~~Real estate equity display + value history chart~~ | ✓ Done | Feature | F-1 |
 | ~~F-3~~ | ~~Net worth liquidity breakdown~~ | ✓ Done | Feature | F-1 ✓ |
@@ -426,4 +426,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-12. I-4–I-6, UX-166/UX-167, F-11 (CR-183) delivered. B-8 done. All P1 bugs done. Next: **F-5** (payslip deposit stored pairing) or **F-7** (AI insights pollution fix).*
+*Last updated: 2026-05-12. I-4–I-6, UX-166/UX-167, F-11 (CR-183), B-8 (FIX-B8) delivered. All P1 bugs + all originally-P2 bugs done. Next: **F-5** (payslip deposit stored pairing) or **F-7** (AI insights pollution fix).*
