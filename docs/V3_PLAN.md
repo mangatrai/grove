@@ -164,31 +164,36 @@ Two gaps in `insight-prompt.service.ts` make LLM spending figures unreliable:
 
 ---
 
-### F-10: Transaction aggregation strip (CR-177)
-Extend the Transactions page with a live "Summary of filtered results" strip that answers aggregate questions (total spent, count, average, breakdown by category/merchant/account/month) without leaving the page. Replaces the functionality of the retired Reports page, surfaced in context.
+### ~~F-10: Transaction aggregation strip (CR-177)~~ ✓ Done (2026-05-11; FIX-177 corrective pass same day)
+Live **Summary of filtered results** on Transactions: server-backed totals and breakdowns over the full filtered ledger (not the current page). Replaces the retired Reports page in context.
 
-**Architecture note:** The Transactions page uses true server-side pagination (limit/offset, default 100 rows per page). The client never holds the full filtered set — client-side aggregation would only cover the visible page and show wrong totals. A dedicated aggregate endpoint is required from day one, not deferred.
+**Architecture:** True server-side pagination on the list; **`GET /transactions/aggregate`** mirrors list filters (no pagination). Headline money fields use signed `amount` (see `docs/API_LEDGER.md`).
 
-**Also bundled:** category, account, and belongs-to filters are currently single-select only. Multi-select for these three is part of this CR — it's required for useful aggregation (e.g. "how much across Taxes > Federal + State in 2025?") and the backend filter clause work is shared with the aggregate endpoint.
+**Backend (shipped):** `categoryIds` / `accountIds` / `ownerPersonProfileIds` plus legacy singular params; **`belongsTo`** (`household` and/or profile UUIDs, precedence over legacy owner scope). Integration tests on aggregate auth, filters, merchant normalization, month buckets.
 
-**Backend:**
-- Extend `GET /ledger` to accept `categoryIds[]`, `accountIds[]`, `belongsTo[]` (array params). Keep old single-value params working for backward compat with existing dashboard deep-links.
-- New `GET /ledger/aggregate?<same filter params>` — returns `{ count, net, inflows, outflows, avgAbsolute, byCategory[], byMerchant[], byAccount[], byMonth[], dateFirst, dateLast }`. No pagination. Uses the same filter clause as the list endpoint.
+**Frontend (shipped):** `HierarchicalSearchPicker` multi-select on Transactions (category, account, belongs-to); `TransactionAggregateSummary` strip; `useEffect` + `apiJson` fetch (not React Query). **FIX-177:** parent click selects parent value + children (no “direct” row, no Mantine checkbox in menu); strip headline without duplicate Count cell; plain `$` inflows/outflows; stat `title` tooltips; By month last 6 with cap notice; context stats row.
 
-**Frontend:**
-- Extend `HierarchicalSearchPicker` to multi-select: `value: string[]`, child buttons toggle with checkmarks, parent left pane shows selection count badge, trigger renders chips. Portal/search/data normalization unchanged. Mantine has no native equivalent; external libraries would need full re-styling.
-- `useQuery` keyed on filter state → aggregate endpoint (not `useMemo` over the current page)
-- Summary strip above the table, below filter toolbar; collapsible (expanded when any filter active, collapsed on no filters)
-- Headline row: count, net (forest/terracotta), inflows, outflows, avg per transaction, date span
-- Breakdown tabs: By category / By merchant / By account / By month; ranked horizontal bars; top 8 + "Show all"
+**Slices (reference):** CR-177-a–d + FIX-177 in `docs/CHANGE_HISTORY.md`.
 
-**Recommended PR slices:**
-1. `feat(api/CR-177-a): multi-select filters on GET /ledger + new GET /ledger/aggregate + tests`
-2. `feat(ui/CR-177-b): swap pickers to MultiSelect, update URL param handling`
-3. `feat(ui/CR-177-c): summary strip headline row`
-4. `feat(ui/CR-177-d): breakdown tabs`
+**Files:** `backend/src/modules/ledger/ledger.service.ts`, `ledger.routes.ts`, `backend/tests/app.test.ts`, `openapi/openapi.yaml`, `docs/API_LEDGER.md`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/TransactionAggregateSummary.tsx`
 
-**Files:** `backend/src/modules/ledger/ledger.service.ts`, `ledger.routes.ts`, `openapi/openapi.yaml`, `frontend/src/pages/TransactionsPage.tsx`, new `frontend/src/components/TransactionAggregateSummary.tsx`
+---
+
+### B-8: Settings — Add custom institution uses `window.prompt`
+**Settings → Accounts → Institutions → Add institution** still uses a native browser prompt for the name. Rest of the app uses custom modals and Mantine forms.
+
+**Fix:** Inline modal or form consistent with other Settings flows; same validation and household-scoped save behavior.
+
+**Files:** `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+### F-11: Record cash payments (manual ledger entry)
+Manual ledger entry requires an **account**; cash outside bank/card imports has no first-class target today.
+
+**Groom before build:** placeholder cash `financial_account` vs explicit **cash** type on enriched accounts (F-1) vs folding into broader multi-account / institution UX. Decide net-worth and cash-summary treatment and whether cash is household-wide or per person.
+
+**Files (TBD):** likely `financial_account` model/seeds, manual transaction UI (`TransactionsPage` / ledger API), possibly `SettingsPage` account creation.
 
 ---
 
@@ -400,12 +405,14 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
 | ~~B-7~~ | ~~AI insight cooldown: in-memory → DB-backed~~ | ✓ Done | Security | — |
+| B-8 | Settings: Add institution uses `window.prompt` | P2 | Bug + UX | — |
 | ~~F-1~~ | ~~Account enrichment (sub_type, memo, liquidity, linked_account_id, health/education types)~~ | ✓ Done | Feature | — |
 | ~~F-2~~ | ~~Real estate equity display + value history chart~~ | ✓ Done | Feature | F-1 |
 | ~~F-3~~ | ~~Net worth liquidity breakdown~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
 | F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
-| F-10 | Transaction aggregation strip (requires backend aggregate endpoint) | P2 | Feature | — |
+| ~~F-10~~ | ~~Transaction aggregation strip (CR-177 + FIX-177)~~ | ✓ Done | Feature | — |
+| F-11 | Record cash payments (manual ledger entry) | P2 | Feature | F-1 (groom) |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
 | F-7 | AI insights: fix transfer/flow pollution | P2 | Feature | — |
 | F-8 | Money flow classification in reports | P2 | Feature | F-7 |
@@ -428,4 +435,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-10. All P1 bugs done. F-1, F-2, F-3, and F-9 done. Added F-10 (transaction aggregation strip — requires backend endpoint, pagination already live). Next: F-5 (payslip deposit stored pairing) or F-7 (AI insights pollution fix).*
+*Last updated: 2026-05-11. All P1 bugs done. F-1, F-2, F-3, F-9, and F-10 (CR-177 + FIX-177) done. Queued: **B-8** (institution add prompt → modal), **F-11** (cash payment recording — groom first). Next: F-5 (payslip deposit stored pairing) or F-7 (AI insights pollution fix).*

@@ -1366,9 +1366,16 @@ textarea {
   text-align: left;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 0.4rem 0.45rem;
   border-radius: 6px;
+}
+
+.hs-picker__parent {
+  justify-content: space-between;
+}
+
+.hs-picker__child {
+  justify-content: flex-start;
 }
 
 .hs-picker__parent--active,

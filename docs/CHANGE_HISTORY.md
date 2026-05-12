@@ -18,6 +18,100 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-180 (2026-05-11): Hierarchical picker child row alignment
+
+**Why:** Multi-select child rows inherited `justify-content: space-between` from the shared parent/child button rule, pushing labels toward the right pane edge away from the parent column.
+
+**What changed:** Parent rows keep space-between (label + chevron); child rows use `flex-start` so labels sit on the left next to the optional ✓ marker.
+
+**Files:** `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-180 (2026-05-11): Row belongs-to picker vs filter UUID values
+
+**Why:** CR-177 belongs-to filter groups use raw person profile UUIDs, but the per-row belongs-to editor still used `person:<uuid>` values. Selecting a member from the row menu did not update ownership; closed labels could not resolve.
+
+**What changed:** Row and manual-entry pickers use `belongsToPickerValueFromRow` / `parseBelongsToPickerValue` (raw UUID + legacy `person:` support). Removed unused single-select belongs-to filter state. Active-filter chip copy uses `formatActiveBelongsToSummary`; belongs-to multi-select label is “selections”. `belongsTo` query params dedupe in `ledger.routes.ts`.
+
+**Files:** `frontend/src/ledger/ledgerListQuery.ts`, `frontend/src/ledger/ledgerListQuery.test.ts`, `frontend/src/pages/TransactionsPage.tsx`, `backend/src/modules/ledger/ledger.routes.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-179 (2026-05-11): CR-177 multi-select and aggregate test coverage
+
+**Why:** CR-177 added multi-select ledger filters and aggregate parity on the API, but integration coverage was thin and the Transactions page had no automated tests for URL/query wiring or picker parent multi-select behavior.
+
+**What changed:** `backend/tests/ledger-filters.test.ts` now uses an isolated household fixture for `categoryIds`, `accountIds`, `belongsTo`, `ownerPersonProfileIds`, aggregate signed totals, and list/aggregate count parity. Frontend helpers moved to `frontend/src/ledger/ledgerListQuery.ts` and `frontend/src/components/hierarchicalPickerMultiSelect.ts` with Vitest unit tests.
+
+**Files:** `backend/tests/ledger-filters.test.ts`, `frontend/src/ledger/ledgerListQuery.ts`, `frontend/src/ledger/ledgerListQuery.test.ts`, `frontend/src/components/hierarchicalPickerMultiSelect.ts`, `frontend/src/components/hierarchicalPickerMultiSelect.test.ts`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/components/HierarchicalSearchPicker.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## DB-178 (2026-05-11): Dev sample ledger seed
+
+**Why:** Default dev seeding only created financial accounts; Transactions and aggregation needed a realistic posted ledger volume for manual testing.
+
+**What changed:** `backend/db/seeds/dev/dev_0004_seed_sample_ledger.sql` adds two household member profiles and 520 deterministic pseudo-random posted rows (2024–2025, six accounts, mixed categories/merchants, signed amounts). Generator: `scripts/generate-dev-ledger-seed.mjs` (`npm run db:generate:dev-ledger`).
+
+**Files:** `backend/db/seeds/dev/dev_0004_seed_sample_ledger.sql`, `scripts/generate-dev-ledger-seed.mjs`, `package.json`, `backend/db/README.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-177 (2026-05-11): CR-177 corrective pass
+
+**Why:** Initial CR-177 shipped with picker UX gaps, deferred belongs-to multi-select, a redundant aggregate Count cell, and a By month tab that could overwhelm long ranges.
+
+**What changed:** `HierarchicalSearchPicker` parent click selects the parent value plus all children; removed the right-pane “(direct)” row; replaced Mantine checkboxes with inline ✓ and `hs-picker__child--active`. Belongs-to multi-select on Transactions via repeated `belongsTo` URL params (`household` and/or person profile UUIDs) with backend `LedgerListFilters.belongsTo` and mixed household/person SQL; legacy `ownerScope` params still work. Aggregate strip drops the duplicate Count cell; Inflows/Outflows use plain `$` amounts; stat labels have `title` tooltips; By month shows the last six months with a cap notice; context row shows category/account/month counts. Prior filter memoization, server-backed strip gating, and signed-amount aggregate totals remain.
+
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/TransactionAggregateSummary.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `backend/src/modules/ledger/ledger.service.ts`, `backend/src/modules/ledger/ledger.routes.ts`, `docs/API_LEDGER.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-177-d (2026-05-11): Transaction aggregation strip — breakdown tabs
+
+**Why:** Filtered Transactions views need category / merchant / account / month rollups without leaving the page.
+
+**What changed:** `TransactionAggregateSummary` adds Mantine tabs with ranked horizontal bars (dashboard pattern): top-8 + show-all for category and merchant, all accounts, month tab when more than one month. Breakdown tabs hide when the filtered set has only one transaction.
+
+**Files:** `frontend/src/components/TransactionAggregateSummary.tsx`, `docs/CHANGE_HISTORY.md`, `docs/API_LEDGER.md`
+
+---
+
+## CR-177-c (2026-05-11): Transaction aggregation strip — headline row
+
+**Why:** Users need full-filter-set totals while the table stays paginated.
+
+**What changed:** New summary strip above the transactions table fetches `GET /transactions/aggregate` from current URL filters (independent of page size). Collapsible header shows transaction count; headline row shows net, inflows, outflows, average, and date span with Forest Studio styling.
+
+**Superseded (FIX-177):** Body row no longer duplicates count in a Count cell; inflows/outflows use plain `$` formatting; stat labels have tooltips; By month caps at six buckets with a notice; context stats row when `count > 1`.
+
+**Files:** `frontend/src/components/TransactionAggregateSummary.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-177-b (2026-05-11): Transactions multi-select filters + URL params
+
+**Why:** Aggregation use cases require combining multiple categories and accounts in one filter.
+
+**What changed:** `HierarchicalSearchPicker` gains optional multi-select (parent select-all, count chips). Transactions page reads/writes `categoryIds` and `accountIds` repeated params with legacy `categoryId` / `accountId` compat; list and aggregate requests share filter query building.
+
+**Superseded (FIX-177):** No Mantine `Checkbox` in the menu, no right-pane “(direct)” row; parent click toggles parent value plus all children; inline ✓ + `hs-picker__child--active`. Belongs-to filter multi-select and `belongsTo` URL params shipped in the corrective pass (see FIX-177 / FIX-180).
+
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-177-a (2026-05-11): Ledger aggregate endpoint + multi-select filters
+
+**Why:** Client-side pagination cannot compute totals over the full filtered ledger.
+
+**What changed:** `GET /transactions/aggregate` reuses ledger filter parsing and returns headline totals plus capped breakdowns. `GET /transactions` accepts `categoryIds`, `accountIds`, and `ownerPersonProfileIds` (merged with legacy singular params). Integration tests cover aggregate auth, filters, merchant normalization, and month buckets.
+
+**Files:** `backend/src/modules/ledger/ledger.routes.ts`, `backend/src/modules/ledger/ledger.service.ts`, `backend/tests/app.test.ts`, `openapi/openapi.yaml`, `docs/API_LEDGER.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-176 / UX-176 (2026-05-11): Forest Studio Phase F — authed layout cap + Inter Tight headings
 
 **Why:** Wide monitors stretched route content edge-to-edge; headings and KPI numerals read small and generic next to the Forest Studio chrome.

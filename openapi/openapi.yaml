@@ -1653,6 +1653,135 @@ paths:
         "404":
           description: Import session not found for household
       security: [{ bearerAuth: [] }]
+  /transactions/aggregate:
+    get:
+      tags: [transactions]
+      summary: Aggregate filtered ledger totals and breakdowns (no pagination)
+      description: >
+        Same filter query params as GET /transactions except limit and offset.
+        Returns headline totals plus capped breakdown arrays (by category, merchant, account, month).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: sessionId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: fileId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: categoryId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: categoryIds
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: uncategorizedOnly
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: needsReview
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: resolutionType
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: amountMin
+          in: query
+          schema: { type: number }
+        - name: amountMax
+          in: query
+          schema: { type: number }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: accountId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: accountIds
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: ownerScope
+          in: query
+          schema: { type: string, enum: [household, person] }
+        - name: ownerPersonProfileId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: ownerPersonProfileIds
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: belongsTo
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - name: trashOnly
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200":
+          description: Aggregate summary for the filtered ledger set
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, net, inflows, outflows, avgAbsolute, byCategory, byMerchant, byAccount, byMonth, dateFirst, dateLast]
+                properties:
+                  count: { type: integer }
+                  net: { type: number }
+                  inflows: { type: number }
+                  outflows: { type: number }
+                  avgAbsolute: { type: number }
+                  dateFirst: { type: string, format: date, nullable: true }
+                  dateLast: { type: string, format: date, nullable: true }
+                  byCategory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                        categoryId: { type: string, format: uuid, nullable: true }
+                  byMerchant:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                  byAccount:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                        accountId: { type: string, format: uuid }
+                  byMonth:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                        net: { type: number }
+        "400":
+          description: Invalid query
+        "401":
+          description: Unauthorized
+        "404":
+          description: Import session not found when sessionId is set
   /transactions:
     get:
       tags: [transactions]

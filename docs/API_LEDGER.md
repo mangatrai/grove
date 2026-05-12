@@ -19,14 +19,20 @@ Household-scoped access to `transaction_canonical`: **GET** lists rows with opti
 - `limit` — default `50`, max `200`
 - `offset` — default `0`
 - `sessionId` — if set (UUID), only transactions whose **`source_ref`** chain maps to **`transaction_raw`** → **`import_file`** in that import session (household must own the session).
-- `categoryId` — optional UUID; filters to that category, or — if it is a **parent** — to that parent and all its **child** categories.
+- `categoryId` — optional UUID; filters to that category, or — if it is a **parent** — to that parent and all its **child** categories (legacy single-value; dashboard deep-links).
+- `categoryIds` — optional UUID, repeatable; multi-select filter. When more than one ID is sent, matches any listed category **without** parent/child expansion (the picker sends explicit IDs). Singular `categoryId` and `categoryIds` may be combined; duplicates are ignored.
 - `uncategorizedOnly` — `true` / `false`; when `true`, only rows with **`category_id` IS NULL** (do not combine with `categoryId`).
 - `needsReview` — `true` / `false`; when `true`, only rows that need attention: **`category_id` IS NULL**, **`status` ≠ `posted`**, or an **open** / **in_review** **`resolution_item`** for this row (**`unknown_category`**, **`transfer_ambiguity`**, **`reconciliation_mismatch`** on canonical id, or **`duplicate_ambiguity`** when **`source_ref = 'raw:' || resolution target_id`**).
 - `resolutionType` — optional filter, **only when `needsReview=true`** (otherwise **400**). Repeat the query key or use comma-separated values. Allowed values: **`unknown_category`**, **`duplicate_ambiguity`**, **`transfer_ambiguity`**, **`reconciliation_mismatch`**. Narrows the list to rows that have at least one **open** / **in_review** resolution item of one of the given types, using the **same link rules** as the overall needs-review predicate (canonical `target_id` vs `raw:` + duplicate pattern).
 - `search` — optional string; matches rows where **`lower(merchant || memo)`** contains the query as a **substring**, **or** (when migration **`0011`** applied) the row matches **FTS5** **`MATCH`** on **`ledger_search_fts`** (Porter + Unicode61; multi-word queries are **AND**’d token phrases). Either path can match — substring helps when the FTS index is empty or out of sync. Results are ordered by **`txn_date` DESC**, **`created_at` DESC**. Migration **`0014`** rebuilds **`ledger_search_fts`** from **`transaction_canonical`** if you need to resync the index.
 - `amountMin`, `amountMax` — optional numbers; filter on signed **`amount`** (inclusive).
 - `dateFrom`, `dateTo` — `YYYY-MM-DD` inclusive bounds on **`txn_date`**.
-- `accountId` — optional UUID; filter to that financial account.
+- `accountId` — optional UUID; filter to that financial account (legacy single-value).
+- `accountIds` — optional UUID, repeatable; multi-select account filter. Singular `accountId` and `accountIds` may be combined.
+- `ownerScope` — optional `household` or `person`.
+- `ownerPersonProfileId` — optional UUID when `ownerScope=person` (legacy single-value).
+- `ownerPersonProfileIds` — optional UUID, repeatable; multi-select person profile filter when `ownerScope=person`. Singular and array params may be combined.
+- `belongsTo` — optional, repeatable; multi-select belongs-to filter. Values are `household` and/or person profile UUIDs. When present, takes precedence over `ownerScope` / `ownerPersonProfileId` / `ownerPersonProfileIds`. Mixed household + person IDs match household-scoped rows **or** rows owned by any listed profile.
 - `returnTo` — optional relative app URL for context return affordance (frontend-only hint; ignored by backend filtering).
 - `fromDashboard` — optional `true`/`false` frontend context hint used for drill-down UX.
 
@@ -80,6 +86,35 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
 - **`reviewReasons`** — present only when **`needsReview=true`**; human-readable strings explaining why the row matches the needs-review predicate. Possible values: **`Uncategorized`** (category_id IS NULL), **`Exact duplicate`** (status = 'duplicate', from CR-080), **`Status: <value>`** (other non-posted statuses), **`Open review: near-duplicate`** (open duplicate_ambiguity item on a posted row), **`Open review: reconciliation`** (open reconciliation_mismatch item).
 - **`openReviewItems`** — present only when **`needsReview=true`**; open / in_review resolution rows tied to this transaction (**`id`**, **`type`**, **`status`**: **`open`** or **`in_review`**), for **`POST /resolution/bulk`**, **`POST /resolution/bulk-apply-category`**, and **`PATCH /resolution/:id`** (same link rules as **`GET /resolution`**).
 - **`importSessionId`** — present only when **`needsReview=true`**; import session id when the row’s **`source_ref`** links to **`transaction_raw`** → **`import_file`**, otherwise **`null`** (manual rows, etc.).
+
+## `GET /transactions/aggregate`
+
+**Auth:** Bearer JWT (same as **`GET /transactions`**).
+
+**Query:** Same optional filters as **`GET /transactions`** except **`limit`** and **`offset`** are not accepted. Supports the same multi-select params (`categoryIds`, `accountIds`, `ownerPersonProfileIds`) and legacy singular params.
+
+**200:** Headline totals and capped breakdown arrays for the **entire** filtered set (not the current page).
+
+```json
+{
+  "count": 124,
+  "net": -4821.33,
+  "inflows": 8200,
+  "outflows": 13021.33,
+  "avgAbsolute": 105.05,
+  "dateFirst": "2025-01-03",
+  "dateLast": "2025-12-31",
+  "byCategory": [{ "label": "Groceries", "value": 420.5, "categoryId": "uuid" }],
+  "byMerchant": [{ "label": "costco", "value": 310 }],
+  "byAccount": [{ "label": "Bank of America checking •1001", "value": -120.5, "accountId": "uuid" }],
+  "byMonth": [{ "label": "2025-01", "value": 900, "net": -40 }]
+}
+```
+
+- **`byCategory` / `byMerchant` / `byAccount` / `byMonth`** — each capped at 50 rows server-side (120 months max for **`byMonth`**). Merchant keys are normalized (trim, lowercase, collapsed whitespace).
+- **`byAccount.value`** — signed net (credits minus debits) per account.
+
+**400 / 401 / 404:** Same validation and session-not-found rules as **`GET /transactions`**.
 
 ## `POST /transactions`
 

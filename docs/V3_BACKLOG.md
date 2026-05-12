@@ -22,75 +22,69 @@ Authed app **main** content column max-width **1500px** (centered); **Inter Tigh
 
 ---
 
-## Transaction Aggregation Strip (CR-177) — Design Notes
+## Transaction Aggregation Strip (CR-177) — delivered 2026-05-11
 
-### Background
-The app previously had a dedicated Reports page with arbitrary filter + aggregate. That page was dropped. The Home dashboard only shows top categories for the current month. There is no way today to answer "how much did I spend on streaming this year?" or "what did we spend at Costco in Q1?"
+**Status:** Shipped on Transactions (initial CR-177 slices + **FIX-177** corrective pass). Audit trail: `docs/CHANGE_HISTORY.md` **CR-177-a–d**, **FIX-177**; API: `docs/API_LEDGER.md`, `openapi/openapi.yaml` (`GET /transactions/aggregate`).
 
-We are not bringing back a separate Reports page. The Transactions page already has every filter the user needs — the aggregation strip lives there, updates live as filters change.
+### Background (unchanged intent)
+The retired Reports page had arbitrary filter + aggregate; Home only shows top categories for the current month. CR-177 surfaces full-filter-set totals on **Transactions** without a separate reports route.
 
-### Pagination discovery (2026-05-10)
-The original spec (claude-design/SPEC_aggregation.md) proposed client-side aggregation via `useMemo` over `filteredTransactions`, deferring a backend endpoint "until pagination forces it." This was wrong: the Transactions page **already uses true server-side pagination** (limit/offset, default 100 rows per page, max 200). The client never has the full filtered set — client-side aggregation would compute totals over the visible page only and show wrong numbers.
+### Pagination + backend (locked)
+Transactions uses true server-side pagination; the client never holds the full filtered set. **`GET /transactions/aggregate`** shares list filter params (no `limit`/`offset`), returns headline totals plus capped breakdowns (`byCategory`, `byMerchant`, `byAccount`, `byMonth`, `dateFirst`, `dateLast`). Headline **inflows/outflows** use signed `amount` (positive credits, debit magnitude for outflows), aligned with cash summary — not raw direction-only sums on signed debits.
 
-**Decision:** A backend aggregate endpoint is required from day one, not deferred.
+### Multi-select filters (shipped)
+- **Category + account:** repeated `categoryIds` / `accountIds`; legacy singular params still work; single parent `categoryId` still expands children server-side.
+- **Belongs-to:** repeated **`belongsTo`** (`household` and/or person profile UUIDs). Backend `belongsTo` takes precedence over legacy `ownerScope` / `ownerPersonProfileId(s)`; mixed household + person IDs use OR semantics. Row-level belongs-to editor on the table still uses `person:<uuid>` encoding — filter picker only.
+- **`HierarchicalSearchPicker`:** `multiSelect` gated; other pages stay single-select.
 
-### Backend endpoint shape
-```
-GET /ledger/aggregate?<same filter params as GET /ledger>
-→ {
-    count: number,
-    net: number,
-    inflows: number,
-    outflows: number,
-    avgAbsolute: number,
-    byCategory: Array<{ label: string; value: number; categoryId: string | null }>,
-    byMerchant: Array<{ label: string; value: number }>,
-    byAccount: Array<{ label: string; value: number; accountId: string }>,
-    byMonth: Array<{ label: string; value: number; net: number }>,
-    dateFirst: string | null,
-    dateLast: string | null
-  }
-```
+### Picker interaction (corrective pass — locked 2026-05-11)
+- Left-pane parent click toggles **parent selectable value + all children**; menu stays open.
+- **No** right-pane “(direct)” row; **no** Mantine `Checkbox` in the menu — inline **✓** + `hs-picker__child--active`.
+- Parent count chip when any child/parent value under that parent is selected; trigger shows one/two labels or `N <categories|accounts|members>`.
 
-Filter params are identical to `GET /ledger` — no new query vocabulary. The endpoint has no limit/offset; it always aggregates the full filtered set. A single SQL query with GROUP BY per breakdown dimension (category, merchant, account, YYYY-MM) is sufficient — no materialized views, no background jobs.
-
-### Frontend — useQuery not useMemo
-The strip calls `useQuery` keyed on the current filter state (same key shape as the transactions list query). It does NOT compute from the current page's rows. The two queries (list + aggregate) run in parallel; the strip can render independently of table pagination.
-
-### Multi-select filters — design decision (2026-05-10)
-
-Category, account, and belongs-to are currently single-select (`HierarchicalSearchPicker`, single value in URL params). This makes the aggregation strip useless for cross-category questions (e.g. tax filing: "show me all Taxes > Federal + State + Property transactions for 2025").
-
-**Approach: extend the existing `HierarchicalSearchPicker`**
-The app already has a custom two-pane picker (`frontend/src/components/HierarchicalSearchPicker.tsx`, ~328 lines). The hard parts — portal positioning, search, data normalization — are already built. The multi-select delta is surgical: `value` becomes an array, child buttons toggle with checkmarks, parent shows a count badge, trigger renders chips. Mantine 7 has no native hierarchical picker (its `MultiSelect` supports visual group labels only). External libraries exist (`react-dropdown-tree-select`) but would need full re-styling to match Forest Studio.
-
-**Parent-click behavior — design review note (2026-05-11, not locked):**
-Recommendation is Option A: click parent → selects all children immediately; right pane stays open showing all children checked so the user can uncheck individually. Parent is the fast path, right pane is the granular undo surface. Option C (parent checkbox + hover) rejected: two hit targets per row, indeterminate state weight, touch-hostile. Option B (hover only, no parent select-all) rejected: too many clicks for the primary use case.
-
-Left pane: no checkbox on parent row — just a count chip `Taxes (2/3)` via `<Badge size="xs" color="fsForest" variant="light">` when children are selected. Right pane: inline `<Checkbox size="xs">` per child row, stays open. Trigger: comma-separated labels or `"3 categories"` when count > 2.
-
-**`multiSelect?: boolean` prop** — gate all new behavior behind this flag so existing single-select callers are unaffected.
-
-**Locked interaction model (2026-05-11) — post-implementation iteration expected after testing:**
-
-Parent categories are assignable directly to transactions (e.g. bare "Travel" on a one-off expense). Clicking the parent in the left pane is a "select all children" shortcut — it does **not** auto-include bare parent-tagged transactions. The right pane always shows a `Travel (direct)` row first (representing the parent category ID), unchecked by default. User explicitly checks it to include bare parent transactions.
-
-SQL is a flat `category_id = ANY($checkedIds)` — no subquery, no parent expansion. The picker owns the ID set; the backend just filters on whatever IDs arrive. Count chip on the parent row counts all checked items (children + "direct" if checked): `Travel · 2`, `Travel · 1`, or no chip when nothing is selected under that parent.
-
-### "No active filters" signal
-Filters are already in URL search params. The existing `clearFilters()` function has the right signal implicitly. A `hasActiveFilters` boolean derived from search params drives collapse/expand behavior. The component already does this kind of check for the "Active filters:" label.
-
-### byMerchant normalization
-Normalize merchant strings before bucketing (trim, lowercase, collapse whitespace) so "Netflix.com" and "NETFLIX.COM " don't produce two rows. If `formatMerchant()` doesn't exist, add `normalizeMerchant()` in the aggregate query or service layer. Do this server-side (not client) since aggregation is now server-side.
-
-### Performance
-Single SQL pass per filter change. The aggregate query can reuse the same WHERE clause as the list query. The byMonth bucket is a GROUP BY DATE_TRUNC('month', txn_date). No new indexes needed — the list query's existing indexes cover the filter columns.
+### Summary strip UX (shipped)
+`TransactionAggregateSummary` above the table: collapsible **Summary (N transactions)** header; headline **Net / Inflows / Outflows / Avg / Date span** (no duplicate Count cell); plain `$` on inflows/outflows; `title` tooltips on labels; context row (category/account/month counts when `count > 1`); breakdown tabs from one aggregate response (no refetch on tab change); **By month** tab when **>1** month in data, **last 6** months shown with cap notice. Strip mounts for **server-backed** filters only (`recurringOnly` remains client-side on the current page).
 
 ### Out of scope for CR-177
 - Saved aggregation views / "save this report"
 - Sparklines per category
 - Year-over-year compare
 - Export to CSV
+
+---
+
+## Record cash payments (manual ledger entry)
+
+**Status:** Queued — groom before implementation.
+
+### The problem
+Manual transaction entry requires choosing a **financial account**. Cash spent or received outside linked bank/card accounts has no natural account row today, so users cannot record cash the same way as imported ledger activity.
+
+### Open design directions (pick during grooming)
+- **Placeholder cash account:** one household-level `financial_account` (e.g. institution “Cash”, type aligned with wallet / petty cash) used for all manual cash entries.
+- **First-class cash type:** extend account enrichment (F-1) with an explicit **cash** institution/type path so cash can coexist with other accounts without abusing checking/savings labels.
+- **Reuse “more accounts” work:** if multi-account / institution UX expands, fold cash into that model instead of a one-off.
+
+### Grooming questions
+- One shared household cash wallet vs per-person cash accounts.
+- Net worth / cash-summary treatment (liquid asset vs out-of-band).
+- Whether manual cash should default category, belongs-to, or memo patterns.
+
+**No code yet** — planning record only.
+
+---
+
+## Settings — Add custom institution uses browser prompt
+
+**Status:** Queued bug — straightforward UX alignment; implement when prioritized.
+
+### The problem
+**Settings → Accounts → Institutions → Add institution** calls `window.prompt` for the institution name (`SettingsPage.tsx`). That is an outlier: the rest of the app uses in-app modals, Mantine forms, and `ConfirmDialog`-style flows.
+
+### Expected direction
+Replace the prompt with the same custom modal / inline form pattern used elsewhere on Settings (and related account flows). No product behavior change beyond input UX.
+
+**Files (likely):** `frontend/src/pages/SettingsPage.tsx`
 
 ---
 

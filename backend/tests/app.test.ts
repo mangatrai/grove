@@ -3569,7 +3569,7 @@ describe("cash summary (reports)", () => {
     );
 
     const res = await request(app).get(
-      `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&categoryBreakdown=true&categoryRollup=leaf`
+      `/reports/cash-summary?preset=rolling_30&asOf=${encodeURIComponent(asOf)}&categoryBreakdown=true&categoryRollup=leaf&accountId=${normalAccountId}`
     ).set("authorization", `Bearer ${token}`);
 
     expect(res.status).toBe(200);
@@ -4271,6 +4271,212 @@ describe("member ownership closure", () => {
       .set("authorization", `Bearer ${token}`);
     expect(sum.status).toBe(200);
     expect(sum.body.household.inflows).toBeGreaterThan(0);
+  });
+});
+
+describe("GET /transactions/aggregate (CR-177)", () => {
+  const householdId = "10000000-0000-0000-0000-000000000001";
+  const catGroceries = "30000000-0000-0000-0000-000000000004";
+  const catDining = "30000000-0000-0000-0000-000000000005";
+
+  it("returns 401 without auth", async () => {
+    const res = await request(app).get("/transactions/aggregate");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns well-shaped summary with no filters", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+    const res = await request(app).get("/transactions/aggregate").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(typeof res.body.count).toBe("number");
+    expect(res.body.count).toBeGreaterThanOrEqual(0);
+    expect(typeof res.body.inflows).toBe("number");
+    expect(typeof res.body.outflows).toBe("number");
+    expect(typeof res.body.net).toBe("number");
+    expect(res.body.net).toBeCloseTo(res.body.inflows - res.body.outflows, 5);
+    expect(Array.isArray(res.body.byCategory)).toBe(true);
+    expect(Array.isArray(res.body.byMerchant)).toBe(true);
+    expect(Array.isArray(res.body.byAccount)).toBe(true);
+    expect(Array.isArray(res.body.byMonth)).toBe(true);
+  });
+
+  it("single categoryId aggregate count matches GET /transactions total", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const list = await request(app)
+      .get(`/transactions?categoryId=${catGroceries}&limit=5`)
+      .set("authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const agg = await request(app)
+      .get(`/transactions/aggregate?categoryId=${catGroceries}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(agg.status).toBe(200);
+    expect(agg.body.count).toBe(list.body.total);
+  });
+
+  it("categoryIds union counts distinct rows across categories", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const a = await request(app)
+      .get(`/transactions/aggregate?categoryIds=${catGroceries}&categoryIds=${catDining}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(a.status).toBe(200);
+    const g = await request(app)
+      .get(`/transactions/aggregate?categoryId=${catGroceries}`)
+      .set("authorization", `Bearer ${token}`);
+    const d = await request(app)
+      .get(`/transactions/aggregate?categoryId=${catDining}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(g.status).toBe(200);
+    expect(d.status).toBe(200);
+    expect(a.body.count).toBeLessThanOrEqual(g.body.count + d.body.count);
+    expect(a.body.count).toBeGreaterThanOrEqual(Math.max(g.body.count, d.body.count));
+  });
+
+  it("accountIds restricts aggregate to those accounts", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const both = await request(app)
+      .get(`/transactions/aggregate?accountIds=${SEED_BOA_CHECKING}&accountIds=${SEED_CHASE_CC}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(both.status).toBe(200);
+    const one = await request(app)
+      .get(`/transactions/aggregate?accountId=${SEED_BOA_CHECKING}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(one.status).toBe(200);
+    expect(both.body.count).toBeGreaterThanOrEqual(one.body.count);
+    const chaseOnly = await request(app)
+      .get(`/transactions/aggregate?accountId=${SEED_CHASE_CC}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(chaseOnly.status).toBe(200);
+    expect(both.body.count).toBe(one.body.count + chaseOnly.body.count);
+  });
+
+  it("dedupes repeated belongsTo query params on aggregate", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const single = await request(app)
+      .get("/transactions/aggregate?belongsTo=household")
+      .set("authorization", `Bearer ${token}`);
+    const repeated = await request(app)
+      .get("/transactions/aggregate?belongsTo=household&belongsTo=household")
+      .set("authorization", `Bearer ${token}`);
+    expect(single.status).toBe(200);
+    expect(repeated.status).toBe(200);
+    expect(repeated.body.count).toBe(single.body.count);
+    expect(repeated.body.inflows).toBe(single.body.inflows);
+    expect(repeated.body.outflows).toBe(single.body.outflows);
+  });
+
+  it("byMerchant collapses case and whitespace variants", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const tag = `agg-merchant-${crypto.randomUUID().slice(0, 8)}`;
+    const id1 = crypto.randomUUID();
+    const id2 = crypto.randomUUID();
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, '2026-04-10', -5.25, 'debit', ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(id1, householdId, SEED_BOA_CHECKING, catGroceries, `NETFLIX ${tag}`, fp1, `manual:${tag}-a`);
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, '2026-04-11', -3.00, 'debit', ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(id2, householdId, SEED_BOA_CHECKING, catGroceries, `netflix   ${tag}`, fp2, `manual:${tag}-b`);
+    try {
+      const res = await request(app)
+        .get(`/transactions/aggregate?search=${encodeURIComponent(tag)}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const netflixRows = (res.body.byMerchant as { label: string; value: number }[]).filter((m) =>
+        m.label.includes("netflix")
+      );
+      expect(netflixRows.length).toBe(1);
+      expect(netflixRows[0]!.value).toBeCloseTo(8.25, 5);
+    } finally {
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id IN (?, ?)`).run(id1, id2);
+    }
+  });
+
+  it("byMonth returns ascending YYYY-MM labels across a date range", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const tag = `agg-month-${crypto.randomUUID().slice(0, 8)}`;
+    const id1 = crypto.randomUUID();
+    const id2 = crypto.randomUUID();
+    const fp1 = crypto.randomBytes(32).toString("hex");
+    const fp2 = crypto.randomBytes(32).toString("hex");
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, '2026-01-05', -1, 'debit', ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(id1, householdId, SEED_BOA_CHECKING, catGroceries, tag, fp1, `manual:${tag}-1`);
+    await sqlStmt(
+      `INSERT INTO transaction_canonical (
+         id, household_id, account_id, user_id, category_id, txn_date, amount, direction,
+         merchant, memo, transfer_group_id, fingerprint, source_ref, status
+       ) VALUES (?, ?, ?, NULL, ?, '2026-02-20', -2, 'debit', ?, NULL, NULL, ?, ?, 'posted')`
+    ).run(id2, householdId, SEED_BOA_CHECKING, catGroceries, tag, fp2, `manual:${tag}-2`);
+    try {
+      const res = await request(app)
+        .get(
+          `/transactions/aggregate?search=${encodeURIComponent(tag)}&dateFrom=2026-01-01&dateTo=2026-03-31`
+        )
+        .set("authorization", `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      const months = res.body.byMonth as { label: string; value: number; net: number }[];
+      expect(months.length).toBeGreaterThanOrEqual(2);
+      expect(months[0]!.label).toMatch(/^\d{4}-\d{2}$/);
+      expect(months[1]!.label).toMatch(/^\d{4}-\d{2}$/);
+      expect(months[0]!.label < months[1]!.label).toBe(true);
+    } finally {
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id IN (?, ?)`).run(id1, id2);
+    }
+  });
+
+  it("unknown categoryId yields zero count and empty breakdowns", async () => {
+    const login = await request(app).post("/auth/login").send({
+      email: "owner@example.com",
+      password: "ChangeMe123!"
+    });
+    const token = login.body.token as string;
+    const ghost = crypto.randomUUID();
+    const res = await request(app).get(`/transactions/aggregate?categoryId=${ghost}`).set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.count).toBe(0);
+    expect(res.body.byCategory).toEqual([]);
+    expect(res.body.byMerchant).toEqual([]);
+    expect(res.body.byAccount).toEqual([]);
+    expect(res.body.byMonth).toEqual([]);
   });
 });
 

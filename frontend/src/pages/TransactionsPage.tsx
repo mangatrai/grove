@@ -28,10 +28,20 @@ import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { TransactionAggregateSummary } from "../components/TransactionAggregateSummary";
 import { RecurringTagModal } from "../components/RecurringTagModal";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
+import {
+  appendLedgerListFilters,
+  belongsToPickerValueFromRow,
+  buildBelongsToGroups,
+  formatActiveBelongsToSummary,
+  parseBelongsToPickerValue,
+  resolveActiveBelongsTo,
+  resolveEffectiveIds
+} from "../ledger/ledgerListQuery.js";
 
 type OpenReviewItem = { id: string; type: string; status: "open" | "in_review" };
 
@@ -160,42 +170,6 @@ function findConfirmedOverride(merchant: string | null, overrides: RecurringOver
 }
 
 type OwnerProfileOption = { id: string; label: string };
-type BelongsToFilterValue = "" | "household" | `person:${string}`;
-
-function parseBelongsToFilterValue(value: string): {
-  ownerScope?: "household" | "person";
-  ownerPersonProfileId?: string;
-} {
-  if (value === "household") {
-    return { ownerScope: "household" };
-  }
-  if (value.startsWith("person:")) {
-    const id = value.slice("person:".length);
-    if (id) {
-      return { ownerScope: "person", ownerPersonProfileId: id };
-    }
-  }
-  return {};
-}
-
-function formatBelongsToLabel(label: string): string {
-  return `Household > ${label}`;
-}
-
-function buildBelongsToGroups(ownerProfiles: OwnerProfileOption[]): HierarchicalPickerGroup[] {
-  return [
-    { group: "Household", items: [{ value: "household", label: "Household", searchText: "household" }] },
-    {
-      group: "Members",
-      items: ownerProfiles.map((p) => ({
-        value: `person:${p.id}`,
-        label: formatBelongsToLabel(p.label),
-        displayLabel: p.label,
-        searchText: p.label
-      }))
-    }
-  ];
-}
 
 function buildAccountGroups(accounts: AccountRow[]): HierarchicalPickerGroup[] {
   const byInstitution = new Map<string, AccountRow[]>();
@@ -327,7 +301,11 @@ export function TransactionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
   const fileFilter = searchParams.get("fileId")?.trim() || null;
-  const categoryFilter = searchParams.get("categoryId")?.trim() || null;
+  const effectiveCategoryIds = useMemo(
+    () => resolveEffectiveIds(searchParams, "categoryIds", "categoryId"),
+    [searchParams]
+  );
+  const categoryIdsKey = useMemo(() => effectiveCategoryIds.join("|"), [effectiveCategoryIds]);
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
   const trashTab = searchParams.get("trash") === "true";
@@ -347,15 +325,32 @@ export function TransactionsPage() {
   const amountMaxUrl = searchParams.get("amountMax")?.trim() ?? "";
   const dateFrom = searchParams.get("dateFrom")?.trim() || null;
   const dateTo = searchParams.get("dateTo")?.trim() || null;
-  const accountFilter = searchParams.get("accountId")?.trim() || null;
+  const effectiveAccountIds = useMemo(
+    () => resolveEffectiveIds(searchParams, "accountIds", "accountId"),
+    [searchParams]
+  );
+  const accountIdsKey = useMemo(() => effectiveAccountIds.join("|"), [effectiveAccountIds]);
   const ownerScopeFilter = (searchParams.get("ownerScope")?.trim() as "household" | "person" | null) || null;
-  const ownerPersonProfileFilter = searchParams.get("ownerPersonProfileId")?.trim() || null;
-  const belongsToFilterValue: BelongsToFilterValue =
-    ownerScopeFilter === "person" && ownerPersonProfileFilter
-      ? (`person:${ownerPersonProfileFilter}` as BelongsToFilterValue)
-      : ownerScopeFilter === "household"
-        ? "household"
-        : "";
+  const legacyPersonId = searchParams.get("ownerPersonProfileId")?.trim() || null;
+  const effectivePersonIds = useMemo(
+    () => resolveEffectiveIds(searchParams, "ownerPersonProfileIds", "ownerPersonProfileId"),
+    [searchParams]
+  );
+  const personIdsKey = useMemo(() => effectivePersonIds.join("|"), [effectivePersonIds]);
+  const effectiveBelongsTo = useMemo(
+    () => searchParams.getAll("belongsTo").filter(Boolean),
+    [searchParams]
+  );
+  const activeBelongsTo = useMemo(
+    () =>
+      resolveActiveBelongsTo({
+        belongsTo: effectiveBelongsTo,
+        ownerScope: ownerScopeFilter,
+        legacyPersonId,
+        personIds: effectivePersonIds
+      }),
+    [effectiveBelongsTo, ownerScopeFilter, legacyPersonId, effectivePersonIds]
+  );
   const returnTo = searchParams.get("returnTo")?.trim() || null;
   const fromDashboard = searchParams.get("fromDashboard") === "true";
   const pageLimit = Math.min(Math.max(Number(searchParams.get("limit") || 100), 1), 200);
@@ -366,6 +361,7 @@ export function TransactionsPage() {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
+  const ownerProfilesFetchRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -382,7 +378,7 @@ export function TransactionsPage() {
   const [addAmount, setAddAmount] = useState("");
   const [addMerchant, setAddMerchant] = useState("Manual entry");
   const [addCategoryId, setAddCategoryId] = useState<string | null>(null);
-  const [addBelongsTo, setAddBelongsTo] = useState<BelongsToFilterValue>("");
+  const [addBelongsTo, setAddBelongsTo] = useState("");
   const addFirstFieldRef = useRef<HTMLSelectElement | null>(null);
   const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(() => new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
@@ -426,7 +422,7 @@ export function TransactionsPage() {
   // For members: auto-default Belongs-To in the manual-entry form to their own profile.
   useEffect(() => {
     if (currentRole === "member" && currentPersonProfileId) {
-      setAddBelongsTo(`person:${currentPersonProfileId}` as BelongsToFilterValue);
+      setAddBelongsTo(currentPersonProfileId);
     }
   }, [currentRole, currentPersonProfileId]);
 
@@ -435,10 +431,15 @@ export function TransactionsPage() {
   useEffect(() => {
     if (currentRole === "member" && currentPersonProfileId) {
       setSearchParams((prev) => {
-        if (prev.get("ownerPersonProfileId")) return prev;
+        if (
+          prev.getAll("belongsTo").length > 0 ||
+          prev.get("ownerPersonProfileId") ||
+          prev.get("ownerScope")
+        ) {
+          return prev;
+        }
         const next = new URLSearchParams(prev);
-        next.set("ownerScope", "person");
-        next.set("ownerPersonProfileId", currentPersonProfileId);
+        next.append("belongsTo", currentPersonProfileId);
         return next;
       }, { replace: true });
     }
@@ -480,60 +481,55 @@ export function TransactionsPage() {
     return () => window.clearTimeout(t);
   }, [searchDraft, setSearchParams]);
 
+  const ledgerFilterState = useMemo(
+    () => ({
+      sessionFilter,
+      fileFilter,
+      effectiveCategoryIds,
+      uncategorizedOnly,
+      needsReviewTab,
+      trashTab,
+      resolutionTypes,
+      searchFromUrl,
+      dateFrom,
+      dateTo,
+      effectiveAccountIds,
+      effectiveBelongsTo: activeBelongsTo,
+      ownerScopeFilter,
+      effectivePersonIds,
+      amountMinUrl,
+      amountMaxUrl
+    }),
+    [
+      sessionFilter,
+      fileFilter,
+      effectiveCategoryIds,
+      uncategorizedOnly,
+      needsReviewTab,
+      trashTab,
+      resolutionTypesKey,
+      searchFromUrl,
+      dateFrom,
+      dateTo,
+      effectiveAccountIds,
+      activeBelongsTo,
+      ownerScopeFilter,
+      effectivePersonIds,
+      amountMinUrl,
+      amountMaxUrl
+    ]
+  );
+
+  const aggregateFilterQs = useMemo(() => {
+    const qs = new URLSearchParams();
+    appendLedgerListFilters(qs, ledgerFilterState);
+    return qs.toString();
+  }, [ledgerFilterState]);
+
   const load = useCallback(async () => {
     setError(null);
     const qs = new URLSearchParams({ limit: String(pageLimit), offset: String(pageOffset) });
-    if (sessionFilter) {
-      qs.set("sessionId", sessionFilter);
-    }
-    if (fileFilter) {
-      qs.set("fileId", fileFilter);
-    }
-    if (categoryFilter) {
-      qs.set("categoryId", categoryFilter);
-    }
-    if (uncategorizedOnly) {
-      qs.set("uncategorizedOnly", "true");
-    }
-    if (needsReviewTab) {
-      qs.set("needsReview", "true");
-    }
-    if (trashTab) {
-      qs.set("trashOnly", "true");
-    }
-    for (const rt of resolutionTypes) {
-      qs.append("resolutionType", rt);
-    }
-    if (searchFromUrl) {
-      qs.set("search", searchFromUrl);
-    }
-    if (dateFrom) {
-      qs.set("dateFrom", dateFrom);
-    }
-    if (dateTo) {
-      qs.set("dateTo", dateTo);
-    }
-    if (accountFilter) {
-      qs.set("accountId", accountFilter);
-    }
-    if (ownerScopeFilter) {
-      qs.set("ownerScope", ownerScopeFilter);
-    }
-    if (ownerPersonProfileFilter) {
-      qs.set("ownerPersonProfileId", ownerPersonProfileFilter);
-    }
-    if (amountMinUrl !== "") {
-      const n = Number(amountMinUrl);
-      if (Number.isFinite(n)) {
-        qs.set("amountMin", String(n));
-      }
-    }
-    if (amountMaxUrl !== "") {
-      const n = Number(amountMaxUrl);
-      if (Number.isFinite(n)) {
-        qs.set("amountMax", String(n));
-      }
-    }
+    appendLedgerListFilters(qs, ledgerFilterState);
     const [txRes, catRes, acctRes, ovRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
       apiJson<{ categories: CategoryOption[] }>("/categories"),
@@ -544,7 +540,8 @@ export function TransactionsPage() {
     setCategories(catRes.categories);
     setAccounts(acctRes.accounts);
     setRecurringOverrides(ovRes.ok ? ovRes.data : []);
-    if (ownerProfiles.length === 0) {
+    if (!ownerProfilesFetchRef.current) {
+      ownerProfilesFetchRef.current = true;
       try {
         const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
           "/household/members"
@@ -564,26 +561,7 @@ export function TransactionsPage() {
         }
       }
     }
-  }, [
-    sessionFilter,
-    fileFilter,
-    categoryFilter,
-    uncategorizedOnly,
-    needsReviewTab,
-    trashTab,
-    resolutionTypesKey,
-    searchFromUrl,
-    dateFrom,
-    dateTo,
-    accountFilter,
-    ownerScopeFilter,
-    ownerPersonProfileFilter,
-    amountMinUrl,
-    amountMaxUrl,
-    pageLimit,
-    pageOffset,
-    ownerProfiles.length
-  ]);
+  }, [ledgerFilterState, pageLimit, pageOffset]);
 
   const refreshCategories = useCallback(async () => {
     try {
@@ -637,12 +615,12 @@ export function TransactionsPage() {
     resolutionTypesKey,
     sessionFilter,
     fileFilter,
-    categoryFilter,
+    categoryIdsKey,
     uncategorizedOnly,
     searchFromUrl,
     dateFrom,
     dateTo,
-    accountFilter,
+    accountIdsKey,
     amountMinUrl,
     amountMaxUrl,
     pageOffset,
@@ -659,12 +637,12 @@ export function TransactionsPage() {
     resolutionTypesKey,
     sessionFilter,
     fileFilter,
-    categoryFilter,
+    categoryIdsKey,
     uncategorizedOnly,
     searchFromUrl,
     dateFrom,
     dateTo,
-    accountFilter,
+    accountIdsKey,
     amountMinUrl,
     amountMaxUrl,
     pageOffset,
@@ -1154,17 +1132,26 @@ export function TransactionsPage() {
     }
   }
 
-  const categoryName = useMemo(
-    () => (categoryFilter ? categories.find((c) => c.id === categoryFilter)?.name ?? categoryFilter : null),
-    [categories, categoryFilter]
-  );
-  const accountName = useMemo(() => {
-    if (!accountFilter) {
+  const categoryName = useMemo(() => {
+    if (effectiveCategoryIds.length === 0) {
       return null;
     }
-    const account = accounts.find((a) => a.id === accountFilter);
-    return account ? formatAccountForSelect(account) : accountFilter;
-  }, [accounts, accountFilter]);
+    if (effectiveCategoryIds.length === 1) {
+      const id = effectiveCategoryIds[0]!;
+      return categories.find((c) => c.id === id)?.name ?? id;
+    }
+    return `${effectiveCategoryIds.length} categories`;
+  }, [categories, effectiveCategoryIds]);
+  const accountName = useMemo(() => {
+    if (effectiveAccountIds.length === 0) {
+      return null;
+    }
+    if (effectiveAccountIds.length === 1) {
+      const account = accounts.find((a) => a.id === effectiveAccountIds[0]);
+      return account ? formatAccountForSelect(account) : effectiveAccountIds[0]!;
+    }
+    return `${effectiveAccountIds.length} accounts`;
+  }, [accounts, effectiveAccountIds]);
 
   const accountGroups = useMemo(() => buildAccountGroups(accounts), [accounts]);
   const belongsToGroups = useMemo(() => buildBelongsToGroups(ownerProfiles), [ownerProfiles]);
@@ -1178,22 +1165,22 @@ export function TransactionsPage() {
     []
   );
 
-  const hasLedgerFilters = Boolean(
-    categoryFilter ||
+  const hasServerBackedLedgerFilters = Boolean(
+    effectiveCategoryIds.length > 0 ||
       uncategorizedOnly ||
       dateFrom ||
       dateTo ||
-      accountFilter ||
+      effectiveAccountIds.length > 0 ||
+      sessionFilter ||
       fileFilter ||
-      ownerScopeFilter ||
-      ownerPersonProfileFilter ||
+      activeBelongsTo.length > 0 ||
       needsReviewTab ||
       resolutionTypes.length > 0 ||
       searchFromUrl ||
       amountMinUrl !== "" ||
-      amountMaxUrl !== "" ||
-      recurringOnlyFilter
+      amountMaxUrl !== ""
   );
+  const hasLedgerFilters = hasServerBackedLedgerFilters || recurringOnlyFilter;
 
   const canPageBack = pageOffset > 0;
   const canPageForward = data ? pageOffset + data.transactions.length < data.total : false;
@@ -1274,7 +1261,7 @@ export function TransactionsPage() {
   }
 
   function openAddModal() {
-    setAddAccountId(accountFilter ?? accounts[0]?.id ?? "");
+    setAddAccountId(effectiveAccountIds[0] ?? accounts[0]?.id ?? "");
     setAddTxnDate(localDateStr());
     setAddDirection("debit");
     setAddAmount("");
@@ -1294,7 +1281,7 @@ export function TransactionsPage() {
       setAddSaving(false);
       return;
     }
-    const belongsTo = parseBelongsToFilterValue(addBelongsTo);
+    const belongsTo = parseBelongsToPickerValue(addBelongsTo);
     if (!belongsTo.ownerScope) {
       setAddError("Choose Belongs-to.");
       setAddSaving(false);
@@ -1333,8 +1320,6 @@ export function TransactionsPage() {
   if (!token) {
     return <Navigate to="/" replace />;
   }
-
-  const categorySelectValue = uncategorizedOnly ? "__uncat__" : categoryFilter ?? "";
 
   return (
     <Stack gap="md">
@@ -1417,17 +1402,20 @@ export function TransactionsPage() {
           <Box>
             <Text size="sm" mb={4}>Account</Text>
             <HierarchicalSearchPicker
-              value={accountFilter ?? null}
-              onChange={(v) =>
+              multiSelect
+              multiValue={effectiveAccountIds}
+              onMultiChange={(ids) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
-                  if (!v) n.delete("accountId");
-                  else n.set("accountId", v);
+                  n.delete("accountId");
+                  n.delete("accountIds");
+                  for (const id of ids) n.append("accountIds", id);
                 })
               }
               groups={accountGroups}
               placeholder="All accounts"
               ariaLabel="Filter by account"
+              multiSelectLabel="accounts"
               clearable
             />
           </Box>
@@ -1460,40 +1448,50 @@ export function TransactionsPage() {
           <Box>
             <Text size="sm" mb={4}>Belongs-to</Text>
             <HierarchicalSearchPicker
-              value={belongsToFilterValue || null}
-              onChange={(v) =>
+              multiSelect
+              multiValue={activeBelongsTo}
+              onMultiChange={(ids) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
-                  const parsed = parseBelongsToFilterValue(v ?? "");
+                  n.delete("belongsTo");
                   n.delete("ownerScope");
                   n.delete("ownerPersonProfileId");
-                  if (parsed.ownerScope) n.set("ownerScope", parsed.ownerScope);
-                  if (parsed.ownerPersonProfileId) n.set("ownerPersonProfileId", parsed.ownerPersonProfileId);
+                  n.delete("ownerPersonProfileIds");
+                  for (const id of ids) n.append("belongsTo", id);
                 })
               }
               groups={belongsToGroups}
               placeholder="All household activity"
               ariaLabel="Filter by belongs-to"
+              multiSelectLabel="selections"
               clearable
             />
           </Box>
           <Box>
             <Text size="sm" mb={4}>Category</Text>
             <HierarchicalSearchPicker
-              value={categorySelectValue || "__any__"}
-              onChange={(v) => {
-                const next = v ?? "__any__";
+              multiSelect
+              multiValue={effectiveCategoryIds}
+              onMultiChange={(ids) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
                   n.delete("categoryId");
+                  n.delete("categoryIds");
                   n.delete("uncategorizedOnly");
-                  if (next === "__uncat__") n.set("uncategorizedOnly", "true");
-                  else if (next && next !== "__any__") n.set("categoryId", next);
-                });
-              }}
+                  if (ids.includes("__uncat__")) {
+                    n.set("uncategorizedOnly", "true");
+                    return;
+                  }
+                  for (const id of ids.filter((x) => x !== "__any__" && x !== "__uncat__")) {
+                    n.append("categoryIds", id);
+                  }
+                })
+              }
               groups={categoryGroups}
-              placeholder="Any"
+              placeholder="All categories"
               ariaLabel="Filter by category"
+              multiSelectLabel="categories"
+              clearable
             />
           </Box>
         </SimpleGrid>
@@ -1611,18 +1609,11 @@ export function TransactionsPage() {
                 [account: <Code>{accountName}</Code>]
               </>
             ) : null}
-            {ownerScopeFilter ? (
+            {activeBelongsTo.length > 0 ? (
               <>
                 {" "}
                 [belongs-to:{" "}
-                <Code>{lookupLabel(belongsToGroups, ownerScopeFilter) ?? ownerScopeFilter}</Code>]
-              </>
-            ) : null}
-            {ownerPersonProfileFilter ? (
-              <>
-                {" "}
-                [belongs-to:{" "}
-                <Code>{lookupLabel(belongsToGroups, `person:${ownerPersonProfileFilter}`) ?? ownerPersonProfileFilter}</Code>]
+                <Code>{formatActiveBelongsToSummary(activeBelongsTo, belongsToGroups)}</Code>]
               </>
             ) : null}
             {amountMinUrl !== "" ? (
@@ -1819,6 +1810,10 @@ export function TransactionsPage() {
             </Button>
           </Group>
         ) : null}
+        <TransactionAggregateSummary
+          filterQs={aggregateFilterQs}
+          hasActiveFilters={hasServerBackedLedgerFilters}
+        />
         {error ? <Alert color="red">{error}</Alert> : null}
         {loading ? <Text c="dimmed">Loading…</Text> : null}
         {!loading && data ? (
@@ -2077,9 +2072,9 @@ export function TransactionsPage() {
                             {!trashTab ? (
                               <Table.Td miw="12rem">
                                 <HierarchicalSearchPicker
-                                  value={t.ownerScope === "household" ? "household" : (`person:${t.ownerPersonProfileId ?? ""}` as const)}
+                                  value={belongsToPickerValueFromRow(t.ownerScope, t.ownerPersonProfileId)}
                                   onChange={(v) => {
-                                    const parsed = parseBelongsToFilterValue(v ?? "household");
+                                    const parsed = parseBelongsToPickerValue(v ?? "household");
                                     if (parsed.ownerScope === "household") {
                                       void updateCategory(t.id, t.categoryId, "household", null);
                                     } else if (parsed.ownerPersonProfileId) {
@@ -2442,7 +2437,7 @@ export function TransactionsPage() {
             <Text size="sm" mb={6}>Belongs-to</Text>
             <HierarchicalSearchPicker
               value={addBelongsTo || null}
-              onChange={(v) => setAddBelongsTo((v ?? "") as BelongsToFilterValue)}
+              onChange={(v) => setAddBelongsTo(v ?? "")}
               groups={belongsToGroups}
               placeholder="Choose belongs-to..."
               ariaLabel="Belongs-to for new transaction"
