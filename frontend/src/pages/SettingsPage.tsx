@@ -412,6 +412,10 @@ export function SettingsPage() {
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [institutionModalOpen, setInstitutionModalOpen] = useState(false);
+  const [institutionModalName, setInstitutionModalName] = useState("");
+  const [institutionModalSaving, setInstitutionModalSaving] = useState(false);
+  const [institutionModalError, setInstitutionModalError] = useState<string | null>(null);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [recurringLoading, setRecurringLoading] = useState(false);
   const [recurringError, setRecurringError] = useState<string | null>(null);
@@ -653,24 +657,32 @@ export function SettingsPage() {
       .finally(() => setRecurringLoading(false));
   }, [token, tab]);
 
-  async function addCustomInstitutionName() {
-    if (!token) {
+  function openAddInstitutionModal() {
+    setInstitutionModalName("");
+    setInstitutionModalError(null);
+    setInstitutionModalOpen(true);
+  }
+
+  async function submitCustomInstitution() {
+    const name = institutionModalName.trim();
+    if (!name) {
+      setInstitutionModalError("Institution name is required.");
       return;
     }
-    const name = window.prompt("Institution name (saved for everyone in your household):");
-    if (!name?.trim()) {
-      return;
-    }
-    setAccountError(null);
+    setInstitutionModalSaving(true);
+    setInstitutionModalError(null);
     try {
       await apiJson("/imports/institutions/custom", {
         method: "POST",
-        body: JSON.stringify({ displayName: name.trim() })
+        body: JSON.stringify({ displayName: name })
       });
       await loadInstitutions();
-      setAccountDraft((d) => ({ ...d, institution: name.trim() }));
+      setAccountDraft((d) => ({ ...d, institution: name }));
+      setInstitutionModalOpen(false);
     } catch (e: unknown) {
-      setAccountError(e instanceof Error ? e.message : "Could not add institution");
+      setInstitutionModalError(e instanceof Error ? e.message : "Could not add institution");
+    } finally {
+      setInstitutionModalSaving(false);
     }
   }
 
@@ -1802,7 +1814,7 @@ export function SettingsPage() {
                         type="button"
                         variant="default"
                         disabled={savingAccount}
-                        onClick={() => void addCustomInstitutionName()}
+                        onClick={() => openAddInstitutionModal()}
                       >
                         Add institution name…
                       </Button>
@@ -2002,6 +2014,41 @@ export function SettingsPage() {
                   })}
               </Table.Tbody>
             </Table>
+            <Modal
+              opened={institutionModalOpen}
+              onClose={() => setInstitutionModalOpen(false)}
+              title="Add institution"
+              size="sm"
+            >
+              <Stack gap="md">
+                <TextInput
+                  label="Institution name"
+                  description="Saved for everyone in your household."
+                  placeholder="e.g. First National Bank"
+                  value={institutionModalName}
+                  onChange={(e) => setInstitutionModalName(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void submitCustomInstitution(); }}
+                  disabled={institutionModalSaving}
+                  data-autofocus
+                />
+                {institutionModalError ? <Alert color="red">{institutionModalError}</Alert> : null}
+                <Group justify="flex-end">
+                  <Button
+                    variant="default"
+                    disabled={institutionModalSaving}
+                    onClick={() => setInstitutionModalOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    loading={institutionModalSaving}
+                    onClick={() => void submitCustomInstitution()}
+                  >
+                    Add
+                  </Button>
+                </Group>
+              </Stack>
+            </Modal>
           </Stack>
         ) : null}
 
