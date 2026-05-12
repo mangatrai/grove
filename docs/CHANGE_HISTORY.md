@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-167b (2026-05-12): CurrencyInput — custom cash-register implementation
+
+**Why:** `react-currency-input-field` v4 does not have a right-to-left digit-shifting (cash register) mode — `fixedDecimalLength` only pads decimals on blur. Controlled-value round-trips also reset the library's internal cursor state on every keystroke, preventing any digit-shift behavior.
+
+**What changed:**
+- `frontend/src/components/CurrencyInput.tsx` — replaced `react-currency-input-field` with a custom implementation: stores value as integer cents, intercepts `onKeyDown` for digit/backspace/delete, uses `Intl.NumberFormat` for display. Passes navigation/modifier keys through. Blocks paste and cut. No upper limit on value.
+
+---
+
 ## CR-183 (2026-05-12): Cash On Hand account type (F-11)
 
 **Why:** Users keep physical cash (e.g. a $1,000 home emergency fund) with no bank account to track it against. Manual ledger entries required an account; there was no suitable type for physical cash.
