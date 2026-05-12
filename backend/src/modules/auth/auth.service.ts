@@ -206,6 +206,16 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
+/** Delete used or expired password reset tokens. Safe to call repeatedly. */
+export async function purgeStalePasswordResetTokens(): Promise<void> {
+  await qExec(
+    `
+    DELETE FROM password_reset_token
+    WHERE used_at IS NOT NULL OR expires_at < NOW()
+    `
+  );
+}
+
 export async function createPasswordResetToken(userId: string, ttlHours: number): Promise<string> {
   await qExec(
     `

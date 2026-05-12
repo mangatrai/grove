@@ -727,6 +727,11 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
               {restoreMessage && previewSource === "device" ? (
                 <Alert color={restoreSuccess ? "green" : "red"}>{restoreMessage}</Alert>
               ) : null}
+              {restoreSuccess ? (
+                <Alert color="yellow" variant="light">
+                  Google Drive connection has been reset. Go to Settings → Data → Backup to reconnect.
+                </Alert>
+              ) : null}
               <Group align="flex-end" wrap="nowrap">
                 <FileInput
                   label="Backup .hfb file"
@@ -1078,6 +1083,11 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
             </Alert>
             {restoreMessage && previewSource === "device" ? (
               <Alert color={restoreSuccess ? "green" : "red"}>{restoreMessage}</Alert>
+            ) : null}
+            {restoreSuccess ? (
+              <Alert color="yellow" variant="light">
+                Google Drive connection has been reset. Go to Settings → Data → Backup to reconnect.
+              </Alert>
             ) : null}
             <Group justify="flex-end">
               <Button variant="default" onClick={closePreviewModal}>Cancel</Button>

@@ -6,7 +6,6 @@ import {
   Box,
   Button,
   Group,
-  NumberInput,
   Paper,
   Progress,
   Select,
@@ -18,6 +17,7 @@ import {
 } from "@mantine/core";
 
 import { apiJson, useAuthToken } from "../api";
+import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -217,16 +217,12 @@ function ProgressBar({ percent }: { percent: number }) {
 // ── Amount input ──────────────────────────────────────────────────────────────
 
 function AmountInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const parsed = parseFloat(value);
   return (
-    <NumberInput
-      value={parseFloat(value) || 0}
-      onChange={(v) => onChange(String(typeof v === "number" ? v : parseFloat(v as string) || 0))}
-      min={0}
-      step={1}
-      leftSection={<Text size="xs">$</Text>}
-      size="xs"
-      styles={{ input: { textAlign: "right" } }}
-      hideControls
+    <CurrencyInput
+      value={Number.isFinite(parsed) ? parsed : undefined}
+      onChange={(v) => onChange(v == null ? "" : String(v))}
+      placeholder="0.00"
     />
   );
 }

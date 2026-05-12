@@ -37,6 +37,7 @@ import {
 
 import { apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { FS_CLAY, FS_FOREST, FS_SAGE } from "../theme/chartPalette";
@@ -1051,7 +1052,7 @@ export function NetWorthPage() {
                         <Table.Td>
                           {isEditing ? (
                             <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow} onClick={(e) => e.stopPropagation()}>
-                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                              <CurrencyInput size="xs" style={{ width: "7rem" }} value={editAmount === "" ? undefined : Number(String(editAmount).replace(/,/g, ""))} onChange={(v) => setEditAmount(v == null ? "" : String(v))} aria-label="Balance amount" />
                               <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
                               <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
                               <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>
@@ -1304,7 +1305,7 @@ export function NetWorthPage() {
                         <Table.Td>
                           {isEditing ? (
                             <Group gap={4} wrap="wrap" align="center" component="form" onSubmit={saveRow} onClick={(e) => e.stopPropagation()}>
-                              <TextInput size="xs" style={{ width: "7rem" }} inputMode="decimal" value={editAmount} onChange={(ev) => setEditAmount(ev.target.value)} aria-label="Balance amount" />
+                              <CurrencyInput size="xs" style={{ width: "7rem" }} value={editAmount === "" ? undefined : Number(String(editAmount).replace(/,/g, ""))} onChange={(v) => setEditAmount(v == null ? "" : String(v))} aria-label="Balance amount" />
                               <TextInput type="date" size="xs" value={editAsOf} onChange={(ev) => setEditAsOf(ev.target.value)} aria-label="As-of date" />
                               <Button type="submit" size="xs" disabled={rowSaving}>Save</Button>
                               <Button type="button" variant="default" size="xs" onClick={cancelEdit}>Cancel</Button>

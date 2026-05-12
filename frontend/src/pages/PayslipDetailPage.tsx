@@ -30,6 +30,7 @@ import type {
   ValidationWarning
 } from "../payslip/types";
 import { SECTION_LABELS, SECTION_ORDER } from "../payslip/types";
+import { formatUsd } from "../utils/format";
 
 export type { PayslipSnapshotDetail };
 
@@ -99,7 +100,7 @@ function depositWindowLink(accountId: string, payDate: string): string {
 
 function formatMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  return `$${n.toFixed(2)}`;
+  return `$${formatUsd(n)}`;
 }
 
 function parseAmountInput(s: string): number | null {

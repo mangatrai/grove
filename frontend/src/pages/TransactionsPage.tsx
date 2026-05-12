@@ -26,6 +26,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { TransactionAggregateSummary } from "../components/TransactionAggregateSummary";
@@ -2422,13 +2423,10 @@ export function TransactionsPage() {
                 </Group>
               </Radio.Group>
             </Box>
-            <TextInput
+            <CurrencyInput
               label="Amount"
-              type="number"
-              step="any"
-              min="0"
-              value={addAmount}
-              onChange={(e) => setAddAmount(e.target.value)}
+              value={addAmount === "" ? undefined : Number(addAmount)}
+              onChange={(v) => setAddAmount(v == null ? "" : String(v))}
               placeholder="42.50"
             />
           </SimpleGrid>

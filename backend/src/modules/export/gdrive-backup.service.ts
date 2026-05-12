@@ -145,6 +145,10 @@ async function listHfbFilesInFolder(
   pageSize: number,
   opts?: ListHfbOptions
 ): Promise<DriveBackupEntry[]> {
+  if (!/^[\w-]+$/.test(folderId)) {
+    throw new Error(`Invalid folderId: ${folderId}`);
+  }
+
   const oauth2Client = buildOAuth2Client(refreshToken);
   const drive = google.drive({ version: "v3", auth: oauth2Client });
   const all: DriveBackupEntry[] = [];

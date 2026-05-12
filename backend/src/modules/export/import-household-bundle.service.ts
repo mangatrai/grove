@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -237,10 +238,12 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
   )) as { storage_path: string; requested_by_user_id: string } | undefined;
   if (!row?.storage_path) return;
 
+  const storagePath = row.storage_path;
+
   await qExec(`UPDATE import_job SET status = 'running' WHERE id = ?`, jobId);
 
   try {
-    const rawBuffer = fs.readFileSync(row.storage_path);
+    const rawBuffer = fs.readFileSync(storagePath);
     let zipBuffer: Buffer;
     if (isEncryptedBackup(rawBuffer)) {
       if (!env.BACKUP_ENCRYPTION_KEY) {
@@ -435,5 +438,11 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
     const msg = err instanceof Error ? err.message : String(err);
     await qExec(`UPDATE import_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);
     log.error(`Import job ${jobId} failed: ${msg}`);
+  } finally {
+    try {
+      await fsp.unlink(storagePath);
+    } catch {
+      /* ignore */
+    }
   }
 }

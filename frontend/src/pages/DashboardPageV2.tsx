@@ -36,6 +36,7 @@ import {
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
+import { formatUsd } from "../utils/format";
 
 type CashSummaryResponse = {
   range: { start: string; end: string; label: string };
@@ -925,7 +926,7 @@ export function DashboardPageV2() {
                         </Text>
                       </Group>
                       <Group gap={8} wrap="nowrap">
-                        <Text size="sm">${item.medianAmount.toFixed(2)}/mo</Text>
+                        <Text size="sm">${formatUsd(item.medianAmount)}/mo</Text>
                         {!isConfirmed ? (
                           <Button
                             type="button"

@@ -9,6 +9,7 @@ import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
 import type { PayslipSnapshotDetail } from "../payslip/types";
+import { formatUsd } from "../utils/format";
 
 type ListResponse = {
   total: number;
@@ -33,7 +34,7 @@ function formatMoney(n: number | null): string {
   if (n == null || !Number.isFinite(n)) {
     return "—";
   }
-  return `$${n.toFixed(2)}`;
+  return `$${formatUsd(n)}`;
 }
 
 export function PayslipsPage() {

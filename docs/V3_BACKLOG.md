@@ -4,6 +4,18 @@ This document tracks features, design decisions, and open questions for the v3 r
 
 ---
 
+## P3 maintenance + UX polish (delivered I-4–I-6, UX-166/UX-167, 2026-05-12)
+
+- **I-4:** Hourly purge of used/expired password reset tokens on the export cleanup schedule.
+- **I-5:** Restore staging `.hfb` deleted after import jobs; successful restore warns to reconnect Google Drive.
+- **I-6:** Drive `folderId` validated before API `q` interpolation.
+- **UX-166:** Shared `formatUsd` for comma-separated dollar display in payslips, dashboard, import reconciliation, and related views.
+- **UX-167:** `CurrencyInput` cash-register dollar fields on net worth, settings, budget, payslip manual, and manual transaction entry.
+
+Tracked in `docs/CHANGE_HISTORY.md` and `docs/V3_PLAN.md`.
+
+---
+
 ## Forest Studio UI polish (delivered CR-174, 2026-05-10)
 
 Shipped as a **non-functional** visual pass: extended `--fs-*` tokens, terracotta instead of pure red for money-negative / over-budget (red kept for delete/errors), earthy Recharts fills, sidebar section labels **Daily / Reports / Setup**, warm-cream active link state replacing mint teal on chrome + guest landing. Tracked in `docs/CHANGE_HISTORY.md` **CR-174 / UX-174**.
