@@ -20,7 +20,7 @@ export function CurrencyInput({
   onChange,
   label,
   description,
-  placeholder,
+  placeholder = "0.00",
   disabled,
   error,
   size,
@@ -35,17 +35,16 @@ export function CurrencyInput({
         style={style}
         aria-label={ariaLabel}
         decimalsLimit={2}
-        fixedDecimalLength={2}
         disableAbbreviations
         placeholder={placeholder}
         disabled={disabled}
-        value={value === undefined ? "" : value}
+        value={value === undefined ? "" : value.toFixed(2)}
         onValueChange={(next) => {
           if (next == null || next === "") {
             onChange(undefined);
             return;
           }
-          const parsed = Number(next);
+          const parsed = parseFloat(next);
           onChange(Number.isFinite(parsed) ? parsed : undefined);
         }}
       />

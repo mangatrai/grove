@@ -28,7 +28,7 @@ import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
-import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { TransactionAggregateSummary } from "../components/TransactionAggregateSummary";
 import { RecurringTagModal } from "../components/RecurringTagModal";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
@@ -337,7 +337,7 @@ export function TransactionsPage() {
     () => resolveEffectiveIds(searchParams, "ownerPersonProfileIds", "ownerPersonProfileId"),
     [searchParams]
   );
-  const personIdsKey = useMemo(() => effectivePersonIds.join("|"), [effectivePersonIds]);
+
   const effectiveBelongsTo = useMemo(
     () => searchParams.getAll("belongsTo").filter(Boolean),
     [searchParams]
