@@ -18,13 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## FIX-178 (2026-05-13): Drop unused `react-currency-input-field`; narrow Knip to supply-chain signals
+## FIX-178 (2026-05-13): Drop unused `react-currency-input-field`
 
-**Why:** `CurrencyInput` is implemented with Mantine only; the extra package was orphaned. Default Knip output also listed many intentional module exports and stale files, which read like a mandate to delete working code.
+**Why:** `CurrencyInput` is implemented with Mantine only; the npm package was never imported.
 
 **Changed:**
 - `frontend/package.json` — removed `react-currency-input-field`
-- `knip.json` — top-level `exclude` for files / exports / types / namespace and duplicate-member rules so `npm run knip` focuses on dependencies, devDependencies, unlisted imports, binaries, and unresolved imports (still useful for monorepo hygiene)
+- `package-lock.json` — lockfile updated accordingly
+
+**Correction (same day):** A brief `knip.json` top-level `exclude` was added in the same commit to reduce Knip noise; that was **reverted** immediately after — maintainers want `npm run knip` to keep reporting unused files, exports/types, and duplicates for intentional dead-code review, not only dependency hygiene.
 
 ---
 
