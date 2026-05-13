@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-178 (2026-05-13): Drop unused `react-currency-input-field`; narrow Knip to supply-chain signals
+
+**Why:** `CurrencyInput` is implemented with Mantine only; the extra package was orphaned. Default Knip output also listed many intentional module exports and stale files, which read like a mandate to delete working code.
+
+**Changed:**
+- `frontend/package.json` — removed `react-currency-input-field`
+- `knip.json` — top-level `exclude` for files / exports / types / namespace and duplicate-member rules so `npm run knip` focuses on dependencies, devDependencies, unlisted imports, binaries, and unresolved imports (still useful for monorepo hygiene)
+
+---
+
 ## CR-176 (2026-05-13): Add Knip config for the npm workspaces monorepo
 
 **Why:** Running Knip without config treated Vitest suites, root `scripts/*.mjs`, and backend one-off tooling as unreachable, producing a noisy and misleading dead-code report.

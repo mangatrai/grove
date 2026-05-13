@@ -1,5 +1,15 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "exclude": [
+    "files",
+    "exports",
+    "types",
+    "nsExports",
+    "nsTypes",
+    "duplicates",
+    "enumMembers",
+    "namespaceMembers"
+  ],
   "workspaces": {
     ".": {
       "entry": ["scripts/**/*.mjs"],
