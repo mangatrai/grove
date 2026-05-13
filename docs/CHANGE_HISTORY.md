@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-176 (2026-05-13): Add Knip config for the npm workspaces monorepo
+
+**Why:** Running Knip without config treated Vitest suites, root `scripts/*.mjs`, and backend one-off tooling as unreachable, producing a noisy and misleading dead-code report.
+
+**Changed:**
+- `knip.json` — per-workspace `project` globs; **Vite** + **Vitest** plugins on `frontend`; **Vitest** on `backend` so entries implied by `vite.config.ts` / `vitest.config.ts` / `package.json` scripts are not duplicated; explicit backend entries only for `tests/**/*.test.js` (outside Vitest `include`) and `backend/scripts/**/*.mjs` (manual one-offs); root workspace `scripts/**/*.mjs` with `ignoreDependencies` for `better-sqlite3` / `dotenv` still imported by legacy root scripts (Postgres-only stack).
+- `package.json` (root) — `knip` script and `knip` devDependency; `package-lock.json` must list `knip` so `npm run knip` resolves `node_modules/.bin/knip` (fresh clones need `npm install`).
+
+---
+
 ## CR-175 (2026-05-12): Rename "Household Finance" → "Grove" in package metadata and test fixtures
 
 **Why:** App was rebranded to Grove; frontend/backend code was already updated but package.json names, README title, and SMTP_FROM test fixture strings still carried the old name.

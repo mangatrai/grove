@@ -30,12 +30,14 @@
     "test": "npm run test -w backend && npm run test -w frontend",
     "lint": "npm run lint -w backend && npm run lint -w frontend",
     "import:purge": "node scripts/purge-import-staging.mjs",
-    "icons:gen": "node scripts/gen-icons.mjs"
+    "icons:gen": "node scripts/gen-icons.mjs",
+    "knip": "knip"
   },
   "dependencies": {
     "postgres": "^3.4.8"
   },
   "devDependencies": {
-    "@resvg/resvg-js": "^2.6.2"
+    "@resvg/resvg-js": "^2.6.2",
+    "knip": "^6.13.1"
   }
 }
