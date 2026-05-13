@@ -1,4 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
+import { GroveMark } from "../components/GroveMark";
 import {
   IconHome,
   IconChartBar,
@@ -92,9 +93,10 @@ export function AppSidebar({
               to="/"
               className="app-sidebar__brand"
               onClick={onCloseMobile}
-              title="Household Finance"
+              title="Grove"
             >
-              <span className="app-sidebar__brand-text">Household Finance</span>
+              <GroveMark size={20} color="#f0e9d8" />
+              <span className="app-sidebar__brand-text">Grove</span>
             </Link>
           ) : null}
         </div>

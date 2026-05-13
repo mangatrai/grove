@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-168 (2026-05-12): Grove — product name and PWA chrome
+
+**Why:** Rebrand the user-visible app name to Grove and align tab/install/manifest chrome with the new mark and forest palette.
+
+**What changed:**
+- `frontend/index.html` — document title, apple web app title, theme color, favicon link.
+- `frontend/public/manifest.json` — `name` / `short_name` / theme and background colors.
+- `frontend/public/favicon.png`, `frontend/public/icons/icon-192.png`, `frontend/public/icons/icon-512.png` — regenerated from `frontend/public/icons/grove-app-icon.svg` via `npm run icons:gen` (`scripts/gen-icons.mjs`, `@resvg/resvg-js`).
+- `frontend/src/components/GroveMark.tsx` — shared stems mark for sidebar and landing.
+- `frontend/src/layout/AppSidebar.tsx`, `frontend/src/pages/HomePage.tsx` — brand row uses mark + “Grove”.
+
+---
+
 ## FIX-B8 (2026-05-12): Settings — Add institution modal stacking fix
 
 **Why:** The "Add institution name…" button lives inside the `HierarchicalSearchPicker` footer, which renders its dropdown in a `createPortal` at `zIndex: 1300`. Clicking the button opened the Mantine modal without closing the picker first, so the modal appeared behind the picker overlay regardless of the modal's own z-index.

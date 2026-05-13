@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Alert, Anchor, Button, Paper, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
 import { useSearchParams } from "react-router-dom";
 import { setToken } from "../api";
+import { GroveMark } from "../components/GroveMark";
 
 /**
  * Guest landing at `/` — full-screen split hero + clean sign-in card.
@@ -118,10 +119,10 @@ export function HomePage() {
       <div className="home-landing__glow" aria-hidden />
       <div className="home-landing__wrap">
         <header className="home-landing__brand">
-          <span className="home-landing__logo" aria-hidden>
-            HF
-          </span>
-          <span className="home-landing__brand-text">Household Finance</span>
+          <div className="home-landing__logo" aria-hidden>
+            <GroveMark size={18} color="#fff" />
+          </div>
+          <span className="home-landing__brand-text">Grove</span>
         </header>
 
         <div className="home-landing__grid">
