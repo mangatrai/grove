@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionIcon, Alert, Badge, Box, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { GroveLoader } from "../components/GroveLoader";
 import { IconEye, IconFilePlus, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
 
@@ -231,7 +232,12 @@ export function PayslipsPage() {
           {data ? <Badge variant="light">{data.total} total</Badge> : null}
         </Group>
         {loadError ? <Alert color="red" mb="sm">{loadError}</Alert> : null}
-        {loading ? <Text c="dimmed">Loading…</Text> : null}
+        {loading ? (
+          <Group gap="sm" py="sm">
+            <GroveLoader size="sm" color="muted" />
+            <Text size="sm" c="dimmed">Loading payslips…</Text>
+          </Group>
+        ) : null}
         {!loading && data && data.items.length === 0 ? (
           <Text c="dimmed">No payslips yet. Use "Import PDF" or "Add manually" above.</Text>
         ) : null}

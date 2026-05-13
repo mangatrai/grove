@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { GroveLoader } from "./GroveLoader";
 import { Link } from "react-router-dom";
 import {
   Accordion,
@@ -9,7 +10,6 @@ import {
   Box,
   Button,
   Group,
-  Loader,
   Modal,
   Paper,
   ScrollArea,
@@ -251,7 +251,7 @@ export function FinancialHealthCard() {
     return (
       <Paper component="section" withBorder p="md" radius="md">
         <Group gap="sm">
-          <Loader size="sm" />
+          <GroveLoader size="sm" color="muted" />
           <Text size="sm" c="dimmed">
             Loading financial health…
           </Text>
@@ -311,7 +311,7 @@ export function FinancialHealthCard() {
 
       {generating ? (
         <Group gap="sm" my="md">
-          <Loader size="sm" />
+          <GroveLoader size="sm" color="muted" />
           <Text size="sm" c="dimmed">
             Generating analysis… this may take up to 30 seconds
           </Text>
@@ -492,7 +492,7 @@ export function FinancialHealthCard() {
           <Stack gap="sm">
             {historyLoading ? (
               <Group gap="sm">
-                <Loader size="sm" />
+                <GroveLoader size="sm" color="muted" />
                 <Text size="sm" c="dimmed">Loading history…</Text>
               </Group>
             ) : null}

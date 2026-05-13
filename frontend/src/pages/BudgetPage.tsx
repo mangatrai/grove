@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { GroveCardLoader, GroveLoader } from "../components/GroveLoader";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconPencil, IconX } from "@tabler/icons-react";
 import {
   ActionIcon,
@@ -825,7 +826,7 @@ export function BudgetPage() {
         </Group>
       </Group>
 
-      {loading && <Text c="dimmed">Loading…</Text>}
+      {loading && <GroveCardLoader label="Loading budget…" size="lg" speed="slow" />}
       {error && <Text c="red">{error}</Text>}
 
       {/* Setup: new budget for this month */}
@@ -877,7 +878,10 @@ export function BudgetPage() {
 
       {/* Waiting for suggestions */}
       {!loading && !error && budget !== null && !budget.exists && suggestions === null && (
-        <Text c="dimmed">Loading suggestions…</Text>
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading suggestions…</Text>
+        </Group>
       )}
     </Stack>
   );

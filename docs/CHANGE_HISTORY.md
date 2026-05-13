@@ -18,6 +18,34 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-172 (2026-05-12): Wire GroveLoader across all loading states
+
+**Why:** Production pages with slow/complex queries (budget aggregation, net worth, transaction list) showed no visual feedback — just plain "Loading…" text or blank space. Replaced with Grove brand loader using three design patterns from the Claude design spec.
+
+**Patterns added:**
+- `GroveCardLoader` — new export in `GroveLoader.tsx`; centered column (loader above label) inside a card or section panel, no full-page height. Used for complex aggregations.
+- In-context horizontal (`GroveLoader` + `Group`) — loader and label side by side within a list/section. Used for list fetches.
+- `GrovePageLoader` — existing export, unchanged. Full-page centered for top-level page loads.
+
+**Pages updated:**
+- `DashboardPageV2.tsx` — 3 Paper cards (spending breakdown, net worth, recurring payments) → `GroveCardLoader` with contextual labels
+- `TransactionsPage.tsx` — transaction list fetch → in-context `GroveLoader size="lg" color="forest" speed="slow"`
+- `BudgetPage.tsx` — main budget load → `GroveCardLoader size="lg" speed="slow"`; suggestions load → in-context `GroveLoader size="sm" color="muted"`
+- `PayslipDetailPage.tsx` — payslip detail fetch → `GroveCardLoader` inside Paper
+- `PayslipsPage.tsx` — payslip list fetch → in-context `GroveLoader size="sm" color="muted"`
+- `SettingsPage.tsx` — 3 section loads (profile, members, household) → in-context `GroveLoader size="sm" color="muted"`
+
+---
+
+## UX-171 (2026-05-12): Replace Mantine Loader with GroveLoader
+
+**Why:** Mantine's `<Loader>` uses a generic spinner; GroveLoader uses the Grove Stems mark animation (three bars, brand colors) for visual consistency with the Grove identity.
+
+**What changed:**
+- `frontend/src/components/FinancialHealthCard.tsx` — removed `Loader` from Mantine imports; added `GroveLoader` import; replaced all 3 `<Loader size="sm" />` with `<GroveLoader size="sm" color="muted" />` (inline card loading states: initial load, generating analysis, loading history).
+
+---
+
 ## UX-170 (2026-05-12): Grove branding — email templates
 
 **Why:** All 5 mailer templates still referenced "Household Finance" and "HF ·" in subject lines, body text, header brand, and footer. Renamed to "Grove" to match the shipped app identity.

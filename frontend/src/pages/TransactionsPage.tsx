@@ -26,6 +26,7 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { GroveLoader } from "../components/GroveLoader";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
@@ -1816,7 +1817,12 @@ export function TransactionsPage() {
           hasActiveFilters={hasServerBackedLedgerFilters}
         />
         {error ? <Alert color="red">{error}</Alert> : null}
-        {loading ? <Text c="dimmed">Loading…</Text> : null}
+        {loading ? (
+          <Group gap="sm" py="sm">
+            <GroveLoader size="lg" color="forest" speed="slow" />
+            <Text size="sm" c="dimmed">Loading transactions…</Text>
+          </Group>
+        ) : null}
         {!loading && data ? (
           <>
             <Group gap="md" wrap="wrap" mb="xs">

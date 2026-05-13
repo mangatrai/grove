@@ -21,6 +21,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { GroveCardLoader } from "../components/GroveLoader";
 import type {
   MatchedDeposit,
   PayslipLineItemRow,
@@ -761,7 +762,7 @@ export function PayslipDetailPage() {
 
       {loading ? (
         <Paper withBorder p="lg">
-          <Text c="dimmed">Loading…</Text>
+          <GroveCardLoader label="Loading payslip…" />
         </Paper>
       ) : null}
 

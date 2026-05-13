@@ -35,6 +35,7 @@ import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
+import { GroveLoader } from "../components/GroveLoader";
 
 const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
 type SettingsTab = (typeof TABS)[number];
@@ -1203,7 +1204,9 @@ export function SettingsPage() {
             </Paper>
             {profileError ? <Alert color="red">{profileError}</Alert> : null}
             {profileSuccess ? <Alert color="green">{profileSuccess}</Alert> : null}
-            {loadingProfile ? <Text c="dimmed">Loading…</Text> : null}
+            {loadingProfile ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading profile…</Text></Group>
+            ) : null}
             {!loadingProfile ? (
               <Stack>
                 <Group align="end" grow>
@@ -1537,7 +1540,9 @@ export function SettingsPage() {
             <Text c="dimmed">Track household members for role and relationship context.</Text>
             {membersError ? <Alert color="red">{membersError}</Alert> : null}
             {membersSuccess ? <Alert color="green">{membersSuccess}</Alert> : null}
-            {loadingMembers ? <Text c="dimmed">Loading members…</Text> : null}
+            {loadingMembers ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading members…</Text></Group>
+            ) : null}
             {!loadingMembers ? (
               <>
                 {memberDrafts.map((member, idx) => (
@@ -1712,7 +1717,9 @@ export function SettingsPage() {
               </>
             ) : null}
             {householdError ? <Alert color="red">{householdError}</Alert> : null}
-            {loadingHousehold ? <Text c="dimmed">Loading…</Text> : null}
+            {loadingHousehold ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading household…</Text></Group>
+            ) : null}
             {!loadingHousehold ? (
               <Stack mb="xl">
                 <CurrencyInput

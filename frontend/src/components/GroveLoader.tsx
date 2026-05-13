@@ -81,6 +81,24 @@ export function GroveLoader({
   );
 }
 
+/** Centred loading state inside a card or section panel — no full-page height. */
+export function GroveCardLoader({
+  label = "Loading…",
+  size = "md" as GroveLoaderSize,
+  speed = "normal" as GroveLoaderSpeed,
+}: { label?: string; size?: GroveLoaderSize; speed?: GroveLoaderSpeed }) {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: "1.5rem 0", gap: "0.75rem",
+    }}>
+      <GroveLoader size={size} color="forest" speed={speed} />
+      <p style={{ fontSize: "0.85rem", color: "#78716c", margin: 0 }}>{label}</p>
+    </div>
+  );
+}
+
 /** Full-page centred loading state — drop in where you'd use Mantine's <Loader>. */
 export function GrovePageLoader({ label = "Loading…" }: { label?: string }) {
   return (

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { GroveCardLoader } from "../components/GroveLoader";
 import {
   Anchor,
   Badge,
@@ -717,9 +718,7 @@ export function DashboardPageV2() {
       <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, lg: 4 }} spacing="md" mt="lg">
         <Paper component="section" withBorder p="md" radius="md">
           {loading ? (
-            <Text size="sm" c="dimmed">
-              Loading…
-            </Text>
+            <GroveCardLoader label="Loading spending…" />
           ) : cashUnavailable ? (
             <Text size="sm" c="dimmed">
               Spending data unavailable
@@ -817,9 +816,7 @@ export function DashboardPageV2() {
             Net Worth
           </Text>
           {loading ? (
-            <Text size="sm" c="dimmed">
-              Loading…
-            </Text>
+            <GroveCardLoader label="Calculating your net worth…" />
           ) : (
             <>
               <Text
@@ -899,9 +896,7 @@ export function DashboardPageV2() {
             Estimated from repeated charges
           </Text>
           {loading ? (
-            <Text size="sm" c="dimmed">
-              Loading…
-            </Text>
+            <GroveCardLoader label="Detecting recurring payments…" />
           ) : recurringAll.length === 0 ? (
             <Text size="sm" c="dimmed">
               No recurring charges detected yet — import a few months of statements to see patterns
