@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Household Finance API
-  version: 0.1.0
+  title: Grove API
+  version: 3.0.0
   description: |
-    HTTP API for the self-hosted household finance app. All authenticated routes expect
+    HTTP API for the self-hosted Grove app. All authenticated routes expect
     `Authorization: Bearer <JWT>` unless noted. See `docs/API_INDEX.md` for prose topic guides.
 servers:
   - url: /
