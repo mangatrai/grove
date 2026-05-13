@@ -1,4 +1,4 @@
-import { lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker.js";
+import { lookupTriggerLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker.js";
 
 export type LedgerResolutionType =
   | "duplicate_ambiguity"
@@ -61,20 +61,20 @@ export function formatActiveBelongsToSummary(
     return "";
   }
   if (values.length === 1) {
-    return lookupLabel(groups, values[0]!) ?? values[0]!;
+    return lookupTriggerLabel(groups, values[0]!) ?? values[0]!;
   }
   const hasHousehold = values.includes("household");
   const people = values.filter((id) => id !== "household");
   if (hasHousehold && people.length > 0) {
     if (people.length === 1) {
-      const personLabel = lookupLabel(groups, people[0]!) ?? "member";
+      const personLabel = lookupTriggerLabel(groups, people[0]!) ?? "member";
       return `Household, ${personLabel}`;
     }
     return `Household + ${people.length} members`;
   }
   if (values.length === 2) {
-    const a = lookupLabel(groups, values[0]!) ?? values[0]!;
-    const b = lookupLabel(groups, values[1]!) ?? values[1]!;
+    const a = lookupTriggerLabel(groups, values[0]!) ?? values[0]!;
+    const b = lookupTriggerLabel(groups, values[1]!) ?? values[1]!;
     return `${a}, ${b}`;
   }
   return `${values.length} selections`;

@@ -18,6 +18,30 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-179 (2026-05-13): Knip dead-code sweep — orphaned files, dead exports, stale re-exports
+
+**Why:** Knip audit identified confirmed orphans — files and exports with no live consumers and no future-use intent documented in CHANGE_HISTORY. Items flagged "keep" (e.g., `GrovePageLoader`, `subscribeToken`/`getTokenSnapshot`) were verified as intentional placeholders or substrate-level API and left alone.
+
+**What was removed:**
+
+*Files deleted:*
+- `frontend/src/pages/ResolutionQueuePage.tsx` — CR-018 said "deleted" but the file survived on disk; router already redirects away from it
+- `frontend/src/components/PageHeader.tsx` — pre-Mantine shared component, superseded by Mantine primitives
+- `frontend/src/components/SectionCard.tsx` — same
+- `frontend/src/import/startImportSession.ts` — extracted helper that was never adopted; pages inline the `POST /imports/sessions` call directly
+
+*Dead exports/functions removed:*
+- `backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts` — `parseIbmPayslipPdf`, `PayslipPdfParseFailureReason`, `PayslipPdfParseResult`; CHANGE_HISTORY said "kept for tests" but no test ever imported it; IBM parsing routes through LLM extract path
+- `backend/src/modules/canonical/canonical-ingest.service.ts` — removed re-export block for `computeTransactionFingerprint` / `normalizeAmountForFingerprint` / `normalizeDescriptionForFingerprint` / `normalizeTxnDateForFingerprint`; all consumers import directly from `transaction-fingerprint.ts`
+- `backend/src/paths.ts` — removed `export` from `repoRoot`; `env.ts` defines its own local copy and never imported this one
+- `backend/src/modules/imports/profiles/boa-estatement-pdf.ts` — removed `parseBoaEStatementPdf`; callers use `parseBoaEStatementFromTextDetailed` from the same file
+- `backend/src/modules/budget/budget.service.ts` — removed `getBudgetEntry`; no call site anywhere
+- `frontend/src/components/HierarchicalSearchPicker.tsx` — removed `lookupLabel` alias; `ledgerListQuery.ts` (the only consumer) updated to call `lookupTriggerLabel` directly
+
+**Files changed:** `frontend/src/pages/ResolutionQueuePage.tsx` (deleted), `frontend/src/components/PageHeader.tsx` (deleted), `frontend/src/components/SectionCard.tsx` (deleted), `frontend/src/import/startImportSession.ts` (deleted), `backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts`, `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/src/paths.ts`, `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`, `backend/src/modules/budget/budget.service.ts`, `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/ledger/ledgerListQuery.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## FIX-178 (2026-05-13): Drop unused `react-currency-input-field`
 
 **Why:** `CurrencyInput` is implemented with Mantine only; the npm package was never imported.

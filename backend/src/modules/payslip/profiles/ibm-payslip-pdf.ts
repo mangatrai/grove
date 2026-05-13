@@ -554,33 +554,3 @@ export function parseIbmPayslipFromText(text: string): ParsedPayslipSummary | nu
   return parsed;
 }
 
-export type PayslipPdfParseFailureReason =
-  | "empty_pdf_text"
-  | "no_summary_fields"
-  | "pdf_extract_unreadable"
-  | "pdf_read_error";
-
-export type PayslipPdfParseResult =
-  | { ok: true; summary: ParsedPayslipSummary }
-  | { ok: false; reason: PayslipPdfParseFailureReason };
-
-export async function parseIbmPayslipPdf(buffer: Buffer): Promise<PayslipPdfParseResult> {
-  let text: string;
-  try {
-    text = await extractPdfText(buffer);
-  } catch {
-    return { ok: false, reason: "pdf_read_error" };
-  }
-  const normalized = normalizePdfExtractText(text).trim();
-  if (!normalized) {
-    return { ok: false, reason: "empty_pdf_text" };
-  }
-  if (payslipPdfExtractLooksUnusable(text)) {
-    return { ok: false, reason: "pdf_extract_unreadable" };
-  }
-  const summary = parseIbmPayslipFromText(normalized);
-  if (!summary) {
-    return { ok: false, reason: "no_summary_fields" };
-  }
-  return { ok: true, summary };
-}

@@ -428,22 +428,3 @@ export async function listBudgetMonths(householdId: string): Promise<BudgetMonth
     totalBudgeted: parseFloat(r.total_budgeted) || 0
   }));
 }
-
-/**
- * Return a single budget entry for a specific category + month, or null if none exists.
- * Used internally; not directly exposed as an endpoint.
- */
-export async function getBudgetEntry(
-  householdId: string,
-  categoryId: string,
-  month: string
-): Promise<{ amount: number } | null> {
-  const row = await qGet<{ amount: string }>(
-    `SELECT amount FROM budget_category
-     WHERE household_id = ? AND category_id = ? AND month = ?`,
-    householdId,
-    categoryId,
-    month
-  );
-  return row ? { amount: parseFloat(row.amount) || 0 } : null;
-}

@@ -57,14 +57,6 @@ export function extractBoaEStatementBalancesFromText(text: string): BoaStatement
 
 type Zone = "none" | "deposits" | "atm" | "other";
 
-/**
- * Bank of America deposit account eStatement PDF (Adv Relationship / checking-style layout).
- * Parses "Deposits and other additions", "ATM and debit card subtractions", and "Other subtractions" tables.
- */
-export async function parseBoaEStatementPdf(buffer: Buffer): Promise<NormalizedRawPayload[]> {
-  const text = await extractPdfText(buffer);
-  return parseBoaEStatementFromTextDetailed(text).rows;
-}
 
 /** pdf-parse output often concatenates headers and dates (no spaces). */
 function isBoaColumnHeaderLine(line: string): boolean {

@@ -26,12 +26,6 @@ export type CanonicalizeFailure =
   | { ok: false; code: "NOT_FOUND"; message: string }
   | { ok: false; code: "NO_RAW_ROWS"; message: string };
 
-export {
-  computeTransactionFingerprint,
-  normalizeAmountForFingerprint,
-  normalizeDescriptionForFingerprint,
-  normalizeTxnDateForFingerprint
-} from "./transaction-fingerprint.js";
 
 /** Visible label for transfer pairing (merchant + memo). */
 function transferRowLabel(merchant: string | null, memo: string | null): string {

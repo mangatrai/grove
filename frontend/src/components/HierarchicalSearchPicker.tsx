@@ -72,8 +72,6 @@ export function lookupTriggerLabel(
   return item.displayLabel ?? item.label;
 }
 
-/** Alias for `lookupTriggerLabel` (short display for trigger / chips). */
-export const lookupLabel = lookupTriggerLabel;
 
 function normalizeGroups(groups: HierarchicalPickerGroup[]): PickerParent[] {
   const byLabel = new Map<string, PickerParent>();
