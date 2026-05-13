@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-169 (2026-05-12): Mobile layout — transactions scroll, grids, toolbars
+
+**Why:** On narrow viewports (e.g. iPhone 15 Pro Max), the transactions ledger and several pages caused horizontal scroll or cramped layouts; the transactions toolbar needed safer wrapping and bulk bar styling wired to the bulk `Group`.
+
+**What changed:**
+- `frontend/src/pages/TransactionsPage.tsx` — horizontal scroll wrapper around the main ledger `Table`; `txn-col--secondary` on Account and Belongs-to columns (hidden ≤640px); `className="transactions-bulk-bar"` on bulk selection `Group`s.
+- `frontend/src/index.css` — `overflow-x: hidden` on `.app-shell-main` / `.app-main` under 768px; expanded 640px rules (toolbar fields, bulk bar, hidden secondary columns, Recharts max-width, tighter `.app-main` Card/Paper padding, page header actions, topbar actions nowrap); sticky toolbar comment aligned with topbar height.
+- `frontend/src/pages/DashboardPageV2.tsx`, `BudgetPage.tsx`, `NetWorthPage.tsx` — responsive `SimpleGrid` `cols` with `xs` breakpoints for mid-width phones.
+
+---
+
 ## UX-168 (2026-05-12): Grove — product name and PWA chrome
 
 **Why:** Rebrand the user-visible app name to Grove and align tab/install/manifest chrome with the new mark and forest palette.

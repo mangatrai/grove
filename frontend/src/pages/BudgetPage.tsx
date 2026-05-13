@@ -615,7 +615,7 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
   return (
     <Stack gap="md">
       {/* Summary KPI cards */}
-      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+      <SimpleGrid cols={{ base: 1, xs: 2, sm: 3 }}>
         {kpiCards.map(({ label, value, textColor, borderColor }) => (
           <Paper key={label} p="md" withBorder radius="md" style={{ textAlign: "center", borderTop: `3px solid ${borderColor}` }}>
             <Text size="xs" c="dimmed" tt="uppercase" fw={500} mb={4} style={{ letterSpacing: "0.04em" }}>{label}</Text>

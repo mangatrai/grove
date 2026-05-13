@@ -791,7 +791,7 @@ export function NetWorthPage() {
       </Paper>
 
       <Stack gap={4}>
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+        <SimpleGrid cols={{ base: 1, xs: 2, sm: 3 }} spacing="md">
           <Paper withBorder shadow="sm" radius="md" p="md" style={{ textAlign: "center", borderTop: "3px solid var(--color-success)" }}>
             <Text size="xs" c="dimmed" tt="uppercase" fw={600} lts="0.06em" mb={4}>Assets</Text>
             <Text size="xl" fw={700} style={{ color: "var(--color-success)", fontVariantNumeric: "tabular-nums" }}>
@@ -1376,7 +1376,7 @@ export function NetWorthPage() {
           <Alert color="red" variant="light" radius="md" mt="sm">{propertyRowSaveError}</Alert>
         ) : null}
         {!loading && data && (topAssets.length > 0 || topLiabilities.length > 0) ? (
-          <SimpleGrid cols={2} spacing="lg" mt="md" style={{ paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
+          <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="lg" mt="md" style={{ paddingTop: "1rem", borderTop: "1px solid var(--color-border)" }}>
             {topAssets.length > 0 ? (
               <Box>
                 <Text fz={11} fw={600} tt="uppercase" lts="0.05em" c="dimmed" mb={6}>Top Assets</Text>

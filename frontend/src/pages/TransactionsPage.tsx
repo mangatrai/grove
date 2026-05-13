@@ -1636,7 +1636,7 @@ export function TransactionsPage() {
         {needsReviewTab ? (
           <Box pos="sticky" top={0} style={{ zIndex: 10 }} bg="var(--color-surface, #fff)" pb={4}>
             {selectedCount > 0 ? (
-              <Group role="status" aria-live="polite" wrap="wrap" align="center">
+              <Group className="transactions-bulk-bar" role="status" aria-live="polite" wrap="wrap" align="center">
                 <Text c="dimmed" size="sm">
                   {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
                 </Text>
@@ -1750,7 +1750,7 @@ export function TransactionsPage() {
           </Box>
         ) : null}
         {!needsReviewTab && !trashTab && selectedAllIds.size > 0 ? (
-          <Group role="status" aria-live="polite" wrap="wrap" align="center">
+          <Group className="transactions-bulk-bar" role="status" aria-live="polite" wrap="wrap" align="center">
             <Text c="dimmed" size="sm">
               {selectedAllIds.size} row{selectedAllIds.size === 1 ? "" : "s"} selected
             </Text>
@@ -1861,7 +1861,14 @@ export function TransactionsPage() {
                         : "No transactions yet. Use New import in the header, then run import from the workspace, or add a row with + Add transaction."}
               </Text>
             ) : (
-              <Table withTableBorder withColumnBorders withRowBorders striped highlightOnHover>
+              <div
+                style={{
+                  overflowX: "auto",
+                  width: "100%",
+                  WebkitOverflowScrolling: "touch",
+                }}
+              >
+                <Table withTableBorder withColumnBorders withRowBorders striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
                       {needsReviewTab ? (
@@ -1905,13 +1912,15 @@ export function TransactionsPage() {
                         </Table.Th>
                       ) : null}
                       <Table.Th>Date</Table.Th>
-                      <Table.Th>Account</Table.Th>
+                      <Table.Th className="txn-col--secondary">Account</Table.Th>
                       <Table.Th>Amount</Table.Th>
                       <Table.Th>Description</Table.Th>
                       <Table.Th w="5.5rem" ta="center">Recurring</Table.Th>
                       {needsReviewTab ? <Table.Th>Why</Table.Th> : null}
                       {needsReviewTab ? <Table.Th>Session</Table.Th> : null}
-                      {!trashTab ? <Table.Th>Belongs-to</Table.Th> : null}
+                      {!trashTab ? (
+                        <Table.Th className="txn-col--secondary">Belongs-to</Table.Th>
+                      ) : null}
                       <Table.Th>Category</Table.Th>
                       <Table.Th w={1}></Table.Th>
                     </Table.Tr>
@@ -1984,7 +1993,7 @@ export function TransactionsPage() {
                               </Table.Td>
                             ) : null}
                             <Table.Td>{t.txnDate}</Table.Td>
-                            <Table.Td>{accountLabel}</Table.Td>
+                            <Table.Td className="txn-col--secondary">{accountLabel}</Table.Td>
                             <Table.Td>
                               <Group gap={5} wrap="nowrap">
                                 <Text>{formatMoney(t.amount, t.direction)}</Text>
@@ -2071,7 +2080,7 @@ export function TransactionsPage() {
                               </Table.Td>
                             ) : null}
                             {!trashTab ? (
-                              <Table.Td miw="12rem">
+                              <Table.Td miw="12rem" className="txn-col--secondary">
                                 <HierarchicalSearchPicker
                                   value={belongsToPickerValueFromRow(t.ownerScope, t.ownerPersonProfileId)}
                                   onChange={(v) => {
@@ -2393,6 +2402,7 @@ export function TransactionsPage() {
                     })}
                   </Table.Tbody>
                 </Table>
+              </div>
             )}
           </>
         ) : null}

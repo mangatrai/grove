@@ -714,7 +714,7 @@ export function DashboardPageV2() {
         </Group>
       ) : null}
 
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" mt="lg">
+      <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, lg: 4 }} spacing="md" mt="lg">
         <Paper component="section" withBorder p="md" radius="md">
           {loading ? (
             <Text size="sm" c="dimmed">
