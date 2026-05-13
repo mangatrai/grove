@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-170 (2026-05-12): Grove branding — email templates
+
+**Why:** All 5 mailer templates still referenced "Household Finance" and "HF ·" in subject lines, body text, header brand, and footer. Renamed to "Grove" to match the shipped app identity.
+
+**What changed:**
+- `backend/src/modules/mailer/templates/layout.ts` — header brand replaced with Grove Mark C (G letterform) SVG + "Grove" wordmark; footer "member of Grove"; background `#f5f7f6` → `#efebe3` (warm linen).
+- `backend/src/modules/mailer/templates/member-invite.ts` — subject, title, and body text updated to "Grove".
+- `backend/src/modules/mailer/templates/password-reset.ts` — subject, both title branches, and body/plain text updated to "Grove".
+- `backend/src/modules/mailer/templates/password-changed.ts` — subject, title, and body text updated to "Grove".
+- `backend/src/modules/mailer/templates/export-ready.ts` — subject, both title branches, and body/plain text updated to "Grove".
+
+**Acceptance:** `grep -r "Household Finance" backend/src/modules/mailer/` returns zero results.
+
+---
+
 ## UX-169 (2026-05-12): Mobile layout — transactions scroll, grids, toolbars
 
 **Why:** On narrow viewports (e.g. iPhone 15 Pro Max), the transactions ledger and several pages caused horizontal scroll or cramped layouts; the transactions toolbar needed safer wrapping and bulk bar styling wired to the bulk `Group`.

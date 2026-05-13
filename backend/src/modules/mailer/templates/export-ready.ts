@@ -17,7 +17,7 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
   const html =
     settingsUrl != null && settingsUrl.length > 0
       ? layout({
-          title: "Your Household Finance export is ready",
+          title: "Your Grove export is ready",
           content: `
         <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;">Your export is ready to download.</h1>
         <p style="margin:0 0 20px;color:#374151;line-height:1.6;">
@@ -38,14 +38,14 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
       `
         })
       : layout({
-          title: "Your Household Finance export is ready",
+          title: "Your Grove export is ready",
           content: `
         <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;">Your export is ready to download.</h1>
         <p style="margin:0 0 16px;color:#374151;line-height:1.6;">
           Your household export file is ready.
         </p>
         <p style="margin:0 0 16px;color:#374151;line-height:1.6;">
-          To download it: open the Household Finance app and go to Settings → Data and Backup.
+          To download it: open the Grove app and go to Settings → Data and Backup.
         </p>
         ${expiryBlock}
       `
@@ -54,7 +54,7 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
   const text =
     settingsUrl != null && settingsUrl.length > 0
       ? [
-          "Your Household Finance export is ready",
+          "Your Grove export is ready",
           "",
           "Your household export file is ready.",
           "",
@@ -63,17 +63,17 @@ export function renderExportReadyTemplate({ expiresAt, settingsUrl }: ExportRead
           `This file expires on ${expiresAt}. After that you'll need to start a new export.`
         ].join("\n")
       : [
-          "Your Household Finance export is ready",
+          "Your Grove export is ready",
           "",
           "Your household export file is ready.",
           "",
-          "To download it: open the Household Finance app and go to Settings → Data & Backup.",
+          "To download it: open the Grove app and go to Settings → Data & Backup.",
           "",
           `This file expires on ${expiresAt}. After that you'll need to start a new export.`
         ].join("\n");
 
   return {
-    subject: "Your Household Finance export is ready",
+    subject: "Your Grove export is ready",
     html,
     text
   };

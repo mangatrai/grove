@@ -416,6 +416,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~I-6~~ | ~~Drive query string escaping~~ | ✓ Done | Security hygiene | — |
 | ~~UX-166~~ | ~~Consistent currency display (comma thousands separator)~~ | ✓ Done | UX polish | — |
 | ~~UX-167~~ | ~~Cash register input for dollar amount fields~~ | ✓ Done | UX polish | UX-166 |
+| ~~UX-170~~ | ~~Grove branding — rename all email templates from "Household Finance"~~ | ✓ Done | Branding | — |
 | I-7 | Recurring payments: annual detection, prediction, per-tx exclusion | P3 | Enhancement | — |
 | I-8 | Playwright E2E test suite exploration (spike) | P3 | Testing | — |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
@@ -426,4 +427,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-12. I-4–I-6, UX-166/UX-167, F-11 (CR-183), B-8 (FIX-B8) delivered. All P1 bugs + all originally-P2 bugs done. Next: **F-5** (payslip deposit stored pairing) or **F-7** (AI insights pollution fix).*
+*Last updated: 2026-05-12. I-4–I-6, UX-166/UX-167, UX-170, F-11 (CR-183), B-8 (FIX-B8) delivered. All P1 bugs + all originally-P2 bugs done. Next: **F-5** (payslip deposit stored pairing) or **F-7** (AI insights pollution fix).*
