@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-175 (2026-05-12): Rename "Household Finance" → "Grove" in package metadata and test fixtures
+
+**Why:** App was rebranded to Grove; frontend/backend code was already updated but package.json names, README title, and SMTP_FROM test fixture strings still carried the old name.
+
+**Changed:**
+- `package.json` (root) — name `household-finance-app` → `grove-app`
+- `backend/package.json` — name `@household-finance/backend` → `@grove/backend`
+- `frontend/package.json` — name `@household-finance/frontend` → `@grove/frontend`
+- `README.md` — top-level heading updated to `# Grove`
+- `backend/tests/member-invite.test.ts`, `password-reset.test.ts` — SMTP_FROM sender display name updated
+
+**Intentionally unchanged:** crypto key-derivation salt strings in `dob-crypto.ts` and `gdrive.service.ts` (renaming would break decryption of existing data); `docker-compose.yml` `POSTGRES_DB` name (live database identifier).
+
+---
+
 ## UX-172 (2026-05-12): Wire GroveLoader across all loading states
 
 **Why:** Production pages with slow/complex queries (budget aggregation, net worth, transaction list) showed no visual feedback — just plain "Loading…" text or blank space. Replaced with Grove brand loader using three design patterns from the Claude design spec.

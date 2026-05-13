@@ -1,5 +1,5 @@
 {
-  "name": "@household-finance/backend",
+  "name": "@grove/backend",
   "version": "3.0.0",
   "private": true,
   "type": "module",

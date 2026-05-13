@@ -21,7 +21,7 @@ function setEmailConfigForTest(): void {
   env.SMTP_HOST = "smtp.test.local";
   env.SMTP_USER = "tester";
   env.SMTP_PASS = "secret";
-  env.SMTP_FROM = "Household Finance <noreply@example.com>";
+  env.SMTP_FROM = "Grove <noreply@example.com>";
   env.PUBLIC_BASE_URL = "https://finance.test.example";
 }
 
