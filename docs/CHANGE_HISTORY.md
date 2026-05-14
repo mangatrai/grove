@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## F-5a (2026-05-14): Payslip deposit matching — join table (migration only)
+
+- **Type:** DB- / Feature slice (V3 F-5)
+- **What:** Added `payslip_deposit_match` (`payslip_snapshot_id`, `household_id`, `transaction_canonical_id`, `confirmed_at`) with unique pair per payslip+canonical row and index on `payslip_snapshot_id`. Cascade deletes from payslip, household, and canonical transaction. IDs use **TEXT** + `gen_random_uuid()::text` default to match `0001_baseline` (`payslip_snapshot.id` / `household.id` are TEXT, not UUID).
+- **Why:** Foundation for stored confirmed net-pay deposit links (1-to-N split deposits); API and UI follow in later F-5 slices.
+- **Files:** `backend/db/migrations/0045_f5_payslip_deposit_match.sql`.
+
+---
+
 ## I-3 (2026-05-14): Category taxonomy + rule audit
 
 - **Type:** Improvement (V3 I-3)
