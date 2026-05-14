@@ -111,6 +111,7 @@ For **v1**, we persist **both** summary-level compensation buckets **and** indiv
 | **3.3b** | List + detail + charts; read-only. |
 | **3.3c** | Per-row line item storage + rich extraction (IBM + Deloitte); line items accordion in detail view; new manual add fields. Shipped (**CR-072**). Deposit match shipped (**CR-068**). |
 | **3.3c+ backlog** | ADP (non-stub); optional OCR for scanned PDFs; full per-row manual line item entry UI; salary vs commission split charts. |
+| **3.3d (V4)** | Analytics integration: wire payslip deduction line items (`pre_tax_deductions`, `tax_deductions`) into AI insights + savings rate calculations. Enables: (a) true total savings rate including payroll 401k/IRA/ESPP/HSA withholdings; (b) wealth-building rate = total investment contributions / take-home; (c) employer match separation. Blocked on reliable line item extraction for all supported parsers. See `docs/V3_BACKLOG.md` (V4 Backlog section) for the analytics-side design. |
 | **Manual entry (shipped)** | [§7](#7-manual-payslip-entry-shipped) — **`POST /payslips/manual`**, **`/payslips/new`**. |
 
 ---
