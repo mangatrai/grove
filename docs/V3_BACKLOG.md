@@ -1034,4 +1034,46 @@ Store as a `monthly_report` table row — essentially a JSON blob of the month's
 
 ---
 
+## V4 Backlog — Items deferred from F-7/F-8 (2026-05-14)
+
+### Per-month investment contribution tracking (payslip + account delta)
+
+**Context:** F-7/F-8 ships investment portfolio balances (snapshots from `account_balance_snapshot`) to the LLM. Month-over-month balance changes reflect both contributions AND market movements — the LLM is instructed to account for this. What we can't compute today is how much of a portfolio change was due to new contributions vs. market returns.
+
+**What's needed:**
+- Wire payslip 401k/IRA/ESPP/HSA withholding amounts into the LLM context (requires payslip redesign)
+- Optionally compute account delta minus payslip withholdings as a "market return estimate"
+- Separate out employer contributions (match) from employee contributions where payslip data provides it
+
+**Why deferred:** Requires a payslip data redesign pass (better parsing + structured storage of individual deduction line items). Likely V4.
+
+---
+
+### Total savings rate + wealth-building rate formulas
+
+**Context:** F-7/F-8 ships `cashBufferRate` = (income − lifestyle − committed) / income. This is the liquid buffer rate — take-home after obligations. Two additional rates are defined but not yet computable:
+
+- **Total savings rate** = (take-home + payroll 401k + employer match) / gross. Requires reliable payslip deduction data.
+- **Wealth-building rate** = total investment contributions / take-home. Same dependency.
+
+**Why deferred:** Both require payslip wiring. Groom alongside the per-month investment contribution tracking item above. Likely V4 payslip redesign pass.
+
+---
+
+### "Exclude transaction" flag on individual transactions
+
+**Context:** Some transactions are one-off events that distort aggregations — a legal settlement credit, a large insurance reimbursement, a rare cash gift. There's currently no way to mark these as "include in ledger but exclude from cash flow calculations, AI insights, and budget actuals."
+
+**Proposed behavior:**
+- New `excluded` status (or a boolean flag) on `transaction_canonical`.
+- Excluded rows appear in the ledger with a visual indicator.
+- Excluded from: `flowBreakdown12m`, `topSpendCategories12m`, cash summary `aggregateForRange`, budget actuals queries.
+- NOT the same as `status = 'trashed'` which implies an error/duplicate.
+
+**Priority:** Low. The `Transfer In` pattern handles the main use case (spouse/family transfers). The exclude flag is a power-user escape hatch. Note: custom category classification already lets users route odd transactions to non-reporting categories (e.g. Transfer In).
+
+---
+
+*Last updated: 2026-05-14.*
+
 *Last updated: 2026-05-08. Discussion: v2 live onboarding session.*

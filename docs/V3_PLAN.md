@@ -405,8 +405,8 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~F-10~~ | ~~Transaction aggregation strip (CR-177 + FIX-177)~~ | ✓ Done | Feature | — |
 | ~~F-11~~ | ~~Record cash payments (manual ledger entry)~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
-| F-7 | AI insights: fix transfer/flow pollution | P2 | Feature | — |
-| F-8 | Money flow classification in reports | P2 | Feature | F-7 |
+| ~~F-7~~ | ~~AI insights: fix transfer/flow pollution~~ | ✓ Done | Feature | — |
+| ~~F-8~~ | ~~Money flow classification in reports~~ | ✓ Done | Feature | F-7 ✓ |
 | ~~F-9~~ | ~~Date of birth encrypted at rest, computed age~~ | ✓ Done | Feature + Security | — |
 | I-1 | Personal loan tracker | P3 | Feature | F-8 |
 | I-2 | Async import parse + canonicalize | P3 | Reliability | — |
@@ -427,4 +427,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-12. I-4–I-6, UX-166/UX-167, UX-170, F-11 (CR-183), B-8 (FIX-B8) delivered. All P1 bugs + all originally-P2 bugs done. Next: **F-5** (payslip deposit stored pairing) or **F-7** (AI insights pollution fix).*
+*Last updated: 2026-05-14. F-7/F-8 shipped (AI flow classification + budget suggestion cleanup). Remaining P2: **F-5** (payslip deposit stored pairing). P3: I-1 (personal loan tracker), I-2 (async import), I-3 (category taxonomy cleanup), I-7, I-8.*

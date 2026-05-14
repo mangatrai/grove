@@ -6,7 +6,7 @@ import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import type { InsightPayload } from "./insights.types.js";
 
-const PROMPT_VERSION = "v1.0";
+const PROMPT_VERSION = "v1.1";
 
 export { PROMPT_VERSION };
 
@@ -57,6 +57,14 @@ IMPORTANT:
 - Provide local (city/state) AND national benchmarks separately.
 - Be specific and actionable. Avoid generic advice.
 - Return ONLY valid JSON matching the schema below. No prose outside the JSON.
+
+Key field definitions in the input:
+- avgMonthlyInflow: take-home income only (Income category transactions).
+- avgMonthlyLifestyleSpend: discretionary lifestyle categories (shopping, food, home, etc.) — excludes loan payments.
+- avgMonthlyCommittedExpenses: loan obligations (mortgage, auto, HELOC) — cannot be easily reduced.
+- cashBufferRate: (income - lifestyle - committed) / income — fraction left after all obligations.
+- topCategories: lifestyle spend only; loan and investment categories are reported separately.
+- investmentPortfolioTrend: total investment/retirement/HSA/529 balances by month. Month-over-month changes reflect BOTH contributions and market movements — do not assume all changes are due to new contributions.
 
 Output JSON schema:
 {

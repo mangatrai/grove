@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## F-7/F-8 (2026-05-14): AI insights — flow classification + budget suggestion cleanup
+
+- **Type:** Feature (V3 F-7 + F-8)
+- **What:**
+  - **F-7 — LLM data feed overhaul (`insight-prompt.service.ts`):**
+    - Added flow-class taxonomy (compile-time category UUID constants): `MOVEMENT`, `COMMITTED_EXPENSE`, `WEALTH_BUILDING`, `TAX`, `INCOME`, non-lifestyle set.
+    - Replaced flat `flowTotals12m` with `flowBreakdown12m` which returns four separated 12-month aggregates in a single query: `inflow12` (Income category only), `lifestyleSpend12`, `committedExpenses12` (Loans), `uncategorized12`.
+    - `InsightPromptInput` interface updated: `avgMonthlyOutflow` + `avgMonthlySavingsRate` → `avgMonthlyLifestyleSpend`, `avgMonthlyCommittedExpenses`, `cashBufferRate` ((income−lifestyle−committed)/income). `netWorth` block gains `healthSavingsTotal` and `educationSavingsTotal`. New `uncategorizedMonthlyAvg` field separates uncategorized debits from `topCategories`.
+    - `topSpendCategories12m` now excludes all non-lifestyle categories (movement/investments/taxes/loans/income) and uncategorized; `topCategories` is lifestyle-only.
+    - Added `investmentPortfolioTrend` function: CTE with window function picks latest snapshot per account per month, aggregates across investment/retirement/health/education accounts, returns 6-month trend. Uses `account_balance_snapshot.financial_account_id` and `.amount` columns (not `.account_id`/`.balance`).
+    - `overBudgetCategories` now filters budget rows to lifestyle + loans only — movement/investments/taxes do not trigger over-budget alerts.
+  - **F-7 — LLM system prompt (`llm-provider.service.ts`):** Bumped `PROMPT_VERSION` → `v1.1`. Added field-definition block explaining `cashBufferRate` formula and noting that `investmentPortfolioTrend` reflects both contributions and market movements.
+  - **F-8 — Budget suggestions (`budget.service.ts`):** `EXCLUDED_PARENTS` expanded from 3 to 6 IDs — added Taxes, Borrowing (CC payments/personal lending), Banking (fees). Loans intentionally kept so mortgage/auto payments appear as budget suggestions. SQL `IS DISTINCT FROM` placeholder count updated from 3×2 to 6×2.
+- **Why:** Transfer-polluted and movement-category transactions were inflating the LLM's view of household spending; uncategorized amounts were appearing as a top "category"; the old savings rate included investment outflows making it misleadingly low. Budget suggestions were surfacing Taxes and Borrowing/Banking rows that households can't meaningfully budget for.
+- **Decisions recorded:**
+  - Loans = committed_expense (not movement); households must plan around mortgage/auto payments — they stay in budget + LLM feed.
+  - Investment account balances sent via `investmentPortfolioTrend` (not per-month transaction sums which miss payroll 401k deductions).
+  - `cashBufferRate` definition: fraction of take-home income remaining after lifestyle discretionary spend and committed loan obligations.
+  - Custom household categories default to lifestyle class (documented choice, revisit in I-3).
+- **Files:** `backend/src/modules/insights/insight-prompt.service.ts`, `backend/src/modules/insights/llm-provider.service.ts`, `backend/src/modules/budget/budget.service.ts`.
+
+---
+
 ## FIX-179 (2026-05-13): Knip dead-code sweep — orphaned files, dead exports, stale re-exports
 
 **Why:** Knip audit identified confirmed orphans — files and exports with no live consumers and no future-use intent documented in CHANGE_HISTORY. Items flagged "keep" (e.g., `GrovePageLoader`, `subscribeToken`/`getTokenSnapshot`) were verified as intentional placeholders or substrate-level API and left alone.

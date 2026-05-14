@@ -149,17 +149,17 @@ export async function getBudgetSuggestions(
   const windowStart = monthBounds(shiftMonthBack(anchor, 5)).start;
   const windowEnd = anchorBounds.end;
 
-  // Excluded parent category IDs — these are financial-flow categories that
-  // do not belong in a household spending budget:
-  //   Transfers  30000000-0000-0000-0000-000000000112
-  //   Income     30000000-0000-0000-0000-000000000001
-  //   Investments 30000000-0000-0000-0000-000000000105
+  // Excluded parent category IDs — flow categories that don't belong in a spending budget.
+  // Loans (mortgage/auto/HELOC) are intentionally kept — households must plan around them.
   // IS DISTINCT FROM handles NULL correctly (dangling FK rows after restore pass
   // through and get filtered later by the category_name != null check).
   const EXCLUDED_PARENTS = [
     "30000000-0000-0000-0000-000000000112", // Transfers
     "30000000-0000-0000-0000-000000000001", // Income
     "30000000-0000-0000-0000-000000000105", // Investments
+    "30000000-0000-0000-0000-000000000111", // Taxes
+    "30000000-0000-0000-0000-000000000104", // Borrowing (CC payments, personal lending)
+    "30000000-0000-0000-0000-000000000153", // Banking (fees, service charges)
   ] as const;
 
   type ActualRow = {
@@ -197,6 +197,12 @@ export async function getBudgetSuggestions(
        AND c.parent_id  IS DISTINCT FROM ?
        AND c.parent_id  IS DISTINCT FROM ?
        AND c.parent_id  IS DISTINCT FROM ?
+       AND c.parent_id  IS DISTINCT FROM ?
+       AND c.parent_id  IS DISTINCT FROM ?
+       AND c.parent_id  IS DISTINCT FROM ?
+       AND c.id         IS DISTINCT FROM ?
+       AND c.id         IS DISTINCT FROM ?
+       AND c.id         IS DISTINCT FROM ?
        AND c.id         IS DISTINCT FROM ?
        AND c.id         IS DISTINCT FROM ?
        AND c.id         IS DISTINCT FROM ?
@@ -208,8 +214,8 @@ export async function getBudgetSuggestions(
     householdId,
     windowStart,
     windowEnd,
-    ...EXCLUDED_PARENTS,  // c.parent_id IS DISTINCT FROM x3
-    ...EXCLUDED_PARENTS,  // c.id IS DISTINCT FROM x3
+    ...EXCLUDED_PARENTS,  // c.parent_id IS DISTINCT FROM x6
+    ...EXCLUDED_PARENTS,  // c.id IS DISTINCT FROM x6
   );
 
   const suggestions: BudgetSuggestionRow[] = rows
