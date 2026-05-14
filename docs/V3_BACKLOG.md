@@ -461,13 +461,44 @@ The cards read `data.items[0]` — the first item from the sorted payslip list. 
 
 This is correct behaviour. No change needed here.
 
-### Payslip backlog from prior sessions — to be dug through in v3
-There is existing backlog around payslip features (estimated tax calculations, enhanced payslip views, etc.) captured in prior planning docs and sessions. When v3 payslip work begins, pull from:
-- `docs/PAYSLIP_V1.md` — original feature spec, may have deferred items
-- Prior change history entries (search `docs/CHANGE_HISTORY.md` for payslip-related CRs)
-- Any other payslip-specific backlog docs
+### Payslip backlog — groomed 2026-05-14
 
-Do a full review of what was deferred before starting new payslip work in v3.
+#### Payslip-over-payslip (MoM) comparison
+Each payslip detail view and the payslip list should show delta indicators (↑ / ↓ / —) for key line items vs the prior payslip for the same person:
+- Net pay, gross pay, total taxes withheld, total pre-tax deductions
+- Display as absolute delta + direction badge (not percentage — the numbers are already in dollars)
+- "Prior payslip" = same person's immediately preceding `pay_period_end`, not necessarily same employer
+
+This is additive to the existing list/detail views. No schema change — all data is already in `payslip_snapshot`. Pure service + UI work.
+
+**Files:** `payslip.service.ts` (add `getPriorPayslip` lookup by person + pay_period_end DESC LIMIT 1 WHERE pay_period_end < current), `PayslipDetailPage.tsx` (delta badges), `PayslipsPage.tsx` (optional summary column).
+
+#### Estimated tax sufficiency — "Am I withholding enough?"
+Help the user answer: _Is what my employer is withholding enough to avoid an underpayment penalty at year end? How much should I be setting aside if my withholding falls short?_
+
+**The question this answers:** US federal safe harbour is 100% of prior-year tax liability (or 110% if AGI > $150k) OR 90% of current-year liability. Failing either triggers a penalty. Many W-2 earners don't realise they owe estimated quarterly payments on non-W-2 income (investment gains, freelance, rental income).
+
+**Inputs available from the app:**
+- Payslip YTD federal + state tax withheld (from `payslip_snapshot.tax_deductions_json`)
+- Gross YTD income from payslips (already extracted)
+- Household income logged in the ledger (other accounts, non-payslip sources)
+
+**Constraints / design notes:**
+- Actual tax liability calculation requires filing status, deductions, credits — not stored. We do not attempt to compute exact tax owed.
+- What we *can* do (without full tax modelling): show annualised withholding rate, flag if YTD effective rate looks dangerously low vs a configurable threshold (e.g. < 20% federal effective), and surface the raw YTD withheld + estimated annual projection so the user can sanity-check.
+- For households with non-W-2 income (visible in ledger), surface a callout: "You have $X in non-wage income this year — check whether estimated quarterly payments are needed."
+- Long-term: if the user enters prior-year total tax (a single Settings field), we can run the safe-harbour test automatically.
+
+**Dependency:** Requires reliable extraction of `federal_income_tax` and `state_income_tax` line items from `tax_deductions_json` — coverage depends on parser completeness (IBM and Deloitte parsers; check extraction quality before building the UI).
+
+**Priority:** P3 — useful, but dependent on parser reliability and multi-source income context. Build after F-5 (payslip deposit pairing) is shipped and parser line-item extraction is validated.
+
+**Files when ready:** `payslip.service.ts` (annualised projection query), new `PayslipTaxHealthCard` component, optional `Settings` field for prior-year total tax.
+
+#### Prior backlog sources (already reviewed 2026-05-14)
+- `docs/PAYSLIP_V1.md` — original feature spec; deferred items folded into above
+- `docs/CHANGE_HISTORY.md` — payslip CRs reviewed
+- Analytics integration (payroll deductions → savings rate) remains V4 backlog (see PAYSLIP_V1.md §3.3d)
 
 ---
 

@@ -260,7 +260,7 @@ Import session state machine already handles in-progress state; frontend polls s
 ### I-3: Category / reimbursement taxonomy cleanup
 - Rename or restructure `Income > Reimbursements`: the "Income" parent is misleading. Consider top-level `Reimbursements & Recoveries` category, classified as `money_return` flow class (not `true_income`).
 - Audit global rules: remove/narrow any rule mapping payment methods (Zelle, Venmo, PayPal, CashApp) → Reimbursements. These are too broad.
-- Groom alongside F-8 (flow classification) — categories must align with flow class map.
+- F-8 flow classification shipped (2026-05-14) — I-3 can now be groomed independently. Categories must align with the shipped flow class map (`true_income`, `money_return`, `lifestyle_spend`, `wealth_building`, `tax_obligation`, `money_movement`).
 
 **Files:** `backend/db/seeds/`, category service, potentially new migration to rename global builtin category
 
@@ -419,6 +419,8 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~UX-170~~ | ~~Grove branding — rename all email templates from "Household Finance"~~ | ✓ Done | Branding | — |
 | I-7 | Recurring payments: annual detection, prediction, per-tx exclusion | P3 | Enhancement | — |
 | I-8 | Playwright E2E test suite exploration (spike) | P3 | Testing | — |
+| PS-1 | Payslip MoM comparison: delta badges (net, gross, taxes, deductions vs prior payslip) | P3 | Feature | F-5 |
+| PS-2 | Estimated tax sufficiency: annualised withholding rate, safe-harbour flag, non-W2 income callout | P3 | Feature | F-5, parser line-item coverage |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
 | D-2 | Real estate auto-valuation (market value API) | Deferred | Enhancement | F-2 |
 | D-3 | Rental income tracking | Deferred | Feature | F-2 |
@@ -427,4 +429,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-14. F-7/F-8 shipped (AI flow classification + budget suggestion cleanup). Remaining P2: **F-5** (payslip deposit stored pairing). P3: I-1 (personal loan tracker), I-2 (async import), I-3 (category taxonomy cleanup), I-7, I-8.*
+*Last updated: 2026-05-14. F-7/F-8 shipped (AI flow classification + budget suggestion cleanup). I-3 unblocked (F-8 landed). Remaining P2: **F-5** (payslip deposit stored pairing). P3: I-1 (personal loan tracker), I-2 (async import), I-3 (category taxonomy cleanup), I-7, I-8, PS-1 (payslip MoM comparison), PS-2 (estimated tax sufficiency).*
