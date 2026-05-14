@@ -24,6 +24,8 @@ export type MatchedDeposit = {
   institution: string;
   accountType: string;
   accountMask: string | null;
+  dateDelta: number;
+  amountDelta: number;
 };
 
 export type PayslipLineItemSection =

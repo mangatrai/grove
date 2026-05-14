@@ -415,7 +415,7 @@ describe("GET /payslips/:id — matchedDeposits", () => {
     return res.body.token as string;
   }
 
-  it("matchedDeposits finds a canonical credit deposit within ±3 days and 1% of net pay", async () => {
+  it("matchedDeposits finds a canonical credit deposit within ±7 days and 1% of net pay", async () => {
     const token = await loginToken();
 
     // The mock LLM always returns payDate="2026-01-15" and netPayCurrent=4000.
@@ -454,20 +454,22 @@ describe("GET /payslips/:id — matchedDeposits", () => {
       expect(match!.accountId).toBe(SEED_BOA_CHECKING);
       expect(match!.institution).toBeDefined();
       expect(match!.accountType).toBeDefined();
+      expect(match!.dateDelta).toBe(1);
+      expect(match!.amountDelta).toBe(0);
     } finally {
       await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
     }
   });
 
-  it("matchedDeposits excludes credits outside the ±3-day window", async () => {
+  it("matchedDeposits excludes credits outside the ±7-day window", async () => {
     const token = await loginToken();
 
-    // Insert a credit transaction 5 days before pay date — outside the ±3-day window
+    // Insert a credit transaction 10 days before pay date — outside the ±7-day window (pay 2026-01-15)
     const txnId = crypto.randomUUID();
     await sqlStmt(
       `INSERT INTO transaction_canonical
          (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
-       VALUES (?, ?, ?, '2026-01-10', 4000, 'credit', 'OutOfWindow Deposit', 'posted', ?, CURRENT_TIMESTAMP)`
+       VALUES (?, ?, ?, '2026-01-05', 4000, 'credit', 'OutOfWindow Deposit', 'posted', ?, CURRENT_TIMESTAMP)`
     ).run(txnId, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `out-of-window-fp-${txnId}`);
 
     try {

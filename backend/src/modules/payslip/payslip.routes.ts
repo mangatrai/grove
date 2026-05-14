@@ -418,7 +418,13 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     return;
   }
   const [matchedDeposits, lineItems] = await Promise.all([
-    findMatchedDeposits(householdId, snapshot.payDate, snapshot.netPayCurrent, snapshot.ownerPersonProfileId),
+    findMatchedDeposits(
+      householdId,
+      snapshot.payDate,
+      snapshot.netPayCurrent,
+      snapshot.ownerPersonProfileId,
+      snapshot.payPeriodEnd
+    ),
     getPayslipLineItems(snapshot.id, householdId)
   ]);
   const validationWarnings = validatePayslipBalance(snapshot, lineItems);

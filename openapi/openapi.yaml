@@ -2130,7 +2130,7 @@ paths:
       summary: Payslip detail (includes matchedDeposits and lineItems — CR-068, CR-072)
       description: |
         Returns the full payslip snapshot plus:
-        - `matchedDeposits`: up to 5 credit transactions within ±3 days / 1% of net pay on salary deposit account (CR-068)
+        - `matchedDeposits`: up to 5 posted `credit` transactions within ±7 days of `payDate` (or ±10 days when anchored on `payPeriodEnd` only) / 1% of net pay on salary deposit account when set (CR-068, F-5b)
         - `lineItems`: per-row earnings/deduction/tax items grouped by section (CR-072)
       security: [{ bearerAuth: [] }]
       parameters:
@@ -2181,7 +2181,7 @@ paths:
                   createdAt: { type: string }
                   matchedDeposits:
                     type: array
-                    description: Credit transactions within ±3 days / 1% of net pay (CR-068)
+                    description: Posted credit transactions within date window / 1% of net pay (CR-068, F-5b)
                     items:
                       type: object
                       properties:
@@ -2195,6 +2195,8 @@ paths:
                         institution: { type: string }
                         accountType: { type: string }
                         accountMask: { type: string, nullable: true }
+                        dateDelta: { type: number, description: Calendar days between anchor date and txn date }
+                        amountDelta: { type: number, description: Absolute dollars between txn amount and net pay }
                   lineItems:
                     type: object
                     description: Per-row line items grouped by section (CR-072)

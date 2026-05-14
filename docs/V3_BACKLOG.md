@@ -383,10 +383,10 @@ This lets the LLM contextualise any anomalies rather than misinterpreting them a
 ## Payslip — Bank Deposit Matching Is Flaky; Needs Stored Pairing
 
 ### Current behaviour (CR-068, shipped 2026-04-10)
-`GET /payslips/:id` calls `findMatchedDeposits()` which queries `transaction_canonical` fresh on every request. No link is stored. The match is ephemeral and recomputed each time.
+`GET /payslips/:id` calls `findMatchedDeposits()` which queries `transaction_canonical` fresh on every request until the user confirms links (F-5); confirmed rows live in `payslip_deposit_match` (`getConfirmedDeposits` / add/remove helpers).
 
 ### Why the card disappears entirely (no box at all)
-`findMatchedDeposits` returns `[]` immediately if `pay_date IS NULL` or `net_pay_current IS NULL` on the payslip row. When the frontend receives an empty array or no `matchedDeposits` field, it renders no card. Payslips where LLM extraction missed pay date or net pay will silently show nothing.
+`findMatchedDeposits` returns `[]` when both `pay_date` and `pay_period_end` are null, or when `net_pay_current` is null. When the frontend receives an empty array or no `matchedDeposits` field, it renders no card. Payslips where extraction missed both dates and net pay will silently show nothing.
 
 ### Why the box shows but is empty (no match found)
 `pay_date` and `net_pay_current` are set but the query returns no rows. Known causes:
@@ -426,7 +426,7 @@ With the stored model: fixing the dynamic search logic (wider date window, loose
 - **Surface match confidence**: show to user why a candidate was suggested (date distance, amount delta) so they can judge edge cases
 
 ### Files to touch (when fixing)
-- `backend/src/modules/payslip/payslip.service.ts` — `findMatchedDeposits`, add `getConfirmedDeposit`
+- `backend/src/modules/payslip/payslip.service.ts` — `findMatchedDeposits`, `getConfirmedDeposits`, `addConfirmedDeposit`, `removeConfirmedDeposit`
 - `backend/db/migrations/` — add `matched_deposit_canonical_id` column
 - `backend/src/modules/payslip/payslip.routes.ts` — PATCH endpoint to confirm/unlink a match
 - `frontend/src/pages/PayslipDetailPage.tsx` — confirm/unlink UX on the bank deposit card

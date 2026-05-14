@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## F-5b (2026-05-14): Payslip deposit matching — service layer (F-5 slice 2)
+
+- **Type:** Feature (V3 F-5)
+- **What:** `MatchedDeposit` gains `dateDelta` and `amountDelta`. `findMatchedDeposits` anchors on `pay_date` else `pay_period_end`, uses ±7-day window (±10 when anchored on period end only), filters `transaction_canonical.status = 'posted'`, and maps deltas in JS. New exports: `getConfirmedDeposits`, `addConfirmedDeposit`, `removeConfirmedDeposit` (join table `payslip_deposit_match`). `GET /payslips/:id` passes `payPeriodEnd` into the search helper.
+- **Why:** Prepare stored confirmed links (F-5) and widen/tune ephemeral deposit suggestions without split-deposit auto-detection.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `frontend/src/payslip/types.ts`, `backend/tests/payslip-upload.test.ts`, `openapi/openapi.yaml`, `docs/PAYSLIP_V1.md`.
+
+---
+
 ## F-5a (2026-05-14): Payslip deposit matching — join table (migration only)
 
 - **Type:** DB- / Feature slice (V3 F-5)
