@@ -50,7 +50,7 @@ household,,,COSTCO,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,SAMS,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,KROGER,contains,any,,Shopping > Groceries,40,0.98,true
 household,,,HEB,contains,any,,Shopping > Groceries,40,0.98,true
-household,,,APPLE,contains,any,,Shopping > Electronic,40,0.98,true
+household,,,APPLE STORE,contains,any,,Shopping > Electronic,40,0.98,true
 household,,,UBER,contains,any,,Mobility > Taxi,60,0.90,true
 household,,,LYFT,contains,any,,Mobility > Taxi,60,0.90,true
 household,,,CHEVRON,contains,debit_only,,Mobility > Fuel,90,0.75,true
@@ -82,7 +82,6 @@ household,,,PRIMROSE SCHOOL,contains,any,,Education > Childcare,40,0.98,true
 household,,,LEADERSHIP,contains,any,,Education > Tuition,40,0.98,true
 household,,,ATT DES:,contains,debit_only,,Utilities > Mobile phone,40,0.95,true
 household,,,TMOBILE,contains,debit_only,,Utilities > Mobile phone,40,0.96,true
-household,,,ZELLE,contains,credit_only,,Income > Reimbursements,40,0.88,true
 household,,,FRONTIER,contains,debit_only,,Utilities > Internet,40,0.95,true
 household,,,BKOFAMERICA ATM,contains,debit_only,,Transfers > Cash withdrawal,40,0.98,true
 household,,,INDIA BAZAAR,contains,debit_only,,Shopping > Groceries,40,0.97,true
@@ -92,7 +91,7 @@ household,,,HARELI FRESH MARKET,contains,debit_only,,Shopping > Groceries,40,0.9
 household,,,PY *HARELI,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,TOM THUMB,contains,debit_only,,Shopping > Groceries,40,0.97,true
 household,,,TESLA SUPERCHARGER,contains,debit_only,,Mobility > EV Charging,40,0.98,true
-household,,,DIRECTPAY FULL BALANCE,contains,debit_only,,Transfers > Transfers out,40,0.97,true
+household,,,DIRECTPAY FULL BALANCE,contains,any,,Transfers > Transfers out,40,0.97,true
 household,,,CASHBACK BONUS REDEMPTION,contains,credit_only,,Income > Refunds,40,0.95,true
 household,,,AUTOPAY PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.97,true
 household,,,AMEX OFFER CREDIT,contains,credit_only,,Income > Refunds,40,0.97,true
@@ -171,3 +170,17 @@ household,,,homedepot,contains,any,,Home > Home improvement,100,0.9,true
 household,,,nebraska furniture mart o,contains,any,,Home > Furniture,100,0.9,true
 household,,,einstein bros bagels,contains,any,,Food > Dining out,100,0.9,true
 household,,,category spend bonus,contains,any,,Transfers > Transfers in,100,0.9,true
+household,,,ROCKET MORTGAGE LOAN,contains,any,,Loans > Rental Prop,100,0.90,true
+household,,,PENNYMAC CASH,contains,any,,Loans > Rental Prop,100,0.90,true
+household,,,NEWREZ-SHELLPOIN ACH PMT,contains,any,,Loans > Rental Prop,100,0.90,true
+household,,,WF HOME MTG AUTO PAY,contains,any,,Loans > Rental Prop,100,0.90,true
+household,,,FLEX PLAN,contains,any,,Banking > Fees,100,0.90,true
+household,,,GEXA ENERGY,contains,debit_only,,Utilities > Energy,40,0.96,true
+household,,,ENERGY OGRE,contains,debit_only,,Utilities > Energy,40,0.95,true
+household,,,ENERGY TEXAS,contains,debit_only,,Utilities > Energy,40,0.95,true
+household,,,ROYAL CARIBBEAN,contains,debit_only,,Travel > Cruise,40,0.95,true
+household,,,MSC CRUISES,contains,debit_only,,Travel > Cruise,40,0.95,true
+household,,,A2Z EV,contains,debit_only,,Mobility > EV Charging,40,0.93,true
+household,,,FRANCIS ENERGY,contains,debit_only,,Mobility > EV Charging,40,0.93,true
+household,,,AMC,contains,debit_only,,Entertainment > Movies,40,0.92,true
+household,,,DESI MANDI,contains,debit_only,,Shopping > Groceries,40,0.96,true

@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## I-3 (2026-05-14): Category taxonomy + rule audit
+
+- **Type:** Improvement (V3 I-3)
+- **What:**
+  - **Builtin rule fixes (`0044_i3_rule_taxonomy_fix.sql` + `0001_bootstrap.sql`):** Shell, Exxon, Chevron, BP were routed to `Mobility > Public Transit` — corrected to `Mobility > Fuel`. `parking` and `toll` patterns corrected to `Mobility > Parking & Tolls`. Rule keys renamed to match (`fuel_0_shell`, `parking_0_parking`, etc.).
+  - **Apple Pay bug fix (`category-rules-house.csv`):** `APPLE` rule narrowed to `APPLE STORE`. The broad `apple` pattern was matching the bank-appended suffix `TXAPPLE PAY ENDING IN XXXX`, miscategorizing 40 transactions (Hareli Fresh Market, Patel Brothers, India Bazaar, Gwalia Sweets, Chipotle, etc.) as `Shopping > Electronic`.
+  - **Household rules CSV audit:** `DIRECTPAY FULL BALANCE` consolidated to `any` (was `debit_only` only). Synced 6 rules that existed in DB but were missing from master file: FLEX PLAN, ROCKET MORTGAGE LOAN, PENNYMAC CASH, NEWREZ-SHELLPOIN ACH PMT, WF HOME MTG AUTO PAY (→ Loans > Rental Prop), and DIRECTPAY credit variant. Zelle rule removed (was disabled; too broad for P2P). Added 12 new rules: GEXA ENERGY, ENERGY OGRE, ENERGY TEXAS (→ Utilities > Energy); ROYAL CARIBBEAN, MSC CRUISES (→ Travel > Cruise); A2Z EV, FRANCIS ENERGY (→ Mobility > EV Charging); AMC (→ Entertainment > Movies); DESI MANDI (→ Shopping > Groceries).
+  - **Custom categories in bootstrap seed + fixture:** `Bonds` (Investments > Bonds, `11d3b2b9-*`) and `Rental Prop` (Loans > Rental Prop, `dd347c5f-*`) added to `0001_bootstrap.sql` and `fixtures/category-import/categories.csv`. New installs will create these automatically.
+- **Why:** 441 transactions (13%) were unclassified at import time; all manually fixed by user. Root causes: broad `apple` rule; gas station builtins pointing to wrong category; missing rules for recurring energy vendors, cruise lines, EV chargers; household CSV drifted from DB state.
+- **Decisions recorded:**
+  - `Income > Reimbursements` stays under Income — employer per diems and FSA drawdowns are genuine cash-positive inflows; no structural rename.
+  - Spouse P2P payments: `Income > Reimbursements` is the correct bucket until both accounts are imported (Transfer In implies a paired out-transfer that doesn't exist yet; transfer detection pairs retroactively using amount/date/account — category is irrelevant to pairing).
+  - Zelle rule permanently removed — P2P credits cannot be safely classified by payment method; manual per-transaction resolution is correct.
+- **Files:** `backend/db/migrations/0044_i3_rule_taxonomy_fix.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/category-rules-house.csv`, `fixtures/category-import/categories.csv`.
+
+---
+
 ## F-7/F-8 (2026-05-14): AI insights — flow classification + budget suggestion cleanup
 
 - **Type:** Feature (V3 F-7 + F-8)

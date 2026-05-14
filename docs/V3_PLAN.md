@@ -257,12 +257,16 @@ Import session state machine already handles in-progress state; frontend polls s
 
 ---
 
-### I-3: Category / reimbursement taxonomy cleanup
-- Rename or restructure `Income > Reimbursements`: the "Income" parent is misleading. Consider top-level `Reimbursements & Recoveries` category, classified as `money_return` flow class (not `true_income`).
-- Audit global rules: remove/narrow any rule mapping payment methods (Zelle, Venmo, PayPal, CashApp) → Reimbursements. These are too broad.
-- F-8 flow classification shipped (2026-05-14) — I-3 can now be groomed independently. Categories must align with the shipped flow class map (`true_income`, `money_return`, `lifestyle_spend`, `wealth_building`, `tax_obligation`, `money_movement`).
+### ~~I-3: Category / reimbursement taxonomy cleanup~~ ✓ DELIVERED (I-3, 2026-05-14)
 
-**Files:** `backend/db/seeds/`, category service, potentially new migration to rename global builtin category
+**Decision:** No structural rename — `Income > Reimbursements` stays under Income. Employer per diems and FSA reimbursements are genuine cash-positive events; treating them as income-adjacent inflow is correct for this household. Zelle rule removed (too broad; manual resolution is cleaner for P2P).
+
+**Delivered:**
+- Builtin rules fixed: shell/exxon/chevron/bp → `Mobility > Fuel`; parking/toll → `Mobility > Parking & Tolls` (migration `0044_i3_rule_taxonomy_fix.sql` + seed)
+- Household rule master CSV (`fixtures/category-import/category-rules-house.csv`) fully audited and updated: `APPLE` → `APPLE STORE` (fixes 40 Apple Pay miscategorizations); `DIRECTPAY FULL BALANCE` consolidated to `any`; synced 6 rules that existed in DB but were missing from master file (FLEX PLAN, Rental Prop loan servicers); added 12 new rules (energy vendors, cruise lines, EV charging, AMC, DESI MANDI)
+- `Bonds` and `Rental Prop` custom categories added to bootstrap seed and `categories.csv` fixture
+
+**Files:** `backend/db/migrations/0044_i3_rule_taxonomy_fix.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/category-rules-house.csv`, `fixtures/category-import/categories.csv`
 
 ---
 
@@ -410,7 +414,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~F-9~~ | ~~Date of birth encrypted at rest, computed age~~ | ✓ Done | Feature + Security | — |
 | I-1 | Personal loan tracker | P3 | Feature | F-8 |
 | I-2 | Async import parse + canonicalize | P3 | Reliability | — |
-| I-3 | Category / reimbursements taxonomy cleanup | P3 | Improvement | F-7/F-8 |
+| ~~I-3~~ | ~~Category / reimbursements taxonomy cleanup~~ | ~~P3~~ | ✓ Done 2026-05-14 | — |
 | ~~I-4~~ | ~~Password reset token periodic cleanup~~ | ✓ Done | Maintenance | — |
 | ~~I-5~~ | ~~Export/restore housekeeping (staging file, GDrive warning)~~ | ✓ Done | Maintenance | — |
 | ~~I-6~~ | ~~Drive query string escaping~~ | ✓ Done | Security hygiene | — |
@@ -429,4 +433,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-14. F-7/F-8 shipped (AI flow classification + budget suggestion cleanup). I-3 unblocked (F-8 landed). Remaining P2: **F-5** (payslip deposit stored pairing). P3: I-1 (personal loan tracker), I-2 (async import), I-3 (category taxonomy cleanup), I-7, I-8, PS-1 (payslip MoM comparison), PS-2 (estimated tax sufficiency).*
+*Last updated: 2026-05-14. I-3 shipped (builtin rule taxonomy fix + household rules master CSV audit). Remaining P2: **F-5** (payslip deposit stored pairing). P3: I-1 (personal loan tracker), I-2 (async import), I-7, I-8, PS-1 (payslip MoM comparison), PS-2 (estimated tax sufficiency).*

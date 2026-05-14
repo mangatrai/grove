@@ -298,35 +298,19 @@ This gives the LLM accurate lifestyle spending to benchmark, separate tax contex
 - Split the flow totals into lifestyle vs non-lifestyle
 - No schema changes needed — category names are the signal
 
-### Grooming note — "Income > Reimbursements" category and the shared-expense netting pattern
+### ✓ RESOLVED (I-3, 2026-05-14) — Category taxonomy and rule audit
 
-**Context from v2 live onboarding (2026-05-08):**
+**Decision — `Income > Reimbursements` stays under Income.** Employer per diems and FSA reimbursements are genuine cash-positive inflows for this household; treating them as income is correct. No structural rename.
 
-User pays the full family cell phone bill, then family members Zelle their share back. The natural categorization question: where do those Zelle credits go?
+**Decision — Zelle rule removed.** Too broad to classify safely; manual resolution per transaction is the right approach for P2P payments. Transfer detection pairs spouse payments automatically once both accounts are imported.
 
-**Two valid approaches:**
+**Decision — Spouse P2P before both accounts are imported:** Mark inbound spouse payments as `Income > Reimbursements` (not Transfer In). Transfer In implies a paired out-transfer, which doesn't exist until the spouse account is imported. Reimbursements-as-income gives an honest monthly cash flow picture. Once spouse's account is imported, transfer detection retroactively pairs the transactions (category is irrelevant to pairing — only amount, date, different accounts, and `transfer_group_id IS NULL` matter).
 
-| Approach | Debit | Credits | Net in report |
-|---|---|---|---|
-| **Netting** (user's current approach) | `Utilities > Mobile Phone` | `Utilities > Mobile Phone` | Net = user's true cost ✓ |
-| **Split** | `Utilities > Mobile Phone` | `Income > Reimbursements` | Full cost in Utilities + recovery in Reimbursements |
-
-Netting is pragmatically correct for shared recurring bills. The app should not break it.
-
-**The "Income > Reimbursements" naming problem:**
-The category name implies these are income, but they are not — they are `money_return` in the flow taxonomy (recovery of a prior outflow, not new money). A blanket rule "Zelle incoming = Reimbursements" was created in the default rules and has been disabled by the user because it is too broad. Zelle credits can be:
-- Shared expense recovery (cell plan, dinner, trip)
-- Personal loan repayment (friend paying back $500)
-- Rent from a tenant (actual income)
-- Selling something
-
-These are different flow classes and should not all land in the same bucket.
-
-**What to groom when working on categories:**
-1. Rename or clarify `Income > Reimbursements` — the word "Income" is misleading. Consider `Reimbursements & Recoveries` as a top-level category, or make "Reimbursements" a sibling of Income, not a child.
-2. Audit the default global rules — any rule that maps a payment method (Zelle, Venmo, PayPal, CashApp) to Reimbursements is too broad. Remove or narrow them.
-3. In the flow classification work: treat `Reimbursements` as `money_return`, not `true_income`. Same for personal loan repayments.
-4. The netting pattern (crediting a category to net out a shared expense) is valid and should be preserved — do not introduce changes that break it.
+**Delivered in I-3:**
+- Builtin rules corrected: gas stations → Fuel; parking/toll → Parking & Tolls
+- `APPLE` rule narrowed to `APPLE STORE` — fixed 40 Apple Pay miscategorizations where the bank-appended suffix `TXAPPLE PAY ENDING IN` was matching the broad `apple` pattern
+- Household rules master CSV fully synced with DB state + 12 new rules added
+- `Bonds` and `Rental Prop` added to bootstrap seed and categories fixture
 
 ---
 
