@@ -94,8 +94,10 @@ export type PayslipSnapshotDetail = {
   employmentRateType: string | null;
   rawExtractJson: Record<string, unknown>;
   createdAt: string;
-  /** Bank transactions that likely represent the net pay deposit for this payslip. */
-  matchedDeposits?: MatchedDeposit[];
+  /** Explicitly confirmed deposit transactions from payslip_deposit_match join table (F-5). */
+  confirmedDeposits: MatchedDeposit[];
+  /** Dynamic search candidates — only populated when confirmedDeposits is empty (F-5). */
+  suggestedDeposits: MatchedDeposit[];
   /** Individual line items grouped by section — only present on GET /payslips/:id */
   lineItems?: PayslipLineItemsGrouped;
   /** Cross-validation warnings between line item sums and summary columns (CR-117) */
