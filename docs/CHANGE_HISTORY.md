@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## F-5c (2026-05-14): Payslip deposit matching — HTTP routes (F-5 slice 3)
+
+- **Type:** Feature (V3 F-5)
+- **What:** `GET /payslips/:id` returns `confirmedDeposits` (always from `payslip_deposit_match`) and `suggestedDeposits` (ephemeral search only when confirmed is empty); removes `matchedDeposits`. New `PUT` / `DELETE /payslips/:id/deposits/:canonicalId` (registered before `GET /:id`) return `{ snapshot, confirmedDeposits }`. Path params validated with Zod (`depositCanonicalIdParamSchema`).
+- **Why:** Stored confirmation + API for add/remove links; Express route order avoids `:id` capturing `deposits`.
+- **Files:** `backend/src/modules/payslip/payslip.routes.ts`, `backend/tests/payslip-upload.test.ts`, `openapi/openapi.yaml`, `docs/PAYSLIP_V1.md`, `docs/V3_BACKLOG.md`.
+
+---
+
 ## F-5b (2026-05-14): Payslip deposit matching — service layer (F-5 slice 2)
 
 - **Type:** Feature (V3 F-5)

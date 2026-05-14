@@ -383,10 +383,10 @@ This lets the LLM contextualise any anomalies rather than misinterpreting them a
 ## Payslip — Bank Deposit Matching Is Flaky; Needs Stored Pairing
 
 ### Current behaviour (CR-068, shipped 2026-04-10)
-`GET /payslips/:id` calls `findMatchedDeposits()` which queries `transaction_canonical` fresh on every request until the user confirms links (F-5); confirmed rows live in `payslip_deposit_match` (`getConfirmedDeposits` / add/remove helpers).
+`GET /payslips/:id` returns `confirmedDeposits` plus `suggestedDeposits` (suggestions empty when any confirmed link exists). `PUT`/`DELETE /payslips/:id/deposits/:canonicalId` mutate stored links (`payslip_deposit_match`).
 
 ### Why the card disappears entirely (no box at all)
-`findMatchedDeposits` returns `[]` when both `pay_date` and `pay_period_end` are null, or when `net_pay_current` is null. When the frontend receives an empty array or no `matchedDeposits` field, it renders no card. Payslips where extraction missed both dates and net pay will silently show nothing.
+`findMatchedDeposits` / empty **`suggestedDeposits`** when both `pay_date` and `pay_period_end` are null, or when `net_pay_current` is null, or when **`confirmedDeposits`** is non-empty. When the frontend receives empty `suggestedDeposits` and empty `confirmedDeposits`, it may show no deposit card until a later UI slice.
 
 ### Why the box shows but is empty (no match found)
 `pay_date` and `net_pay_current` are set but the query returns no rows. Known causes:

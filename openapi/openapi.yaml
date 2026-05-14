@@ -2124,13 +2124,91 @@ paths:
       tags: [payslips]
       summary: Sniff PDF for parser hints
       security: [{ bearerAuth: [] }]
+  /payslips/{id}/deposits/{canonicalId}:
+    put:
+      tags: [payslips]
+      summary: Confirm net-pay deposit link (idempotent)
+      description: |
+        Stores a row in `payslip_deposit_match` linking this payslip to a `transaction_canonical` id
+        in the same household. No-op on duplicate pair. Returns 404 if payslip or canonical row is missing (F-5c).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: canonicalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated snapshot and all confirmed deposit rows for this payslip
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [snapshot, confirmedDeposits]
+                properties:
+                  snapshot:
+                    type: object
+                    description: Full payslip_snapshot row after insert (same core fields as GET /payslips/:id)
+                  confirmedDeposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+        "400":
+          description: Invalid path parameter
+        "404":
+          description: Payslip or canonical transaction not found for this household
+    delete:
+      tags: [payslips]
+      summary: Remove one confirmed net-pay deposit link
+      description: Deletes the matching `payslip_deposit_match` row if present; no-op when link absent. 404 only when payslip is missing (F-5c).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: canonicalId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Updated snapshot and remaining confirmed deposit rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [snapshot, confirmedDeposits]
+                properties:
+                  snapshot:
+                    type: object
+                    description: Full payslip_snapshot row after delete
+                  confirmedDeposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+        "400":
+          description: Invalid path parameter
+        "404":
+          description: Payslip not found
   /payslips/{id}:
     get:
       tags: [payslips]
-      summary: Payslip detail (includes matchedDeposits and lineItems — CR-068, CR-072)
+      summary: Payslip detail (confirmedDeposits, suggestedDeposits, lineItems — F-5c, CR-072)
       description: |
         Returns the full payslip snapshot plus:
-        - `matchedDeposits`: up to 5 posted `credit` transactions within ±7 days of `payDate` (or ±10 days when anchored on `payPeriodEnd` only) / 1% of net pay on salary deposit account when set (CR-068, F-5b)
+        - `confirmedDeposits`: stored links from `payslip_deposit_match` (always present; empty if none)
+        - `suggestedDeposits`: ephemeral search candidates — **only populated when `confirmedDeposits` is empty**; same shape as former `matchedDeposits` (±7/±10 day window, posted credits, 1% amount tolerance; F-5b + F-5c)
         - `lineItems`: per-row earnings/deduction/tax items grouped by section (CR-072)
       security: [{ bearerAuth: [] }]
       parameters:
@@ -2179,24 +2257,14 @@ paths:
                   employmentRateType: { type: string, nullable: true, description: "annual | biweekly | hourly (CR-072)" }
                   rawExtractJson: { type: object }
                   createdAt: { type: string }
-                  matchedDeposits:
+                  confirmedDeposits:
                     type: array
-                    description: Posted credit transactions within date window / 1% of net pay (CR-068, F-5b)
-                    items:
-                      type: object
-                      properties:
-                        id: { type: string }
-                        txnDate: { type: string }
-                        amount: { type: number }
-                        direction: { type: string }
-                        merchant: { type: string, nullable: true }
-                        memo: { type: string, nullable: true }
-                        accountId: { type: string }
-                        institution: { type: string }
-                        accountType: { type: string }
-                        accountMask: { type: string, nullable: true }
-                        dateDelta: { type: number, description: Calendar days between anchor date and txn date }
-                        amountDelta: { type: number, description: Absolute dollars between txn amount and net pay }
+                    description: Stored deposit links for this payslip (always present; F-5c)
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+                  suggestedDeposits:
+                    type: array
+                    description: Ephemeral search candidates — empty when confirmedDeposits is non-empty (F-5c)
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
                   lineItems:
                     type: object
                     description: Per-row line items grouped by section (CR-072)
@@ -2800,6 +2868,22 @@ components:
         totalRows:
           type: integer
           minimum: 0
+    MatchedDeposit:
+      type: object
+      description: Canonical credit row surfaced as a deposit candidate or confirmed link (CR-068, F-5b)
+      properties:
+        id: { type: string }
+        txnDate: { type: string }
+        amount: { type: number }
+        direction: { type: string }
+        merchant: { type: string, nullable: true }
+        memo: { type: string, nullable: true }
+        accountId: { type: string }
+        institution: { type: string }
+        accountType: { type: string }
+        accountMask: { type: string, nullable: true }
+        dateDelta: { type: number, description: Calendar days between anchor date and txn date }
+        amountDelta: { type: number, description: Absolute dollars between txn amount and net pay }
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)
@@ -2852,7 +2936,7 @@ components:
         rate: { type: number, nullable: true }
     PayslipSnapshotSummary:
       type: object
-      description: Payslip snapshot row (summary columns; no lineItems or matchedDeposits)
+      description: Payslip snapshot row (summary columns; no lineItems or deposit arrays)
       properties:
         id: { type: string }
         payDate: { type: string, nullable: true }
