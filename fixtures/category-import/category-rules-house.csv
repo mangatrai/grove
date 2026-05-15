@@ -51,6 +51,8 @@ household,,,SAMS,contains,any,,Shopping > General merchandise,60,0.80,true
 household,,,KROGER,contains,any,,Shopping > Groceries,40,0.98,true
 household,,,HEB,contains,any,,Shopping > Groceries,40,0.98,true
 household,,,APPLE STORE,contains,any,,Shopping > Electronic,40,0.98,true
+household,,,APPLE.COM,contains,any,,Shopping > Electronic,40,0.98,true
+household,,,MONTHLY INSTALLMENTS,contains,any,,Shopping > Electronic,40,0.98,true
 household,,,UBER,contains,any,,Mobility > Taxi,60,0.90,true
 household,,,LYFT,contains,any,,Mobility > Taxi,60,0.90,true
 household,,,CHEVRON,contains,debit_only,,Mobility > Fuel,90,0.75,true
@@ -131,6 +133,7 @@ household,,,Merchant Offers Credit,contains,credit_only,,Income > Refunds,40,0.9
 household,,,DESI DISTRICT,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,THE HUMAN BEAN,contains,debit_only,,Food > Coffee,40,0.95,true
 household,,,CLAUDE,contains,debit_only,,Shopping > Software,40,0.90,true
+household,,,OPENAI,contains,debit_only,,Shopping > Software,40,0.90,true
 household,,,CITY OF FRISCO,contains,debit_only,,Utilities > City Water,40,0.96,true
 household,,,MUNICIPAL ONLINE PAY,contains,debit_only,,Utilities > City Water,40,0.96,true
 household,,,ADT SECURITY,contains,debit_only,,Shopping > Software,40,0.88,true
@@ -149,6 +152,7 @@ household,,,AQUA TOTS,contains,debit_only,,Education > Activities,40,0.94,true
 household,,,ASIAN POT EXPRESS,contains,debit_only,,Food > Dining out,40,0.95,true
 household,,,RIVIAN,contains,debit_only,,Mobility > EV Charging,40,0.93,true
 household,,,AUTOPAY,contains,credit_only,,Transfers > Transfers in,40,0.85,true
+household,,,ACH DEPOSIT INTERNET TRANSFER,contains,credit_only,,Transfers > Transfers in,40,0.85,true
 household,,,AUTOMATIC PAYMENT,contains,credit_only,,Transfers > Transfers in,40,0.85,true
 household,,,Offer:,contains,credit_only,,Income > Refunds,40,0.85,true
 household,,,CORNER BAKERY,contains,debit_only,,Food > Dining out,40,0.95,true
@@ -184,3 +188,4 @@ household,,,A2Z EV,contains,debit_only,,Mobility > EV Charging,40,0.93,true
 household,,,FRANCIS ENERGY,contains,any,,Mobility > EV Charging,40,0.93,true
 household,,,AMC,contains,debit_only,,Entertainment > Movies,40,0.92,true
 household,,,DESI MANDI,contains,debit_only,,Shopping > Groceries,40,0.96,true
+household,,,GOFUNDME,contains,debit_only,,Giving > Charity,40,0.80,true
