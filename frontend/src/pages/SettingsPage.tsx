@@ -449,6 +449,7 @@ export function SettingsPage() {
     error: string | null;
     apiPropertyId: string | null;
     apiListingId: string | null;
+    valuationDetail: unknown | null;
     retrieving: boolean;
     retrieveError: string | null;
   }>({
@@ -457,7 +458,7 @@ export function SettingsPage() {
     propertyUse: "", marketValueUsd: "",
     asOfDate: new Date().toISOString().slice(0, 10),
     saving: false, error: null,
-    apiPropertyId: null, apiListingId: null,
+    apiPropertyId: null, apiListingId: null, valuationDetail: null,
     retrieving: false, retrieveError: null
   });
 
@@ -769,7 +770,8 @@ export function SettingsPage() {
           addressLine1: "", city: "", state: "", zip: "", propertyUse: "",
           marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
           saving: false, error: null,
-          apiPropertyId: null, apiListingId: null, retrieving: false, retrieveError: null
+          apiPropertyId: null, apiListingId: null, valuationDetail: null,
+          retrieving: false, retrieveError: null
         });
       }
     } catch (e: unknown) {
@@ -786,7 +788,8 @@ export function SettingsPage() {
       propertyUse: "" as "" | "primary" | "rental" | "vacation",
       marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
       saving: false, error: null,
-      apiPropertyId: null, apiListingId: null, retrieving: false, retrieveError: null
+      apiPropertyId: null, apiListingId: null, valuationDetail: null,
+      retrieving: false, retrieveError: null
     };
     if (a.property_id) {
       try {
@@ -828,7 +831,7 @@ export function SettingsPage() {
     if (!addr) return;
     setPropertyModal((m) => ({ ...m, retrieving: true, retrieveError: null }));
     try {
-      const r = await apiJson<{ estimate: number; apiPropertyId: string; apiListingId: string | null }>(
+      const r = await apiJson<{ estimate: number; apiPropertyId: string; apiListingId: string | null; detail: unknown }>(
         "/household/properties/preview-valuation",
         { method: "POST", body: JSON.stringify({ address: addr }) }
       );
@@ -838,7 +841,8 @@ export function SettingsPage() {
         marketValueUsd: String(Math.round(r.estimate)),
         asOfDate: new Date().toISOString().slice(0, 10),
         apiPropertyId: r.apiPropertyId,
-        apiListingId: r.apiListingId
+        apiListingId: r.apiListingId,
+        valuationDetail: r.detail
       }));
     } catch (e: unknown) {
       setPropertyModal((m) => ({
@@ -864,6 +868,7 @@ export function SettingsPage() {
       if (propertyModal.apiPropertyId) {
         body.apiPropertyId = propertyModal.apiPropertyId;
         body.apiListingId = propertyModal.apiListingId;
+        body.valuationDetailJson = propertyModal.valuationDetail;
       }
       const valueUsd = parseFloat(propertyModal.marketValueUsd);
       if (!isNaN(valueUsd) && valueUsd >= 0) {
@@ -2168,10 +2173,16 @@ export function SettingsPage() {
               variant="light"
               size="xs"
               loading={propertyModal.retrieving}
-              disabled={propertyModal.saving || (!propertyModal.addressLine1.trim() && !propertyModal.city.trim())}
+              disabled={
+                propertyModal.saving ||
+                !propertyModal.addressLine1.trim() ||
+                !propertyModal.city.trim() ||
+                !propertyModal.state.trim() ||
+                !propertyModal.zip.trim()
+              }
               onClick={() => void retrieveValuation()}
             >
-              {propertyModal.apiPropertyId ? "Update Redfin estimate" : "Retrieve Redfin estimate"}
+              {propertyModal.marketValueUsd !== "" ? "Update Redfin estimate" : "Retrieve Redfin estimate"}
             </Button>
             <Text size="xs" c="dimmed">
               Market value creates a snapshot in property history. Add new snapshots any time to track appreciation.

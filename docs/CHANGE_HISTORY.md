@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-189 (2026-05-15): D-2 — Property valuation UX polish
+
+- **Type:** UX fix (D-2 follow-on)
+- **What:**
+  - **Settings modal button gate**: "Retrieve/Update Redfin estimate" button now requires all four address fields (street, city, state, zip) before enabling — prevents partial-address API calls.
+  - **Settings modal label logic**: Button reads "Update Redfin estimate" when the property already has a market value set (regardless of `apiPropertyId`); "Retrieve Redfin estimate" on first-time lookup only.
+  - **valuation_detail_json stored on create**: `POST /household/properties` now accepts `valuationDetailJson` in body and writes it (plus `valuation_fetched_at`) immediately on property creation. Previously only the Redfin IDs were saved; the full detail JSON was lost. Frontend passes `detail` from the preview response through on save.
+  - **Net Worth refresh button**: Replaced "Redfin" text button with a compact refresh icon (`IconRefresh`) + native `title` tooltip "Refresh market value from Redfin". Cleaner inline edit row.
+- **Files:**
+  - `backend/src/modules/household/household.routes.ts` (+valuationDetailJson field, updated UPDATE to write detail + fetched_at)
+  - `frontend/src/pages/SettingsPage.tsx` (valuationDetail in modal state, correct gate/label logic, pass detail on save)
+  - `frontend/src/pages/NetWorthPage.tsx` (IconRefresh + title tooltip replaces text button)
+
+---
+
 ## CR-188 (2026-05-15): D-2 — Redfin comps parser fix + property valuation UI (Settings + Net Worth)
 
 - **Type:** Bug fix + UI feature (D-2 follow-on)

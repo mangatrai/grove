@@ -1,4 +1,4 @@
-import { IconChevronDown, IconChevronRight, IconPencil } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconPencil, IconRefresh } from "@tabler/icons-react";
 import {
   ActionIcon,
   Alert,
@@ -1200,16 +1200,18 @@ export function NetWorthPage() {
                                     onChange={(ev) => setEditPropertyAsOf(ev.target.value)}
                                     aria-label="As-of date"
                                   />
-                                  <Button
+                                  <ActionIcon
                                     type="button"
                                     variant="light"
-                                    size="xs"
+                                    size="sm"
                                     loading={propertyRowRetrieving}
                                     disabled={propertyRowSaving}
                                     onClick={() => void refreshPropertyValuation(p.propertyId)}
+                                    aria-label="Refresh Redfin estimate"
+                                    title="Refresh market value from Redfin"
                                   >
-                                    Redfin
-                                  </Button>
+                                    <IconRefresh size={14} />
+                                  </ActionIcon>
                                   <Button type="submit" size="xs" disabled={propertyRowSaving || propertyRowRetrieving}>Save</Button>
                                   <Button type="button" variant="default" size="xs" onClick={cancelPropertyEdit} disabled={propertyRowSaving || propertyRowRetrieving}>Cancel</Button>
                                 </Group>

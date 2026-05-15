@@ -349,13 +349,15 @@ Pre-compute and store `monthly_report` rows at month close. Raw data retention p
 
 ---
 
-### ~~D-2: Real estate auto-valuation (market value API)~~ ✓ DELIVERED (D-2, 2026-05-14)
+### ~~D-2: Real estate auto-valuation (market value API)~~ ✓ DELIVERED (CR-187/CR-188/CR-189, 2026-05-15)
 
 **Provider:** Redfin via RealtyAPI.io (free tier 250 req/month).
-**Three surfaces (frontend pending):** Add property modal (retrieve before save), Settings→Accounts property edit (update value), Net worth edit modal.
-**Backend shipped:** `/properties/preview-valuation` + `/properties/:id/refresh-valuation` + monthly scheduler + `ValuationDetail` JSON (comps, tax history, AVM).
+**Backend:** `/properties/preview-valuation` + `/properties/:id/refresh-valuation` + monthly 28-day background scheduler + `ValuationDetail` JSON (AVM estimate+range, last sold, tax history, up to 6 comparable sales with prices/sqft/beds/baths).
 **Schema:** `property.api_listing_id`, `property.valuation_detail_json`, `property.valuation_fetched_at` (migration 0046).
-**Frontend UI surfaces:** TODO — next step.
+**Frontend (all 3 surfaces shipped):**
+- Settings property modal: "Retrieve/Update Redfin estimate" button (requires all 4 address fields); auto-fills market value; stores Redfin IDs + full `valuation_detail_json` on save.
+- Net Worth inline edit: refresh icon button (`IconRefresh` + hover tooltip) calls stored-ID endpoint, fills edit fields.
+**UX polish (CR-189):** Button gate (all 4 address fields required), correct Retrieve vs Update label based on whether value is already set, `valuation_detail_json` now written on property create (was only written on refresh).
 
 ---
 
@@ -411,11 +413,11 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | PS-1 | Payslip MoM comparison: delta badges (net, gross, taxes, deductions vs prior payslip) | P3 | Feature | F-5 |
 | PS-2 | Estimated tax sufficiency: annualised withholding rate, safe-harbour flag, non-W2 income callout | P3 | Feature | F-5, parser line-item coverage |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
-| D-2 | Real estate auto-valuation (market value API) | Deferred | Enhancement | F-2 |
+| ~~D-2~~ | ~~Real estate auto-valuation (market value API)~~ | ✓ Done | Enhancement | F-2 |
 | D-3 | Rental income tracking | Deferred | Feature | F-2 |
 | D-4 | Multi-household | Deferred | Architecture | — |
 | D-5 | HELOC modeling | Deferred | Feature | F-2 |
 
 ---
 
-*Last updated: 2026-05-14. F-5 shipped. I-1 closed (prompt fix). D-2 backend shipped (Redfin AVM + comps + tax history, scheduler, 2 new routes). Frontend UI surfaces for D-2 (Add property modal, Settings, Net worth page) are the next step. P3 remaining: I-2, I-7, I-8, PS-1, PS-2.*
+*Last updated: 2026-05-15. D-2 fully shipped (CR-187/188/189): Redfin AVM + comps + tax history, scheduler, 2 API routes, all 3 frontend surfaces (Settings modal + Net Worth inline edit). I-1 closed (prompt fix). P3 remaining: I-2, I-7, I-8, PS-1, PS-2.*

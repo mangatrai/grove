@@ -320,7 +320,9 @@ const propertyBodySchema = z.object({
   initialValueAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   /** Redfin IDs pre-fetched by preview-valuation — skip re-lookup on save */
   apiPropertyId: z.string().optional(),
-  apiListingId: z.string().nullable().optional()
+  apiListingId: z.string().nullable().optional(),
+  /** Full valuation detail JSON from preview-valuation — stored immediately on create */
+  valuationDetailJson: z.unknown().optional()
 });
 
 householdRouter.get("/properties", async (req: AuthenticatedRequest, res) => {
@@ -360,12 +362,24 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
     initialValueAsOf: parsed.data.initialValueAsOf ?? null
   });
 
-  // Store Redfin IDs returned from preview-valuation (avoids a second API lookup)
+  // Store Redfin IDs + valuation detail returned from preview-valuation
   if (parsed.data.apiPropertyId) {
+    const detailJson = parsed.data.valuationDetailJson != null
+      ? JSON.stringify(parsed.data.valuationDetailJson)
+      : null;
     await qExec(
-      `UPDATE property SET api_provider = 'redfin', api_property_id = ?, api_listing_id = ? WHERE id = ?`,
+      `UPDATE property
+          SET api_provider          = 'redfin',
+              api_property_id       = ?,
+              api_listing_id        = ?,
+              valuation_detail_json = ?::jsonb,
+              valuation_fetched_at  = CASE WHEN ? IS NOT NULL THEN NOW() ELSE valuation_fetched_at END,
+              updated_at            = NOW()
+        WHERE id = ?`,
       parsed.data.apiPropertyId,
       parsed.data.apiListingId ?? null,
+      detailJson,
+      detailJson,
       id
     );
   }
