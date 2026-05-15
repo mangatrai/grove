@@ -340,8 +340,8 @@ Pre-compute and store `monthly_report` rows at month close. Raw data retention p
 
 ---
 
-### D-3: Rental income tracking
-Link rent deposits to a rental property account; track expenses (HOA, maintenance), compute ROI. Significant feature thread — v4 candidate. Do not block F-2 (real estate account type) on this.
+### ~~D-3: Rental income tracking~~ — DROPPED
+App is not a rental property management tool. Removed from backlog permanently (2026-05-15).
 
 ---
 
@@ -350,8 +350,8 @@ Email as canonical identity; `user_household_membership` join table. Fully defer
 
 ---
 
-### D-5: HELOC modeling
-Home equity line of credit — hybrid liability. Tentative: `type: credit_card` + `linked_account_id → real_estate`. Needs more design thought before implementation.
+### ~~D-5: HELOC modeling~~ — DROPPED
+User does not have a HELOC. Schema hook already in place: `financial_account.linked_account_id` (added in F-1) supports future HELOC→mortgage pairing if ever needed. No code required beyond the existing column. Removed from active backlog (2026-05-15).
 
 ---
 
@@ -393,10 +393,10 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | PS-2 | Estimated tax sufficiency: annualised withholding rate, safe-harbour flag, non-W2 income callout | P3 | Feature | F-5, parser line-item coverage |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
 | ~~D-2~~ | ~~Real estate auto-valuation (market value API)~~ | ✓ Done | Enhancement | F-2 |
-| D-3 | Rental income tracking | Deferred | Feature | F-2 |
+| ~~D-3~~ | ~~Rental income tracking~~ | ~~Deferred~~ → Dropped | Feature | F-2 |
 | D-4 | Multi-household | Deferred | Architecture | — |
-| D-5 | HELOC modeling | Deferred | Feature | F-2 |
+| ~~D-5~~ | ~~HELOC modeling~~ | ~~Deferred~~ → Dropped | Feature | F-2 |
 
 ---
 
-*Last updated: 2026-05-15. **V3 complete.** All P1, P2, and actionable P3 items shipped. Post-V3 interest: **D-1 only** (data archival + pre-computed monthly reports). All other deferred items (D-3/D-4/D-5, I-2/I-7/I-8, PS-1/PS-2) are not of interest at this time.*
+*Last updated: 2026-05-15. **V3 complete.** All P1, P2, and actionable P3 items shipped. D-3 and D-5 permanently dropped. Active V4 planning in `docs/V4_PLAN.md`.*
