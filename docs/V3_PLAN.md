@@ -122,24 +122,11 @@ Edge cases: 1-2 snapshots → flat line or placeholder; 0 snapshots → no expan
 
 ---
 
-### F-5: Payslip deposit matching — stored pairing + improved matching logic
-Current dynamic-only model loses the confirmed match on every load; flaky for edge cases (split deposits, late ACH, null pay_date).
+### ~~F-5: Payslip deposit matching — stored pairing + improved matching logic~~ ✓ Done (CR-185, 2026-05-14)
 
-**Hybrid model:**
-1. Dynamic candidates shown as suggestions (existing behavior)
-2. "Confirm" button on a candidate → writes `matched_deposit_canonical_id` on `payslip_snapshot` row
-3. Subsequent loads use stored match (no re-query); "Unlink" clears it
-4. Manual pick: search/select any transaction from ledger (handles split deposits)
+**Delivered:** `payslip_deposit_match` join table (1-to-N per payslip, supports split deposits across multiple transactions/accounts). `GET /payslips/:id` returns `confirmedDeposits` (join table) and `suggestedDeposits` (dynamic, only when confirmed is empty). `PUT /payslips/:id/deposits/:canonicalId` adds a confirmed link (idempotent). `DELETE /payslips/:id/deposits/:canonicalId` removes one. Dynamic search window expanded from ±3 to ±7 calendar days; `pay_period_end` fallback (±10 days); `tc.status = 'posted'` filter added; `dateDelta`/`amountDelta` confidence fields on every deposit row. UI: confirmed deposits show with Remove buttons; suggestions show with Confirm + confidence annotation; "Search ledger…" opens a modal for manual linking with multi-select support.
 
-**Matching improvements:**
-- Date window: ±5 business days instead of ±3 calendar days
-- Split deposit support: if no single match, look for same-day credits summing to net pay
-- `pay_date` null fallback: use `pay_period_end` ± wider window
-- Surface confidence to user (date distance, amount delta)
-
-**DB:** New migration adding `matched_deposit_canonical_id TEXT REFERENCES transaction_canonical(id) ON DELETE SET NULL` to `payslip_snapshot`.
-
-**Files:** `payslip.service.ts`, new migration, `payslip.routes.ts` (PATCH confirm/unlink), `PayslipDetailPage.tsx`
+**Files:** `backend/db/migrations/0045_f5_payslip_deposit_match.sql`, `payslip.service.ts`, `payslip.routes.ts`, `frontend/src/payslip/types.ts`, `frontend/src/pages/PayslipDetailPage.tsx`
 
 ---
 
@@ -405,7 +392,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~F-2~~ | ~~Real estate equity display + value history chart~~ | ✓ Done | Feature | F-1 |
 | ~~F-3~~ | ~~Net worth liquidity breakdown~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
-| F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
+| ~~F-5~~ | ~~Payslip deposit matching: stored pairing + improved logic~~ | ✓ Done | Feature | — |
 | ~~F-10~~ | ~~Transaction aggregation strip (CR-177 + FIX-177)~~ | ✓ Done | Feature | — |
 | ~~F-11~~ | ~~Record cash payments (manual ledger entry)~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
@@ -433,4 +420,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-14. I-3 shipped (builtin rule taxonomy fix + household rules master CSV audit). Remaining P2: **F-5** (payslip deposit stored pairing). P3: I-1 (personal loan tracker), I-2 (async import), I-7, I-8, PS-1 (payslip MoM comparison), PS-2 (estimated tax sufficiency).*
+*Last updated: 2026-05-14. F-5 shipped (payslip deposit stored pairing — join table, confirmed/suggested split, multi-link, search modal). All P2 items done. P3 remaining: I-1 (personal loan tracker), I-2 (async import), I-7, I-8, PS-1 (payslip MoM comparison), PS-2 (estimated tax sufficiency).*
