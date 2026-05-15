@@ -219,16 +219,11 @@ Extend flow classification (F-7) from AI insights to the app's own reports:
 
 ## P3 — Useful Improvements
 
-### I-1: Personal loan tracker
-`loan_event` entity groups related lent/repaid transactions under a named event. Outstanding balance optionally surfaced as informal receivable on net worth.
+### ~~I-1: Personal loan tracker~~ ✓ DELIVERED (I-1, 2026-05-14)
 
-**Schema:** `loan_event` + `loan_event_transaction` join table (see V3_BACKLOG.md for full design).
+**Decision:** Full loan event tracker (schema + UI) scoped down. Category-based tracking is sufficient: both outgoing and incoming sides of informal lending are tagged `Loans > Personal` — they net out over time. No new schema or UI required.
 
-**Net worth integration:** Open loan events shown as "Informal Receivables" asset row (user-configurable include/exclude per event).
-
-**AI insights integration:** Transactions tagged to a loan event excluded from lifestyle spending totals; separate `informalLoans` block sent to LLM.
-
-**Priority note:** Category workaround (`Loans > Personal` out, `Income > Reimbursements` in) is viable for now. Build after F-8 flow classification is shipped.
+**Delivered:** AI insights system prompt updated (`llm-provider.service.ts`) to explain `Loans > Personal` = informal cash lending to friends/family, not discretionary spending or a bank obligation. Prevents the LLM from misreading a lend/repay cycle as a spending spike + income bump. `PROMPT_VERSION` bumped to `v1.2`.
 
 ---
 
@@ -354,10 +349,13 @@ Pre-compute and store `monthly_report` rows at month close. Raw data retention p
 
 ---
 
-### D-2: Real estate auto-valuation (market value API)
-Monthly background job fetches `account_balance_snapshot` from RealtyAPI / FreeWebAPI using stored `property_api_id`. Requires `REALTY_API_KEY` env var; degrades to manual if absent.
+### ~~D-2: Real estate auto-valuation (market value API)~~ ✓ DELIVERED (D-2, 2026-05-14)
 
-**Why deferred:** Manual entry covers the use case for v3. API integration is nice-to-have; property values don't move meaningfully month-to-month.
+**Provider:** Redfin via RealtyAPI.io (free tier 250 req/month).
+**Three surfaces (frontend pending):** Add property modal (retrieve before save), Settings→Accounts property edit (update value), Net worth edit modal.
+**Backend shipped:** `/properties/preview-valuation` + `/properties/:id/refresh-valuation` + monthly scheduler + `ValuationDetail` JSON (comps, tax history, AVM).
+**Schema:** `property.api_listing_id`, `property.valuation_detail_json`, `property.valuation_fetched_at` (migration 0046).
+**Frontend UI surfaces:** TODO — next step.
 
 ---
 
@@ -399,7 +397,7 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 | ~~F-7~~ | ~~AI insights: fix transfer/flow pollution~~ | ✓ Done | Feature | — |
 | ~~F-8~~ | ~~Money flow classification in reports~~ | ✓ Done | Feature | F-7 ✓ |
 | ~~F-9~~ | ~~Date of birth encrypted at rest, computed age~~ | ✓ Done | Feature + Security | — |
-| I-1 | Personal loan tracker | P3 | Feature | F-8 |
+| ~~I-1~~ | ~~Personal loan tracker~~ | ✓ Done 2026-05-14 | Prompt update | — |
 | I-2 | Async import parse + canonicalize | P3 | Reliability | — |
 | ~~I-3~~ | ~~Category / reimbursements taxonomy cleanup~~ | ~~P3~~ | ✓ Done 2026-05-14 | — |
 | ~~I-4~~ | ~~Password reset token periodic cleanup~~ | ✓ Done | Maintenance | — |
@@ -420,4 +418,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-14. F-5 shipped (payslip deposit stored pairing — join table, confirmed/suggested split, multi-link, search modal). All P2 items done. P3 remaining: I-1 (personal loan tracker), I-2 (async import), I-7, I-8, PS-1 (payslip MoM comparison), PS-2 (estimated tax sufficiency).*
+*Last updated: 2026-05-14. F-5 shipped. I-1 closed (prompt fix). D-2 backend shipped (Redfin AVM + comps + tax history, scheduler, 2 new routes). Frontend UI surfaces for D-2 (Add property modal, Settings, Net worth page) are the next step. P3 remaining: I-2, I-7, I-8, PS-1, PS-2.*

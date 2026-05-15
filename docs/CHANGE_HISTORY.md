@@ -18,6 +18,42 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-187 (2026-05-14): D-2 — Real estate auto-valuation (Redfin via RealtyAPI)
+
+- **Type:** Feature (D-2 — pulled forward from deferred)
+- **What:**
+  - **`POST /properties/preview-valuation`** — pre-save address lookup via Redfin (2 API credits). Returns estimate, Redfin propertyId/listingId, and compact `ValuationDetail` JSON. Client passes IDs back on save to avoid a second API call.
+  - **`POST /properties/:propertyId/refresh-valuation`** — on-demand or scheduler-triggered refresh for an existing property. Uses stored Redfin IDs (1 credit) when available; falls back to address lookup (2 credits) if IDs not yet stored.
+  - **Monthly background scheduler** (`realty-scheduler.service.ts`) — 6h heartbeat, refreshes any `property` row with `api_property_id` set that hasn't been fetched in 28 days.
+  - **`ValuationDetail` JSON** stored in `property.valuation_detail_json` (JSONB). Contains: Redfin AVM estimate + range, last-sold event (price hidden in TX non-disclosure), current + historical tax assessments from public records, up to 6 comparable recent sales with address/sqft/beds/baths/list price/close price/sold date. Rebuilt on every refresh — overwrites previous.
+  - **Schema migration `0046`**: `api_listing_id TEXT`, `valuation_detail_json JSONB`, `valuation_fetched_at TIMESTAMPTZ` added to `property` table.
+  - **`POST /properties` schema updated**: `apiPropertyId` + `apiListingId` optional fields (passed through from preview); `zip` validated to 5-digit US format; `state` validated to 2-char; `addressLine1` enforces min length 1.
+  - **`REALTYAPI_KEY`** added to `env.ts` and `.env.example`.
+- **Why:** Property value on net worth page was a static manual entry. API auto-refresh keeps equity display accurate. The `ValuationDetail` JSON also captures comparable sale data + county tax assessment history for future property tax protest use.
+- **API provider:** Redfin via RealtyAPI.io (free tier: 250 req/month). Both Zillow and Redfin endpoints on RealtyAPI proxy Redfin data. Redfin chosen as primary: has AVM, comp sales with close prices, and authoritative tax-from-public-records data.
+- **Non-disclosure states (TX):** Last sold price is hidden (`isPriceAdminOnly`); comp prices are fully visible as they come from separate listings.
+- **Files:**
+  - `backend/db/migrations/0046_d2_realty_valuation.sql` (new)
+  - `backend/src/config/env.ts` (+REALTYAPI_KEY)
+  - `backend/src/modules/household/realty-api.service.ts` (new)
+  - `backend/src/modules/household/realty-scheduler.service.ts` (new)
+  - `backend/src/modules/household/property.service.ts` (+refreshPropertyValuation, +previewValuationByAddress, extended types)
+  - `backend/src/modules/household/household.routes.ts` (+2 routes, updated POST /properties schema)
+  - `backend/src/server.ts` (+startRealtyScheduler)
+  - `.env.example` (+REALTYAPI_KEY)
+
+---
+
+## CR-186 (2026-05-14): I-1 — AI insights: Loans > Personal prompt clarification
+
+- **Type:** Prompt update (P3 / I-1)
+- **What:** Updated AI insights system prompt (`buildSystemPrompt` in `llm-provider.service.ts`) to explain that `Loans > Personal` subcategory transactions are informal cash lending to friends/family — not a bank loan or discretionary overspend. The outgoing and incoming sides net to zero over time and should be treated as a temporary receivable, not a spending spike.
+- **Why:** Without this context the LLM misreads a lend/repay cycle as a spending surge followed by an income bump. The loan event tracker (original I-1 proposal) was scoped down — category-based tracking is sufficient; the prompt fix closes the AI interpretation gap.
+- **Prompt version:** bumped `PROMPT_VERSION` from `v1.1` → `v1.2` (ensures cached insight rows are regenerated on next request).
+- **Files:** `backend/src/modules/insights/llm-provider.service.ts`
+
+---
+
 ## CR-185 (2026-05-14): F-5 — Payslip deposit matching: stored pairing + multi-transaction support
 
 - **Type:** Feature (P2 / CR-185)

@@ -6,7 +6,7 @@ import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import type { InsightPayload } from "./insights.types.js";
 
-const PROMPT_VERSION = "v1.1";
+const PROMPT_VERSION = "v1.2";
 
 export { PROMPT_VERSION };
 
@@ -65,6 +65,7 @@ Key field definitions in the input:
 - cashBufferRate: (income - lifestyle - committed) / income — fraction left after all obligations.
 - topCategories: lifestyle spend only; loan and investment categories are reported separately.
 - investmentPortfolioTrend: total investment/retirement/HSA/529 balances by month. Month-over-month changes reflect BOTH contributions and market movements — do not assume all changes are due to new contributions.
+- avgMonthlyCommittedExpenses includes a "Loans > Personal" subcategory which represents informal cash lending to friends or family (not a bank loan). These outflows will be offset by repayment inflows in a future month and net to zero over time. Do not treat a spike in this category as increased debt burden or discretionary overspending — it is a temporary receivable.
 
 Output JSON schema:
 {

@@ -25,9 +25,12 @@ import {
   getProperty,
   listPropertiesForHousehold,
   listPropertyValueSnapshots,
+  previewValuationByAddress,
+  refreshPropertyValuation,
   updateProperty,
   type PropertyUse
 } from "./property.service.js";
+import { isRealtyApiConfigured } from "./realty-api.service.js";
 import { qExec, qGet } from "../../db/query.js";
 
 export const householdRouter = Router();
@@ -305,16 +308,19 @@ householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), as
 // ─── Property routes ──────────────────────────────────────────────────────────
 
 const propertyBodySchema = z.object({
-  addressLine1: z.string().max(200).nullable().optional(),
-  city: z.string().max(100).nullable().optional(),
-  state: z.string().max(100).nullable().optional(),
-  zip: z.string().max(20).nullable().optional(),
+  addressLine1: z.string().min(1).max(200).nullable().optional(),
+  city: z.string().min(1).max(100).nullable().optional(),
+  state: z.string().min(2).max(2).nullable().optional(),
+  zip: z.string().regex(/^\d{5}(-\d{4})?$/, "Zip must be 5 digits (or 5+4 with hyphen)").nullable().optional(),
   propertyUse: z.enum(["primary", "rental", "vacation"]).nullable().optional(),
   /** accountId to link to this property on creation */
   accountId: z.string().uuid().optional(),
   /** Initial market value snapshot (optional) */
   initialValueUsd: z.number().finite().min(0).nullable().optional(),
-  initialValueAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional()
+  initialValueAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /** Redfin IDs pre-fetched by preview-valuation — skip re-lookup on save */
+  apiPropertyId: z.string().optional(),
+  apiListingId: z.string().nullable().optional()
 });
 
 householdRouter.get("/properties", async (req: AuthenticatedRequest, res) => {
@@ -353,6 +359,16 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
     initialValueUsd: parsed.data.initialValueUsd ?? null,
     initialValueAsOf: parsed.data.initialValueAsOf ?? null
   });
+
+  // Store Redfin IDs returned from preview-valuation (avoids a second API lookup)
+  if (parsed.data.apiPropertyId) {
+    await qExec(
+      `UPDATE property SET api_provider = 'redfin', api_property_id = ?, api_listing_id = ? WHERE id = ?`,
+      parsed.data.apiPropertyId,
+      parsed.data.apiListingId ?? null,
+      id
+    );
+  }
 
   if (parsed.data.accountId) {
     await qExec(
@@ -458,4 +474,60 @@ householdRouter.post("/properties/:propertyId/values", requireRole(["owner", "ad
     return;
   }
   res.status(201).json({ id: out.id });
+});
+
+// ─── Valuation API routes ─────────────────────────────────────────────────────
+
+/**
+ * POST /properties/preview-valuation
+ * Pre-save address lookup: calls Redfin, returns estimate + Redfin IDs.
+ * Does NOT create any DB record. Frontend passes returned IDs back on save.
+ */
+householdRouter.post("/properties/preview-valuation", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  if (!isRealtyApiConfigured()) {
+    res.status(503).json({ message: "Property valuation API not configured", code: "API_NOT_CONFIGURED" });
+    return;
+  }
+  const parsed = z.object({
+    address: z.string().min(5).max(300)
+  }).safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const result = await previewValuationByAddress(parsed.data.address);
+  if (!result.ok) {
+    const status = result.code === "API_NOT_CONFIGURED" ? 503 : 502;
+    res.status(status).json({ message: result.message, code: result.code });
+    return;
+  }
+  res.status(200).json({
+    estimate: result.estimate,
+    apiPropertyId: result.apiPropertyId,
+    apiListingId: result.apiListingId,
+    detail: result.detail
+  });
+});
+
+/**
+ * POST /properties/:propertyId/refresh-valuation
+ * On-demand or scheduler-triggered refresh for an existing saved property.
+ * Updates property_value_snapshot and valuation_detail_json.
+ */
+householdRouter.post("/properties/:propertyId/refresh-valuation", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await refreshPropertyValuation(params.data.propertyId, householdId);
+  if (!result.ok) {
+    const statusMap: Record<string, number> = {
+      NOT_FOUND: 404, NO_ADDRESS: 422, API_NOT_CONFIGURED: 503, API_ERROR: 502
+    };
+    res.status(statusMap[result.code] ?? 500).json({ message: result.message, code: result.code });
+    return;
+  }
+  res.status(200).json({ estimate: result.estimate, fetchedAt: result.fetchedAt });
 });

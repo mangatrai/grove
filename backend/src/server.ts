@@ -8,6 +8,7 @@ import { checkExportCoverage } from "./db/export-coverage-check.js";
 import { closeSql, getSql } from "./db/query.js";
 import { log } from "./logger.js";
 import { startBackupScheduler } from "./modules/gdrive/gdrive-scheduler.service.js";
+import { startRealtyScheduler } from "./modules/household/realty-scheduler.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
 
@@ -40,6 +41,7 @@ void (async () => {
   await checkExportCoverage();
   if (env.MODE !== "TEST") {
     startBackupScheduler();
+    startRealtyScheduler();
   }
   const server = app.listen(port, () => {
     log.info(`Backend listening on http://localhost:${port}`);

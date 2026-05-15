@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { fetchByIds, isRealtyApiConfigured, lookupByAddress, type ValuationDetail } from "./realty-api.service.js";
+import { log } from "../../logger.js";
 
 export type PropertyUse = "primary" | "rental" | "vacation";
 export type PropertyValueSource = "manual" | "api";
@@ -15,6 +17,9 @@ export type PropertyRecord = {
   propertyUse: PropertyUse | null;
   apiProvider: string | null;
   apiPropertyId: string | null;
+  apiListingId: string | null;
+  valuationDetail: ValuationDetail | null;
+  valuationFetchedAt: string | null;
   latestValueUsd: number | null;
   latestValueAsOf: string | null;
   createdAt: string;
@@ -42,6 +47,9 @@ type PropertyRow = {
   property_use: string | null;
   api_provider: string | null;
   api_property_id: string | null;
+  api_listing_id: string | null;
+  valuation_detail_json: unknown | null;
+  valuation_fetched_at: string | null;
   latest_value_usd: string | null;
   latest_value_as_of: string | null;
   created_at: string;
@@ -61,6 +69,9 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     propertyUse: (row.property_use as PropertyUse | null) ?? null,
     apiProvider: row.api_provider,
     apiPropertyId: row.api_property_id,
+    apiListingId: row.api_listing_id ?? null,
+    valuationDetail: (row.valuation_detail_json as ValuationDetail | null) ?? null,
+    valuationFetchedAt: row.valuation_fetched_at ?? null,
     latestValueUsd: lv != null && Number.isFinite(lv) ? lv : null,
     latestValueAsOf: row.latest_value_as_of ?? null,
     createdAt: row.created_at,
@@ -253,4 +264,109 @@ export async function listPropertyValueSnapshots(
     apiProvider: r.api_provider,
     createdAt: r.created_at
   }));
+}
+
+/**
+ * Refresh property valuation via RealtyAPI.
+ *
+ * - If the property already has api_property_id stored: uses cheap /detailsbyid (1 credit).
+ * - Otherwise: uses /property/address (2 credits), stores the returned IDs for future calls.
+ * - Always writes a new property_value_snapshot and updates valuation_detail_json.
+ */
+export async function refreshPropertyValuation(
+  propertyId: string,
+  householdId: string
+): Promise<
+  | { ok: true; estimate: number; fetchedAt: string }
+  | { ok: false; code: "NOT_FOUND" | "NO_ADDRESS" | "API_NOT_CONFIGURED" | "API_ERROR"; message: string }
+> {
+  if (!isRealtyApiConfigured()) {
+    return { ok: false, code: "API_NOT_CONFIGURED", message: "REALTYAPI_KEY not configured" };
+  }
+
+  const prop = await qGet<{
+    id: string;
+    address_line1: string | null;
+    city: string | null;
+    state: string | null;
+    zip: string | null;
+    api_property_id: string | null;
+    api_listing_id: string | null;
+  }>(
+    `SELECT id, address_line1, city, state, zip, api_property_id, api_listing_id
+       FROM property WHERE id = ? AND household_id = ?`,
+    propertyId,
+    householdId
+  );
+  if (!prop) return { ok: false, code: "NOT_FOUND", message: "Property not found" };
+
+  let result;
+  try {
+    if (prop.api_property_id) {
+      result = await fetchByIds(prop.api_property_id, prop.api_listing_id);
+    } else {
+      const parts = [prop.address_line1, prop.city, prop.state, prop.zip].filter(Boolean);
+      if (parts.length < 3) {
+        return { ok: false, code: "NO_ADDRESS", message: "Property address incomplete — add street, city, state, zip first" };
+      }
+      const address = parts.join(", ");
+      result = await lookupByAddress(address);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error("refreshPropertyValuation: API error", { propertyId, err: msg });
+    return { ok: false, code: "API_ERROR", message: msg };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Persist IDs for future 1-credit calls
+  await qExec(
+    `UPDATE property
+        SET api_provider           = 'redfin',
+            api_property_id        = ?,
+            api_listing_id         = ?,
+            valuation_detail_json  = ?::jsonb,
+            valuation_fetched_at   = NOW(),
+            updated_at             = NOW()
+      WHERE id = ? AND household_id = ?`,
+    result.apiPropertyId,
+    result.apiListingId,
+    JSON.stringify(result.detail),
+    propertyId,
+    householdId
+  );
+
+  // Write snapshot (upsert on date — overwrite if same day)
+  await addPropertyValueSnapshot(propertyId, householdId, {
+    marketValueUsd: result.estimate,
+    asOfDate: today,
+    source: "api",
+    apiProvider: "redfin"
+  });
+
+  log.info("refreshPropertyValuation: done", { propertyId, estimate: result.estimate });
+  return { ok: true, estimate: result.estimate, fetchedAt: today };
+}
+
+/**
+ * Preview valuation by address string without creating a property record.
+ * Used by the "Retrieve value" button on the Add Property modal (pre-save).
+ * Returns the estimate and Redfin IDs so the caller can pass them through on save.
+ */
+export async function previewValuationByAddress(address: string): Promise<
+  | { ok: true; estimate: number; apiPropertyId: string; apiListingId: string | null; detail: ValuationDetail }
+  | { ok: false; code: "API_NOT_CONFIGURED" | "API_ERROR"; message: string }
+> {
+  if (!isRealtyApiConfigured()) {
+    return { ok: false, code: "API_NOT_CONFIGURED", message: "REALTYAPI_KEY not configured" };
+  }
+  try {
+    const result = await lookupByAddress(address);
+    return { ok: true, estimate: result.estimate, apiPropertyId: result.apiPropertyId, apiListingId: result.apiListingId, detail: result.detail };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error("previewValuationByAddress: API error", { address, err: msg });
+    return { ok: false, code: "API_ERROR", message: msg };
+  }
 }
