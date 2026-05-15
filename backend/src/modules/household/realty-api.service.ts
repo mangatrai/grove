@@ -70,7 +70,7 @@ export interface ValuationLookupResult {
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function apiKey(): string {
-  return env.REALTYAPI_KEY ?? "";
+  return env.REALTY_API_KEY ?? "";
 }
 
 async function realtyGet(endpoint: string, params: Record<string, string>): Promise<unknown> {
@@ -119,12 +119,14 @@ function msToDate(ms: unknown): string | null {
 /**
  * Parse comparable sales from Redfin's positional __atts encoding.
  *
- * Confirmed positions from real API responses (7070 Coulter Lake Rd / Phillips Creek Ranch):
- *   __atts[4].__atts[23]  = list price
+ * Confirmed positions from live /detailsbyaddress responses:
+ *   __atts[4].__atts[21]  = list price
+ *   __atts[4].__atts[26]  = beds
+ *   __atts[4].__atts[27]  = baths
  *   __atts[4].__atts[50]  = close/sold price
- *   __atts[6].__atts[2]['1'][0].lastSaleDate = sold date string
- *   __atts[9].__atts      = [state,_,city,_,yearBuilt,streetNum,streetSuffix,_,_,zip,_,_,lat,lon,
- *                             beds,baths,fullBaths,lotSqft,_,streetName,_,approxSqft,_,type,propId]
+ *   __atts[6].__atts[3]['1'][0].lastSaleDate = sold date string
+ *   __atts[7].__atts      = [state,_,city,_,yearBuilt,streetNum,streetSuffix,_,_,zip,_,_,lat,lon,
+ *                             _,_,_,lotSqft,_,streetName,_,_,approxSqft,_,propId]
  */
 function parseComps(comparables: unknown): ValuationComp[] {
   if (!Array.isArray(comparables)) return [];
@@ -133,29 +135,35 @@ function parseComps(comparables: unknown): ValuationComp[] {
   for (const comp of comparables) {
     try {
       const outerAtts = (comp as Record<string, unknown>).__atts;
-      if (!Array.isArray(outerAtts) || outerAtts.length < 10) continue;
+      if (!Array.isArray(outerAtts) || outerAtts.length < 8) continue;
 
       // Listing data — positional array inside __atts[4]
       const listingObj = outerAtts[4] as Record<string, unknown>;
       const listingArr = listingObj?.__atts as unknown[];
-      const listPrice = typeof atIdx<number>(listingArr, 23) === "number"
-        ? (atIdx<number>(listingArr, 23) as number)
+      const listPrice = typeof atIdx<number>(listingArr, 21) === "number"
+        ? (atIdx<number>(listingArr, 21) as number)
         : null;
       const soldPrice = typeof atIdx<number>(listingArr, 50) === "number"
         ? (atIdx<number>(listingArr, 50) as number)
         : null;
+      const beds = typeof atIdx<number>(listingArr, 26) === "number"
+        ? (atIdx<number>(listingArr, 26) as number)
+        : null;
+      const baths = typeof atIdx<number>(listingArr, 27) === "number"
+        ? (atIdx<number>(listingArr, 27) as number)
+        : null;
 
-      // Sash block — __atts[6].__atts[2]['1'][0].lastSaleDate
+      // Sash block — __atts[6].__atts[3]['1'][0].lastSaleDate
       const sashObj = outerAtts[6] as Record<string, unknown>;
       const sashAtts = Array.isArray(sashObj?.__atts) ? (sashObj.__atts as unknown[]) : [];
-      const sashMap = sashAtts[2] as Record<string, unknown[]> | undefined;
+      const sashMap = sashAtts[3] as Record<string, unknown[]> | undefined;
       const sash1 = Array.isArray(sashMap?.["1"]) ? (sashMap!["1"][0] as Record<string, unknown>) : null;
       const soldDate = parseSashDate(sash1?.lastSaleDate);
 
-      // Facts array — __atts[9].__atts (positional)
-      const factsObj = outerAtts[9] as Record<string, unknown>;
+      // Facts array — __atts[7].__atts (positional)
+      const factsObj = outerAtts[7] as Record<string, unknown>;
       const facts = factsObj?.__atts as unknown[];
-      if (!Array.isArray(facts) || facts.length < 22) continue;
+      if (!Array.isArray(facts) || facts.length < 20) continue;
 
       const streetNum = typeof facts[5] === "string" ? facts[5] : "";
       const streetName = typeof facts[19] === "string" ? facts[19] : "";
@@ -165,10 +173,8 @@ function parseComps(comparables: unknown): ValuationComp[] {
       const state = typeof facts[0] === "string" ? facts[0] : "";
       const zip = typeof facts[9] === "string" ? facts[9] : "";
       const yearBuilt = typeof facts[4] === "number" ? facts[4] : null;
-      const beds = typeof facts[14] === "number" ? facts[14] : null;
-      const baths = typeof facts[15] === "number" ? facts[15] : null;
       const lotSqft = typeof facts[17] === "number" ? facts[17] : null;
-      const sqft = typeof facts[21] === "number" ? facts[21] : null;
+      const sqft = typeof facts[22] === "number" ? facts[22] : null;
       const pricePerSqft = soldPrice && sqft && sqft > 0 ? Math.round(soldPrice / sqft) : null;
 
       if (!address || !city) continue;
@@ -263,7 +269,8 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
     .sort((a, b) => b.year - a.year);
 
   // Comparable sales
-  const comps = parseComps(avmRoot?.comparables);
+  const rawComps = avmRoot?.comparables;
+  const comps = parseComps(rawComps);
 
   const detail: ValuationDetail = {
     fetchedAt: new Date().toISOString().slice(0, 10),
@@ -283,7 +290,7 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
 
 /** Returns false if REALTYAPI_KEY is not configured. */
 export function isRealtyApiConfigured(): boolean {
-  return Boolean(env.REALTYAPI_KEY?.trim());
+  return Boolean(env.REALTY_API_KEY?.trim());
 }
 
 /**
@@ -294,7 +301,7 @@ export function isRealtyApiConfigured(): boolean {
 export async function lookupByAddress(address: string): Promise<ValuationLookupResult> {
   if (!isRealtyApiConfigured()) throw new Error("REALTYAPI_KEY not configured");
   log.info("RealtyAPI: address lookup", { address });
-  const raw = await realtyGet("/property/address", { address });
+  const raw = await realtyGet("/detailsbyaddress", { property_address: address });
   const result = parseRedfinResponse(raw);
   if (!result) throw new Error("RealtyAPI: could not parse valuation from address response");
   return result;

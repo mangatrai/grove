@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-188 (2026-05-15): D-2 — Redfin comps parser fix + property valuation UI (Settings + Net Worth)
+
+- **Type:** Bug fix + UI feature (D-2 follow-on)
+- **What:**
+  - **Comps parser corrected** (`realty-api.service.ts`): Live `/detailsbyaddress` responses have 8 top-level `__atts` entries (not 10+). Corrected all positional offsets confirmed against live API data: facts at `[7]` (was `[9]`), sash date at `sashAtts[3]` (was `[2]`), list price at `listingArr[21]` (was `[23]`), beds/baths from `listingArr[26/27]` (more reliable than facts array), sqft at `facts[22]` (was `[21]`). Debug log removed.
+  - **Settings → Property modal** (`SettingsPage.tsx`): "Retrieve Redfin estimate" / "Update Redfin estimate" button below the market value field. Calls `POST /household/properties/preview-valuation`; auto-fills market value from AVM estimate and resets as-of date to today. Redfin property/listing IDs stored in modal state and passed through on save to `POST /household/properties`. Button disabled when address fields are empty.
+  - **Net Worth page inline edit** (`NetWorthPage.tsx`): "Redfin" button in the edit row. Calls `POST /household/properties/:id/refresh-valuation`; auto-fills the market value and date inputs with the returned estimate + fetchedAt. Save/Cancel disabled while retrieving.
+- **Why:** The comps bug caused all `comps: []` in API responses. UI surfaces complete the end-to-end D-2 workflow — users can now retrieve Redfin AVM without leaving either the Settings or Net Worth page.
+- **Files:**
+  - `backend/src/modules/household/realty-api.service.ts` (comps parser positions corrected, debug log removed)
+  - `frontend/src/pages/SettingsPage.tsx` (+retrieveValuation, apiPropertyId/apiListingId in modal state, Retrieve button)
+  - `frontend/src/pages/NetWorthPage.tsx` (+refreshPropertyValuation, propertyRowRetrieving state, Redfin button in edit row)
+
+---
+
 ## CR-187 (2026-05-14): D-2 — Real estate auto-valuation (Redfin via RealtyAPI)
 
 - **Type:** Feature (D-2 — pulled forward from deferred)
@@ -34,13 +49,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Non-disclosure states (TX):** Last sold price is hidden (`isPriceAdminOnly`); comp prices are fully visible as they come from separate listings.
 - **Files:**
   - `backend/db/migrations/0046_d2_realty_valuation.sql` (new)
-  - `backend/src/config/env.ts` (+REALTYAPI_KEY)
+  - `backend/src/config/env.ts` (+REALTY_API_KEY)
   - `backend/src/modules/household/realty-api.service.ts` (new)
   - `backend/src/modules/household/realty-scheduler.service.ts` (new)
   - `backend/src/modules/household/property.service.ts` (+refreshPropertyValuation, +previewValuationByAddress, extended types)
   - `backend/src/modules/household/household.routes.ts` (+2 routes, updated POST /properties schema)
   - `backend/src/server.ts` (+startRealtyScheduler)
-  - `.env.example` (+REALTYAPI_KEY)
+  - `.env.example` (+REALTY_API_KEY)
 
 ---
 

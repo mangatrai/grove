@@ -447,12 +447,18 @@ export function SettingsPage() {
     asOfDate: string;
     saving: boolean;
     error: string | null;
+    apiPropertyId: string | null;
+    apiListingId: string | null;
+    retrieving: boolean;
+    retrieveError: string | null;
   }>({
     open: false, accountId: "", propertyId: null,
     addressLine1: "", city: "", state: "", zip: "",
     propertyUse: "", marketValueUsd: "",
     asOfDate: new Date().toISOString().slice(0, 10),
-    saving: false, error: null
+    saving: false, error: null,
+    apiPropertyId: null, apiListingId: null,
+    retrieving: false, retrieveError: null
   });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
@@ -762,7 +768,8 @@ export function SettingsPage() {
           open: true, accountId: newAccountId!, propertyId: null,
           addressLine1: "", city: "", state: "", zip: "", propertyUse: "",
           marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
-          saving: false, error: null
+          saving: false, error: null,
+          apiPropertyId: null, apiListingId: null, retrieving: false, retrieveError: null
         });
       }
     } catch (e: unknown) {
@@ -778,7 +785,8 @@ export function SettingsPage() {
       addressLine1: "", city: "", state: "", zip: "",
       propertyUse: "" as "" | "primary" | "rental" | "vacation",
       marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
-      saving: false, error: null
+      saving: false, error: null,
+      apiPropertyId: null, apiListingId: null, retrieving: false, retrieveError: null
     };
     if (a.property_id) {
       try {
@@ -809,6 +817,38 @@ export function SettingsPage() {
     }
   }
 
+  async function retrieveValuation() {
+    if (!token) return;
+    const addr = [
+      propertyModal.addressLine1.trim(),
+      propertyModal.city.trim(),
+      propertyModal.state.trim(),
+      propertyModal.zip.trim()
+    ].filter(Boolean).join(", ");
+    if (!addr) return;
+    setPropertyModal((m) => ({ ...m, retrieving: true, retrieveError: null }));
+    try {
+      const r = await apiJson<{ estimate: number; apiPropertyId: string; apiListingId: string | null }>(
+        "/household/properties/preview-valuation",
+        { method: "POST", body: JSON.stringify({ address: addr }) }
+      );
+      setPropertyModal((m) => ({
+        ...m,
+        retrieving: false,
+        marketValueUsd: String(Math.round(r.estimate)),
+        asOfDate: new Date().toISOString().slice(0, 10),
+        apiPropertyId: r.apiPropertyId,
+        apiListingId: r.apiListingId
+      }));
+    } catch (e: unknown) {
+      setPropertyModal((m) => ({
+        ...m,
+        retrieving: false,
+        retrieveError: e instanceof Error ? e.message : "Could not retrieve valuation"
+      }));
+    }
+  }
+
   async function savePropertyDetails() {
     if (!token) return;
     setPropertyModal((m) => ({ ...m, saving: true, error: null }));
@@ -821,6 +861,10 @@ export function SettingsPage() {
         propertyUse: propertyModal.propertyUse || null,
         accountId: propertyModal.accountId
       };
+      if (propertyModal.apiPropertyId) {
+        body.apiPropertyId = propertyModal.apiPropertyId;
+        body.apiListingId = propertyModal.apiListingId;
+      }
       const valueUsd = parseFloat(propertyModal.marketValueUsd);
       if (!isNaN(valueUsd) && valueUsd >= 0) {
         body.initialValueUsd = valueUsd;
@@ -2117,6 +2161,18 @@ export function SettingsPage() {
                 disabled={propertyModal.saving}
               />
             </Group>
+            {propertyModal.retrieveError ? (
+              <Alert color="orange" py={6}>{propertyModal.retrieveError}</Alert>
+            ) : null}
+            <Button
+              variant="light"
+              size="xs"
+              loading={propertyModal.retrieving}
+              disabled={propertyModal.saving || (!propertyModal.addressLine1.trim() && !propertyModal.city.trim())}
+              onClick={() => void retrieveValuation()}
+            >
+              {propertyModal.apiPropertyId ? "Update Redfin estimate" : "Retrieve Redfin estimate"}
+            </Button>
             <Text size="xs" c="dimmed">
               Market value creates a snapshot in property history. Add new snapshots any time to track appreciation.
             </Text>

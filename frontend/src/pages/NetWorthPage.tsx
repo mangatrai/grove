@@ -262,6 +262,7 @@ export function NetWorthPage() {
   const [editPropertyAsOf, setEditPropertyAsOf] = useState("");
   const [propertyRowSaving, setPropertyRowSaving] = useState(false);
   const [propertyRowSaveError, setPropertyRowSaveError] = useState<string | null>(null);
+  const [propertyRowRetrieving, setPropertyRowRetrieving] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -751,6 +752,26 @@ export function NetWorthPage() {
     ]
   );
 
+  const refreshPropertyValuation = useCallback(
+    async (propertyId: string) => {
+      setPropertyRowRetrieving(true);
+      setPropertyRowSaveError(null);
+      try {
+        const r = await apiJson<{ estimate: number; fetchedAt: string }>(
+          `/household/properties/${propertyId}/refresh-valuation`,
+          { method: "POST" }
+        );
+        setEditPropertyAmount(String(Math.round(r.estimate)));
+        setEditPropertyAsOf(r.fetchedAt);
+      } catch (err: unknown) {
+        setPropertyRowSaveError(err instanceof Error ? err.message : "Could not retrieve valuation");
+      } finally {
+        setPropertyRowRetrieving(false);
+      }
+    },
+    []
+  );
+
   const onPresetChange = (next: PeriodPreset) => {
     setPeriodPreset(next);
     if (next !== "custom") {
@@ -1179,8 +1200,18 @@ export function NetWorthPage() {
                                     onChange={(ev) => setEditPropertyAsOf(ev.target.value)}
                                     aria-label="As-of date"
                                   />
-                                  <Button type="submit" size="xs" disabled={propertyRowSaving}>Save</Button>
-                                  <Button type="button" variant="default" size="xs" onClick={cancelPropertyEdit}>Cancel</Button>
+                                  <Button
+                                    type="button"
+                                    variant="light"
+                                    size="xs"
+                                    loading={propertyRowRetrieving}
+                                    disabled={propertyRowSaving}
+                                    onClick={() => void refreshPropertyValuation(p.propertyId)}
+                                  >
+                                    Redfin
+                                  </Button>
+                                  <Button type="submit" size="xs" disabled={propertyRowSaving || propertyRowRetrieving}>Save</Button>
+                                  <Button type="button" variant="default" size="xs" onClick={cancelPropertyEdit} disabled={propertyRowSaving || propertyRowRetrieving}>Cancel</Button>
                                 </Group>
                               ) : (
                                 formatMoney(p.marketValue)
