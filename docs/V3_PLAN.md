@@ -399,4 +399,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-15. **V3 complete.** All P1, P2, and actionable P3 items shipped. Remaining open items deferred to future sprints: I-2 (not a live issue), I-7 (recurring enhancements), I-8 (Playwright spike — between-sprints), PS-1/PS-2 (payslip improvement sprint), D-3/D-4/D-5 (post-V3).*
+*Last updated: 2026-05-15. **V3 complete.** All P1, P2, and actionable P3 items shipped. Post-V3 interest: **D-1 only** (data archival + pre-computed monthly reports). All other deferred items (D-3/D-4/D-5, I-2/I-7/I-8, PS-1/PS-2) are not of interest at this time.*
