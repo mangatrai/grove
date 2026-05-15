@@ -135,19 +135,7 @@ The import session flow is already async and stateful. The 504 risk on IBM paysl
 
 ---
 
-### F-7: AI insights — fix transfer and flow pollution in spending data
-Two gaps in `insight-prompt.service.ts` make LLM spending figures unreliable:
-1. Transfer-categorized transactions without `transfer_group_id` pass the `IS NULL` filter and appear in topCategories
-2. Credit card payments (checking → credit card) double-count as both outflow and inflow
-
-**Fixes:**
-- Add `AND NOT (COALESCE(p.name, c.name) ILIKE '%transfer%')` filter to `topSpendCategories12m` and `flowTotals12m`
-- Filter Uncategorized from `topCategories` (move to separate `uncategorizedMonthlyAvg` field)
-- Add `dataNote` annotation to LLM prompt context explaining what was excluded
-
-**Bonus (flow classification):** Map top-level category names to flow classes (`true_income`, `lifestyle`, `wealth_building`, `tax`, `movement`). Split `avgMonthlyOutflow` into `lifestyleSpend`, `wealthBuilding`, `taxObligations`, `moneyMovements`. Annotate LLM prompt with separate fields. No schema change needed — category names are the signal. ⚠ Keep compute simple: lookup map at query time only.
-
-**Files:** `insight-prompt.service.ts`
+### ~~F-7: AI insights — fix transfer and flow pollution in spending data~~ ✓ Done
 
 ---
 
@@ -187,16 +175,7 @@ Live **Summary of filtered results** on Transactions: server-backed totals and b
 
 ---
 
-### F-8: Money flow classification in reports (cash summary + budget)
-Extend flow classification (F-7) from AI insights to the app's own reports:
-
-**Cash Summary:** Split outflow into `lifestyleSpend` / `wealthBuilding` / `taxObligations` / `moneyMovements`. Compute savings rate on lifestyle only (not total outflow). Split inflow into `trueIncome` / `moneyReturns`.
-
-**Budget page:** Suppress budget progress bars for non-lifestyle categories. Show investment contributions, loans, taxes in a separate "Movements" section or hide from budget overage report.
-
-**⚠ Groom before implementing:** 0.25 vCPU constraint. Solution must be a lookup map on category names at query time. No materialised views, no background jobs, no new tables. Design-review this item before writing code.
-
-**Files:** `cash-summary.service.ts`, `budget.service.ts`, `DashboardPageV2.tsx`, `BudgetPage.tsx`
+### ~~F-8: Money flow classification in reports (cash summary + budget)~~ ✓ Done
 
 ---
 
@@ -420,4 +399,4 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 ---
 
-*Last updated: 2026-05-15. D-2 fully shipped (CR-187/188/189): Redfin AVM + comps + tax history, scheduler, 2 API routes, all 3 frontend surfaces (Settings modal + Net Worth inline edit). I-1 closed (prompt fix). P3 remaining: I-2, I-7, I-8, PS-1, PS-2.*
+*Last updated: 2026-05-15. **V3 complete.** All P1, P2, and actionable P3 items shipped. Remaining open items deferred to future sprints: I-2 (not a live issue), I-7 (recurring enhancements), I-8 (Playwright spike — between-sprints), PS-1/PS-2 (payslip improvement sprint), D-3/D-4/D-5 (post-V3).*
