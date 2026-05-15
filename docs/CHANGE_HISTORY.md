@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## F-5e (2026-05-14): Payslip deposit matching — detail UI (F-5 slice 5)
+
+- **Type:** UX / Feature (V3 F-5)
+- **What:** `PayslipDetailPage` Bank deposit card always visible: **Confirmed** table with remove, **Suggestions** table with confirm (when no confirmed links), empty-state copy, **Search ledger** modal with debounced `GET /transactions` search (`amountMin=0.01`, credits only). PATCH / line-item mutations preserve `confirmedDeposits` / `suggestedDeposits` in local state; PUT/DELETE deposit endpoints update state and refetch detail when the last confirmed link is removed.
+- **Why:** End-user confirm/unlink and manual multi-link against stored `payslip_deposit_match` rows.
+- **Files:** `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/payslip/payslipChartsModel.test.ts` (mock snapshots include deposit arrays).
+
+---
+
 ## F-5c (2026-05-14): Payslip deposit matching — HTTP routes (F-5 slice 3)
 
 - **Type:** Feature (V3 F-5)

@@ -3,10 +3,13 @@ import {
   ActionIcon,
   Alert,
   Anchor,
+  Badge,
   Box,
   Button,
   Code,
   Group,
+  Loader,
+  Modal,
   NumberInput,
   Paper,
   Select,
@@ -34,6 +37,16 @@ import { SECTION_LABELS, SECTION_ORDER } from "../payslip/types";
 import { formatUsd } from "../utils/format";
 
 export type { PayslipSnapshotDetail };
+
+const EMPTY_LINE_ITEMS: PayslipLineItemsGrouped = {
+  earnings: [],
+  pre_tax_deductions: [],
+  post_tax_deductions: [],
+  tax_deductions: [],
+  other_deductions: [],
+  other_information: [],
+  taxable_earnings: []
+};
 
 const ADD_SECTION_OPTIONS: { value: PayslipLineItemSection; label: string }[] = [
   { value: "earnings",            label: "Earnings" },
@@ -456,6 +469,18 @@ function LineItemsSection({
   );
 }
 
+type TxnSearchRow = {
+  id: string;
+  txnDate: string;
+  amount: number;
+  direction: string;
+  merchant: string | null;
+  memo: string | null;
+  accountId: string;
+  institution: string;
+  accountMask: string | null;
+};
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
@@ -492,6 +517,16 @@ export function PayslipDetailPage() {
   const [addError, setAddError] = useState<string | null>(null);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
 
+  // Deposit confirm/unlink state
+  const [depositSaving, setDepositSaving] = useState(false);
+  const [depositError, setDepositError] = useState<string | null>(null);
+
+  // Manual search modal
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<TxnSearchRow[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+
   const load = useCallback(async () => {
     if (!payslipId) return;
     const res = await apiJson<PayslipSnapshotDetail>(`/payslips/${encodeURIComponent(payslipId)}`);
@@ -504,6 +539,31 @@ export function PayslipDetailPage() {
       .then((r) => setEmployers(r.employers ?? []))
       .catch(() => setEmployers([]));
   }, [token]);
+
+  // Debounced transaction search for deposit manual-link modal
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (!token) {
+        setSearchLoading(false);
+        return;
+      }
+      setSearchLoading(true);
+      void apiJson<{ transactions: TxnSearchRow[] }>(
+        `/transactions?search=${encodeURIComponent(searchQuery.trim())}&limit=20&amountMin=0.01`
+      )
+        .then((r) => {
+          const rows = r.transactions ?? [];
+          setSearchResults(rows.filter((t) => t.direction === "credit"));
+        })
+        .catch(() => setSearchResults([]))
+        .finally(() => setSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, token]);
 
   useEffect(() => {
     if (!token || !payslipId) return;
@@ -537,7 +597,13 @@ export function PayslipDetailPage() {
       }
       const data = await res.json() as { snapshot: PayslipSnapshotDetail; validationWarnings?: ValidationWarning[] };
       setDetail((prev) => prev
-        ? { ...data.snapshot, lineItems: prev.lineItems, matchedDeposits: prev.matchedDeposits, validationWarnings: data.validationWarnings }
+        ? {
+            ...data.snapshot,
+            lineItems: prev.lineItems,
+            confirmedDeposits: prev.confirmedDeposits,
+            suggestedDeposits: prev.suggestedDeposits,
+            validationWarnings: data.validationWarnings
+          }
         : data.snapshot
       );
       setSummaryEdit(null);
@@ -572,8 +638,20 @@ export function PayslipDetailPage() {
 
   const applyLineItemMutation = useCallback((res: LiMutationResponse) => {
     setDetail((prev) => prev
-      ? { ...res.snapshot, lineItems: res.lineItems, matchedDeposits: prev.matchedDeposits, validationWarnings: res.validationWarnings }
-      : { ...res.snapshot, lineItems: res.lineItems, validationWarnings: res.validationWarnings }
+      ? {
+          ...res.snapshot,
+          lineItems: res.lineItems,
+          confirmedDeposits: prev.confirmedDeposits,
+          suggestedDeposits: prev.suggestedDeposits,
+          validationWarnings: res.validationWarnings
+        }
+      : {
+          ...res.snapshot,
+          lineItems: res.lineItems,
+          confirmedDeposits: [],
+          suggestedDeposits: [],
+          validationWarnings: res.validationWarnings
+        }
     );
     setLiEditingId(null);
     setLiEditFields(null);
@@ -605,6 +683,94 @@ export function PayslipDetailPage() {
       setLiSaving(false);
     }
   }, [applyLineItemMutation]);
+
+  const confirmDeposit = useCallback(
+    async (canonicalId: string) => {
+      if (!payslipId) return;
+      setDepositSaving(true);
+      setDepositError(null);
+      try {
+        const res = await apiFetch(
+          `/payslips/${encodeURIComponent(payslipId)}/deposits/${encodeURIComponent(canonicalId)}`,
+          { method: "PUT" }
+        );
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { message?: string };
+          setDepositError(j.message ?? "Failed to link deposit");
+          return;
+        }
+        const data = (await res.json()) as {
+          snapshot: PayslipSnapshotDetail;
+          confirmedDeposits: MatchedDeposit[];
+        };
+        setDetail((prev) => {
+          const next: PayslipSnapshotDetail = {
+            ...data.snapshot,
+            confirmedDeposits: data.confirmedDeposits,
+            suggestedDeposits: []
+          };
+          if (!prev) return next;
+          return {
+            ...next,
+            lineItems: prev.lineItems,
+            validationWarnings: prev.validationWarnings
+          };
+        });
+        setSearchOpen(false);
+      } finally {
+        setDepositSaving(false);
+      }
+    },
+    [payslipId]
+  );
+
+  const removeDeposit = useCallback(
+    async (canonicalId: string) => {
+      if (!payslipId) return;
+      setDepositSaving(true);
+      setDepositError(null);
+      try {
+        const res = await apiFetch(
+          `/payslips/${encodeURIComponent(payslipId)}/deposits/${encodeURIComponent(canonicalId)}`,
+          { method: "DELETE" }
+        );
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { message?: string };
+          setDepositError(j.message ?? "Failed to unlink deposit");
+          return;
+        }
+        const data = (await res.json()) as {
+          snapshot: PayslipSnapshotDetail;
+          confirmedDeposits: MatchedDeposit[];
+        };
+        const confirmedEmpty = data.confirmedDeposits.length === 0;
+        setDetail((prev) => {
+          if (!prev) {
+            return {
+              ...data.snapshot,
+              lineItems: EMPTY_LINE_ITEMS,
+              validationWarnings: [],
+              confirmedDeposits: data.confirmedDeposits,
+              suggestedDeposits: []
+            };
+          }
+          return {
+            ...data.snapshot,
+            lineItems: prev.lineItems,
+            validationWarnings: prev.validationWarnings,
+            confirmedDeposits: data.confirmedDeposits,
+            suggestedDeposits: []
+          };
+        });
+        if (confirmedEmpty) {
+          void load();
+        }
+      } finally {
+        setDepositSaving(false);
+      }
+    },
+    [payslipId, load]
+  );
 
   // --- Add line item handler ---
   const handleAddLineItem = useCallback(async () => {
@@ -822,35 +988,217 @@ export function PayslipDetailPage() {
             </Stack>
           </Paper>
 
-          {detail.payDate != null && detail.netPayCurrent != null ? (
-            <Paper withBorder p="lg">
-              <Title order={4} mt={0}>Bank deposit</Title>
-              {detail.matchedDeposits && detail.matchedDeposits.length > 0 ? (
+          <Paper withBorder p="lg">
+            <Group justify="space-between" mb="xs" align="center">
+              <Title order={4} mt={0} mb={0}>Bank deposit</Title>
+              <Button
+                type="button"
+                size="xs"
+                variant="subtle"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchResults([]);
+                  setSearchOpen(true);
+                }}
+              >
+                {(detail.confirmedDeposits?.length ?? 0) > 0 ? "Link another…" : "Search ledger…"}
+              </Button>
+            </Group>
+
+            {depositError ? (
+              <Alert color="red" mb="sm" withCloseButton onClose={() => setDepositError(null)}>
+                {depositError}
+              </Alert>
+            ) : null}
+
+            {(detail.confirmedDeposits?.length ?? 0) > 0 ? (
+              <Stack gap="xs">
+                <Group gap="xs" mb={4}>
+                  <Badge color="green" variant="light" size="sm">Confirmed</Badge>
+                  {(detail.confirmedDeposits?.length ?? 0) > 1 ? (
+                    <Text size="xs" c="dimmed">
+                      Total linked: $
+                      {formatUsd(
+                        (detail.confirmedDeposits ?? []).reduce((s, d) => s + d.amount, 0)
+                      )}
+                      {detail.netPayCurrent != null
+                        ? ` of $${formatUsd(detail.netPayCurrent)} net pay`
+                        : ""}
+                    </Text>
+                  ) : null}
+                </Group>
                 <Table withTableBorder striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
-                      <Table.Th>Date</Table.Th><Table.Th>Description</Table.Th><Table.Th>Amount</Table.Th><Table.Th>Account</Table.Th><Table.Th />
+                      <Table.Th>Date</Table.Th>
+                      <Table.Th>Description</Table.Th>
+                      <Table.Th>Amount</Table.Th>
+                      <Table.Th>Account</Table.Th>
+                      <Table.Th w={80} />
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                      {detail.matchedDeposits.map((d) => (
-                        <Table.Tr key={d.id}>
-                          <Table.Td>{d.txnDate}</Table.Td>
-                          <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
-                          <Table.Td>{formatMoney(d.amount)}</Table.Td>
-                          <Table.Td>{accountLabel(d)}</Table.Td>
-                          <Table.Td><Anchor component={Link} to={depositWindowLink(d.accountId, detail.payDate!)}>View</Anchor></Table.Td>
-                        </Table.Tr>
-                      ))}
+                    {(detail.confirmedDeposits ?? []).map((d) => (
+                      <Table.Tr key={d.id}>
+                        <Table.Td>
+                          <Anchor
+                            component={Link}
+                            to={depositWindowLink(
+                              d.accountId,
+                              detail.payDate ?? detail.payPeriodEnd ?? d.txnDate
+                            )}
+                          >
+                            {d.txnDate}
+                          </Anchor>
+                        </Table.Td>
+                        <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
+                        <Table.Td>${formatUsd(d.amount)}</Table.Td>
+                        <Table.Td>{accountLabel(d)}</Table.Td>
+                        <Table.Td>
+                          <Button
+                            type="button"
+                            size="xs"
+                            color="gray"
+                            variant="subtle"
+                            disabled={depositSaving}
+                            onClick={() => void removeDeposit(d.id)}
+                          >
+                            Remove
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
                   </Table.Tbody>
                 </Table>
+              </Stack>
+            ) : null}
+
+            {(detail.confirmedDeposits?.length ?? 0) === 0 && (detail.suggestedDeposits?.length ?? 0) > 0 ? (
+              <Stack gap="xs">
+                <Text size="xs" c="dimmed">Suggestions — not confirmed yet</Text>
+                <Table withTableBorder striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Date</Table.Th>
+                      <Table.Th>Description</Table.Th>
+                      <Table.Th>Amount</Table.Th>
+                      <Table.Th>Account</Table.Th>
+                      <Table.Th>Match quality</Table.Th>
+                      <Table.Th w={90} />
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {(detail.suggestedDeposits ?? []).map((d) => (
+                      <Table.Tr key={d.id}>
+                        <Table.Td>
+                          <Anchor
+                            component={Link}
+                            to={depositWindowLink(
+                              d.accountId,
+                              detail.payDate ?? detail.payPeriodEnd ?? d.txnDate
+                            )}
+                          >
+                            {d.txnDate}
+                          </Anchor>
+                        </Table.Td>
+                        <Table.Td>{d.merchant ?? d.memo ?? "—"}</Table.Td>
+                        <Table.Td>${formatUsd(d.amount)}</Table.Td>
+                        <Table.Td>{accountLabel(d)}</Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c="dimmed">
+                            {d.dateDelta === 0 ? "Same day" : `${d.dateDelta}d off`}
+                            {d.amountDelta > 0 ? `, $${formatUsd(d.amountDelta)} diff` : ""}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Button
+                            type="button"
+                            size="xs"
+                            disabled={depositSaving}
+                            onClick={() => void confirmDeposit(d.id)}
+                          >
+                            Confirm
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Stack>
+            ) : null}
+
+            {(detail.confirmedDeposits?.length ?? 0) === 0 && (detail.suggestedDeposits?.length ?? 0) === 0 ? (
+              <Text c="dimmed" size="sm" mt="xs">
+                No matching deposit found.{" "}
+                {detail.payDate
+                  ? `Searched near ${detail.payDate}`
+                  : detail.payPeriodEnd
+                    ? `Searched near period end ${detail.payPeriodEnd}`
+                    : "Add a pay date to enable automatic suggestions."}{" "}
+                {`Use the "Search ledger…" button to link manually.`}
+              </Text>
+            ) : null}
+
+            <Modal
+              opened={searchOpen}
+              onClose={() => setSearchOpen(false)}
+              title="Link bank deposit"
+              size="xl"
+            >
+              <TextInput
+                placeholder="Search by description, merchant, or amount…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.currentTarget.value)}
+                mb="sm"
+                autoFocus
+              />
+              {searchLoading ? (
+                <Group justify="center" py="md"><Loader size="sm" /></Group>
+              ) : searchResults.length > 0 ? (
+                <Table withTableBorder striped highlightOnHover>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Date</Table.Th>
+                      <Table.Th>Description</Table.Th>
+                      <Table.Th>Amount</Table.Th>
+                      <Table.Th>Account</Table.Th>
+                      <Table.Th w={80} />
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {searchResults.map((t) => (
+                      <Table.Tr key={t.id}>
+                        <Table.Td>{t.txnDate}</Table.Td>
+                        <Table.Td>{t.merchant ?? t.memo ?? "—"}</Table.Td>
+                        <Table.Td>${formatUsd(t.amount)}</Table.Td>
+                        <Table.Td>
+                          {t.accountMask
+                            ? `${t.institution} ···${t.accountMask}`
+                            : t.institution}
+                        </Table.Td>
+                        <Table.Td>
+                          <Button
+                            type="button"
+                            size="xs"
+                            disabled={depositSaving}
+                            onClick={() => void confirmDeposit(t.id)}
+                          >
+                            Link
+                          </Button>
+                        </Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              ) : searchQuery.trim() ? (
+                <Text c="dimmed" size="sm">{`No results for "${searchQuery}"`}</Text>
               ) : (
-                <Text c="dimmed" m={0}>
-                  No matching deposit found near {detail.payDate} for {formatMoney(detail.netPayCurrent)}.
+                <Text c="dimmed" size="sm">
+                  Type to search transactions. Only credit transactions are shown.
                 </Text>
               )}
-            </Paper>
-          ) : null}
+            </Modal>
+          </Paper>
 
           <Paper withBorder p="lg">
             <Title order={4} mt={0}>Amounts</Title>
