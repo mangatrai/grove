@@ -2124,91 +2124,14 @@ paths:
       tags: [payslips]
       summary: Sniff PDF for parser hints
       security: [{ bearerAuth: [] }]
-  /payslips/{id}/deposits/{canonicalId}:
-    put:
-      tags: [payslips]
-      summary: Confirm net-pay deposit link (idempotent)
-      description: |
-        Stores a row in `payslip_deposit_match` linking this payslip to a `transaction_canonical` id
-        in the same household. No-op on duplicate pair. Returns 404 if payslip or canonical row is missing (F-5c).
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: canonicalId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Updated snapshot and all confirmed deposit rows for this payslip
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [snapshot, confirmedDeposits]
-                properties:
-                  snapshot:
-                    type: object
-                    description: Full payslip_snapshot row after insert (same core fields as GET /payslips/:id)
-                  confirmedDeposits:
-                    type: array
-                    items: { $ref: '#/components/schemas/MatchedDeposit' }
-        "400":
-          description: Invalid path parameter
-        "404":
-          description: Payslip or canonical transaction not found for this household
-    delete:
-      tags: [payslips]
-      summary: Remove one confirmed net-pay deposit link
-      description: Deletes the matching `payslip_deposit_match` row if present; no-op when link absent. 404 only when payslip is missing (F-5c).
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - name: canonicalId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: Updated snapshot and remaining confirmed deposit rows
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [snapshot, confirmedDeposits]
-                properties:
-                  snapshot:
-                    type: object
-                    description: Full payslip_snapshot row after delete
-                  confirmedDeposits:
-                    type: array
-                    items: { $ref: '#/components/schemas/MatchedDeposit' }
-        "400":
-          description: Invalid path parameter
-        "404":
-          description: Payslip not found
   /payslips/{id}:
     get:
       tags: [payslips]
       summary: Payslip detail (confirmedDeposits, suggestedDeposits, lineItems — F-5c, CR-072)
       description: |
         Returns the full payslip snapshot plus:
-        - `confirmedDeposits`: stored links from `payslip_deposit_match` (always present; empty if none)
-        - `suggestedDeposits`: ephemeral search candidates — **only populated when `confirmedDeposits` is empty**; same shape as former `matchedDeposits` (±7/±10 day window, posted credits, 1% amount tolerance; F-5b + F-5c)
+        - `confirmedDeposits`: transactions explicitly confirmed as the net pay deposit (F-5)
+        - `suggestedDeposits`: dynamic candidates (empty when confirmedDeposits is non-empty) (F-5)
         - `lineItems`: per-row earnings/deduction/tax items grouped by section (CR-072)
       security: [{ bearerAuth: [] }]
       parameters:
@@ -2219,7 +2142,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Payslip detail with line items and matched deposit
+          description: Payslip detail with line items and deposit matching (F-5)
           content:
             application/json:
               schema:
@@ -2259,12 +2182,14 @@ paths:
                   createdAt: { type: string }
                   confirmedDeposits:
                     type: array
-                    description: Stored deposit links for this payslip (always present; F-5c)
-                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+                    description: Explicitly confirmed deposit transactions (from payslip_deposit_match)
+                    items:
+                      $ref: '#/components/schemas/MatchedDeposit'
                   suggestedDeposits:
                     type: array
-                    description: Ephemeral search candidates — empty when confirmedDeposits is non-empty (F-5c)
-                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+                    description: Dynamic search candidates (only populated when confirmedDeposits is empty)
+                    items:
+                      $ref: '#/components/schemas/MatchedDeposit'
                   lineItems:
                     type: object
                     description: Per-row line items grouped by section (CR-072)
@@ -2319,6 +2244,68 @@ paths:
       tags: [payslips]
       summary: Delete payslip snapshot (cascades to line items)
       security: [{ bearerAuth: [] }]
+  /payslips/{id}/deposits/{canonicalId}:
+    put:
+      tags: [payslips]
+      summary: Add a confirmed deposit link to a payslip (idempotent)
+      description: |
+        Links a transaction as a confirmed net-pay deposit. Idempotent — safe to call
+        multiple times with the same canonicalId. Supports multiple links per payslip for split deposits.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: canonicalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated snapshot with confirmedDeposits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/PayslipSnapshot' }
+                  confirmedDeposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+        "400":
+          description: Invalid UUID
+        "404":
+          description: Payslip or transaction not found
+    delete:
+      tags: [payslips]
+      summary: Remove one confirmed deposit link from a payslip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: canonicalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated snapshot with remaining confirmedDeposits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/PayslipSnapshot' }
+                  confirmedDeposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+        "400":
+          description: Invalid UUID
+        "404":
+          description: Payslip not found
   /payslips/{id}/line-items:
     post:
       tags: [payslips]
@@ -2868,22 +2855,65 @@ components:
         totalRows:
           type: integer
           minimum: 0
-    MatchedDeposit:
+    PayslipSnapshot:
       type: object
-      description: Canonical credit row surfaced as a deposit candidate or confirmed link (CR-068, F-5b)
+      description: |
+        Full `payslip_snapshot` row in camelCase (same core fields as GET /payslips/:id without
+        `lineItems`, `confirmedDeposits`, `suggestedDeposits`, or `validationWarnings`). Additional
+        fields may be present.
+      additionalProperties: true
       properties:
         id: { type: string }
-        txnDate: { type: string }
+        householdId: { type: string }
+        fileName: { type: string }
+        fileChecksum: { type: string }
+        parserProfileId: { type: string }
+        employerId: { type: string, nullable: true }
+        ownerScope: { type: string, enum: [household, person] }
+        ownerPersonProfileId: { type: string, nullable: true }
+        importFileId: { type: string, nullable: true }
+        payPeriodStart: { type: string, nullable: true }
+        payPeriodEnd: { type: string, nullable: true }
+        payDate: { type: string, nullable: true }
+        grossPayCurrent: { type: number, nullable: true }
+        grossPayYtd: { type: number, nullable: true }
+        employeeTaxesCurrent: { type: number, nullable: true }
+        employeeTaxesYtd: { type: number, nullable: true }
+        preTaxDeductionsCurrent: { type: number, nullable: true }
+        preTaxDeductionsYtd: { type: number, nullable: true }
+        postTaxDeductionsCurrent: { type: number, nullable: true }
+        postTaxDeductionsYtd: { type: number, nullable: true }
+        netPayCurrent: { type: number, nullable: true }
+        netPayYtd: { type: number, nullable: true }
+        hoursOrDaysCurrent: { type: string, nullable: true }
+        hoursOrDaysYtd: { type: string, nullable: true }
+        taxableEarningsCurrent: { type: number, nullable: true }
+        taxableEarningsYtd: { type: number, nullable: true }
+        otherInformationCurrent: { type: number, nullable: true }
+        otherInformationYtd: { type: number, nullable: true }
+        employmentRate: { type: number, nullable: true }
+        employmentRateType: { type: string, nullable: true }
+        rawExtractJson: { type: object }
+        createdAt: { type: string }
+    MatchedDeposit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        txnDate: { type: string, format: date }
         amount: { type: number }
-        direction: { type: string }
+        direction: { type: string, enum: [credit, debit] }
         merchant: { type: string, nullable: true }
         memo: { type: string, nullable: true }
-        accountId: { type: string }
+        accountId: { type: string, format: uuid }
         institution: { type: string }
         accountType: { type: string }
         accountMask: { type: string, nullable: true }
-        dateDelta: { type: number, description: Calendar days between anchor date and txn date }
-        amountDelta: { type: number, description: Absolute dollars between txn amount and net pay }
+        dateDelta:
+          type: integer
+          description: Calendar days between pay date and transaction date (absolute value)
+        amountDelta:
+          type: number
+          description: Absolute dollar difference from net pay
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)

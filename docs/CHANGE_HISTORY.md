@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-185 (2026-05-14): F-5 — Payslip deposit matching: stored pairing + multi-transaction support
+
+- **Type:** Feature (P2 / CR-185)
+- **What:**
+  - New **`payslip_deposit_match`** join table stores confirmed deposit links (1-to-N per payslip).
+  - **`GET /payslips/:id`** returns **`confirmedDeposits`** (join table) and **`suggestedDeposits`** (dynamic search, only populated when `confirmedDeposits` is empty). The old **`matchedDeposits`** field is removed.
+  - **`PUT /payslips/:id/deposits/:canonicalId`** — add a confirmed link (idempotent).
+  - **`DELETE /payslips/:id/deposits/:canonicalId`** — remove one confirmed link.
+  - Dynamic search window expanded from ±3 to **±7** calendar days; **`pay_period_end`** fallback added (**±10** days); **`tc.status = 'posted'`** filter added.
+  - **`MatchedDeposit`** carries **`dateDelta`** and **`amountDelta`** confidence fields.
+  - **UI:** confirmed deposits with **Remove**; suggestions with **Confirm**; **Search ledger…** modal for manual linking (multi-link via repeated **Link**). Split deposit across multiple transactions supported.
+- **Files:** `backend/db/migrations/0045_f5_payslip_deposit_match.sql`, `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `frontend/src/payslip/types.ts`, `frontend/src/pages/PayslipDetailPage.tsx`, `openapi/openapi.yaml`, `backend/tests/payslip-upload.test.ts`.
+
+---
+
 ## F-5e (2026-05-14): Payslip deposit matching — detail UI (F-5 slice 5)
 
 - **Type:** UX / Feature (V3 F-5)
