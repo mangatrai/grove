@@ -1,5 +1,5 @@
 import { useAuthToken } from "../api";
-import { DashboardPage } from "./DashboardPage";
+import { DashboardPageV2 } from "./DashboardPageV2";
 import { HomePage } from "./HomePage";
 
 /** Signed-in users land on the cash dashboard; guests see the landing page with inline sign-in (`HomePage`). */
@@ -8,5 +8,5 @@ export function HomeRoute() {
   if (!token) {
     return <HomePage />;
   }
-  return <DashboardPage />;
+  return <DashboardPageV2 />;
 }

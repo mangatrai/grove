@@ -82,12 +82,16 @@ export interface ListCanonicalResult {
 /** Optional filters for ledger lists (category drill-down, date window, uncategorized, account). */
 export interface LedgerListFilters {
   categoryId?: string;
+  /** Multi-select: explicit category UUIDs (flat `= ANY`, no parent expansion). */
+  categoryIds?: string[];
   uncategorizedOnly?: boolean;
   dateFrom?: string;
   dateTo?: string;
   /** Restrict to rows linked to one import file via `source_ref = raw:<id>` chain. */
   fileId?: string;
   accountId?: string;
+  /** Multi-select account UUIDs. */
+  accountIds?: string[];
   /** Full-text search on merchant + memo (`search_document` tsvector + substring fallback). */
   search?: string;
   amountMin?: number;
@@ -104,6 +108,13 @@ export interface LedgerListFilters {
   resolutionTypes?: string[];
   ownerScope?: "household" | "person";
   ownerPersonProfileId?: string;
+  /** Multi-select person profile UUIDs (with `owner_scope = 'person'`). */
+  ownerPersonProfileIds?: string[];
+  /**
+   * Multi-select belongs-to. Values: "household" or person profile UUIDs.
+   * When set, takes precedence over ownerScope / ownerPersonProfileId / ownerPersonProfileIds.
+   */
+  belongsTo?: string[];
   /** When true, return only trashed rows (status = 'trashed'). Default behaviour excludes them. */
   trashOnly?: boolean;
 }
@@ -229,16 +240,23 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
   }
   if (filters.uncategorizedOnly) {
     parts.push("tc.category_id IS NULL");
-  } else if (filters.categoryId) {
-    const cid = filters.categoryId;
-    if (await categoryHasChildren(cid)) {
-      parts.push(
-        "(tc.category_id = ? OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ? AND (household_id IS NULL OR household_id = ?)))"
-      );
-      params.push(cid, cid, householdId);
-    } else {
-      parts.push("tc.category_id = ?");
-      params.push(cid);
+  } else {
+    const allCategoryIds = [...(filters.categoryId ? [filters.categoryId] : []), ...(filters.categoryIds ?? [])];
+    const uniqueCategoryIds = [...new Set(allCategoryIds)];
+    if (uniqueCategoryIds.length === 1) {
+      const cid = uniqueCategoryIds[0]!;
+      if (await categoryHasChildren(cid)) {
+        parts.push(
+          "(tc.category_id = ? OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ? AND (household_id IS NULL OR household_id = ?)))"
+        );
+        params.push(cid, cid, householdId);
+      } else {
+        parts.push("tc.category_id = ?");
+        params.push(cid);
+      }
+    } else if (uniqueCategoryIds.length > 1) {
+      parts.push("tc.category_id = ANY(?)");
+      params.push(uniqueCategoryIds);
     }
   }
   if (filters.dateFrom) {
@@ -255,17 +273,48 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
     );
     params.push(filters.fileId);
   }
-  if (filters.accountId) {
+  const allAccountIds = [...(filters.accountId ? [filters.accountId] : []), ...(filters.accountIds ?? [])];
+  const uniqueAccountIds = [...new Set(allAccountIds)];
+  if (uniqueAccountIds.length === 1) {
     parts.push("tc.account_id = ?");
-    params.push(filters.accountId);
+    params.push(uniqueAccountIds[0]!);
+  } else if (uniqueAccountIds.length > 1) {
+    parts.push("tc.account_id = ANY(?)");
+    params.push(uniqueAccountIds);
   }
-  if (filters.ownerScope) {
-    parts.push("tc.owner_scope = ?");
-    params.push(filters.ownerScope);
-  }
-  if (filters.ownerPersonProfileId) {
-    parts.push("tc.owner_person_profile_id = ?");
-    params.push(filters.ownerPersonProfileId);
+
+  if (filters.belongsTo?.length) {
+    const includeHousehold = filters.belongsTo.includes("household");
+    const personIds = filters.belongsTo.filter((id) => id !== "household");
+    if (includeHousehold && personIds.length > 0) {
+      parts.push("(tc.owner_scope = 'household' OR tc.owner_person_profile_id = ANY(?))");
+      params.push(personIds);
+    } else if (includeHousehold) {
+      parts.push("tc.owner_scope = 'household'");
+    } else if (personIds.length === 1) {
+      parts.push("tc.owner_scope = 'person' AND tc.owner_person_profile_id = ?");
+      params.push(personIds[0]!);
+    } else if (personIds.length > 1) {
+      parts.push("tc.owner_scope = 'person' AND tc.owner_person_profile_id = ANY(?)");
+      params.push(personIds);
+    }
+  } else {
+    const allPersonIds = [
+      ...(filters.ownerPersonProfileId ? [filters.ownerPersonProfileId] : []),
+      ...(filters.ownerPersonProfileIds ?? [])
+    ];
+    const uniquePersonIds = [...new Set(allPersonIds)];
+    if (filters.ownerScope === "household") {
+      parts.push("tc.owner_scope = 'household'");
+    } else if (uniquePersonIds.length === 1) {
+      parts.push("tc.owner_scope = 'person' AND tc.owner_person_profile_id = ?");
+      params.push(uniquePersonIds[0]!);
+    } else if (uniquePersonIds.length > 1) {
+      parts.push("tc.owner_scope = 'person' AND tc.owner_person_profile_id = ANY(?)");
+      params.push(uniquePersonIds);
+    } else if (filters.ownerScope === "person") {
+      parts.push("tc.owner_scope = 'person'");
+    }
   }
   if (filters.amountMin !== undefined && Number.isFinite(filters.amountMin)) {
     parts.push("CAST(tc.amount AS DOUBLE PRECISION) >= ?");
@@ -479,6 +528,155 @@ export async function listCanonicalTransactionsForImportSession(
   const transactions: CanonicalTransactionRow[] = rows.map((r) => mapRow(r, { includeReviewReasons: includeReview }));
 
   return { total, limit, offset, sessionId, transactions };
+}
+
+/** Response shape for `GET /transactions/aggregate` (CR-177). */
+export type LedgerAggregateSummary = {
+  count: number;
+  net: number;
+  inflows: number;
+  outflows: number;
+  avgAbsolute: number;
+  byCategory: Array<{ label: string; value: number; categoryId: string | null }>;
+  byMerchant: Array<{ label: string; value: number }>;
+  byAccount: Array<{ label: string; value: number; accountId: string }>;
+  byMonth: Array<{ label: string; value: number; net: number }>;
+  dateFirst: string | null;
+  dateLast: string | null;
+};
+
+/**
+ * Aggregate counts and sums over the full filtered ledger (no pagination).
+ * When `importSessionId` is set, the same session scope as `GET /transactions?sessionId=` applies.
+ */
+export async function aggregateCanonicalTransactions(
+  householdId: string,
+  filters: LedgerListFilters | undefined,
+  opts?: { importSessionId?: string }
+): Promise<LedgerAggregateSummary> {
+  const sessionId = opts?.importSessionId;
+  const xf = await ledgerFilterClause(householdId, filters);
+  const sessionJoin =
+    sessionId != null
+      ? ` INNER JOIN transaction_raw tr ON tc.source_ref = ('raw:' || tr.id)
+       INNER JOIN import_file f ON f.id = tr.file_id`
+      : "";
+  const fromCore = `FROM transaction_canonical tc${sessionJoin}`;
+  const whereCore =
+    sessionId != null ? `WHERE f.session_id = ? AND tc.household_id = ?${xf.sql}` : `WHERE tc.household_id = ?${xf.sql}`;
+  const bp = sessionId != null ? [sessionId, householdId, ...xf.params] : [householdId, ...xf.params];
+  const inflowExpr = `CASE WHEN CAST(tc.amount AS NUMERIC) > 0 THEN CAST(tc.amount AS NUMERIC) ELSE 0 END`;
+  const outflowExpr = `CASE WHEN CAST(tc.amount AS NUMERIC) < 0 THEN -CAST(tc.amount AS NUMERIC) ELSE 0 END`;
+
+  const headline = await qGet<{
+    cnt: string;
+    total_inflows: string;
+    total_outflows: string;
+    date_first: string | null;
+    date_last: string | null;
+  }>(
+    `SELECT
+      COUNT(*)::text AS cnt,
+      COALESCE(SUM(${inflowExpr}), 0)::text AS total_inflows,
+      COALESCE(SUM(${outflowExpr}), 0)::text AS total_outflows,
+      MIN(tc.txn_date)::text AS date_first,
+      MAX(tc.txn_date)::text AS date_last
+    ${fromCore}
+    ${whereCore}`,
+    ...bp
+  );
+
+  const count = Number(headline?.cnt ?? 0);
+  const inflows = Number(headline?.total_inflows ?? 0);
+  const outflows = Number(headline?.total_outflows ?? 0);
+  const net = inflows - outflows;
+  const avgAbsolute = count > 0 ? (inflows + outflows) / count : 0;
+
+  const catRows = await qAll<{ cat_id: string | null; cat_name: string | null; outflow_sum: string }>(
+    `SELECT
+      c.id AS cat_id,
+      c.name AS cat_name,
+      SUM(${outflowExpr})::text AS outflow_sum
+    ${fromCore}
+    LEFT JOIN category c ON c.id = tc.category_id
+    ${whereCore}
+    GROUP BY c.id, c.name
+    ORDER BY SUM(${outflowExpr}) DESC
+    LIMIT 50`,
+    ...bp
+  );
+
+  const merchantRows = await qAll<{ merchant_key: string; outflow_sum: string }>(
+    `SELECT
+      LOWER(REGEXP_REPLACE(TRIM(COALESCE(tc.merchant, tc.memo, 'Unknown')), '\\s+', ' ', 'g')) AS merchant_key,
+      SUM(${outflowExpr})::text AS outflow_sum
+    ${fromCore}
+    ${whereCore}
+    GROUP BY merchant_key
+    ORDER BY SUM(${outflowExpr}) DESC
+    LIMIT 50`,
+    ...bp
+  );
+
+  const accountRows = await qAll<{ account_id: string; acct_label: string; net_sum: string }>(
+    `SELECT
+      tc.account_id,
+      (fa.institution || ' ' || fa.type || COALESCE(' •' || fa.account_mask, '')) AS acct_label,
+      SUM(CAST(tc.amount AS NUMERIC))::text AS net_sum
+    ${fromCore}
+    LEFT JOIN financial_account fa ON fa.id = tc.account_id
+    ${whereCore}
+    GROUP BY tc.account_id, fa.institution, fa.type, fa.account_mask
+    ORDER BY ABS(SUM(CAST(tc.amount AS NUMERIC))) DESC
+    LIMIT 50`,
+    ...bp
+  );
+
+  const monthRows = await qAll<{ month_label: string; inflow_sum: string; outflow_sum: string }>(
+    `SELECT
+      TO_CHAR(DATE_TRUNC('month', tc.txn_date::date), 'YYYY-MM') AS month_label,
+      SUM(${inflowExpr})::text AS inflow_sum,
+      SUM(${outflowExpr})::text AS outflow_sum
+    ${fromCore}
+    ${whereCore}
+    GROUP BY DATE_TRUNC('month', tc.txn_date::date)
+    ORDER BY DATE_TRUNC('month', tc.txn_date::date) ASC
+    LIMIT 120`,
+    ...bp
+  );
+
+  return {
+    count,
+    net,
+    inflows,
+    outflows,
+    avgAbsolute,
+    dateFirst: headline?.date_first ?? null,
+    dateLast: headline?.date_last ?? null,
+    byCategory: catRows.map((r) => ({
+      categoryId: r.cat_id ?? null,
+      label: r.cat_name ?? "Uncategorized",
+      value: Number(r.outflow_sum)
+    })),
+    byMerchant: merchantRows.map((r) => ({
+      label: r.merchant_key,
+      value: Number(r.outflow_sum)
+    })),
+    byAccount: accountRows.map((r) => ({
+      accountId: r.account_id,
+      label: r.acct_label,
+      value: Number(r.net_sum)
+    })),
+    byMonth: monthRows.map((r) => {
+      const inf = Number(r.inflow_sum);
+      const out = Number(r.outflow_sum);
+      return {
+        label: r.month_label,
+        value: out,
+        net: inf - out
+      };
+    })
+  };
 }
 
 export async function updateCanonicalTransactionCategory(

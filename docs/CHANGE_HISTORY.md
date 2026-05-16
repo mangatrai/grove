@@ -18,6 +18,692 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-190 (2026-05-15): Home page hero redesign — animated preview cards
+
+- **Type:** UX / design
+- **Files:** `frontend/src/pages/HomePage.tsx`, `frontend/src/index.css`, `frontend/index.html`
+- **What changed:** Replaced the static bullet-list + feature-pill hero with two animated preview cards (Net Worth card with SVG line chart that draws itself, Budget ring card with arc fill animation) and three staggered transaction rows. Added JetBrains Mono to the font stack for monospaced values. Hero panel widened to 60%; aside is 40% (flex split replacing the old 1.1fr/0.9fr grid).
+- **Removed:** `.home-landing__lead`, `.home-landing__bullets`, `.home-landing__check`, `.home-landing__pills`, `.home-landing__pill` CSS classes; `featurePills` constant in TSX.
+- **Added:** `.home-landing__sub`, all `hl-*` CSS classes + `@keyframes hl-*` animations; `nwValueRef` counter effect.
+- **Auth card:** untouched — all Mantine components, handlers, reset-success banner, forgot-password flow unchanged.
+
+---
+
+## CR-189 (2026-05-15): D-2 — Property valuation UX polish
+
+- **Type:** UX fix (D-2 follow-on)
+- **What:**
+  - **Settings modal button gate**: "Retrieve/Update Redfin estimate" button now requires all four address fields (street, city, state, zip) before enabling — prevents partial-address API calls.
+  - **Settings modal label logic**: Button reads "Update Redfin estimate" when the property already has a market value set (regardless of `apiPropertyId`); "Retrieve Redfin estimate" on first-time lookup only.
+  - **valuation_detail_json stored on create**: `POST /household/properties` now accepts `valuationDetailJson` in body and writes it (plus `valuation_fetched_at`) immediately on property creation. Previously only the Redfin IDs were saved; the full detail JSON was lost. Frontend passes `detail` from the preview response through on save.
+  - **Net Worth refresh button**: Replaced "Redfin" text button with a compact refresh icon (`IconRefresh`) + native `title` tooltip "Refresh market value from Redfin". Cleaner inline edit row.
+- **Files:**
+  - `backend/src/modules/household/household.routes.ts` (+valuationDetailJson field, updated UPDATE to write detail + fetched_at)
+  - `frontend/src/pages/SettingsPage.tsx` (valuationDetail in modal state, correct gate/label logic, pass detail on save)
+  - `frontend/src/pages/NetWorthPage.tsx` (IconRefresh + title tooltip replaces text button)
+
+---
+
+## CR-188 (2026-05-15): D-2 — Redfin comps parser fix + property valuation UI (Settings + Net Worth)
+
+- **Type:** Bug fix + UI feature (D-2 follow-on)
+- **What:**
+  - **Comps parser corrected** (`realty-api.service.ts`): Live `/detailsbyaddress` responses have 8 top-level `__atts` entries (not 10+). Corrected all positional offsets confirmed against live API data: facts at `[7]` (was `[9]`), sash date at `sashAtts[3]` (was `[2]`), list price at `listingArr[21]` (was `[23]`), beds/baths from `listingArr[26/27]` (more reliable than facts array), sqft at `facts[22]` (was `[21]`). Debug log removed.
+  - **Settings → Property modal** (`SettingsPage.tsx`): "Retrieve Redfin estimate" / "Update Redfin estimate" button below the market value field. Calls `POST /household/properties/preview-valuation`; auto-fills market value from AVM estimate and resets as-of date to today. Redfin property/listing IDs stored in modal state and passed through on save to `POST /household/properties`. Button disabled when address fields are empty.
+  - **Net Worth page inline edit** (`NetWorthPage.tsx`): "Redfin" button in the edit row. Calls `POST /household/properties/:id/refresh-valuation`; auto-fills the market value and date inputs with the returned estimate + fetchedAt. Save/Cancel disabled while retrieving.
+- **Why:** The comps bug caused all `comps: []` in API responses. UI surfaces complete the end-to-end D-2 workflow — users can now retrieve Redfin AVM without leaving either the Settings or Net Worth page.
+- **Files:**
+  - `backend/src/modules/household/realty-api.service.ts` (comps parser positions corrected, debug log removed)
+  - `frontend/src/pages/SettingsPage.tsx` (+retrieveValuation, apiPropertyId/apiListingId in modal state, Retrieve button)
+  - `frontend/src/pages/NetWorthPage.tsx` (+refreshPropertyValuation, propertyRowRetrieving state, Redfin button in edit row)
+
+---
+
+## CR-187 (2026-05-14): D-2 — Real estate auto-valuation (Redfin via RealtyAPI)
+
+- **Type:** Feature (D-2 — pulled forward from deferred)
+- **What:**
+  - **`POST /properties/preview-valuation`** — pre-save address lookup via Redfin (2 API credits). Returns estimate, Redfin propertyId/listingId, and compact `ValuationDetail` JSON. Client passes IDs back on save to avoid a second API call.
+  - **`POST /properties/:propertyId/refresh-valuation`** — on-demand or scheduler-triggered refresh for an existing property. Uses stored Redfin IDs (1 credit) when available; falls back to address lookup (2 credits) if IDs not yet stored.
+  - **Monthly background scheduler** (`realty-scheduler.service.ts`) — 6h heartbeat, refreshes any `property` row with `api_property_id` set that hasn't been fetched in 28 days.
+  - **`ValuationDetail` JSON** stored in `property.valuation_detail_json` (JSONB). Contains: Redfin AVM estimate + range, last-sold event (price hidden in TX non-disclosure), current + historical tax assessments from public records, up to 6 comparable recent sales with address/sqft/beds/baths/list price/close price/sold date. Rebuilt on every refresh — overwrites previous.
+  - **Schema migration `0046`**: `api_listing_id TEXT`, `valuation_detail_json JSONB`, `valuation_fetched_at TIMESTAMPTZ` added to `property` table.
+  - **`POST /properties` schema updated**: `apiPropertyId` + `apiListingId` optional fields (passed through from preview); `zip` validated to 5-digit US format; `state` validated to 2-char; `addressLine1` enforces min length 1.
+  - **`REALTYAPI_KEY`** added to `env.ts` and `.env.example`.
+- **Why:** Property value on net worth page was a static manual entry. API auto-refresh keeps equity display accurate. The `ValuationDetail` JSON also captures comparable sale data + county tax assessment history for future property tax protest use.
+- **API provider:** Redfin via RealtyAPI.io (free tier: 250 req/month). Both Zillow and Redfin endpoints on RealtyAPI proxy Redfin data. Redfin chosen as primary: has AVM, comp sales with close prices, and authoritative tax-from-public-records data.
+- **Non-disclosure states (TX):** Last sold price is hidden (`isPriceAdminOnly`); comp prices are fully visible as they come from separate listings.
+- **Files:**
+  - `backend/db/migrations/0046_d2_realty_valuation.sql` (new)
+  - `backend/src/config/env.ts` (+REALTY_API_KEY)
+  - `backend/src/modules/household/realty-api.service.ts` (new)
+  - `backend/src/modules/household/realty-scheduler.service.ts` (new)
+  - `backend/src/modules/household/property.service.ts` (+refreshPropertyValuation, +previewValuationByAddress, extended types)
+  - `backend/src/modules/household/household.routes.ts` (+2 routes, updated POST /properties schema)
+  - `backend/src/server.ts` (+startRealtyScheduler)
+  - `.env.example` (+REALTY_API_KEY)
+
+---
+
+## CR-186 (2026-05-14): I-1 — AI insights: Loans > Personal prompt clarification
+
+- **Type:** Prompt update (P3 / I-1)
+- **What:** Updated AI insights system prompt (`buildSystemPrompt` in `llm-provider.service.ts`) to explain that `Loans > Personal` subcategory transactions are informal cash lending to friends/family — not a bank loan or discretionary overspend. The outgoing and incoming sides net to zero over time and should be treated as a temporary receivable, not a spending spike.
+- **Why:** Without this context the LLM misreads a lend/repay cycle as a spending surge followed by an income bump. The loan event tracker (original I-1 proposal) was scoped down — category-based tracking is sufficient; the prompt fix closes the AI interpretation gap.
+- **Prompt version:** bumped `PROMPT_VERSION` from `v1.1` → `v1.2` (ensures cached insight rows are regenerated on next request).
+- **Files:** `backend/src/modules/insights/llm-provider.service.ts`
+
+---
+
+## CR-185 (2026-05-14): F-5 — Payslip deposit matching: stored pairing + multi-transaction support
+
+- **Type:** Feature (P2 / CR-185)
+- **What:**
+  - New **`payslip_deposit_match`** join table stores confirmed deposit links (1-to-N per payslip).
+  - **`GET /payslips/:id`** returns **`confirmedDeposits`** (join table) and **`suggestedDeposits`** (dynamic search, only populated when `confirmedDeposits` is empty). The old **`matchedDeposits`** field is removed.
+  - **`PUT /payslips/:id/deposits/:canonicalId`** — add a confirmed link (idempotent).
+  - **`DELETE /payslips/:id/deposits/:canonicalId`** — remove one confirmed link.
+  - Dynamic search window expanded from ±3 to **±7** calendar days; **`pay_period_end`** fallback added (**±10** days); **`tc.status = 'posted'`** filter added.
+  - **`MatchedDeposit`** carries **`dateDelta`** and **`amountDelta`** confidence fields.
+  - **UI:** confirmed deposits with **Remove**; suggestions with **Confirm**; **Search ledger…** modal for manual linking (multi-link via repeated **Link**). Split deposit across multiple transactions supported.
+- **Files:** `backend/db/migrations/0045_f5_payslip_deposit_match.sql`, `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `frontend/src/payslip/types.ts`, `frontend/src/pages/PayslipDetailPage.tsx`, `openapi/openapi.yaml`, `backend/tests/payslip-upload.test.ts`.
+
+---
+
+## F-5e (2026-05-14): Payslip deposit matching — detail UI (F-5 slice 5)
+
+- **Type:** UX / Feature (V3 F-5)
+- **What:** `PayslipDetailPage` Bank deposit card always visible: **Confirmed** table with remove, **Suggestions** table with confirm (when no confirmed links), empty-state copy, **Search ledger** modal with debounced `GET /transactions` search (`amountMin=0.01`, credits only). PATCH / line-item mutations preserve `confirmedDeposits` / `suggestedDeposits` in local state; PUT/DELETE deposit endpoints update state and refetch detail when the last confirmed link is removed.
+- **Why:** End-user confirm/unlink and manual multi-link against stored `payslip_deposit_match` rows.
+- **Files:** `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/payslip/payslipChartsModel.test.ts` (mock snapshots include deposit arrays).
+
+---
+
+## F-5c (2026-05-14): Payslip deposit matching — HTTP routes (F-5 slice 3)
+
+- **Type:** Feature (V3 F-5)
+- **What:** `GET /payslips/:id` returns `confirmedDeposits` (always from `payslip_deposit_match`) and `suggestedDeposits` (ephemeral search only when confirmed is empty); removes `matchedDeposits`. New `PUT` / `DELETE /payslips/:id/deposits/:canonicalId` (registered before `GET /:id`) return `{ snapshot, confirmedDeposits }`. Path params validated with Zod (`depositCanonicalIdParamSchema`).
+- **Why:** Stored confirmation + API for add/remove links; Express route order avoids `:id` capturing `deposits`.
+- **Files:** `backend/src/modules/payslip/payslip.routes.ts`, `backend/tests/payslip-upload.test.ts`, `openapi/openapi.yaml`, `docs/PAYSLIP_V1.md`, `docs/V3_BACKLOG.md`.
+
+---
+
+## F-5b (2026-05-14): Payslip deposit matching — service layer (F-5 slice 2)
+
+- **Type:** Feature (V3 F-5)
+- **What:** `MatchedDeposit` gains `dateDelta` and `amountDelta`. `findMatchedDeposits` anchors on `pay_date` else `pay_period_end`, uses ±7-day window (±10 when anchored on period end only), filters `transaction_canonical.status = 'posted'`, and maps deltas in JS. New exports: `getConfirmedDeposits`, `addConfirmedDeposit`, `removeConfirmedDeposit` (join table `payslip_deposit_match`). `GET /payslips/:id` passes `payPeriodEnd` into the search helper.
+- **Why:** Prepare stored confirmed links (F-5) and widen/tune ephemeral deposit suggestions without split-deposit auto-detection.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/payslip/payslip.routes.ts`, `frontend/src/payslip/types.ts`, `backend/tests/payslip-upload.test.ts`, `openapi/openapi.yaml`, `docs/PAYSLIP_V1.md`.
+
+---
+
+## F-5a (2026-05-14): Payslip deposit matching — join table (migration only)
+
+- **Type:** DB- / Feature slice (V3 F-5)
+- **What:** Added `payslip_deposit_match` (`payslip_snapshot_id`, `household_id`, `transaction_canonical_id`, `confirmed_at`) with unique pair per payslip+canonical row and index on `payslip_snapshot_id`. Cascade deletes from payslip, household, and canonical transaction. IDs use **TEXT** + `gen_random_uuid()::text` default to match `0001_baseline` (`payslip_snapshot.id` / `household.id` are TEXT, not UUID).
+- **Why:** Foundation for stored confirmed net-pay deposit links (1-to-N split deposits); API and UI follow in later F-5 slices.
+- **Files:** `backend/db/migrations/0045_f5_payslip_deposit_match.sql`.
+
+---
+
+## I-3 (2026-05-14): Category taxonomy + rule audit
+
+- **Type:** Improvement (V3 I-3)
+- **What:**
+  - **Builtin rule fixes (`0044_i3_rule_taxonomy_fix.sql` + `0001_bootstrap.sql`):** Shell, Exxon, Chevron, BP were routed to `Mobility > Public Transit` — corrected to `Mobility > Fuel`. `parking` and `toll` patterns corrected to `Mobility > Parking & Tolls`. Rule keys renamed to match (`fuel_0_shell`, `parking_0_parking`, etc.).
+  - **Apple Pay bug fix (`category-rules-house.csv`):** `APPLE` rule narrowed to `APPLE STORE`. The broad `apple` pattern was matching the bank-appended suffix `TXAPPLE PAY ENDING IN XXXX`, miscategorizing 40 transactions (Hareli Fresh Market, Patel Brothers, India Bazaar, Gwalia Sweets, Chipotle, etc.) as `Shopping > Electronic`.
+  - **Household rules CSV audit:** `DIRECTPAY FULL BALANCE` consolidated to `any` (was `debit_only` only). Synced 6 rules that existed in DB but were missing from master file: FLEX PLAN, ROCKET MORTGAGE LOAN, PENNYMAC CASH, NEWREZ-SHELLPOIN ACH PMT, WF HOME MTG AUTO PAY (→ Loans > Rental Prop), and DIRECTPAY credit variant. Zelle rule removed (was disabled; too broad for P2P). Added 12 new rules: GEXA ENERGY, ENERGY OGRE, ENERGY TEXAS (→ Utilities > Energy); ROYAL CARIBBEAN, MSC CRUISES (→ Travel > Cruise); A2Z EV, FRANCIS ENERGY (→ Mobility > EV Charging); AMC (→ Entertainment > Movies); DESI MANDI (→ Shopping > Groceries).
+  - **Custom categories in bootstrap seed + fixture:** `Bonds` (Investments > Bonds, `11d3b2b9-*`) and `Rental Prop` (Loans > Rental Prop, `dd347c5f-*`) added to `0001_bootstrap.sql` and `fixtures/category-import/categories.csv`. New installs will create these automatically.
+- **Why:** 441 transactions (13%) were unclassified at import time; all manually fixed by user. Root causes: broad `apple` rule; gas station builtins pointing to wrong category; missing rules for recurring energy vendors, cruise lines, EV chargers; household CSV drifted from DB state.
+- **Decisions recorded:**
+  - `Income > Reimbursements` stays under Income — employer per diems and FSA drawdowns are genuine cash-positive inflows; no structural rename.
+  - Spouse P2P payments: `Income > Reimbursements` is the correct bucket until both accounts are imported (Transfer In implies a paired out-transfer that doesn't exist yet; transfer detection pairs retroactively using amount/date/account — category is irrelevant to pairing).
+  - Zelle rule permanently removed — P2P credits cannot be safely classified by payment method; manual per-transaction resolution is correct.
+- **Files:** `backend/db/migrations/0044_i3_rule_taxonomy_fix.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/category-rules-house.csv`, `fixtures/category-import/categories.csv`.
+
+---
+
+## F-7/F-8 (2026-05-14): AI insights — flow classification + budget suggestion cleanup
+
+- **Type:** Feature (V3 F-7 + F-8)
+- **What:**
+  - **F-7 — LLM data feed overhaul (`insight-prompt.service.ts`):**
+    - Added flow-class taxonomy (compile-time category UUID constants): `MOVEMENT`, `COMMITTED_EXPENSE`, `WEALTH_BUILDING`, `TAX`, `INCOME`, non-lifestyle set.
+    - Replaced flat `flowTotals12m` with `flowBreakdown12m` which returns four separated 12-month aggregates in a single query: `inflow12` (Income category only), `lifestyleSpend12`, `committedExpenses12` (Loans), `uncategorized12`.
+    - `InsightPromptInput` interface updated: `avgMonthlyOutflow` + `avgMonthlySavingsRate` → `avgMonthlyLifestyleSpend`, `avgMonthlyCommittedExpenses`, `cashBufferRate` ((income−lifestyle−committed)/income). `netWorth` block gains `healthSavingsTotal` and `educationSavingsTotal`. New `uncategorizedMonthlyAvg` field separates uncategorized debits from `topCategories`.
+    - `topSpendCategories12m` now excludes all non-lifestyle categories (movement/investments/taxes/loans/income) and uncategorized; `topCategories` is lifestyle-only.
+    - Added `investmentPortfolioTrend` function: CTE with window function picks latest snapshot per account per month, aggregates across investment/retirement/health/education accounts, returns 6-month trend. Uses `account_balance_snapshot.financial_account_id` and `.amount` columns (not `.account_id`/`.balance`).
+    - `overBudgetCategories` now filters budget rows to lifestyle + loans only — movement/investments/taxes do not trigger over-budget alerts.
+  - **F-7 — LLM system prompt (`llm-provider.service.ts`):** Bumped `PROMPT_VERSION` → `v1.1`. Added field-definition block explaining `cashBufferRate` formula and noting that `investmentPortfolioTrend` reflects both contributions and market movements.
+  - **F-8 — Budget suggestions (`budget.service.ts`):** `EXCLUDED_PARENTS` expanded from 3 to 6 IDs — added Taxes, Borrowing (CC payments/personal lending), Banking (fees). Loans intentionally kept so mortgage/auto payments appear as budget suggestions. SQL `IS DISTINCT FROM` placeholder count updated from 3×2 to 6×2.
+- **Why:** Transfer-polluted and movement-category transactions were inflating the LLM's view of household spending; uncategorized amounts were appearing as a top "category"; the old savings rate included investment outflows making it misleadingly low. Budget suggestions were surfacing Taxes and Borrowing/Banking rows that households can't meaningfully budget for.
+- **Decisions recorded:**
+  - Loans = committed_expense (not movement); households must plan around mortgage/auto payments — they stay in budget + LLM feed.
+  - Investment account balances sent via `investmentPortfolioTrend` (not per-month transaction sums which miss payroll 401k deductions).
+  - `cashBufferRate` definition: fraction of take-home income remaining after lifestyle discretionary spend and committed loan obligations.
+  - Custom household categories default to lifestyle class (documented choice, revisit in I-3).
+- **Files:** `backend/src/modules/insights/insight-prompt.service.ts`, `backend/src/modules/insights/llm-provider.service.ts`, `backend/src/modules/budget/budget.service.ts`.
+
+---
+
+## FIX-179 (2026-05-13): Knip dead-code sweep — orphaned files, dead exports, stale re-exports
+
+**Why:** Knip audit identified confirmed orphans — files and exports with no live consumers and no future-use intent documented in CHANGE_HISTORY. Items flagged "keep" (e.g., `GrovePageLoader`, `subscribeToken`/`getTokenSnapshot`) were verified as intentional placeholders or substrate-level API and left alone.
+
+**What was removed:**
+
+*Files deleted:*
+- `frontend/src/pages/ResolutionQueuePage.tsx` — CR-018 said "deleted" but the file survived on disk; router already redirects away from it
+- `frontend/src/components/PageHeader.tsx` — pre-Mantine shared component, superseded by Mantine primitives
+- `frontend/src/components/SectionCard.tsx` — same
+- `frontend/src/import/startImportSession.ts` — extracted helper that was never adopted; pages inline the `POST /imports/sessions` call directly
+
+*Dead exports/functions removed:*
+- `backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts` — `parseIbmPayslipPdf`, `PayslipPdfParseFailureReason`, `PayslipPdfParseResult`; CHANGE_HISTORY said "kept for tests" but no test ever imported it; IBM parsing routes through LLM extract path
+- `backend/src/modules/canonical/canonical-ingest.service.ts` — removed re-export block for `computeTransactionFingerprint` / `normalizeAmountForFingerprint` / `normalizeDescriptionForFingerprint` / `normalizeTxnDateForFingerprint`; all consumers import directly from `transaction-fingerprint.ts`
+- `backend/src/paths.ts` — removed `export` from `repoRoot`; `env.ts` defines its own local copy and never imported this one
+- `backend/src/modules/imports/profiles/boa-estatement-pdf.ts` — removed `parseBoaEStatementPdf`; callers use `parseBoaEStatementFromTextDetailed` from the same file
+- `backend/src/modules/budget/budget.service.ts` — removed `getBudgetEntry`; no call site anywhere
+- `frontend/src/components/HierarchicalSearchPicker.tsx` — removed `lookupLabel` alias; `ledgerListQuery.ts` (the only consumer) updated to call `lookupTriggerLabel` directly
+
+**Files changed:** `frontend/src/pages/ResolutionQueuePage.tsx` (deleted), `frontend/src/components/PageHeader.tsx` (deleted), `frontend/src/components/SectionCard.tsx` (deleted), `frontend/src/import/startImportSession.ts` (deleted), `backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts`, `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/src/paths.ts`, `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`, `backend/src/modules/budget/budget.service.ts`, `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/ledger/ledgerListQuery.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-178 (2026-05-13): Drop unused `react-currency-input-field`
+
+**Why:** `CurrencyInput` is implemented with Mantine only; the npm package was never imported.
+
+**Changed:**
+- `frontend/package.json` — removed `react-currency-input-field`
+- `package-lock.json` — lockfile updated accordingly
+
+**Correction (same day):** A brief `knip.json` top-level `exclude` was added in the same commit to reduce Knip noise; that was **reverted** immediately after — maintainers want `npm run knip` to keep reporting unused files, exports/types, and duplicates for intentional dead-code review, not only dependency hygiene.
+
+---
+
+## CR-176 (2026-05-13): Add Knip config for the npm workspaces monorepo
+
+**Why:** Running Knip without config treated Vitest suites, root `scripts/*.mjs`, and backend one-off tooling as unreachable, producing a noisy and misleading dead-code report.
+
+**Changed:**
+- `knip.json` — per-workspace `project` globs; **Vite** + **Vitest** plugins on `frontend`; **Vitest** on `backend` so entries implied by `vite.config.ts` / `vitest.config.ts` / `package.json` scripts are not duplicated; explicit backend entries only for `tests/**/*.test.js` (outside Vitest `include`) and `backend/scripts/**/*.mjs` (manual one-offs); root workspace `scripts/**/*.mjs` with `ignoreDependencies` for `better-sqlite3` / `dotenv` still imported by legacy root scripts (Postgres-only stack).
+- `package.json` (root) — `knip` script and `knip` devDependency; `package-lock.json` must list `knip` so `npm run knip` resolves `node_modules/.bin/knip` (fresh clones need `npm install`).
+
+---
+
+## CR-175 (2026-05-12): Rename "Household Finance" → "Grove" in package metadata and test fixtures
+
+**Why:** App was rebranded to Grove; frontend/backend code was already updated but package.json names, README title, and SMTP_FROM test fixture strings still carried the old name.
+
+**Changed:**
+- `package.json` (root) — name `household-finance-app` → `grove-app`
+- `backend/package.json` — name `@household-finance/backend` → `@grove/backend`
+- `frontend/package.json` — name `@household-finance/frontend` → `@grove/frontend`
+- `README.md` — top-level heading updated to `# Grove`
+- `backend/tests/member-invite.test.ts`, `password-reset.test.ts` — SMTP_FROM sender display name updated
+
+**Intentionally unchanged:** crypto key-derivation salt strings in `dob-crypto.ts` and `gdrive.service.ts` (renaming would break decryption of existing data); `docker-compose.yml` `POSTGRES_DB` name (live database identifier).
+
+---
+
+## UX-172 (2026-05-12): Wire GroveLoader across all loading states
+
+**Why:** Production pages with slow/complex queries (budget aggregation, net worth, transaction list) showed no visual feedback — just plain "Loading…" text or blank space. Replaced with Grove brand loader using three design patterns from the Claude design spec.
+
+**Patterns added:**
+- `GroveCardLoader` — new export in `GroveLoader.tsx`; centered column (loader above label) inside a card or section panel, no full-page height. Used for complex aggregations.
+- In-context horizontal (`GroveLoader` + `Group`) — loader and label side by side within a list/section. Used for list fetches.
+- `GrovePageLoader` — existing export, unchanged. Full-page centered for top-level page loads.
+
+**Pages updated:**
+- `DashboardPageV2.tsx` — 3 Paper cards (spending breakdown, net worth, recurring payments) → `GroveCardLoader` with contextual labels
+- `TransactionsPage.tsx` — transaction list fetch → in-context `GroveLoader size="lg" color="forest" speed="slow"`
+- `BudgetPage.tsx` — main budget load → `GroveCardLoader size="lg" speed="slow"`; suggestions load → in-context `GroveLoader size="sm" color="muted"`
+- `PayslipDetailPage.tsx` — payslip detail fetch → `GroveCardLoader` inside Paper
+- `PayslipsPage.tsx` — payslip list fetch → in-context `GroveLoader size="sm" color="muted"`
+- `SettingsPage.tsx` — 3 section loads (profile, members, household) → in-context `GroveLoader size="sm" color="muted"`
+
+---
+
+## UX-171 (2026-05-12): Replace Mantine Loader with GroveLoader
+
+**Why:** Mantine's `<Loader>` uses a generic spinner; GroveLoader uses the Grove Stems mark animation (three bars, brand colors) for visual consistency with the Grove identity.
+
+**What changed:**
+- `frontend/src/components/FinancialHealthCard.tsx` — removed `Loader` from Mantine imports; added `GroveLoader` import; replaced all 3 `<Loader size="sm" />` with `<GroveLoader size="sm" color="muted" />` (inline card loading states: initial load, generating analysis, loading history).
+
+---
+
+## UX-170 (2026-05-12): Grove branding — email templates
+
+**Why:** All 5 mailer templates still referenced "Household Finance" and "HF ·" in subject lines, body text, header brand, and footer. Renamed to "Grove" to match the shipped app identity.
+
+**What changed:**
+- `backend/src/modules/mailer/templates/layout.ts` — header brand replaced with Grove Mark C (G letterform) SVG + "Grove" wordmark; footer "member of Grove"; background `#f5f7f6` → `#efebe3` (warm linen).
+- `backend/src/modules/mailer/templates/member-invite.ts` — subject, title, and body text updated to "Grove".
+- `backend/src/modules/mailer/templates/password-reset.ts` — subject, both title branches, and body/plain text updated to "Grove".
+- `backend/src/modules/mailer/templates/password-changed.ts` — subject, title, and body text updated to "Grove".
+- `backend/src/modules/mailer/templates/export-ready.ts` — subject, both title branches, and body/plain text updated to "Grove".
+
+**Acceptance:** `grep -r "Household Finance" backend/src/modules/mailer/` returns zero results.
+
+---
+
+## UX-169 (2026-05-12): Mobile layout — transactions scroll, grids, toolbars
+
+**Why:** On narrow viewports (e.g. iPhone 15 Pro Max), the transactions ledger and several pages caused horizontal scroll or cramped layouts; the transactions toolbar needed safer wrapping and bulk bar styling wired to the bulk `Group`.
+
+**What changed:**
+- `frontend/src/pages/TransactionsPage.tsx` — horizontal scroll wrapper around the main ledger `Table`; `txn-col--secondary` on Account and Belongs-to columns (hidden ≤640px); `className="transactions-bulk-bar"` on bulk selection `Group`s.
+- `frontend/src/index.css` — `overflow-x: hidden` on `.app-shell-main` / `.app-main` under 768px; expanded 640px rules (toolbar fields, bulk bar, hidden secondary columns, Recharts max-width, tighter `.app-main` Card/Paper padding, page header actions, topbar actions nowrap); sticky toolbar comment aligned with topbar height.
+- `frontend/src/pages/DashboardPageV2.tsx`, `BudgetPage.tsx`, `NetWorthPage.tsx` — responsive `SimpleGrid` `cols` with `xs` breakpoints for mid-width phones.
+
+---
+
+## UX-168 (2026-05-12): Grove — product name and PWA chrome
+
+**Why:** Rebrand the user-visible app name to Grove and align tab/install/manifest chrome with the new mark and forest palette.
+
+**What changed:**
+- `frontend/index.html` — document title, apple web app title, theme color, favicon link.
+- `frontend/public/manifest.json` — `name` / `short_name` / theme and background colors.
+- `frontend/public/favicon.png`, `frontend/public/icons/icon-192.png`, `frontend/public/icons/icon-512.png` — regenerated from `frontend/public/icons/grove-app-icon.svg` via `npm run icons:gen` (`scripts/gen-icons.mjs`, `@resvg/resvg-js`).
+- `frontend/src/components/GroveMark.tsx` — shared stems mark for sidebar and landing.
+- `frontend/src/layout/AppSidebar.tsx`, `frontend/src/pages/HomePage.tsx` — brand row uses mark + “Grove”.
+
+---
+
+## FIX-B8 (2026-05-12): Settings — Add institution modal stacking fix
+
+**Why:** The "Add institution name…" button lives inside the `HierarchicalSearchPicker` footer, which renders its dropdown in a `createPortal` at `zIndex: 1300`. Clicking the button opened the Mantine modal without closing the picker first, so the modal appeared behind the picker overlay regardless of the modal's own z-index.
+
+**What changed:**
+- `frontend/src/components/HierarchicalSearchPicker.tsx` — `footer` prop now accepts `ReactNode | ((close: () => void) => ReactNode)`. When a render function is provided, it receives a `close` callback that calls `setOpen(false)` + `setSearch("")`. Existing `ReactNode` usages are unaffected.
+- `frontend/src/pages/SettingsPage.tsx` — institution picker `footer` updated to the render-function form; button handler calls `close()` before `openAddInstitutionModal()`, ensuring the picker dismisses before the modal mounts.
+
+---
+
+## UX-167b (2026-05-12): CurrencyInput — custom cash-register implementation
+
+**Why:** `react-currency-input-field` v4 does not have a right-to-left digit-shifting (cash register) mode — `fixedDecimalLength` only pads decimals on blur. Controlled-value round-trips also reset the library's internal cursor state on every keystroke, preventing any digit-shift behavior.
+
+**What changed:**
+- `frontend/src/components/CurrencyInput.tsx` — replaced `react-currency-input-field` with a custom implementation: stores value as integer cents, intercepts `onKeyDown` for digit/backspace/delete, uses `Intl.NumberFormat` for display. Passes navigation/modifier keys through. Blocks paste and cut. No upper limit on value.
+
+---
+
+## CR-183 (2026-05-12): Cash On Hand account type (F-11)
+
+**Why:** Users keep physical cash (e.g. a $1,000 home emergency fund) with no bank account to track it against. Manual ledger entries required an account; there was no suitable type for physical cash.
+
+**What changed:**
+- Migration `0043` widens `financial_account_type_check` to include `'cash'`.
+- `accountUpsertSchema` in `imports.routes.ts` accepts `"cash"` as a valid type.
+- `defaultLiquidity("cash")` returns `"liquid"`.
+- `accountSide("cash")` returns `"asset"` — cash accounts appear on the net worth balance sheet.
+- AI insights `buildNetWorthBlock` rolls cash balances into `checkingSavingsTotal`.
+- `"Cash & Wallet"` added to both institution catalogs as a built-in suggestion (no custom institution needed).
+- `SettingsPage` type picker adds a Cash entry with searchText `cash on hand wallet petty cash liquid`.
+
+**Flow:** Settings → Accounts → Add account → Institution: "Cash & Wallet" → Type: Cash → set initial balance → record payments as manual debit transactions.
+
+**Files:** `backend/db/migrations/0043_cash_account_type.sql`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `backend/src/modules/imports/institution-catalog.ts`, `frontend/src/import/institutionCatalog.ts`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+## UX-167 (2026-05-12): Cash register dollar amount inputs
+
+**Why:** Dollar fields used Mantine `NumberInput` or plain numeric text without consistent decimal-first entry.
+
+**What changed:** Added `react-currency-input-field` and `CurrencyInput` (Mantine `Input.Wrapper` styling, two fixed decimals). Wired into net worth manual balance, Settings salary/balance fields, budget amounts, payslip manual dollar fields, and manual transaction amount.
+
+**Files:** `frontend/package.json`, `frontend/src/components/CurrencyInput.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/BudgetPage.tsx`, `frontend/src/pages/PayslipManualPage.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## UX-166 (2026-05-12): Consistent USD display formatting
+
+**Why:** Dollar amounts used bare `toFixed(2)` without thousands separators.
+
+**What changed:** Added `formatUsd` (`en-US`, two decimals) and replaced dollar `toFixed(2)` display in payslips, dashboard, import reconciliation, settings recurring anchor, and payslip charts/detail/manual views.
+
+**Files:** `frontend/src/utils/format.ts`, `frontend/src/pages/PayslipsPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/ImportWorkspacePage.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/payslip/PayslipIncomeCharts.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/pages/PayslipManualPage.tsx`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## I-6 (2026-05-12): Drive folderId query guard
+
+**Why:** `folderId` is interpolated into Drive API `q` strings; validate DB-sourced IDs before use.
+
+**What changed:** `listHfbFilesInFolder` rejects `folderId` values that are not `[\w-]+`.
+
+**Files:** `backend/src/modules/export/gdrive-backup.service.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/SECURITY_HARDENING_BACKLOG.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## I-5 (2026-05-12): Export/restore housekeeping
+
+**Why:** Completed restore jobs left staging `.hfb` files on disk; successful restore did not warn that Google Drive must be reconnected.
+
+**What changed:** `runImportJob` deletes the uploaded staging file in `finally`. Restore success UI shows a yellow alert to reconnect Drive under Settings → Data → Backup.
+
+**Files:** `backend/src/modules/export/import-household-bundle.service.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/EXPORT_IMPORT_BACKLOG.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## I-4 (2026-05-12): Password reset token periodic cleanup
+
+**Why:** Used and expired `password_reset_token` rows were never purged outside per-user token rotation.
+
+**What changed:** `purgeStalePasswordResetTokens` deletes rows with `used_at` set or `expires_at` in the past; called from the existing hourly export purge schedule (no new timer).
+
+**Files:** `backend/src/modules/auth/auth.service.ts`, `backend/src/modules/export/export-job.service.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/SECURITY_HARDENING_BACKLOG.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## FIX-182 (2026-05-12): CR-177 post-review cleanup
+
+**Why:** Code review after CR-177/FIX-177 found two small issues.
+
+1. `multiSelectLabel="selections"` on the belongs-to picker — trigger showed "3 selections" instead of "3 members" when 3+ members selected. Changed to `"members"`.
+2. `formatDateLabel` in `TransactionAggregateSummary.tsx` was defined but never called (dead code). Removed.
+
+Note: `byMerchant` normalization and `byMonth` ascending-order tests were confirmed present in `app.test.ts` (lines 4452, 4490) — no new tests needed.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/components/TransactionAggregateSummary.tsx`
+
+---
+
+## FIX-B8 (2026-05-12): Settings add institution Mantine modal
+
+**Why:** The Connected accounts institution picker used `window.prompt` for custom institution names.
+
+**What changed:** Settings → Accounts → Add institution prompt replaced with a Mantine modal. State: `institutionModalOpen` / `institutionModalName` / `institutionModalSaving` / `institutionModalError`.
+
+**Files:** `frontend/src/pages/SettingsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-181 (2026-05-11): CR-177 backlog sync and row ownership PATCH test
+
+**Why:** `V3_BACKLOG.md` still described Transactions row belongs-to as `person:<uuid>` and belongs-to filter triggers as `N members` after FIX-180. Row ownership persistence had only frontend helper unit tests.
+
+**What changed:** Backlog text matches Transactions raw UUID picker values and `selections` / summary chip copy. `app.test.ts` asserts `PATCH /transactions/:id` assigns and clears `ownerScope` / `ownerPersonProfileId` via the ledger API.
+
+**Files:** `docs/V3_BACKLOG.md`, `backend/tests/app.test.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-180 (2026-05-11): Hierarchical picker child row alignment
+
+**Why:** Multi-select child rows inherited `justify-content: space-between` from the shared parent/child button rule, pushing labels toward the right pane edge away from the parent column.
+
+**What changed:** Parent rows keep space-between (label + chevron); child rows use `flex-start` so labels sit on the left next to the optional ✓ marker.
+
+**Files:** `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-180 (2026-05-11): Row belongs-to picker vs filter UUID values
+
+**Why:** CR-177 belongs-to filter groups use raw person profile UUIDs, but the per-row belongs-to editor still used `person:<uuid>` values. Selecting a member from the row menu did not update ownership; closed labels could not resolve.
+
+**What changed:** Row and manual-entry pickers use `belongsToPickerValueFromRow` / `parseBelongsToPickerValue` (raw UUID + legacy `person:` support). Removed unused single-select belongs-to filter state. Active-filter chip copy uses `formatActiveBelongsToSummary`; belongs-to multi-select label is “selections”. `belongsTo` query params dedupe in `ledger.routes.ts`.
+
+**Files:** `frontend/src/ledger/ledgerListQuery.ts`, `frontend/src/ledger/ledgerListQuery.test.ts`, `frontend/src/pages/TransactionsPage.tsx`, `backend/src/modules/ledger/ledger.routes.ts`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-179 (2026-05-11): CR-177 multi-select and aggregate test coverage
+
+**Why:** CR-177 added multi-select ledger filters and aggregate parity on the API, but integration coverage was thin and the Transactions page had no automated tests for URL/query wiring or picker parent multi-select behavior.
+
+**What changed:** `backend/tests/ledger-filters.test.ts` now uses an isolated household fixture for `categoryIds`, `accountIds`, `belongsTo`, `ownerPersonProfileIds`, aggregate signed totals, and list/aggregate count parity. Frontend helpers moved to `frontend/src/ledger/ledgerListQuery.ts` and `frontend/src/components/hierarchicalPickerMultiSelect.ts` with Vitest unit tests.
+
+**Files:** `backend/tests/ledger-filters.test.ts`, `frontend/src/ledger/ledgerListQuery.ts`, `frontend/src/ledger/ledgerListQuery.test.ts`, `frontend/src/components/hierarchicalPickerMultiSelect.ts`, `frontend/src/components/hierarchicalPickerMultiSelect.test.ts`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/components/HierarchicalSearchPicker.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## DB-178 (2026-05-11): Dev sample ledger seed
+
+**Why:** Default dev seeding only created financial accounts; Transactions and aggregation needed a realistic posted ledger volume for manual testing.
+
+**What changed:** `backend/db/seeds/dev/dev_0004_seed_sample_ledger.sql` adds two household member profiles and 520 deterministic pseudo-random posted rows (2024–2025, six accounts, mixed categories/merchants, signed amounts). Generator: `scripts/generate-dev-ledger-seed.mjs` (`npm run db:generate:dev-ledger`).
+
+**Files:** `backend/db/seeds/dev/dev_0004_seed_sample_ledger.sql`, `scripts/generate-dev-ledger-seed.mjs`, `package.json`, `backend/db/README.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## FIX-177 (2026-05-11): CR-177 corrective pass
+
+**Why:** Initial CR-177 shipped with picker UX gaps, deferred belongs-to multi-select, a redundant aggregate Count cell, and a By month tab that could overwhelm long ranges.
+
+**What changed:** `HierarchicalSearchPicker` parent click selects the parent value plus all children; removed the right-pane “(direct)” row; replaced Mantine checkboxes with inline ✓ and `hs-picker__child--active`. Belongs-to multi-select on Transactions via repeated `belongsTo` URL params (`household` and/or person profile UUIDs) with backend `LedgerListFilters.belongsTo` and mixed household/person SQL; legacy `ownerScope` params still work. Aggregate strip drops the duplicate Count cell; Inflows/Outflows use plain `$` amounts; stat labels have `title` tooltips; By month shows the last six months with a cap notice; context row shows category/account/month counts. Prior filter memoization, server-backed strip gating, and signed-amount aggregate totals remain.
+
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/TransactionAggregateSummary.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `backend/src/modules/ledger/ledger.service.ts`, `backend/src/modules/ledger/ledger.routes.ts`, `docs/API_LEDGER.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-177-d (2026-05-11): Transaction aggregation strip — breakdown tabs
+
+**Why:** Filtered Transactions views need category / merchant / account / month rollups without leaving the page.
+
+**What changed:** `TransactionAggregateSummary` adds Mantine tabs with ranked horizontal bars (dashboard pattern): top-8 + show-all for category and merchant, all accounts, month tab when more than one month. Breakdown tabs hide when the filtered set has only one transaction.
+
+**Files:** `frontend/src/components/TransactionAggregateSummary.tsx`, `docs/CHANGE_HISTORY.md`, `docs/API_LEDGER.md`
+
+---
+
+## CR-177-c (2026-05-11): Transaction aggregation strip — headline row
+
+**Why:** Users need full-filter-set totals while the table stays paginated.
+
+**What changed:** New summary strip above the transactions table fetches `GET /transactions/aggregate` from current URL filters (independent of page size). Collapsible header shows transaction count; headline row shows net, inflows, outflows, average, and date span with Forest Studio styling.
+
+**Superseded (FIX-177):** Body row no longer duplicates count in a Count cell; inflows/outflows use plain `$` formatting; stat labels have tooltips; By month caps at six buckets with a notice; context stats row when `count > 1`.
+
+**Files:** `frontend/src/components/TransactionAggregateSummary.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-177-b (2026-05-11): Transactions multi-select filters + URL params
+
+**Why:** Aggregation use cases require combining multiple categories and accounts in one filter.
+
+**What changed:** `HierarchicalSearchPicker` gains optional multi-select (parent select-all, count chips). Transactions page reads/writes `categoryIds` and `accountIds` repeated params with legacy `categoryId` / `accountId` compat; list and aggregate requests share filter query building.
+
+**Superseded (FIX-177):** No Mantine `Checkbox` in the menu, no right-pane “(direct)” row; parent click toggles parent value plus all children; inline ✓ + `hs-picker__child--active`. Belongs-to filter multi-select and `belongsTo` URL params shipped in the corrective pass (see FIX-177 / FIX-180).
+
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-177-a (2026-05-11): Ledger aggregate endpoint + multi-select filters
+
+**Why:** Client-side pagination cannot compute totals over the full filtered ledger.
+
+**What changed:** `GET /transactions/aggregate` reuses ledger filter parsing and returns headline totals plus capped breakdowns. `GET /transactions` accepts `categoryIds`, `accountIds`, and `ownerPersonProfileIds` (merged with legacy singular params). Integration tests cover aggregate auth, filters, merchant normalization, and month buckets.
+
+**Files:** `backend/src/modules/ledger/ledger.routes.ts`, `backend/src/modules/ledger/ledger.service.ts`, `backend/tests/app.test.ts`, `openapi/openapi.yaml`, `docs/API_LEDGER.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-176 / UX-176 (2026-05-11): Forest Studio Phase F — authed layout cap + Inter Tight headings
+
+**Why:** Wide monitors stretched route content edge-to-edge; headings and KPI numerals read small and generic next to the Forest Studio chrome.
+
+**What changed:** `max-width: 1500px` + horizontal centering on `.app-shell-main > main.app-main` (and fallbacks for `.app-content` / `[role="main"]`) so sidebar/topbar column stays full width while page body caps. Google Fonts link adds **Inter Tight**; `:root` gains `--font-heading`; global rules for `h1`–`h4`, `.mantine-Title-root`, and `.kpi-value`; Mantine `createTheme({ headings: … })` aligns `<Title>` sizes. No TSX logic or inline hero KPI edits.
+
+**Files:** `frontend/index.html`, `frontend/src/index.css`, `frontend/src/theme.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## CR-175 / UX-175 (2026-05-11): Forest Studio prompt #2 — dashboard polish & status colors
+
+**Phase A — dashboard resolution badges:** Replaced bright yellow Mantine badges and unicode glyphs (⚠ ⟳ ◑) with neutral `color="gray"` badges plus Tabler icons (`IconAlertCircle`, `IconArrowsExchange`, `IconCopy`); same `Link` targets and query strings.
+
+**Phase B — positive status text → forest:** Replaced `c="green"` on status `<Text>` with `style={{ color: "var(--fs-forest)" }}`; `Badge` / `Button` / `ActionIcon` positives use `color="fsForest"`. Post-action success `<Alert color="green">` unchanged. Inline import session `<Alert>` uses `color="fsForest" variant="light"`.
+
+**Files (Phase A):** `frontend/src/pages/DashboardPageV2.tsx`, `docs/CHANGE_HISTORY.md`
+
+**Files (Phase B):** `frontend/src/pages/HomePage.tsx`, `ImportWorkspacePage.tsx`, `PayslipManualPage.tsx`, `SettingsPage.tsx`, `settings/BackupRestoreSection.tsx`, `TransactionsPage.tsx`, `ResetPasswordPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+**Phase C — informational yellow → fsGold:** Softened non-destructive hints (backup staleness, import duplicate note, payslip validation banners) to `Alert color="fsGold" variant="light"`. Remove-member dialog data-loss warning stays `color="yellow"` with an inline comment.
+
+**Files (Phase C):** `BackupRestoreSection.tsx`, `SettingsPage.tsx`, `TransactionsPage.tsx`, `PayslipManualPage.tsx`, `PayslipDetailPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+**Phase D — collapsed sidebar brand:** Removed HF abbreviation and full brand row when `collapsed && !mobileOpen`; mobile drawer still shows brand. Removed unused `.app-sidebar__brand-abbr` CSS; added collapsed `.app-sidebar__top` spacing.
+
+**Files (Phase D):** `frontend/src/layout/AppSidebar.tsx`, `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`
+
+**Phase E — spending card ranked bars:** Replaced Recharts pie + legend on the Home dashboard “spending this month” card with a descending horizontal bar list (same `slices` data, links preserved). Added `--color-track` for bar track contrast in light/dark. Removed unused `Pie` / `PieChart` / `Cell` imports.
+
+**Files (Phase E):** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/index.css`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md`
+
+---
+
+## CR-174 / UX-174 (2026-05-10): Forest Studio — design tokens, money palette, nav grouping
+
+**Why:** Align the UI with the Forest Studio palette: reserve pure red for destructive actions only, use terracotta for financial “down / over,” earthy Recharts colors, grouped sidebar, and warm-cream active states instead of mint.
+
+**Phase 1 — tokens:** CSS `--fs-*` custom properties (light + dark overrides) and `frontend/src/theme/chartPalette.ts` for Recharts.
+
+**Phase 2 — money / charts:** Mantine theme colors `fsForest`, `fsTerracotta`, `fsGold`. Budget progress and KPI borders; Net worth trend gradients and top bars; dashboard pie (`FS_CAT_PALETTE`), 6‑month trend bars, hero net/outflow, budget strip, sparkline stroke, account trend arrows; transactions status badges; payslip KPI cards (gross forest / net gold) and list net color; payslip breakdown slice colors. `.kpi-delta-chip--down` uses terracotta. Removed shim `DashboardPage.tsx` — `HomeRoute` imports `DashboardPageV2` directly.
+
+**Phase 3 — chrome:** `AppSidebar` nav grouped Daily / Reports / Setup; collapsed mode shows dividers between groups; `--color-sidebar-active` → cream via `--fs-sidebar-active`; guest landing logo gradient (`--fs-gold` → `--fs-forest`); theme switcher, import button, user menu hover, landing check/pill, and dark auth links use cream/forest instead of mint.
+
+**Files:** `frontend/src/index.css`, `frontend/src/theme.ts`, `frontend/src/theme/chartPalette.ts`, `frontend/src/layout/AppSidebar.tsx`, `frontend/src/pages/HomeRoute.tsx`, `frontend/src/pages/BudgetPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/PayslipsPage.tsx`, `frontend/src/payslip/payslipChartsModel.ts`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`, `docs/V3_BACKLOG.md` (deleted `frontend/src/pages/DashboardPage.tsx`)
+
+---
+
+## CR-173 / DB-042 (2026-05-10): F-9 — Date of birth encrypted at rest, computed age
+
+**Why:** Manually-entered age is a stale value requiring yearly updates. Storing DOB allows the app to compute current age automatically. DOB is PII and must not be stored plaintext.
+
+**What changed:**
+
+- Migration **0042**: `date_of_birth_encrypted TEXT` column added to **`person_profile`**.
+- **`backend/src/modules/household/dob-crypto.ts`** (new): `encryptDob`, `decryptDob`, `computeAgeFromDob`. Key = SHA-256(`"household-finance:dob:" + JWT_SECRET`) — same derivation pattern as gdrive OAuth token encryption. Format: base64(`iv[12] || tag[16] || ciphertext`).
+- **`household.service.ts`**: all profile SELECT queries now include `date_of_birth_encrypted`. Profile row mapping computes effective age from DOB when present, with manual age fallback. Single mapper (`toHouseholdMemberProfile`) keeps `dateOfBirth: null` for safety; an own-profile helper (`toOwnProfile`) reveals the decrypted DOB. `patchCurrentUserProfile` accepts `dateOfBirth?: string | null` — setting clears manual age; clearing leaves manual age input editable. Own-profile responses include decrypted `dateOfBirth`. Member-list/detail responses include `hasDob` + computed `age` but NOT raw `dateOfBirth`.
+- **`household.routes.ts`**: `profilePatchSchema` accepts `dateOfBirth` (`YYYY-MM-DD` regex, nullable, optional).
+- **`insight-prompt.service.ts`**: selects `date_of_birth_encrypted`, computes effective age (DOB-first, manual fallback) for both `assembleHouseholdPromptInput` (head + spouse) and `assemblePersonalPromptInput` before building AI prompt context.
+- **`export-registry.ts`**: `person_profile` entry gets `onExport` hook stripping `date_of_birth_encrypted` before `.hfb` export. Restore notice should say: "Date of birth must be re-entered after restore."
+- **`SettingsPage.tsx`**: profile edit replaces the age `NumberInput` with a DOB date picker. When DOB set: date input + computed age display + "Clear DOB" button. When DOB unset: date picker placeholder + manual age fallback input. Save unconditionally sends `dateOfBirth`; manual `age` is only sent when no DOB is set.
+
+**Files:** `backend/db/migrations/0042_person_profile_dob.sql` (new), `backend/src/modules/household/dob-crypto.ts` (new), `backend/src/modules/household/household.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `backend/src/modules/export/export-registry.ts`, `frontend/src/pages/SettingsPage.tsx`, `openapi/openapi.yaml`, `docs/API_HOUSEHOLD_PROFILE.md`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`
+
+---
+
+## FIX-172 (2026-05-10): OpenAPI — `property_id` / `linked_account_id` not account-upsert inputs
+
+**Why:** CR-171 OpenAPI listed **`linkedAccountId`** and **`propertyId`** on **`ImportAccountUpsertRequest`**, implying the importer account PATCH/POST could set them. **`property_id`** is set only when **`POST /household/properties`** includes **`accountId`**; **`linked_account_id`** is reserved for future HELOC pairing (**D-5**) and is not writable via account upsert.
+
+**What changed:** Removed those two properties from **`ImportAccountUpsertRequest`** in **`openapi/openapi.yaml`**; documented **`linked_account_id`** and **`property_id`** on **`FinancialAccountListItem`** with **`readOnly: true`** and clarifying descriptions. **`docs/API_HOUSEHOLD.md`** account-enrichment prose aligned (writable: `subType`, `memo`, `liquidity` only).
+
+**Files:** `openapi/openapi.yaml`, `docs/API_HOUSEHOLD.md`, `docs/CHANGE_HISTORY.md`
+
+## CR-171 / UX-171 (2026-05-10): F-2 display complete + F-3 liquidity breakdown + OpenAPI doc remediation (CR-169 gap)
+
+**Why:** Properties stored in DB since CR-169 but invisible on NetWorthPage — market values excluded from totals and no UI display. OpenAPI spec and API_HOUSEHOLD.md were not updated in CR-169 commit (doc gap). F-3 (liquidity breakdown) is a natural extension of the same page once liquidity field is surfaced from the backend.
+
+**What changed:**
+
+- `balance-sheet.service.ts`: SELECT now includes `liquidity` column from `financial_account`. New property query runs after accounts loop — LEFT JOIN LATERAL to latest `property_value_snapshot` ≤ asOf, then finds linked mortgage via `financial_account.property_id`. Property market values added to `assetSum`/`assetHasAny`. Result includes `properties[]` array and `PropertySheetRow` type. `BalanceSheetAccountRow` now includes `liquidity` field.
+- `reports.routes.ts`: `properties` forwarded in GET /reports/balance-sheet response.
+- `NetWorthPage.tsx`:
+  - F-2: property rows folded into Assets table under a "Real Estate" sub-label. Each row shows address, property use type, market value, equity sub-text (market value − mortgage balance). Pencil edit posts new market value snapshot to POST /household/properties/:id/values. Expand-on-click shows Recharts LineChart of value history from GET /household/properties/:id/values.
+  - F-3: Liquidity breakdown Paper section added between KPI cards and Trend chart. Groups asset balances by liquidity tier (liquid/semi_liquid/restricted/uncategorized). Property market values always count as restricted. Uncategorized row shows link to Settings → Accounts. Only rendered when at least one account has a liquidity tag or a property has a value.
+- `openapi/openapi.yaml`: Added all 6 /household/properties routes. Added PropertyRecord and PropertyValueSnapshot component schemas. Updated account upsert request with sub_type, memo, liquidity (camelCase) and corrected type enum (health/education added, mortgage removed); account list response documents read-only `linked_account_id` / `property_id` (see **FIX-172** for input-schema correction). Updated /reports/balance-sheet response schema with properties[] and liquidity on account rows.
+- `docs/API_HOUSEHOLD.md`: Added Property routes section and Account enrichment fields section.
+- `docs/API_INDEX.md`: Added property route entries.
+- `docs/API_BALANCE_SHEET.md`: Documented `liquidity`, `properties[]`, and corrected account-type lists for the balance sheet response.
+- `import-file-binding.service.ts`: `GET /imports/accounts` list rows now include `linked_account_id` (OpenAPI parity).
+
+**Files:** `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/reports/reports.routes.ts`, `backend/src/modules/imports/import-file-binding.service.ts`, `frontend/src/pages/NetWorthPage.tsx`, `openapi/openapi.yaml`, `docs/API_HOUSEHOLD.md`, `docs/API_INDEX.md`, `docs/API_BALANCE_SHEET.md`, `docs/CHANGE_HISTORY.md`, `docs/V3_PLAN.md`
+
+## CR-169 / DB-041 (2026-05-10): Account enrichment + Property entity (F-1/F-2)
+
+**Why:** Accounts lacked sub-classification (HSA vs FSA vs 401k), free-text context for AI insights, and a structured way to track property assets linked to mortgages. Net worth was also missing health/education account types.
+
+**What changed:**
+
+- **Migration `0041_v3_account_enrichment.sql`:**
+  - New columns on `financial_account`: `sub_type TEXT`, `memo TEXT`, `liquidity TEXT CHECK('liquid','semi_liquid','restricted')`, `linked_account_id` (self-referential FK, for future HELOC→mortgage pairing), `property_id FK → property`
+  - New `property` table: address fields, property use, API provider/ID for future valuation API
+  - New `property_value_snapshot` table: time-series market values per property (mirrors `account_balance_snapshot` pattern); unique index on `(property_id, as_of_date)`
+  - Migrated all existing `type='mortgage'` rows → `type='loan', sub_type='mortgage_primary'`
+  - Widened `type` CHECK: added `health`, `education`; removed `mortgage`
+  - `defaultLiquidity()` auto-sets liquidity at create/update time based on type+subtype (user can override)
+
+- **Backend:**
+  - `import-file-binding.service.ts`: `listHouseholdFinancialAccounts`, `createHouseholdFinancialAccount`, `updateHouseholdFinancialAccount` — all updated for new fields; `defaultLiquidity()` exported helper
+  - `imports.routes.ts`: `accountUpsertSchema` updated — `mortgage` removed, `health`/`education` added, `subType`/`memo`/`liquidity` added
+  - `household/property.service.ts` (new): `createProperty`, `getProperty`, `listPropertiesForHousehold`, `updateProperty`, `addPropertyValueSnapshot`, `listPropertyValueSnapshots`
+  - `household.routes.ts`: property CRUD routes — `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
+  - `balance-sheet.service.ts`: `accountSide()` — added `health`/`education` as assets, removed `mortgage` from liabilities
+  - `insight-prompt.service.ts`: removed `mortgage` from loan liability aggregation
+
+- **Frontend:**
+  - `SettingsPage.tsx`: flat `Select` for account type replaced with `HierarchicalSearchPicker` (type → subtype two-pane picker); added memo `Textarea`; added liquidity override `Select`; added `+ Property` button for mortgage accounts opening a property details `Modal` (address + market value snapshot); accounts table shows formatted type·subtype label + memo preview
+  - `NetWorthPage.tsx`: `ACCOUNT_TYPE_LABELS` — added `health`/`education`, removed `mortgage`
+  - `DashboardPageV2.tsx`: `LIABILITY_ACCOUNT_TYPES` — removed `mortgage`
+
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/household/property.service.ts` (new), `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+## FIX-168 / DB-040 (2026-05-10): Transfer ambiguity — debit-only items, excluded flag, live candidates (B-1/B-2/B-3)
+
+**Why:** Three interconnected transfer detection bugs blocked users from resolving ambiguous transfer pairs:
+- **B-1:** "Confirm as transfer" button never appeared — confirm logic required `creditId` (singular) in reason JSON, but ingest always wrote `creditCandidateIds` (plural array). Additionally, resolution items were created for every involved transaction (debit + all credits) creating queue noise.
+- **B-2:** Dismissed "Not a transfer" items re-surfaced on every new import — canonical row had no memory of the dismissal decision.
+- **B-3:** Two same-amount transfers on consecutive days each claimed the same two credit candidates — impossible to resolve even if the button had worked.
+
+**What (backend):**
+- **Migration 0040:** `transfer_excluded BOOLEAN NOT NULL DEFAULT FALSE` on `transaction_canonical`. Partial index on excluded rows.
+- **Ingest (all three ambiguity paths):** Changed to create resolution items for the **debit only** (not the credit candidates). Credits are shown as selectable candidates in the UI instead. `creditCandidateIds` stays in the reason JSON as candidate hints. `transfer_excluded` rows skipped from candidate query so dismissed rows never re-surface. Low-pair-score path now also uses `creditCandidateIds: [credit.id]` (unified shape). Credit→multiple-debits path now creates one item per debit with the credit as the single candidate.
+- **`confirmTransferPairForHousehold`:** Accepts explicit `creditId` from caller (user-selected) instead of reading from reason JSON. Validates: credit is posted, unpaired, household matches, abs amounts match within 1¢.
+- **`buildResolutionItemRow`:** For `transfer_ambiguity` items, live-queries candidate transactions (`status = posted`, `transfer_group_id IS NULL`) and returns them as `transferCandidates[]` (`id`, `txnDate`, `amount`, `description`, `accountName`). Handles both legacy `creditId` and current `creditCandidateIds` shapes.
+- **Dismiss path (`updateResolutionStatusForHousehold` + bulk):** On `resolved` for `transfer_ambiguity`, sets `transfer_excluded = TRUE` on the target canonical row. Prevents re-detection on future imports.
+- **`bulkConfirmTransferPairsForHousehold`:** Returns descriptive error for all items — bulk confirm is not supported for ambiguous pairs that require user candidate selection.
+- **Route:** `POST /resolution/:id/confirm-transfer` now requires `{ creditId: string (UUID) }` in body (validated with Zod).
+- **Tests:** Updated `app.test.ts` to assert debit-only item creation (1 item instead of 3) and verify `creditCandidateIds` shape and target alignment.
+
+**Files:** `backend/db/migrations/0040_transfer_excluded.sql`, `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/src/modules/resolution/resolution.service.ts`, `backend/src/modules/resolution/resolution.routes.ts`, `backend/tests/app.test.ts`
+
+---
+
+## CR-162 (2026-05-09): Needs Review — transfer ambiguity candidate list + confirm body
+
+**Why:** Backend `transfer_ambiguity` resolution items now expose `transferCandidates` so the user can pick the correct other-leg transaction instead of a single implicit pair from `reasonDetail`.
+
+**What:** Extended `ResolutionDetailItem` with optional `transferCandidates`. Replaced the old single “Confirm as transfer” button (gated on `reasonDetail` debit/credit IDs) with a compact Mantine list: date, currency-formatted amount, account name, truncated description, per-candidate `Button variant="light" size="xs"` calling `POST /resolution/:id/confirm-transfer` with `{ creditId: candidate.id }`. Empty array shows a dimmed hint; missing field leaves confirm UI absent (legacy queue). “Not a transfer” dismiss unchanged. Bulk confirm path untouched.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## UX-165 (2026-05-09): AI insight refresh — surface rate-limit message with retry countdown
+
+**Why:** When the cooldown 429 fired, the frontend showed the raw string "HTTP 429". The `retryAfterMs` field in the response body was never read.
+
+**What:** `startRefresh` now reads the response body before throwing. On `status === 429` / `code === "RATE_LIMITED"`, it formats a human-readable message: "Analysis was refreshed recently — try again in X minutes." using `retryAfterMs` from the payload (falls back to 5 minutes if absent).
+
+**Files:** `frontend/src/components/FinancialHealthCard.tsx`
+
+---
+
+## FIX-164 (2026-05-09): AI insight cooldown — in-memory Map replaced with DB query (SEC)
+
+**Why:** The per-household cooldown Map reset on every process restart, allowing unbounded OpenAI API calls if the process was restarted frequently. `insight_job` already existed and records every job with `created_at`, making it the authoritative source of truth.
+
+**What:** Replaced `insightRefreshLastByHousehold: Map<string, number>` and the synchronous `refreshCooldownRemainingMs()` with an async DB query against `insight_job` — selects the most recent `created_at` for the household and computes remaining cooldown from that. Removed the post-enqueue `Map.set()` call (no longer needed; the DB row itself is the record). `TEST` mode bypass retained.
+
+**Files:** `backend/src/modules/insights/insights.routes.ts`
+
+---
+
 ## FIX-163 (2026-05-08): Net Worth — remove period delta cards re-introduced by Cursor
 
 **Why:** The three ASSETS/LIABILITIES/NET WORTH delta summary cards (period-over-period change) were removed in the V2 design pass. Cursor's CR-161 commit left them in the file — they had always been present in the source but never rendered before because the user had no full 3-month history with non-null values at both endpoints. Once real balance history existed, they re-appeared. User confirmed they should be gone.

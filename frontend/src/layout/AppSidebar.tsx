@@ -1,4 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
+import { GroveMark } from "../components/GroveMark";
 import {
   IconHome,
   IconChartBar,
@@ -19,13 +20,29 @@ type NavItem = {
   Icon: TablerIcon;
 };
 
-const NAV: NavItem[] = [
-  { to: "/", end: true, label: "Home", Icon: IconHome },
-  { to: "/budget", end: false, label: "Budget", Icon: IconChartBar },
-  { to: "/net-worth", end: false, label: "Net worth", Icon: IconScale },
-  { to: "/transactions", end: false, label: "Transactions", Icon: IconReceipt },
-  { to: "/payslips", end: false, label: "Payslips", Icon: IconFileText },
-  { to: "/categories", end: false, label: "Categories", Icon: IconTag },
+const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Daily",
+    items: [
+      { to: "/", end: true, label: "Home", Icon: IconHome },
+      { to: "/transactions", end: false, label: "Transactions", Icon: IconReceipt },
+      { to: "/payslips", end: false, label: "Payslips", Icon: IconFileText },
+    ],
+  },
+  {
+    label: "Reports",
+    items: [
+      { to: "/net-worth", end: false, label: "Net worth", Icon: IconScale },
+      { to: "/budget", end: false, label: "Budget", Icon: IconChartBar },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { to: "/categories", end: false, label: "Categories", Icon: IconTag },
+      { to: "/settings", end: false, label: "Settings", Icon: IconSettings },
+    ],
+  },
 ];
 
 type AppSidebarProps = {
@@ -69,54 +86,70 @@ export function AppSidebar({
           .join(" ")}
         aria-label="Main navigation"
       >
-        {/* Brand */}
+        {/* Brand — hidden when collapsed (icons only) */}
         <div className="app-sidebar__top">
-          <Link
-            to="/"
-            className="app-sidebar__brand"
-            onClick={onCloseMobile}
-            title="Household Finance"
-          >
-            <span className="app-sidebar__brand-abbr" aria-hidden>
-              HF
-            </span>
-            <span className="app-sidebar__brand-text">Household Finance</span>
-          </Link>
+          {!isCollapsed ? (
+            <Link
+              to="/"
+              className="app-sidebar__brand"
+              onClick={onCloseMobile}
+              title="Grove"
+            >
+              <GroveMark size={20} color="#f0e9d8" />
+              <span className="app-sidebar__brand-text">Grove</span>
+            </Link>
+          ) : null}
         </div>
 
         {/* Main nav */}
         <nav className="app-sidebar__nav" aria-label="Main">
-          {NAV.map(({ to, end, label, Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              title={isCollapsed ? label : undefined}
-              className={({ isActive }) => navClass(isActive)}
-              onClick={onCloseMobile}
-            >
-              <span className="app-sidebar__link-icon" aria-hidden>
-                <Icon size={18} stroke={1.75} />
-              </span>
-              <span className="app-sidebar__link-text">{label}</span>
-            </NavLink>
+          {NAV_GROUPS.map((group, groupIndex) => (
+            <div key={group.label}>
+              {isCollapsed && groupIndex > 0 ? (
+                <div
+                  style={{
+                    height: 1,
+                    margin: "8px 12px",
+                    background: "rgba(255,255,255,0.06)",
+                  }}
+                />
+              ) : null}
+              {!isCollapsed ? (
+                <div
+                  className="sidebar-group-label"
+                  style={{
+                    padding: "14px 16px 4px",
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.1em",
+                    color: "rgba(207,216,210,0.55)",
+                    fontWeight: 600,
+                  }}
+                >
+                  {group.label}
+                </div>
+              ) : null}
+              {group.items.map(({ to, end, label, Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  title={isCollapsed ? label : undefined}
+                  className={({ isActive }) => navClass(isActive)}
+                  onClick={onCloseMobile}
+                >
+                  <span className="app-sidebar__link-icon" aria-hidden>
+                    <Icon size={18} stroke={1.75} />
+                  </span>
+                  <span className="app-sidebar__link-text">{label}</span>
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
 
-        {/* Bottom: Settings + collapse toggle */}
+        {/* Bottom: collapse toggle */}
         <div className="app-sidebar__footer">
-          <NavLink
-            to="/settings"
-            title={isCollapsed ? "Settings" : undefined}
-            className={({ isActive }) => navClass(isActive)}
-            onClick={onCloseMobile}
-          >
-            <span className="app-sidebar__link-icon" aria-hidden>
-              <IconSettings size={18} stroke={1.75} />
-            </span>
-            <span className="app-sidebar__link-text">Settings</span>
-          </NavLink>
-
           <button
             type="button"
             className="app-sidebar__collapse-btn"

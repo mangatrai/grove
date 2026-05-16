@@ -4,6 +4,7 @@
  * Keep labels aligned with `normalizeInstitutionKey` so imports map to the right parser.
  */
 export const US_INSTITUTION_LABELS: readonly string[] = [
+  "Cash & Wallet",
   "Ally Bank",
   "American Express",
   "Bank of America",

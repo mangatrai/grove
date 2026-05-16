@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Alert, Anchor, Button, Paper, PasswordInput, Stack, Text, TextInput } from "@mantine/core";
 import { useSearchParams } from "react-router-dom";
 import { setToken } from "../api";
+import { GroveMark } from "../components/GroveMark";
 
 /**
  * Guest landing at `/` — full-screen split hero + clean sign-in card.
@@ -104,81 +105,225 @@ export function HomePage() {
     }
   }
 
-  const featurePills = [
-    "Cash flow",
-    "Budgets",
-    "Net worth",
-    "Payslips",
-    "Imports",
-    "Categories",
-  ];
+  // ── Net worth counter animation ──────────────────────────
+  const nwValueRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = nwValueRef.current;
+    if (!el) return;
+
+    const target   = 124_600;
+    const duration = 2_200;
+    const delay    = 450;
+
+    const timer = setTimeout(() => {
+      const t0  = Date.now();
+      const fmt = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+
+      const tick = () => {
+        const p = Math.min((Date.now() - t0) / duration, 1);
+        const e = 1 - Math.pow(1 - p, 3);
+        el.textContent = fmt(e * target);
+        if (p < 1) requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, delay);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   return (
     <div className="home-landing">
-      <div className="home-landing__glow" aria-hidden />
-      <div className="home-landing__wrap">
+
+      {/* ── Hero panel ──────────────────────────────────────────────── */}
+      <div className="home-landing__hero">
+        <div className="home-landing__glow" aria-hidden />
+
         <header className="home-landing__brand">
-          <span className="home-landing__logo" aria-hidden>
-            HF
-          </span>
-          <span className="home-landing__brand-text">Household Finance</span>
+          <div className="home-landing__logo" aria-hidden>
+            <GroveMark size={18} color="#fff" />
+          </div>
+          <span className="home-landing__brand-text">Grove</span>
         </header>
 
-        <div className="home-landing__grid">
-          {/* ── Hero ──────────────────────────────────────────────────── */}
-          <div className="home-landing__hero">
-            <p className="home-landing__eyebrow">Private · self-hosted</p>
-            <h1 className="home-landing__title">
-              Your money,
-              <br />
-              one calm view
-            </h1>
-            <p className="home-landing__lead">
-              Track cash flow, categories, and imports in one place — built for
-              households that want clarity without shipping data to the cloud.
-            </p>
-            <ul className="home-landing__bullets" aria-label="What you get">
-              <li>
-                <span className="home-landing__check" aria-hidden>✓</span>
-                <span>
-                  <strong>Cash snapshot</strong> — inflows, outflows,
-                  safe-to-spend, and savings rate on your dashboard.
-                </span>
-              </li>
-              <li>
-                <span className="home-landing__check" aria-hidden>✓</span>
-                <span>
-                  <strong>Statement imports</strong> — upload, parse, and review
-                  before your ledger updates.
-                </span>
-              </li>
-              <li>
-                <span className="home-landing__check" aria-hidden>✓</span>
-                <span>
-                  <strong>Categories &amp; rules</strong> — classify transactions
-                  and tune behavior over time.
-                </span>
-              </li>
-              <li>
-                <span className="home-landing__check" aria-hidden>✓</span>
-                <span>
-                  <strong>Budgets &amp; net worth</strong> — monthly targets,
-                  balance sheet, and trend charts.
-                </span>
-              </li>
-            </ul>
+        <div className="home-landing__hero-body">
+          <p className="home-landing__eyebrow">Private · self-hosted</p>
+          <h1 className="home-landing__title">
+            Your money,
+            <br />
+            one calm view.
+          </h1>
+          <p className="home-landing__sub">
+            For households that want clarity without the cloud.
+          </p>
 
-            <div className="home-landing__pills" aria-hidden>
-              {featurePills.map((p) => (
-                <span key={p} className="home-landing__pill">
-                  {p}
-                </span>
-              ))}
-            </div>
+          {/* ── Animated preview cards ──────────────────────────────── */}
+          <div className="hl-preview-row">
+
+              {/* ── Card 1: Net worth ── */}
+              <div className="hl-card-wrap">
+                <div className="hl-snap-card hl-snap-card--nw">
+
+                  <div className="hl-card-header">
+                    <span className="hl-card-label">
+                      <span className="hl-live-dot" aria-hidden="true" />
+                      Net worth
+                    </span>
+                    <span className="hl-badge">↑ 6.7% YTD</span>
+                  </div>
+
+                  <div className="hl-nw-value" ref={nwValueRef}>$0</div>
+
+                  <svg
+                    className="hl-mini-chart"
+                    viewBox="0 0 260 50"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                  >
+                    <defs>
+                      <linearGradient id="hl-chartFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%"   stopColor="#2d6a4f" stopOpacity="0.5" />
+                        <stop offset="100%" stopColor="#2d6a4f" stopOpacity="0"   />
+                      </linearGradient>
+                    </defs>
+
+                    <line x1="0" y1="38" x2="260" y2="38"
+                      stroke="rgba(45,106,79,0.3)" strokeWidth="1" />
+                    <line x1="0" y1="22" x2="260" y2="22"
+                      stroke="rgba(45,106,79,0.18)" strokeWidth="1" />
+
+                    <path
+                      className="hl-chart-area"
+                      d="M 0,44 C 28,42 42,47 62,41 S 92,36 118,34 S 146,26 173,20 S 216,11 260,7 L 260,50 L 0,50 Z"
+                      fill="url(#hl-chartFill)"
+                    />
+
+                    <path
+                      className="hl-chart-line"
+                      d="M 0,44 C 28,42 42,47 62,41 S 92,36 118,34 S 146,26 173,20 S 216,11 260,7"
+                      stroke="#4a8a6e"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+
+                    <circle className="hl-chart-dot" cx="260" cy="7" r="10"
+                      fill="#2d6a4f" opacity="0.2" />
+                    <circle className="hl-chart-dot" cx="260" cy="7" r="3.5"
+                      fill="#f0e9d8" opacity="0.9" />
+                  </svg>
+
+                  <p className="hl-card-sub">
+                    <span className="hl-card-mono">+$8,240</span>
+                    {"\u2002"}increase this year
+                  </p>
+
+                </div>
+              </div>
+
+              {/* ── Card 2: Budget ring ── */}
+              <div className="hl-card-wrap">
+                <div className="hl-snap-card hl-snap-card--budget">
+
+                  <div className="hl-card-header">
+                    <span className="hl-card-label">Budgets</span>
+                    <span className="hl-badge hl-badge--gold">May</span>
+                  </div>
+
+                  <div className="hl-ring-wrap">
+                    <svg
+                      className="hl-ring-svg"
+                      viewBox="0 0 88 88"
+                      fill="none"
+                      aria-label="73% of monthly budget used"
+                    >
+                      <circle cx="44" cy="44" r="34"
+                        stroke="rgba(45,106,79,0.2)" strokeWidth="7" />
+
+                      <circle
+                        className="hl-ring-progress"
+                        cx="44" cy="44" r="34"
+                        stroke="#2d6a4f"
+                        strokeWidth="7"
+                        strokeLinecap="round"
+                        strokeDasharray="214"
+                        strokeDashoffset="214"
+                        fill="none"
+                      />
+
+                      <text
+                        x="44" y="41"
+                        fontFamily="Inter Tight, Inter, sans-serif"
+                        fontWeight="800"
+                        fontSize="15"
+                        fill="#f0e9d8"
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                      >
+                        73%
+                      </text>
+                      <text
+                        x="44" y="57"
+                        fontFamily="Inter, sans-serif"
+                        fontSize="7.5"
+                        fill="#6b9178"
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                      >
+                        used
+                      </text>
+                    </svg>
+                  </div>
+
+                  <p className="hl-card-sub hl-card-sub--center">
+                    <span className="hl-card-mono">$3,840</span>
+                    {"\u2002"}of $5,200
+                  </p>
+
+                  <div className="hl-cat-pills">
+                    <span className="hl-cat-pill">Groceries</span>
+                    <span className="hl-cat-pill">Dining</span>
+                    <span className="hl-cat-pill">+4</span>
+                  </div>
+
+                </div>
+              </div>
+
+            </div>{/* /hl-preview-row */}
+
+            {/* ── Recent transactions ─────────────────────────────────── */}
+            <div className="hl-txn-section">
+              <div className="hl-txn-list">
+
+                <div className="hl-txn">
+                  <div className="hl-txn-dot" style={{ background: "#2d6a4f" }} />
+                  <span className="hl-txn-name">Whole Foods Market</span>
+                  <span className="hl-txn-tag">Groceries</span>
+                  <span className="hl-txn-amt hl-txn-amt--d">−$84.32</span>
+                </div>
+
+                <div className="hl-txn">
+                  <div className="hl-txn-dot" style={{ background: "#c8860a" }} />
+                  <span className="hl-txn-name">Payroll · May 2026</span>
+                  <span className="hl-txn-tag hl-txn-tag--income">Income</span>
+                  <span className="hl-txn-amt hl-txn-amt--c">+$5,200.00</span>
+                </div>
+
+                <div className="hl-txn">
+                  <div className="hl-txn-dot" style={{ background: "#8a7a68" }} />
+                  <span className="hl-txn-name">Netflix</span>
+                  <span className="hl-txn-tag hl-txn-tag--sub">Subscriptions</span>
+                  <span className="hl-txn-amt hl-txn-amt--d">−$15.99</span>
+                </div>
+
+              </div>
           </div>
+        </div>
+      </div>
 
-          {/* ── Auth card ─────────────────────────────────────────────── */}
-          <div className="home-landing__aside">
+      {/* ── Auth panel ──────────────────────────────────────────────── */}
+      <div className="home-landing__aside">
             <Paper withBorder shadow="sm" radius="md" p="lg">
               <Stack gap="md">
                 <div>
@@ -227,7 +372,7 @@ export function HomePage() {
                     type="submit"
                     fullWidth
                     radius="sm"
-                    color="green"
+                    color="fsForest"
                     loading={loading}
                   >
                     Sign in
@@ -236,7 +381,7 @@ export function HomePage() {
 
                 {/* Auth helper links */}
                 <Text size="xs" c="dimmed" ta="center">
-                  New here?{" "}
+                  New here?{"\u2002"}
                   <Anchor href="mailto:admin@household.local" size="xs" title="Contact your household admin to be added as a member">
                     Request access
                   </Anchor>
@@ -285,8 +430,7 @@ export function HomePage() {
               </Stack>
             </Paper>
           </div>
-        </div>
-      </div>
+
     </div>
   );
 }

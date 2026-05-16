@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActionIcon, Alert, Badge, Box, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
+import { GroveLoader } from "../components/GroveLoader";
 import { IconEye, IconFilePlus, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate } from "react-router-dom";
 
@@ -9,6 +10,7 @@ import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
 import type { PayslipSnapshotDetail } from "../payslip/types";
+import { formatUsd } from "../utils/format";
 
 type ListResponse = {
   total: number;
@@ -33,7 +35,7 @@ function formatMoney(n: number | null): string {
   if (n == null || !Number.isFinite(n)) {
     return "—";
   }
-  return `$${n.toFixed(2)}`;
+  return `$${formatUsd(n)}`;
 }
 
 export function PayslipsPage() {
@@ -181,10 +183,10 @@ export function PayslipsPage() {
       {latest ? (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
           {([
-            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), borderColor: "var(--mantine-color-blue-5)", c: "blue" },
-            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   borderColor: "var(--mantine-color-green-6)", c: "green" },
-            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     borderColor: "var(--mantine-color-gray-4)", c: "dimmed" },
-            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       borderColor: "var(--mantine-color-gray-4)", c: "dimmed" },
+            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), borderColor: "var(--fs-forest)", c: "fsForest" as const },
+            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   borderColor: "var(--fs-gold)", c: "fsGold" as const },
+            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     borderColor: "var(--mantine-color-gray-4)", c: "dimmed" as const },
+            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       borderColor: "var(--mantine-color-gray-4)", c: "dimmed" as const },
           ] as const).map(({ label, value, borderColor, c }) => (
             <Paper key={label} withBorder p="md" ta="center" style={{ borderTop: `3px solid ${borderColor}` }}>
               <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={4}>{label}</Text>
@@ -230,7 +232,12 @@ export function PayslipsPage() {
           {data ? <Badge variant="light">{data.total} total</Badge> : null}
         </Group>
         {loadError ? <Alert color="red" mb="sm">{loadError}</Alert> : null}
-        {loading ? <Text c="dimmed">Loading…</Text> : null}
+        {loading ? (
+          <Group gap="sm" py="sm">
+            <GroveLoader size="sm" color="muted" />
+            <Text size="sm" c="dimmed">Loading payslips…</Text>
+          </Group>
+        ) : null}
         {!loading && data && data.items.length === 0 ? (
           <Text c="dimmed">No payslips yet. Use "Import PDF" or "Add manually" above.</Text>
         ) : null}
@@ -255,7 +262,7 @@ export function PayslipsPage() {
                     </Box>
                     <Box>
                       <Text size="xs" c="dimmed" lh={1.2}>Net</Text>
-                      <Text size="sm" fw={600} c="green">{formatMoney(r.netPayCurrent)}</Text>
+                      <Text size="sm" fw={600} style={{ color: "var(--fs-forest)" }}>{formatMoney(r.netPayCurrent)}</Text>
                     </Box>
                   </Group>
                   {/* Actions */}

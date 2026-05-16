@@ -16,11 +16,13 @@
 
 ---
 
+## ~~2026-05-12 — Restore staging cleanup + GDrive reconnect notice~~ — **Done (I-5, 2026-05-12)**
+
+- **Shipped:** `runImportJob` deletes the uploaded `.hfb` staging file in `finally`; successful device restore shows a yellow alert to reconnect Google Drive under Settings → Data → Backup.
+
+---
+
 ## Optional later
 
 - Lightweight periodic cleanup for stale files in `data/imports-restore-upload/` (interrupted requests), if disk hygiene becomes a concern.
-
-- **Restore: staging file not deleted after completion** — `runImportJob` in `import-household-bundle.service.ts` reads the `.hfb` from `storage_path` but has no `unlink` in success or failure paths (unlike `runBackupJob` which cleans up in `finally`). Disk accumulates uploaded `.hfb` files for completed restores. Low urgency for self-hosted single-user, but worth fixing before high-frequency use. Add `fs.unlink(storagePath)` in a `finally` block after the job run.
-
-- **Restore UI: warn that GDrive connection is lost** — `household_gdrive_config` is intentionally excluded from `.hfb` backups (security). After a restore the Drive connection silently disappears. The restore completion UI / success message should mention this so the user knows to reconnect in Settings → Data.
 

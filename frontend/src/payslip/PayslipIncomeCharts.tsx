@@ -20,6 +20,7 @@ import {
   toPaycheckSeries,
   type PaycheckChartPoint
 } from "./payslipChartsModel";
+import { formatUsd } from "../utils/format";
 
 function moneyTick(v: number): string {
   if (v >= 1000 || v <= -1000) {
@@ -29,7 +30,7 @@ function moneyTick(v: number): string {
 }
 
 function moneyTooltip(v: number): string {
-  return `$${Number(v).toFixed(2)}`;
+  return `$${formatUsd(Number(v))}`;
 }
 
 type Props = {

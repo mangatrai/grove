@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Household Finance API
-  version: 0.1.0
+  title: Grove API
+  version: 3.0.0
   description: |
-    HTTP API for the self-hosted household finance app. All authenticated routes expect
+    HTTP API for the self-hosted Grove app. All authenticated routes expect
     `Authorization: Bearer <JWT>` unless noted. See `docs/API_INDEX.md` for prose topic guides.
 servers:
   - url: /
@@ -549,6 +549,174 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
+
+  /household/properties:
+    get:
+      summary: List all properties for the household
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: List of properties
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  properties:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PropertyRecord'
+    post:
+      summary: Create a property and optionally link to a mortgage account
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressLine1: { type: string, nullable: true, maxLength: 200 }
+                city: { type: string, nullable: true, maxLength: 100 }
+                state: { type: string, nullable: true, maxLength: 100 }
+                zip: { type: string, nullable: true, maxLength: 20 }
+                propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+                accountId:
+                  type: string
+                  format: uuid
+                  description: Financial account to link (mortgage)
+                initialValueUsd: { type: number, nullable: true, minimum: 0 }
+                initialValueAsOf: { type: string, format: date, nullable: true }
+      responses:
+        "201":
+          description: Property created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        "400":
+          description: Validation error
+        "404":
+          description: Account not found (ACCOUNT_NOT_FOUND)
+
+  /household/properties/{propertyId}:
+    get:
+      summary: Get a single property
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Property record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  property:
+                    $ref: '#/components/schemas/PropertyRecord'
+        "404":
+          description: Not found
+    patch:
+      summary: Update property address or use
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressLine1: { type: string, nullable: true }
+                city: { type: string, nullable: true }
+                state: { type: string, nullable: true }
+                zip: { type: string, nullable: true }
+                propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: boolean }
+        "400":
+          description: Validation error
+        "404":
+          description: Not found
+
+  /household/properties/{propertyId}/values:
+    get:
+      summary: List all market value snapshots for a property (ASC date order)
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Value snapshot list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshots:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PropertyValueSnapshot'
+        "404":
+          description: Not found
+    post:
+      summary: Add or upsert a market value snapshot (upserts on same date)
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [marketValueUsd, asOfDate]
+              properties:
+                marketValueUsd: { type: number, minimum: 0 }
+                asOfDate: { type: string, format: date }
+                source: { type: string, enum: [manual, api], default: manual }
+      responses:
+        "201":
+          description: Snapshot created/updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        "400":
+          description: Validation error or INVALID_VALUE
+        "404":
+          description: Property not found
 
   /insights/financial:
     get:
@@ -1271,34 +1439,49 @@ paths:
                   accounts:
                     type: array
                     items:
-                      type: object
-                      properties:
-                        id: { type: string, format: uuid }
-                        type: { type: string }
-                        institution: { type: string }
-                        account_mask: { type: string, nullable: true }
-                        currency: { type: string }
-                        owner_scope: { type: string, enum: [household, person] }
-                        owner_person_profile_id: { type: string, format: uuid, nullable: true }
-                        default_parser_profile_id: { type: string, nullable: true }
-                        last_uploaded_at:
-                          type: string
-                          format: date-time
-                          nullable: true
-                          description: Latest successfully parsed statement upload for this account.
-                        last_statement_end_date:
-                          type: string
-                          nullable: true
-                          description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
+                      $ref: '#/components/schemas/FinancialAccountListItem'
     post:
       tags: [imports]
       summary: Create connected account
       security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportAccountUpsertRequest'
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+        "400":
+          description: Validation error
   /imports/accounts/{accountId}:
     patch:
       tags: [imports]
       summary: Update connected account
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImportAccountUpsertRequest'
+      responses:
+        "200":
+          description: Updated
+        "400":
+          description: Validation error
   /imports/parser-profiles:
     get:
       tags: [imports]
@@ -1470,6 +1653,135 @@ paths:
         "404":
           description: Import session not found for household
       security: [{ bearerAuth: [] }]
+  /transactions/aggregate:
+    get:
+      tags: [transactions]
+      summary: Aggregate filtered ledger totals and breakdowns (no pagination)
+      description: >
+        Same filter query params as GET /transactions except limit and offset.
+        Returns headline totals plus capped breakdown arrays (by category, merchant, account, month).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: sessionId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: fileId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: categoryId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: categoryIds
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: uncategorizedOnly
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: needsReview
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+        - name: resolutionType
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - name: search
+          in: query
+          schema: { type: string, maxLength: 200 }
+        - name: amountMin
+          in: query
+          schema: { type: number }
+        - name: amountMax
+          in: query
+          schema: { type: number }
+        - name: dateFrom
+          in: query
+          schema: { type: string, format: date }
+        - name: dateTo
+          in: query
+          schema: { type: string, format: date }
+        - name: accountId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: accountIds
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: ownerScope
+          in: query
+          schema: { type: string, enum: [household, person] }
+        - name: ownerPersonProfileId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: ownerPersonProfileIds
+          in: query
+          schema: { type: array, items: { type: string, format: uuid } }
+          style: form
+          explode: true
+        - name: belongsTo
+          in: query
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+        - name: trashOnly
+          in: query
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200":
+          description: Aggregate summary for the filtered ledger set
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, net, inflows, outflows, avgAbsolute, byCategory, byMerchant, byAccount, byMonth, dateFirst, dateLast]
+                properties:
+                  count: { type: integer }
+                  net: { type: number }
+                  inflows: { type: number }
+                  outflows: { type: number }
+                  avgAbsolute: { type: number }
+                  dateFirst: { type: string, format: date, nullable: true }
+                  dateLast: { type: string, format: date, nullable: true }
+                  byCategory:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                        categoryId: { type: string, format: uuid, nullable: true }
+                  byMerchant:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                  byAccount:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                        accountId: { type: string, format: uuid }
+                  byMonth:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        label: { type: string }
+                        value: { type: number }
+                        net: { type: number }
+        "400":
+          description: Invalid query
+        "401":
+          description: Unauthorized
+        "404":
+          description: Import session not found when sessionId is set
   /transactions:
     get:
       tags: [transactions]
@@ -1636,10 +1948,33 @@ paths:
       tags: [reports]
       summary: Balance sheet / net worth snapshot (optional ownerScope filters by account belongs-to)
       description: >-
-        Assets: checking, savings, investment, retirement. Liabilities: credit_card, loan, mortgage.
+        Assets: checking, savings, investment, retirement, health, education. Liabilities: credit_card, loan.
+        Property market values (latest snapshot ≤ asOf) are included in asset totals and in the `properties` array.
         Liability balances stored as positive magnitudes (what you owe); netWorth = assetSum − liabilitySum.
         Statement-ending balances auto-persisted from bank parsers (OFX, BoA CSV/PDF, Marcus PDF, Wealthfront PDF).
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema: { type: string, format: date }
+        - name: ownerScope
+          in: query
+          required: false
+          schema: { type: string, enum: [household, person] }
+        - name: ownerPersonProfileId
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Snapshot rows and totals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BalanceSheetSnapshotResponse'
+        "400":
+          description: Invalid query (e.g. ownerScope=person without ownerPersonProfileId)
   /reports/balance-sheet/history:
     get:
       tags: [reports]
@@ -1792,10 +2127,11 @@ paths:
   /payslips/{id}:
     get:
       tags: [payslips]
-      summary: Payslip detail (includes matchedDeposits and lineItems — CR-068, CR-072)
+      summary: Payslip detail (confirmedDeposits, suggestedDeposits, lineItems — F-5c, CR-072)
       description: |
         Returns the full payslip snapshot plus:
-        - `matchedDeposits`: up to 5 credit transactions within ±3 days / 1% of net pay on salary deposit account (CR-068)
+        - `confirmedDeposits`: transactions explicitly confirmed as the net pay deposit (F-5)
+        - `suggestedDeposits`: dynamic candidates (empty when confirmedDeposits is non-empty) (F-5)
         - `lineItems`: per-row earnings/deduction/tax items grouped by section (CR-072)
       security: [{ bearerAuth: [] }]
       parameters:
@@ -1806,7 +2142,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Payslip detail with line items and matched deposit
+          description: Payslip detail with line items and deposit matching (F-5)
           content:
             application/json:
               schema:
@@ -1844,22 +2180,16 @@ paths:
                   employmentRateType: { type: string, nullable: true, description: "annual | biweekly | hourly (CR-072)" }
                   rawExtractJson: { type: object }
                   createdAt: { type: string }
-                  matchedDeposits:
+                  confirmedDeposits:
                     type: array
-                    description: Credit transactions within ±3 days / 1% of net pay (CR-068)
+                    description: Explicitly confirmed deposit transactions (from payslip_deposit_match)
                     items:
-                      type: object
-                      properties:
-                        id: { type: string }
-                        txnDate: { type: string }
-                        amount: { type: number }
-                        direction: { type: string }
-                        merchant: { type: string, nullable: true }
-                        memo: { type: string, nullable: true }
-                        accountId: { type: string }
-                        institution: { type: string }
-                        accountType: { type: string }
-                        accountMask: { type: string, nullable: true }
+                      $ref: '#/components/schemas/MatchedDeposit'
+                  suggestedDeposits:
+                    type: array
+                    description: Dynamic search candidates (only populated when confirmedDeposits is empty)
+                    items:
+                      $ref: '#/components/schemas/MatchedDeposit'
                   lineItems:
                     type: object
                     description: Per-row line items grouped by section (CR-072)
@@ -1914,6 +2244,68 @@ paths:
       tags: [payslips]
       summary: Delete payslip snapshot (cascades to line items)
       security: [{ bearerAuth: [] }]
+  /payslips/{id}/deposits/{canonicalId}:
+    put:
+      tags: [payslips]
+      summary: Add a confirmed deposit link to a payslip (idempotent)
+      description: |
+        Links a transaction as a confirmed net-pay deposit. Idempotent — safe to call
+        multiple times with the same canonicalId. Supports multiple links per payslip for split deposits.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: canonicalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated snapshot with confirmedDeposits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/PayslipSnapshot' }
+                  confirmedDeposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+        "400":
+          description: Invalid UUID
+        "404":
+          description: Payslip or transaction not found
+    delete:
+      tags: [payslips]
+      summary: Remove one confirmed deposit link from a payslip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: canonicalId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Updated snapshot with remaining confirmedDeposits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { $ref: '#/components/schemas/PayslipSnapshot' }
+                  confirmedDeposits:
+                    type: array
+                    items: { $ref: '#/components/schemas/MatchedDeposit' }
+        "400":
+          description: Invalid UUID
+        "404":
+          description: Payslip not found
   /payslips/{id}/line-items:
     post:
       tags: [payslips]
@@ -2463,6 +2855,65 @@ components:
         totalRows:
           type: integer
           minimum: 0
+    PayslipSnapshot:
+      type: object
+      description: |
+        Full `payslip_snapshot` row in camelCase (same core fields as GET /payslips/:id without
+        `lineItems`, `confirmedDeposits`, `suggestedDeposits`, or `validationWarnings`). Additional
+        fields may be present.
+      additionalProperties: true
+      properties:
+        id: { type: string }
+        householdId: { type: string }
+        fileName: { type: string }
+        fileChecksum: { type: string }
+        parserProfileId: { type: string }
+        employerId: { type: string, nullable: true }
+        ownerScope: { type: string, enum: [household, person] }
+        ownerPersonProfileId: { type: string, nullable: true }
+        importFileId: { type: string, nullable: true }
+        payPeriodStart: { type: string, nullable: true }
+        payPeriodEnd: { type: string, nullable: true }
+        payDate: { type: string, nullable: true }
+        grossPayCurrent: { type: number, nullable: true }
+        grossPayYtd: { type: number, nullable: true }
+        employeeTaxesCurrent: { type: number, nullable: true }
+        employeeTaxesYtd: { type: number, nullable: true }
+        preTaxDeductionsCurrent: { type: number, nullable: true }
+        preTaxDeductionsYtd: { type: number, nullable: true }
+        postTaxDeductionsCurrent: { type: number, nullable: true }
+        postTaxDeductionsYtd: { type: number, nullable: true }
+        netPayCurrent: { type: number, nullable: true }
+        netPayYtd: { type: number, nullable: true }
+        hoursOrDaysCurrent: { type: string, nullable: true }
+        hoursOrDaysYtd: { type: string, nullable: true }
+        taxableEarningsCurrent: { type: number, nullable: true }
+        taxableEarningsYtd: { type: number, nullable: true }
+        otherInformationCurrent: { type: number, nullable: true }
+        otherInformationYtd: { type: number, nullable: true }
+        employmentRate: { type: number, nullable: true }
+        employmentRateType: { type: string, nullable: true }
+        rawExtractJson: { type: object }
+        createdAt: { type: string }
+    MatchedDeposit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        txnDate: { type: string, format: date }
+        amount: { type: number }
+        direction: { type: string, enum: [credit, debit] }
+        merchant: { type: string, nullable: true }
+        memo: { type: string, nullable: true }
+        accountId: { type: string, format: uuid }
+        institution: { type: string }
+        accountType: { type: string }
+        accountMask: { type: string, nullable: true }
+        dateDelta:
+          type: integer
+          description: Calendar days between pay date and transaction date (absolute value)
+        amountDelta:
+          type: number
+          description: Absolute dollar difference from net pay
     PayslipLineItem:
       type: object
       description: One row from a payslip earnings/deduction/tax section (CR-072)
@@ -2515,7 +2966,7 @@ components:
         rate: { type: number, nullable: true }
     PayslipSnapshotSummary:
       type: object
-      description: Payslip snapshot row (summary columns; no lineItems or matchedDeposits)
+      description: Payslip snapshot row (summary columns; no lineItems or deposit arrays)
       properties:
         id: { type: string }
         payDate: { type: string, nullable: true }
@@ -2576,7 +3027,18 @@ components:
         avatarKey: { type: string, nullable: true }
         role: { type: string, enum: [head, member] }
         relationship: { type: string, enum: [self, spouse, child, dependent, other] }
-        age: { type: integer, nullable: true }
+        age:
+          type: integer
+          nullable: true
+          description: "Effective age — computed from DOB if set, otherwise manually entered."
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+          description: "Decrypted DOB, returned only for the authenticated user's own profile (GET/PATCH /household/profile). Null on member-list/detail responses regardless of stored value."
+        hasDob:
+          type: boolean
+          description: "True if a date of birth has been set. Safe to return for any profile."
         sex: { type: string, nullable: true, enum: [male, female, nonbinary, prefer_not_to_say] }
         individualGrossIncomeUsd: { type: number, nullable: true }
         riskTolerance: { type: string, nullable: true, enum: [conservative, moderate, aggressive] }
@@ -2587,6 +3049,11 @@ components:
       type: object
       properties:
         age: { type: integer, nullable: true, minimum: 1, maximum: 129 }
+        dateOfBirth:
+          type: string
+          format: date
+          nullable: true
+          description: "YYYY-MM-DD. Setting this auto-computes age and clears manual age. Null clears DOB and restores manual age input."
         sex: { type: string, nullable: true, enum: [male, female, nonbinary, prefer_not_to_say] }
         individualGrossIncomeUsd: { type: number, nullable: true }
         riskTolerance: { type: string, nullable: true, enum: [conservative, moderate, aggressive] }
@@ -2870,6 +3337,162 @@ components:
       properties:
         jobId: { type: string }
         message: { type: string }
+
+    FinancialAccountListItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [checking, savings, credit_card, loan, investment, retirement, payslip, health, education]
+        sub_type: { type: string, nullable: true, maxLength: 50 }
+        memo: { type: string, nullable: true, maxLength: 500 }
+        liquidity:
+          type: string
+          nullable: true
+          enum: [liquid, semi_liquid, restricted]
+        linked_account_id:
+          type: string
+          format: uuid
+          nullable: true
+          readOnly: true
+          description: >-
+            Read-only. Self-referential FK for future HELOC→mortgage pairing (D-5); not writable via account upsert.
+        property_id:
+          type: string
+          format: uuid
+          nullable: true
+          readOnly: true
+          description: >-
+            Read-only. Set when a property is created with `accountId` (POST /household/properties); not writable via account upsert.
+        institution: { type: string }
+        account_mask: { type: string, nullable: true }
+        currency: { type: string }
+        owner_scope: { type: string, enum: [household, person] }
+        owner_person_profile_id: { type: string, format: uuid, nullable: true }
+        default_parser_profile_id: { type: string, nullable: true }
+        last_uploaded_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Latest successfully parsed statement upload for this account.
+        last_statement_end_date:
+          type: string
+          nullable: true
+          description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
+
+    ImportAccountUpsertRequest:
+      type: object
+      required: [type, institution]
+      properties:
+        type:
+          type: string
+          enum: [checking, savings, credit_card, loan, investment, retirement, payslip, health, education]
+        subType:
+          type: string
+          nullable: true
+          maxLength: 50
+        memo:
+          type: string
+          nullable: true
+          maxLength: 500
+        liquidity:
+          type: string
+          nullable: true
+          enum: [liquid, semi_liquid, restricted]
+          description: Defaults to auto-computed value from type+subType. Override only if needed.
+        institution: { type: string, minLength: 1, maxLength: 120 }
+        accountMask: { type: string, nullable: true, maxLength: 20 }
+        ownerScope: { type: string, enum: [household, person], default: household }
+        ownerPersonProfileId: { type: string, format: uuid, nullable: true }
+        defaultParserProfileId: { type: string, nullable: true }
+        initialBalance: { type: number, nullable: true }
+        initialBalanceDate: { type: string, format: date, nullable: true }
+
+    BalanceSheetAccountRow:
+      type: object
+      properties:
+        financialAccountId: { type: string, format: uuid }
+        institution: { type: string }
+        accountMask: { type: string, nullable: true }
+        type: { type: string }
+        currency: { type: string }
+        liquidity:
+          type: string
+          nullable: true
+          enum: [liquid, semi_liquid, restricted]
+        side: { type: string, enum: [asset, liability] }
+        balance: { type: number, nullable: true }
+        balanceAsOf: { type: string, nullable: true, format: date }
+        balanceSource: { type: string, nullable: true, enum: [manual, import] }
+        importFileId: { type: string, format: uuid, nullable: true }
+
+    BalanceSheetPropertyRow:
+      type: object
+      properties:
+        propertyId: { type: string, format: uuid }
+        addressLine1: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+        marketValue: { type: number, nullable: true }
+        marketValueAsOf: { type: string, nullable: true, format: date }
+        linkedMortgageAccountId: { type: string, nullable: true, format: uuid }
+        linkedMortgageBalance: { type: number, nullable: true }
+        linkedMortgageAsOf: { type: string, nullable: true, format: date }
+
+    BalanceSheetSnapshotResponse:
+      type: object
+      properties:
+        asOf: { type: string, format: date }
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceSheetAccountRow'
+        liabilities:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceSheetAccountRow'
+        properties:
+          type: array
+          items:
+            $ref: '#/components/schemas/BalanceSheetPropertyRow'
+        totals:
+          type: object
+          properties:
+            assets: { type: number, nullable: true }
+            liabilities: { type: number, nullable: true }
+            netWorth: { type: number, nullable: true }
+
+    PropertyRecord:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        addressLine1: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        zip: { type: string, nullable: true }
+        country: { type: string }
+        propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+        apiProvider: { type: string, nullable: true }
+        apiPropertyId: { type: string, nullable: true }
+        latestValueUsd: { type: number, nullable: true }
+        latestValueAsOf: { type: string, format: date, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    PropertyValueSnapshot:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        asOfDate: { type: string, format: date }
+        marketValueUsd: { type: number }
+        source: { type: string, enum: [manual, api] }
+        apiProvider: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
     ServiceErrorResponse:
       type: object
       properties:

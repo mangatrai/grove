@@ -3,6 +3,24 @@ import crypto from "node:crypto";
 import { qAll, qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { deriveSummaryFromLineItems, validatePayslipBalance } from "./payslip-validation.js";
 import type { ValidationWarning } from "./payslip-validation.js";
+import type {
+  LineItemForInsert,
+  ParsedPayslipSummary,
+  PayslipHybridColumns,
+  PayslipLineItemRow,
+  PayslipLineItemSection,
+  PayslipLineItemsGrouped
+} from "./payslip.types.js";
+import { PAYSLIP_LINE_ITEM_SECTIONS } from "./payslip.types.js";
+
+function daysBetween(a: string, b: string): number {
+  return Math.abs(
+    Math.round(
+      (new Date(`${b}T00:00:00`).getTime() - new Date(`${a}T00:00:00`).getTime()) /
+        86_400_000
+    )
+  );
+}
 
 export type MatchedDeposit = {
   id: string;
@@ -15,16 +33,9 @@ export type MatchedDeposit = {
   institution: string;
   accountType: string;
   accountMask: string | null;
+  dateDelta: number;
+  amountDelta: number;
 };
-import type {
-  LineItemForInsert,
-  ParsedPayslipSummary,
-  PayslipHybridColumns,
-  PayslipLineItemRow,
-  PayslipLineItemSection,
-  PayslipLineItemsGrouped
-} from "./payslip.types.js";
-import { PAYSLIP_LINE_ITEM_SECTIONS } from "./payslip.types.js";
 
 export type PayslipSnapshotRow = {
   id: string;
@@ -525,10 +536,12 @@ export type PayslipSnapshotPatchInput = {
 /**
  * Find bank transactions that likely represent the net pay deposit for a payslip.
  *
- * Looks for credit transactions within ±3 days of `payDate` whose amount is within
- * 1% (or $0.50, whichever is larger) of `netPayCurrent`. If the payslip is
- * person-scoped and that person has a salary deposit account configured, the search
- * is restricted to that account; otherwise all household accounts are searched.
+ * Uses `payDate` as the anchor when set, otherwise `payPeriodEnd`. Looks for posted
+ * credit transactions within ±7 days of that anchor (±10 when anchored on period end
+ * only) whose amount is within 1% (or $0.50, whichever is larger) of `netPayCurrent`.
+ * If the payslip is person-scoped and that person has a salary deposit account
+ * configured, the search is restricted to that account; otherwise all household
+ * accounts are searched.
  *
  * Returns up to 5 candidates, closest amount match first.
  */
@@ -536,11 +549,14 @@ export async function findMatchedDeposits(
   householdId: string,
   payDate: string | null,
   netPayCurrent: number | null,
-  ownerPersonProfileId: string | null
+  ownerPersonProfileId: string | null,
+  payPeriodEnd?: string | null
 ): Promise<MatchedDeposit[]> {
-  if (!payDate || netPayCurrent == null) {
+  const effectiveDate = payDate ?? payPeriodEnd ?? null;
+  if (!effectiveDate || netPayCurrent == null) {
     return [];
   }
+  const windowDays = payDate != null ? 7 : 10;
 
   let salaryAccountId: string | null = null;
   if (ownerPersonProfileId) {
@@ -557,6 +573,11 @@ export async function findMatchedDeposits(
 
   const accountFilter = salaryAccountId ? ` AND tc.account_id = ?` : "";
   const accountParam: unknown[] = salaryAccountId ? [salaryAccountId] : [];
+
+  const datePredicate =
+    windowDays === 7
+      ? `tc.txn_date::date BETWEEN ?::date - INTERVAL '7 days' AND ?::date + INTERVAL '7 days'`
+      : `tc.txn_date::date BETWEEN ?::date - INTERVAL '10 days' AND ?::date + INTERVAL '10 days'`;
 
   type DepositRow = {
     id: string;
@@ -578,13 +599,14 @@ export async function findMatchedDeposits(
        JOIN financial_account fa ON fa.id = tc.account_id AND fa.household_id = tc.household_id
       WHERE tc.household_id = ?
         AND tc.direction = 'credit'
-        AND tc.txn_date::date BETWEEN ?::date - INTERVAL '3 days' AND ?::date + INTERVAL '3 days'
+        AND tc.status = 'posted'
+        AND ${datePredicate}
         AND ABS(CAST(tc.amount AS DOUBLE PRECISION) - ?) <= GREATEST(ABS(?) * 0.01, 0.50)${accountFilter}
       ORDER BY ABS(CAST(tc.amount AS DOUBLE PRECISION) - ?) ASC, tc.txn_date ASC
       LIMIT 5`,
     householdId,
-    payDate,
-    payDate,
+    effectiveDate,
+    effectiveDate,
     netPayCurrent,
     netPayCurrent,
     ...accountParam,
@@ -601,7 +623,9 @@ export async function findMatchedDeposits(
     accountId: String(r.account_id),
     institution: String(r.institution),
     accountType: String(r.account_type),
-    accountMask: r.account_mask == null ? null : String(r.account_mask)
+    accountMask: r.account_mask == null ? null : String(r.account_mask),
+    dateDelta: daysBetween(effectiveDate, String(r.txn_date)),
+    amountDelta: Math.abs(Number(r.amount) - netPayCurrent)
   }));
 }
 
@@ -957,6 +981,147 @@ export async function addPayslipLineItem(
       validationWarnings: validatePayslipBalance(snapshot, grouped)
     };
   });
+}
+
+/**
+ * Fetch all confirmed deposit matches for a payslip from payslip_deposit_match.
+ * Returns them as MatchedDeposit[] with dateDelta/amountDelta computed against payDate
+ * (fallback: payPeriodEnd). Returns [] if no confirmed matches exist.
+ */
+export async function getConfirmedDeposits(
+  householdId: string,
+  payslipId: string,
+  payDate: string | null,
+  netPayCurrent: number | null,
+  payPeriodEnd?: string | null
+): Promise<MatchedDeposit[]> {
+  const effectiveDate = payDate ?? payPeriodEnd ?? null;
+  const dateDeltaForRow = (txnDate: string): number => {
+    if (!effectiveDate) {
+      return 0;
+    }
+    return daysBetween(effectiveDate, txnDate);
+  };
+  const amountDeltaForRow = (amt: number): number =>
+    netPayCurrent != null ? Math.abs(amt - netPayCurrent) : 0;
+
+  type DepositRow = {
+    id: string;
+    txn_date: string;
+    amount: string | number;
+    direction: string;
+    merchant: string | null;
+    memo: string | null;
+    account_id: string;
+    institution: string;
+    account_type: string;
+    account_mask: string | null;
+  };
+
+  const rows = await qAll<DepositRow>(
+    `SELECT tc.id, tc.txn_date, tc.amount, tc.direction, tc.merchant, tc.memo,
+            tc.account_id, fa.institution, fa.type AS account_type, fa.account_mask
+       FROM payslip_deposit_match pdm
+       JOIN transaction_canonical tc ON tc.id = pdm.transaction_canonical_id
+       JOIN financial_account fa ON fa.id = tc.account_id
+                                 AND fa.household_id = tc.household_id
+      WHERE pdm.payslip_snapshot_id = ?
+        AND pdm.household_id = ?
+      ORDER BY tc.txn_date ASC`,
+    payslipId,
+    householdId
+  );
+
+  return rows.map((r) => ({
+    id: String(r.id),
+    txnDate: String(r.txn_date),
+    amount: Number(r.amount),
+    direction: String(r.direction),
+    merchant: r.merchant == null ? null : String(r.merchant),
+    memo: r.memo == null ? null : String(r.memo),
+    accountId: String(r.account_id),
+    institution: String(r.institution),
+    accountType: String(r.account_type),
+    accountMask: r.account_mask == null ? null : String(r.account_mask),
+    dateDelta: dateDeltaForRow(String(r.txn_date)),
+    amountDelta: amountDeltaForRow(Number(r.amount))
+  }));
+}
+
+/**
+ * Add a confirmed deposit link. Idempotent — if the link already exists, returns
+ * the snapshot without error. Validates that the transaction belongs to this household
+ * before inserting.
+ *
+ * Returns null if payslipId not found, or if canonicalId not found in this household.
+ */
+export async function addConfirmedDeposit(
+  householdId: string,
+  payslipId: string,
+  canonicalId: string
+): Promise<PayslipSnapshotRow | null> {
+  const payslip = await qGet<{ id: string }>(
+    `SELECT id FROM payslip_snapshot WHERE id = ? AND household_id = ? LIMIT 1`,
+    payslipId,
+    householdId
+  );
+  if (!payslip) {
+    return null;
+  }
+
+  const txn = await qGet<{ id: string }>(
+    `SELECT id FROM transaction_canonical WHERE id = ? AND household_id = ? LIMIT 1`,
+    canonicalId,
+    householdId
+  );
+  if (!txn) {
+    return null;
+  }
+
+  await qExec(
+    `INSERT INTO payslip_deposit_match
+       (payslip_snapshot_id, household_id, transaction_canonical_id)
+     VALUES (?, ?, ?)
+     ON CONFLICT (payslip_snapshot_id, transaction_canonical_id) DO NOTHING`,
+    payslipId,
+    householdId,
+    canonicalId
+  );
+
+  return getPayslipSnapshotForHousehold(householdId, payslipId);
+}
+
+/**
+ * Remove one confirmed deposit link. If the link does not exist, this is a no-op
+ * (returns the snapshot without error).
+ *
+ * Returns null if payslipId not found.
+ */
+export async function removeConfirmedDeposit(
+  householdId: string,
+  payslipId: string,
+  canonicalId: string
+): Promise<PayslipSnapshotRow | null> {
+  const payslip = await qGet<{ id: string }>(
+    `SELECT id FROM payslip_snapshot WHERE id = ? AND household_id = ? LIMIT 1`,
+    payslipId,
+    householdId
+  );
+  if (!payslip) {
+    return null;
+  }
+
+  await qExec(
+    `DELETE FROM payslip_deposit_match
+      WHERE payslip_snapshot_id = ?
+        AND household_id = ?
+        AND transaction_canonical_id = ?`,
+    payslipId,
+    householdId,
+    canonicalId
+  );
+
+  return getPayslipSnapshotForHousehold(householdId, payslipId);
 }
 
 export type { ValidationWarning };

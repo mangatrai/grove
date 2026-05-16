@@ -35,6 +35,14 @@ interface ClassificationExplainability {
   ai?: ClassificationAiMeta | null;
 }
 
+export interface TransferCandidate {
+  id: string;
+  txnDate: string;
+  amount: number;
+  description: string;
+  accountName: string;
+}
+
 export interface ResolutionItemRow {
   id: string;
   type: string;
@@ -52,6 +60,12 @@ export interface ResolutionItemRow {
     raw: RawPreview | null;
     classification: ClassificationExplainability | null;
   };
+  /**
+   * Live-queried transfer candidates for `transfer_ambiguity` items.
+   * Only includes transactions that are still posted and not yet paired.
+   * Absent for all other item types.
+   */
+  transferCandidates?: TransferCandidate[];
 }
 
 export type ResolutionStatus = "open" | "in_review" | "resolved";
@@ -270,6 +284,57 @@ async function buildResolutionItemRow(r: ResolutionDbListRow, householdId: strin
     }
   }
 
+  let transferCandidates: TransferCandidate[] | undefined;
+  if (r.type === "transfer_ambiguity") {
+    // Collect candidate IDs from reason JSON. Support both legacy `creditId` (singular) and
+    // the current `creditCandidateIds` (array) shapes.
+    const detail = reasonDetail as { creditCandidateIds?: string[]; creditId?: string } | null;
+    const candidateIds: string[] = [];
+    if (Array.isArray(detail?.creditCandidateIds)) {
+      candidateIds.push(...detail.creditCandidateIds);
+    } else if (typeof detail?.creditId === "string") {
+      candidateIds.push(detail.creditId);
+    }
+    // Guard: legacy credit-side resolution items (pre-FIX-168) have creditId === target_id,
+    // meaning the credit was flagged with a reference to itself. Exclude self-referential IDs
+    // so the item shows "no candidates" rather than offering the transaction as its own pair.
+    const filteredCandidateIds = candidateIds.filter((id) => id !== r.targetId);
+
+    if (filteredCandidateIds.length > 0) {
+      // Query only candidates that are still posted and unpaired — live state, not stale JSON.
+      const placeholders = filteredCandidateIds.map(() => "?").join(", ");
+      const rows = await qAll<{
+        id: string;
+        txnDate: string;
+        amount: number;
+        merchant: string | null;
+        memo: string | null;
+        institution: string;
+        accountMask: string | null;
+      }>(
+        `SELECT tc.id, tc.txn_date AS "txnDate", tc.amount, tc.merchant, tc.memo,
+                fa.institution, fa.account_mask AS "accountMask"
+           FROM transaction_canonical tc
+           JOIN financial_account fa ON fa.id = tc.account_id
+          WHERE tc.id IN (${placeholders})
+            AND tc.household_id = ?
+            AND tc.status = 'posted'
+            AND tc.transfer_group_id IS NULL`,
+        ...filteredCandidateIds,
+        householdId
+      );
+      transferCandidates = rows.map((row) => ({
+        id: row.id,
+        txnDate: row.txnDate,
+        amount: row.amount,
+        description: `${row.merchant ?? ""} ${row.memo ?? ""}`.trim() || "—",
+        accountName: row.accountMask ? `${row.institution} …${row.accountMask}` : row.institution
+      }));
+    } else {
+      transferCandidates = [];
+    }
+  }
+
   return {
     id: r.id,
     type: r.type,
@@ -284,7 +349,8 @@ async function buildResolutionItemRow(r: ResolutionDbListRow, householdId: strin
       fileName,
       raw: rawPreview,
       classification
-    }
+    },
+    ...(transferCandidates !== undefined ? { transferCandidates } : {})
   };
 }
 
@@ -422,6 +488,16 @@ export async function updateResolutionStatusForHousehold(
     );
   }
 
+  // B-2: dismissing a transfer_ambiguity item ("Not a transfer") marks the debit as permanently
+  // excluded from future transfer detection so it doesn't re-surface on every import.
+  if (nextStatus === "resolved" && row.type === "transfer_ambiguity") {
+    await qExec(
+      `UPDATE transaction_canonical SET transfer_excluded = TRUE WHERE id = ? AND household_id = ?`,
+      row.targetId,
+      householdId
+    );
+  }
+
   return { ok: true, data: { id: itemId, status: nextStatus } };
 }
 
@@ -482,6 +558,14 @@ export async function bulkUpdateResolutionStatusForHousehold(
            AND source_ref = ('raw:' || ?)`,
         householdId,
         row.targetId
+      );
+    }
+    // B-2: dismissing a transfer_ambiguity item marks the debit as excluded from future detection.
+    if (nextStatus === "resolved" && row.type === "transfer_ambiguity") {
+      await qExec(
+        `UPDATE transaction_canonical SET transfer_excluded = TRUE WHERE id = ? AND household_id = ?`,
+        row.targetId,
+        householdId
       );
     }
     updated.push({ id: itemId, status: nextStatus });
@@ -604,64 +688,67 @@ export async function bulkApplyCategoryToUnknownItems(
 export type ConfirmTransferFailure =
   | { ok: false; code: "NOT_FOUND"; message: string }
   | { ok: false; code: "NOT_TRANSFER_AMBIGUITY"; message: string }
-  | { ok: false; code: "MISSING_PAIR_IDS"; message: string }
-  | { ok: false; code: "TRANSACTION_NOT_FOUND"; message: string };
+  | { ok: false; code: "TRANSACTION_NOT_FOUND"; message: string }
+  | { ok: false; code: "AMOUNT_MISMATCH"; message: string }
+  | { ok: false; code: "ALREADY_PAIRED"; message: string };
 
 /**
  * Confirm a transfer_ambiguity item as a real transfer.
  *
- * Reads `debitId` and `creditId` from the item's reason JSON (populated by the
- * `low_pair_score` path in canonical ingest), assigns a shared `transfer_group_id`
- * to both canonical rows, and resolves **all** open transfer_ambiguity items whose
- * target is either leg — so both the debit-side and credit-side review items are
- * cleared in one call regardless of which item ID the caller passes.
+ * Caller provides the `creditId` explicitly (user-selected from the candidate list).
+ * The debit is always the resolution item's `target_id`.
  *
- * This is the "yes, I confirm these are the same transfer" action. The existing
- * PATCH /resolution/:id { status: "resolved" } path remains for "not a transfer /
- * just dismiss" — it does not set transfer_group_id.
+ * Validates: both transactions exist, are posted, have matching abs amounts, and are unpaired.
+ * Assigns a shared `transfer_group_id` to both rows and resolves all open transfer_ambiguity
+ * items for both legs (clears debit-side item and any legacy credit-side items).
  */
 export async function confirmTransferPairForHousehold(
   householdId: string,
-  itemId: string
+  itemId: string,
+  creditId: string
 ): Promise<{ ok: true; data: { debitId: string; creditId: string; transferGroupId: string } } | ConfirmTransferFailure> {
-  const row = await qGet<{ id: string; type: string; reason: string }>(
-    `SELECT id, type, reason FROM resolution_item WHERE id = ? AND household_id = ?`,
+  const item = await qGet<{ id: string; type: string; targetId: string }>(
+    `SELECT id, type, target_id AS "targetId" FROM resolution_item WHERE id = ? AND household_id = ?`,
     itemId,
     householdId
   );
-  if (!row) return { ok: false, code: "NOT_FOUND", message: "Resolution item not found" };
-  if (row.type !== "transfer_ambiguity") {
+  if (!item) return { ok: false, code: "NOT_FOUND", message: "Resolution item not found" };
+  if (item.type !== "transfer_ambiguity") {
     return { ok: false, code: "NOT_TRANSFER_AMBIGUITY", message: "Item is not a transfer_ambiguity" };
   }
 
-  let debitId: string | undefined;
-  let creditId: string | undefined;
-  try {
-    const detail = JSON.parse(row.reason) as { debitId?: string; creditId?: string };
-    debitId = detail.debitId;
-    creditId = detail.creditId;
-  } catch { /* malformed */ }
+  const debitId = item.targetId;
 
-  if (!debitId || !creditId) {
-    return { ok: false, code: "MISSING_PAIR_IDS", message: "Reason JSON does not contain an unambiguous debitId + creditId pair" };
-  }
-
-  const debitExists = await qGet<{ id: string }>(
-    `SELECT id FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+  const debit = await qGet<{ id: string; amount: number; transferGroupId: string | null }>(
+    `SELECT id, amount, transfer_group_id AS "transferGroupId"
+       FROM transaction_canonical WHERE id = ? AND household_id = ? AND status = 'posted'`,
     debitId,
     householdId
   );
-  const creditExists = await qGet<{ id: string }>(
-    `SELECT id FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+  if (!debit) {
+    return { ok: false, code: "TRANSACTION_NOT_FOUND", message: "Debit transaction not found or not posted" };
+  }
+
+  const credit = await qGet<{ id: string; amount: number; transferGroupId: string | null }>(
+    `SELECT id, amount, transfer_group_id AS "transferGroupId"
+       FROM transaction_canonical WHERE id = ? AND household_id = ? AND status = 'posted'`,
     creditId,
     householdId
   );
-  if (!debitExists || !creditExists) {
-    return { ok: false, code: "TRANSACTION_NOT_FOUND", message: "One or both paired transactions not found in this household" };
+  if (!credit) {
+    return { ok: false, code: "TRANSACTION_NOT_FOUND", message: "Selected credit transaction not found or not posted" };
+  }
+
+  if (debit.transferGroupId || credit.transferGroupId) {
+    return { ok: false, code: "ALREADY_PAIRED", message: "One or both transactions are already part of a transfer pair" };
+  }
+
+  // Validate abs amounts match (within 1 cent for floating point safety).
+  if (Math.abs(Math.abs(Number(debit.amount)) - Math.abs(Number(credit.amount))) > 0.01) {
+    return { ok: false, code: "AMOUNT_MISMATCH", message: "Transaction amounts do not match" };
   }
 
   const transferGroupId = crypto.randomUUID();
-  // Only set if not already paired (idempotent for re-submissions).
   await qExec(
     `UPDATE transaction_canonical SET transfer_group_id = ? WHERE id = ? AND household_id = ? AND transfer_group_id IS NULL`,
     transferGroupId,
@@ -675,8 +762,8 @@ export async function confirmTransferPairForHousehold(
     householdId
   );
 
-  // Resolve ALL open/in_review transfer_ambiguity items for both legs in one sweep —
-  // both the debit-side and credit-side resolution items are cleared.
+  // Resolve all open transfer_ambiguity items for both legs (handles debit-only new items
+  // and any legacy credit-side items from the old ingest model).
   await qExec(
     `UPDATE resolution_item
         SET status = 'resolved'
@@ -698,63 +785,19 @@ export interface BulkConfirmTransferResult {
 }
 
 /**
- * Confirm multiple transfer_ambiguity items as real transfers (best-effort).
- * Deduplicates by debit+credit pair so processing both legs of the same transfer
- * in one request doesn't create two separate groups.
+ * Bulk confirm is no longer supported for transfer_ambiguity items — each pair requires
+ * the user to explicitly select the matching credit from the candidate list.
+ * This stub returns a descriptive error for every item so the frontend can surface
+ * actionable feedback rather than silently failing.
  */
 export async function bulkConfirmTransferPairsForHousehold(
   householdId: string,
   itemIds: string[]
 ): Promise<BulkConfirmTransferResult> {
-  const confirmed: BulkConfirmTransferResult["confirmed"] = [];
-  const errors: BulkConfirmTransferResult["errors"] = [];
-  // Track pairs already confirmed this call (both legs may appear in the list).
-  const confirmedPairKeys = new Map<string, string>(); // pairKey → transferGroupId
-
-  for (const itemId of itemIds) {
-    const row = await qGet<{ id: string; type: string; reason: string }>(
-      `SELECT id, type, reason FROM resolution_item WHERE id = ? AND household_id = ?`,
-      itemId,
-      householdId
-    );
-    if (!row) {
-      errors.push({ itemId, code: "NOT_FOUND", message: "Resolution item not found" });
-      continue;
-    }
-    if (row.type !== "transfer_ambiguity") {
-      errors.push({ itemId, code: "NOT_TRANSFER_AMBIGUITY", message: "Item is not a transfer_ambiguity" });
-      continue;
-    }
-
-    let debitId: string | undefined;
-    let creditId: string | undefined;
-    try {
-      const detail = JSON.parse(row.reason) as { debitId?: string; creditId?: string };
-      debitId = detail.debitId;
-      creditId = detail.creditId;
-    } catch { /* ignore */ }
-
-    if (!debitId || !creditId) {
-      errors.push({ itemId, code: "MISSING_PAIR_IDS", message: "Reason JSON does not contain an unambiguous debit + credit pair" });
-      continue;
-    }
-
-    // Dedup: if the other leg was already processed in this batch, reuse the group ID.
-    const pairKey = [debitId, creditId].sort().join(":");
-    const existingGroupId = confirmedPairKeys.get(pairKey);
-    if (existingGroupId) {
-      confirmed.push({ itemId, debitId, creditId, transferGroupId: existingGroupId });
-      continue;
-    }
-
-    const out = await confirmTransferPairForHousehold(householdId, itemId);
-    if (!out.ok) {
-      errors.push({ itemId, code: out.code, message: out.message });
-    } else {
-      confirmedPairKeys.set(pairKey, out.data.transferGroupId);
-      confirmed.push({ itemId, debitId, creditId, transferGroupId: out.data.transferGroupId });
-    }
-  }
-
-  return { confirmed, errors };
+  const errors: BulkConfirmTransferResult["errors"] = itemIds.map((itemId) => ({
+    itemId,
+    code: "MISSING_PAIR_IDS",
+    message: "Transfer ambiguity items must be confirmed individually — open each item and select the matching credit."
+  }));
+  return { confirmed: [], errors };
 }

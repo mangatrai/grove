@@ -12,7 +12,6 @@ import {
   Group,
   Modal,
   MultiSelect,
-  NumberInput,
   Paper,
   PasswordInput,
   SegmentedControl,
@@ -21,6 +20,7 @@ import {
   Table,
   Tabs,
   Text,
+  Textarea,
   TextInput,
   Title
 } from "@mantine/core";
@@ -32,7 +32,10 @@ import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../compo
 import { RecurringTagModal, type RecurringOverride } from "../components/RecurringTagModal";
 import { formatAccountForSelect, formatAccountFreshness } from "../import/accountDisplay";
 import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
+import { CurrencyInput } from "../components/CurrencyInput";
+import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
+import { GroveLoader } from "../components/GroveLoader";
 
 const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
 type SettingsTab = (typeof TABS)[number];
@@ -60,6 +63,10 @@ type AccountRow = {
   id: string;
   institution: string;
   type: string;
+  sub_type: string | null;
+  memo: string | null;
+  liquidity: string | null;
+  property_id: string | null;
   account_mask: string | null;
   last_uploaded_at?: string | null;
   last_statement_end_date?: string | null;
@@ -67,6 +74,108 @@ type AccountRow = {
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
 };
+
+// ─── Account type / sub-type picker data ─────────────────────────────────────
+
+const ACCOUNT_TYPE_GROUPS: HierarchicalPickerGroup[] = [
+  {
+    group: "general",
+    items: [
+      { value: "checking",    label: "Checking",    searchText: "bank liquid" },
+      { value: "savings",     label: "Savings",     searchText: "bank liquid hysa" },
+      { value: "investment",  label: "Investment",  searchText: "brokerage reit crypto semi-liquid" },
+      { value: "retirement",  label: "Retirement",  searchText: "401k ira pension restricted" },
+      { value: "health",      label: "Health",      searchText: "hsa fsa hra able benefits" },
+      { value: "education",   label: "Education",   searchText: "529 college coverdell" },
+      { value: "credit_card", label: "Credit Card", searchText: "liability revolving" },
+      { value: "loan",        label: "Loan",        searchText: "mortgage auto debt liability" },
+      { value: "cash",        label: "Cash",        searchText: "cash on hand wallet petty cash liquid" },
+      { value: "payslip",     label: "Payslip",     searchText: "income payroll" }
+    ]
+  },
+  {
+    group: "Subtypes",
+    items: [
+      { value: "checking/personal", label: "Checking > Personal" },
+      { value: "checking/joint",    label: "Checking > Joint" },
+      { value: "checking/business", label: "Checking > Business" },
+      { value: "checking/student",  label: "Checking > Student" },
+      { value: "savings/regular",      label: "Savings > Regular" },
+      { value: "savings/high_yield",   label: "Savings > High-Yield (HYSA)", searchText: "hysa high yield" },
+      { value: "savings/money_market", label: "Savings > Money Market" },
+      { value: "savings/cd",           label: "Savings > CD (Certificate of Deposit)", searchText: "certificate deposit" },
+      { value: "investment/brokerage",     label: "Investment > Brokerage" },
+      { value: "investment/reit",          label: "Investment > REIT", searchText: "real estate investment trust" },
+      { value: "investment/crypto",        label: "Investment > Crypto" },
+      { value: "investment/stock_options", label: "Investment > Stock Options / RSU", searchText: "rsu espp equity" },
+      { value: "investment/annuity",       label: "Investment > Annuity" },
+      { value: "retirement/401k_traditional", label: "Retirement > 401(k) Traditional" },
+      { value: "retirement/401k_roth",        label: "Retirement > 401(k) Roth" },
+      { value: "retirement/ira_traditional",  label: "Retirement > IRA Traditional" },
+      { value: "retirement/ira_roth",         label: "Retirement > IRA Roth" },
+      { value: "retirement/sep_ira",          label: "Retirement > SEP-IRA", searchText: "self employed" },
+      { value: "retirement/simple_ira",       label: "Retirement > SIMPLE IRA" },
+      { value: "retirement/403b",             label: "Retirement > 403(b)", searchText: "nonprofit" },
+      { value: "retirement/457b",             label: "Retirement > 457(b)", searchText: "government public sector" },
+      { value: "retirement/pension",          label: "Retirement > Pension" },
+      { value: "health/hsa",  label: "Health > HSA",  searchText: "health savings account triple tax" },
+      { value: "health/fsa",  label: "Health > FSA",  searchText: "flexible spending" },
+      { value: "health/hra",  label: "Health > HRA",  searchText: "health reimbursement" },
+      { value: "health/able", label: "Health > ABLE", searchText: "disability savings" },
+      { value: "education/529",        label: "Education > 529 Plan",    searchText: "college savings" },
+      { value: "education/coverdell",  label: "Education > Coverdell ESA" },
+      { value: "education/ugma_utma",  label: "Education > UGMA / UTMA", searchText: "custodial" },
+      { value: "credit_card/rewards",  label: "Credit Card > Rewards / Cashback" },
+      { value: "credit_card/travel",   label: "Credit Card > Travel" },
+      { value: "credit_card/store",    label: "Credit Card > Store" },
+      { value: "credit_card/secured",  label: "Credit Card > Secured" },
+      { value: "credit_card/business", label: "Credit Card > Business" },
+      { value: "loan/mortgage_primary",    label: "Loan > Mortgage (Primary Home)",        searchText: "primary residence home" },
+      { value: "loan/mortgage_investment", label: "Loan > Mortgage (Investment Property)", searchText: "rental investment" },
+      { value: "loan/mortgage_vacation",   label: "Loan > Mortgage (Vacation Home)",       searchText: "vacation second home" },
+      { value: "loan/heloc",               label: "Loan > HELOC",                          searchText: "home equity line credit" },
+      { value: "loan/home_equity_loan",    label: "Loan > Home Equity Loan",               searchText: "home equity fixed" },
+      { value: "loan/auto",                label: "Loan > Auto",                           searchText: "car vehicle" },
+      { value: "loan/personal",            label: "Loan > Personal" },
+      { value: "loan/student_federal",     label: "Loan > Student Loan (Federal)",         searchText: "federal student" },
+      { value: "loan/student_private",     label: "Loan > Student Loan (Private)",         searchText: "private student" },
+      { value: "loan/business",            label: "Loan > Business" },
+      { value: "loan/medical",             label: "Loan > Medical",                        searchText: "medical debt" }
+    ]
+  }
+];
+
+const SUBTYPE_LABELS: Record<string, string> = {
+  personal: "Personal", joint: "Joint", business: "Business", student: "Student",
+  regular: "Regular", high_yield: "High-Yield", money_market: "Money Market", cd: "CD",
+  brokerage: "Brokerage", reit: "REIT", crypto: "Crypto",
+  stock_options: "Stock Options", annuity: "Annuity",
+  "401k_traditional": "401(k) Trad", "401k_roth": "401(k) Roth",
+  ira_traditional: "IRA Trad", ira_roth: "IRA Roth",
+  sep_ira: "SEP-IRA", simple_ira: "SIMPLE IRA", "403b": "403(b)", "457b": "457(b)", pension: "Pension",
+  hsa: "HSA", fsa: "FSA", hra: "HRA", able: "ABLE",
+  "529": "529", coverdell: "Coverdell", ugma_utma: "UGMA/UTMA",
+  rewards: "Rewards", travel: "Travel", store: "Store", secured: "Secured",
+  mortgage_primary: "Mortgage (Primary)", mortgage_investment: "Mortgage (Investment)",
+  mortgage_vacation: "Mortgage (Vacation)", heloc: "HELOC",
+  home_equity_loan: "Home Equity Loan", auto: "Auto",
+  student_federal: "Student (Federal)", student_private: "Student (Private)", medical: "Medical"
+};
+
+const TYPE_LABELS: Record<string, string> = {
+  checking: "Checking", savings: "Savings", investment: "Investment",
+  retirement: "Retirement", health: "Health", education: "Education",
+  credit_card: "Credit Card", loan: "Loan", cash: "Cash", payslip: "Payslip"
+};
+
+function formatAccountTypeLabel(type: string, subType: string | null): string {
+  const t = TYPE_LABELS[type] ?? type;
+  if (!subType) return t;
+  const st = SUBTYPE_LABELS[subType] ?? subType.replace(/_/g, " ");
+  return `${t} · ${st}`;
+}
+
+const MORTGAGE_SUBTYPES = new Set(["mortgage_primary", "mortgage_investment", "mortgage_vacation"]);
 
 type BelongsToChoice = "household" | `person:${string}`;
 
@@ -115,6 +224,8 @@ type HouseholdProfileResponse = {
     role: "head" | "member";
     relationship: "self" | "spouse" | "child" | "dependent" | "other";
     age: number | null;
+    dateOfBirth: string | null;
+    hasDob: boolean;
     sex: "male" | "female" | "nonbinary" | "prefer_not_to_say" | null;
     individualGrossIncomeUsd: number | null;
     riskTolerance: "conservative" | "moderate" | "aggressive" | null;
@@ -147,12 +258,25 @@ type ProfileDraft = {
   phone: string;
   avatarIconKey: string;
   age: string;
+  /** YYYY-MM-DD or "" when not set. Setting this auto-computes age. */
+  dateOfBirth: string;
   sex: "" | "male" | "female" | "nonbinary" | "prefer_not_to_say";
   individualGrossIncomeUsd: string;
   riskTolerance: "" | "conservative" | "moderate" | "aggressive";
   financialGoals: string[];
   employers: EmployerDraft[];
 };
+
+/** Compute display-friendly age from a YYYY-MM-DD string. Returns "—" on invalid. */
+function computeAgeDisplay(dob: string): string {
+  const birth = new Date(`${dob}T12:00:00.000Z`);
+  if (isNaN(birth.getTime())) return "—";
+  const today = new Date();
+  let age = today.getUTCFullYear() - birth.getUTCFullYear();
+  const m = today.getUTCMonth() - birth.getUTCMonth();
+  if (m < 0 || (m === 0 && today.getUTCDate() < birth.getUTCDate())) age--;
+  return age >= 0 && age <= 150 ? String(age) : "—";
+}
 
 type HouseholdMemberDraft = {
   id?: string;
@@ -196,6 +320,7 @@ function normalizeProfileDraft(payload: HouseholdProfileResponse): ProfileDraft 
     phone: (p.phoneNumber ?? "").trim(),
     avatarIconKey: (p.avatarKey ?? PROFILE_ICON_KEYS[0]).trim() || PROFILE_ICON_KEYS[0],
     age: p.age == null ? "" : String(p.age),
+    dateOfBirth: p.dateOfBirth ?? "",
     sex: p.sex ?? "",
     individualGrossIncomeUsd: p.individualGrossIncomeUsd == null ? "" : String(p.individualGrossIncomeUsd),
     riskTolerance: p.riskTolerance ?? "",
@@ -250,6 +375,7 @@ export function SettingsPage() {
     phone: "",
     avatarIconKey: PROFILE_ICON_KEYS[0],
     age: "",
+    dateOfBirth: "",
     sex: "",
     individualGrossIncomeUsd: "",
     riskTolerance: "",
@@ -289,18 +415,51 @@ export function SettingsPage() {
   const [accountSuccess, setAccountSuccess] = useState<string | null>(null);
   const [institutionCatalogList, setInstitutionCatalogList] = useState<string[]>([...US_INSTITUTION_LABELS]);
   const [institutionCustom, setInstitutionCustom] = useState<Array<{ id: string; displayName: string }>>([]);
+  const [institutionModalOpen, setInstitutionModalOpen] = useState(false);
+  const [institutionModalName, setInstitutionModalName] = useState("");
+  const [institutionModalSaving, setInstitutionModalSaving] = useState(false);
+  const [institutionModalError, setInstitutionModalError] = useState<string | null>(null);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [recurringLoading, setRecurringLoading] = useState(false);
   const [recurringError, setRecurringError] = useState<string | null>(null);
   const [editingOverride, setEditingOverride] = useState<RecurringOverride | null>(null);
   const [accountDraft, setAccountDraft] = useState({
     id: "",
-    type: "checking",
+    typeSubtype: "checking",
     institution: "",
     accountMask: "",
+    memo: "",
+    liquidity: "" as "" | "liquid" | "semi_liquid" | "restricted",
     belongsTo: "household" as BelongsToChoice,
     initialBalance: "",
     initialBalanceDate: new Date().toISOString().slice(0, 10)
+  });
+  const [propertyModal, setPropertyModal] = useState<{
+    open: boolean;
+    accountId: string;
+    propertyId: string | null;
+    addressLine1: string;
+    city: string;
+    state: string;
+    zip: string;
+    propertyUse: "" | "primary" | "rental" | "vacation";
+    marketValueUsd: string;
+    asOfDate: string;
+    saving: boolean;
+    error: string | null;
+    apiPropertyId: string | null;
+    apiListingId: string | null;
+    valuationDetail: unknown | null;
+    retrieving: boolean;
+    retrieveError: string | null;
+  }>({
+    open: false, accountId: "", propertyId: null,
+    addressLine1: "", city: "", state: "", zip: "",
+    propertyUse: "", marketValueUsd: "",
+    asOfDate: new Date().toISOString().slice(0, 10),
+    saving: false, error: null,
+    apiPropertyId: null, apiListingId: null, valuationDetail: null,
+    retrieving: false, retrieveError: null
   });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
@@ -508,24 +667,32 @@ export function SettingsPage() {
       .finally(() => setRecurringLoading(false));
   }, [token, tab]);
 
-  async function addCustomInstitutionName() {
-    if (!token) {
+  function openAddInstitutionModal() {
+    setInstitutionModalName("");
+    setInstitutionModalError(null);
+    setInstitutionModalOpen(true);
+  }
+
+  async function submitCustomInstitution() {
+    const name = institutionModalName.trim();
+    if (!name) {
+      setInstitutionModalError("Institution name is required.");
       return;
     }
-    const name = window.prompt("Institution name (saved for everyone in your household):");
-    if (!name?.trim()) {
-      return;
-    }
-    setAccountError(null);
+    setInstitutionModalSaving(true);
+    setInstitutionModalError(null);
     try {
       await apiJson("/imports/institutions/custom", {
         method: "POST",
-        body: JSON.stringify({ displayName: name.trim() })
+        body: JSON.stringify({ displayName: name })
       });
       await loadInstitutions();
-      setAccountDraft((d) => ({ ...d, institution: name.trim() }));
+      setAccountDraft((d) => ({ ...d, institution: name }));
+      setInstitutionModalOpen(false);
     } catch (e: unknown) {
-      setAccountError(e instanceof Error ? e.message : "Could not add institution");
+      setInstitutionModalError(e instanceof Error ? e.message : "Could not add institution");
+    } finally {
+      setInstitutionModalSaving(false);
     }
   }
 
@@ -546,11 +713,15 @@ export function SettingsPage() {
     setAccountError(null);
     setAccountSuccess(null);
     try {
+      const [typeVal, subTypeVal] = accountDraft.typeSubtype.split("/");
       const parsedInitialBalance = accountDraft.initialBalance.trim()
         ? parseFloat(accountDraft.initialBalance)
         : null;
       const body: Record<string, unknown> = {
-        type: accountDraft.type,
+        type: typeVal,
+        subType: subTypeVal ?? null,
+        memo: accountDraft.memo.trim() || null,
+        liquidity: accountDraft.liquidity || null,
         institution: accountDraft.institution.trim(),
         accountMask: accountDraft.accountMask.trim() || null,
         ownerScope: belongsTo.ownerScope,
@@ -562,30 +733,181 @@ export function SettingsPage() {
         body.initialBalance = parsedInitialBalance;
         body.initialBalanceDate = accountDraft.initialBalanceDate || new Date().toISOString().slice(0, 10);
       }
+      let newAccountId: string | null = null;
       if (accountDraft.id) {
         await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
           method: "PATCH",
           body: JSON.stringify(body)
         });
       } else {
-        await apiJson("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
+        const created = await apiJson<{ id: string }>("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
+        newAccountId = created.id;
       }
       const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
       setAccounts(r.accounts);
       setAccountSuccess(accountDraft.id ? "Account updated." : "Account created.");
+
+      // Auto-open property modal when a mortgage account is newly created
+      const [typeVal2, subTypeVal2] = accountDraft.typeSubtype.split("/");
+      const justCreatedMortgage = !accountDraft.id && newAccountId
+        && typeVal2 === "loan" && MORTGAGE_SUBTYPES.has(subTypeVal2 ?? "");
+
       setAccountDraft({
         id: "",
-        type: "checking",
+        typeSubtype: "checking",
         institution: "",
         accountMask: "",
+        memo: "",
+        liquidity: "",
         belongsTo: "household",
         initialBalance: "",
         initialBalanceDate: new Date().toISOString().slice(0, 10)
       });
+
+      if (justCreatedMortgage) {
+        setPropertyModal({
+          open: true, accountId: newAccountId!, propertyId: null,
+          addressLine1: "", city: "", state: "", zip: "", propertyUse: "",
+          marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
+          saving: false, error: null,
+          apiPropertyId: null, apiListingId: null, valuationDetail: null,
+          retrieving: false, retrieveError: null
+        });
+      }
     } catch (e: unknown) {
       setAccountError(e instanceof Error ? e.message : "Could not save account");
     } finally {
       setSavingAccount(false);
+    }
+  }
+
+  async function openPropertyModal(a: AccountRow) {
+    const base = {
+      open: true, accountId: a.id, propertyId: a.property_id,
+      addressLine1: "", city: "", state: "", zip: "",
+      propertyUse: "" as "" | "primary" | "rental" | "vacation",
+      marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
+      saving: false, error: null,
+      apiPropertyId: null, apiListingId: null, valuationDetail: null,
+      retrieving: false, retrieveError: null
+    };
+    if (a.property_id) {
+      try {
+        const r = await apiJson<{
+          property: {
+            addressLine1: string | null; city: string | null;
+            state: string | null; zip: string | null;
+            propertyUse: string | null; latestValueUsd: number | null;
+            latestValueAsOf: string | null;
+          }
+        }>(`/household/properties/${encodeURIComponent(a.property_id)}`);
+        const p = r.property;
+        setPropertyModal({
+          ...base,
+          addressLine1: p.addressLine1 ?? "",
+          city: p.city ?? "",
+          state: p.state ?? "",
+          zip: p.zip ?? "",
+          propertyUse: (p.propertyUse ?? "") as typeof base.propertyUse,
+          marketValueUsd: p.latestValueUsd != null ? String(p.latestValueUsd) : "",
+          asOfDate: p.latestValueAsOf ?? base.asOfDate
+        });
+      } catch {
+        setPropertyModal(base);
+      }
+    } else {
+      setPropertyModal(base);
+    }
+  }
+
+  async function retrieveValuation() {
+    if (!token) return;
+    const addr = [
+      propertyModal.addressLine1.trim(),
+      propertyModal.city.trim(),
+      propertyModal.state.trim(),
+      propertyModal.zip.trim()
+    ].filter(Boolean).join(", ");
+    if (!addr) return;
+    setPropertyModal((m) => ({ ...m, retrieving: true, retrieveError: null }));
+    try {
+      const r = await apiJson<{ estimate: number; apiPropertyId: string; apiListingId: string | null; detail: unknown }>(
+        "/household/properties/preview-valuation",
+        { method: "POST", body: JSON.stringify({ address: addr }) }
+      );
+      setPropertyModal((m) => ({
+        ...m,
+        retrieving: false,
+        marketValueUsd: String(Math.round(r.estimate)),
+        asOfDate: new Date().toISOString().slice(0, 10),
+        apiPropertyId: r.apiPropertyId,
+        apiListingId: r.apiListingId,
+        valuationDetail: r.detail
+      }));
+    } catch (e: unknown) {
+      setPropertyModal((m) => ({
+        ...m,
+        retrieving: false,
+        retrieveError: e instanceof Error ? e.message : "Could not retrieve valuation"
+      }));
+    }
+  }
+
+  async function savePropertyDetails() {
+    if (!token) return;
+    setPropertyModal((m) => ({ ...m, saving: true, error: null }));
+    try {
+      const body: Record<string, unknown> = {
+        addressLine1: propertyModal.addressLine1.trim() || null,
+        city: propertyModal.city.trim() || null,
+        state: propertyModal.state.trim() || null,
+        zip: propertyModal.zip.trim() || null,
+        propertyUse: propertyModal.propertyUse || null,
+        accountId: propertyModal.accountId
+      };
+      if (propertyModal.apiPropertyId) {
+        body.apiPropertyId = propertyModal.apiPropertyId;
+        body.apiListingId = propertyModal.apiListingId;
+        body.valuationDetailJson = propertyModal.valuationDetail;
+      }
+      const valueUsd = parseFloat(propertyModal.marketValueUsd);
+      if (!isNaN(valueUsd) && valueUsd >= 0) {
+        body.initialValueUsd = valueUsd;
+        body.initialValueAsOf = propertyModal.asOfDate;
+      }
+
+      if (propertyModal.propertyId) {
+        // Update existing property
+        await apiJson(`/household/properties/${encodeURIComponent(propertyModal.propertyId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            addressLine1: body.addressLine1,
+            city: body.city,
+            state: body.state,
+            zip: body.zip,
+            propertyUse: body.propertyUse
+          })
+        });
+        if (!isNaN(valueUsd) && valueUsd >= 0) {
+          await apiJson(`/household/properties/${encodeURIComponent(propertyModal.propertyId)}/values`, {
+            method: "POST",
+            body: JSON.stringify({ marketValueUsd: valueUsd, asOfDate: propertyModal.asOfDate })
+          });
+        }
+      } else {
+        // Create new property + link to account
+        await apiJson("/household/properties", { method: "POST", body: JSON.stringify(body) });
+      }
+
+      const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
+      setAccounts(r.accounts);
+      setPropertyModal((m) => ({ ...m, open: false, saving: false }));
+    } catch (e: unknown) {
+      setPropertyModal((m) => ({
+        ...m,
+        saving: false,
+        error: e instanceof Error ? e.message : "Could not save property details"
+      }));
     }
   }
 
@@ -630,43 +952,53 @@ export function SettingsPage() {
       const iconKey = profileDraft.avatarIconKey.trim() || PROFILE_ICON_KEYS[0];
       const ageTrim = profileDraft.age.trim();
       const incomeTrim = profileDraft.individualGrossIncomeUsd.trim();
+      const dobTrim = profileDraft.dateOfBirth.trim();
       const age = ageTrim === "" ? null : Number(ageTrim);
       const individualIncome = incomeTrim === "" ? null : Number(incomeTrim);
       if (age !== null && (!Number.isInteger(age) || age < 1 || age > 129)) {
         throw new Error("Age must be an integer between 1 and 129.");
       }
+      if (dobTrim !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(dobTrim)) {
+        throw new Error("Date of birth must be a valid YYYY-MM-DD value.");
+      }
       if (individualIncome !== null && (!Number.isFinite(individualIncome) || individualIncome < 0)) {
         throw new Error("Individual gross annual income must be a non-negative number.");
       }
+      const body: Record<string, unknown> = {
+        firstName: profileDraft.firstName.trim(),
+        lastName: profileDraft.lastName.trim(),
+        email: profileDraft.email.trim() || null,
+        phoneNumber: profileDraft.phone.trim() || null,
+        avatarKey: iconKey,
+        sex: profileDraft.sex || null,
+        individualGrossIncomeUsd: individualIncome,
+        riskTolerance: profileDraft.riskTolerance || null,
+        financialGoals: profileDraft.financialGoals,
+        dateOfBirth: dobTrim === "" ? null : dobTrim,
+        salaryDepositFinancialAccountId:
+          profileDraft.employers[0]?.salaryDepositAccountId &&
+          profileDraft.employers[0].salaryDepositAccountId !== ""
+            ? profileDraft.employers[0].salaryDepositAccountId
+            : null,
+        employers: profileDraft.employers
+          .map((e) => ({
+            id: e.id,
+            displayName: e.displayName.trim(),
+            parserProfileId: e.parserProfileId,
+            parserMapping: {} as Record<string, unknown>,
+            salaryDepositFinancialAccountId:
+              e.salaryDepositAccountId === "" ? null : e.salaryDepositAccountId
+          }))
+          .filter((e) => e.displayName.length > 0)
+      };
+      // Only include manual age in payload when DOB is unset (manual age mode).
+      // When DOB is set, the backend auto-clears age and computes it on read.
+      if (dobTrim === "") {
+        body.age = age;
+      }
       await apiJson<HouseholdProfileResponse>("/household/profile", {
         method: "PATCH",
-        body: JSON.stringify({
-          firstName: profileDraft.firstName.trim(),
-          lastName: profileDraft.lastName.trim(),
-          email: profileDraft.email.trim() || null,
-          phoneNumber: profileDraft.phone.trim() || null,
-          avatarKey: iconKey,
-          age,
-          sex: profileDraft.sex || null,
-          individualGrossIncomeUsd: individualIncome,
-          riskTolerance: profileDraft.riskTolerance || null,
-          financialGoals: profileDraft.financialGoals,
-          salaryDepositFinancialAccountId:
-            profileDraft.employers[0]?.salaryDepositAccountId &&
-            profileDraft.employers[0].salaryDepositAccountId !== ""
-              ? profileDraft.employers[0].salaryDepositAccountId
-              : null,
-          employers: profileDraft.employers
-            .map((e) => ({
-              id: e.id,
-              displayName: e.displayName.trim(),
-              parserProfileId: e.parserProfileId,
-              parserMapping: {} as Record<string, unknown>,
-              salaryDepositFinancialAccountId:
-                e.salaryDepositAccountId === "" ? null : e.salaryDepositAccountId
-            }))
-            .filter((e) => e.displayName.length > 0)
-        })
+        body: JSON.stringify(body)
       });
       setProfileSuccess("Profile saved.");
       await loadProfile();
@@ -921,7 +1253,9 @@ export function SettingsPage() {
             </Paper>
             {profileError ? <Alert color="red">{profileError}</Alert> : null}
             {profileSuccess ? <Alert color="green">{profileSuccess}</Alert> : null}
-            {loadingProfile ? <Text c="dimmed">Loading…</Text> : null}
+            {loadingProfile ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading profile…</Text></Group>
+            ) : null}
             {!loadingProfile ? (
               <Stack>
                 <Group align="end" grow>
@@ -968,21 +1302,65 @@ export function SettingsPage() {
                 />
                 <Fieldset legend="Financial Profile" mt="sm">
                   <Stack gap="sm">
+                    {profileDraft.dateOfBirth ? (
+                      <Box>
+                        <Text size="sm" fw={500} mb={4}>Date of birth</Text>
+                        <Group gap="sm" align="center">
+                          <TextInput
+                            type="date"
+                            size="sm"
+                            value={profileDraft.dateOfBirth}
+                            onChange={(e) =>
+                              setProfileDraft((prev) => ({ ...prev, dateOfBirth: e.currentTarget.value }))
+                            }
+                            disabled={savingProfile}
+                            aria-label="Date of birth"
+                          />
+                          <Button
+                            type="button"
+                            variant="subtle"
+                            color="red"
+                            size="xs"
+                            disabled={savingProfile}
+                            onClick={() => setProfileDraft((prev) => ({ ...prev, dateOfBirth: "" }))}
+                          >
+                            Clear DOB
+                          </Button>
+                        </Group>
+                        <Text size="xs" c="dimmed" mt={4}>
+                          Age: {computeAgeDisplay(profileDraft.dateOfBirth)}
+                        </Text>
+                      </Box>
+                    ) : (
+                      <Box>
+                        <Text size="sm" fw={500} mb={4}>Date of birth</Text>
+                        <TextInput
+                          type="date"
+                          size="sm"
+                          placeholder="Set to auto-compute age"
+                          value={profileDraft.dateOfBirth}
+                          onChange={(e) =>
+                            setProfileDraft((prev) => ({ ...prev, dateOfBirth: e.currentTarget.value }))
+                          }
+                          disabled={savingProfile}
+                          aria-label="Date of birth"
+                        />
+                        <Text size="xs" c="dimmed" mt={4}>Or enter age manually:</Text>
+                        <TextInput
+                          size="sm"
+                          inputMode="numeric"
+                          placeholder="Age"
+                          style={{ width: "6rem", marginTop: "0.25rem" }}
+                          value={profileDraft.age}
+                          onChange={(e) =>
+                            setProfileDraft((prev) => ({ ...prev, age: e.currentTarget.value }))
+                          }
+                          disabled={savingProfile}
+                          aria-label="Age (manual)"
+                        />
+                      </Box>
+                    )}
                     <Group align="end" grow>
-                      <NumberInput
-                        label="Age"
-                        min={1}
-                        max={129}
-                        value={profileDraft.age === "" ? undefined : Number(profileDraft.age)}
-                        onChange={(value) =>
-                          setProfileDraft((prev) => ({
-                            ...prev,
-                            age: typeof value === "number" && Number.isFinite(value) ? String(value) : ""
-                          }))
-                        }
-                        disabled={savingProfile}
-                        style={{ flex: "0 0 10rem" }}
-                      />
                       <Select
                         label="Sex"
                         clearable
@@ -999,12 +1377,9 @@ export function SettingsPage() {
                         disabled={savingProfile}
                         style={{ flex: "0 0 14rem" }}
                       />
-                      <NumberInput
+                      <CurrencyInput
                         label="Individual gross annual income"
                         description="Include base salary + regular bonuses + regular 1099 income. Exclude one-time items."
-                        prefix="$"
-                        thousandSeparator=","
-                        min={0}
                         value={
                           profileDraft.individualGrossIncomeUsd === ""
                             ? undefined
@@ -1014,7 +1389,7 @@ export function SettingsPage() {
                           setProfileDraft((prev) => ({
                             ...prev,
                             individualGrossIncomeUsd:
-                              typeof value === "number" && Number.isFinite(value) ? String(value) : ""
+                              value == null ? "" : String(value)
                           }))
                         }
                         disabled={savingProfile}
@@ -1214,7 +1589,9 @@ export function SettingsPage() {
             <Text c="dimmed">Track household members for role and relationship context.</Text>
             {membersError ? <Alert color="red">{membersError}</Alert> : null}
             {membersSuccess ? <Alert color="green">{membersSuccess}</Alert> : null}
-            {loadingMembers ? <Text c="dimmed">Loading members…</Text> : null}
+            {loadingMembers ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading members…</Text></Group>
+            ) : null}
             {!loadingMembers ? (
               <>
                 {memberDrafts.map((member, idx) => (
@@ -1314,7 +1691,7 @@ export function SettingsPage() {
                         {member.id ? (
                           member.linkedUserId ? (
                             <Group>
-                              <Text size="sm" c="green" fw={600}>
+                              <Text size="sm" style={{ color: "var(--fs-forest)" }} fw={600}>
                               ✓ Has login account
                               </Text>
                               <Button
@@ -1389,18 +1766,18 @@ export function SettingsPage() {
               </>
             ) : null}
             {householdError ? <Alert color="red">{householdError}</Alert> : null}
-            {loadingHousehold ? <Text c="dimmed">Loading…</Text> : null}
+            {loadingHousehold ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading household…</Text></Group>
+            ) : null}
             {!loadingHousehold ? (
               <Stack mb="xl">
-                <NumberInput
+                <CurrencyInput
                   label="Monthly savings target (USD)"
-                  min={0}
-                  step={0.01}
                   placeholder="e.g. 500"
-                  value={targetDraft === "" ? "" : Number(targetDraft)}
-                  onChange={(value) => setTargetDraft(value === "" || value == null ? "" : String(value))}
+                  value={targetDraft === "" ? undefined : Number(targetDraft)}
+                  onChange={(value) => setTargetDraft(value == null ? "" : String(value))}
                   disabled={savingHousehold}
-                  maw={320}
+                  style={{ maxWidth: 320 }}
                 />
                 <Fieldset legend="Household Demographics" mt="sm">
                   <Stack gap="sm">
@@ -1417,20 +1794,15 @@ export function SettingsPage() {
                       onChange={(e) => setHouseholdStateDraft(e.currentTarget.value)}
                       disabled={savingHousehold}
                     />
-                    <NumberInput
+                    <CurrencyInput
                       label="Combined gross household income"
                       description="Combined gross income for all earners: base salary + regular bonuses. Exclude one-time items."
-                      prefix="$"
-                      thousandSeparator=","
-                      min={0}
                       value={householdIncomeDraft === "" ? undefined : Number(householdIncomeDraft)}
                       onChange={(value) =>
-                        setHouseholdIncomeDraft(
-                          typeof value === "number" && Number.isFinite(value) ? String(value) : ""
-                        )
+                        setHouseholdIncomeDraft(value == null ? "" : String(value))
                       }
                       disabled={savingHousehold}
-                      maw={360}
+                      style={{ maxWidth: 360 }}
                     />
                   </Stack>
                 </Fieldset>
@@ -1484,37 +1856,31 @@ export function SettingsPage() {
                   ariaLabel="Financial institution"
                   disabled={savingAccount}
                   clearable
-                  footer={
+                  footer={(close) => (
                     <Group justify="flex-start">
                       <Button
                         type="button"
                         variant="default"
                         disabled={savingAccount}
-                        onClick={() => void addCustomInstitutionName()}
+                        onClick={() => { close(); openAddInstitutionModal(); }}
                       >
                         Add institution name…
                       </Button>
                     </Group>
-                  }
+                  )}
+                />
+              </Fieldset>
+              <Fieldset legend="Account type">
+                <HierarchicalSearchPicker
+                  value={accountDraft.typeSubtype}
+                  onChange={(v) => v && setAccountDraft((d) => ({ ...d, typeSubtype: v }))}
+                  groups={ACCOUNT_TYPE_GROUPS}
+                  placeholder="Select type (e.g. Checking, Loan > Mortgage…)"
+                  ariaLabel="Account type and subtype"
+                  disabled={savingAccount}
                 />
               </Fieldset>
               <Group align="end" grow>
-                <Select
-                  label="Account type"
-                  value={accountDraft.type}
-                  onChange={(value) => value && setAccountDraft((d) => ({ ...d, type: value }))}
-                  disabled={savingAccount}
-                  data={[
-                    { value: "checking", label: "Checking" },
-                    { value: "savings", label: "Savings" },
-                    { value: "credit_card", label: "Credit card" },
-                    { value: "loan", label: "Loan" },
-                    { value: "mortgage", label: "Mortgage" },
-                    { value: "investment", label: "Investment" },
-                    { value: "retirement", label: "Retirement (401K / IRA / Pension)" },
-                    { value: "payslip", label: "Payslip" }
-                  ]}
-                />
                 <TextInput
                   label="Account mask (optional)"
                   value={accountDraft.accountMask}
@@ -1522,7 +1888,30 @@ export function SettingsPage() {
                   disabled={savingAccount}
                   placeholder="1234"
                 />
+                <Select
+                  label="Liquidity override (optional)"
+                  value={accountDraft.liquidity || null}
+                  onChange={(v) => setAccountDraft((d) => ({ ...d, liquidity: (v ?? "") as typeof d.liquidity }))}
+                  disabled={savingAccount}
+                  clearable
+                  placeholder="Auto (from type)"
+                  data={[
+                    { value: "liquid",      label: "Liquid" },
+                    { value: "semi_liquid", label: "Semi-liquid" },
+                    { value: "restricted",  label: "Restricted" }
+                  ]}
+                />
               </Group>
+              <Textarea
+                label="Memo (optional)"
+                value={accountDraft.memo}
+                onChange={(e) => setAccountDraft((d) => ({ ...d, memo: e.currentTarget.value }))}
+                disabled={savingAccount}
+                placeholder="Notes about this account (used in AI insights)"
+                autosize
+                minRows={1}
+                maxRows={3}
+              />
               <Fieldset legend="Belongs-to">
                 <HierarchicalSearchPicker
                   value={accountDraft.belongsTo}
@@ -1535,21 +1924,18 @@ export function SettingsPage() {
               </Fieldset>
               {!accountDraft.id ? (
                 <Group align="end" grow>
-                  <NumberInput
+                  <CurrencyInput
                     label="Starting balance (optional)"
-                    value={accountDraft.initialBalance === "" ? "" : Number(accountDraft.initialBalance)}
+                    value={accountDraft.initialBalance === "" ? undefined : Number(accountDraft.initialBalance)}
                     onChange={(value) =>
                       setAccountDraft((d) => ({
                         ...d,
-                        initialBalance: value === "" || value == null ? "" : String(value)
+                        initialBalance: value == null ? "" : String(value)
                       }))
                     }
-                    decimalScale={2}
-                    fixedDecimalScale={false}
-                    thousandSeparator=","
                     disabled={savingAccount}
                     placeholder="0.00"
-                    maw={280}
+                    style={{ maxWidth: 280 }}
                   />
                   <TextInput
                     label="Balance as of"
@@ -1577,9 +1963,11 @@ export function SettingsPage() {
                     onClick={() =>
                       setAccountDraft({
                         id: "",
-                        type: "checking",
+                        typeSubtype: "checking",
                         institution: "",
                         accountMask: "",
+                        memo: "",
+                        liquidity: "",
                         belongsTo: "household",
                         initialBalance: "",
                         initialBalanceDate: new Date().toISOString().slice(0, 10)
@@ -1603,10 +1991,15 @@ export function SettingsPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                  {accounts.map((a) => (
+                  {accounts.map((a) => {
+                    const isMortgage = a.type === "loan" && MORTGAGE_SUBTYPES.has(a.sub_type ?? "");
+                    return (
                     <Table.Tr key={a.id}>
                       <Table.Td>{a.institution}</Table.Td>
-                      <Table.Td>{a.type}</Table.Td>
+                      <Table.Td>
+                        <Text size="sm">{formatAccountTypeLabel(a.type, a.sub_type)}</Text>
+                        {a.memo ? <Text size="xs" c="dimmed" truncate maw={200}>{a.memo}</Text> : null}
+                      </Table.Td>
                       <Table.Td>{a.account_mask ?? "—"}</Table.Td>
                       <Table.Td>
                         <Stack gap={2}>
@@ -1624,34 +2017,186 @@ export function SettingsPage() {
                           : "Household"}
                       </Table.Td>
                       <Table.Td>
-                        <Button
-                          type="button"
-                          variant="default"
-                          size="xs"
-                          onClick={() =>
-                            setAccountDraft({
-                              id: a.id,
-                              type: a.type,
-                              institution: a.institution,
-                              accountMask: a.account_mask ?? "",
-                              belongsTo:
-                                a.owner_scope === "person" && a.owner_person_profile_id
-                                  ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
-                                  : "household",
-                              initialBalance: "",
-                              initialBalanceDate: new Date().toISOString().slice(0, 10)
-                            })
-                          }
-                        >
-                          Edit
-                        </Button>
+                        <Group gap="xs" wrap="nowrap">
+                          <Button
+                            type="button"
+                            variant="default"
+                            size="xs"
+                            onClick={() =>
+                              setAccountDraft({
+                                id: a.id,
+                                typeSubtype: a.sub_type ? `${a.type}/${a.sub_type}` : a.type,
+                                institution: a.institution,
+                                accountMask: a.account_mask ?? "",
+                                memo: a.memo ?? "",
+                                liquidity: (a.liquidity as typeof accountDraft.liquidity) ?? "",
+                                belongsTo:
+                                  a.owner_scope === "person" && a.owner_person_profile_id
+                                    ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
+                                    : "household",
+                                initialBalance: "",
+                                initialBalanceDate: new Date().toISOString().slice(0, 10)
+                              })
+                            }
+                          >
+                            Edit
+                          </Button>
+                          {isMortgage ? (
+                            <Button
+                              type="button"
+                              variant="light"
+                              color={a.property_id ? "teal" : "blue"}
+                              size="xs"
+                              onClick={() => void openPropertyModal(a)}
+                            >
+                              {a.property_id ? "Property ✓" : "+ Property"}
+                            </Button>
+                          ) : null}
+                        </Group>
                       </Table.Td>
                     </Table.Tr>
-                  ))}
+                    );
+                  })}
               </Table.Tbody>
             </Table>
+            <Modal
+              opened={institutionModalOpen}
+              onClose={() => setInstitutionModalOpen(false)}
+              title="Add institution"
+              size="sm"
+            >
+              <Stack gap="md">
+                <TextInput
+                  label="Institution name"
+                  description="Saved for everyone in your household."
+                  placeholder="e.g. First National Bank"
+                  value={institutionModalName}
+                  onChange={(e) => setInstitutionModalName(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void submitCustomInstitution(); }}
+                  disabled={institutionModalSaving}
+                  data-autofocus
+                />
+                {institutionModalError ? <Alert color="red">{institutionModalError}</Alert> : null}
+                <Group justify="flex-end">
+                  <Button
+                    variant="default"
+                    disabled={institutionModalSaving}
+                    onClick={() => setInstitutionModalOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    loading={institutionModalSaving}
+                    onClick={() => void submitCustomInstitution()}
+                  >
+                    Add
+                  </Button>
+                </Group>
+              </Stack>
+            </Modal>
           </Stack>
         ) : null}
+
+        {/* ── Property details modal ── */}
+        <Modal
+          opened={propertyModal.open}
+          onClose={() => setPropertyModal((m) => ({ ...m, open: false }))}
+          title="Property details"
+          size="md"
+        >
+          <Stack>
+            {propertyModal.error ? <Alert color="red">{propertyModal.error}</Alert> : null}
+            <TextInput
+              label="Street address"
+              value={propertyModal.addressLine1}
+              onChange={(e) => setPropertyModal((m) => ({ ...m, addressLine1: e.currentTarget.value }))}
+              placeholder="123 Main St"
+              disabled={propertyModal.saving}
+            />
+            <Group grow>
+              <TextInput
+                label="City"
+                value={propertyModal.city}
+                onChange={(e) => setPropertyModal((m) => ({ ...m, city: e.currentTarget.value }))}
+                disabled={propertyModal.saving}
+              />
+              <TextInput
+                label="State"
+                value={propertyModal.state}
+                onChange={(e) => setPropertyModal((m) => ({ ...m, state: e.currentTarget.value }))}
+                placeholder="CA"
+                maw={80}
+                disabled={propertyModal.saving}
+              />
+              <TextInput
+                label="ZIP"
+                value={propertyModal.zip}
+                onChange={(e) => setPropertyModal((m) => ({ ...m, zip: e.currentTarget.value }))}
+                placeholder="94105"
+                maw={100}
+                disabled={propertyModal.saving}
+              />
+            </Group>
+            <Select
+              label="Property use"
+              value={propertyModal.propertyUse || null}
+              onChange={(v) => setPropertyModal((m) => ({ ...m, propertyUse: (v ?? "") as typeof m.propertyUse }))}
+              disabled={propertyModal.saving}
+              clearable
+              placeholder="Select use"
+              data={[
+                { value: "primary", label: "Primary residence" },
+                { value: "rental",  label: "Rental / investment property" },
+                { value: "vacation", label: "Vacation home" }
+              ]}
+            />
+            <Group grow align="end">
+              <CurrencyInput
+                label="Market value (USD)"
+                value={propertyModal.marketValueUsd === "" ? undefined : Number(propertyModal.marketValueUsd)}
+                onChange={(v) => setPropertyModal((m) => ({ ...m, marketValueUsd: v == null ? "" : String(v) }))}
+                placeholder="0.00"
+                disabled={propertyModal.saving}
+              />
+              <TextInput
+                label="As of date"
+                type="date"
+                value={propertyModal.asOfDate}
+                onChange={(e) => setPropertyModal((m) => ({ ...m, asOfDate: e.currentTarget.value }))}
+                disabled={propertyModal.saving}
+              />
+            </Group>
+            {propertyModal.retrieveError ? (
+              <Alert color="orange" py={6}>{propertyModal.retrieveError}</Alert>
+            ) : null}
+            <Button
+              variant="light"
+              size="xs"
+              loading={propertyModal.retrieving}
+              disabled={
+                propertyModal.saving ||
+                !propertyModal.addressLine1.trim() ||
+                !propertyModal.city.trim() ||
+                !propertyModal.state.trim() ||
+                !propertyModal.zip.trim()
+              }
+              onClick={() => void retrieveValuation()}
+            >
+              {propertyModal.marketValueUsd !== "" ? "Update Redfin estimate" : "Retrieve Redfin estimate"}
+            </Button>
+            <Text size="xs" c="dimmed">
+              Market value creates a snapshot in property history. Add new snapshots any time to track appreciation.
+            </Text>
+            <Group justify="flex-end">
+              <Button variant="default" onClick={() => setPropertyModal((m) => ({ ...m, open: false }))} disabled={propertyModal.saving}>
+                Cancel
+              </Button>
+              <Button loading={propertyModal.saving} onClick={() => void savePropertyDetails()}>
+                Save property
+              </Button>
+            </Group>
+          </Stack>
+        </Modal>
 
         {tab === "recurring" ? (
           <Stack mt="md">
@@ -1690,7 +2235,7 @@ export function SettingsPage() {
                           <Table.Tr key={o.id}>
                             <Table.Td><Text ff="monospace">{o.merchantKey}</Text></Table.Td>
                             <Table.Td>{o.displayName ?? <Text c="dimmed" span>—</Text>}</Table.Td>
-                            <Table.Td>{o.amountAnchor != null ? `$${o.amountAnchor.toFixed(2)}` : <Text c="dimmed" span>any</Text>}</Table.Td>
+                            <Table.Td>{o.amountAnchor != null ? `$${formatUsd(o.amountAnchor)}` : <Text c="dimmed" span>any</Text>}</Table.Td>
                             <Table.Td>{o.amountTolerancePct}%</Table.Td>
                             <Table.Td>
                               <Button
@@ -1789,13 +2334,16 @@ export function SettingsPage() {
               </Alert>
             ) : null}
             {removeMemberDataCount && (removeMemberDataCount.transactions > 0 || removeMemberDataCount.payslips > 0) ? (
-              <Alert color="yellow" mb="sm">
+              <>
+                {/* True warning: assigned records lose owner context if member is removed without reassignment */}
+                <Alert color="yellow" mb="sm">
                 <strong>Warning:</strong> This member has{" "}
                 {removeMemberDataCount.transactions > 0 ? <><strong>{removeMemberDataCount.transactions}</strong> transaction(s)</> : null}
                 {removeMemberDataCount.transactions > 0 && removeMemberDataCount.payslips > 0 ? " and " : null}
                 {removeMemberDataCount.payslips > 0 ? <><strong>{removeMemberDataCount.payslips}</strong> payslip(s)</> : null}
                 {" "}assigned to them. Those records will remain but show no owner. Use <strong>Transactions → Belongs-to</strong> filter to reassign before deleting.
               </Alert>
+              </>
             ) : null}
             <Text size="sm" mb="sm">This member will be permanently removed from the household. This cannot be undone.</Text>
             {memberDrafts.find((m) => m.id === removeMemberConfirm)?.linkedUserId ? (

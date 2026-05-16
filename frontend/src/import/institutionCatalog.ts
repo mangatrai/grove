@@ -3,6 +3,7 @@
  * `backend/src/modules/imports/institution-catalog.ts`.
  */
 export const US_INSTITUTION_LABELS: readonly string[] = [
+  "Cash & Wallet",
   "Ally Bank",
   "American Express",
   "Bank of America",

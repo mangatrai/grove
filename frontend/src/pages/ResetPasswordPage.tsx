@@ -104,7 +104,7 @@ export function ResetPasswordPage() {
               required
               error={confirmError ?? undefined}
             />
-            <Button type="submit" color="green" loading={loading}>Update password</Button>
+            <Button type="submit" color="fsForest" loading={loading}>Update password</Button>
           </Stack>
         </form>
       </Stack>

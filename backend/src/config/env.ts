@@ -104,7 +104,9 @@ const envSchema = z.object({
    * If unset: uses `PUBLIC_BASE_URL` when set; in `MODE=TEST` defaults to `http://localhost:3000`; in `MODE=PROD`
    * with neither set, redirects are relative to the API host (same-origin deployments only).
    */
-  FRONTEND_APP_URL: z.string().default("")
+  FRONTEND_APP_URL: z.string().default(""),
+  /** RealtyAPI key for Redfin property valuation (D-2). Optional — feature degrades to manual if absent. */
+  REALTY_API_KEY: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

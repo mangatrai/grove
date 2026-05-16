@@ -4,6 +4,102 @@ This document tracks features, design decisions, and open questions for the v3 r
 
 ---
 
+## P3 maintenance + UX polish (delivered I-4–I-6, UX-166/UX-167, 2026-05-12)
+
+- **I-4:** Hourly purge of used/expired password reset tokens on the export cleanup schedule.
+- **I-5:** Restore staging `.hfb` deleted after import jobs; successful restore warns to reconnect Google Drive.
+- **I-6:** Drive `folderId` validated before API `q` interpolation.
+- **UX-166:** Shared `formatUsd` for comma-separated dollar display in payslips, dashboard, import reconciliation, and related views.
+- **UX-167:** `CurrencyInput` cash-register dollar fields on net worth, settings, budget, payslip manual, and manual transaction entry.
+
+Tracked in `docs/CHANGE_HISTORY.md` and `docs/V3_PLAN.md`.
+
+---
+
+## Forest Studio UI polish (delivered CR-174, 2026-05-10)
+
+Shipped as a **non-functional** visual pass: extended `--fs-*` tokens, terracotta instead of pure red for money-negative / over-budget (red kept for delete/errors), earthy Recharts fills, sidebar section labels **Daily / Reports / Setup**, warm-cream active link state replacing mint teal on chrome + guest landing. Tracked in `docs/CHANGE_HISTORY.md` **CR-174 / UX-174**.
+
+---
+
+## Forest Studio prompt #2 (delivered CR-175, 2026-05-11)
+
+Follow-up UX pass: dashboard resolution badges (icons, no yellow), application-wide positive green text routed to forest tones, informational yellow → `fsGold`, collapsed sidebar without HF/brand row, Home spending card changed from pie chart to ranked horizontal bars (`--color-track`). **CR-175 / UX-175** in `docs/CHANGE_HISTORY.md`.
+
+---
+
+## Forest Studio Phase F — layout + typography (delivered CR-176, 2026-05-11)
+
+Authed app **main** content column max-width **1500px** (centered); **Inter Tight** for headings and bumped **`.kpi-value`** sizing; Mantine theme `headings` block. Documented as **CR-176 / UX-176** in `docs/CHANGE_HISTORY.md`.
+
+---
+
+## Transaction Aggregation Strip (CR-177) — delivered 2026-05-11
+
+**Status:** Shipped on Transactions (initial CR-177 slices + **FIX-177** corrective pass). Audit trail: `docs/CHANGE_HISTORY.md` **CR-177-a–d**, **FIX-177**; API: `docs/API_LEDGER.md`, `openapi/openapi.yaml` (`GET /transactions/aggregate`).
+
+### Background (unchanged intent)
+The retired Reports page had arbitrary filter + aggregate; Home only shows top categories for the current month. CR-177 surfaces full-filter-set totals on **Transactions** without a separate reports route.
+
+### Pagination + backend (locked)
+Transactions uses true server-side pagination; the client never holds the full filtered set. **`GET /transactions/aggregate`** shares list filter params (no `limit`/`offset`), returns headline totals plus capped breakdowns (`byCategory`, `byMerchant`, `byAccount`, `byMonth`, `dateFirst`, `dateLast`). Headline **inflows/outflows** use signed `amount` (positive credits, debit magnitude for outflows), aligned with cash summary — not raw direction-only sums on signed debits.
+
+### Multi-select filters (shipped)
+- **Category + account:** repeated `categoryIds` / `accountIds`; legacy singular params still work; single parent `categoryId` still expands children server-side.
+- **Belongs-to:** repeated **`belongsTo`** (`household` and/or person profile UUIDs). Backend `belongsTo` takes precedence over legacy `ownerScope` / `ownerPersonProfileId(s)`; mixed household + person IDs use OR semantics. On **Transactions**, filter, row editor, and manual-entry pickers share raw UUID values (`household` or profile id); **`person:<uuid>`** remains on other surfaces (Net Worth, payslips, import binding, Settings).
+- **`HierarchicalSearchPicker`:** `multiSelect` gated; other pages stay single-select.
+
+### Picker interaction (corrective pass — locked 2026-05-11)
+- Left-pane parent click toggles **parent selectable value + all children**; menu stays open.
+- **No** right-pane “(direct)” row; **no** Mantine `Checkbox` in the menu — inline **✓** + `hs-picker__child--active`.
+- Parent count chip when any child/parent value under that parent is selected; trigger shows one/two labels or `N <categories|accounts|selections>` on Transactions belongs-to filter (active-filter chip uses `formatActiveBelongsToSummary` when household and members are mixed).
+
+### Summary strip UX (shipped)
+`TransactionAggregateSummary` above the table: collapsible **Summary (N transactions)** header; headline **Net / Inflows / Outflows / Avg / Date span** (no duplicate Count cell); plain `$` on inflows/outflows; `title` tooltips on labels; context row (category/account/month counts when `count > 1`); breakdown tabs from one aggregate response (no refetch on tab change); **By month** tab when **>1** month in data, **last 6** months shown with cap notice. Strip mounts for **server-backed** filters only (`recurringOnly` remains client-side on the current page).
+
+### Out of scope for CR-177
+- Saved aggregation views / "save this report"
+- Sparklines per category
+- Year-over-year compare
+- Export to CSV
+
+---
+
+## Record cash payments (manual ledger entry)
+
+**Status:** Queued — groom before implementation.
+
+### The problem
+Manual transaction entry requires choosing a **financial account**. Cash spent or received outside linked bank/card accounts has no natural account row today, so users cannot record cash the same way as imported ledger activity.
+
+### Open design directions (pick during grooming)
+- **Placeholder cash account:** one household-level `financial_account` (e.g. institution “Cash”, type aligned with wallet / petty cash) used for all manual cash entries.
+- **First-class cash type:** extend account enrichment (F-1) with an explicit **cash** institution/type path so cash can coexist with other accounts without abusing checking/savings labels.
+- **Reuse “more accounts” work:** if multi-account / institution UX expands, fold cash into that model instead of a one-off.
+
+### Grooming questions
+- One shared household cash wallet vs per-person cash accounts.
+- Net worth / cash-summary treatment (liquid asset vs out-of-band).
+- Whether manual cash should default category, belongs-to, or memo patterns.
+
+**No code yet** — planning record only.
+
+---
+
+## Settings — Add custom institution uses browser prompt
+
+**Status:** Queued bug — straightforward UX alignment; implement when prioritized.
+
+### The problem
+**Settings → Accounts → Institutions → Add institution** calls `window.prompt` for the institution name (`SettingsPage.tsx`). That is an outlier: the rest of the app uses in-app modals, Mantine forms, and `ConfirmDialog`-style flows.
+
+### Expected direction
+Replace the prompt with the same custom modal / inline form pattern used elsewhere on Settings (and related account flows). No product behavior change beyond input UX.
+
+**Files (likely):** `frontend/src/pages/SettingsPage.tsx`
+
+---
+
 ## Personal Loan Tracking — Informal Lending to Friends/Family
 
 ### The problem
@@ -202,35 +298,19 @@ This gives the LLM accurate lifestyle spending to benchmark, separate tax contex
 - Split the flow totals into lifestyle vs non-lifestyle
 - No schema changes needed — category names are the signal
 
-### Grooming note — "Income > Reimbursements" category and the shared-expense netting pattern
+### ✓ RESOLVED (I-3, 2026-05-14) — Category taxonomy and rule audit
 
-**Context from v2 live onboarding (2026-05-08):**
+**Decision — `Income > Reimbursements` stays under Income.** Employer per diems and FSA reimbursements are genuine cash-positive inflows for this household; treating them as income is correct. No structural rename.
 
-User pays the full family cell phone bill, then family members Zelle their share back. The natural categorization question: where do those Zelle credits go?
+**Decision — Zelle rule removed.** Too broad to classify safely; manual resolution per transaction is the right approach for P2P payments. Transfer detection pairs spouse payments automatically once both accounts are imported.
 
-**Two valid approaches:**
+**Decision — Spouse P2P before both accounts are imported:** Mark inbound spouse payments as `Income > Reimbursements` (not Transfer In). Transfer In implies a paired out-transfer, which doesn't exist until the spouse account is imported. Reimbursements-as-income gives an honest monthly cash flow picture. Once spouse's account is imported, transfer detection retroactively pairs the transactions (category is irrelevant to pairing — only amount, date, different accounts, and `transfer_group_id IS NULL` matter).
 
-| Approach | Debit | Credits | Net in report |
-|---|---|---|---|
-| **Netting** (user's current approach) | `Utilities > Mobile Phone` | `Utilities > Mobile Phone` | Net = user's true cost ✓ |
-| **Split** | `Utilities > Mobile Phone` | `Income > Reimbursements` | Full cost in Utilities + recovery in Reimbursements |
-
-Netting is pragmatically correct for shared recurring bills. The app should not break it.
-
-**The "Income > Reimbursements" naming problem:**
-The category name implies these are income, but they are not — they are `money_return` in the flow taxonomy (recovery of a prior outflow, not new money). A blanket rule "Zelle incoming = Reimbursements" was created in the default rules and has been disabled by the user because it is too broad. Zelle credits can be:
-- Shared expense recovery (cell plan, dinner, trip)
-- Personal loan repayment (friend paying back $500)
-- Rent from a tenant (actual income)
-- Selling something
-
-These are different flow classes and should not all land in the same bucket.
-
-**What to groom when working on categories:**
-1. Rename or clarify `Income > Reimbursements` — the word "Income" is misleading. Consider `Reimbursements & Recoveries` as a top-level category, or make "Reimbursements" a sibling of Income, not a child.
-2. Audit the default global rules — any rule that maps a payment method (Zelle, Venmo, PayPal, CashApp) to Reimbursements is too broad. Remove or narrow them.
-3. In the flow classification work: treat `Reimbursements` as `money_return`, not `true_income`. Same for personal loan repayments.
-4. The netting pattern (crediting a category to net out a shared expense) is valid and should be preserved — do not introduce changes that break it.
+**Delivered in I-3:**
+- Builtin rules corrected: gas stations → Fuel; parking/toll → Parking & Tolls
+- `APPLE` rule narrowed to `APPLE STORE` — fixed 40 Apple Pay miscategorizations where the bank-appended suffix `TXAPPLE PAY ENDING IN` was matching the broad `apple` pattern
+- Household rules master CSV fully synced with DB state + 12 new rules added
+- `Bonds` and `Rental Prop` added to bootstrap seed and categories fixture
 
 ---
 
@@ -303,10 +383,10 @@ This lets the LLM contextualise any anomalies rather than misinterpreting them a
 ## Payslip — Bank Deposit Matching Is Flaky; Needs Stored Pairing
 
 ### Current behaviour (CR-068, shipped 2026-04-10)
-`GET /payslips/:id` calls `findMatchedDeposits()` which queries `transaction_canonical` fresh on every request. No link is stored. The match is ephemeral and recomputed each time.
+`GET /payslips/:id` returns `confirmedDeposits` plus `suggestedDeposits` (suggestions empty when any confirmed link exists). `PUT`/`DELETE /payslips/:id/deposits/:canonicalId` mutate stored links (`payslip_deposit_match`).
 
 ### Why the card disappears entirely (no box at all)
-`findMatchedDeposits` returns `[]` immediately if `pay_date IS NULL` or `net_pay_current IS NULL` on the payslip row. When the frontend receives an empty array or no `matchedDeposits` field, it renders no card. Payslips where LLM extraction missed pay date or net pay will silently show nothing.
+`findMatchedDeposits` / empty **`suggestedDeposits`** when both `pay_date` and `pay_period_end` are null, or when `net_pay_current` is null, or when **`confirmedDeposits`** is non-empty. When the frontend receives empty `suggestedDeposits` and empty `confirmedDeposits`, it may show no deposit card until a later UI slice.
 
 ### Why the box shows but is empty (no match found)
 `pay_date` and `net_pay_current` are set but the query returns no rows. Known causes:
@@ -346,7 +426,7 @@ With the stored model: fixing the dynamic search logic (wider date window, loose
 - **Surface match confidence**: show to user why a candidate was suggested (date distance, amount delta) so they can judge edge cases
 
 ### Files to touch (when fixing)
-- `backend/src/modules/payslip/payslip.service.ts` — `findMatchedDeposits`, add `getConfirmedDeposit`
+- `backend/src/modules/payslip/payslip.service.ts` — `findMatchedDeposits`, `getConfirmedDeposits`, `addConfirmedDeposit`, `removeConfirmedDeposit`
 - `backend/db/migrations/` — add `matched_deposit_canonical_id` column
 - `backend/src/modules/payslip/payslip.routes.ts` — PATCH endpoint to confirm/unlink a match
 - `frontend/src/pages/PayslipDetailPage.tsx` — confirm/unlink UX on the bank deposit card
@@ -365,13 +445,44 @@ The cards read `data.items[0]` — the first item from the sorted payslip list. 
 
 This is correct behaviour. No change needed here.
 
-### Payslip backlog from prior sessions — to be dug through in v3
-There is existing backlog around payslip features (estimated tax calculations, enhanced payslip views, etc.) captured in prior planning docs and sessions. When v3 payslip work begins, pull from:
-- `docs/PAYSLIP_V1.md` — original feature spec, may have deferred items
-- Prior change history entries (search `docs/CHANGE_HISTORY.md` for payslip-related CRs)
-- Any other payslip-specific backlog docs
+### Payslip backlog — groomed 2026-05-14
 
-Do a full review of what was deferred before starting new payslip work in v3.
+#### Payslip-over-payslip (MoM) comparison
+Each payslip detail view and the payslip list should show delta indicators (↑ / ↓ / —) for key line items vs the prior payslip for the same person:
+- Net pay, gross pay, total taxes withheld, total pre-tax deductions
+- Display as absolute delta + direction badge (not percentage — the numbers are already in dollars)
+- "Prior payslip" = same person's immediately preceding `pay_period_end`, not necessarily same employer
+
+This is additive to the existing list/detail views. No schema change — all data is already in `payslip_snapshot`. Pure service + UI work.
+
+**Files:** `payslip.service.ts` (add `getPriorPayslip` lookup by person + pay_period_end DESC LIMIT 1 WHERE pay_period_end < current), `PayslipDetailPage.tsx` (delta badges), `PayslipsPage.tsx` (optional summary column).
+
+#### Estimated tax sufficiency — "Am I withholding enough?"
+Help the user answer: _Is what my employer is withholding enough to avoid an underpayment penalty at year end? How much should I be setting aside if my withholding falls short?_
+
+**The question this answers:** US federal safe harbour is 100% of prior-year tax liability (or 110% if AGI > $150k) OR 90% of current-year liability. Failing either triggers a penalty. Many W-2 earners don't realise they owe estimated quarterly payments on non-W-2 income (investment gains, freelance, rental income).
+
+**Inputs available from the app:**
+- Payslip YTD federal + state tax withheld (from `payslip_snapshot.tax_deductions_json`)
+- Gross YTD income from payslips (already extracted)
+- Household income logged in the ledger (other accounts, non-payslip sources)
+
+**Constraints / design notes:**
+- Actual tax liability calculation requires filing status, deductions, credits — not stored. We do not attempt to compute exact tax owed.
+- What we *can* do (without full tax modelling): show annualised withholding rate, flag if YTD effective rate looks dangerously low vs a configurable threshold (e.g. < 20% federal effective), and surface the raw YTD withheld + estimated annual projection so the user can sanity-check.
+- For households with non-W-2 income (visible in ledger), surface a callout: "You have $X in non-wage income this year — check whether estimated quarterly payments are needed."
+- Long-term: if the user enters prior-year total tax (a single Settings field), we can run the safe-harbour test automatically.
+
+**Dependency:** Requires reliable extraction of `federal_income_tax` and `state_income_tax` line items from `tax_deductions_json` — coverage depends on parser completeness (IBM and Deloitte parsers; check extraction quality before building the UI).
+
+**Priority:** P3 — useful, but dependent on parser reliability and multi-source income context. Build after F-5 (payslip deposit pairing) is shipped and parser line-item extraction is validated.
+
+**Files when ready:** `payslip.service.ts` (annualised projection query), new `PayslipTaxHealthCard` component, optional `Settings` field for prior-year total tax.
+
+#### Prior backlog sources (already reviewed 2026-05-14)
+- `docs/PAYSLIP_V1.md` — original feature spec; deferred items folded into above
+- `docs/CHANGE_HISTORY.md` — payslip CRs reviewed
+- Analytics integration (payroll deductions → savings rate) remains V4 backlog (see PAYSLIP_V1.md §3.3d)
 
 ---
 
@@ -644,85 +755,36 @@ See `reports.routes.ts` lines 99–194 and `balance-sheet.service.ts` `BalanceSh
 
 ---
 
-## Real Estate / Property Accounts — Scope & Equity Linkage
+## ~~Real Estate / Property Accounts — Scope & Equity Linkage~~ → Delivered (CR-169, 2026-05-10)
 
-### Scope (explicitly settled)
-**In scope**: onboard a property as an asset account, enter current market value manually, link it to an existing mortgage/loan account, display equity inline in the net worth table.
+**Delivered approach — simpler than originally planned (no `real_estate` account type):**
 
-**Out of scope (deferred indefinitely)**: rental income tracking, expense tracking, ROI calculation. The app is not a property management tool.
+The original design added a `real_estate` account type, which created an institution identity problem (properties have no bank). The implemented design instead attaches property data to the mortgage account via a dedicated `property` table.
 
-### How the math works (already correct)
-If you add a real estate account (asset, e.g. $1.2M) and a mortgage account (liability, e.g. $790K), the net worth calculation already gives you the right answer — assets − liabilities. No special logic needed. The linkage is purely a **display/UX feature**, not a calculation requirement.
+### What shipped (migration 0041)
+- `property` table: `address_line1`, `city`, `state`, `zip`, `country`, `property_use` (`primary`/`rental`/`vacation`), `api_provider`, `api_property_id`
+- `property_value_snapshot` table: time-series market values; `UNIQUE(property_id, as_of_date)`, upserts on same date
+- `financial_account.property_id FK → property(id)` — links a mortgage loan account to its property record
+- `financial_account.linked_account_id FK → financial_account(id)` — self-referential, wired for future use (HELOC→mortgage)
+- `mortgage` top-level type removed; all mortgages are now `type='loan'` with `sub_type='mortgage_primary|investment|vacation'`
+- Routes: `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
+- UI: `+ Property` / `Property` button on mortgage accounts in Settings; modal with address fields + market value (creates first snapshot)
 
-### What the linkage adds
-Without it: the net worth table shows property and mortgage as unrelated rows. Users have to mentally do `$1.2M − $790K = $410K equity`.
-
-With `linked_account_id` (mortgage → property):
+### What remains (F-2 display work — still needed)
+The data is stored. The net worth equity callout is not yet implemented:
 ```
 Assets
-  Primary Residence         $1,200,000
-    └─ Mortgage            -$790,000        ← indented under property
-    └─ Equity               $410,000        ← computed callout
+  Primary Residence         $1,200,000    ← from property_value_snapshot (latest)
+    └─ Mortgage            -$790,000      ← from account_balance_snapshot (loan account)
+    └─ Equity               $410,000      ← computed: property value − loan balance
 
 Liabilities
-  (mortgage excluded — already shown under its property)
+  (mortgage excluded from standalone list when linked to property)
 ```
-The mortgage is shown nested under its property in the asset section and excluded from the standalone liabilities list to avoid double-counting in the display. The underlying math (assets − liabilities) doesn't change — just the presentation.
+This requires updating `balance-sheet.service.ts` to join `property` + `property_value_snapshot` and `NetWorthPage.tsx` to render the grouped equity display.
 
-### Schema needed
-```sql
--- Already planned in account enrichment migration:
-linked_account_id TEXT REFERENCES financial_account(id) ON DELETE SET NULL
-
--- New type:
--- ALTER TABLE financial_account DROP CONSTRAINT financial_account_type_check;
--- ALTER TABLE financial_account ADD CONSTRAINT financial_account_type_check
---   CHECK (type IN ('checking','savings','credit_card','loan','mortgage',
---                   'investment','retirement','payslip','real_estate'));
-
--- property_use field (primary | rental | vacation):
-property_use TEXT CHECK (property_use IN ('primary', 'rental', 'vacation'))
-```
-
-### Onboarding flow in UI
-
-When user selects `type: Real Estate`, the account form changes:
-
-- **Institution name** field becomes a display label only — pre-filled with "Real Estate" or "House". No need to enter a bank name.
-- **Sub-type** (`property_use`) shown as a required toggle: `Primary` | `Rental` | `Vacation`.
-- **Structured address fields** appear (hidden for all other account types), collected as separate inputs:
-  - Street address
-  - City
-  - State
-  - ZIP code
-- **Link to mortgage/loan** — optional dropdown of existing loan/mortgage accounts in the household.
-- User enters initial market value as a manual balance snapshot at creation time.
-- Net worth table immediately shows equity callout if a mortgage is linked.
-
-### Address storage and API identifier mapping
-
-When the user saves the address, we do an **address lookup/validation call** against the chosen real estate API (RealtyAPI or similar). The API returns a canonical property identifier (a property ID or standardized address key unique to that listing in their system). We store:
-
-```sql
--- Additional columns on financial_account for real_estate type:
-property_address_json   TEXT   -- structured: { street, city, state, zip }
-property_api_provider   TEXT   -- e.g. 'realtyapi' | 'freewebapi'
-property_api_id         TEXT   -- canonical property ID from provider; used for subsequent valuation calls
-```
-
-The `property_api_id` is the key that makes monthly auto-updates cheap and reliable — no need to re-search by address each time, just hit the valuation endpoint with the stored ID.
-
-If address validation/API lookup fails (API down, property not found), fall back to storing the raw address and flagging as manual-only until resolved.
-
-### Balance updates — manual and automated
-
-**Manual**: market value entered as a balance snapshot at any time. User always has full control.
-
-**Automated**: monthly background job fetches latest valuation from the stored `property_api_id` and writes a new `account_balance_snapshot` row.
-
-Candidate APIs (both have generous free tiers, include address search + valuation endpoints):
-- https://www.realtyapi.io/
-- https://freewebapi.com/data-apis/real-estate-api/#free-real-estate-api-getting-started
+### Valuation API integration (deferred → D-2)
+`api_provider` and `api_property_id` columns exist. Manual entry covers the use case for V3. API integration (RealtyAPI / ATTOM / similar) deferred until real need arises.
 
 Implementation design:
 - **Cadence**: monthly. Values don't move meaningfully week to week.
@@ -986,5 +1048,47 @@ Store as a `monthly_report` table row — essentially a JSON blob of the month's
 **Post-V3.** Foundational reporting and flow classification must come first. This is long-term infrastructure that only matters at scale (2+ years of data). Note it now so the schema and report generation are designed with archival in mind from the start.
 
 ---
+
+## V4 Backlog — Items deferred from F-7/F-8 (2026-05-14)
+
+### Per-month investment contribution tracking (payslip + account delta)
+
+**Context:** F-7/F-8 ships investment portfolio balances (snapshots from `account_balance_snapshot`) to the LLM. Month-over-month balance changes reflect both contributions AND market movements — the LLM is instructed to account for this. What we can't compute today is how much of a portfolio change was due to new contributions vs. market returns.
+
+**What's needed:**
+- Wire payslip 401k/IRA/ESPP/HSA withholding amounts into the LLM context (requires payslip redesign)
+- Optionally compute account delta minus payslip withholdings as a "market return estimate"
+- Separate out employer contributions (match) from employee contributions where payslip data provides it
+
+**Why deferred:** Requires a payslip data redesign pass (better parsing + structured storage of individual deduction line items). Likely V4.
+
+---
+
+### Total savings rate + wealth-building rate formulas
+
+**Context:** F-7/F-8 ships `cashBufferRate` = (income − lifestyle − committed) / income. This is the liquid buffer rate — take-home after obligations. Two additional rates are defined but not yet computable:
+
+- **Total savings rate** = (take-home + payroll 401k + employer match) / gross. Requires reliable payslip deduction data.
+- **Wealth-building rate** = total investment contributions / take-home. Same dependency.
+
+**Why deferred:** Both require payslip wiring. Groom alongside the per-month investment contribution tracking item above. Likely V4 payslip redesign pass.
+
+---
+
+### "Exclude transaction" flag on individual transactions
+
+**Context:** Some transactions are one-off events that distort aggregations — a legal settlement credit, a large insurance reimbursement, a rare cash gift. There's currently no way to mark these as "include in ledger but exclude from cash flow calculations, AI insights, and budget actuals."
+
+**Proposed behavior:**
+- New `excluded` status (or a boolean flag) on `transaction_canonical`.
+- Excluded rows appear in the ledger with a visual indicator.
+- Excluded from: `flowBreakdown12m`, `topSpendCategories12m`, cash summary `aggregateForRange`, budget actuals queries.
+- NOT the same as `status = 'trashed'` which implies an error/duplicate.
+
+**Priority:** Low. The `Transfer In` pattern handles the main use case (spouse/family transfers). The exclude flag is a power-user escape hatch. Note: custom category classification already lets users route odd transactions to non-reporting categories (e.g. Transfer In).
+
+---
+
+*Last updated: 2026-05-14.*
 
 *Last updated: 2026-05-08. Discussion: v2 live onboarding session.*

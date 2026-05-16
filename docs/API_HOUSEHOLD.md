@@ -141,3 +141,116 @@ Creates login credentials for an existing member profile.
 **400:** invalid `memberId` or member missing email (`EMAIL_REQUIRED`)  
 **404:** member not found  
 **409:** `ALREADY_HAS_LOGIN` or `EMAIL_CONFLICT`
+
+---
+
+## Account enrichment fields (CR-169)
+
+These columns live on **`financial_account`** (see migration **`0041`**) and appear on **`GET /imports/accounts`** responses (`sub_type`, `memo`, `liquidity`, `linked_account_id`, `property_id`) and in **`GET /reports/balance-sheet`** asset rows (`liquidity` only on the balance-sheet DTO).
+
+| Field | Meaning |
+|--------|---------|
+| **`sub_type`** | Subtype key from the account type hierarchy (e.g. `mortgage_primary` under `loan`). |
+| **`memo`** | Free-text note; surfaced to AI insights context. |
+| **`liquidity`** | `liquid` \| `semi_liquid` \| `restricted` — auto-set by `defaultLiquidity()` from type+subtype at save unless the user overrides (nullable for liability types). |
+| **`linked_account_id`** | Self-referential UUID FK to another **`financial_account`** (future HELOC ↔ mortgage pairing, **D-5**). Read-only from the API today; not writable on **`POST/PATCH /imports/accounts`**. |
+| **`property_id`** | UUID FK to **`property`** on mortgage/loan accounts. Set only via **`POST /household/properties`** with **`accountId`** — not writable on account upsert. |
+
+**`POST/PATCH /imports/accounts`** writable enrichment: camelCase **`subType`**, **`memo`**, **`liquidity`** (plus existing account fields). **`property_id`** and **`linked_account_id`** appear on **`GET /imports/accounts`** as read-only columns when present.
+
+---
+
+## Property routes
+
+All routes require **`Authorization: Bearer <JWT>`**. Responses use camelCase for JSON property names.
+
+### `GET /household/properties`
+
+Returns every **`property`** row for the caller’s household, including **`latestValueUsd`** / **`latestValueAsOf`** from the most recent snapshot (any date).
+
+**200:**
+
+```json
+{
+  "properties": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "addressLine1": "123 Main St",
+      "city": "Austin",
+      "state": "TX",
+      "zip": "78701",
+      "country": "US",
+      "propertyUse": "primary",
+      "apiProvider": null,
+      "apiPropertyId": null,
+      "latestValueUsd": 450000,
+      "latestValueAsOf": "2026-01-01",
+      "createdAt": "2026-05-10T12:00:00.000Z",
+      "updatedAt": "2026-05-10T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+### `POST /household/properties`
+
+**Owner/admin only.** Creates a **`property`** and optionally links it to an existing mortgage **`financial_account`** when **`accountId`** is supplied (sets that account’s **`property_id`**).
+
+**Body (all fields optional):** `addressLine1`, `city`, `state`, `zip`, `propertyUse` (`primary` \| `rental` \| `vacation`), `accountId` (UUID of mortgage account), `initialValueUsd` (≥ 0), `initialValueAsOf` (`YYYY-MM-DD`, used with initial value).
+
+**201:** `{ "id": "<new property uuid>" }`
+
+**400** — Zod validation (`{ errors: [...] }`).
+
+**404** — `accountId` not found for household (`ACCOUNT_NOT_FOUND`).
+
+### `GET /household/properties/:propertyId`
+
+**200:** `{ "property": { ...PropertyRecord } }`
+
+**404** — property not in household.
+
+### `PATCH /household/properties/:propertyId`
+
+**Owner/admin only.** Updates address / use fields. **Body:** at least one of `addressLine1`, `city`, `state`, `zip`, `propertyUse`.
+
+**200:** `{ "updated": true }`
+
+**400** / **404** as usual.
+
+### `GET /household/properties/:propertyId/values`
+
+Lists all **`property_value_snapshot`** rows for the property, **ascending** by **`asOfDate`**.
+
+**200:**
+
+```json
+{
+  "snapshots": [
+    {
+      "id": "uuid",
+      "propertyId": "uuid",
+      "asOfDate": "2026-01-01",
+      "marketValueUsd": 450000,
+      "source": "manual",
+      "apiProvider": null,
+      "createdAt": "2026-05-10T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+**404** — property not found.
+
+### `POST /household/properties/:propertyId/values`
+
+**Owner/admin only.** Creates or **upserts** (same calendar **`asOfDate`**) a market value snapshot.
+
+**Body:** `marketValueUsd` (number, ≥ 0), `asOfDate` (`YYYY-MM-DD`), optional `source` (`manual` \| `api`, default `manual`).
+
+**201:** `{ "id": "<snapshot uuid>" }`
+
+**400** — validation or business rule (`INVALID_VALUE`).
+
+**404** — property not found.

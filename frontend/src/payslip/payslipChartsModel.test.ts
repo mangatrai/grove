@@ -35,7 +35,9 @@ const base = (): PayslipSnapshotDetail => ({
   employmentRate: null,
   employmentRateType: null,
   rawExtractJson: {},
-  createdAt: "2026-01-15T12:00:00.000Z"
+  createdAt: "2026-01-15T12:00:00.000Z",
+  confirmedDeposits: [],
+  suggestedDeposits: []
 });
 
 describe("payslipChartsModel", () => {

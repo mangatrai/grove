@@ -80,7 +80,10 @@ const fileBindingSchema = z.object({
 });
 
 const accountUpsertSchema = z.object({
-  type: z.enum(["checking", "savings", "credit_card", "loan", "mortgage", "investment", "retirement", "payslip"]),
+  type: z.enum(["checking", "savings", "credit_card", "loan", "investment", "retirement", "payslip", "health", "education", "cash"]),
+  subType: z.string().max(50).nullable().optional(),
+  memo: z.string().max(500).nullable().optional(),
+  liquidity: z.enum(["liquid", "semi_liquid", "restricted"]).nullable().optional(),
   institution: z.string().min(1).max(120),
   accountMask: z.union([z.string().max(20), z.null()]).optional(),
   ownerScope: z.enum(["household", "person"]).optional().default("household"),
@@ -389,6 +392,9 @@ importsRouter.post("/accounts", async (req: AuthenticatedRequest, res) => {
     householdId,
     ownerUserId: userId,
     type: parsed.data.type,
+    subType: parsed.data.subType ?? null,
+    memo: parsed.data.memo ?? null,
+    liquidity: parsed.data.liquidity ?? null,
     institution: parsed.data.institution,
     accountMask: parsed.data.accountMask ?? null,
     ownerScope,
@@ -462,6 +468,9 @@ importsRouter.patch("/accounts/:accountId", async (req: AuthenticatedRequest, re
     accountId: params.data.accountId,
     householdId,
     type: parsed.data.type,
+    subType: parsed.data.subType ?? null,
+    memo: parsed.data.memo ?? null,
+    liquidity: parsed.data.liquidity ?? null,
     institution: parsed.data.institution,
     accountMask: parsed.data.accountMask ?? null,
     ownerScope,

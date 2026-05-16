@@ -12,37 +12,24 @@
 
 ## P1 — Bugs & Correctness
 
-### B-1: Transfer ambiguity — confirm button missing after partial candidate dismissal
-When a resolution item has `creditCandidateIds` (plural array) and the user dismisses one, the surviving candidate never gets promoted to `creditId` (singular). Confirm button never appears; pair is unresolvable from the UI.
+### ~~B-1: Transfer ambiguity — confirm button missing after partial candidate dismissal~~ ✓ DELIVERED (FIX-168, 2026-05-10)
+Confirm button never appeared because it required `creditId` (singular) in reason JSON but ingest always wrote `creditCandidateIds` (plural array).
 
-**Three gaps:**
-- Gap 1: After dismissal of one candidate, update surviving item's reason JSON from array → singular `creditId`
-- Gap 2: Bulk confirm must handle single-entry `creditCandidateIds` as unambiguous; surface error for multi-entry instead of silently failing
-- Gap 3: Bulk confirm gives zero user feedback on failure — toast "Could not confirm X transfers" at minimum
-
-**Files:** `resolution.service.ts`, `canonical-ingest.service.ts`, resolution queue frontend page
+**Delivered approach (simpler than originally planned):** Replaced the broken `creditId`-in-JSON confirm path entirely. Ingest now creates resolution items for the **debit only** (not all candidates). `buildResolutionItemRow` live-queries candidate transactions and returns `transferCandidates[]`. UI presents a radio picker — user selects the correct credit, clicks "Confirm transfer pair". One confirm button per item regardless of candidate count. Bulk confirm removed (dead after this redesign). Legacy credit-side items handled gracefully (self-referential candidates filtered out).
 
 ---
 
-### B-2: Dismissed transfer items re-surface on every new import
-Dismissing "Not a transfer" only closes the resolution item. The canonical row has no memory of the decision. Next import re-detects the same pair and creates a new resolution item. User must re-dismiss on every import cycle.
+### ~~B-2: Dismissed transfer items re-surface on every new import~~ ✓ DELIVERED (FIX-168, 2026-05-10)
+Canonical row had no memory of the dismissal decision.
 
-**Fix:** Add `transfer_excluded BOOLEAN NOT NULL DEFAULT FALSE` to `transaction_canonical`. Set it on dismissal. Transfer detection skips rows where `transfer_excluded = TRUE`. Also add a ledger-level "re-include as transfer candidate" action for corrections.
-
-**DB change:** New migration for `transfer_excluded` column.
-
-**Files:** `canonical-ingest.service.ts`, `resolution.service.ts`, new migration
+**Delivered:** Migration 0040 adds `transfer_excluded BOOLEAN NOT NULL DEFAULT FALSE` to `transaction_canonical`. Dismiss path (`updateResolutionStatusForHousehold` + bulk) sets `transfer_excluded = TRUE` on the debit row. Ingest candidate query adds `AND NOT transfer_excluded`. Note: "re-include as transfer candidate" action not implemented (deferred — uncommon edge case).
 
 ---
 
-### B-3: Multi-day same-amount transfers create cross-match ambiguity
-Two $10k transfers on consecutive days each claim the same two credit candidates. Both produce `transfer_ambiguity` items with identical candidate arrays — even a working Confirm button can't resolve which debit pairs with which credit.
+### ~~B-3: Multi-day same-amount transfers create cross-match ambiguity~~ ✓ DELIVERED (FIX-168, 2026-05-10)
+Two same-amount transfers on consecutive days each claimed the same two credit candidates.
 
-**Fix:** Greedy closest-date pre-assignment pass during ingest. Score all (debit, credit) pairs by date proximity; greedily assign best pairs; remaining ambiguous items get singular `creditId` for one-click confirm. Keep detection window at ±3 days (ACH float). Output is single-candidate confirm, not silent auto-pair.
-
-Also implement: **"Dissolve transfer pair"** action in ledger (when `transfer_group_id IS NOT NULL`) — sets both legs back to `NULL`, re-opens as candidates. Safer than perfecting the algorithm.
-
-**Files:** `canonical-ingest.service.ts`
+**Delivered approach (simpler than originally planned):** No greedy algorithm. The debit-only resolution item model solves this naturally — each debit gets its own item with the full candidate list, and the radio picker lets the user assign the correct credit. First debit to confirm claims the credit; the other debit's item shows "no candidates" on next load. "Dissolve transfer pair" action not implemented (deferred).
 
 ---
 
@@ -73,62 +60,54 @@ Category picker still uses custom CSS. Group/sub-group alert uses custom class. 
 
 ---
 
-### B-7 (Security P1): AI insight cooldown — in-memory → DB-backed
+### ~~B-7 (Security P1): AI insight cooldown — in-memory → DB-backed~~ ✓ DELIVERED (FIX-164, 2026-05-09)
 Rate-limit `Map<householdId, timestamp>` resets on every process restart. Allows unbounded API cost on frequent restarts.
 
-**Fix:** Replace Map check with DB query: `SELECT created_at FROM insight_job WHERE household_id = ? ORDER BY created_at DESC LIMIT 1`. Return 429 if within 5 minutes. Also creates the foundation for a proper `insight_job` table (async insight status, history).
+**Fix:** `insight_job` table already existed. Replaced Map with a query for the most recent `created_at` for the household; remaining cooldown computed from that. No migration needed.
 
-**Files:** `backend/src/modules/insights/insights.routes.ts`, new migration for `insight_job` table
+**Files:** `backend/src/modules/insights/insights.routes.ts`
 
 ---
 
 ## P2 — High-Value Features
 
-### F-1: Account enrichment — memo, sub_type, liquidity
-Adds three nullable columns to `financial_account`:
-- `memo TEXT` — free-form note (fed into AI insights for account context)
-- `sub_type TEXT` — descriptive sub-classification (UI suggests per type: `401k`, `roth_ira`, `hsa`, `brokerage`, `529`, `able`, `hysa`, `crypto`, etc.)
-- `liquidity TEXT CHECK ('liquid','semi_liquid','restricted')` — behavioral tag; inferred by default from type, user-overridable
+### ~~F-1: Account enrichment — memo, sub_type, liquidity~~ ✓ DELIVERED (CR-169, 2026-05-10)
 
-Liquidity defaults: checking/savings → `liquid`; investment → `semi_liquid`; retirement/real_estate → `restricted`. HSA critical case: `investment + restricted`.
+**Delivered (expanded from original plan):**
+- `sub_type TEXT` — comprehensive two-level hierarchy (9 top-level types × up to 13 subtypes). New types added: `health` (HSA/FSA/HRA/ABLE) and `education` (529/Coverdell/UGMA-UTMA). `mortgage` top-level type removed — now `loan/mortgage_primary|investment|vacation`.
+- `memo TEXT` — free-form note fed to AI insights
+- `liquidity TEXT CHECK('liquid','semi_liquid','restricted')` — `defaultLiquidity()` auto-sets from type+subtype at save; user can override. Correct edge cases: savings/cd → semi_liquid; investment/stock_options → restricted; health/hsa → semi_liquid.
+- `linked_account_id TEXT FK → financial_account(id)` — self-referential, wired for future HELOC→mortgage pairing
+- `property_id TEXT FK → property(id)` — links mortgage accounts to property entity (see F-2)
+- **UI:** flat `Select` replaced with `HierarchicalSearchPicker` (type → subtype two-pane picker); memo `Textarea`; liquidity override `Select` (clearable, auto label when empty)
+- **Data migration:** existing `mortgage` rows → `type='loan', sub_type='mortgage_primary'`
+- `balance-sheet.service.ts` + `insight-prompt.service.ts` updated: `health`/`education` classified as assets; `mortgage` references removed
 
-**Also adds:** `linked_account_id TEXT FK → financial_account(id)` (mortgage → property pairing) and `property_use TEXT CHECK ('primary','rental','vacation')` for real_estate.
-
-**DB:** Single migration adding all enrichment columns.
-
-**UI:** Account create/edit form gains memo textarea, sub_type select (suggestions per type), liquidity override toggle.
-
-**Files:** New migration, `household.service.ts`, account-related routes, account form in frontend
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/imports/imports.routes.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/src/modules/insights/insight-prompt.service.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `frontend/src/pages/DashboardPageV2.tsx`
 
 ---
 
-### F-2: Real estate account type + home equity display
-Add `real_estate` to the `type` CHECK constraint. Onboarding flow: structured address fields, property_use toggle, link-to-mortgage dropdown, initial market value entry.
+### ~~F-2: Real estate account type + home equity display~~ ✓ DELIVERED (CR-169 structural + CR-171 display, 2026-05-10)
 
-Net worth table equity callout: when a mortgage has `linked_account_id` pointing to a real_estate account, show:
-```
-Primary Residence    $1,200,000
-  └─ Mortgage       -$790,000
-  └─ Equity          $410,000
-```
-Mortgage excluded from standalone liabilities to avoid double-counting in display (math unchanged).
+**Delivered approach (simpler than originally planned — no `real_estate` account type):**
 
-**Optional (store the intent, implement later):** Monthly auto-valuation from RealtyAPI/FreeWebAPI. Requires `property_api_provider` + `property_api_id` columns and `REALTY_API_KEY` env var. Degrades gracefully to manual if absent.
+Original plan added a `real_estate` account type, which created an institution identity problem (no bank = no natural institution). Revised design: property data lives on a dedicated `property` table linked to the mortgage account via FK. No separate asset account needed.
 
-**Files:** New migration (type constraint + real_estate columns), `household.service.ts`, `NetWorthPage.tsx`, account form
+- **`property` table:** `address_line1`, `city`, `state`, `zip`, `country`, `property_use` (`primary`/`rental`/`vacation`), `api_provider`, `api_property_id` (for future valuation API)
+- **`property_value_snapshot` table:** time-series market values — mirrors `account_balance_snapshot` pattern. Unique index on `(property_id, as_of_date)`. Upserts on same date rather than creating duplicates.
+- **Backend:** `property.service.ts` (new) — full CRUD + value snapshot CRUD. Routes at `GET/POST /household/properties`, `GET/PATCH /household/properties/:id`, `GET/POST /household/properties/:id/values`
+- **UI (CR-169):** mortgage accounts in Settings table show a `+ Property` / `Property` button opening a modal with address fields + market value entry. Value creates first snapshot in the time series.
+- **UI + API (CR-171):** `GET /reports/balance-sheet` includes `properties[]`, rolls property market values into `totals.assets` / `netWorth`, resolves linked loan balance for equity sub-text. Net worth page shows a **Real Estate** subsection with expand-on-click value history (Recharts) and inline edit for new snapshots.
+
+**Deferred:** Real estate auto-valuation API integration → **D-2**.
+
+**Files:** `backend/db/migrations/0041_v3_account_enrichment.sql`, `backend/src/modules/household/property.service.ts` (new), `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `backend/src/modules/reports/balance-sheet.service.ts`, `frontend/src/pages/NetWorthPage.tsx`
 
 ---
 
-### F-3: Net worth — liquidity breakdown
-Adds a liquidity tier summary beneath the net worth total:
-```
-Net Worth:     $XXX,XXX
-  Liquid:       $XX,XXX   (checking, savings)
-  Semi-liquid:  $XX,XXX   (brokerage — days to settle)
-  Restricted:   $XX,XXX   (retirement, HSA, 529, real estate)
-  Liabilities: -$XX,XXX
-```
-Computed from `liquidity` field on `financial_account` (F-1 prerequisite). Accounts with no `liquidity` set fall into an "Uncategorized" bucket to prompt tagging.
+### ~~F-3: Net worth — liquidity breakdown~~ ✓ DELIVERED (CR-171, 2026-05-10)
+
+Adds a liquidity tier summary on the net worth page (between KPI cards and trend chart): **Liquid**, **Semi-liquid**, **Restricted**, and **Uncategorized** (with link to Settings → Accounts). Computed from `liquidity` on each asset row returned by the balance sheet API; property market values are always counted as **restricted**. Shown when at least one asset has a non-null liquidity tag or any property has a market value.
 
 **Files:** `balance-sheet.service.ts`, `NetWorthPage.tsx`
 
@@ -143,24 +122,11 @@ Edge cases: 1-2 snapshots → flat line or placeholder; 0 snapshots → no expan
 
 ---
 
-### F-5: Payslip deposit matching — stored pairing + improved matching logic
-Current dynamic-only model loses the confirmed match on every load; flaky for edge cases (split deposits, late ACH, null pay_date).
+### ~~F-5: Payslip deposit matching — stored pairing + improved matching logic~~ ✓ Done (CR-185, 2026-05-14)
 
-**Hybrid model:**
-1. Dynamic candidates shown as suggestions (existing behavior)
-2. "Confirm" button on a candidate → writes `matched_deposit_canonical_id` on `payslip_snapshot` row
-3. Subsequent loads use stored match (no re-query); "Unlink" clears it
-4. Manual pick: search/select any transaction from ledger (handles split deposits)
+**Delivered:** `payslip_deposit_match` join table (1-to-N per payslip, supports split deposits across multiple transactions/accounts). `GET /payslips/:id` returns `confirmedDeposits` (join table) and `suggestedDeposits` (dynamic, only when confirmed is empty). `PUT /payslips/:id/deposits/:canonicalId` adds a confirmed link (idempotent). `DELETE /payslips/:id/deposits/:canonicalId` removes one. Dynamic search window expanded from ±3 to ±7 calendar days; `pay_period_end` fallback (±10 days); `tc.status = 'posted'` filter added; `dateDelta`/`amountDelta` confidence fields on every deposit row. UI: confirmed deposits show with Remove buttons; suggestions show with Confirm + confidence annotation; "Search ledger…" opens a modal for manual linking with multi-select support.
 
-**Matching improvements:**
-- Date window: ±5 business days instead of ±3 calendar days
-- Split deposit support: if no single match, look for same-day credits summing to net pay
-- `pay_date` null fallback: use `pay_period_end` ± wider window
-- Surface confidence to user (date distance, amount delta)
-
-**DB:** New migration adding `matched_deposit_canonical_id TEXT REFERENCES transaction_canonical(id) ON DELETE SET NULL` to `payslip_snapshot`.
-
-**Files:** `payslip.service.ts`, new migration, `payslip.routes.ts` (PATCH confirm/unlink), `PayslipDetailPage.tsx`
+**Files:** `backend/db/migrations/0045_f5_payslip_deposit_match.sql`, `payslip.service.ts`, `payslip.routes.ts`, `frontend/src/payslip/types.ts`, `frontend/src/pages/PayslipDetailPage.tsx`
 
 ---
 
@@ -169,62 +135,74 @@ The import session flow is already async and stateful. The 504 risk on IBM paysl
 
 ---
 
-### F-7: AI insights — fix transfer and flow pollution in spending data
-Two gaps in `insight-prompt.service.ts` make LLM spending figures unreliable:
-1. Transfer-categorized transactions without `transfer_group_id` pass the `IS NULL` filter and appear in topCategories
-2. Credit card payments (checking → credit card) double-count as both outflow and inflow
-
-**Fixes:**
-- Add `AND NOT (COALESCE(p.name, c.name) ILIKE '%transfer%')` filter to `topSpendCategories12m` and `flowTotals12m`
-- Filter Uncategorized from `topCategories` (move to separate `uncategorizedMonthlyAvg` field)
-- Add `dataNote` annotation to LLM prompt context explaining what was excluded
-
-**Bonus (flow classification):** Map top-level category names to flow classes (`true_income`, `lifestyle`, `wealth_building`, `tax`, `movement`). Split `avgMonthlyOutflow` into `lifestyleSpend`, `wealthBuilding`, `taxObligations`, `moneyMovements`. Annotate LLM prompt with separate fields. No schema change needed — category names are the signal. ⚠ Keep compute simple: lookup map at query time only.
-
-**Files:** `insight-prompt.service.ts`
+### ~~F-7: AI insights — fix transfer and flow pollution in spending data~~ ✓ Done
 
 ---
 
-### F-8: Money flow classification in reports (cash summary + budget)
-Extend flow classification (F-7) from AI insights to the app's own reports:
+### ~~F-10: Transaction aggregation strip (CR-177)~~ ✓ Done (2026-05-11; FIX-177 corrective pass same day)
+Live **Summary of filtered results** on Transactions: server-backed totals and breakdowns over the full filtered ledger (not the current page). Replaces the retired Reports page in context.
 
-**Cash Summary:** Split outflow into `lifestyleSpend` / `wealthBuilding` / `taxObligations` / `moneyMovements`. Compute savings rate on lifestyle only (not total outflow). Split inflow into `trueIncome` / `moneyReturns`.
+**Architecture:** True server-side pagination on the list; **`GET /transactions/aggregate`** mirrors list filters (no pagination). Headline money fields use signed `amount` (see `docs/API_LEDGER.md`).
 
-**Budget page:** Suppress budget progress bars for non-lifestyle categories. Show investment contributions, loans, taxes in a separate "Movements" section or hide from budget overage report.
+**Backend (shipped):** `categoryIds` / `accountIds` / `ownerPersonProfileIds` plus legacy singular params; **`belongsTo`** (`household` and/or profile UUIDs, precedence over legacy owner scope). Integration tests on aggregate auth, filters, merchant normalization, month buckets.
 
-**⚠ Groom before implementing:** 0.25 vCPU constraint. Solution must be a lookup map on category names at query time. No materialised views, no background jobs, no new tables. Design-review this item before writing code.
+**Frontend (shipped):** `HierarchicalSearchPicker` multi-select on Transactions (category, account, belongs-to); `TransactionAggregateSummary` strip; `useEffect` + `apiJson` fetch (not React Query). **FIX-177:** parent click selects parent value + children (no “direct” row, no Mantine checkbox in menu); strip headline without duplicate Count cell; plain `$` inflows/outflows; stat `title` tooltips; By month last 6 with cap notice; context stats row.
 
-**Files:** `cash-summary.service.ts`, `budget.service.ts`, `DashboardPageV2.tsx`, `BudgetPage.tsx`
+**Slices (reference):** CR-177-a–d + FIX-177 in `docs/CHANGE_HISTORY.md`.
+
+**Files:** `backend/src/modules/ledger/ledger.service.ts`, `ledger.routes.ts`, `backend/tests/app.test.ts`, `openapi/openapi.yaml`, `docs/API_LEDGER.md`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/components/TransactionAggregateSummary.tsx`
 
 ---
 
-### F-9: Date of birth — encrypted at rest, computed age
-`person_profile.age` is a manually-entered integer the user must update every year. Store encrypted DOB instead; compute age automatically.
+### ~~B-8: Settings — Add custom institution uses `window.prompt`~~ ✓ DELIVERED (FIX-B8, 2026-05-12)
+**Settings → Accounts → Institutions → Add institution** still uses a native browser prompt for the name. Rest of the app uses custom modals and Mantine forms.
 
-**Schema:** Add `date_of_birth_encrypted TEXT` to `person_profile`. Keep `age INTEGER` as nullable fallback for profiles without DOB. API never returns raw DOB — only `hasDob: boolean` and computed `age: number | null`.
+**Delivered:** Cursor replaced `window.prompt` with a Mantine modal. Follow-up fix: modal was rendering behind the `HierarchicalSearchPicker` dropdown portal (`zIndex: 1300`). Fixed by extending `HierarchicalSearchPicker`'s `footer` prop to accept a render function `(close: () => void) => ReactNode`; the "Add institution" button now calls `close()` before opening the modal, dismissing the picker overlay first.
 
-**Encryption:** AES-256-GCM, same pattern as `gdrive.service.ts`. Key derived from `JWT_SECRET` via `crypto.scryptSync`. Format: `base64(iv[12] + authTag[16] + ciphertext)`.
+**Files:** `frontend/src/components/HierarchicalSearchPicker.tsx`, `frontend/src/pages/SettingsPage.tsx`
 
-**UI:** Date picker in profile edit. Age field becomes read-only + auto-computed once DOB is set. Clear DOB returns to manual age input.
+---
 
-**Export:** DOB excluded from `.hfb` exports (PII encrypted with instance-specific key). Restore completion notice should say: "Date of birth for each person must be re-entered."
+### ~~F-11: Record cash payments (manual ledger entry)~~ ✓ DELIVERED (CR-183, 2026-05-12)
 
-**Files:** `household.service.ts`, `insight-prompt.service.ts`, new migration, profile settings UI
+**Delivered:** New `cash` account type — reuses the existing account + manual ledger entry + `account_balance_snapshot` stack.
+- `"Cash & Wallet"` built into the institution catalog (no custom institution needed)
+- `type='cash'` → `defaultLiquidity='liquid'`; `accountSide='asset'` → appears on net worth balance sheet
+- AI insights rolls cash into `checkingSavingsTotal`
+- Flow: Settings → Add account → Institution: "Cash & Wallet" → Type: Cash → set initial balance → record payments as manual debit transactions
+
+**Files:** `backend/db/migrations/0043_cash_account_type.sql`, `imports.routes.ts`, `import-file-binding.service.ts`, `balance-sheet.service.ts`, `insight-prompt.service.ts`, `institution-catalog.ts` (both), `SettingsPage.tsx`
+
+---
+
+### ~~F-8: Money flow classification in reports (cash summary + budget)~~ ✓ Done
+
+---
+
+### ~~F-9: Date of birth — encrypted at rest, computed age~~ ✓ Done (CR-173, 2026-05-10)
+`person_profile.age` was a manually-entered integer the user had to update every year. DOB is now stored encrypted and age is computed on read.
+
+**Schema:** Migration **0042** adds `date_of_birth_encrypted TEXT` to `person_profile`. The existing `age INTEGER` column stays as a fallback for profiles without DOB. Own-profile responses (`GET/PATCH /household/profile`) return decrypted `dateOfBirth`; member-list/detail responses return only `hasDob: boolean` and computed `age: number | null`.
+
+**Encryption:** AES-256-GCM in **`backend/src/modules/household/dob-crypto.ts`**. Key = `SHA-256("household-finance:dob:" + JWT_SECRET)` — same derivation pattern as `gdrive.service.ts` token encryption. Format: `base64(iv[12] || authTag[16] || ciphertext)`. `decryptDob` returns `null` on any failure.
+
+**UI:** **`SettingsPage.tsx`** profile tab swaps the age `NumberInput` for a DOB date picker. When DOB is set: date input + computed age display + "Clear DOB" button. When DOB is unset: date picker placeholder + manual age fallback input. Save sends `dateOfBirth` unconditionally; manual `age` is only sent when no DOB is set.
+
+**Export:** **`export-registry.ts`** has an `onExport` hook on the `person_profile` entry that strips `date_of_birth_encrypted` before `.hfb` export. The encryption key is instance-specific (depends on `JWT_SECRET`), so re-entering DOBs after a restore is required.
+
+**AI insights:** **`insight-prompt.service.ts`** decrypts DOB and computes effective age (DOB-first, manual fallback) for both household-level (head + spouse) and personal prompt input.
+
+**Files:** `backend/db/migrations/0042_person_profile_dob.sql` (new), `backend/src/modules/household/dob-crypto.ts` (new), `household.service.ts`, `household.routes.ts`, `insight-prompt.service.ts`, `export-registry.ts`, `SettingsPage.tsx`
 
 ---
 
 ## P3 — Useful Improvements
 
-### I-1: Personal loan tracker
-`loan_event` entity groups related lent/repaid transactions under a named event. Outstanding balance optionally surfaced as informal receivable on net worth.
+### ~~I-1: Personal loan tracker~~ ✓ DELIVERED (I-1, 2026-05-14)
 
-**Schema:** `loan_event` + `loan_event_transaction` join table (see V3_BACKLOG.md for full design).
+**Decision:** Full loan event tracker (schema + UI) scoped down. Category-based tracking is sufficient: both outgoing and incoming sides of informal lending are tagged `Loans > Personal` — they net out over time. No new schema or UI required.
 
-**Net worth integration:** Open loan events shown as "Informal Receivables" asset row (user-configurable include/exclude per event).
-
-**AI insights integration:** Transactions tagged to a loan event excluded from lifestyle spending totals; separate `informalLoans` block sent to LLM.
-
-**Priority note:** Category workaround (`Loans > Personal` out, `Income > Reimbursements` in) is viable for now. Build after F-8 flow classification is shipped.
+**Delivered:** AI insights system prompt updated (`llm-provider.service.ts`) to explain `Loans > Personal` = informal cash lending to friends/family, not discretionary spending or a bank obligation. Prevents the LLM from misreading a lend/repay cycle as a spending spike + income bump. `PROMPT_VERSION` bumped to `v1.2`.
 
 ---
 
@@ -240,39 +218,94 @@ Import session state machine already handles in-progress state; frontend polls s
 
 ---
 
-### I-3: Category / reimbursement taxonomy cleanup
-- Rename or restructure `Income > Reimbursements`: the "Income" parent is misleading. Consider top-level `Reimbursements & Recoveries` category, classified as `money_return` flow class (not `true_income`).
-- Audit global rules: remove/narrow any rule mapping payment methods (Zelle, Venmo, PayPal, CashApp) → Reimbursements. These are too broad.
-- Groom alongside F-8 (flow classification) — categories must align with flow class map.
+### ~~I-3: Category / reimbursement taxonomy cleanup~~ ✓ DELIVERED (I-3, 2026-05-14)
 
-**Files:** `backend/db/seeds/`, category service, potentially new migration to rename global builtin category
+**Decision:** No structural rename — `Income > Reimbursements` stays under Income. Employer per diems and FSA reimbursements are genuine cash-positive events; treating them as income-adjacent inflow is correct for this household. Zelle rule removed (too broad; manual resolution is cleaner for P2P).
 
----
+**Delivered:**
+- Builtin rules fixed: shell/exxon/chevron/bp → `Mobility > Fuel`; parking/toll → `Mobility > Parking & Tolls` (migration `0044_i3_rule_taxonomy_fix.sql` + seed)
+- Household rule master CSV (`fixtures/category-import/category-rules-house.csv`) fully audited and updated: `APPLE` → `APPLE STORE` (fixes 40 Apple Pay miscategorizations); `DIRECTPAY FULL BALANCE` consolidated to `any`; synced 6 rules that existed in DB but were missing from master file (FLEX PLAN, Rental Prop loan servicers); added 12 new rules (energy vendors, cruise lines, EV charging, AMC, DESI MANDI)
+- `Bonds` and `Rental Prop` custom categories added to bootstrap seed and `categories.csv` fixture
 
-### I-4: Security — password reset token cleanup
-`createPasswordResetToken` deletes *unused* tokens for user before insert. Used/expired tokens are never purged — slow table growth over time.
-
-**Fix:** Add periodic cleanup (inside `purgeExpiredExports` or separate cron):
-`DELETE FROM password_reset_token WHERE used_at IS NOT NULL OR expires_at < NOW()`
-
-**Files:** `auth.service.ts`
+**Files:** `backend/db/migrations/0044_i3_rule_taxonomy_fix.sql`, `backend/db/seeds/0001_bootstrap.sql`, `fixtures/category-import/category-rules-house.csv`, `fixtures/category-import/categories.csv`
 
 ---
 
-### I-5: Export/restore housekeeping
-Two small items from `EXPORT_IMPORT_BACKLOG.md`:
-- **Restore staging file not deleted:** Add `fs.unlink(storagePath)` in `finally` block of `runImportJob` after job completion/failure (mirrors `runBackupJob` which already does this).
-- **Restore completion UI:** Warn user that GDrive connection is lost after restore (expected — `household_gdrive_config` excluded from `.hfb`). Add notice to restore success message: "Settings → Data → Reconnect Google Drive."
+### ~~I-4: Security — password reset token cleanup~~ ✓ DELIVERED (I-4, 2026-05-12)
 
-**Files:** `import-household-bundle.service.ts`, restore success UI
+`purgeStalePasswordResetTokens` runs on the existing hourly export purge schedule.
+
+**Files:** `auth.service.ts`, `export-job.service.ts`
 
 ---
 
-### I-6: Drive query string escaping
-`folderId` interpolated directly into Drive API `q` parameter. DB-sourced so low exploitability, but add guard:
-`if (!/^[\w-]+$/.test(folderId)) throw new Error(...)`
+### ~~I-5: Export/restore housekeeping~~ ✓ DELIVERED (I-5, 2026-05-12)
+
+- Restore staging `.hfb` deleted in `runImportJob` `finally`.
+- Successful restore UI warns to reconnect Google Drive under Settings → Data → Backup.
+
+**Files:** `import-household-bundle.service.ts`, `BackupRestoreSection.tsx`
+
+---
+
+### ~~I-6: Drive query string escaping~~ ✓ DELIVERED (I-6, 2026-05-12)
+
+`listHfbFilesInFolder` validates `folderId` with `^[\w-]+$` before Drive `q` interpolation.
 
 **Files:** `gdrive-backup.service.ts`
+
+---
+
+### I-8: Playwright end-to-end test suite exploration
+The app has 400+ backend integration tests (Vitest + supertest) but no browser-level test coverage. UI bugs like the ones found in V3 (broken subcategory picker, delta cards, broken expand chart) would be caught earlier with E2E tests that drive a real browser.
+
+**Scope for exploration:**
+- Evaluate [Playwright](https://github.com/microsoft/playwright) (Microsoft, TypeScript-native, supports Chromium/Firefox/WebKit, built-in trace viewer)
+- Spike: auth flow, import session creation, ledger category assignment, net worth balance entry
+- Decision point: how to handle local Postgres setup (reuse Docker Compose) and whether to run in CI or locally only
+- Timebox to a spike — full coverage is a multi-sprint effort; the goal is proving out the framework and toolchain before committing
+
+**Why P3 (not deferred):** Reliability gap is visible in V3. Worth scheduling once P1/P2 are stable rather than post-V3.
+
+---
+
+### ~~UX-166: Consistent currency display — comma-separated thousands everywhere~~ ✓ DELIVERED (UX-166, 2026-05-12)
+
+**Delivered:** Shared `formatUsd` utility; dollar `toFixed(2)` display replaced in payslips, dashboard, import reconciliation, settings recurring anchor, and payslip chart/detail/manual views.
+
+**Files:** `frontend/src/utils/format.ts`, `PayslipsPage.tsx`, `DashboardPageV2.tsx`, `ImportWorkspacePage.tsx`, `SettingsPage.tsx`, `PayslipIncomeCharts.tsx`, `PayslipDetailPage.tsx`, `PayslipManualPage.tsx`
+
+---
+
+### ~~UX-167: Cash register input — decimal-first dollar entry~~ ✓ DELIVERED (UX-167, 2026-05-12)
+
+**Delivered:** `CurrencyInput` wrapper around `react-currency-input-field` (two fixed decimals, Mantine `Input.Wrapper`); wired into net worth balance, Settings dollar fields, budget amounts, payslip manual dollar fields, and manual transaction amount.
+
+**Files:** `frontend/src/components/CurrencyInput.tsx`, `NetWorthPage.tsx`, `SettingsPage.tsx`, `BudgetPage.tsx`, `PayslipManualPage.tsx`, `TransactionsPage.tsx`
+
+---
+
+### ~~UX-175: Forest Studio prompt #2 — dashboard badges, fsForest sweep, fsGold alerts, sidebar brand, ranked spending bars~~ ✓ DELIVERED (CR-175, 2026-05-11)
+
+**Delivered:** Dashboard resolution pills → gray + Tabler icons (no unicode); positive-status `c="green"` / non-banner greens → `fsForest` / CSS var; informational yellow alerts → `fsGold variant="light"` (member-remove data warning stays yellow); collapsed sidebar hides brand entirely; spending card → ranked horizontal bars + `--color-track`.
+
+**Files:** `DashboardPageV2.tsx`, `HomePage.tsx`, `ImportWorkspacePage.tsx`, `PayslipManualPage.tsx`, `PayslipDetailPage.tsx`, `SettingsPage.tsx`, `ResetPasswordPage.tsx`, `TransactionsPage.tsx`, `settings/BackupRestoreSection.tsx`, `AppSidebar.tsx`, `index.css`
+
+---
+
+### ~~UX-176: Forest Studio Phase F — authed shell width cap + Inter Tight typography~~ ✓ DELIVERED (CR-176, 2026-05-11)
+
+**Delivered:** Main column content capped at **1500px** centered under `app-shell-main` while sidebar/topbar layout unchanged; **Inter Tight** on Google Fonts + `--font-heading` for `h1`–`h4` / Mantine `Title` + larger `.kpi-value`; `theme.ts` `headings.sizes` aligned with global CSS.
+
+**Files:** `frontend/index.html`, `frontend/src/index.css`, `frontend/src/theme.ts`
+
+---
+
+### ~~UX-174: Forest Studio — design tokens, terracotta money semantics, grouped nav~~ ✓ DELIVERED (CR-174, 2026-05-10)
+
+**Delivered:** CSS `--fs-*` palette + `chartPalette.ts`; Mantine `fsForest` / `fsTerracotta` / `fsGold`; dashboard / net worth / budget / payslips / transactions badge colors updated; sidebar **Daily / Reports / Setup** groups; warm-cream active nav and topbar accents (replacing mint teal); removed `DashboardPage.tsx` shim in favor of direct `DashboardPageV2` import.
+
+**Files:** `frontend/src/index.css`, `frontend/src/theme.ts`, `frontend/src/theme/chartPalette.ts`, `frontend/src/layout/AppSidebar.tsx`, `HomeRoute.tsx`, `BudgetPage.tsx`, `NetWorthPage.tsx`, `DashboardPageV2.tsx`, `TransactionsPage.tsx`, `PayslipsPage.tsx`, `payslipChartsModel.ts`
 
 ---
 
@@ -295,15 +328,20 @@ Pre-compute and store `monthly_report` rows at month close. Raw data retention p
 
 ---
 
-### D-2: Real estate auto-valuation (market value API)
-Monthly background job fetches `account_balance_snapshot` from RealtyAPI / FreeWebAPI using stored `property_api_id`. Requires `REALTY_API_KEY` env var; degrades to manual if absent.
+### ~~D-2: Real estate auto-valuation (market value API)~~ ✓ DELIVERED (CR-187/CR-188/CR-189, 2026-05-15)
 
-**Why deferred:** Manual entry covers the use case for v3. API integration is nice-to-have; property values don't move meaningfully month-to-month.
+**Provider:** Redfin via RealtyAPI.io (free tier 250 req/month).
+**Backend:** `/properties/preview-valuation` + `/properties/:id/refresh-valuation` + monthly 28-day background scheduler + `ValuationDetail` JSON (AVM estimate+range, last sold, tax history, up to 6 comparable sales with prices/sqft/beds/baths).
+**Schema:** `property.api_listing_id`, `property.valuation_detail_json`, `property.valuation_fetched_at` (migration 0046).
+**Frontend (all 3 surfaces shipped):**
+- Settings property modal: "Retrieve/Update Redfin estimate" button (requires all 4 address fields); auto-fills market value; stores Redfin IDs + full `valuation_detail_json` on save.
+- Net Worth inline edit: refresh icon button (`IconRefresh` + hover tooltip) calls stored-ID endpoint, fills edit fields.
+**UX polish (CR-189):** Button gate (all 4 address fields required), correct Retrieve vs Update label based on whether value is already set, `valuation_detail_json` now written on property create (was only written on refresh).
 
 ---
 
-### D-3: Rental income tracking
-Link rent deposits to a rental property account; track expenses (HOA, maintenance), compute ROI. Significant feature thread — v4 candidate. Do not block F-2 (real estate account type) on this.
+### ~~D-3: Rental income tracking~~ — DROPPED
+App is not a rental property management tool. Removed from backlog permanently (2026-05-15).
 
 ---
 
@@ -312,8 +350,8 @@ Email as canonical identity; `user_household_membership` join table. Fully defer
 
 ---
 
-### D-5: HELOC modeling
-Home equity line of credit — hybrid liability. Tentative: `type: credit_card` + `linked_account_id → real_estate`. Needs more design thought before implementation.
+### ~~D-5: HELOC modeling~~ — DROPPED
+User does not have a HELOC. Schema hook already in place: `financial_account.linked_account_id` (added in F-1) supports future HELOC→mortgage pairing if ever needed. No code required beyond the existing column. Removed from active backlog (2026-05-15).
 
 ---
 
@@ -321,35 +359,44 @@ Home equity line of credit — hybrid liability. Tentative: `type: credit_card` 
 
 | ID | Title | Priority | Type | Prereqs |
 |---|---|---|---|---|
-| B-1 | Transfer confirm button missing after partial dismissal | P1 | Bug | — |
-| B-2 | Dismissed transfers re-surface on next import | P1 | Bug + DB | — |
-| B-3 | Multi-day same-amount transfer cross-match | P1 | Bug | — |
+| ~~B-1~~ | ~~Transfer confirm button missing after partial dismissal~~ | ✓ Done | Bug | — |
+| ~~B-2~~ | ~~Dismissed transfers re-surface on next import~~ | ✓ Done | Bug + DB | — |
+| ~~B-3~~ | ~~Multi-day same-amount transfer cross-match~~ | ✓ Done | Bug | — |
 | ~~B-4~~ | ~~Marcus PDF ACH deposits silently dropped~~ | ✓ Done | Bug | — |
 | ~~B-5~~ | ~~Import "Belongs To" not auto-set from account~~ | ✓ Done | Bug (FE only) | — |
 | ~~B-6~~ | ~~Transactions page: incomplete Mantine + broken subcategory picker~~ | ✓ Done | Bug + UX | — |
-| B-7 | AI insight cooldown: in-memory → DB-backed | P1 | Security | — |
-| F-1 | Account enrichment (memo, sub_type, liquidity, linked_account_id) | P2 | Feature | — |
-| F-2 | Real estate account type + home equity display | P2 | Feature | F-1 |
-| F-3 | Net worth liquidity breakdown | P2 | Feature | F-1 |
+| ~~B-7~~ | ~~AI insight cooldown: in-memory → DB-backed~~ | ✓ Done | Security | — |
+| ~~B-8~~ | ~~Settings: Add institution uses `window.prompt`~~ | ✓ Done | Bug + UX | — |
+| ~~F-1~~ | ~~Account enrichment (sub_type, memo, liquidity, linked_account_id, health/education types)~~ | ✓ Done | Feature | — |
+| ~~F-2~~ | ~~Real estate equity display + value history chart~~ | ✓ Done | Feature | F-1 |
+| ~~F-3~~ | ~~Net worth liquidity breakdown~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-4~~ | ~~Per-account balance history chart (FE only)~~ | ✓ Done | Feature | — |
-| F-5 | Payslip deposit matching: stored pairing + improved logic | P2 | Feature | — |
+| ~~F-5~~ | ~~Payslip deposit matching: stored pairing + improved logic~~ | ✓ Done | Feature | — |
+| ~~F-10~~ | ~~Transaction aggregation strip (CR-177 + FIX-177)~~ | ✓ Done | Feature | — |
+| ~~F-11~~ | ~~Record cash payments (manual ledger entry)~~ | ✓ Done | Feature | F-1 ✓ |
 | ~~F-6~~ | ~~Async payslip upload (fix 504 on OpenAI)~~ | → P3/I-2 | Reliability | — |
-| F-7 | AI insights: fix transfer/flow pollution | P2 | Feature | — |
-| F-8 | Money flow classification in reports | P2 | Feature | F-7 |
-| F-9 | Date of birth encrypted at rest, computed age | P2 | Feature + Security | — |
-| I-1 | Personal loan tracker | P3 | Feature | F-8 |
+| ~~F-7~~ | ~~AI insights: fix transfer/flow pollution~~ | ✓ Done | Feature | — |
+| ~~F-8~~ | ~~Money flow classification in reports~~ | ✓ Done | Feature | F-7 ✓ |
+| ~~F-9~~ | ~~Date of birth encrypted at rest, computed age~~ | ✓ Done | Feature + Security | — |
+| ~~I-1~~ | ~~Personal loan tracker~~ | ✓ Done 2026-05-14 | Prompt update | — |
 | I-2 | Async import parse + canonicalize | P3 | Reliability | — |
-| I-3 | Category / reimbursements taxonomy cleanup | P3 | Improvement | F-7/F-8 |
-| I-4 | Password reset token periodic cleanup | P3 | Maintenance | — |
-| I-5 | Export/restore housekeeping (staging file, GDrive warning) | P3 | Maintenance | — |
-| I-6 | Drive query string escaping | P3 | Security hygiene | — |
+| ~~I-3~~ | ~~Category / reimbursements taxonomy cleanup~~ | ~~P3~~ | ✓ Done 2026-05-14 | — |
+| ~~I-4~~ | ~~Password reset token periodic cleanup~~ | ✓ Done | Maintenance | — |
+| ~~I-5~~ | ~~Export/restore housekeeping (staging file, GDrive warning)~~ | ✓ Done | Maintenance | — |
+| ~~I-6~~ | ~~Drive query string escaping~~ | ✓ Done | Security hygiene | — |
+| ~~UX-166~~ | ~~Consistent currency display (comma thousands separator)~~ | ✓ Done | UX polish | — |
+| ~~UX-167~~ | ~~Cash register input for dollar amount fields~~ | ✓ Done | UX polish | UX-166 |
+| ~~UX-170~~ | ~~Grove branding — rename all email templates from "Household Finance"~~ | ✓ Done | Branding | — |
 | I-7 | Recurring payments: annual detection, prediction, per-tx exclusion | P3 | Enhancement | — |
+| I-8 | Playwright E2E test suite exploration (spike) | P3 | Testing | — |
+| PS-1 | Payslip MoM comparison: delta badges (net, gross, taxes, deductions vs prior payslip) | P3 | Feature | F-5 |
+| PS-2 | Estimated tax sufficiency: annualised withholding rate, safe-harbour flag, non-W2 income callout | P3 | Feature | F-5, parser line-item coverage |
 | D-1 | Data archival + pre-computed monthly reports | Deferred | Infrastructure | F-8 |
-| D-2 | Real estate auto-valuation (market value API) | Deferred | Enhancement | F-2 |
-| D-3 | Rental income tracking | Deferred | Feature | F-2 |
+| ~~D-2~~ | ~~Real estate auto-valuation (market value API)~~ | ✓ Done | Enhancement | F-2 |
+| ~~D-3~~ | ~~Rental income tracking~~ | ~~Deferred~~ → Dropped | Feature | F-2 |
 | D-4 | Multi-household | Deferred | Architecture | — |
-| D-5 | HELOC modeling | Deferred | Feature | F-2 |
+| ~~D-5~~ | ~~HELOC modeling~~ | ~~Deferred~~ → Dropped | Feature | F-2 |
 
 ---
 
-*Last updated: 2026-05-08. Compiled from all backlog sources at start of v3 planning.*
+*Last updated: 2026-05-15. **V3 complete.** All P1, P2, and actionable P3 items shipped. D-3 and D-5 permanently dropped. Active V4 planning in `docs/V4_PLAN.md`.*

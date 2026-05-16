@@ -19,8 +19,10 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { IconChevronDown, IconChevronRight, IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { apiJson, useAuthToken } from "../api";
+import { CurrencyInput } from "../components/CurrencyInput";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import type { PayslipLineItemSection, PayslipSnapshotDetail, ValidationWarning } from "../payslip/types";
+import { formatUsd } from "../utils/format";
 
 type EmployerRow = { id: string; displayName: string };
 type HouseholdMemberResponse = { id: string; fullName?: string; firstName?: string; lastName?: string };
@@ -48,6 +50,11 @@ function parseNum(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function currencyFieldValue(raw: string): number | undefined {
+  const parsed = parseNum(raw);
+  return parsed == null ? undefined : parsed;
+}
+
 function parseDate(raw: string): string | null {
   const t = raw.trim();
   return t === "" ? null : t;
@@ -55,7 +62,7 @@ function parseDate(raw: string): string | null {
 
 function fmtMoney(n: number | null): string {
   if (n == null) return "";
-  return `$${n.toFixed(2)}`;
+  return `$${formatUsd(n)}`;
 }
 
 function makeDraftId(): string {
@@ -394,28 +401,28 @@ export function PayslipManualPage() {
             <Table.Tbody>
               <Table.Tr>
                 <Table.Td><Text fw={500}>Gross pay</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={grossPayCurrent} onChange={(v) => setGrossPayCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Gross pay current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={grossPayYtd} onChange={(v) => setGrossPayYtd(String(v ?? ""))} placeholder="0.00" aria-label="Gross pay YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(grossPayCurrent)} onChange={(v) => setGrossPayCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Gross pay current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(grossPayYtd)} onChange={(v) => setGrossPayYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Gross pay YTD" /></Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text fw={500}>Pre-tax deductions</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={preTaxCurrent} onChange={(v) => setPreTaxCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Pre-tax deductions current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={preTaxYtd} onChange={(v) => setPreTaxYtd(String(v ?? ""))} placeholder="0.00" aria-label="Pre-tax deductions YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(preTaxCurrent)} onChange={(v) => setPreTaxCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Pre-tax deductions current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(preTaxYtd)} onChange={(v) => setPreTaxYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Pre-tax deductions YTD" /></Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text fw={500}>Employee taxes</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={employeeTaxesCurrent} onChange={(v) => setEmployeeTaxesCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Employee taxes current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={employeeTaxesYtd} onChange={(v) => setEmployeeTaxesYtd(String(v ?? ""))} placeholder="0.00" aria-label="Employee taxes YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(employeeTaxesCurrent)} onChange={(v) => setEmployeeTaxesCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Employee taxes current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(employeeTaxesYtd)} onChange={(v) => setEmployeeTaxesYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Employee taxes YTD" /></Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text fw={500}>Post-tax deductions</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={postTaxCurrent} onChange={(v) => setPostTaxCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Post-tax deductions current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={postTaxYtd} onChange={(v) => setPostTaxYtd(String(v ?? ""))} placeholder="0.00" aria-label="Post-tax deductions YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(postTaxCurrent)} onChange={(v) => setPostTaxCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Post-tax deductions current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(postTaxYtd)} onChange={(v) => setPostTaxYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Post-tax deductions YTD" /></Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text fw={500}>Net pay</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={netPayCurrent} onChange={(v) => setNetPayCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Net pay current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={netPayYtd} onChange={(v) => setNetPayYtd(String(v ?? ""))} placeholder="0.00" aria-label="Net pay YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(netPayCurrent)} onChange={(v) => setNetPayCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Net pay current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(netPayYtd)} onChange={(v) => setNetPayYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Net pay YTD" /></Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text c="dimmed" size="sm">Hours / days</Text></Table.Td>
@@ -424,13 +431,13 @@ export function PayslipManualPage() {
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text c="dimmed" size="sm">Taxable earnings</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={taxableEarningsCurrent} onChange={(v) => setTaxableEarningsCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Taxable earnings current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={taxableEarningsYtd} onChange={(v) => setTaxableEarningsYtd(String(v ?? ""))} placeholder="0.00" aria-label="Taxable earnings YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(taxableEarningsCurrent)} onChange={(v) => setTaxableEarningsCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Taxable earnings current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(taxableEarningsYtd)} onChange={(v) => setTaxableEarningsYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Taxable earnings YTD" /></Table.Td>
               </Table.Tr>
               <Table.Tr>
                 <Table.Td><Text c="dimmed" size="sm">Other information</Text></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={otherInformationCurrent} onChange={(v) => setOtherInformationCurrent(String(v ?? ""))} placeholder="0.00" aria-label="Other information current" /></Table.Td>
-                <Table.Td><NumberInput decimalScale={2} value={otherInformationYtd} onChange={(v) => setOtherInformationYtd(String(v ?? ""))} placeholder="0.00" aria-label="Other information YTD" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(otherInformationCurrent)} onChange={(v) => setOtherInformationCurrent(v == null ? "" : String(v))} placeholder="0.00" aria-label="Other information current" /></Table.Td>
+                <Table.Td><CurrencyInput value={currencyFieldValue(otherInformationYtd)} onChange={(v) => setOtherInformationYtd(v == null ? "" : String(v))} placeholder="0.00" aria-label="Other information YTD" /></Table.Td>
               </Table.Tr>
             </Table.Tbody>
           </Table>
@@ -442,7 +449,7 @@ export function PayslipManualPage() {
               <Text size="sm" fw={600} c={netColor}>{fmtMoney(impliedNet)}</Text>
               {statedNet != null && netDelta != null && netDelta > 0.01 ? (
                 <Text size="sm" c={netColor}>
-                  (stated net {fmtMoney(statedNet)}, diff ${netDelta.toFixed(2)})
+                  (stated net {fmtMoney(statedNet)}, diff {formatUsd(netDelta)})
                 </Text>
               ) : statedNet != null && netDelta != null && netDelta <= 0.01 ? (
                 <Text size="sm" c={netColor}>matches stated net</Text>
@@ -464,7 +471,7 @@ export function PayslipManualPage() {
                 Line items
               </Button>
               <Text size="sm" c="dimmed">optional - individual earnings and deduction rows</Text>
-              {draftLineItems.length > 0 ? <Text size="sm" c="green">({draftLineItems.length} added)</Text> : null}
+              {draftLineItems.length > 0 ? <Text size="sm" style={{ color: "var(--fs-forest)" }}>({draftLineItems.length} added)</Text> : null}
             </Group>
           </Group>
           {lineItemsOpen ? (
@@ -501,18 +508,16 @@ export function PayslipManualPage() {
                           />
                         </Table.Td>
                         <Table.Td>
-                          <NumberInput
-                            decimalScale={2}
-                            value={d.amountCurrent}
-                            onChange={(v) => updateLineItem(d.draftId, "amountCurrent", String(v ?? ""))}
+                          <CurrencyInput
+                            value={currencyFieldValue(d.amountCurrent)}
+                            onChange={(v) => updateLineItem(d.draftId, "amountCurrent", v == null ? "" : String(v))}
                             placeholder="0.00"
                           />
                         </Table.Td>
                         <Table.Td>
-                          <NumberInput
-                            decimalScale={2}
-                            value={d.amountYtd}
-                            onChange={(v) => updateLineItem(d.draftId, "amountYtd", String(v ?? ""))}
+                          <CurrencyInput
+                            value={currencyFieldValue(d.amountYtd)}
+                            onChange={(v) => updateLineItem(d.draftId, "amountYtd", v == null ? "" : String(v))}
                             placeholder="0.00"
                           />
                         </Table.Td>
@@ -573,10 +578,10 @@ export function PayslipManualPage() {
         <Paper withBorder p="lg">
           {submitError ? <Alert color="red" mb="sm">{submitError}</Alert> : null}
           {validationWarnings.length > 0 ? (
-            <Alert color="yellow" mb="sm">
+            <Alert color="fsGold" variant="light" mb="sm">
               <Stack gap={4}>
                 {validationWarnings.map((w, i) => (
-                  <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "yellow"}>
+                  <Text key={i} size="sm" c={w.code === "ARITHMETIC_IMBALANCE" ? "red" : "dimmed"}>
                     {w.message}
                   </Text>
                 ))}

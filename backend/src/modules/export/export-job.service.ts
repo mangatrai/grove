@@ -12,6 +12,7 @@ import { encryptBackup } from "./backup-crypto.js";
 import { queryAllExportTables } from "./export-household-bundle.service.js";
 import { renderExportReadyTemplate } from "../mailer/templates/export-ready.js";
 import { sendMail } from "../mailer/mailer.service.js";
+import { purgeStalePasswordResetTokens } from "../auth/auth.service.js";
 
 const EXPORTS_DIR = resolveDataPath("data/exports");
 const EXPORT_TTL_HOURS = 48;
@@ -237,6 +238,8 @@ export async function readExportFileIfReady(householdId: string, jobId: string):
  * older than EXPORT_TTL_HOURS. Safe to call repeatedly.
  */
 export async function purgeExpiredExports(): Promise<void> {
+  await purgeStalePasswordResetTokens();
+
   const expired = (await qAll(
     `SELECT id, storage_path FROM export_job
       WHERE status = 'complete'

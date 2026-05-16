@@ -153,16 +153,25 @@ resolutionRouter.post("/bulk-confirm-transfers", async (req: AuthenticatedReques
   res.status(200).json(out);
 });
 
+const confirmTransferSchema = z.object({
+  creditId: z.string().uuid()
+});
+
 /**
  * POST /resolution/:id/confirm-transfer
  * Confirm a single transfer_ambiguity item as a real transfer.
- * Reads debitId + creditId from the item's reason JSON, sets a shared transfer_group_id
- * on both canonical rows, and resolves all open transfer_ambiguity items for both legs.
- * Use PATCH /resolution/:id { status: "resolved" } to dismiss without pairing.
+ * Body: { creditId: string } — the user-selected credit transaction to pair with this debit.
+ * Sets a shared transfer_group_id on both rows and resolves all open transfer_ambiguity items
+ * for both legs. Use PATCH /resolution/:id { status: "resolved" } to dismiss without pairing.
  */
 resolutionRouter.post("/:id/confirm-transfer", async (req: AuthenticatedRequest, res) => {
+  const parsed = confirmTransferSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "creditId (UUID) is required", issues: parsed.error.issues });
+    return;
+  }
   const householdId = req.authUser!.householdId;
-  const out = await confirmTransferPairForHousehold(householdId, req.params.id);
+  const out = await confirmTransferPairForHousehold(householdId, req.params.id, parsed.data.creditId);
   if (!out.ok) {
     if (out.code === "NOT_FOUND") {
       res.status(404).json({ message: out.message, code: out.code });

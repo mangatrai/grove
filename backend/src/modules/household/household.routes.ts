@@ -19,6 +19,19 @@ import {
   patchHouseholdSettings,
   resetMemberPassword
 } from "./household.service.js";
+import {
+  addPropertyValueSnapshot,
+  createProperty,
+  getProperty,
+  listPropertiesForHousehold,
+  listPropertyValueSnapshots,
+  previewValuationByAddress,
+  refreshPropertyValuation,
+  updateProperty,
+  type PropertyUse
+} from "./property.service.js";
+import { isRealtyApiConfigured } from "./realty-api.service.js";
+import { qExec, qGet } from "../../db/query.js";
 
 export const householdRouter = Router();
 householdRouter.use(requireAuth);
@@ -90,6 +103,7 @@ const profilePatchSchema = z
     salaryDepositFinancialAccountId: z.union([z.string().uuid(), z.null()]).optional(),
     employers: z.array(employerInputSchema).max(20).optional(),
     age: z.union([z.number().int().min(1).max(129), z.null()]).optional(),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD").nullable().optional(),
     sex: z.enum(["male", "female", "nonbinary", "prefer_not_to_say"]).nullable().optional(),
     individualGrossIncomeUsd: z.union([z.number().min(0).max(100_000_000), z.null()]).optional(),
     riskTolerance: z.enum(["conservative", "moderate", "aggressive"]).nullable().optional(),
@@ -289,4 +303,245 @@ householdRouter.delete("/members/:memberId", requireRole(["owner", "admin"]), as
     return;
   }
   res.status(204).end();
+});
+
+// ─── Property routes ──────────────────────────────────────────────────────────
+
+const propertyBodySchema = z.object({
+  addressLine1: z.string().min(1).max(200).nullable().optional(),
+  city: z.string().min(1).max(100).nullable().optional(),
+  state: z.string().min(2).max(2).nullable().optional(),
+  zip: z.string().regex(/^\d{5}(-\d{4})?$/, "Zip must be 5 digits (or 5+4 with hyphen)").nullable().optional(),
+  propertyUse: z.enum(["primary", "rental", "vacation"]).nullable().optional(),
+  /** accountId to link to this property on creation */
+  accountId: z.string().uuid().optional(),
+  /** Initial market value snapshot (optional) */
+  initialValueUsd: z.number().finite().min(0).nullable().optional(),
+  initialValueAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  /** Redfin IDs pre-fetched by preview-valuation — skip re-lookup on save */
+  apiPropertyId: z.string().optional(),
+  apiListingId: z.string().nullable().optional(),
+  /** Full valuation detail JSON from preview-valuation — stored immediately on create */
+  valuationDetailJson: z.unknown().optional()
+});
+
+householdRouter.get("/properties", async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const properties = await listPropertiesForHousehold(householdId);
+  res.status(200).json({ properties });
+});
+
+householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const parsed = propertyBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+
+  if (parsed.data.accountId) {
+    const acct = await qGet<{ id: string }>(
+      `SELECT id FROM financial_account WHERE id = ? AND household_id = ?`,
+      parsed.data.accountId,
+      householdId
+    );
+    if (!acct) {
+      res.status(404).json({ message: "Financial account not found", code: "ACCOUNT_NOT_FOUND" });
+      return;
+    }
+  }
+
+  const { id } = await createProperty({
+    householdId,
+    addressLine1: parsed.data.addressLine1 ?? null,
+    city: parsed.data.city ?? null,
+    state: parsed.data.state ?? null,
+    zip: parsed.data.zip ?? null,
+    propertyUse: (parsed.data.propertyUse as PropertyUse | null | undefined) ?? null,
+    initialValueUsd: parsed.data.initialValueUsd ?? null,
+    initialValueAsOf: parsed.data.initialValueAsOf ?? null
+  });
+
+  // Store Redfin IDs + valuation detail returned from preview-valuation
+  if (parsed.data.apiPropertyId) {
+    const detailJson = parsed.data.valuationDetailJson != null
+      ? JSON.stringify(parsed.data.valuationDetailJson)
+      : null;
+    await qExec(
+      `UPDATE property
+          SET api_provider          = 'redfin',
+              api_property_id       = ?,
+              api_listing_id        = ?,
+              valuation_detail_json = ?::jsonb,
+              valuation_fetched_at  = CASE WHEN ? IS NOT NULL THEN NOW() ELSE valuation_fetched_at END,
+              updated_at            = NOW()
+        WHERE id = ?`,
+      parsed.data.apiPropertyId,
+      parsed.data.apiListingId ?? null,
+      detailJson,
+      detailJson,
+      id
+    );
+  }
+
+  if (parsed.data.accountId) {
+    await qExec(
+      `UPDATE financial_account SET property_id = ? WHERE id = ? AND household_id = ?`,
+      id,
+      parsed.data.accountId,
+      householdId
+    );
+  }
+
+  res.status(201).json({ id });
+});
+
+householdRouter.get("/properties/:propertyId", async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  res.status(200).json({ property });
+});
+
+const propertyPatchSchema = z.object({
+  addressLine1: z.string().max(200).nullable().optional(),
+  city: z.string().max(100).nullable().optional(),
+  state: z.string().max(100).nullable().optional(),
+  zip: z.string().max(20).nullable().optional(),
+  propertyUse: z.enum(["primary", "rental", "vacation"]).nullable().optional()
+}).refine((b) => Object.keys(b).length > 0, { message: "At least one field required" });
+
+householdRouter.patch("/properties/:propertyId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const parsed = propertyPatchSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await updateProperty(params.data.propertyId, householdId, {
+    addressLine1: parsed.data.addressLine1,
+    city: parsed.data.city,
+    state: parsed.data.state,
+    zip: parsed.data.zip,
+    propertyUse: parsed.data.propertyUse as PropertyUse | null | undefined
+  });
+  if (!out.ok) {
+    res.status(404).json({ message: "Property not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ updated: true });
+});
+
+const valueSnapshotSchema = z.object({
+  marketValueUsd: z.number().finite().min(0),
+  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  source: z.enum(["manual", "api"]).optional().default("manual")
+});
+
+householdRouter.get("/properties/:propertyId/values", async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const snapshots = await listPropertyValueSnapshots(params.data.propertyId, householdId);
+  res.status(200).json({ snapshots });
+});
+
+householdRouter.post("/properties/:propertyId/values", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const parsed = valueSnapshotSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await addPropertyValueSnapshot(params.data.propertyId, householdId, {
+    marketValueUsd: parsed.data.marketValueUsd,
+    asOfDate: parsed.data.asOfDate,
+    source: parsed.data.source
+  });
+  if (!out.ok) {
+    if (out.code === "NOT_FOUND") {
+      res.status(404).json({ message: "Property not found", code: out.code });
+      return;
+    }
+    res.status(400).json({ message: "Invalid value", code: out.code });
+    return;
+  }
+  res.status(201).json({ id: out.id });
+});
+
+// ─── Valuation API routes ─────────────────────────────────────────────────────
+
+/**
+ * POST /properties/preview-valuation
+ * Pre-save address lookup: calls Redfin, returns estimate + Redfin IDs.
+ * Does NOT create any DB record. Frontend passes returned IDs back on save.
+ */
+householdRouter.post("/properties/preview-valuation", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  if (!isRealtyApiConfigured()) {
+    res.status(503).json({ message: "Property valuation API not configured", code: "API_NOT_CONFIGURED" });
+    return;
+  }
+  const parsed = z.object({
+    address: z.string().min(5).max(300)
+  }).safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const result = await previewValuationByAddress(parsed.data.address);
+  if (!result.ok) {
+    const status = result.code === "API_NOT_CONFIGURED" ? 503 : 502;
+    res.status(status).json({ message: result.message, code: result.code });
+    return;
+  }
+  res.status(200).json({
+    estimate: result.estimate,
+    apiPropertyId: result.apiPropertyId,
+    apiListingId: result.apiListingId,
+    detail: result.detail
+  });
+});
+
+/**
+ * POST /properties/:propertyId/refresh-valuation
+ * On-demand or scheduler-triggered refresh for an existing saved property.
+ * Updates property_value_snapshot and valuation_detail_json.
+ */
+householdRouter.post("/properties/:propertyId/refresh-valuation", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const result = await refreshPropertyValuation(params.data.propertyId, householdId);
+  if (!result.ok) {
+    const statusMap: Record<string, number> = {
+      NOT_FOUND: 404, NO_ADDRESS: 422, API_NOT_CONFIGURED: 503, API_ERROR: 502
+    };
+    res.status(statusMap[result.code] ?? 500).json({ message: result.message, code: result.code });
+    return;
+  }
+  res.status(200).json({ estimate: result.estimate, fetchedAt: result.fetchedAt });
 });

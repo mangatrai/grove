@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { GroveCardLoader, GroveLoader } from "../components/GroveLoader";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconPencil, IconX } from "@tabler/icons-react";
 import {
   ActionIcon,
   Box,
   Button,
   Group,
-  NumberInput,
   Paper,
   Progress,
   Select,
@@ -18,6 +18,7 @@ import {
 } from "@mantine/core";
 
 import { apiJson, useAuthToken } from "../api";
+import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -210,23 +211,19 @@ function budgetCategoriesToGroups(
 
 function ProgressBar({ percent }: { percent: number }) {
   const clamped = Math.min(percent, 100);
-  const color = percent > 100 ? "red" : percent >= 80 ? "yellow" : "green";
+  const color = percent > 100 ? "fsTerracotta" : percent >= 80 ? "fsGold" : "fsForest";
   return <Progress value={clamped} color={color} size={8} radius="sm" />;
 }
 
 // ── Amount input ──────────────────────────────────────────────────────────────
 
 function AmountInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const parsed = parseFloat(value);
   return (
-    <NumberInput
-      value={parseFloat(value) || 0}
-      onChange={(v) => onChange(String(typeof v === "number" ? v : parseFloat(v as string) || 0))}
-      min={0}
-      step={1}
-      leftSection={<Text size="xs">$</Text>}
-      size="xs"
-      styles={{ input: { textAlign: "right" } }}
-      hideControls
+    <CurrencyInput
+      value={Number.isFinite(parsed) ? parsed : undefined}
+      onChange={(v) => onChange(v == null ? "" : String(v))}
+      placeholder="0.00"
     />
   );
 }
@@ -605,21 +602,21 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
     {
       label: "Spent",
       value: fmtUSD(summary.totalSpent),
-      textColor: summary.totalSpent > summary.totalBudgeted ? "var(--mantine-color-red-6)" : "var(--mantine-color-text)",
-      borderColor: summary.totalSpent > summary.totalBudgeted ? "var(--mantine-color-red-6)" : "var(--mantine-color-gray-4)"
+      textColor: summary.totalSpent > summary.totalBudgeted ? "var(--fs-terracotta)" : "var(--mantine-color-text)",
+      borderColor: summary.totalSpent > summary.totalBudgeted ? "var(--fs-terracotta)" : "var(--mantine-color-gray-4)"
     },
     {
       label: summary.remaining >= 0 ? "Remaining" : "Over budget",
       value: fmtUSD(Math.abs(summary.remaining)),
-      textColor: summary.remaining < 0 ? "var(--mantine-color-red-6)" : "var(--mantine-color-green-6)",
-      borderColor: summary.remaining < 0 ? "var(--mantine-color-red-6)" : "var(--mantine-color-green-6)"
+      textColor: summary.remaining < 0 ? "var(--fs-terracotta)" : "var(--fs-forest)",
+      borderColor: summary.remaining < 0 ? "var(--fs-terracotta)" : "var(--fs-forest)"
     }
   ];
 
   return (
     <Stack gap="md">
       {/* Summary KPI cards */}
-      <SimpleGrid cols={{ base: 1, sm: 3 }}>
+      <SimpleGrid cols={{ base: 1, xs: 2, sm: 3 }}>
         {kpiCards.map(({ label, value, textColor, borderColor }) => (
           <Paper key={label} p="md" withBorder radius="md" style={{ textAlign: "center", borderTop: `3px solid ${borderColor}` }}>
             <Text size="xs" c="dimmed" tt="uppercase" fw={500} mb={4} style={{ letterSpacing: "0.04em" }}>{label}</Text>
@@ -678,7 +675,11 @@ function ProgressView({ budget, onEdit }: { budget: BudgetResult; onEdit: () => 
                       <Text size="sm" c="dimmed">{fmtUSD(cat.budgeted)}</Text>
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }}>
-                      <Text size="sm" fw={600} c={isOver ? "red" : "green"}>
+                      <Text
+                        size="sm"
+                        fw={600}
+                        style={{ color: isOver ? "var(--fs-terracotta)" : "var(--fs-forest)" }}
+                      >
                         {isOver ? `-${fmtUSD(Math.abs(cat.remaining))}` : fmtUSD(cat.remaining)}
                       </Text>
                     </Table.Td>
@@ -825,7 +826,7 @@ export function BudgetPage() {
         </Group>
       </Group>
 
-      {loading && <Text c="dimmed">Loading…</Text>}
+      {loading && <GroveCardLoader label="Loading budget…" size="lg" speed="slow" />}
       {error && <Text c="red">{error}</Text>}
 
       {/* Setup: new budget for this month */}
@@ -877,7 +878,10 @@ export function BudgetPage() {
 
       {/* Waiting for suggestions */}
       {!loading && !error && budget !== null && !budget.exists && suggestions === null && (
-        <Text c="dimmed">Loading suggestions…</Text>
+        <Group gap="sm">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading suggestions…</Text>
+        </Group>
       )}
     </Stack>
   );

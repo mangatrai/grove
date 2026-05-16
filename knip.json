@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.mjs"],
+      "project": ["scripts/**/*.mjs"],
+      "ignoreDependencies": ["better-sqlite3", "dotenv"]
+    },
+    "backend": {
+      "entry": ["tests/**/*.test.js", "scripts/**/*.mjs"],
+      "project": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs"],
+      "vitest": true
+    },
+    "frontend": {
+      "project": ["src/**/*.{ts,tsx}"],
+      "vite": true,
+      "vitest": true
+    }
+  }
+}

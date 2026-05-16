@@ -36,6 +36,7 @@ import {
   type IncomeInferenceContext
 } from "../import/inferParserProfile";
 import { friendlyParserLabel, DISABLED_PROFILES } from "../import/profileLabels";
+import { formatUsd } from "../utils/format";
 
 const PAYSLIP_PARSER_IDS = new Set(["ibm_pay_contributions_pdf", "deloitte_payslip_pdf", "adp_payslip_pdf"]);
 const OFX_PARSER_ID = "ofx_transactions";
@@ -1364,7 +1365,7 @@ export function ImportWorkspacePage() {
           </Group>
         </Group>
         {error ? <Alert color="red" mt="xs">{error}</Alert> : null}
-        {message ? <Alert color="green" variant="light" mt="xs">{message}</Alert> : null}
+        {message ? <Alert color="fsForest" variant="light" mt="xs">{message}</Alert> : null}
       </Paper>
 
       {lastImportSummary ? (
@@ -1505,7 +1506,7 @@ export function ImportWorkspacePage() {
                       {friendlyParserLabel(profileForRow)} — not supported yet, file will not be imported
                     </Text>
                   ) : inferred && savedProfile && profilesEquivalent(inferred, savedProfile) ? (
-                    <Text size="sm" c="green" span>Ready: {friendlyParserLabel(inferred)}</Text>
+                    <Text size="sm" style={{ color: "var(--fs-forest)" }} span>Ready: {friendlyParserLabel(inferred)}</Text>
                   ) : savedProfile ? (
                     <Text size="sm" span>{friendlyParserLabel(savedProfile)}</Text>
                   ) : (
@@ -1555,7 +1556,7 @@ export function ImportWorkspacePage() {
                                 <Text size="xs" c="dimmed">
                                   {sug.acctIdLast4 ? `OFX account: ...${sug.acctIdLast4}` : "OFX"}
                                   {sug.normalizedAcctType ? ` · ${sug.normalizedAcctType}` : ""}
-                                  {sug.matchedAccountId ? <Text span size="xs" c="green"> ✓ matched</Text> : null}
+                                  {sug.matchedAccountId ? <Text span size="xs" style={{ color: "var(--fs-forest)" }}> ✓ matched</Text> : null}
                                 </Text>
                                 {sug.ledgerBalance !== null && sug.ledgerBalanceDate ? (
                                   <Text size="xs" c="dimmed">
@@ -1869,11 +1870,11 @@ export function ImportWorkspacePage() {
                       </Stack>
                       {row.reconciliation.available ? (
                         <Text size="xs" c="dimmed" mb="xs">
-                          Open: ${row.reconciliation.openingBalance?.toFixed(2) ?? "—"} · Net: $
-                          {row.reconciliation.netActivity?.toFixed(2) ?? "—"} · Expected close: $
-                          {row.reconciliation.expectedClosingBalance?.toFixed(2) ?? "—"} · Actual close: $
-                          {row.reconciliation.closingBalance?.toFixed(2) ?? "—"} · Variance: $
-                          {row.reconciliation.variance?.toFixed(2) ?? "—"}
+                          Open: ${row.reconciliation.openingBalance != null ? formatUsd(row.reconciliation.openingBalance) : "—"} · Net: $
+                          {row.reconciliation.netActivity != null ? formatUsd(row.reconciliation.netActivity) : "—"} · Expected close: $
+                          {row.reconciliation.expectedClosingBalance != null ? formatUsd(row.reconciliation.expectedClosingBalance) : "—"} · Actual close: $
+                          {row.reconciliation.closingBalance != null ? formatUsd(row.reconciliation.closingBalance) : "—"} · Variance: $
+                          {row.reconciliation.variance != null ? formatUsd(row.reconciliation.variance) : "—"}
                         </Text>
                       ) : (
                         <Text size="xs" c="dimmed" mb="xs">{row.reconciliation.note}</Text>

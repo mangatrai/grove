@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { GroveLoader } from "./GroveLoader";
 import { Link } from "react-router-dom";
 import {
   Accordion,
@@ -9,7 +10,6 @@ import {
   Box,
   Button,
   Group,
-  Loader,
   Modal,
   Paper,
   ScrollArea,
@@ -205,9 +205,15 @@ export function FinancialHealthCard() {
     setJobError(null);
     try {
       const res = await apiFetch("/insights/financial/refresh", { method: "POST" });
-      const body = (await res.json()) as { ok?: boolean; jobId?: string };
+      const body = (await res.json()) as { ok?: boolean; jobId?: string; code?: string; retryAfterMs?: number };
+      if (res.status === 429 || body.code === "RATE_LIMITED") {
+        const mins = body.retryAfterMs != null
+          ? Math.ceil(body.retryAfterMs / 60_000)
+          : 5;
+        throw new Error(`Analysis was refreshed recently — try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
+      }
       if (!res.ok || !body.jobId) {
-        throw new Error(`HTTP ${res.status}`);
+        throw new Error("Could not start analysis. Please try again.");
       }
       void pollJob(body.jobId);
     } catch (e: unknown) {
@@ -245,7 +251,7 @@ export function FinancialHealthCard() {
     return (
       <Paper component="section" withBorder p="md" radius="md">
         <Group gap="sm">
-          <Loader size="sm" />
+          <GroveLoader size="sm" color="muted" />
           <Text size="sm" c="dimmed">
             Loading financial health…
           </Text>
@@ -305,7 +311,7 @@ export function FinancialHealthCard() {
 
       {generating ? (
         <Group gap="sm" my="md">
-          <Loader size="sm" />
+          <GroveLoader size="sm" color="muted" />
           <Text size="sm" c="dimmed">
             Generating analysis… this may take up to 30 seconds
           </Text>
@@ -486,7 +492,7 @@ export function FinancialHealthCard() {
           <Stack gap="sm">
             {historyLoading ? (
               <Group gap="sm">
-                <Loader size="sm" />
+                <GroveLoader size="sm" color="muted" />
                 <Text size="sm" c="dimmed">Loading history…</Text>
               </Group>
             ) : null}

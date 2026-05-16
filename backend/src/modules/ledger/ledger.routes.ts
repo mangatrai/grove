@@ -7,6 +7,7 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
+  aggregateCanonicalTransactions,
   bulkHardDeleteTransactions,
   bulkReassignOwner,
   bulkRestoreTransactions,
@@ -36,7 +37,25 @@ const querySchema = z.object({
   sessionId: z.string().uuid().optional(),
   fileId: z.string().uuid().optional(),
   accountId: z.string().uuid().optional(),
+  accountIds: z
+    .union([z.string().uuid(), z.array(z.string().uuid())])
+    .optional()
+    .transform((v): string[] | undefined => {
+      if (v === undefined) return undefined;
+      const parts = (Array.isArray(v) ? v : [v]).filter(Boolean);
+      const uniq = [...new Set(parts)];
+      return uniq.length ? uniq : undefined;
+    }),
   categoryId: z.string().uuid().optional(),
+  categoryIds: z
+    .union([z.string().uuid(), z.array(z.string().uuid())])
+    .optional()
+    .transform((v): string[] | undefined => {
+      if (v === undefined) return undefined;
+      const parts = (Array.isArray(v) ? v : [v]).filter(Boolean);
+      const uniq = [...new Set(parts)];
+      return uniq.length ? uniq : undefined;
+    }),
   uncategorizedOnly: z
     .enum(["true", "false"])
     .optional()
@@ -68,11 +87,31 @@ const querySchema = z.object({
   dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   ownerScope: z.enum(["household", "person"]).optional(),
   ownerPersonProfileId: z.string().uuid().optional(),
+  ownerPersonProfileIds: z
+    .union([z.string().uuid(), z.array(z.string().uuid())])
+    .optional()
+    .transform((v): string[] | undefined => {
+      if (v === undefined) return undefined;
+      const parts = (Array.isArray(v) ? v : [v]).filter(Boolean);
+      const uniq = [...new Set(parts)];
+      return uniq.length ? uniq : undefined;
+    }),
+  belongsTo: z
+    .union([z.string(), z.array(z.string())])
+    .optional()
+    .transform((v): string[] | undefined => {
+      if (!v) return undefined;
+      const parts = (Array.isArray(v) ? v : [v]).filter(Boolean);
+      const uniq = [...new Set(parts)];
+      return uniq.length ? uniq : undefined;
+    }),
   trashOnly: z
     .enum(["true", "false"])
     .optional()
     .transform((v) => v === "true")
 });
+
+const aggregateQuerySchema = querySchema.omit({ limit: true, offset: true });
 
 const postManualSchema = z.object({
   accountId: z.string().uuid(),
@@ -108,20 +147,20 @@ async function filterOwnedTransactionIds(
 export const ledgerRouter = Router();
 ledgerRouter.use(requireAuth);
 
-ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
-  const parsed = querySchema.safeParse(req.query);
+ledgerRouter.get("/aggregate", async (req: AuthenticatedRequest, res) => {
+  const parsed = aggregateQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid query", issues: parsed.error.issues });
     return;
   }
 
   const {
-    limit,
-    offset,
     sessionId,
     fileId,
     accountId,
+    accountIds,
     categoryId,
+    categoryIds,
     uncategorizedOnly,
     needsReview,
     resolutionType,
@@ -132,12 +171,14 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     dateTo,
     ownerScope,
     ownerPersonProfileId,
+    ownerPersonProfileIds,
+    belongsTo,
     trashOnly
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
-  if (categoryId && uncategorizedOnly) {
-    res.status(400).json({ message: "Use categoryId or uncategorizedOnly, not both" });
+  if ((categoryId || (categoryIds?.length ?? 0) > 0) && uncategorizedOnly) {
+    res.status(400).json({ message: "Use categoryId/categoryIds or uncategorizedOnly, not both" });
     return;
   }
 
@@ -160,6 +201,7 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
 
   const filters: LedgerListFilters = {
     categoryId: categoryId ?? undefined,
+    categoryIds: categoryIds ?? undefined,
     uncategorizedOnly: uncategorizedOnly || undefined,
     needsReviewOnly: needsReview || undefined,
     resolutionTypes: resolutionType?.length ? resolutionType : undefined,
@@ -170,9 +212,108 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     dateTo: dateTo ?? undefined,
     fileId: fileId ?? undefined,
     accountId: accountId ?? undefined,
-    ownerScope: ownerScope ?? undefined,
-    ownerPersonProfileId: ownerPersonProfileId ?? undefined,
-    trashOnly: trashOnly || undefined
+    accountIds: accountIds ?? undefined,
+    trashOnly: trashOnly || undefined,
+    ...(belongsTo?.length
+      ? { belongsTo }
+      : {
+          ownerScope: ownerScope ?? undefined,
+          ownerPersonProfileId: ownerPersonProfileId ?? undefined,
+          ownerPersonProfileIds: ownerPersonProfileIds ?? undefined
+        })
+  };
+
+  if (sessionId) {
+    const session = await qGet(`SELECT 1 FROM import_session WHERE id = ? AND household_id = ?`, sessionId, householdId);
+    if (!session) {
+      res.status(404).json({ message: "Import session not found", code: "SESSION_NOT_FOUND" });
+      return;
+    }
+    const result = await aggregateCanonicalTransactions(householdId, filters, { importSessionId: sessionId });
+    res.status(200).json(result);
+    return;
+  }
+
+  const result = await aggregateCanonicalTransactions(householdId, filters);
+  res.status(200).json(result);
+});
+
+ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
+  const parsed = querySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid query", issues: parsed.error.issues });
+    return;
+  }
+
+  const {
+    limit,
+    offset,
+    sessionId,
+    fileId,
+    accountId,
+    accountIds,
+    categoryId,
+    categoryIds,
+    uncategorizedOnly,
+    needsReview,
+    resolutionType,
+    search,
+    amountMin,
+    amountMax,
+    dateFrom,
+    dateTo,
+    ownerScope,
+    ownerPersonProfileId,
+    ownerPersonProfileIds,
+    belongsTo,
+    trashOnly
+  } = parsed.data;
+  const householdId = req.authUser!.householdId;
+
+  if ((categoryId || (categoryIds?.length ?? 0) > 0) && uncategorizedOnly) {
+    res.status(400).json({ message: "Use categoryId/categoryIds or uncategorizedOnly, not both" });
+    return;
+  }
+
+  if (resolutionType?.length && !needsReview) {
+    res.status(400).json({ message: "resolutionType requires needsReview=true" });
+    return;
+  }
+
+  const allowedTypes = new Set<string>(LEDGER_RESOLUTION_TYPES);
+  if (resolutionType?.some((t) => !allowedTypes.has(t))) {
+    res.status(400).json({
+      message: "Invalid resolutionType",
+      allowed: [...LEDGER_RESOLUTION_TYPES]
+    });
+    return;
+  }
+
+  const amin = amountMin !== undefined && Number.isFinite(amountMin) ? amountMin : undefined;
+  const amax = amountMax !== undefined && Number.isFinite(amountMax) ? amountMax : undefined;
+
+  const filters: LedgerListFilters = {
+    categoryId: categoryId ?? undefined,
+    categoryIds: categoryIds ?? undefined,
+    uncategorizedOnly: uncategorizedOnly || undefined,
+    needsReviewOnly: needsReview || undefined,
+    resolutionTypes: resolutionType?.length ? resolutionType : undefined,
+    search: search?.trim() || undefined,
+    amountMin: amin,
+    amountMax: amax,
+    dateFrom: dateFrom ?? undefined,
+    dateTo: dateTo ?? undefined,
+    fileId: fileId ?? undefined,
+    accountId: accountId ?? undefined,
+    accountIds: accountIds ?? undefined,
+    trashOnly: trashOnly || undefined,
+    ...(belongsTo?.length
+      ? { belongsTo }
+      : {
+          ownerScope: ownerScope ?? undefined,
+          ownerPersonProfileId: ownerPersonProfileId ?? undefined,
+          ownerPersonProfileIds: ownerPersonProfileIds ?? undefined
+        })
   };
 
   if (sessionId) {

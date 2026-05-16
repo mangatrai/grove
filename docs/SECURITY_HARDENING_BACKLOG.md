@@ -11,6 +11,13 @@
 
 ---
 
+## Shipped (2026-05-12 — I-4, I-6)
+
+- **I-4:** Periodic purge of used/expired `password_reset_token` rows via `purgeStalePasswordResetTokens` on the existing hourly export cleanup schedule.
+- **I-6:** `folderId` validated with `^[\w-]+$` before Drive API `q` interpolation in `gdrive-backup.service.ts`.
+
+---
+
 ## Post-merge backlog
 
 ### HIGH
@@ -25,12 +32,6 @@
 
 ### MEDIUM
 
-**Password reset tokens: no periodic cleanup of used/expired rows**
-- **File:** `backend/src/modules/auth/auth.service.ts`
-- **Issue:** `createPasswordResetToken` deletes *unused* tokens for the user before inserting a new one. Used tokens (`used_at IS NOT NULL`) and expired tokens are never purged.
-- **Fix:** Add a periodic cleanup (e.g. inside `purgeExpiredExports` or a separate cron): `DELETE FROM password_reset_token WHERE used_at IS NOT NULL OR expires_at < NOW()`.
-- **Why it matters:** Slow table growth; cosmetic for single-user but worth fixing before adding more users.
-
 **Login accepts 8-char passwords; change/reset requires 12 + complexity**
 - **File:** `backend/src/modules/auth/auth.routes.ts`
 - **Issue:** Login body schema uses `.min(8)` but the `PASSWORD_STRENGTH_REGEX` enforces 12+ chars with complexity. Users who set passwords before the strength policy was introduced can still log in but can't change their password without meeting the stronger rules.
@@ -42,11 +43,6 @@
 ---
 
 ### LOW
-
-**Drive query strings: interpolated folder ID and label**
-- **File:** `backend/src/modules/export/gdrive-backup.service.ts` ~lines 115, 152
-- **Issue:** `folderId` and `label` are interpolated directly into Drive API query strings (`q` parameter). Drive doesn't support parameterized queries; the values are DB-sourced (not direct user input), so exploitability is negligible today. But `folderId` should be validated to be a plain alphanumeric/dash/underscore string before interpolation as a hygiene measure.
-- **Fix:** Add a guard: `if (!/^[\w-]+$/.test(folderId)) throw new Error(...)` before use in query strings.
 
 **Export TTL hours interpolated into SQL INTERVAL**
 - **File:** `backend/src/modules/export/export-job.service.ts` ~line 243

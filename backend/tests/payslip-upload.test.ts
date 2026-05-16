@@ -393,16 +393,17 @@ describe("GET /payslips/:id", () => {
     expect(one.body.lineItems.tax_deductions[0].name).toBe("Federal Withholding");
     expect(one.body.lineItems.post_tax_deductions).toEqual([]);
     expect(one.body.lineItems.other_information).toEqual([]);
-    // matchedDeposits is always present — empty array when no canonical credits match
-    expect(Array.isArray(one.body.matchedDeposits)).toBe(true);
+    // confirmedDeposits / suggestedDeposits are always present — suggested empty when confirmed non-empty
+    expect(Array.isArray(one.body.confirmedDeposits)).toBe(true);
+    expect(Array.isArray(one.body.suggestedDeposits)).toBe(true);
     // validationWarnings is always present
     expect(Array.isArray(one.body.validationWarnings)).toBe(true);
   });
 });
 
-// ─── matchedDeposits (CR-068) ─────────────────────────────────────────────────
+// ─── GET deposit matching + PUT/DELETE confirmed deposits (CR-068, CR-185) ─────
 
-describe("GET /payslips/:id — matchedDeposits", () => {
+describe("GET /payslips/:id — deposit matching", () => {
   const SEEDED_HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
   const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
 
@@ -415,7 +416,7 @@ describe("GET /payslips/:id — matchedDeposits", () => {
     return res.body.token as string;
   }
 
-  it("matchedDeposits finds a canonical credit deposit within ±3 days and 1% of net pay", async () => {
+  it("suggestedDeposits finds a credit deposit within ±7 days and 1% of net pay", async () => {
     const token = await loginToken();
 
     // The mock LLM always returns payDate="2026-01-15" and netPayCurrent=4000.
@@ -442,11 +443,22 @@ describe("GET /payslips/:id — matchedDeposits", () => {
         .get(`/payslips/${id}`)
         .set("authorization", `Bearer ${token}`);
       expect(one.status).toBe(200);
-      expect(Array.isArray(one.body.matchedDeposits)).toBe(true);
+      expect(Array.isArray(one.body.confirmedDeposits)).toBe(true);
+      expect(one.body.confirmedDeposits.length).toBe(0);
+      expect(Array.isArray(one.body.suggestedDeposits)).toBe(true);
 
-      // Our inserted transaction must appear in matchedDeposits
-      const match = (one.body.matchedDeposits as Array<{ id: string; direction: string; amount: number; txnDate: string; accountId: string; institution: string; accountType: string }>)
-        .find((d) => d.id === txnId);
+      // Our inserted transaction must appear in suggestedDeposits
+      const match = (
+        one.body.suggestedDeposits as Array<{
+          id: string;
+          direction: string;
+          amount: number;
+          txnDate: string;
+          accountId: string;
+          institution: string;
+          accountType: string;
+        }>
+      ).find((d) => d.id === txnId);
       expect(match).toBeDefined();
       expect(match!.direction).toBe("credit");
       expect(match!.amount).toBe(4000);
@@ -454,20 +466,22 @@ describe("GET /payslips/:id — matchedDeposits", () => {
       expect(match!.accountId).toBe(SEED_BOA_CHECKING);
       expect(match!.institution).toBeDefined();
       expect(match!.accountType).toBeDefined();
+      expect(match!.dateDelta).toBe(1);
+      expect(match!.amountDelta).toBe(0);
     } finally {
       await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
     }
   });
 
-  it("matchedDeposits excludes credits outside the ±3-day window", async () => {
+  it("suggestedDeposits excludes credits outside the ±7-day window", async () => {
     const token = await loginToken();
 
-    // Insert a credit transaction 5 days before pay date — outside the ±3-day window
+    // Insert a credit transaction 8 days before pay date — outside the ±7-day window (pay 2026-01-15)
     const txnId = crypto.randomUUID();
     await sqlStmt(
       `INSERT INTO transaction_canonical
          (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
-       VALUES (?, ?, ?, '2026-01-10', 4000, 'credit', 'OutOfWindow Deposit', 'posted', ?, CURRENT_TIMESTAMP)`
+       VALUES (?, ?, ?, '2026-01-07', 4000, 'credit', 'OutOfWindow Deposit', 'posted', ?, CURRENT_TIMESTAMP)`
     ).run(txnId, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `out-of-window-fp-${txnId}`);
 
     try {
@@ -485,13 +499,150 @@ describe("GET /payslips/:id — matchedDeposits", () => {
         .get(`/payslips/${id}`)
         .set("authorization", `Bearer ${token}`);
       expect(one.status).toBe(200);
-      expect(Array.isArray(one.body.matchedDeposits)).toBe(true);
+      expect(Array.isArray(one.body.confirmedDeposits)).toBe(true);
+      expect(Array.isArray(one.body.suggestedDeposits)).toBe(true);
 
-      // Our out-of-window transaction must NOT appear in matchedDeposits
-      const ids = (one.body.matchedDeposits as Array<{ id: string }>).map((d) => d.id);
+      // Our out-of-window transaction must NOT appear in suggestedDeposits
+      const ids = (one.body.suggestedDeposits as Array<{ id: string }>).map((d) => d.id);
       expect(ids).not.toContain(txnId);
     } finally {
       await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
+    }
+  });
+});
+
+describe("PUT/DELETE /payslips/:id/deposits/:canonicalId", () => {
+  const SEEDED_HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const SEED_BOA_CHECKING = "40000000-0000-0000-0000-000000000001";
+
+  async function loginToken(): Promise<string> {
+    const res = await request(app)
+      .post("/auth/login")
+      .send({ email: "owner@example.com", password: "ChangeMe123!" });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  it("PUT links a transaction as a confirmed deposit and GET returns it in confirmedDeposits", async () => {
+    const token = await loginToken();
+    const txnId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
+       VALUES (?, ?, ?, '2026-01-15', 4000, 'credit', 'Payroll ACH', 'posted', ?, CURRENT_TIMESTAMP)`
+    ).run(txnId, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `confirm-deposit-fp-${txnId}`);
+
+    const base = readFileSync(ibmFixture);
+    const buf = Buffer.concat([base, Buffer.from(`\nconfirm-deposit-${Date.now()}`)]);
+    const up = await request(app)
+      .post("/payslips/upload")
+      .set("authorization", `Bearer ${token}`)
+      .attach("file", buf, "confirm-deposit.pdf");
+    expect(up.status).toBe(201);
+    const payslipId = up.body.snapshot.id as string;
+
+    try {
+      const put = await request(app)
+        .put(`/payslips/${payslipId}/deposits/${txnId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(put.status).toBe(200);
+      expect(Array.isArray(put.body.confirmedDeposits)).toBe(true);
+      expect(put.body.confirmedDeposits).toHaveLength(1);
+      expect(put.body.confirmedDeposits[0].id).toBe(txnId);
+      expect(typeof put.body.confirmedDeposits[0].dateDelta).toBe("number");
+      expect(typeof put.body.confirmedDeposits[0].amountDelta).toBe("number");
+
+      const get = await request(app)
+        .get(`/payslips/${payslipId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(get.status).toBe(200);
+      expect(get.body.confirmedDeposits).toHaveLength(1);
+      expect(get.body.confirmedDeposits[0].id).toBe(txnId);
+      expect(get.body.suggestedDeposits).toHaveLength(0);
+
+      const put2 = await request(app)
+        .put(`/payslips/${payslipId}/deposits/${txnId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(put2.status).toBe(200);
+      expect(put2.body.confirmedDeposits).toHaveLength(1);
+
+      const del = await request(app)
+        .delete(`/payslips/${payslipId}/deposits/${txnId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(del.status).toBe(200);
+      expect(del.body.confirmedDeposits).toHaveLength(0);
+    } finally {
+      await sqlStmt(`DELETE FROM payslip_deposit_match WHERE transaction_canonical_id = ?`).run(txnId);
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id = ?`).run(txnId);
+    }
+  });
+
+  it("PUT returns 404 when the transaction belongs to a different household", async () => {
+    const token = await loginToken();
+    const fakeTxnId = crypto.randomUUID();
+
+    const up = await request(app)
+      .post("/payslips/upload")
+      .set("authorization", `Bearer ${token}`)
+      .attach(
+        "file",
+        Buffer.concat([readFileSync(ibmFixture), Buffer.from(`\ncross-hh-${Date.now()}`)]),
+        "cross-hh.pdf"
+      );
+    expect(up.status).toBe(201);
+    const payslipId = up.body.snapshot.id as string;
+
+    const put = await request(app)
+      .put(`/payslips/${payslipId}/deposits/${fakeTxnId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(put.status).toBe(404);
+  });
+
+  it("supports multiple confirmed deposits on the same payslip (split deposit)", async () => {
+    const token = await loginToken();
+    const txnId1 = crypto.randomUUID();
+    const txnId2 = crypto.randomUUID();
+
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
+       VALUES (?, ?, ?, '2026-01-15', 2500, 'credit', 'Split Deposit A', 'posted', ?, CURRENT_TIMESTAMP)`
+    ).run(txnId1, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `split-a-${txnId1}`);
+    await sqlStmt(
+      `INSERT INTO transaction_canonical
+         (id, household_id, account_id, txn_date, amount, direction, merchant, status, fingerprint, created_at)
+       VALUES (?, ?, ?, '2026-01-15', 1500, 'credit', 'Split Deposit B', 'posted', ?, CURRENT_TIMESTAMP)`
+    ).run(txnId2, SEEDED_HOUSEHOLD_ID, SEED_BOA_CHECKING, `split-b-${txnId2}`);
+
+    const buf = Buffer.concat([readFileSync(ibmFixture), Buffer.from(`\nsplit-${Date.now()}`)]);
+    const up = await request(app)
+      .post("/payslips/upload")
+      .set("authorization", `Bearer ${token}`)
+      .attach("file", buf, "split.pdf");
+    expect(up.status).toBe(201);
+    const payslipId = up.body.snapshot.id as string;
+
+    try {
+      await request(app)
+        .put(`/payslips/${payslipId}/deposits/${txnId1}`)
+        .set("authorization", `Bearer ${token}`);
+      const put2 = await request(app)
+        .put(`/payslips/${payslipId}/deposits/${txnId2}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(put2.status).toBe(200);
+      expect(put2.body.confirmedDeposits).toHaveLength(2);
+
+      const get = await request(app)
+        .get(`/payslips/${payslipId}`)
+        .set("authorization", `Bearer ${token}`);
+      expect(get.body.confirmedDeposits).toHaveLength(2);
+      expect(get.body.suggestedDeposits).toHaveLength(0);
+    } finally {
+      await sqlStmt(`DELETE FROM payslip_deposit_match WHERE transaction_canonical_id IN (?, ?)`).run(
+        txnId1,
+        txnId2
+      );
+      await sqlStmt(`DELETE FROM transaction_canonical WHERE id IN (?, ?)`).run(txnId1, txnId2);
     }
   });
 });

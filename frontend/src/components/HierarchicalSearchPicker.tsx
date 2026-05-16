@@ -1,5 +1,12 @@
+import { Badge } from "@mantine/core";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+
+import {
+  parentSelectedCount,
+  toggleMultiValue,
+  toggleParentMultiSelection
+} from "./hierarchicalPickerMultiSelect.js";
 
 /** `label` is used for search and menu; `displayLabel` (optional) is shown on the closed trigger only. */
 export type HierarchicalPickerItem = {
@@ -24,6 +31,28 @@ type PickerParent = {
   searchText: string;
 };
 
+type PickerProps = {
+  groups: HierarchicalPickerGroup[];
+  placeholder: string;
+  ariaLabel: string;
+  clearable?: boolean;
+  disabled?: boolean;
+  footer?: ReactNode | ((close: () => void) => ReactNode);
+  onActiveParentChange?: (parentId: string | null) => void;
+} & (
+  | {
+      multiSelect?: false;
+      value: string | null;
+      onChange: (value: string | null) => void;
+    }
+  | {
+      multiSelect: true;
+      multiValue: string[];
+      onMultiChange: (value: string[]) => void;
+      multiSelectLabel?: string;
+    }
+);
+
 function flatten(groups: HierarchicalPickerGroup[]): FlatItem[] {
   return groups.flatMap((g) => g.items);
 }
@@ -43,8 +72,6 @@ export function lookupTriggerLabel(
   return item.displayLabel ?? item.label;
 }
 
-/** Alias for `lookupTriggerLabel` (short display for trigger / chips). */
-export const lookupLabel = lookupTriggerLabel;
 
 function normalizeGroups(groups: HierarchicalPickerGroup[]): PickerParent[] {
   const byLabel = new Map<string, PickerParent>();
@@ -97,27 +124,23 @@ function normalizeGroups(groups: HierarchicalPickerGroup[]): PickerParent[] {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-export function HierarchicalSearchPicker({
-  value,
-  onChange,
-  groups,
-  placeholder,
-  ariaLabel,
-  clearable = false,
-  disabled = false,
-  footer,
-  onActiveParentChange
-}: {
-  value: string | null;
-  onChange: (value: string | null) => void;
-  groups: HierarchicalPickerGroup[];
-  placeholder: string;
-  ariaLabel: string;
-  clearable?: boolean;
-  disabled?: boolean;
-  footer?: ReactNode;
-  onActiveParentChange?: (parentId: string | null) => void;
-}) {
+export function HierarchicalSearchPicker(props: PickerProps) {
+  const {
+    groups,
+    placeholder,
+    ariaLabel,
+    clearable = false,
+    disabled = false,
+    footer,
+    onActiveParentChange
+  } = props;
+  const multiSelect = props.multiSelect === true;
+  const value = !multiSelect ? props.value : null;
+  const onChange = !multiSelect ? props.onChange : undefined;
+  const multiValue = multiSelect ? props.multiValue : [];
+  const onMultiChange = multiSelect ? props.onMultiChange : undefined;
+  const multiSelectLabel = multiSelect ? (props.multiSelectLabel ?? "items") : "items";
+
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -138,7 +161,37 @@ export function HierarchicalSearchPicker({
       .filter((p) => p.children.length > 0 || `${p.label} ${p.searchText}`.toLowerCase().includes(needle));
   }, [parents, search]);
   const selectedLabel = useMemo(() => lookupTriggerLabel(groups, value), [groups, value]);
+  const multiTriggerLabel = useMemo(() => {
+    if (!multiSelect || multiValue.length === 0) {
+      return null;
+    }
+    if (multiValue.length === 1) {
+      return lookupTriggerLabel(groups, multiValue[0]!) ?? multiValue[0]!;
+    }
+    if (multiValue.length === 2) {
+      const a = lookupTriggerLabel(groups, multiValue[0]!) ?? multiValue[0]!;
+      const b = lookupTriggerLabel(groups, multiValue[1]!) ?? multiValue[1]!;
+      return `${a}, ${b}`;
+    }
+    return `${multiValue.length} ${multiSelectLabel}`;
+  }, [groups, multiSelect, multiSelectLabel, multiValue]);
   const activeParent = filtered.find((p) => p.id === activeParentId) ?? filtered[0] ?? null;
+
+  const toggleMulti = useCallback(
+    (id: string) => {
+      if (!onMultiChange) return;
+      onMultiChange(toggleMultiValue(multiValue, id));
+    },
+    [multiValue, onMultiChange]
+  );
+
+  const toggleParentChildren = useCallback(
+    (parent: PickerParent) => {
+      if (!onMultiChange) return;
+      onMultiChange(toggleParentMultiSelection(multiValue, parent));
+    },
+    [multiValue, onMultiChange]
+  );
 
   useEffect(() => {
     if (filtered.length === 0) {
@@ -153,8 +206,6 @@ export function HierarchicalSearchPicker({
   }, [filtered, activeParentId]);
 
   useEffect(() => {
-    // Emit the category UUID (selectableValue), not the picker's internal label-derived id.
-    // byId lookups in LedgerCategoryPicker are keyed by UUID, not by label.
     onActiveParentChange?.(activeParent?.selectableValue ?? null);
   }, [activeParent, onActiveParentChange]);
 
@@ -231,6 +282,8 @@ export function HierarchicalSearchPicker({
     }
   }, [open]);
 
+  const triggerText = multiSelect ? multiTriggerLabel : selectedLabel;
+
   const menuContent = open ? (
     <div ref={menuRef} className="hs-picker__menu hs-picker__menu--portal" style={menuStyle} role="listbox">
       <div className="hs-picker__search-wrap">
@@ -247,8 +300,12 @@ export function HierarchicalSearchPicker({
             type="button"
             className="hs-picker__clear"
             onClick={() => {
-              onChange(null);
-              setOpen(false);
+              if (multiSelect) {
+                onMultiChange?.([]);
+              } else {
+                onChange?.(null);
+                setOpen(false);
+              }
               setSearch("");
             }}
           >
@@ -259,48 +316,91 @@ export function HierarchicalSearchPicker({
       <div className="hs-picker__panes">
         <div className="hs-picker__parents">
           {filtered.length === 0 ? <div className="hs-picker__empty">No options</div> : null}
-          {filtered.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className={`hs-picker__parent${activeParent?.id === p.id ? " hs-picker__parent--active" : ""}`}
-              onMouseEnter={() => setActiveParentId(p.id)}
-              onClick={() => {
-                setActiveParentId(p.id);
-                if (p.selectableValue) {
-                  onChange(p.selectableValue);
-                  setOpen(false);
-                  setSearch("");
-                }
-              }}
-            >
-              <span>{p.label}</span>
-              {p.children.length ? <span className="hs-picker__arrow">›</span> : null}
-            </button>
-          ))}
-        </div>
-        <div className="hs-picker__children">
-          {activeParent && activeParent.children.length > 0 ? (
-            activeParent.children.map((c) => (
+          {filtered.map((p) => {
+            const chipCount = multiSelect ? parentSelectedCount(p, multiValue) : 0;
+            return (
               <button
-                key={c.value}
+                key={p.id}
                 type="button"
-                className={`hs-picker__child${value === c.value ? " hs-picker__child--active" : ""}`}
+                className={`hs-picker__parent${activeParent?.id === p.id ? " hs-picker__parent--active" : ""}`}
+                onMouseEnter={() => setActiveParentId(p.id)}
                 onClick={() => {
-                  onChange(c.value);
-                  setOpen(false);
-                  setSearch("");
+                  setActiveParentId(p.id);
+                  if (multiSelect) {
+                    toggleParentChildren(p);
+                    return;
+                  }
+                  if (p.selectableValue) {
+                    onChange?.(p.selectableValue);
+                    setOpen(false);
+                    setSearch("");
+                  }
                 }}
               >
-                {c.label}
+                <span>{p.label}</span>
+                {multiSelect && chipCount > 0 ? (
+                  <Badge size="xs" color="fsForest" variant="light" ml="auto">
+                    {chipCount}
+                  </Badge>
+                ) : null}
+                {p.children.length ? <span className="hs-picker__arrow">›</span> : null}
               </button>
-            ))
+            );
+          })}
+        </div>
+        <div className="hs-picker__children">
+          {activeParent ? (
+            <>
+              {activeParent.children.length > 0 ? (
+                activeParent.children.map((c) =>
+                  multiSelect ? (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className={`hs-picker__child${multiValue.includes(c.value) ? " hs-picker__child--active" : ""}`}
+                      onClick={() => toggleMulti(c.value)}
+                    >
+                      <span
+                        style={{
+                          display: "inline-block",
+                          minWidth: 16,
+                          marginRight: 6,
+                          color: "var(--color-accent, #2d6a4f)",
+                          fontWeight: 700,
+                          fontSize: 11,
+                          lineHeight: 1
+                        }}
+                        aria-hidden
+                      >
+                        {multiValue.includes(c.value) ? "✓" : ""}
+                      </span>
+                      {c.label}
+                    </button>
+                  ) : (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className={`hs-picker__child${value === c.value ? " hs-picker__child--active" : ""}`}
+                      onClick={() => {
+                        onChange?.(c.value);
+                        setOpen(false);
+                        setSearch("");
+                      }}
+                    >
+                      {c.label}
+                    </button>
+                  )
+                )
+              ) : !multiSelect || !activeParent.selectableValue ? (
+                <div className="hs-picker__empty">Hover/select a group to view submenu.</div>
+              ) : null}
+            </>
           ) : (
             <div className="hs-picker__empty">Hover/select a group to view submenu.</div>
           )}
         </div>
       </div>
-      {footer ? <div className="hs-picker__footer">{footer}</div> : null}
+      {footer ? <div className="hs-picker__footer">{typeof footer === "function" ? footer(() => { setOpen(false); setSearch(""); }) : footer}</div> : null}
     </div>
   ) : null;
 
@@ -317,7 +417,7 @@ export function HierarchicalSearchPicker({
           setOpen((v) => !v);
         }}
       >
-        <span className={selectedLabel ? "hs-picker__value" : "hs-picker__placeholder"}>{selectedLabel ?? placeholder}</span>
+        <span className={triggerText ? "hs-picker__value" : "hs-picker__placeholder"}>{triggerText ?? placeholder}</span>
         <span aria-hidden className="hs-picker__chev">
           ▾
         </span>

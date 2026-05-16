@@ -691,7 +691,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
         ) : null}
 
         {showStaleness ? (
-          <Alert color="yellow" variant="light" mt="sm">
+          <Alert color="fsGold" variant="light" mt="sm">
             Last successful backup was over{" "}
             {Math.floor((Date.now() - new Date(gdriveLastCompletedJob!.completedAt!).getTime()) / 3600000)}{" "}
             hours ago. The server may have been sleeping and missed scheduled backups.
@@ -726,6 +726,11 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
               ) : null}
               {restoreMessage && previewSource === "device" ? (
                 <Alert color={restoreSuccess ? "green" : "red"}>{restoreMessage}</Alert>
+              ) : null}
+              {restoreSuccess ? (
+                <Alert color="yellow" variant="light">
+                  Google Drive connection has been reset. Go to Settings → Data → Backup to reconnect.
+                </Alert>
               ) : null}
               <Group align="flex-end" wrap="nowrap">
                 <FileInput
@@ -880,7 +885,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                 <Group justify="space-between" wrap="nowrap" align="flex-start">
                   <Stack gap={4}>
                     <Group gap="xs">
-                      <Badge color="green" variant="light">Connected</Badge>
+                      <Badge color="fsForest" variant="light">Connected</Badge>
                       <Text size="sm" fw={500}>{gdriveStatus?.folderName ?? gdriveStatus?.folderId}</Text>
                     </Group>
                     {gdriveStatus?.connectedAt ? (
@@ -958,7 +963,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                         Save
                       </Button>
                       {gdriveSchedulerSavedFlash ? (
-                        <Text size="sm" c="green" fw={500}>Saved</Text>
+                        <Text size="sm" style={{ color: "var(--fs-forest)" }} fw={500}>Saved</Text>
                       ) : null}
                     </Group>
                   </Box>
@@ -1078,6 +1083,11 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
             </Alert>
             {restoreMessage && previewSource === "device" ? (
               <Alert color={restoreSuccess ? "green" : "red"}>{restoreMessage}</Alert>
+            ) : null}
+            {restoreSuccess ? (
+              <Alert color="yellow" variant="light">
+                Google Drive connection has been reset. Go to Settings → Data → Backup to reconnect.
+              </Alert>
             ) : null}
             <Group justify="flex-end">
               <Button variant="default" onClick={closePreviewModal}>Cancel</Button>

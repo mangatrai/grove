@@ -14,10 +14,12 @@ import {
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
 import { sniffPayslipPdfBuffer } from "./payslip-sniff.service.js";
 import {
+  addConfirmedDeposit,
   addPayslipLineItem,
   deletePayslipLineItem,
   deletePayslipSnapshotForHousehold,
   findMatchedDeposits,
+  getConfirmedDeposits,
   getPayslipLineItems,
   getPayslipSnapshotForHousehold,
   insertManualPayslipSnapshot,
@@ -25,8 +27,10 @@ import {
   listPayslipSnapshots,
   patchPayslipLineItem,
   patchPayslipSnapshotForHousehold,
+  removeConfirmedDeposit,
   sha256Hex
 } from "./payslip.service.js";
+import type { MatchedDeposit } from "./payslip.service.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "./payslip.types.js";
 import { validatePayslipBalance } from "./payslip-validation.js";
 import type { PayslipLineItemSection } from "./payslip.types.js";
@@ -51,6 +55,11 @@ const idParamSchema = z.object({
 const lineItemParamSchema = z.object({
   id: z.string().uuid(),
   itemId: z.string().uuid()
+});
+
+const depositCanonicalIdParamSchema = z.object({
+  id: z.string().uuid(),
+  canonicalId: z.string().uuid()
 });
 
 const VALID_SECTIONS = [
@@ -405,6 +414,52 @@ payslipRouter.post("/upload", upload.single("file"), async (req: AuthenticatedRe
   res.status(201).json({ snapshot: result.snapshot });
 });
 
+/** PUT /payslips/:id/deposits/:canonicalId — add a confirmed deposit link (idempotent) */
+payslipRouter.put("/:id/deposits/:canonicalId", async (req: AuthenticatedRequest, res) => {
+  const params = depositCanonicalIdParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid id or canonicalId" });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const updated = await addConfirmedDeposit(householdId, params.data.id, params.data.canonicalId);
+  if (!updated) {
+    res.status(404).json({ message: "Payslip or transaction not found", code: "NOT_FOUND" });
+    return;
+  }
+  const confirmedDeposits = await getConfirmedDeposits(
+    householdId,
+    updated.id,
+    updated.payDate,
+    updated.netPayCurrent,
+    updated.payPeriodEnd
+  );
+  res.json({ snapshot: updated, confirmedDeposits });
+});
+
+/** DELETE /payslips/:id/deposits/:canonicalId — remove one confirmed deposit link */
+payslipRouter.delete("/:id/deposits/:canonicalId", async (req: AuthenticatedRequest, res) => {
+  const params = depositCanonicalIdParamSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ message: "Invalid id or canonicalId" });
+    return;
+  }
+  const { householdId } = req.authUser!;
+  const updated = await removeConfirmedDeposit(householdId, params.data.id, params.data.canonicalId);
+  if (!updated) {
+    res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  const confirmedDeposits = await getConfirmedDeposits(
+    householdId,
+    updated.id,
+    updated.payDate,
+    updated.netPayCurrent,
+    updated.payPeriodEnd
+  );
+  res.json({ snapshot: updated, confirmedDeposits });
+});
+
 payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
   const parsed = idParamSchema.safeParse(req.params);
   if (!parsed.success) {
@@ -417,12 +472,24 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
     return;
   }
-  const [matchedDeposits, lineItems] = await Promise.all([
-    findMatchedDeposits(householdId, snapshot.payDate, snapshot.netPayCurrent, snapshot.ownerPersonProfileId),
+  const [confirmedDeposits, lineItems] = await Promise.all([
+    getConfirmedDeposits(householdId, snapshot.id, snapshot.payDate, snapshot.netPayCurrent, snapshot.payPeriodEnd),
     getPayslipLineItems(snapshot.id, householdId)
   ]);
+
+  let suggestedDeposits: MatchedDeposit[] = [];
+  if (confirmedDeposits.length === 0) {
+    suggestedDeposits = await findMatchedDeposits(
+      householdId,
+      snapshot.payDate,
+      snapshot.netPayCurrent,
+      snapshot.ownerPersonProfileId,
+      snapshot.payPeriodEnd
+    );
+  }
+
   const validationWarnings = validatePayslipBalance(snapshot, lineItems);
-  res.json({ ...snapshot, matchedDeposits, lineItems, validationWarnings });
+  res.json({ ...snapshot, confirmedDeposits, suggestedDeposits, lineItems, validationWarnings });
 });
 
 payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {

@@ -1,4 +1,4 @@
-# Household Finance App
+# Grove
 
 Self-hosted household finance: import bank and card activity, categorize with rules, resolve exceptions, and view cash summaries on a private stack you control. Data stays on your infrastructure (**Postgres**).
 

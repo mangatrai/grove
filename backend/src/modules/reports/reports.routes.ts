@@ -161,8 +161,14 @@ reportsRouter.get("/balance-sheet", async (req: AuthenticatedRequest, res) => {
           ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null
         }
       : undefined;
-  const data = await getBalanceSheet(householdId, asOf, opts);
-  res.status(200).json(data);
+  const result = await getBalanceSheet(householdId, asOf, opts);
+  res.status(200).json({
+    asOf: result.asOf,
+    assets: result.assets,
+    liabilities: result.liabilities,
+    properties: result.properties,
+    totals: result.totals
+  });
 });
 
 reportsRouter.get("/balance-sheet/history", async (req: AuthenticatedRequest, res) => {

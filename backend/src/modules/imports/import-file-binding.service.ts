@@ -181,6 +181,11 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
   Array<{
     id: string;
     type: string;
+    sub_type: string | null;
+    memo: string | null;
+    liquidity: string | null;
+    linked_account_id: string | null;
+    property_id: string | null;
     institution: string;
     account_mask: string | null;
     currency: string;
@@ -194,6 +199,11 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
   const accounts = await qAll<{
     id: string;
     type: string;
+    sub_type: string | null;
+    memo: string | null;
+    liquidity: string | null;
+    linked_account_id: string | null;
+    property_id: string | null;
     institution: string;
     account_mask: string | null;
     currency: string;
@@ -204,6 +214,11 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
   }>(
     `SELECT fa.id,
             fa.type,
+            fa.sub_type,
+            fa.memo,
+            fa.liquidity,
+            fa.linked_account_id,
+            fa.property_id,
             fa.institution,
             fa.account_mask,
             fa.currency,
@@ -216,7 +231,9 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
          ON f.financial_account_id = fa.id
         AND f.status = 'parsed'
       WHERE fa.household_id = ?
-      GROUP BY fa.id, fa.type, fa.institution, fa.account_mask, fa.currency, fa.owner_scope, fa.owner_person_profile_id, fa.default_parser_profile_id
+      GROUP BY fa.id, fa.type, fa.sub_type, fa.memo, fa.liquidity, fa.linked_account_id, fa.property_id,
+               fa.institution, fa.account_mask, fa.currency, fa.owner_scope,
+               fa.owner_person_profile_id, fa.default_parser_profile_id
       ORDER BY CASE WHEN fa.type = 'payslip' THEN 0 ELSE 1 END, fa.institution, fa.type`,
     householdId
   );
@@ -234,13 +251,14 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     householdId
   );
 
+  // Keep the MAXIMUM statement end date per account (YYYY-MM-DD strings compare correctly).
+  // Do NOT break early — a file uploaded later may have an older statement period.
   const lastStatementEndByAccount = new Map<string, string>();
   for (const row of statementRows) {
-    if (lastStatementEndByAccount.has(row.financial_account_id)) {
-      continue;
-    }
     const asOfEnd = parseStatementEndDate(row.confidence_summary);
-    if (asOfEnd) {
+    if (!asOfEnd) continue;
+    const existing = lastStatementEndByAccount.get(row.financial_account_id);
+    if (!existing || asOfEnd > existing) {
       lastStatementEndByAccount.set(row.financial_account_id, asOfEnd);
     }
   }
@@ -255,6 +273,9 @@ export async function createHouseholdFinancialAccount(input: {
   householdId: string;
   ownerUserId: string;
   type: string;
+  subType?: string | null;
+  memo?: string | null;
+  liquidity?: string | null;
   institution: string;
   accountMask?: string | null;
   currency?: string;
@@ -264,16 +285,21 @@ export async function createHouseholdFinancialAccount(input: {
 }): Promise<{ id: string }> {
   const ownerScope = input.ownerScope ?? "household";
   const ownerPersonProfileId = ownerScope === "person" ? (input.ownerPersonProfileId ?? null) : null;
+  const liquidity = input.liquidity ?? defaultLiquidity(input.type, input.subType ?? null);
   const id = randomUUID();
   await qExec(
     `INSERT INTO financial_account (
-       id, household_id, owner_user_id, type, institution, account_mask, currency, created_at,
+       id, household_id, owner_user_id, type, sub_type, memo, liquidity,
+       institution, account_mask, currency, created_at,
        owner_scope, owner_person_profile_id, default_parser_profile_id
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`,
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`,
     id,
     input.householdId,
     input.ownerUserId,
     input.type,
+    input.subType ?? null,
+    input.memo?.trim() || null,
+    liquidity,
     input.institution.trim(),
     input.accountMask ?? null,
     input.currency ?? "USD",
@@ -288,6 +314,9 @@ export async function updateHouseholdFinancialAccount(input: {
   accountId: string;
   householdId: string;
   type: string;
+  subType?: string | null;
+  memo?: string | null;
+  liquidity?: string | null;
   institution: string;
   accountMask?: string | null;
   ownerScope?: "household" | "person";
@@ -296,12 +325,20 @@ export async function updateHouseholdFinancialAccount(input: {
 }): Promise<boolean> {
   const ownerScope = input.ownerScope ?? "household";
   const ownerPersonProfileId = ownerScope === "person" ? (input.ownerPersonProfileId ?? null) : null;
+  // Explicit null means "clear override, revert to auto". Undefined means "keep existing".
+  // Here we always re-derive when null is passed so edits stay consistent.
+  const liquidity = input.liquidity ?? defaultLiquidity(input.type, input.subType ?? null);
   const updated = await qGet<{ id: string }>(
     `UPDATE financial_account
-       SET type = ?, institution = ?, account_mask = ?, owner_scope = ?, owner_person_profile_id = ?, default_parser_profile_id = ?
-       WHERE id = ? AND household_id = ?
-       RETURNING id`,
+        SET type = ?, sub_type = ?, memo = ?, liquidity = ?,
+            institution = ?, account_mask = ?,
+            owner_scope = ?, owner_person_profile_id = ?, default_parser_profile_id = ?
+      WHERE id = ? AND household_id = ?
+      RETURNING id`,
     input.type,
+    input.subType ?? null,
+    input.memo?.trim() || null,
+    liquidity,
     input.institution.trim(),
     input.accountMask ?? null,
     ownerScope,
@@ -311,4 +348,34 @@ export async function updateHouseholdFinancialAccount(input: {
     input.householdId
   );
   return Boolean(updated);
+}
+
+/**
+ * Compute default liquidity from account type + sub_type.
+ * Returns null for liability types (credit_card, loan) and payslip.
+ * The user can always override via the explicit liquidity field.
+ */
+export function defaultLiquidity(
+  type: string,
+  subType: string | null
+): "liquid" | "semi_liquid" | "restricted" | null {
+  switch (type) {
+    case "checking":
+      return "liquid";
+    case "savings":
+      return subType === "cd" ? "semi_liquid" : "liquid";
+    case "investment":
+      return subType === "stock_options" ? "restricted" : "semi_liquid";
+    case "retirement":
+      return "restricted";
+    case "health":
+      return subType === "hsa" ? "semi_liquid" : "restricted";
+    case "education":
+      return "restricted";
+    case "cash":
+      return "liquid";
+    default:
+      // credit_card, loan, payslip — not classified for liquidity
+      return null;
+  }
 }

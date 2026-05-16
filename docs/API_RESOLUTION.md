@@ -234,11 +234,17 @@ Finds **all** open **`unknown_category`** items whose linked transaction descrip
 
 ## `POST /resolution/:id/confirm-transfer`
 
-Confirm a **`transfer_ambiguity`** item as a real transfer. Reads `debitId` and `creditId` from the item's reason JSON (set by the `low_pair_score` path in canonical ingest), assigns a shared `transfer_group_id` to both `transaction_canonical` rows, and resolves **all** open `transfer_ambiguity` items whose `target_id` is either leg — so both the debit-side and credit-side review items are cleared in one call.
+Confirm a **`transfer_ambiguity`** item as a real transfer. The caller provides the explicit `creditId` selected by the user from the candidate list shown in the Needs Review UI.
 
-Use `PATCH /resolution/:id { status: "resolved" }` for the **"not a transfer"** path (coincidental amount match) — that path does **not** set `transfer_group_id`.
+Validates: both transactions exist, are `posted`, have matching absolute amounts (within 1¢), and are not already paired. Assigns a shared `transfer_group_id` to both rows and resolves all open `transfer_ambiguity` items for both legs.
 
-**Body:** empty (`{}`)
+Use `PATCH /resolution/:id { status: "resolved" }` for the **"not a transfer"** path — that path sets `transfer_excluded = TRUE` on the debit row and does **not** set `transfer_group_id`.
+
+**Body:**
+
+```json
+{ "creditId": "uuid" }
+```
 
 **200:**
 
@@ -246,7 +252,7 @@ Use `PATCH /resolution/:id { status: "resolved" }` for the **"not a transfer"** 
 { "debitId": "uuid", "creditId": "uuid", "transferGroupId": "uuid" }
 ```
 
-**400:** item is not `transfer_ambiguity`, or reason JSON does not contain an unambiguous `debitId` + `creditId` (e.g. multi-candidate ambiguity case — manual selection required).
+**400:** item is not `transfer_ambiguity`; credit not found/posted; amounts do not match; one leg already paired.
 
 **404:** item not found for this household.
 
@@ -258,7 +264,7 @@ Use `PATCH /resolution/:id { status: "resolved" }` for the **"not a transfer"** 
 
 ## `POST /resolution/bulk-confirm-transfers`
 
-Confirm many `transfer_ambiguity` items as real transfers (best-effort). Deduplicates by pair so passing both the debit-side and credit-side item IDs does not create two separate transfer groups.
+> **Deprecated for `transfer_ambiguity` items.** Bulk confirm is no longer supported for transfer pairs — each requires the user to explicitly select the matching credit from the candidate list. All items return a `MISSING_PAIR_IDS` error with an actionable message directing the user to confirm individually.
 
 **Body:**
 
@@ -266,19 +272,15 @@ Confirm many `transfer_ambiguity` items as real transfers (best-effort). Dedupli
 { "ids": ["uuid", "uuid"] }
 ```
 
-- `ids` — non-empty array, max 200.
-
 **200:**
 
 ```json
 {
-  "confirmed": [{ "itemId": "uuid", "debitId": "uuid", "creditId": "uuid", "transferGroupId": "uuid" }],
-  "errors": [{ "itemId": "uuid", "code": "MISSING_PAIR_IDS", "message": "…" }]
+  "confirmed": [],
+  "errors": [{ "itemId": "uuid", "code": "MISSING_PAIR_IDS", "message": "Transfer ambiguity items must be confirmed individually…" }]
 }
 ```
 
 **400:** invalid body.
 
 **401:** missing or invalid token.
-
-**UI:** When the Needs Review tab has transfer_ambiguity items in the selection, the bulk bar shows a **"Confirm transfers (N)"** button that calls this endpoint. A separate **"Not a transfer / dismiss"** button calls `POST /resolution/bulk` with `status: resolved` (no pairing).

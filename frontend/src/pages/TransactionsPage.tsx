@@ -26,12 +26,24 @@ import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { useCurrentUser } from "../UserContext";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { GroveLoader } from "../components/GroveLoader";
+import { CurrencyInput } from "../components/CurrencyInput";
 import { HelpIcon } from "../components/HelpIcon";
-import { HierarchicalSearchPicker, lookupLabel, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { TransactionAggregateSummary } from "../components/TransactionAggregateSummary";
 import { RecurringTagModal } from "../components/RecurringTagModal";
 import { buildCategoryFilterGroups, type CategoryOption } from "../components/categoryPickerGroups";
 import { LedgerCategoryPicker } from "../components/LedgerCategoryPicker";
 import { formatAccountForSelect } from "../import/accountDisplay";
+import {
+  appendLedgerListFilters,
+  belongsToPickerValueFromRow,
+  buildBelongsToGroups,
+  formatActiveBelongsToSummary,
+  parseBelongsToPickerValue,
+  resolveActiveBelongsTo,
+  resolveEffectiveIds
+} from "../ledger/ledgerListQuery.js";
 
 type OpenReviewItem = { id: string; type: string; status: "open" | "in_review" };
 
@@ -43,6 +55,13 @@ type ResolutionDetailItem = {
   reasonDetail: { kind?: string; message?: string; existingCanonicalId?: string; rawId?: string } | null;
   status: "open" | "in_review" | "resolved";
   createdAt: string;
+  transferCandidates?: {
+    id: string;
+    txnDate: string;
+    amount: number;
+    description: string;
+    accountName: string;
+  }[];
   context: {
     sessionId: string | null;
     fileId: string | null;
@@ -153,42 +172,6 @@ function findConfirmedOverride(merchant: string | null, overrides: RecurringOver
 }
 
 type OwnerProfileOption = { id: string; label: string };
-type BelongsToFilterValue = "" | "household" | `person:${string}`;
-
-function parseBelongsToFilterValue(value: string): {
-  ownerScope?: "household" | "person";
-  ownerPersonProfileId?: string;
-} {
-  if (value === "household") {
-    return { ownerScope: "household" };
-  }
-  if (value.startsWith("person:")) {
-    const id = value.slice("person:".length);
-    if (id) {
-      return { ownerScope: "person", ownerPersonProfileId: id };
-    }
-  }
-  return {};
-}
-
-function formatBelongsToLabel(label: string): string {
-  return `Household > ${label}`;
-}
-
-function buildBelongsToGroups(ownerProfiles: OwnerProfileOption[]): HierarchicalPickerGroup[] {
-  return [
-    { group: "Household", items: [{ value: "household", label: "Household", searchText: "household" }] },
-    {
-      group: "Members",
-      items: ownerProfiles.map((p) => ({
-        value: `person:${p.id}`,
-        label: formatBelongsToLabel(p.label),
-        displayLabel: p.label,
-        searchText: p.label
-      }))
-    }
-  ];
-}
 
 function buildAccountGroups(accounts: AccountRow[]): HierarchicalPickerGroup[] {
   const byInstitution = new Map<string, AccountRow[]>();
@@ -301,9 +284,9 @@ function formatSignedMoneyRaw(amount: number | null): string {
 
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { label: string; color: string }> = {
-    posted:    { label: "Posted", color: "green" },
-    trashed:   { label: "Trashed", color: "red" },
-    duplicate: { label: "Duplicate", color: "yellow" },
+    posted:    { label: "Posted", color: "fsForest" },
+    trashed:   { label: "Trashed", color: "fsTerracotta" },
+    duplicate: { label: "Duplicate", color: "fsGold" },
     pending:   { label: "Pending", color: "gray" },
   };
   const c = cfg[status] ?? { label: status, color: "gray" };
@@ -320,7 +303,11 @@ export function TransactionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const sessionFilter = searchParams.get("sessionId")?.trim() || null;
   const fileFilter = searchParams.get("fileId")?.trim() || null;
-  const categoryFilter = searchParams.get("categoryId")?.trim() || null;
+  const effectiveCategoryIds = useMemo(
+    () => resolveEffectiveIds(searchParams, "categoryIds", "categoryId"),
+    [searchParams]
+  );
+  const categoryIdsKey = useMemo(() => effectiveCategoryIds.join("|"), [effectiveCategoryIds]);
   const uncategorizedOnly = searchParams.get("uncategorizedOnly") === "true";
   const needsReviewTab = searchParams.get("needsReview") === "true";
   const trashTab = searchParams.get("trash") === "true";
@@ -340,15 +327,32 @@ export function TransactionsPage() {
   const amountMaxUrl = searchParams.get("amountMax")?.trim() ?? "";
   const dateFrom = searchParams.get("dateFrom")?.trim() || null;
   const dateTo = searchParams.get("dateTo")?.trim() || null;
-  const accountFilter = searchParams.get("accountId")?.trim() || null;
+  const effectiveAccountIds = useMemo(
+    () => resolveEffectiveIds(searchParams, "accountIds", "accountId"),
+    [searchParams]
+  );
+  const accountIdsKey = useMemo(() => effectiveAccountIds.join("|"), [effectiveAccountIds]);
   const ownerScopeFilter = (searchParams.get("ownerScope")?.trim() as "household" | "person" | null) || null;
-  const ownerPersonProfileFilter = searchParams.get("ownerPersonProfileId")?.trim() || null;
-  const belongsToFilterValue: BelongsToFilterValue =
-    ownerScopeFilter === "person" && ownerPersonProfileFilter
-      ? (`person:${ownerPersonProfileFilter}` as BelongsToFilterValue)
-      : ownerScopeFilter === "household"
-        ? "household"
-        : "";
+  const legacyPersonId = searchParams.get("ownerPersonProfileId")?.trim() || null;
+  const effectivePersonIds = useMemo(
+    () => resolveEffectiveIds(searchParams, "ownerPersonProfileIds", "ownerPersonProfileId"),
+    [searchParams]
+  );
+
+  const effectiveBelongsTo = useMemo(
+    () => searchParams.getAll("belongsTo").filter(Boolean),
+    [searchParams]
+  );
+  const activeBelongsTo = useMemo(
+    () =>
+      resolveActiveBelongsTo({
+        belongsTo: effectiveBelongsTo,
+        ownerScope: ownerScopeFilter,
+        legacyPersonId,
+        personIds: effectivePersonIds
+      }),
+    [effectiveBelongsTo, ownerScopeFilter, legacyPersonId, effectivePersonIds]
+  );
   const returnTo = searchParams.get("returnTo")?.trim() || null;
   const fromDashboard = searchParams.get("fromDashboard") === "true";
   const pageLimit = Math.min(Math.max(Number(searchParams.get("limit") || 100), 1), 200);
@@ -359,6 +363,7 @@ export function TransactionsPage() {
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
+  const ownerProfilesFetchRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -375,7 +380,7 @@ export function TransactionsPage() {
   const [addAmount, setAddAmount] = useState("");
   const [addMerchant, setAddMerchant] = useState("Manual entry");
   const [addCategoryId, setAddCategoryId] = useState<string | null>(null);
-  const [addBelongsTo, setAddBelongsTo] = useState<BelongsToFilterValue>("");
+  const [addBelongsTo, setAddBelongsTo] = useState("");
   const addFirstFieldRef = useRef<HTMLSelectElement | null>(null);
   const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(() => new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState<string>("");
@@ -402,6 +407,8 @@ export function TransactionsPage() {
   const [savingBulkAll, setSavingBulkAll] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
+  // Selected candidate per transfer_ambiguity resolution item (itemId → candidateId).
+  const [selectedTransferCandidates, setSelectedTransferCandidates] = useState<Record<string, string>>({});
   const [patternResolveOpen, setPatternResolveOpen] = useState(false);
   const [patternDraft, setPatternDraft] = useState("");
   const [patternCategoryId, setPatternCategoryId] = useState("");
@@ -417,7 +424,7 @@ export function TransactionsPage() {
   // For members: auto-default Belongs-To in the manual-entry form to their own profile.
   useEffect(() => {
     if (currentRole === "member" && currentPersonProfileId) {
-      setAddBelongsTo(`person:${currentPersonProfileId}` as BelongsToFilterValue);
+      setAddBelongsTo(currentPersonProfileId);
     }
   }, [currentRole, currentPersonProfileId]);
 
@@ -426,10 +433,15 @@ export function TransactionsPage() {
   useEffect(() => {
     if (currentRole === "member" && currentPersonProfileId) {
       setSearchParams((prev) => {
-        if (prev.get("ownerPersonProfileId")) return prev;
+        if (
+          prev.getAll("belongsTo").length > 0 ||
+          prev.get("ownerPersonProfileId") ||
+          prev.get("ownerScope")
+        ) {
+          return prev;
+        }
         const next = new URLSearchParams(prev);
-        next.set("ownerScope", "person");
-        next.set("ownerPersonProfileId", currentPersonProfileId);
+        next.append("belongsTo", currentPersonProfileId);
         return next;
       }, { replace: true });
     }
@@ -471,60 +483,55 @@ export function TransactionsPage() {
     return () => window.clearTimeout(t);
   }, [searchDraft, setSearchParams]);
 
+  const ledgerFilterState = useMemo(
+    () => ({
+      sessionFilter,
+      fileFilter,
+      effectiveCategoryIds,
+      uncategorizedOnly,
+      needsReviewTab,
+      trashTab,
+      resolutionTypes,
+      searchFromUrl,
+      dateFrom,
+      dateTo,
+      effectiveAccountIds,
+      effectiveBelongsTo: activeBelongsTo,
+      ownerScopeFilter,
+      effectivePersonIds,
+      amountMinUrl,
+      amountMaxUrl
+    }),
+    [
+      sessionFilter,
+      fileFilter,
+      effectiveCategoryIds,
+      uncategorizedOnly,
+      needsReviewTab,
+      trashTab,
+      resolutionTypesKey,
+      searchFromUrl,
+      dateFrom,
+      dateTo,
+      effectiveAccountIds,
+      activeBelongsTo,
+      ownerScopeFilter,
+      effectivePersonIds,
+      amountMinUrl,
+      amountMaxUrl
+    ]
+  );
+
+  const aggregateFilterQs = useMemo(() => {
+    const qs = new URLSearchParams();
+    appendLedgerListFilters(qs, ledgerFilterState);
+    return qs.toString();
+  }, [ledgerFilterState]);
+
   const load = useCallback(async () => {
     setError(null);
     const qs = new URLSearchParams({ limit: String(pageLimit), offset: String(pageOffset) });
-    if (sessionFilter) {
-      qs.set("sessionId", sessionFilter);
-    }
-    if (fileFilter) {
-      qs.set("fileId", fileFilter);
-    }
-    if (categoryFilter) {
-      qs.set("categoryId", categoryFilter);
-    }
-    if (uncategorizedOnly) {
-      qs.set("uncategorizedOnly", "true");
-    }
-    if (needsReviewTab) {
-      qs.set("needsReview", "true");
-    }
-    if (trashTab) {
-      qs.set("trashOnly", "true");
-    }
-    for (const rt of resolutionTypes) {
-      qs.append("resolutionType", rt);
-    }
-    if (searchFromUrl) {
-      qs.set("search", searchFromUrl);
-    }
-    if (dateFrom) {
-      qs.set("dateFrom", dateFrom);
-    }
-    if (dateTo) {
-      qs.set("dateTo", dateTo);
-    }
-    if (accountFilter) {
-      qs.set("accountId", accountFilter);
-    }
-    if (ownerScopeFilter) {
-      qs.set("ownerScope", ownerScopeFilter);
-    }
-    if (ownerPersonProfileFilter) {
-      qs.set("ownerPersonProfileId", ownerPersonProfileFilter);
-    }
-    if (amountMinUrl !== "") {
-      const n = Number(amountMinUrl);
-      if (Number.isFinite(n)) {
-        qs.set("amountMin", String(n));
-      }
-    }
-    if (amountMaxUrl !== "") {
-      const n = Number(amountMaxUrl);
-      if (Number.isFinite(n)) {
-        qs.set("amountMax", String(n));
-      }
-    }
+    appendLedgerListFilters(qs, ledgerFilterState);
     const [txRes, catRes, acctRes, ovRes] = await Promise.all([
       apiJson<ListResponse>(`/transactions?${qs.toString()}`),
       apiJson<{ categories: CategoryOption[] }>("/categories"),
@@ -535,7 +542,8 @@ export function TransactionsPage() {
     setCategories(catRes.categories);
     setAccounts(acctRes.accounts);
     setRecurringOverrides(ovRes.ok ? ovRes.data : []);
-    if (ownerProfiles.length === 0) {
+    if (!ownerProfilesFetchRef.current) {
+      ownerProfilesFetchRef.current = true;
       try {
         const members = await apiJson<{ members: Array<{ id: string; fullName: string; relationship: string }> }>(
           "/household/members"
@@ -555,26 +563,7 @@ export function TransactionsPage() {
         }
       }
     }
-  }, [
-    sessionFilter,
-    fileFilter,
-    categoryFilter,
-    uncategorizedOnly,
-    needsReviewTab,
-    trashTab,
-    resolutionTypesKey,
-    searchFromUrl,
-    dateFrom,
-    dateTo,
-    accountFilter,
-    ownerScopeFilter,
-    ownerPersonProfileFilter,
-    amountMinUrl,
-    amountMaxUrl,
-    pageLimit,
-    pageOffset,
-    ownerProfiles.length
-  ]);
+  }, [ledgerFilterState, pageLimit, pageOffset]);
 
   const refreshCategories = useCallback(async () => {
     try {
@@ -628,12 +617,12 @@ export function TransactionsPage() {
     resolutionTypesKey,
     sessionFilter,
     fileFilter,
-    categoryFilter,
+    categoryIdsKey,
     uncategorizedOnly,
     searchFromUrl,
     dateFrom,
     dateTo,
-    accountFilter,
+    accountIdsKey,
     amountMinUrl,
     amountMaxUrl,
     pageOffset,
@@ -650,12 +639,12 @@ export function TransactionsPage() {
     resolutionTypesKey,
     sessionFilter,
     fileFilter,
-    categoryFilter,
+    categoryIdsKey,
     uncategorizedOnly,
     searchFromUrl,
     dateFrom,
     dateTo,
-    accountFilter,
+    accountIdsKey,
     amountMinUrl,
     amountMaxUrl,
     pageOffset,
@@ -855,42 +844,6 @@ export function TransactionsPage() {
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Bulk resolve failed");
-    } finally {
-      setSavingBulk(false);
-    }
-  }
-
-  async function bulkConfirmTransfers() {
-    const ids: string[] = [];
-    if (!data) return;
-    for (const t of data.transactions) {
-      if (!selectedTxnIds.has(t.id)) continue;
-      for (const item of t.openReviewItems ?? []) {
-        if (item.type === "transfer_ambiguity") ids.push(item.id);
-      }
-    }
-    const uniqueIds = [...new Set(ids)];
-    if (uniqueIds.length === 0) {
-      setError("No transfer ambiguity flags found in selected rows.");
-      return;
-    }
-    setError(null);
-    setSavingBulk(true);
-    try {
-      const res = await apiJson<{ confirmed: { itemId: string }[]; errors: { itemId: string; code: string; message: string }[] }>(
-        "/resolution/bulk-confirm-transfers",
-        { method: "POST", body: JSON.stringify({ ids: uniqueIds }) }
-      );
-      if (res.errors.length > 0) {
-        setError(`Paired ${res.confirmed.length} transfer(s); ${res.errors.length} could not be confirmed.`);
-      }
-      setSelectedTxnIds(new Set());
-      reviewDetailLoadedRef.current.clear();
-      setReviewDetailByTxn({});
-      setReviewDetailErr({});
-      await load();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Bulk confirm transfers failed");
     } finally {
       setSavingBulk(false);
     }
@@ -1136,11 +1089,14 @@ export function TransactionsPage() {
     }
   }
 
-  async function confirmTransferItem(txnId: string, itemId: string) {
+  async function confirmTransferItem(txnId: string, itemId: string, creditId: string) {
     setError(null);
     setSavingResolutionItemId(itemId);
     try {
-      await apiJson(`/resolution/${itemId}/confirm-transfer`, { method: "POST", body: "{}" });
+      await apiJson(`/resolution/${itemId}/confirm-transfer`, {
+        method: "POST",
+        body: JSON.stringify({ creditId })
+      });
       forgetReviewDetail(txnId);
       await load();
     } catch (e: unknown) {
@@ -1178,17 +1134,26 @@ export function TransactionsPage() {
     }
   }
 
-  const categoryName = useMemo(
-    () => (categoryFilter ? categories.find((c) => c.id === categoryFilter)?.name ?? categoryFilter : null),
-    [categories, categoryFilter]
-  );
-  const accountName = useMemo(() => {
-    if (!accountFilter) {
+  const categoryName = useMemo(() => {
+    if (effectiveCategoryIds.length === 0) {
       return null;
     }
-    const account = accounts.find((a) => a.id === accountFilter);
-    return account ? formatAccountForSelect(account) : accountFilter;
-  }, [accounts, accountFilter]);
+    if (effectiveCategoryIds.length === 1) {
+      const id = effectiveCategoryIds[0]!;
+      return categories.find((c) => c.id === id)?.name ?? id;
+    }
+    return `${effectiveCategoryIds.length} categories`;
+  }, [categories, effectiveCategoryIds]);
+  const accountName = useMemo(() => {
+    if (effectiveAccountIds.length === 0) {
+      return null;
+    }
+    if (effectiveAccountIds.length === 1) {
+      const account = accounts.find((a) => a.id === effectiveAccountIds[0]);
+      return account ? formatAccountForSelect(account) : effectiveAccountIds[0]!;
+    }
+    return `${effectiveAccountIds.length} accounts`;
+  }, [accounts, effectiveAccountIds]);
 
   const accountGroups = useMemo(() => buildAccountGroups(accounts), [accounts]);
   const belongsToGroups = useMemo(() => buildBelongsToGroups(ownerProfiles), [ownerProfiles]);
@@ -1202,22 +1167,22 @@ export function TransactionsPage() {
     []
   );
 
-  const hasLedgerFilters = Boolean(
-    categoryFilter ||
+  const hasServerBackedLedgerFilters = Boolean(
+    effectiveCategoryIds.length > 0 ||
       uncategorizedOnly ||
       dateFrom ||
       dateTo ||
-      accountFilter ||
+      effectiveAccountIds.length > 0 ||
+      sessionFilter ||
       fileFilter ||
-      ownerScopeFilter ||
-      ownerPersonProfileFilter ||
+      activeBelongsTo.length > 0 ||
       needsReviewTab ||
       resolutionTypes.length > 0 ||
       searchFromUrl ||
       amountMinUrl !== "" ||
-      amountMaxUrl !== "" ||
-      recurringOnlyFilter
+      amountMaxUrl !== ""
   );
+  const hasLedgerFilters = hasServerBackedLedgerFilters || recurringOnlyFilter;
 
   const canPageBack = pageOffset > 0;
   const canPageForward = data ? pageOffset + data.transactions.length < data.total : false;
@@ -1298,7 +1263,7 @@ export function TransactionsPage() {
   }
 
   function openAddModal() {
-    setAddAccountId(accountFilter ?? accounts[0]?.id ?? "");
+    setAddAccountId(effectiveAccountIds[0] ?? accounts[0]?.id ?? "");
     setAddTxnDate(localDateStr());
     setAddDirection("debit");
     setAddAmount("");
@@ -1318,7 +1283,7 @@ export function TransactionsPage() {
       setAddSaving(false);
       return;
     }
-    const belongsTo = parseBelongsToFilterValue(addBelongsTo);
+    const belongsTo = parseBelongsToPickerValue(addBelongsTo);
     if (!belongsTo.ownerScope) {
       setAddError("Choose Belongs-to.");
       setAddSaving(false);
@@ -1357,8 +1322,6 @@ export function TransactionsPage() {
   if (!token) {
     return <Navigate to="/" replace />;
   }
-
-  const categorySelectValue = uncategorizedOnly ? "__uncat__" : categoryFilter ?? "";
 
   return (
     <Stack gap="md">
@@ -1410,7 +1373,7 @@ export function TransactionsPage() {
           </Button>
         </Group>
         {needsReviewTab && (resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger ?? 0) > 0 ? (
-          <Alert color="yellow" mb="sm">
+          <Alert color="fsGold" variant="light" mb="sm">
             <strong>{resolutionQueueSummary?.openDuplicateAmbiguityNotOnLedger}</strong> near-duplicate item(s) flagged during import have no matching ledger row — they can be ignored or resolved by re-importing.
           </Alert>
         ) : null}
@@ -1441,17 +1404,20 @@ export function TransactionsPage() {
           <Box>
             <Text size="sm" mb={4}>Account</Text>
             <HierarchicalSearchPicker
-              value={accountFilter ?? null}
-              onChange={(v) =>
+              multiSelect
+              multiValue={effectiveAccountIds}
+              onMultiChange={(ids) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
-                  if (!v) n.delete("accountId");
-                  else n.set("accountId", v);
+                  n.delete("accountId");
+                  n.delete("accountIds");
+                  for (const id of ids) n.append("accountIds", id);
                 })
               }
               groups={accountGroups}
               placeholder="All accounts"
               ariaLabel="Filter by account"
+              multiSelectLabel="accounts"
               clearable
             />
           </Box>
@@ -1484,40 +1450,50 @@ export function TransactionsPage() {
           <Box>
             <Text size="sm" mb={4}>Belongs-to</Text>
             <HierarchicalSearchPicker
-              value={belongsToFilterValue || null}
-              onChange={(v) =>
+              multiSelect
+              multiValue={activeBelongsTo}
+              onMultiChange={(ids) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
-                  const parsed = parseBelongsToFilterValue(v ?? "");
+                  n.delete("belongsTo");
                   n.delete("ownerScope");
                   n.delete("ownerPersonProfileId");
-                  if (parsed.ownerScope) n.set("ownerScope", parsed.ownerScope);
-                  if (parsed.ownerPersonProfileId) n.set("ownerPersonProfileId", parsed.ownerPersonProfileId);
+                  n.delete("ownerPersonProfileIds");
+                  for (const id of ids) n.append("belongsTo", id);
                 })
               }
               groups={belongsToGroups}
               placeholder="All household activity"
               ariaLabel="Filter by belongs-to"
+              multiSelectLabel="members"
               clearable
             />
           </Box>
           <Box>
             <Text size="sm" mb={4}>Category</Text>
             <HierarchicalSearchPicker
-              value={categorySelectValue || "__any__"}
-              onChange={(v) => {
-                const next = v ?? "__any__";
+              multiSelect
+              multiValue={effectiveCategoryIds}
+              onMultiChange={(ids) =>
                 mergeParams((n) => {
                   n.set("offset", "0");
                   n.delete("categoryId");
+                  n.delete("categoryIds");
                   n.delete("uncategorizedOnly");
-                  if (next === "__uncat__") n.set("uncategorizedOnly", "true");
-                  else if (next && next !== "__any__") n.set("categoryId", next);
-                });
-              }}
+                  if (ids.includes("__uncat__")) {
+                    n.set("uncategorizedOnly", "true");
+                    return;
+                  }
+                  for (const id of ids.filter((x) => x !== "__any__" && x !== "__uncat__")) {
+                    n.append("categoryIds", id);
+                  }
+                })
+              }
               groups={categoryGroups}
-              placeholder="Any"
+              placeholder="All categories"
               ariaLabel="Filter by category"
+              multiSelectLabel="categories"
+              clearable
             />
           </Box>
         </SimpleGrid>
@@ -1635,18 +1611,11 @@ export function TransactionsPage() {
                 [account: <Code>{accountName}</Code>]
               </>
             ) : null}
-            {ownerScopeFilter ? (
+            {activeBelongsTo.length > 0 ? (
               <>
                 {" "}
                 [belongs-to:{" "}
-                <Code>{lookupLabel(belongsToGroups, ownerScopeFilter) ?? ownerScopeFilter}</Code>]
-              </>
-            ) : null}
-            {ownerPersonProfileFilter ? (
-              <>
-                {" "}
-                [belongs-to:{" "}
-                <Code>{lookupLabel(belongsToGroups, `person:${ownerPersonProfileFilter}`) ?? ownerPersonProfileFilter}</Code>]
+                <Code>{formatActiveBelongsToSummary(activeBelongsTo, belongsToGroups)}</Code>]
               </>
             ) : null}
             {amountMinUrl !== "" ? (
@@ -1668,7 +1637,7 @@ export function TransactionsPage() {
         {needsReviewTab ? (
           <Box pos="sticky" top={0} style={{ zIndex: 10 }} bg="var(--color-surface, #fff)" pb={4}>
             {selectedCount > 0 ? (
-              <Group role="status" aria-live="polite" wrap="wrap" align="center">
+              <Group className="transactions-bulk-bar" role="status" aria-live="polite" wrap="wrap" align="center">
                 <Text c="dimmed" size="sm">
                   {selectedCount} row{selectedCount === 1 ? "" : "s"} selected
                 </Text>
@@ -1685,16 +1654,6 @@ export function TransactionsPage() {
                 <Button type="button" disabled={savingBulk || !bulkCategoryId} onClick={() => void bulkAssignCategory()}>
                   Apply category
                 </Button>
-                {openTransferCountInSelection > 0 ? (
-                  <Button
-                    type="button"
-                    disabled={savingBulk}
-                    onClick={() => void bulkConfirmTransfers()}
-                    title="Confirm selected transfer flags as real transfers — sets transfer_group_id on both legs and excludes them from cash flow"
-                  >
-                    Confirm transfers ({openTransferCountInSelection})
-                  </Button>
-                ) : null}
                 {openFlagCountInSelection > 0 ? (
                   <Button
                     type="button"
@@ -1792,7 +1751,7 @@ export function TransactionsPage() {
           </Box>
         ) : null}
         {!needsReviewTab && !trashTab && selectedAllIds.size > 0 ? (
-          <Group role="status" aria-live="polite" wrap="wrap" align="center">
+          <Group className="transactions-bulk-bar" role="status" aria-live="polite" wrap="wrap" align="center">
             <Text c="dimmed" size="sm">
               {selectedAllIds.size} row{selectedAllIds.size === 1 ? "" : "s"} selected
             </Text>
@@ -1853,8 +1812,17 @@ export function TransactionsPage() {
             </Button>
           </Group>
         ) : null}
+        <TransactionAggregateSummary
+          filterQs={aggregateFilterQs}
+          hasActiveFilters={hasServerBackedLedgerFilters}
+        />
         {error ? <Alert color="red">{error}</Alert> : null}
-        {loading ? <Text c="dimmed">Loading…</Text> : null}
+        {loading ? (
+          <Group gap="sm" py="sm">
+            <GroveLoader size="lg" color="forest" speed="slow" />
+            <Text size="sm" c="dimmed">Loading transactions…</Text>
+          </Group>
+        ) : null}
         {!loading && data ? (
           <>
             <Group gap="md" wrap="wrap" mb="xs">
@@ -1899,7 +1867,14 @@ export function TransactionsPage() {
                         : "No transactions yet. Use New import in the header, then run import from the workspace, or add a row with + Add transaction."}
               </Text>
             ) : (
-              <Table withTableBorder withColumnBorders withRowBorders striped highlightOnHover>
+              <div
+                style={{
+                  overflowX: "auto",
+                  width: "100%",
+                  WebkitOverflowScrolling: "touch",
+                }}
+              >
+                <Table withTableBorder withColumnBorders withRowBorders striped highlightOnHover>
                   <Table.Thead>
                     <Table.Tr>
                       {needsReviewTab ? (
@@ -1943,13 +1918,15 @@ export function TransactionsPage() {
                         </Table.Th>
                       ) : null}
                       <Table.Th>Date</Table.Th>
-                      <Table.Th>Account</Table.Th>
+                      <Table.Th className="txn-col--secondary">Account</Table.Th>
                       <Table.Th>Amount</Table.Th>
                       <Table.Th>Description</Table.Th>
                       <Table.Th w="5.5rem" ta="center">Recurring</Table.Th>
                       {needsReviewTab ? <Table.Th>Why</Table.Th> : null}
                       {needsReviewTab ? <Table.Th>Session</Table.Th> : null}
-                      {!trashTab ? <Table.Th>Belongs-to</Table.Th> : null}
+                      {!trashTab ? (
+                        <Table.Th className="txn-col--secondary">Belongs-to</Table.Th>
+                      ) : null}
                       <Table.Th>Category</Table.Th>
                       <Table.Th w={1}></Table.Th>
                     </Table.Tr>
@@ -2022,7 +1999,7 @@ export function TransactionsPage() {
                               </Table.Td>
                             ) : null}
                             <Table.Td>{t.txnDate}</Table.Td>
-                            <Table.Td>{accountLabel}</Table.Td>
+                            <Table.Td className="txn-col--secondary">{accountLabel}</Table.Td>
                             <Table.Td>
                               <Group gap={5} wrap="nowrap">
                                 <Text>{formatMoney(t.amount, t.direction)}</Text>
@@ -2109,11 +2086,11 @@ export function TransactionsPage() {
                               </Table.Td>
                             ) : null}
                             {!trashTab ? (
-                              <Table.Td miw="12rem">
+                              <Table.Td miw="12rem" className="txn-col--secondary">
                                 <HierarchicalSearchPicker
-                                  value={t.ownerScope === "household" ? "household" : (`person:${t.ownerPersonProfileId ?? ""}` as const)}
+                                  value={belongsToPickerValueFromRow(t.ownerScope, t.ownerPersonProfileId)}
                                   onChange={(v) => {
-                                    const parsed = parseBelongsToFilterValue(v ?? "household");
+                                    const parsed = parseBelongsToPickerValue(v ?? "household");
                                     if (parsed.ownerScope === "household") {
                                       void updateCategory(t.id, t.categoryId, "household", null);
                                     } else if (parsed.ownerPersonProfileId) {
@@ -2157,7 +2134,7 @@ export function TransactionsPage() {
                                     onClick={() => void restoreSingle(t.id)}
                                     title="Restore"
                                     variant="default"
-                                    color="green"
+                                    color="fsForest"
                                   >
                                     <IconArrowBackUp size={14} />
                                   </ActionIcon>
@@ -2200,10 +2177,12 @@ export function TransactionsPage() {
                                   {!detailLoading && !detailError && detailItems && detailItems.length > 0
                                     ? detailItems.map((it) => {
                                         const summary =
-                                          it.reasonDetail?.message ??
-                                          (it.reasonDetail?.kind === "near_duplicate"
-                                            ? "Possible duplicate of an existing transaction."
-                                            : it.reason.slice(0, 200));
+                                          it.type === "transfer_ambiguity"
+                                            ? null // handled by dedicated candidate UI below
+                                            : it.reasonDetail?.message ??
+                                              (it.reasonDetail?.kind === "near_duplicate"
+                                                ? "Possible duplicate of an existing transaction."
+                                                : it.reason.slice(0, 200));
                                         const explainSource = prettyClassificationSource(
                                           it.context.classification?.source
                                         );
@@ -2225,56 +2204,60 @@ export function TransactionsPage() {
                                                 · {it.createdAt}
                                               </Text>
                                             </Group>
-                                            <Text c="dimmed" mt={4} mb={2}>
-                                              <Text span c="dimmed">File:</Text>{" "}
-                                              {it.context.fileName ?? "—"}{" "}
-                                              {it.context.sessionId ? (
-                                                <>
-                                                  ·{" "}
-                                                  <Link
-                                                    to={`/transactions?needsReview=true&sessionId=${it.context.sessionId}`}
-                                                  >
-                                                    Session rows
-                                                  </Link>
-                                                </>
-                                              ) : null}
-                                            </Text>
-                                            <Text c="dimmed" mb={4}>
-                                              <Text span c="dimmed">Raw preview:</Text>{" "}
-                                              {it.context.raw ? (
-                                                <>
-                                                  {it.context.raw.txnDate ?? "—"} ·{" "}
-                                                  {formatSignedMoneyRaw(it.context.raw.amount)} ·{" "}
-                                                  {it.context.raw.description ?? "—"}
-                                                </>
-                                              ) : (
-                                                "—"
-                                              )}
-                                            </Text>
-                                            <Text size="sm" mb={4}>{summary}</Text>
-                                            {explainSource || explainConf || explainRule || explainReason ? (
-                                              <Group gap="xs" wrap="wrap">
-                                                {explainSource ? (
-                                                  <Badge variant="light">{explainSource}</Badge>
+                                            {it.type !== "transfer_ambiguity" ? (
+                                              <>
+                                                <Text c="dimmed" mt={4} mb={2}>
+                                                  <Text span c="dimmed">File:</Text>{" "}
+                                                  {it.context.fileName ?? "—"}{" "}
+                                                  {it.context.sessionId ? (
+                                                    <>
+                                                      ·{" "}
+                                                      <Link
+                                                        to={`/transactions?needsReview=true&sessionId=${it.context.sessionId}`}
+                                                      >
+                                                        Session rows
+                                                      </Link>
+                                                    </>
+                                                  ) : null}
+                                                </Text>
+                                                <Text c="dimmed" mb={4}>
+                                                  <Text span c="dimmed">Raw preview:</Text>{" "}
+                                                  {it.context.raw ? (
+                                                    <>
+                                                      {it.context.raw.txnDate ?? "—"} ·{" "}
+                                                      {formatSignedMoneyRaw(it.context.raw.amount)} ·{" "}
+                                                      {it.context.raw.description ?? "—"}
+                                                    </>
+                                                  ) : (
+                                                    "—"
+                                                  )}
+                                                </Text>
+                                                {summary ? <Text size="sm" mb={4}>{summary}</Text> : null}
+                                                {explainSource || explainConf || explainRule || explainReason ? (
+                                                  <Group gap="xs" wrap="wrap">
+                                                    {explainSource ? (
+                                                      <Badge variant="light">{explainSource}</Badge>
+                                                    ) : null}
+                                                    {explainConf ? (
+                                                      <Badge variant="light">{explainConf}</Badge>
+                                                    ) : null}
+                                                    {explainRule ? (
+                                                      <Badge variant="light">
+                                                        ID {explainRule.slice(0, 8)}
+                                                      </Badge>
+                                                    ) : null}
+                                                    {explainReason ? (
+                                                      <Text c="dimmed" size="sm">{explainReason}</Text>
+                                                    ) : null}
+                                                  </Group>
                                                 ) : null}
-                                                {explainConf ? (
-                                                  <Badge variant="light">{explainConf}</Badge>
+                                                {it.context.classification?.ai ? (
+                                                  <Text c="dimmed" mt="xs" size="xs" lh={1.4}>
+                                                    Legacy AI suggestion metadata is present on this ticket (older
+                                                    canonicalize). New imports use rules-only classification.
+                                                  </Text>
                                                 ) : null}
-                                                {explainRule ? (
-                                                  <Badge variant="light">
-                                                    ID {explainRule.slice(0, 8)}
-                                                  </Badge>
-                                                ) : null}
-                                                {explainReason ? (
-                                                  <Text c="dimmed" size="sm">{explainReason}</Text>
-                                                ) : null}
-                                              </Group>
-                                            ) : null}
-                                            {it.context.classification?.ai ? (
-                                              <Text c="dimmed" mt="xs" size="xs" lh={1.4}>
-                                                Legacy AI suggestion metadata is present on this ticket (older
-                                                canonicalize). New imports use rules-only classification.
-                                              </Text>
+                                              </>
                                             ) : null}
                                             <Group mt="sm" wrap="wrap" align="flex-start">
                                               {it.type === "unknown_category" ? (
@@ -2319,19 +2302,66 @@ export function TransactionsPage() {
                                                   />
                                                 </Box>
                                               ) : null}
+                                              {it.type === "transfer_ambiguity" ? (
+                                                <Stack gap="xs" w="100%" mt={4}>
+                                                  {it.transferCandidates != null && it.transferCandidates.length > 0 ? (
+                                                    <>
+                                                      <Text size="xs" c="dimmed">Select the matching credit to pair with this debit:</Text>
+                                                      <Radio.Group
+                                                        value={selectedTransferCandidates[it.id] ?? ""}
+                                                        onChange={(val) =>
+                                                          setSelectedTransferCandidates((prev) => ({ ...prev, [it.id]: val }))
+                                                        }
+                                                      >
+                                                        <Stack gap={6}>
+                                                          {it.transferCandidates.map((c) => {
+                                                            const rawDesc = c.description ?? "";
+                                                            const descShort = rawDesc.length > 48 ? `${rawDesc.slice(0, 48)}…` : rawDesc;
+                                                            const amt = `+$${Number(c.amount).toLocaleString(undefined, {
+                                                              minimumFractionDigits: 2,
+                                                              maximumFractionDigits: 2
+                                                            })}`;
+                                                            return (
+                                                              <Radio
+                                                                key={c.id}
+                                                                value={c.id}
+                                                                disabled={busy}
+                                                                label={
+                                                                  <Group gap={8} wrap="nowrap">
+                                                                    <Text size="xs" fw={600} style={{ fontVariantNumeric: "tabular-nums" }}>{amt}</Text>
+                                                                    <Text size="xs" c="dimmed">{c.txnDate}</Text>
+                                                                    <Text size="xs">{c.accountName}</Text>
+                                                                    <Text size="xs" c="dimmed" title={rawDesc || undefined}>{descShort}</Text>
+                                                                  </Group>
+                                                                }
+                                                              />
+                                                            );
+                                                          })}
+                                                        </Stack>
+                                                      </Radio.Group>
+                                                      <Button
+                                                        type="button"
+                                                        size="xs"
+                                                        variant="filled"
+                                                        disabled={busy || !selectedTransferCandidates[it.id]}
+                                                        loading={savingResolutionItemId === it.id}
+                                                        onClick={() => {
+                                                          const creditId = selectedTransferCandidates[it.id];
+                                                          if (creditId) void confirmTransferItem(t.id, it.id, creditId);
+                                                        }}
+                                                        style={{ alignSelf: "flex-start" }}
+                                                      >
+                                                        Confirm transfer pair
+                                                      </Button>
+                                                    </>
+                                                  ) : it.transferCandidates != null ? (
+                                                    <Text c="dimmed" size="xs">No matching candidates — may resolve on next import.</Text>
+                                                  ) : null}
+                                                </Stack>
+                                              ) : null}
                                               <Group gap="xs" wrap="wrap">
                                                 {it.status !== "resolved" ? (
                                                   <>
-                                                    {it.type === "transfer_ambiguity" && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.debitId && (it.reasonDetail as { debitId?: string; creditId?: string } | null)?.creditId ? (
-                                                      <Button
-                                                        type="button"
-                                                        disabled={busy || savingResolutionItemId === it.id}
-                                                        title="Link both transactions as a transfer pair — excludes them from cash flow reports"
-                                                        onClick={() => void confirmTransferItem(t.id, it.id)}
-                                                      >
-                                                        {savingResolutionItemId === it.id ? "Confirming…" : "Confirm as transfer"}
-                                                      </Button>
-                                                    ) : null}
                                                     <Button
                                                       type="button"
                                                       variant="default"
@@ -2378,6 +2408,7 @@ export function TransactionsPage() {
                     })}
                   </Table.Tbody>
                 </Table>
+              </div>
             )}
           </>
         ) : null}
@@ -2408,13 +2439,10 @@ export function TransactionsPage() {
                 </Group>
               </Radio.Group>
             </Box>
-            <TextInput
+            <CurrencyInput
               label="Amount"
-              type="number"
-              step="any"
-              min="0"
-              value={addAmount}
-              onChange={(e) => setAddAmount(e.target.value)}
+              value={addAmount === "" ? undefined : Number(addAmount)}
+              onChange={(v) => setAddAmount(v == null ? "" : String(v))}
               placeholder="42.50"
             />
           </SimpleGrid>
@@ -2423,7 +2451,7 @@ export function TransactionsPage() {
             <Text size="sm" mb={6}>Belongs-to</Text>
             <HierarchicalSearchPicker
               value={addBelongsTo || null}
-              onChange={(v) => setAddBelongsTo((v ?? "") as BelongsToFilterValue)}
+              onChange={(v) => setAddBelongsTo(v ?? "")}
               groups={belongsToGroups}
               placeholder="Choose belongs-to..."
               ariaLabel="Belongs-to for new transaction"

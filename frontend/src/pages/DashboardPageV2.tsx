@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { GroveCardLoader } from "../components/GroveLoader";
 import {
   Anchor,
   Badge,
@@ -18,20 +19,25 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
   Legend,
   Line,
   LineChart,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis
 } from "recharts";
 
+import {
+  IconAlertCircle,
+  IconArrowsExchange,
+  IconCopy,
+} from "@tabler/icons-react";
+
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
+import { formatUsd } from "../utils/format";
 
 type CashSummaryResponse = {
   range: { start: string; end: string; label: string };
@@ -107,7 +113,6 @@ type AccountBucket = {
   priorMonthTxnCount: number;
 };
 
-const PIE_COLORS = ["#3b82f6", "#f59e0b", "#22c55e", "#e11d48", "#8b5cf6", "#64748b"];
 
 // Named for the field it actually checks (LedgerRow.merchant), not the brief's "description".
 const EXCLUDE_MERCHANT_TOKENS = [
@@ -168,7 +173,7 @@ const ALLOW_CATEGORIES = new Set([
   "tuition"
 ]);
 
-const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "mortgage", "checking"]);
+const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "checking"]);
 
 function currentYearMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -342,8 +347,8 @@ function accountArrow(b: AccountBucket): { char: string; color: string } | null 
   const liability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
   if (b.priorMonthOutflow === 0) return { char: "→", color: "dimmed" };
   const delta = (b.thisMonthOutflow - b.priorMonthOutflow) / b.priorMonthOutflow;
-  if (delta > 0.05) return { char: "↑", color: liability ? "red" : "orange" };
-  if (delta < -0.05) return { char: "↓", color: "green" };
+  if (delta > 0.05) return { char: "↑", color: liability ? "fsTerracotta" : "fsGold" };
+  if (delta < -0.05) return { char: "↓", color: "fsForest" };
   return { char: "→", color: "dimmed" };
 }
 
@@ -529,9 +534,9 @@ export function DashboardPageV2() {
   const netColor =
     cashData && cashData !== "error"
       ? cashData.household.net > 0
-        ? "green"
+        ? "fsForest"
         : cashData.household.net < 0
-          ? "red"
+          ? "fsTerracotta"
           : "dimmed"
       : "dimmed";
 
@@ -540,9 +545,9 @@ export function DashboardPageV2() {
       ? cashData.household.transactionCount === 0
         ? "dimmed"
         : cashData.household.net < 0
-          ? "red"
+          ? "fsTerracotta"
           : cashData.spendingPower.savingsRate !== null && cashData.spendingPower.savingsRate > 0.2
-            ? "green"
+            ? "fsForest"
             : "dimmed"
       : "dimmed";
 
@@ -594,10 +599,10 @@ export function DashboardPageV2() {
               {cashData.household.net >= 0 ? "+" : "−"}${formatNoCents(Math.abs(cashData.household.net))}
             </Text>
             <Group justify="center" gap="lg" mt={2} mb={4}>
-              <Text size="sm" c="green">
+              <Text size="sm" c="fsForest">
                 ↑ ${formatNoCents(cashData.household.inflows)} inflow
               </Text>
-              <Text size="sm" c="red">
+              <Text size="sm" c="fsTerracotta">
                 ↓ ${formatNoCents(cashData.household.outflows)} outflow
               </Text>
             </Group>
@@ -622,16 +627,16 @@ export function DashboardPageV2() {
               size="sm"
               color={
                 budgetData.summary.totalSpent >= budgetData.summary.totalBudgeted
-                  ? "red"
+                  ? "fsTerracotta"
                   : budgetData.summary.totalSpent / budgetData.summary.totalBudgeted >= 0.8
-                    ? "yellow"
-                    : "green"
+                    ? "fsGold"
+                    : "fsForest"
               }
             />
             <Group justify="space-between" mt={6}>
               <Text
                 size="sm"
-                c={budgetData.summary.totalSpent > budgetData.summary.totalBudgeted ? "red" : "dimmed"}
+                c={budgetData.summary.totalSpent > budgetData.summary.totalBudgeted ? "fsTerracotta" : "dimmed"}
               >
                 {budgetData.summary.totalSpent > budgetData.summary.totalBudgeted
                   ? `Over budget by $${formatNoCents(budgetData.summary.totalSpent - budgetData.summary.totalBudgeted)}`
@@ -668,12 +673,13 @@ export function DashboardPageV2() {
               component={Link}
               to="/transactions?needsReview=true&resolutionType=unknown_category"
               variant="light"
-              color="yellow"
+              color="gray"
               size="lg"
               radius="xl"
+              leftSection={<IconAlertCircle size={14} stroke={1.75} />}
               style={{ textDecoration: "none", cursor: "pointer" }}
             >
-              ⚠ {resolutionData.openByType.unknown_category} uncategorized
+              {resolutionData.openByType.unknown_category} uncategorized
             </Badge>
           ) : null}
           {(resolutionData.openByType.transfer_ambiguity ?? 0) > 0 ? (
@@ -681,12 +687,13 @@ export function DashboardPageV2() {
               component={Link}
               to="/transactions?needsReview=true&resolutionType=transfer_ambiguity"
               variant="light"
-              color="yellow"
+              color="gray"
               size="lg"
               radius="xl"
+              leftSection={<IconArrowsExchange size={14} stroke={1.75} />}
               style={{ textDecoration: "none", cursor: "pointer" }}
             >
-              ⟳ {resolutionData.openByType.transfer_ambiguity} transfer
+              {resolutionData.openByType.transfer_ambiguity} transfer
               {resolutionData.openByType.transfer_ambiguity === 1 ? "" : "s"} to pair
             </Badge>
           ) : null}
@@ -695,27 +702,23 @@ export function DashboardPageV2() {
               component={Link}
               to="/transactions?needsReview=true&resolutionType=duplicate_ambiguity"
               variant="light"
-              color="yellow"
+              color="gray"
               size="lg"
               radius="xl"
+              leftSection={<IconCopy size={14} stroke={1.75} />}
               style={{ textDecoration: "none", cursor: "pointer" }}
             >
-              ◑ {resolutionData.openByType.duplicate_ambiguity} possible duplicate
+              {resolutionData.openByType.duplicate_ambiguity} possible duplicate
               {resolutionData.openByType.duplicate_ambiguity === 1 ? "" : "s"}
             </Badge>
           ) : null}
         </Group>
       ) : null}
 
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md" mt="lg">
+      <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, lg: 4 }} spacing="md" mt="lg">
         <Paper component="section" withBorder p="md" radius="md">
-          <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
-            Spending This Month
-          </Text>
           {loading ? (
-            <Text size="sm" c="dimmed">
-              Loading…
-            </Text>
+            <GroveCardLoader label="Loading spending…" />
           ) : cashUnavailable ? (
             <Text size="sm" c="dimmed">
               Spending data unavailable
@@ -726,55 +729,84 @@ export function DashboardPageV2() {
             </Text>
           ) : (
             <>
-              <Box w="100%" h={180}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={slices} dataKey="outflows" nameKey="categoryName" innerRadius={44} outerRadius={72}>
-                      {slices.map((_, i) => (
-                        <Cell key={String(i)} fill={PIE_COLORS[i % PIE_COLORS.length]!} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => `$${v.toFixed(2)}`} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </Box>
-              <Stack gap={4} mt="xs">
-                {slices.map((slice, idx) => {
-                  const swatch = (
-                    <Group gap={6} wrap="nowrap">
-                      <Box
-                        w={6}
-                        h={6}
-                        style={{ borderRadius: "999px", background: PIE_COLORS[idx % PIE_COLORS.length] }}
-                      />
-                      <Text size="sm" component="span">
-                        {slice.categoryName}
-                      </Text>
-                    </Group>
-                  );
-                  const href =
-                    slice.categoryName === "Other"
-                      ? null
-                      : slice.categoryId
-                        ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
-                        : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
-                  return (
-                    <Group key={`${slice.categoryName}-${idx}`} justify="space-between" gap={4} wrap="nowrap">
-                      {href ? (
-                        <Anchor component={Link} to={href} underline="hover">
-                          {swatch}
-                        </Anchor>
-                      ) : (
-                        swatch
-                      )}
-                      <Text size="sm">${formatNoCents(slice.outflows)}</Text>
-                    </Group>
-                  );
-                })}
-              </Stack>
-              <Text mt="xs" size="sm" c="dimmed">
-                ${formatNoCents(totalOutflows)} total outflows
+              <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb={4} style={{ letterSpacing: "0.06em" }}>
+                Where money went · this month
               </Text>
+              <Text fw={700} size="lg" mb="sm" style={{ fontVariantNumeric: "tabular-nums" }}>
+                ${formatNoCents(totalOutflows)}
+              </Text>
+              <Stack gap={8} mt="xs">
+                {(() => {
+                  const sortedSlices = [...slices].sort((a, b) => b.outflows - a.outflows);
+                  const maxOut = Math.max(...sortedSlices.map((s) => s.outflows), 1);
+                  return sortedSlices.map((slice, idx) => {
+                    const pct = (slice.outflows / maxOut) * 100;
+                    const color = FS_CAT_PALETTE[idx % FS_CAT_PALETTE.length]!;
+                    const href =
+                      slice.categoryName === "Other"
+                        ? null
+                        : slice.categoryId
+                          ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
+                          : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    return (
+                      <Box
+                        key={`${slice.categoryName}-${idx}`}
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "minmax(80px, 110px) 1fr 72px",
+                          alignItems: "center",
+                          gap: 10,
+                          fontSize: 12.5,
+                        }}
+                      >
+                        <Box style={{ minWidth: 0 }}>
+                          {href ? (
+                            <Anchor
+                              component={Link}
+                              to={href}
+                              size="sm"
+                              underline="hover"
+                              style={{
+                                display: "block",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {slice.categoryName}
+                            </Anchor>
+                          ) : (
+                            <Text size="sm" truncate title={slice.categoryName}>
+                              {slice.categoryName}
+                            </Text>
+                          )}
+                        </Box>
+                        <Box
+                          style={{
+                            height: 10,
+                            background: "var(--color-track)",
+                            borderRadius: 999,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <Box
+                            style={{
+                              height: "100%",
+                              width: `${pct}%`,
+                              background: color,
+                              borderRadius: 999,
+                              transition: "width 240ms ease",
+                            }}
+                          />
+                        </Box>
+                        <Text size="sm" ta="right" c="dimmed" style={{ fontVariantNumeric: "tabular-nums" }}>
+                          ${formatNoCents(slice.outflows)}
+                        </Text>
+                      </Box>
+                    );
+                  });
+                })()}
+              </Stack>
             </>
           )}
         </Paper>
@@ -784,9 +816,7 @@ export function DashboardPageV2() {
             Net Worth
           </Text>
           {loading ? (
-            <Text size="sm" c="dimmed">
-              Loading…
-            </Text>
+            <GroveCardLoader label="Calculating your net worth…" />
           ) : (
             <>
               <Text
@@ -797,8 +827,8 @@ export function DashboardPageV2() {
                   netWorthData?.totals.netWorth == null
                     ? undefined
                     : netWorthData.totals.netWorth >= 0
-                      ? "green"
-                      : "red"
+                      ? "fsForest"
+                      : "fsTerracotta"
                 }
               >
                 {netWorthData?.totals.netWorth == null ? "—" : `$${formatNoCents(netWorthData.totals.netWorth)}`}
@@ -826,7 +856,7 @@ export function DashboardPageV2() {
                 if (points.length < 2 || distinctNonZero < 2) return null;
                 const first = points[0]!.netWorth;
                 const last = points[points.length - 1]!.netWorth;
-                const stroke = last > first ? "#16a34a" : last < first ? "#dc2626" : "#6b7280";
+                const stroke = last > first ? FS_FOREST : last < first ? FS_TERRACOTTA : "#6b7280";
                 return (
                   <Box w="100%" h={48} mt="xs">
                     <ResponsiveContainer width="100%" height="100%">
@@ -866,9 +896,7 @@ export function DashboardPageV2() {
             Estimated from repeated charges
           </Text>
           {loading ? (
-            <Text size="sm" c="dimmed">
-              Loading…
-            </Text>
+            <GroveCardLoader label="Detecting recurring payments…" />
           ) : recurringAll.length === 0 ? (
             <Text size="sm" c="dimmed">
               No recurring charges detected yet — import a few months of statements to see patterns
@@ -893,7 +921,7 @@ export function DashboardPageV2() {
                         </Text>
                       </Group>
                       <Group gap={8} wrap="nowrap">
-                        <Text size="sm">${item.medianAmount.toFixed(2)}/mo</Text>
+                        <Text size="sm">${formatUsd(item.medianAmount)}/mo</Text>
                         {!isConfirmed ? (
                           <Button
                             type="button"
@@ -977,8 +1005,8 @@ export function DashboardPageV2() {
               <YAxis tickFormatter={(v) => (trendUseK ? `$${(Number(v) / 1000).toFixed(0)}k` : `$${Number(v).toFixed(0)}`)} />
               <Tooltip formatter={(v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
               <Legend />
-              <Bar dataKey="inflows" fill="#22c55e" name="Income" />
-              <Bar dataKey="outflows" fill="#f97316" name="Spending" />
+              <Bar dataKey="inflows" fill={FS_FOREST} name="Income" />
+              <Bar dataKey="outflows" fill={FS_TERRACOTTA} name="Spending" />
             </BarChart>
           </ResponsiveContainer>
         </Box>
