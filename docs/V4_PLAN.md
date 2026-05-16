@@ -176,6 +176,23 @@ Production issues are currently discovered by tracing code paths by hand because
 
 ---
 
+### I-11: PWA file-input hang — File System Access API fallback
+
+In Chrome installed-app (PWA) mode, any programmatic `<input type="file">.click()` is blocked by Chrome's security policy in standalone display mode, causing the UI to hang silently. Affected flows:
+
+- **Import workspace** (`ImportWorkspacePage.tsx`) — statement file upload
+- **Backup/Restore** (`BackupRestoreSection.tsx`) — `.hfb` restore upload
+- **Category rules** (`CategoryRulesPage.tsx`) — CSV import
+
+**Fix approach:**
+1. Detect PWA mode: `window.matchMedia('(display-mode: standalone)').matches`
+2. Prefer the [File System Access API](https://developer.mozilla.org/en-US/docs/Web/API/Window/showOpenFilePicker) (`window.showOpenFilePicker`) where available — it works in PWA mode and gives the user a native picker
+3. Fall back to showing a warning banner if `showOpenFilePicker` is not available (older Chrome or browser-level block)
+
+**Files:** `frontend/src/pages/ImportWorkspacePage.tsx`, `frontend/src/pages/settings/BackupRestoreSection.tsx`, `frontend/src/pages/CategoryRulesPage.tsx`; possibly a shared `usePwaFileOpen` hook
+
+---
+
 ### T-1: Documentation consolidation
 Reduce 40+ markdown files in `docs/` to 5 canonical documents. Current state has multiple overlapping backlogs, archived PRDs with outdated status, and split deployment guides.
 

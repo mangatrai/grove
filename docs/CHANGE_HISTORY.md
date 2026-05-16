@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-192 (2026-05-15): Grove branding loader — replace Mantine Skeleton in hero card and Net Worth page
+
+- **Type:** UX polish — loading state consistency
+- **What:** Replaced Mantine `<Skeleton>` (solid gray animated rectangle) with the custom `<GroveCardLoader>` component in all remaining locations that had not yet been migrated:
+  - `DashboardPageV2.tsx` — hero cash flow card (inflow/outflow section)
+  - `NetWorthPage.tsx` — main net worth trend chart (340 px height preserved via wrapper Box), balance sheet table skeleton, individual account history expand rows, individual property history expand rows
+- **Why:** Net Worth categories, budget, and top-categories cards already use GroveCardLoader. The hero card and trend chart were the visible exceptions. Skeleton imports removed from both files.
+- **V4 backlog (I-11):** PWA mode (Chrome installed app) hangs on any function that programmatically triggers `<input type="file">.click()`. Affects Import, Backup/Restore, and Category Rules CSV import. Fix requires PWA display-mode detection + File System Access API fallback or a user-facing warning. Added as P3 in V4 plan.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
 ## FIX-191 (2026-05-15): Property create 503 — CASE WHEN untyped param + no try-catch on async handler
 
 - **Type:** Bug fix (production — property valuation create path)

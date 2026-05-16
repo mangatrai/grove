@@ -10,7 +10,6 @@ import {
   Paper,
   Progress,
   SimpleGrid,
-  Skeleton,
   Stack,
   Text,
   Title
@@ -579,7 +578,7 @@ export function DashboardPageV2() {
         </Group>
 
         {loading ? (
-          <Skeleton h={60} w={200} mx="auto" mb="md" radius="sm" />
+          <GroveCardLoader label="Loading cash flow…" size="sm" />
         ) : cashUnavailable ? (
           <Text ta="center" mb="md" c="dimmed">
             {cashRetrying ? (
