@@ -216,7 +216,7 @@ export function HomePage() {
 
                   <p className="hl-card-sub">
                     <span className="hl-card-mono">+$8,240</span>
-                    {" "}increase this year
+                    {"\u2002"}increase this year
                   </p>
 
                 </div>
@@ -278,7 +278,7 @@ export function HomePage() {
 
                   <p className="hl-card-sub hl-card-sub--center">
                     <span className="hl-card-mono">$3,840</span>
-                    {" "}of $5,200
+                    {"\u2002"}of $5,200
                   </p>
 
                   <div className="hl-cat-pills">
@@ -381,7 +381,7 @@ export function HomePage() {
 
                 {/* Auth helper links */}
                 <Text size="xs" c="dimmed" ta="center">
-                  New here?{" "}
+                  New here?{"\u2002"}
                   <Anchor href="mailto:admin@household.local" size="xs" title="Contact your household admin to be added as a member">
                     Request access
                   </Anchor>

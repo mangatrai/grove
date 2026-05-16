@@ -882,55 +882,6 @@ a {
   overflow: hidden;
 }
 
-.home-landing__card {
-  margin-bottom: 0.75rem;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  background: #fff;
-  box-shadow: 0 8px 32px -8px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(148, 163, 184, 0.12);
-}
-
-.home-landing__card-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.25rem;
-  color: var(--color-text);
-}
-
-.home-landing__card-sub {
-  margin: 0 0 1rem;
-  font-size: 0.85rem;
-}
-
-.home-landing__form {
-  margin-top: 0.25rem;
-}
-
-.home-landing__field {
-  margin-bottom: 0.85rem;
-}
-
-.home-landing__field input {
-  max-width: none;
-}
-
-.home-landing__error {
-  margin: 0 0 0.65rem;
-  font-size: 0.88rem;
-}
-
-.home-landing__submit {
-  width: 100%;
-  margin-top: 0.25rem;
-  padding: 0.55rem 1rem;
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.home-landing__footnote {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.45;
-  color: var(--color-text-muted);
-}
 
 /* ════════════════════════════════════════════════════
    HOME PAGE — Animation keyframes (hl- prefix scopes to this page)
@@ -1211,38 +1162,6 @@ a {
 .hl-txn-amt--d { color: #9a6050; }
 .hl-txn-amt--c { color: #4a8a6e; }
 
-/* Auth card helper links (request access · forgot password) */
-.home-landing__auth-links {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.35rem 0.65rem;
-  margin-top: 1rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--color-border);
-}
-
-.home-landing__auth-link-item {
-  font-size: 0.82rem;
-  color: var(--color-text-muted);
-}
-
-.home-landing__auth-link-sep {
-  color: var(--color-border);
-  font-size: 0.9rem;
-}
-
-.home-landing__auth-link {
-  color: var(--color-accent-hover);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.home-landing__auth-link:hover {
-  text-decoration: underline;
-  color: var(--color-accent);
-}
 
 @media (max-width: 899px) {
   .home-landing {
@@ -2876,60 +2795,6 @@ select.ledger-category-select {
   background: #0e110c;
 }
 
-[data-mantine-color-scheme="dark"] .home-landing::before {
-  background: linear-gradient(155deg, #050e07 0%, #0c1e10 70%, #091710 100%);
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__card {
-  background: #181c16;
-  border-color: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__auth-links {
-  border-top-color: rgba(255, 255, 255, 0.07);
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__card-title,
-[data-mantine-color-scheme="dark"] .home-landing__card-sub {
-  color: #ede8e1;
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__field input {
-  background: rgba(12, 15, 10, 0.6);
-  border-color: rgba(255, 255, 255, 0.1);
-  color: #ede8e1;
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__field label {
-  color: #9b9187;
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__auth-link-item {
-  color: #6b9178;
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__auth-link {
-  color: var(--fs-sidebar-active);
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__auth-link:hover {
-  color: #faf6ee;
-}
-
-[data-mantine-color-scheme="dark"] .home-landing__error {
-  color: #e07563;
-}
-
-@media (max-width: 899px) {
-  [data-mantine-color-scheme="dark"] .home-landing {
-    background: linear-gradient(180deg, #050e07 0%, #0c1e10 100%);
-  }
-  [data-mantine-color-scheme="dark"] .home-landing__card {
-    background: #181c16;
-    box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.55);
-  }
-}
 
 [data-mantine-color-scheme="dark"] .card {
   background: var(--color-surface);
