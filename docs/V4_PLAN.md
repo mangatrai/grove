@@ -161,6 +161,19 @@ Email as canonical identity; `user_household_membership` join table. Deferred un
 
 ---
 
+### PT-1: Property Tax Protest Assistant
+Annual workflow to assess whether to protest a county appraisal and build evidence for both protest strategies (market value + unequal appraisal). Per-property worksheet, CAD data integration for comp assessment lookups, LLM-powered case analysis, and protest outcome tracker. Multi-state: Denton County TX (ARB) + Shelby County TN (Board of Equalization).
+
+**Urgency note:** User's Denton County ARB hearing is June 8, 2026. This year's protest will likely be manual; feature targets next year's cycle. An early build before June 8 would serve as real-world validation.
+
+**Architecture decision:** Built feature for data collection, storage, and protest tracking + LLM layer ("Generate protest strategy" button) for case analysis and multi-state strategy adaptation. Not a standalone Claude Code skill — requires persistent property and protest history data.
+
+**Quick win available now (standalone):** Extract subject property physical facts (sqft/beds/baths/yearBuilt/lotSqft) from the existing Redfin `/detailsbyaddress` response. Currently parsed for comps only. Small isolated addition to `realty-api.service.ts`; should ship before the full ARB feature so data accumulates with each monthly refresh.
+
+**Design details:** See `docs/V4_BACKLOG.md` §Property Tax Protest Assistant for full feature vision, CAD data landscape (DCAD portal URLs, Shelby County assessor URLs), reference services (ownwell.com, bezit.co), LLM layer design, and remaining open questions.
+
+---
+
 ### FR-15: Household Staff module (V5/V6 candidate)
 Full timesheet + expense + payment module for household employees (nanny, cleaner, au pair). `staff` RBAC role with restricted navigation (My Timesheet + My Expenses only). Admin review, approval, payment recording with optional ledger posting.
 
@@ -207,6 +220,7 @@ These items are removed from the active backlog. No plans to build.
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
+| PT-1 | Property tax protest assistant (ARB) | Deferred — needs grooming | Feature |
 | FR-15 | Staff module (timesheets, expenses, payments) | Deferred (V5/V6) | Feature |
 
 ---

@@ -58,6 +58,14 @@ export interface ValuationDetail {
     taxesDue: number | null;
   }>;
   comps: ValuationComp[];
+  subject: {
+    beds: number | null;
+    baths: number | null;
+    sqFt: number | null;
+    lotSqFt: number | null;
+    yearBuilt: number | null;
+    apn: string | null;           // Assessor Parcel Number — encodes county property ID for tax protest lookups
+  } | null;
 }
 
 export interface ValuationLookupResult {
@@ -272,6 +280,18 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
   const rawComps = avmRoot?.comparables;
   const comps = parseComps(rawComps);
 
+  // Subject property physical characteristics (from public records)
+  const basicInfo = pubRecords?.basicInfo as Record<string, unknown> | undefined;
+  const subject: ValuationDetail["subject"] = basicInfo ? {
+    beds: typeof basicInfo.beds === "number" ? basicInfo.beds : null,
+    baths: typeof basicInfo.baths === "number" ? basicInfo.baths : null,
+    sqFt: typeof basicInfo.sqFtFinished === "number" ? basicInfo.sqFtFinished
+      : typeof basicInfo.totalSqFt === "number" ? basicInfo.totalSqFt : null,
+    lotSqFt: typeof basicInfo.lotSqFt === "number" ? basicInfo.lotSqFt : null,
+    yearBuilt: typeof basicInfo.yearBuilt === "number" ? basicInfo.yearBuilt : null,
+    apn: typeof basicInfo.apn === "string" ? basicInfo.apn : null
+  } : null;
+
   const detail: ValuationDetail = {
     fetchedAt: new Date().toISOString().slice(0, 10),
     source: "redfin",
@@ -280,7 +300,8 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
     lastSold,
     taxCurrent,
     taxHistory,
-    comps
+    comps,
+    subject
   };
 
   return { estimate: predictedValue, apiPropertyId, apiListingId, detail };
