@@ -538,4 +538,144 @@ This feature is distinct from D-3 (rental income tracking — permanently droppe
 
 ---
 
-*Last updated: 2026-05-15.*
+## Dashboard + Net Worth Caching (F-6)
+
+### Pattern: `useSessionCache` hook
+
+```typescript
+// frontend/src/hooks/useSessionCache.ts
+export function useSessionCache<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttlMs = 10 * 60 * 1000   // 10 min default; effectively infinite for offline use
+): { data: T | null; loading: boolean; lastUpdatedAt: Date | null; refresh: () => void }
+```
+
+- On mount: check `sessionStorage.getItem(key)`. If present and within TTL, parse and return immediately (no fetch).
+- If stale or absent: call `fetcher()`, store result + timestamp in `sessionStorage`.
+- `refresh()`: force fetch regardless of TTL, update storage and state.
+- Storage key format: `hfa:cache:{key}` to avoid namespace collision.
+
+### Cache invalidation on import finalize
+
+In `ImportWorkspacePage.tsx` (or wherever finalize is triggered), after a successful finalize response:
+
+```typescript
+// Clear dashboard and networth caches
+sessionStorage.removeItem('hfa:cache:cash-summary');
+sessionStorage.removeItem('hfa:cache:balance-sheet');
+```
+
+Or dispatch a `CustomEvent('hfa:import-finalized')` and listen for it in each cached page — cleaner if cache keys change.
+
+### Refresh icon placement
+
+- **Home page:** Top-right corner of the INFLOW / OUTFLOW KPI card row. `<ActionIcon variant="subtle">` with `<IconRefresh size={14}>`. Tooltip: "Last updated {timeAgo}".
+- **Net Worth page:** Same placement, top-right of the accounts table card.
+- During fetch: icon spins (`@keyframes spin`). On error: toast "Failed to refresh, using cached data."
+
+### What NOT to cache
+
+Do not cache the Transactions page or ledger — that list has user-driven filters and pagination; stale data there is confusing. Cache only the aggregate/summary endpoints that are expensive and rarely change.
+
+---
+
+## Transfer Matching Improvements (TM-1 / TM-2 / TM-3)
+
+### TM-2: API spec for manual pair/unpair
+
+```
+POST /transactions/pair
+Body: { debitId: string; creditId: string }
+Validates:
+  - Both belong to same household
+  - Different account_id
+  - Opposite signs (one negative, one positive)
+  - Neither already has a transfer_group_id (or require explicit override)
+Response: 200 { transferGroupId: string }
+
+DELETE /transactions/pair/:groupId
+Validates:
+  - At least one transaction with this transfer_group_id belongs to caller's household
+Response: 204 (nulls transfer_group_id on all rows with that groupId)
+```
+
+### TM-3: `transferPairScore` signature change
+
+Current:
+```typescript
+export function transferPairScore(
+  debitLabel: string, creditLabel: string,
+  debitDate: string, creditDate: string,
+  dateDiffDays: (a: string, b: string) => number
+): number
+```
+
+Extended:
+```typescript
+export function transferPairScore(
+  debitLabel: string, creditLabel: string,
+  debitDate: string, creditDate: string,
+  dateDiffDays: (a: string, b: string) => number,
+  opts?: { sameInstitution?: boolean }
+): number
+```
+
+Early return added before the existing `days <= 1` block:
+```typescript
+if (opts?.sameInstitution && dateDiffDays(debitDate, creditDate) === 0) {
+  return 55;  // same bank, same day — strong same-institution signal
+}
+```
+
+The candidates query in `canonicalizeImportSession` needs to join `financial_account` to get `institution` for each candidate row.
+
+---
+
+## AI Year-End Summary (F-7)
+
+### Prompt design
+
+Feed as a structured JSON block (same approach as `insight-prompt.service.ts`):
+
+```
+You are a friendly personal finance advisor reviewing a household's full-year financial data.
+Write a 2-3 paragraph summary that feels personal and encouraging — not clinical.
+Cover: what went well, what stands out or surprised you, one specific actionable suggestion for next year.
+Avoid generic advice. Reference the actual numbers.
+
+DATA:
+{
+  "year": 2025,
+  "income": 280000,
+  "spending": 195000,
+  "netSavings": 85000,
+  "savingsRate": "30.4%",
+  "priorYearComparison": { "income": 265000, "spending": 188000, "savingsRate": "29.1%" },
+  "topCategories": [
+    { "name": "Housing", "amount": 42000, "pct": "21.5%" },
+    ...
+  ],
+  "bestMonth": { "month": "2025-03", "netSavings": 12400 },
+  "worstMonth": { "month": "2025-11", "netSavings": -2100 },
+  "netWorthStart": 620000,
+  "netWorthEnd": 710000,
+  "netWorthChange": 90000,
+  "largestTransaction": { "date": "2025-06-15", "amount": 28000, "description": "ESPP Purchase" },
+  "topMerchant": { "name": "Amazon", "count": 87 }
+}
+```
+
+### Backend endpoint
+
+```
+GET /reports/year-summary?year=2025
+```
+
+- Computes all data fields from `transaction_canonical`, `account_balance_snapshot`, `payslip_snapshot`.
+- Calls LLM and caches narrative in `household` settings JSON or a new `year_summary_cache` table (avoid re-calling LLM on every page load; invalidate if user uploads more data for that year).
+- Returns: `{ year, data: {...}, narrative: string, generatedAt: string }`.
+
+---
+
+*Last updated: 2026-05-16. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes.*

@@ -34,6 +34,39 @@ The backend already computes a `yearOverYear` comparison block for `preset=month
 
 ---
 
+### R-3: Remove `checking` from `LIABILITY_ACCOUNT_TYPES` (dashboard arrow bug)
+Checking accounts are liquid assets, not liabilities. The constant at `DashboardPageV2.tsx:175` incorrectly includes `"checking"`, causing the BY ACCOUNT card to show a red ↑ arrow when checking outflow increases month-over-month — the same signal used for a rising credit card balance. Checking outflow increase should show gold ↑ (neutral) not terracotta (bad).
+
+**Fix:** Remove `"checking"` from the set. Correct list: `new Set(["credit_card", "loan"])`.
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx` (line 175)
+
+---
+
+### F-6: Dashboard + Net Worth page caching with session refresh icon
+Every Home page and Net Worth page load re-runs expensive aggregate SQL queries (cash summary, balance sheet history). For a self-hosted offline app, data does not change between page loads — only after a new import. Caching in `sessionStorage` with an explicit refresh button eliminates the per-navigation latency.
+
+**Scope:**
+- **Home page:** Cache `GET /reports/cash-summary` in `sessionStorage` keyed by `household_id + active_month`. On mount, serve cached data immediately. Refresh icon (top-right corner of the inflow/outflow KPI card) triggers a fresh fetch, updates the cache, and shows a "Last updated X min ago" tooltip.
+- **Net Worth page:** Same pattern for `GET /reports/balance-sheet` + history. Cache keyed by `household_id + member_filter`.
+- **Cache invalidation:** Clear relevant keys when import session is finalized (dispatch a `CustomEvent` from the import flow, listened to by cached pages).
+- **Shared hook:** `useSessionCache<T>(key, fetcher)` — returns `{ data, loading, refresh, lastUpdatedAt }`.
+
+**Design notes:** See `docs/V4_BACKLOG.md` §Dashboard + Net Worth Caching for implementation pattern.
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/NetWorthPage.tsx`; new `frontend/src/hooks/useSessionCache.ts`
+
+---
+
+### TM-1: Transfer matching — bump date tolerance from 2 → 4 days
+The current transfer auto-pairing window is ±2 days (`canonical-ingest.service.ts:922`). Real-world bank-to-bank ACH transfers routinely take 3 days, causing confirmed pairs to miss the window and land in the unmatched queue. Widening to 4 days catches the common 3-day lag without materially increasing false-pair risk: the pair score threshold (45) and same-account exclusion both still apply.
+
+**Implementation:** Change the `<= 2` check at line 922 to `<= 4`. Update the `closeDateToleranceDays` telemetry field (line 964) to match.
+
+**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts` (lines 922, 964)
+
+---
+
 ## P2 — High-Value Features
 
 ### F-1: In-app notification system + budget/operation alerts
@@ -98,6 +131,63 @@ A cohesive pass over the payslip feature covering: month-over-month comparison, 
 **PS-4 — Tax sufficiency signal:** Annualised federal + state withholding rate (YTD withheld ÷ YTD gross × 12/pay-period-count). Display a subtle flag if annualised federal rate looks low vs 20% general benchmark. NOT a full tax calculation — just a data-derived signal to prompt the user to check their W-4.
 
 **Files:** `backend/src/modules/payslip/payslip.service.ts`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/payslip/types.ts`
+
+---
+
+### TM-2: Transfer pair visibility + manual pair/unpair UI
+No way exists today to see which transactions are paired as transfers, or to manually pair unmatched ones. Edge cases that auto-detection misses (check float > 4 days, empty-memo same-institution transfers) require raw SQL to resolve.
+
+**Scope:**
+- **Transactions page — More Filters section:** Add "Transfer status" filter: `Paired` (has `transfer_group_id`), `Unpaired transfer` (no `transfer_group_id` + category is Transfer In or Transfer Out).
+- **Paired indicator:** On transactions with a `transfer_group_id`, show a small "↔ Transfer" badge. Clicking it reveals the paired transaction inline (account, date, amount).
+- **Manual pair:** Select two transactions → "Mark as transfer pair" action → `POST /transactions/pair` (validates different accounts, opposite signs, same household).
+- **Unpair:** From a paired transaction's detail view → "Remove transfer pair" → `DELETE /transactions/pair/:groupId` (nulls `transfer_group_id` on both rows).
+
+**Backend:** New `POST /transactions/pair` and `DELETE /transactions/pair/:groupId` endpoints in `ledger.routes.ts`.
+
+**Design notes:** See `docs/V4_BACKLOG.md` §Transfer Pair Visibility for API spec.
+
+**Files (new):** New endpoints in `backend/src/modules/ledger/ledger.routes.ts`, `ledger.service.ts`
+**Files (updated):** `frontend/src/pages/TransactionsPage.tsx`
+
+---
+
+### TM-3: Transfer matching — same-institution score boost
+When two transactions share the same date, exact matching absolute amounts (opposite signs), and belong to accounts at the **same institution**, it is almost certainly an internal transfer (Citibank card → Citibank savings; BofA checking → BofA credit card payment). The current scorer returns 0 for these pairs when both memos are empty — below the auto-pair threshold (45) — so they land in the resolution queue instead of auto-pairing.
+
+**Fix:** Extend the candidates query to include `institution`. Pass institution to `transferPairScore`. Return 55 when `sameInstitution && dateDiff === 0`. Score 55 is above the auto-pair threshold but still subject to normal ambiguity resolution if multiple same-amount same-institution candidates exist.
+
+**Why not score 0 by default on same-day same-amount different accounts:** An Amazon purchase ($182.81) and a Citibank internal transfer ($182.81) could coincide — institution is the discriminating signal. Amazon is never the institution on a `financial_account` row.
+
+**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts` (candidates query + `transferPairScore` signature + call sites)
+
+---
+
+### F-7: AI Year-End "Wrapped" financial summary
+A "Spotify Wrapped for your finances" — triggered manually in January after the full year is imported and reconciled. Surfaces the year's highlights, trends, and surprises in a card-based UI with optional email delivery.
+
+**Trigger:** Manual "Generate Year Summary" button, visible January 1 – March 31. User selects the year (defaults to prior year).
+
+**What it computes:**
+- Full-year income, spending, net savings, savings rate; YoY comparison if prior year exists
+- Top 5 spending categories with % of total spend
+- Best month (highest net) and worst month (highest spend)
+- Net worth change Jan 1 → Dec 31 (from `account_balance_snapshot`)
+- Investment/retirement account growth (accounts of type `investment`, `retirement`)
+- Largest single transaction; most-used merchant by count
+
+**AI narrative:** Feed structured data to LLM (same pattern as existing AI Financial Health). Returns a 2–3 paragraph personal narrative: what went well, what stands out, one actionable suggestion.
+
+**UI:** "Year in Review" modal or dedicated page — card-per-stat layout, AI narrative at top, data cards below.
+
+**Email:** When F-1 (notification system) has shipped, deliver via `year_summary_ready` notification with email.
+
+**Dependency:** F-1 for email delivery; UI-only mode works without it.
+
+**Design notes:** See `docs/V4_BACKLOG.md` §AI Year-End Summary for prompt design.
+
+**Files (new):** `backend/src/modules/reports/year-summary.service.ts`
+**Files (updated):** `reports.routes.ts`, `insight-prompt.service.ts`, new frontend page/modal
 
 ---
 
@@ -176,9 +266,33 @@ Production issues are currently discovered by tracing code paths by hand because
 
 ---
 
-### I-11: PWA file-input hang — File System Access API fallback
+### F-8: BY ACCOUNT card — net spend vs. outflow-only redesign
+The BY ACCOUNT card currently shows outflow-only (absolute value of debits) with a month-over-month arrow. This doesn't distinguish asset accounts from liability accounts meaningfully. R-3 fixes the arrow color bug for checking; the underlying metric question (should the card show net or outflow? should credit cards show balance-owed instead?) still needs design clarity before building.
 
-In Chrome installed-app (PWA) mode, any programmatic `<input type="file">.click()` is blocked by Chrome's security policy in standalone display mode, causing the UI to hang silently. Affected flows:
+**Open questions:**
+- Primary number: net (inflow − outflow) per account, or outflow-only?
+- For credit cards: transaction-level outflow vs. `account_balance_snapshot` balance?
+- Does R-3 (checking arrow color fix) fully address the concern, or does the metric also need to change?
+
+**Status:** P3 — do not build until metric definition is decided.
+
+**Files (when ready):** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+### I-12: "Other" category hyperlink on WHERE MONEY WENT card
+Top-5 spending category slices are `<Anchor>` links to the Transactions page filtered by category. The "Other" catch-all bucket (categories 6+) renders as plain `<Text>` — not clickable — because it has no single `categoryId`.
+
+**Fix:** In `outflowSlices()` carry the constituent category IDs on the Other slice. Build a URL with all those IDs as `categoryIds[]=...` params — the Transactions page already supports multi-value category filter via `HierarchicalSearchPicker`.
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+### ~~I-11: PWA file-input hang — File System Access API fallback~~ → Deferred
+**Update 2026-05-16:** PWA installed via Safari works correctly. Chrome PWA file-input hang is a real issue but not actively blocking usage. Moved to Deferred; revisit if Safari PWA stops working or Chrome PWA adoption increases.
+
+~~In Chrome installed-app (PWA) mode, any programmatic `<input type="file">.click()` is blocked by Chrome's security policy in standalone display mode, causing the UI to hang silently. Affected flows:~~
 
 - **Import workspace** (`ImportWorkspacePage.tsx`) — statement file upload
 - **Backup/Restore** (`BackupRestoreSection.tsx`) — `.hfb` restore upload
@@ -269,6 +383,7 @@ These items are removed from the active backlog. No plans to build.
 | Export TTL SQL INTERVAL style | Style-only; no correctness or security issue |
 | `vitest --coverage` script | No CI pipeline; no coverage gate needed at this stage |
 | HttpOnly JWT cookies | Not worth the complexity for single-household self-host |
+| Manual dedup fuzzy matching | Same date+amount+slightly different description is a niche case; manual resolution is acceptable; complexity outweighs benefit |
 
 ---
 
@@ -278,17 +393,29 @@ These items are removed from the active backlog. No plans to build.
 |---|---|---|---|
 | R-1 | Post-restore `force_password_change` | P1 | Security |
 | R-2 | YoY delta on Home KPIs (frontend-only) | P1 | UX |
+| R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | P1 | Bug fix |
+| F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
+| TM-1 | Transfer date tolerance 2 → 4 days | P1 | Bug fix |
 | F-1 | In-app notification system + alerts | P2 | Feature |
 | F-2 | Balance sheet member subtotals | P2 | Feature |
 | F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | P2 | Feature |
+| TM-2 | Transfer pair visibility + manual pair/unpair UI | P2 | Feature |
+| TM-3 | Transfer matching — same-institution score boost | P2 | Enhancement |
+| F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
 | I-8 | Playwright E2E spike | P3 | Testing |
 | I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
+| F-4 | Delete property | P3 | Feature |
+| F-5 | Account closed/inactive status | P3 | Feature |
+| F-8 | BY ACCOUNT card redesign (needs design clarity) | P3 | UX |
+| I-10 | App-wide error logging audit | P3 | Reliability |
+| I-12 | "Other" category hyperlink on dashboard | P3 | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
+| I-11 | PWA file-input hang (Safari PWA works; Chrome deferred) | Deferred | Enhancement |
 | PT-1 | Property tax protest assistant (ARB) | Deferred — needs grooming | Feature |
 | FR-15 | Staff module (timesheets, expenses, payments) | Deferred (V5/V6) | Feature |
 
 ---
 
-*Last updated: 2026-05-15. V4 planning complete. Recommended build order: R-1 + R-2 (quick wins, same session) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → F-1 (notifications, scope triggers before building) → P3 items in any order.*
+*Last updated: 2026-05-16. New items added: R-3, F-6, TM-1 (P1); TM-2, TM-3, F-7 (P2); F-8, I-12 (P3); I-11 moved to Deferred. Recommended build order: R-1 + R-2 + R-3 + TM-1 (quick wins) → F-6 (caching) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → TM-2 + TM-3 (transfer UI) → F-7 (year-end summary, after F-1 email infra) → F-1 (notifications) → P3 items in any order.*
