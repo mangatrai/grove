@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-190 (2026-05-15): Home page hero redesign — animated preview cards
+
+- **Type:** UX / design
+- **Files:** `frontend/src/pages/HomePage.tsx`, `frontend/src/index.css`, `frontend/index.html`
+- **What changed:** Replaced the static bullet-list + feature-pill hero with two animated preview cards (Net Worth card with SVG line chart that draws itself, Budget ring card with arc fill animation) and three staggered transaction rows. Added JetBrains Mono to the font stack for monospaced values. Hero panel widened to 60%; aside is 40% (flex split replacing the old 1.1fr/0.9fr grid).
+- **Removed:** `.home-landing__lead`, `.home-landing__bullets`, `.home-landing__check`, `.home-landing__pills`, `.home-landing__pill` CSS classes; `featurePills` constant in TSX.
+- **Added:** `.home-landing__sub`, all `hl-*` CSS classes + `@keyframes hl-*` animations; `nwValueRef` counter effect.
+- **Auth card:** untouched — all Mantine components, handlers, reset-success banner, forgot-password flow unchanged.
+
+---
+
 ## CR-189 (2026-05-15): D-2 — Property valuation UX polish
 
 - **Type:** UX fix (D-2 follow-on)
