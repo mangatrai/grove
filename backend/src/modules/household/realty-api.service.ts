@@ -86,11 +86,13 @@ async function realtyGet(endpoint: string, params: Record<string, string>): Prom
   for (const [k, v] of Object.entries(params)) {
     url.searchParams.set(k, v);
   }
+  log.info("RealtyAPI: GET", { endpoint, paramKeys: Object.keys(params) });
   const res = await fetch(url.toString(), {
     headers: { "x-realtyapi-key": apiKey() },
     signal: AbortSignal.timeout(30_000)
   });
   if (!res.ok) {
+    log.error("RealtyAPI: HTTP error", { endpoint, status: res.status, statusText: res.statusText });
     throw new Error(`RealtyAPI ${endpoint} HTTP ${res.status}`);
   }
   return res.json() as Promise<unknown>;
@@ -188,8 +190,10 @@ function parseComps(comparables: unknown): ValuationComp[] {
       if (!address || !city) continue;
 
       result.push({ address, city, state, zip, sqft, beds, baths, yearBuilt, lotSqft, listPrice, soldPrice, soldDate, pricePerSqft });
-    } catch {
-      // Skip malformed comp entries silently
+    } catch (err) {
+      log.warn("RealtyAPI: parseComps — skipping malformed comp entry", {
+        err: err instanceof Error ? err.message : String(err)
+      });
     }
   }
 
@@ -203,16 +207,32 @@ function parseComps(comparables: unknown): ValuationComp[] {
 function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
   const r = raw as Record<string, unknown>;
   const details = r?.details as Record<string, unknown> | undefined;
-  if (!details) return null;
+  if (!details) {
+    log.error("RealtyAPI: parseRedfinResponse — missing 'details' key", {
+      topLevelKeys: Object.keys(r ?? {}).slice(0, 10)
+    });
+    return null;
+  }
 
   // IDs — from avmInfo and mainHouseInfo
   const avmRoot = (details.avm as Record<string, unknown>)?.__root as Record<string, unknown> | undefined;
   const avmInfo = avmRoot?.avmInfo as Record<string, unknown> | undefined;
   const predictedValue = avmInfo?.predictedValue;
-  if (typeof predictedValue !== "number" || !Number.isFinite(predictedValue)) return null;
+  if (typeof predictedValue !== "number" || !Number.isFinite(predictedValue)) {
+    log.error("RealtyAPI: parseRedfinResponse — predictedValue missing or invalid", {
+      hasAvm: Boolean(details.avm),
+      hasAvmRoot: Boolean(avmRoot),
+      hasAvmInfo: Boolean(avmInfo),
+      predictedValueType: typeof predictedValue
+    });
+    return null;
+  }
 
   const apiPropertyId = avmInfo?.propertyId != null ? String(avmInfo.propertyId) : null;
-  if (!apiPropertyId) return null;
+  if (!apiPropertyId) {
+    log.error("RealtyAPI: parseRedfinResponse — propertyId missing from avmInfo");
+    return null;
+  }
 
   // listing_id — mainHouseInfoPanelInfo is most reliable
   const panelInfo = details.mainHouseInfoPanelInfo as Record<string, unknown> | undefined;

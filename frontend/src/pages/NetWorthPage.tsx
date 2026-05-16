@@ -11,7 +11,6 @@ import {
   Paper,
   Select,
   SimpleGrid,
-  Skeleton,
   Stack,
   Table,
   Text,
@@ -38,6 +37,7 @@ import {
 import { apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CurrencyInput } from "../components/CurrencyInput";
+import { GroveCardLoader } from "../components/GroveLoader";
 import { HelpIcon } from "../components/HelpIcon";
 import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
 import { FS_CLAY, FS_FOREST, FS_SAGE } from "../theme/chartPalette";
@@ -944,7 +944,11 @@ export function NetWorthPage() {
           </Stack>
         ) : null}
 
-        {historyLoading ? <Skeleton height={340} radius="md" mt="sm" animate /> : null}
+        {historyLoading ? (
+          <Box mt="sm" style={{ height: 340, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <GroveCardLoader label="Loading net worth trend…" />
+          </Box>
+        ) : null}
         {!historyLoading && chartRows.length > 0 ? (
           <Box mt="sm">
             <Group gap="sm" wrap="wrap" align="center" style={{ fontSize: "0.82rem" }}>
@@ -1027,7 +1031,7 @@ export function NetWorthPage() {
         <Box mb="sm" style={{ maxWidth: "12rem" }}>
           <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
         </Box>
-        {loading ? <Skeleton height={120} radius="md" animate /> : null}
+        {loading ? <GroveCardLoader label="Loading balance sheet…" size="sm" /> : null}
         {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
           <Box style={{ overflowX: "auto" }}>
             {editDirty ? (
@@ -1103,7 +1107,7 @@ export function NetWorthPage() {
                         <Table.Td colSpan={5} style={{ paddingTop: 0, paddingBottom: 0 }}>
                           <Collapse in={isExpanded}>
                             <Box py="xs">
-                              {isHistoryLoading ? <Skeleton height={120} /> : null}
+                              {isHistoryLoading ? <GroveCardLoader label="Loading account history…" size="sm" /> : null}
                               {!isHistoryLoading && !showNoHistory ? (
                                 <Box style={{ width: "100%", height: 120 }}>
                                   <ResponsiveContainer width="100%" height="100%">
@@ -1242,7 +1246,7 @@ export function NetWorthPage() {
                             <Table.Td colSpan={5} style={{ paddingTop: 0, paddingBottom: 0 }}>
                               <Collapse in={isExpanded}>
                                 <Box py="xs">
-                                  {isHistLoading ? <Skeleton height={120} /> : null}
+                                  {isHistLoading ? <GroveCardLoader label="Loading property history…" size="sm" /> : null}
                                   {!isHistLoading && !showNoHistory && histPoints.length > 0 ? (
                                     <Box style={{ width: "100%", height: 120 }}>
                                       <ResponsiveContainer width="100%" height="100%">
@@ -1368,7 +1372,7 @@ export function NetWorthPage() {
                         <Table.Td colSpan={5} style={{ paddingTop: 0, paddingBottom: 0 }}>
                           <Collapse in={isExpanded}>
                             <Box py="xs">
-                              {isHistoryLoading ? <Skeleton height={120} /> : null}
+                              {isHistoryLoading ? <GroveCardLoader label="Loading account history…" size="sm" /> : null}
                               {!isHistoryLoading && !showNoHistory ? (
                                 <Box style={{ width: "100%", height: 120 }}>
                                   <ResponsiveContainer width="100%" height="100%">

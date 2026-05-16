@@ -32,6 +32,7 @@ import {
 } from "./property.service.js";
 import { isRealtyApiConfigured } from "./realty-api.service.js";
 import { qExec, qGet } from "../../db/query.js";
+import { log } from "../../logger.js";
 
 export const householdRouter = Router();
 householdRouter.use(requireAuth);
@@ -340,8 +341,8 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
   const householdId = req.authUser!.householdId;
 
   if (parsed.data.accountId) {
-    const acct = await qGet<{ id: string }>(
-      `SELECT id FROM financial_account WHERE id = ? AND household_id = ?`,
+    const acct = await qGet<{ id: string; property_id: string | null }>(
+      `SELECT id, property_id FROM financial_account WHERE id = ? AND household_id = ?`,
       parsed.data.accountId,
       householdId
     );
@@ -349,51 +350,64 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
       res.status(404).json({ message: "Financial account not found", code: "ACCOUNT_NOT_FOUND" });
       return;
     }
+    if (acct.property_id) {
+      res.status(409).json({
+        message: "This account already has a property linked. Open the existing property to update it.",
+        code: "PROPERTY_ALREADY_LINKED"
+      });
+      return;
+    }
   }
 
-  const { id } = await createProperty({
-    householdId,
-    addressLine1: parsed.data.addressLine1 ?? null,
-    city: parsed.data.city ?? null,
-    state: parsed.data.state ?? null,
-    zip: parsed.data.zip ?? null,
-    propertyUse: (parsed.data.propertyUse as PropertyUse | null | undefined) ?? null,
-    initialValueUsd: parsed.data.initialValueUsd ?? null,
-    initialValueAsOf: parsed.data.initialValueAsOf ?? null
-  });
+  try {
+    const { id } = await createProperty({
+      householdId,
+      addressLine1: parsed.data.addressLine1 ?? null,
+      city: parsed.data.city ?? null,
+      state: parsed.data.state ?? null,
+      zip: parsed.data.zip ?? null,
+      propertyUse: (parsed.data.propertyUse as PropertyUse | null | undefined) ?? null,
+      initialValueUsd: parsed.data.initialValueUsd ?? null,
+      initialValueAsOf: parsed.data.initialValueAsOf ?? null
+    });
 
-  // Store Redfin IDs + valuation detail returned from preview-valuation
-  if (parsed.data.apiPropertyId) {
-    const detailJson = parsed.data.valuationDetailJson != null
-      ? JSON.stringify(parsed.data.valuationDetailJson)
-      : null;
-    await qExec(
-      `UPDATE property
-          SET api_provider          = 'redfin',
-              api_property_id       = ?,
-              api_listing_id        = ?,
-              valuation_detail_json = ?::jsonb,
-              valuation_fetched_at  = CASE WHEN ? IS NOT NULL THEN NOW() ELSE valuation_fetched_at END,
-              updated_at            = NOW()
-        WHERE id = ?`,
-      parsed.data.apiPropertyId,
-      parsed.data.apiListingId ?? null,
-      detailJson,
-      detailJson,
-      id
-    );
+    // Store Redfin IDs + valuation detail returned from preview-valuation.
+    // Use NOW() directly — no CASE WHEN to avoid PostgreSQL type-resolution failure
+    // on an untyped parameter in a predicate-only position.
+    if (parsed.data.apiPropertyId) {
+      const detailJson = parsed.data.valuationDetailJson != null
+        ? JSON.stringify(parsed.data.valuationDetailJson)
+        : null;
+      await qExec(
+        `UPDATE property
+            SET api_provider          = 'redfin',
+                api_property_id       = ?,
+                api_listing_id        = ?,
+                valuation_detail_json = ?::jsonb,
+                valuation_fetched_at  = NOW(),
+                updated_at            = NOW()
+          WHERE id = ?`,
+        parsed.data.apiPropertyId,
+        parsed.data.apiListingId ?? null,
+        detailJson,
+        id
+      );
+    }
+
+    if (parsed.data.accountId) {
+      await qExec(
+        `UPDATE financial_account SET property_id = ? WHERE id = ? AND household_id = ?`,
+        id,
+        parsed.data.accountId,
+        householdId
+      );
+    }
+
+    res.status(201).json({ id });
+  } catch (err) {
+    log.error("POST /household/properties: create failed", { err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ message: "Failed to create property", code: "CREATE_FAILED" });
   }
-
-  if (parsed.data.accountId) {
-    await qExec(
-      `UPDATE financial_account SET property_id = ? WHERE id = ? AND household_id = ?`,
-      id,
-      parsed.data.accountId,
-      householdId
-    );
-  }
-
-  res.status(201).json({ id });
 });
 
 householdRouter.get("/properties/:propertyId", async (req: AuthenticatedRequest, res) => {

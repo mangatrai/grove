@@ -18,6 +18,33 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-192 (2026-05-15): Grove branding loader — replace Mantine Skeleton in hero card and Net Worth page
+
+- **Type:** UX polish — loading state consistency
+- **What:** Replaced Mantine `<Skeleton>` (solid gray animated rectangle) with the custom `<GroveCardLoader>` component in all remaining locations that had not yet been migrated:
+  - `DashboardPageV2.tsx` — hero cash flow card (inflow/outflow section)
+  - `NetWorthPage.tsx` — main net worth trend chart (340 px height preserved via wrapper Box), balance sheet table skeleton, individual account history expand rows, individual property history expand rows
+- **Why:** Net Worth categories, budget, and top-categories cards already use GroveCardLoader. The hero card and trend chart were the visible exceptions. Skeleton imports removed from both files.
+- **V4 backlog (I-11):** PWA mode (Chrome installed app) hangs on any function that programmatically triggers `<input type="file">.click()`. Affects Import, Backup/Restore, and Category Rules CSV import. Fix requires PWA display-mode detection + File System Access API fallback or a user-facing warning. Added as P3 in V4 plan.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+## FIX-191 (2026-05-15): Property create 503 — CASE WHEN untyped param + no try-catch on async handler
+
+- **Type:** Bug fix (production — property valuation create path)
+- **What:**
+  - **Root cause:** `POST /household/properties` handler had no try-catch. When `apiPropertyId` was present, the UPDATE ran `CASE WHEN ? IS NOT NULL THEN NOW() ELSE valuation_fetched_at END` — PostgreSQL cannot resolve the type of an untyped parameter (`$4`) in a `CASE WHEN … IS NOT NULL` predicate position when using the extended query protocol with OID 0. The Postgres error propagated as an unhandled async exception in Express 4.x → Node 20 treated the unhandled rejection as fatal → process crash → Koyeb returned 503. The INSERT had already committed so the property row was persisted without api details.
+  - **Fix (backend):** Replaced the `CASE WHEN` with `valuation_fetched_at = NOW()` directly (we always want to stamp fetched_at when storing Redfin data). Removed the duplicate `detailJson` parameter. Wrapped the create/link block in try-catch to return 500 instead of crashing the process.
+  - **Fix (backend):** Added `PROPERTY_ALREADY_LINKED` 409 guard — before creating a new property, `POST /properties` now checks whether the linked `accountId` already has a `property_id` set. Returns 409 with a human-readable message if so. Prevents orphan property rows when the user somehow opens the create modal on an already-linked account.
+- **Why it only appeared with Redfin retrieval:** The `if (parsed.data.apiPropertyId)` block only runs when the frontend passes the Redfin IDs (i.e., after clicking "Retrieve Redfin estimate"). Without Redfin data, the entire UPDATE is skipped, so the crash path was never hit.
+- **Logging improvements (same commit):** `realty-api.service.ts` — `realtyGet` now logs endpoint + status before throwing on HTTP error; `parseRedfinResponse` logs structured warn at each early-return path (missing `details`, invalid `predictedValue`, missing `propertyId`) so API response shape changes are visible in Koyeb logs without reading source; `parseComps` logs malformed comp entries instead of silently swallowing them. V4 backlog item I-10 added for a full app-wide logging audit.
+- **Files:**
+  - `backend/src/modules/household/household.routes.ts` (fix UPDATE, add try-catch, add 409 guard, add `log` import)
+  - `backend/src/modules/household/realty-api.service.ts` (error/warn logging in `realtyGet`, `parseRedfinResponse`, `parseComps`)
+
+---
+
 ## UX-190 (2026-05-15): Home page hero redesign — animated preview cards
 
 - **Type:** UX / design
