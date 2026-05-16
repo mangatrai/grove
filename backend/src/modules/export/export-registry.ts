@@ -47,18 +47,33 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     householdIdColumn: "household_id",
     memberScopeInclude: false
   },
+  // property must precede financial_account (financial_account.property_id → property ON DELETE SET NULL)
+  {
+    tableKey: "property",
+    tableName: "property",
+    restoreOrder: 4,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
+  },
   {
     tableKey: "financial_account",
     tableName: "financial_account",
-    restoreOrder: 4,
+    restoreOrder: 5,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] })
   },
   {
+    tableKey: "property_value_snapshot",
+    tableName: "property_value_snapshot",
+    restoreOrder: 6,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
+  },
+  {
     tableKey: "category",
     tableName: "category",
-    restoreOrder: 5,
+    restoreOrder: 7,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     parentFirst: true
@@ -66,7 +81,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
   {
     tableKey: "person_profile",
     tableName: "person_profile",
-    restoreOrder: 6,
+    restoreOrder: 8,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     memberScopeFilter: (profileId) => ({ sql: "id = ?", params: [profileId] }),
@@ -77,28 +92,28 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
   {
     tableKey: "household_membership",
     tableName: "household_membership",
-    restoreOrder: 7,
+    restoreOrder: 9,
     householdIdColumn: "household_id",
     memberScopeInclude: false
   },
   {
     tableKey: "category_rule",
     tableName: "category_rule",
-    restoreOrder: 8,
+    restoreOrder: 10,
     householdIdColumn: "household_id",
     memberScopeInclude: true
   },
   {
     tableKey: "budget_category",
     tableName: "budget_category",
-    restoreOrder: 9,
+    restoreOrder: 11,
     householdIdColumn: "household_id",
     memberScopeInclude: false
   },
   {
     tableKey: "transaction_canonical",
     tableName: "transaction_canonical",
-    restoreOrder: 10,
+    restoreOrder: 12,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] }),
@@ -112,7 +127,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
   {
     tableKey: "account_balance_snapshot",
     tableName: "account_balance_snapshot",
-    restoreOrder: 11,
+    restoreOrder: 13,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     memberScopeFilter: (profileId) => ({
@@ -127,7 +142,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
   {
     tableKey: "payslip_snapshot",
     tableName: "payslip_snapshot",
-    restoreOrder: 12,
+    restoreOrder: 14,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     memberScopeFilter: (profileId) => ({ sql: "owner_person_profile_id = ?", params: [profileId] }),
@@ -139,7 +154,7 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
   {
     tableKey: "payslip_line_item",
     tableName: "payslip_line_item",
-    restoreOrder: 13,
+    restoreOrder: 15,
     householdIdColumn: "household_id",
     memberScopeInclude: true,
     memberScopeFilter: (profileId) => ({
@@ -147,24 +162,36 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
       params: [profileId]
     })
   },
+  // payslip_deposit_match refs both payslip_snapshot (14) and transaction_canonical (12)
+  {
+    tableKey: "payslip_deposit_match",
+    tableName: "payslip_deposit_match",
+    restoreOrder: 16,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+    memberScopeFilter: (profileId) => ({
+      sql: "payslip_snapshot_id IN (SELECT id FROM payslip_snapshot WHERE household_id = payslip_deposit_match.household_id AND owner_person_profile_id = ?)",
+      params: [profileId]
+    })
+  },
   {
     tableKey: "recurring_merchant_override",
     tableName: "recurring_merchant_override",
-    restoreOrder: 14,
+    restoreOrder: 17,
     householdIdColumn: "household_id",
     memberScopeInclude: false
   },
   {
     tableKey: "resolution_item",
     tableName: "resolution_item",
-    restoreOrder: 15,
+    restoreOrder: 18,
     householdIdColumn: "household_id",
     memberScopeInclude: false
   },
   {
     tableKey: "household_ai_insight",
     tableName: "household_ai_insight",
-    restoreOrder: 16,
+    restoreOrder: 19,
     householdIdColumn: "household_id",
     memberScopeInclude: false
   }

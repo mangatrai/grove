@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-193 (2026-05-16): Export registry missing `property`, `property_value_snapshot`, `payslip_deposit_match`
+
+- **Type:** Bug fix (backup coverage — three V3 tables omitted from .hfb exports)
+- **What:** Three tables added in V3 migrations were never registered in `EXPORT_REGISTRY`, so they were silently excluded from every household `.hfb` backup. Koyeb logs surfaced the warning on startup via the export coverage check. Affected user data:
+  - `property` — property address, Redfin IDs, valuation metadata (migration 0041)
+  - `property_value_snapshot` — full market-value time series per property (migration 0041)
+  - `payslip_deposit_match` — confirmed payslip ↔ deposit canonical links (migration 0045)
+- **Fix:** Added all three entries to `EXPORT_REGISTRY` with correct `restoreOrder` to satisfy FK constraints:
+  - `property` at order 4 (before `financial_account` at 5, which holds `property_id → property ON DELETE SET NULL`)
+  - `property_value_snapshot` at order 6 (after `property`)
+  - `payslip_deposit_match` at order 16 (after both `payslip_snapshot` at 14 and `transaction_canonical` at 12)
+  - All subsequent entries renumbered (5→5 was financial_account, everything ≥5 shifted by 1–3)
+  - `property` and `property_value_snapshot`: `memberScopeInclude: false` (household-level, not per-person)
+  - `payslip_deposit_match`: `memberScopeInclude: true` scoped via `payslip_snapshot.owner_person_profile_id`
+- **Files:** `backend/src/modules/export/export-registry.ts`
+
+---
+
 ## UX-192 (2026-05-15): Grove branding loader — replace Mantine Skeleton in hero card and Net Worth page
 
 - **Type:** UX polish — loading state consistency
