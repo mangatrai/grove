@@ -127,6 +127,55 @@ Complement existing exact-regex rules with a fuzzy merchant name matching layer.
 
 ---
 
+### F-4: Delete property
+
+Remove a property record and its value snapshot history. Useful when a property was created by mistake or a home is sold and equity no longer applies.
+
+**Scope:**
+- `DELETE /household/properties/:propertyId` — soft-guard: reject if any `financial_account.property_id` still references the property (user must unlink the account first). Delete cascades `property_value_snapshot` rows.
+- Frontend: small trash icon button in the Net Worth page Real Estate section (owner/admin only); confirmation modal with a warning if the property has value history.
+- No migration needed: cascade delete on `property_value_snapshot` via FK (already `ON DELETE CASCADE` or add it); `financial_account.property_id` FK is nullable — just null it on unlink before delete.
+
+**Files:** `backend/src/modules/household/property.service.ts`, `household.routes.ts`, `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+### F-5: Account closed/inactive status
+
+Mark a financial account as closed. A closed account:
+- No longer appears in import binding dropdowns
+- Is excluded from AI insights spending analysis
+- Shows as "Closed" badge in Settings → Accounts (collapsed by default)
+- Still appears in Net Worth balance sheet with its last snapshot (for historical accuracy); can be toggled off with a "Show closed" filter
+- Still shows in Transactions ledger (historical data preserved); filter can hide closed accounts
+
+**Schema:** `financial_account.status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed'))`, plus `closed_at TIMESTAMPTZ`. One migration; no data migration needed (existing rows stay `active`).
+
+**UI entry points:**
+- Settings → Accounts: kebab menu on each account row → "Close account" (with confirmation modal that explains what this does)
+- Settings → Accounts: "Show closed accounts" toggle at top of table
+
+**Files:** `backend/db/migrations/0047_account_status.sql`, `import-file-binding.service.ts` (filter active accounts in binding), `balance-sheet.service.ts` (keep last snapshot for closed), `insight-prompt.service.ts` (skip closed), `imports.routes.ts` (account list filter), `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+### I-10: App-wide error logging audit
+
+Production issues are currently discovered by tracing code paths by hand because many async route handlers lack try-catch (errors cause process crashes with no log entry) and several service functions return early/silently on unexpected states.
+
+**Scope:**
+- Audit all Express async route handlers for missing try-catch. Any handler where an unhandled rejection can crash the process is a P1 logging gap. Add try-catch + `log.error` to each. Express 4.x with Node 20 exits on unhandled async rejections — every uncaught throw is a silent 503 from Koyeb's perspective.
+- Audit service functions for silent early returns (return `null` / `undefined` / `false` without a `log.warn`). Every non-obvious control flow exit should emit a structured log entry explaining why.
+- Audit external API call sites (RealtyAPI, OpenAI, Google Drive, SMTP) for consistent log coverage: log entry on call start (info), log on success with key output fields (info), log on failure with error message and context (error).
+- Audit the scheduler functions (`realty-scheduler.service.ts`, `export-job.service.ts`, etc.) for unhandled rejection coverage.
+- Add a log line at the start of every background operation (scheduler tick, async job dispatch) so activity is visible in Koyeb log stream.
+
+**Why P3 (not deferred):** The missing try-catch on `POST /household/properties` caused a production 503 that required reading every line of the route handler to diagnose (FIX-191). This audit prevents the same class of invisible failures.
+
+**Files:** All `*.routes.ts` files, all service files with external I/O or non-trivial control flow.
+
+---
+
 ### T-1: Documentation consolidation
 Reduce 40+ markdown files in `docs/` to 5 canonical documents. Current state has multiple overlapping backlogs, archived PRDs with outdated status, and split deployment guides.
 
