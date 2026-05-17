@@ -426,6 +426,13 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
           householdId
         );
       }
+
+      // Force all household members to reset their password after a restore —
+      // the backup may contain stale credentials.
+      await txExec(
+        `UPDATE app_user SET force_password_change = true WHERE household_id = ?`,
+        householdId
+      );
     });
 
     await qExec(

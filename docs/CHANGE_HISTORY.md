@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## SEC-003 (2026-05-17): Force password change for all users after household restore
+
+- **Type:** Security hardening (R-1, V4 plan)
+- **What:** After a household bundle restore completes, all `app_user` rows for the household are flagged `force_password_change = true` inside the same transaction. Previously, restored users could log in immediately with whatever password was in the backup — potentially stale or compromised credentials.
+- **Fix:** Added a `txExec` UPDATE at the end of the restore transaction in `import-household-bundle.service.ts`. Runs atomically with the data restore; if the transaction rolls back, the flag is not set. The existing `auth.service.ts` login flow already enforces the flag (redirects to password-change flow), so no UI or middleware changes needed.
+- **Files:** `backend/src/modules/export/import-household-bundle.service.ts`
+
+---
+
 ## FIX-193 (2026-05-16): Export registry missing `property`, `property_value_snapshot`, `payslip_deposit_match`
 
 - **Type:** Bug fix (backup coverage — three V3 tables omitted from .hfb exports)
