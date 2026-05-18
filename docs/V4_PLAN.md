@@ -12,7 +12,7 @@
 
 ## P1 — Quick Fixes
 
-### R-1: Post-restore `force_password_change`
+### R-1: Post-restore `force_password_change` ✅ SHIPPED (SEC-003, 2026-05-17)
 After a household restore, all sessions are invalidated via `token_version` bump, but existing user passwords are unchanged. A restore from a backup could be from a compromised state; forcing a password change on next login for all users is a cheap safety net.
 
 **Implementation:** In `import-household-bundle.service.ts`, after the wipe-and-restore transaction completes, run:
@@ -25,12 +25,10 @@ The `force_password_change` column already exists; login already returns it; the
 
 ---
 
-### R-2: YoY delta on Home KPIs (frontend-only)
-The backend already computes a `yearOverYear` comparison block for `preset=month` (same month last year — inflows, outflows, net, delta). The frontend ignores it entirely — not a single reference anywhere in the codebase.
+### R-2: YoY delta on Home KPIs — DEFERRED
+~~The backend already computes a `yearOverYear` comparison block for `preset=month`. Wire it into a secondary delta badge alongside the existing "vs last month" delta.~~
 
-**Implementation:** Wire up the existing `comparison.yearOverYear` field from the cash summary API response to display a "vs same month last year" secondary delta badge on the Home page KPI tiles, alongside the existing "vs last month" delta. No backend change required.
-
-**Files:** `frontend/src/pages/HomePage.tsx`
+**Reconsidered 2026-05-18:** The Dashboard is month-by-month navigation — adding a year-over-year frame to a monthly view is contextually jarring. The "vs last month" badge the spec assumed also does not exist on the main KPI card (only account-level MoM arrows exist in the By Account section). If a comparison is added to the KPI card in future, "vs last month" (`comparison.previousPeriod.delta`) is the natural fit, not YoY. Moving to Deferred.
 
 ---
 
@@ -391,8 +389,8 @@ These items are removed from the active backlog. No plans to build.
 
 | ID | Title | Priority | Type |
 |---|---|---|---|
-| R-1 | Post-restore `force_password_change` | P1 | Security |
-| R-2 | YoY delta on Home KPIs (frontend-only) | P1 | UX |
+| R-1 | Post-restore `force_password_change` | ✅ Shipped | Security |
+| R-2 | YoY delta on Home KPIs (frontend-only) | Deferred | UX |
 | R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | P1 | Bug fix |
 | F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | P1 | Bug fix |
@@ -418,4 +416,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-16. New items added: R-3, F-6, TM-1 (P1); TM-2, TM-3, F-7 (P2); F-8, I-12 (P3); I-11 moved to Deferred. Recommended build order: R-1 + R-2 + R-3 + TM-1 (quick wins) → F-6 (caching) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → TM-2 + TM-3 (transfer UI) → F-7 (year-end summary, after F-1 email infra) → F-1 (notifications) → P3 items in any order.*
+*Last updated: 2026-05-18. R-1 shipped (SEC-003). R-2 moved to Deferred (YoY frame doesn't fit monthly dashboard UX). Recommended build order: R-3 + TM-1 (quick wins) → F-6 (caching) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → TM-2 + TM-3 (transfer UI) → F-7 (year-end summary, after F-1 email infra) → F-1 (notifications) → P3 items in any order.*
