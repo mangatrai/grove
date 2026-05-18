@@ -247,6 +247,20 @@ Mark a financial account as closed. A closed account:
 
 ---
 
+### F-8: BY ACCOUNT card — net spend vs. outflow-only redesign
+The BY ACCOUNT card currently shows outflow-only (absolute value of debits) with a month-over-month arrow. This doesn't distinguish asset accounts from liability accounts meaningfully. R-3 fixes the arrow color bug for checking; the underlying metric question (should the card show net or outflow? should credit cards show balance-owed instead?) still needs design clarity before building.
+
+**Open questions:**
+- Primary number: net (inflow − outflow) per account, or outflow-only?
+- For credit cards: transaction-level outflow vs. `account_balance_snapshot` balance?
+- Does R-3 (checking arrow color fix) fully address the concern, or does the metric also need to change?
+
+**Status:** P3 — do not build until metric definition is decided.
+
+**Files (when ready):** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ### I-10: App-wide error logging audit
 
 Production issues are currently discovered by tracing code paths by hand because many async route handlers lack try-catch (errors cause process crashes with no log entry) and several service functions return early/silently on unexpected states.
@@ -261,20 +275,6 @@ Production issues are currently discovered by tracing code paths by hand because
 **Why P3 (not deferred):** The missing try-catch on `POST /household/properties` caused a production 503 that required reading every line of the route handler to diagnose (FIX-191). This audit prevents the same class of invisible failures.
 
 **Files:** All `*.routes.ts` files, all service files with external I/O or non-trivial control flow.
-
----
-
-### F-8: BY ACCOUNT card — net spend vs. outflow-only redesign
-The BY ACCOUNT card currently shows outflow-only (absolute value of debits) with a month-over-month arrow. This doesn't distinguish asset accounts from liability accounts meaningfully. R-3 fixes the arrow color bug for checking; the underlying metric question (should the card show net or outflow? should credit cards show balance-owed instead?) still needs design clarity before building.
-
-**Open questions:**
-- Primary number: net (inflow − outflow) per account, or outflow-only?
-- For credit cards: transaction-level outflow vs. `account_balance_snapshot` balance?
-- Does R-3 (checking arrow color fix) fully address the concern, or does the metric also need to change?
-
-**Status:** P3 — do not build until metric definition is decided.
-
-**Files (when ready):** `frontend/src/pages/DashboardPageV2.tsx`
 
 ---
 
