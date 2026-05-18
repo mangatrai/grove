@@ -34,13 +34,11 @@ Bank of America · 1001   $251   ↑ (vs Apr)   ↓ (vs May '25)
 
 This gives the user two meaningful signals at once: short-term trend (MoM) and seasonal baseline (YoY). A month that looks fine MoM might still be running significantly hotter than the same month last year.
 
-**Scope:** Frontend only for the delta display. Per-account same-month-last-year outflow is not in the current data load (accountBuckets computes from current + prior month transactions only). Implementation options:
-- Option A: Fetch a second month's worth of transaction data (same month, prior year) in the dashboard load and fold it into accountBuckets as `priorYearSameMonthOutflow`.
-- Option B: Backend adds a `sameMonthLastYear` bucket to the cash summary per-account breakdown.
+**Implementation:** After F-8 switches the card to `account_balance_snapshot` as the data source, same-month-last-year balance is already in the snapshot table — no second fetch or backend change needed. Just pull the snapshot row for `month - 12` alongside the existing current and prior-month rows.
 
-**Dependency:** Resolve F-8 metric/filter decisions first — building R-2 on top of a card whose account list and metric are still in flux adds rework risk.
+**Dependency:** F-8 must ship first. R-2 is a column added on top of a stable card.
 
-**Files:** `frontend/src/pages/DashboardPageV2.tsx`, possibly `backend/src/modules/reports/cash-summary.service.ts`
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`
 
 ---
 
@@ -259,27 +257,28 @@ Mark a financial account as closed. A closed account:
 
 ---
 
-### F-8: BY ACCOUNT card — design decisions and full pass
+### F-8: BY ACCOUNT card — full redesign pass
 
-Design session 2026-05-18 settled the following:
+Design decisions locked 2026-05-18:
 
-**Metric: outflow for all account types.** "How much money left my account this month" is meaningful and consistent across both liabilities and assets:
-- Liability accounts (credit_card, loan): outflow = charges/payments = spending velocity. ↑ is bad (terracotta). ↓ is good (forest).
-- Asset accounts (checking, savings): outflow = money leaving the pool. ↑ is cautionary, not catastrophic (gold). ↓ is good (forest). R-3 corrects the color for checking.
-- Investment / retirement / property: outflow is not a meaningful monthly signal — **exclude from this card entirely**.
+**Account types shown:** `credit_card`, `checking`, `savings` only.
+- `loan` excluded — loan balances decrease steadily and predictably; no actionable signal month-to-month.
+- `investment`, `retirement`, `property` excluded — not flow accounts in the monthly sense.
 
-**Account type filter:** Show only `checking`, `savings`, `credit_card`, `loan`. Exclude `investment`, `retirement`, `property`, and any other non-flow types.
+**Row cap:** Top **3 credit cards** + top **3 checking/savings** = max 6 rows. Enough for signal, not overwhelming.
 
-**Row limit:** Cap at **top 5 accounts by thisMonthOutflow**. Prevents test/seed accounts from flooding the list; keeps the card scannable.
+**Primary metric: current balance from `account_balance_snapshot`**, not transaction-derived outflow.
+- Rationale: this is an offline app. The user may update account balances manually (without uploading a statement). In that case transaction-derived outflow is incomplete, but the balance snapshot is authoritative. If imports are complete, outflow and balance should agree anyway.
+- Credit cards: display current balance (= debt owed). ↑ balance = more debt = bad (terracotta). ↓ = paying it down (forest).
+- Checking/savings: display current balance (= liquid assets). ↑ = growing (forest). ↓ = depleting (gold — cautionary, not catastrophic).
 
-**Two arrows per row (after R-2 ships):** MoM arrow (vs prior month) + YoY arrow (vs same month last year), side by side.
+**Comparison arrows (MoM and YoY after R-2):** Compare current month's `account_balance_snapshot` vs prior month's snapshot, and vs same-month-last-year snapshot. Both snapshots are already stored; no new backend data needed beyond what `account_balance_snapshot` already holds.
 
-**Open question — credit card display:**
-Should credit cards show transaction-level outflow (spending velocity) or `account_balance_snapshot` balance (debt load)? Current spec keeps outflow for consistency. Balance view is a future consideration — do not build until decided.
+**R-3 still applies:** `checking` color fix (`LIABILITY_ACCOUNT_TYPES`) is still the right one-liner to ship immediately. F-8 is the broader structural pass on top.
 
-**Build order:** R-3 first (color fix, zero risk) → F-8 account filter + row cap → R-2 YoY arrow (depends on F-8 being stable).
+**Build order:** R-3 (color fix) → F-8 (switch to balance metric, account filter, row cap) → R-2 (add YoY arrow column).
 
-**Files:** `frontend/src/pages/DashboardPageV2.tsx`
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`, possibly `backend/src/modules/reports/` if a new balance-by-account endpoint is needed.
 
 ---
 
@@ -438,4 +437,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-18. R-1 shipped (SEC-003). R-2 re-scoped: both MoM + YoY arrows on BY ACCOUNT card (depends on F-8 being stable first). F-8 design decisions captured: outflow metric for all types, top-5 cap, exclude investment/retirement/property. Recommended build order: R-3 (color fix) → F-8 (account filter + row cap) → R-2 (YoY arrow) → TM-1 → F-6 (caching) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
+*Last updated: 2026-05-18. R-1 shipped (SEC-003). R-2 re-scoped: MoM + YoY balance arrows on BY ACCOUNT card; simplified by F-8 switching to account_balance_snapshot (no extra fetch needed). F-8 design locked: credit_card/checking/savings only, top 3 per group (max 6 rows), balance from account_balance_snapshot as primary metric, loan/investment/retirement/property excluded. Recommended build order: R-3 (color fix) → F-8 (balance metric + filter + cap) → R-2 (YoY arrow) → TM-1 → F-6 → F-2 → F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
