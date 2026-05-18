@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-115 (2026-05-18): BY ACCOUNT card — account filter, top-3 cap, empty state (F-8)
+
+- **Type:** UX redesign (F-8, V4 plan)
+- **What:** Redesigned the "By Account — This Month" dashboard card:
+  - **Account types filtered** to `credit_card`, `checking`, `savings` only. Loans (steady decrease, no monthly signal), investment, retirement, and property excluded. Filter applied inside `computeAccountBuckets` via `ACCOUNT_CARD_TYPES`.
+  - **Row cap:** top 3 credit cards + top 3 checking/savings = max 6 rows, sorted by `thisMonthOutflow` descending within each group.
+  - **Metric stays as transaction outflow** — genuinely "this month" data that fits the month-navigation UX. Outflow is accurate when OFX statements are imported (the primary data entry path).
+  - **Empty state:** card always renders once transactions load; shows "No spending recorded this month for linked accounts." when no matching outflow exists, instead of hiding the card entirely.
+  - **Arrow colors corrected:** checking/savings ↑ = gold (cautionary), ↓ = forest. Previously checking was incorrectly in `LIABILITY_ACCOUNT_TYPES` causing terracotta ↑ (fixed by R-3/UX-114); this pass corrects the broader asset vs liability colour logic.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ## UX-114 (2026-05-18): Fix checking account arrow color in BY ACCOUNT card (R-3)
 
 - **Type:** Bug fix / UX (R-3, V4 plan)

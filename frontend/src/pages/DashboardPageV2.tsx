@@ -52,8 +52,8 @@ type ResolutionSummary = {
 };
 
 type NetWorthSnapshot = {
-  totals: { netWorth: number | null; assets: number | null; liabilities: number | null };
   asOf: string;
+  totals: { netWorth: number | null; assets: number | null; liabilities: number | null };
 };
 
 type NetWorthHistoryPoint = { date: string; netWorth: number | null };
@@ -173,6 +173,7 @@ const ALLOW_CATEGORIES = new Set([
 ]);
 
 const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan"]);
+const ACCOUNT_CARD_TYPES = new Set(["credit_card", "checking", "savings"]);
 
 function currentYearMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -313,6 +314,7 @@ function computeAccountBuckets(txns: LedgerRow[], activeMonth: string): AccountB
   const buckets = new Map<string, AccountBucket>();
   for (const t of txns) {
     if (t.status !== "posted" || t.amount >= 0) continue;
+    if (!ACCOUNT_CARD_TYPES.has(t.accountType)) continue;
     const isThis = t.txnDate.startsWith(activeMonth);
     const isPrior = t.txnDate.startsWith(priorYm);
     if (!isThis && !isPrior) continue;
@@ -335,18 +337,24 @@ function computeAccountBuckets(txns: LedgerRow[], activeMonth: string): AccountB
       b.priorMonthTxnCount += 1;
     }
   }
-  return [...buckets.values()]
-    .filter((b) => b.thisMonthOutflow > 0)
+  const all = [...buckets.values()].filter((b) => b.thisMonthOutflow > 0);
+  const creditCards = all
+    .filter((b) => b.accountType === "credit_card")
     .sort((a, b) => b.thisMonthOutflow - a.thisMonthOutflow)
-    .slice(0, 5);
+    .slice(0, 3);
+  const checkingSavings = all
+    .filter((b) => b.accountType === "checking" || b.accountType === "savings")
+    .sort((a, b) => b.thisMonthOutflow - a.thisMonthOutflow)
+    .slice(0, 3);
+  return [...creditCards, ...checkingSavings];
 }
 
 function accountArrow(b: AccountBucket): { char: string; color: string } | null {
   if (b.priorMonthTxnCount < 3) return null;
-  const liability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
+  const isLiability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
   if (b.priorMonthOutflow === 0) return { char: "→", color: "dimmed" };
   const delta = (b.thisMonthOutflow - b.priorMonthOutflow) / b.priorMonthOutflow;
-  if (delta > 0.05) return { char: "↑", color: liability ? "fsTerracotta" : "fsGold" };
+  if (delta > 0.05) return { char: "↑", color: isLiability ? "fsTerracotta" : "fsGold" };
   if (delta < -0.05) return { char: "↓", color: "fsForest" };
   return { char: "→", color: "dimmed" };
 }
@@ -415,7 +423,7 @@ export function DashboardPageV2() {
         `/transactions?limit=200&dateFrom=${historyFrom}&dateTo=${monthEnd}`,
         { cache: "no-store" }
       ),
-      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" })
+      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" }),
     ]);
     setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
     setResolutionData(results[1].status === "fulfilled" ? results[1].value : null);
@@ -512,10 +520,10 @@ export function DashboardPageV2() {
   );
 
   const accountBuckets = useMemo(
-    () => (recentTxns && recentTxns.length >= 5 ? computeAccountBuckets(recentTxns, activeMonth) : []),
+    () => (recentTxns ? computeAccountBuckets(recentTxns, activeMonth) : []),
     [recentTxns, activeMonth]
   );
-  const showAccountModule = recentTxns !== null && recentTxns.length >= 5 && accountBuckets.length > 0;
+  const showAccountModule = !loading && recentTxns !== null;
 
   const trendData = cashData && cashData !== "error" ? cashData.monthlyTrend : [];
   const trendMax = useMemo(
@@ -959,27 +967,33 @@ export function DashboardPageV2() {
             <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
               By Account — This Month
             </Text>
-            <Stack gap={4}>
-              {accountBuckets.map((b) => {
-                const arrow = accountArrow(b);
-                const href = `/transactions?accountId=${b.accountId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
-                return (
-                  <Group key={b.accountId} justify="space-between" gap={4} wrap="nowrap">
-                    <Anchor component={Link} to={href} size="sm" underline="hover">
-                      {b.name}
-                    </Anchor>
-                    <Group gap={6} wrap="nowrap">
-                      <Text size="sm">${formatNoCents(b.thisMonthOutflow)}</Text>
-                      {arrow ? (
-                        <Text size="sm" c={arrow.color} fw={600}>
-                          {arrow.char}
-                        </Text>
-                      ) : null}
+            {accountBuckets.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                No spending recorded this month for linked accounts.
+              </Text>
+            ) : (
+              <Stack gap={4}>
+                {accountBuckets.map((b) => {
+                  const arrow = accountArrow(b);
+                  const href = `/transactions?accountId=${b.accountId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                  return (
+                    <Group key={b.accountId} justify="space-between" gap={4} wrap="nowrap">
+                      <Anchor component={Link} to={href} size="sm" underline="hover">
+                        {b.name}
+                      </Anchor>
+                      <Group gap={6} wrap="nowrap">
+                        <Text size="sm">${formatNoCents(b.thisMonthOutflow)}</Text>
+                        {arrow ? (
+                          <Text size="sm" c={arrow.color} fw={600}>
+                            {arrow.char}
+                          </Text>
+                        ) : null}
+                      </Group>
                     </Group>
-                  </Group>
-                );
-              })}
-            </Stack>
+                  );
+                })}
+              </Stack>
+            )}
           </Paper>
         ) : null}
       </SimpleGrid>

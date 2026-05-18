@@ -257,7 +257,7 @@ Mark a financial account as closed. A closed account:
 
 ---
 
-### F-8: BY ACCOUNT card — full redesign pass
+### F-8: BY ACCOUNT card — full redesign pass ✅ SHIPPED (UX-115, 2026-05-18)
 
 Design decisions locked 2026-05-18:
 
@@ -267,12 +267,13 @@ Design decisions locked 2026-05-18:
 
 **Row cap:** Top **3 credit cards** + top **3 checking/savings** = max 6 rows. Enough for signal, not overwhelming.
 
-**Primary metric: current balance from `account_balance_snapshot`**, not transaction-derived outflow.
-- Rationale: this is an offline app. The user may update account balances manually (without uploading a statement). In that case transaction-derived outflow is incomplete, but the balance snapshot is authoritative. If imports are complete, outflow and balance should agree anyway.
-- Credit cards: display current balance (= debt owed). ↑ balance = more debt = bad (terracotta). ↓ = paying it down (forest).
-- Checking/savings: display current balance (= liquid assets). ↑ = growing (forest). ↓ = depleting (gold — cautionary, not catastrophic).
+**Primary metric: transaction outflow** (thisMonthOutflow), not balance snapshot.
+- Rationale: the card lives inside a month-navigation dashboard ("← May 2026 →"). Outflow is genuinely this-month data that matches the month context. Balance snapshots are always one month behind mid-month, creating a misleading "May" header with April data.
+- The primary data entry path is OFX import, which provides complete transaction data. Manual balance-only updates are occasional; outflow accuracy is acceptable for this card.
+- Credit cards: ↑ outflow = terracotta (spending more). ↓ = forest.
+- Checking/savings: ↑ outflow = gold (cautionary — more leaving). ↓ = forest.
 
-**Comparison arrows (MoM and YoY after R-2):** Compare current month's `account_balance_snapshot` vs prior month's snapshot, and vs same-month-last-year snapshot. Both snapshots are already stored; no new backend data needed beyond what `account_balance_snapshot` already holds.
+**Comparison arrows (MoM and YoY after R-2):** MoM uses `thisMonthOutflow` vs `priorMonthOutflow` from the transaction fetch already in the load. YoY (R-2) will require a separate fetch for the same month last year.
 
 **R-3 still applies:** `checking` color fix (`LIABILITY_ACCOUNT_TYPES`) is still the right one-liner to ship immediately. F-8 is the broader structural pass on top.
 
@@ -425,7 +426,7 @@ These items are removed from the active backlog. No plans to build.
 | I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
 | F-4 | Delete property | P3 | Feature |
 | F-5 | Account closed/inactive status | P3 | Feature |
-| F-8 | BY ACCOUNT card — account filter, row cap, full pass | P3 | UX |
+| F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | P3 | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
