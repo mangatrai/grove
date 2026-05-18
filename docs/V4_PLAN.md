@@ -25,10 +25,22 @@ The `force_password_change` column already exists; login already returns it; the
 
 ---
 
-### R-2: YoY delta on Home KPIs — DEFERRED
-~~The backend already computes a `yearOverYear` comparison block for `preset=month`. Wire it into a secondary delta badge alongside the existing "vs last month" delta.~~
+### R-2: BY ACCOUNT card — add YoY delta arrow alongside existing MoM arrow
+The "By Account — This Month" card currently shows one MoM arrow per account (thisMonth vs priorMonth). R-2 adds a **second arrow** showing the same metric vs the same month last year, so each row displays both comparisons side by side:
 
-**Reconsidered 2026-05-18:** The Dashboard is month-by-month navigation — adding a year-over-year frame to a monthly view is contextually jarring. The "vs last month" badge the spec assumed also does not exist on the main KPI card (only account-level MoM arrows exist in the By Account section). If a comparison is added to the KPI card in future, "vs last month" (`comparison.previousPeriod.delta`) is the natural fit, not YoY. Moving to Deferred.
+```
+Bank of America · 1001   $251   ↑ (vs Apr)   ↓ (vs May '25)
+```
+
+This gives the user two meaningful signals at once: short-term trend (MoM) and seasonal baseline (YoY). A month that looks fine MoM might still be running significantly hotter than the same month last year.
+
+**Scope:** Frontend only for the delta display. Per-account same-month-last-year outflow is not in the current data load (accountBuckets computes from current + prior month transactions only). Implementation options:
+- Option A: Fetch a second month's worth of transaction data (same month, prior year) in the dashboard load and fold it into accountBuckets as `priorYearSameMonthOutflow`.
+- Option B: Backend adds a `sameMonthLastYear` bucket to the cash summary per-account breakdown.
+
+**Dependency:** Resolve F-8 metric/filter decisions first — building R-2 on top of a card whose account list and metric are still in flux adds rework risk.
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`, possibly `backend/src/modules/reports/cash-summary.service.ts`
 
 ---
 
@@ -247,18 +259,27 @@ Mark a financial account as closed. A closed account:
 
 ---
 
-### F-8: BY ACCOUNT card — net spend vs. outflow-only redesign
+### F-8: BY ACCOUNT card — design decisions and full pass
 
-The BY ACCOUNT card currently shows outflow-only (absolute value of debits) with a month-over-month arrow. This doesn't distinguish asset accounts from liability accounts meaningfully. R-3 fixes the arrow color bug for checking; the underlying metric question (should the card show net or outflow? should credit cards show balance-owed instead?) still needs design clarity before building.
+Design session 2026-05-18 settled the following:
 
-**Open questions:**
-- Primary number: net (inflow − outflow) per account, or outflow-only?
-- For credit cards: transaction-level outflow vs. `account_balance_snapshot` balance?
-- Does R-3 (checking arrow color fix) fully address the concern, or does the metric also need to change?
+**Metric: outflow for all account types.** "How much money left my account this month" is meaningful and consistent across both liabilities and assets:
+- Liability accounts (credit_card, loan): outflow = charges/payments = spending velocity. ↑ is bad (terracotta). ↓ is good (forest).
+- Asset accounts (checking, savings): outflow = money leaving the pool. ↑ is cautionary, not catastrophic (gold). ↓ is good (forest). R-3 corrects the color for checking.
+- Investment / retirement / property: outflow is not a meaningful monthly signal — **exclude from this card entirely**.
 
-**Status:** P3 — do not build until metric definition is decided.
+**Account type filter:** Show only `checking`, `savings`, `credit_card`, `loan`. Exclude `investment`, `retirement`, `property`, and any other non-flow types.
 
-**Files (when ready):** `frontend/src/pages/DashboardPageV2.tsx`
+**Row limit:** Cap at **top 5 accounts by thisMonthOutflow**. Prevents test/seed accounts from flooding the list; keeps the card scannable.
+
+**Two arrows per row (after R-2 ships):** MoM arrow (vs prior month) + YoY arrow (vs same month last year), side by side.
+
+**Open question — credit card display:**
+Should credit cards show transaction-level outflow (spending velocity) or `account_balance_snapshot` balance (debt load)? Current spec keeps outflow for consistency. Balance view is a future consideration — do not build until decided.
+
+**Build order:** R-3 first (color fix, zero risk) → F-8 account filter + row cap → R-2 YoY arrow (depends on F-8 being stable).
+
+**Files:** `frontend/src/pages/DashboardPageV2.tsx`
 
 ---
 
@@ -391,7 +412,7 @@ These items are removed from the active backlog. No plans to build.
 | ID | Title | Priority | Type |
 |---|---|---|---|
 | R-1 | Post-restore `force_password_change` | ✅ Shipped | Security |
-| R-2 | YoY delta on Home KPIs (frontend-only) | Deferred | UX |
+| R-2 | BY ACCOUNT card — add YoY arrow alongside MoM arrow | P2 | UX |
 | R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | P1 | Bug fix |
 | F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | P1 | Bug fix |
@@ -405,7 +426,7 @@ These items are removed from the active backlog. No plans to build.
 | I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
 | F-4 | Delete property | P3 | Feature |
 | F-5 | Account closed/inactive status | P3 | Feature |
-| F-8 | BY ACCOUNT card redesign (needs design clarity) | P3 | UX |
+| F-8 | BY ACCOUNT card — account filter, row cap, full pass | P3 | UX |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | P3 | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
@@ -417,4 +438,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-18. R-1 shipped (SEC-003). R-2 moved to Deferred (YoY frame doesn't fit monthly dashboard UX). Recommended build order: R-3 + TM-1 (quick wins) → F-6 (caching) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → TM-2 + TM-3 (transfer UI) → F-7 (year-end summary, after F-1 email infra) → F-1 (notifications) → P3 items in any order.*
+*Last updated: 2026-05-18. R-1 shipped (SEC-003). R-2 re-scoped: both MoM + YoY arrows on BY ACCOUNT card (depends on F-8 being stable first). F-8 design decisions captured: outflow metric for all types, top-5 cap, exclude investment/retirement/property. Recommended build order: R-3 (color fix) → F-8 (account filter + row cap) → R-2 (YoY arrow) → TM-1 → F-6 (caching) → F-2 (balance sheet subtotals) → F-3 (payslip pass) → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
