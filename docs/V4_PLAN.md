@@ -42,7 +42,7 @@ This gives the user two meaningful signals at once: short-term trend (MoM) and s
 
 ---
 
-### R-3: Remove `checking` from `LIABILITY_ACCOUNT_TYPES` (dashboard arrow bug)
+### R-3: Remove `checking` from `LIABILITY_ACCOUNT_TYPES` (dashboard arrow bug) ✅ SHIPPED (UX-114, 2026-05-18)
 Checking accounts are liquid assets, not liabilities. The constant at `DashboardPageV2.tsx:175` incorrectly includes `"checking"`, causing the BY ACCOUNT card to show a red ↑ arrow when checking outflow increases month-over-month — the same signal used for a rising credit card balance. Checking outflow increase should show gold ↑ (neutral) not terracotta (bad).
 
 **Fix:** Remove `"checking"` from the set. Correct list: `new Set(["credit_card", "loan"])`.
@@ -412,7 +412,7 @@ These items are removed from the active backlog. No plans to build.
 |---|---|---|---|
 | R-1 | Post-restore `force_password_change` | ✅ Shipped | Security |
 | R-2 | BY ACCOUNT card — add YoY arrow alongside MoM arrow | P2 | UX |
-| R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | P1 | Bug fix |
+| R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | ✅ Shipped | Bug fix |
 | F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | P1 | Bug fix |
 | F-1 | In-app notification system + alerts | P2 | Feature |

@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-114 (2026-05-18): Fix checking account arrow color in BY ACCOUNT card (R-3)
+
+- **Type:** Bug fix / UX (R-3, V4 plan)
+- **What:** `LIABILITY_ACCOUNT_TYPES` incorrectly included `"checking"`, causing the BY ACCOUNT dashboard card to show a red ↑ arrow when checking outflow increased month-over-month — the same signal used for a rising credit card balance. Checking is a liquid asset, not a liability; its ↑ should be gold (cautionary/neutral), not terracotta (bad).
+- **Fix:** Removed `"checking"` from the set. Correct list: `new Set(["credit_card", "loan"])`.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx` (line 175)
+
+---
+
 ## SEC-003 (2026-05-17): Force password change for all users after household restore
 
 - **Type:** Security hardening (R-1, V4 plan)

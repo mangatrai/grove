@@ -172,7 +172,7 @@ const ALLOW_CATEGORIES = new Set([
   "tuition"
 ]);
 
-const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "checking"]);
+const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan"]);
 
 function currentYearMonth(): string {
   return new Date().toISOString().slice(0, 7);
