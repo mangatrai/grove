@@ -248,6 +248,7 @@ Mark a financial account as closed. A closed account:
 ---
 
 ### F-8: BY ACCOUNT card — net spend vs. outflow-only redesign
+
 The BY ACCOUNT card currently shows outflow-only (absolute value of debits) with a month-over-month arrow. This doesn't distinguish asset accounts from liability accounts meaningfully. R-3 fixes the arrow color bug for checking; the underlying metric question (should the card show net or outflow? should credit cards show balance-owed instead?) still needs design clarity before building.
 
 **Open questions:**
