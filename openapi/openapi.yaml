@@ -687,6 +687,7 @@ paths:
     post:
       summary: Add or upsert a market value snapshot (upserts on same date)
       tags: [household]
+      x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1502,6 +1503,7 @@ paths:
       tags: [imports]
       summary: One-shot import upload (bank or payslip)
       description: Upload a single file and run the end-to-end import flow for bank transactions or payslips.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -1612,6 +1614,7 @@ paths:
       tags: [imports]
       summary: Confirm OFX account suggestion — members restricted to own sessions and own accounts
       description: Members must own the session and the target financial account.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/reconcile-payslip-async:
     post:
@@ -1631,6 +1634,7 @@ paths:
     post:
       tags: [imports]
       summary: Canonicalize into ledger
+      x-cache-invalidates: [dashboard]
       description: >
         Maps transaction_raw rows for the session into transaction_canonical.
         Returns { inserted, duplicates, skipped, nearDuplicates }.
@@ -1791,6 +1795,7 @@ paths:
       tags: [transactions]
       summary: Manual transaction entry — members restricted to accounts they own
       description: Members may only create transactions on accounts where owner_person_profile_id matches their profile.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/{transactionId}:
     patch:
@@ -1799,10 +1804,12 @@ paths:
       description: >
         Members may only update transactions they own (owner_person_profile_id).
         ownerScope/ownerPersonProfileId fields are ignored for member requests (ownership reassignment is owner/admin only).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
     delete:
       tags: [transactions]
       summary: Hard-delete transaction (must be trashed first) — members restricted to own transactions
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/{transactionId}/open-review:
     get:
@@ -1813,26 +1820,31 @@ paths:
     post:
       tags: [transactions]
       summary: Bulk set category on up to 200 transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-trash:
     post:
       tags: [transactions]
       summary: Bulk soft-delete (trash) up to 500 transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-restore:
     post:
       tags: [transactions]
       summary: Bulk restore up to 500 trashed transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-delete:
     post:
       tags: [transactions]
       summary: Bulk hard-delete up to 500 trashed transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-reassign-owner:
     post:
       tags: [transactions]
       summary: Reassign all transactions from one person profile to another — owner/admin only.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /resolution:
     get:
@@ -1942,6 +1954,10 @@ paths:
     get:
       tags: [reports]
       summary: Cash summary / KPIs
+      description: >-
+        Response is cached client-side in localStorage under scope 'dashboard' (TTL 7 days,
+        invalidated on version-counter bump). See docs/CACHING.md for full design.
+      x-cache-scope: dashboard
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet:
     get:
@@ -1979,16 +1995,22 @@ paths:
     get:
       tags: [reports]
       summary: Balance sheet totals over time (interval=month|quarter|week|day; optional ownerScope; optional accountIds for per-point account slices; max 120 samples)
+      description: >-
+        Response is cached client-side in localStorage under scope 'networth' (TTL 7 days,
+        invalidated on version-counter bump). See docs/CACHING.md for full design.
+      x-cache-scope: networth
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual:
     post:
       tags: [reports]
       summary: Upsert manual account balance snapshot
+      x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual/{id}:
     patch:
       tags: [reports]
       summary: Update manual balance snapshot amount/currency
+      x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
   /payslips:
     get:

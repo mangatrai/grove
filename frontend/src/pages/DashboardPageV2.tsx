@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { GroveCardLoader } from "../components/GroveLoader";
 import {
+  ActionIcon,
   Anchor,
   Badge,
   Box,
@@ -32,12 +33,14 @@ import {
   IconAlertCircle,
   IconArrowsExchange,
   IconCopy,
+  IconRefresh,
 } from "@tabler/icons-react";
 
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
 import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
-import { formatUsd } from "../utils/format";
+import { formatTimeAgo, formatUsd } from "../utils/format";
 
 type CashSummaryResponse = {
   range: { start: string; end: string; label: string };
@@ -399,25 +402,38 @@ export function DashboardPageV2() {
   const [priorYearTxns, setPriorYearTxns] = useState<LedgerRow[] | null>(null);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cashRetrying, setCashRetrying] = useState(false);
   const [showAllRecurring, setShowAllRecurring] = useState(false);
 
   const isCurrentMonth = activeMonth === currentYearMonth();
 
-  const loadCashSummary = useCallback(async () => {
-    setCashRetrying(true);
-    try {
-      const value = await apiJson<CashSummaryResponse>(
+  const cashCacheKey = `cash-summary:${activeMonth}`;
+  const {
+    data: cachedCashData,
+    loading: cashCacheLoading,
+    error: cashCacheError,
+    lastUpdatedAt: cashLastUpdated,
+    refresh: refreshCashCache,
+  } = useLocalStorageCache<CashSummaryResponse>(
+    cashCacheKey,
+    "dashboard",
+    () =>
+      apiJson<CashSummaryResponse>(
         `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
         { cache: "no-store" }
-      );
-      setCashData(value);
-    } catch {
+      )
+  );
+
+  useEffect(() => {
+    if (cashCacheError) {
       setCashData("error");
-    } finally {
-      setCashRetrying(false);
+    } else if (cachedCashData !== null) {
+      setCashData(cachedCashData);
     }
-  }, [activeMonth]);
+  }, [cachedCashData, cashCacheError]);
+
+  const loadCashSummary = useCallback(() => {
+    refreshCashCache();
+  }, [refreshCashCache]);
 
   const loadAll = useCallback(async () => {
     if (!token) {
@@ -428,10 +444,6 @@ export function DashboardPageV2() {
     const monthEnd = lastDayOf(activeMonth);
     const pyMonth = sameMonthPriorYear(activeMonth);
     const results = await Promise.allSettled([
-      apiJson<CashSummaryResponse>(
-        `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
-        { cache: "no-store" }
-      ),
       apiJson<ResolutionSummary>("/resolution/summary", { cache: "no-store" }),
       apiJson<NetWorthSnapshot>("/reports/balance-sheet", { cache: "no-store" }),
       apiJson<{ points: Array<{ asOf: string; totals: { netWorth: number | null } }> }>(
@@ -449,18 +461,17 @@ export function DashboardPageV2() {
         { cache: "no-store" }
       ),
     ]);
-    setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
-    setResolutionData(results[1].status === "fulfilled" ? results[1].value : null);
-    setNetWorthData(results[2].status === "fulfilled" ? results[2].value : null);
+    setResolutionData(results[0].status === "fulfilled" ? results[0].value : null);
+    setNetWorthData(results[1].status === "fulfilled" ? results[1].value : null);
     setNetWorthHistory(
-      results[3].status === "fulfilled"
-        ? results[3].value.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
+      results[2].status === "fulfilled"
+        ? results[2].value.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
         : null
     );
-    setBudgetData(results[4].status === "fulfilled" ? results[4].value : null);
-    setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
-    setRecurringOverrides(results[6].status === "fulfilled" && results[6].value.ok ? results[6].value.data : []);
-    setPriorYearTxns(results[7].status === "fulfilled" ? results[7].value.transactions : null);
+    setBudgetData(results[3].status === "fulfilled" ? results[3].value : null);
+    setRecentTxns(results[4].status === "fulfilled" ? results[4].value.transactions : null);
+    setRecurringOverrides(results[5].status === "fulfilled" && results[5].value.ok ? results[5].value.data : []);
+    setPriorYearTxns(results[6].status === "fulfilled" ? results[6].value.transactions : null);
     setLoading(false);
   }, [activeMonth, token]);
 
@@ -601,40 +612,57 @@ export function DashboardPageV2() {
   return (
     <Box component="main" w="100%">
       <Paper withBorder p="lg" radius="md" mb="md">
-        <Group gap="sm" mb="lg">
-          <Button
-            type="button"
-            variant="default"
-            size="xs"
-            onClick={() => setActiveMonth((m) => prevMonth(m))}
-            disabled={loading}
+        <Group justify="space-between" align="center" mb="lg">
+          <Group gap="sm">
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              onClick={() => setActiveMonth((m) => prevMonth(m))}
+              disabled={loading}
+            >
+              ‹
+            </Button>
+            <Text fw={600} size="lg">
+              {formatMonthLabel(activeMonth)}
+            </Text>
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              onClick={() => setActiveMonth((m) => nextMonth(m))}
+              disabled={isCurrentMonth || loading}
+            >
+              ›
+            </Button>
+          </Group>
+          <Tooltip
+            label={cashLastUpdated ? `Last updated ${formatTimeAgo(cashLastUpdated)}` : "Loading..."}
+            position="bottom"
+            withArrow
           >
-            ‹
-          </Button>
-          <Text fw={600} size="lg">
-            {formatMonthLabel(activeMonth)}
-          </Text>
-          <Button
-            type="button"
-            variant="default"
-            size="xs"
-            onClick={() => setActiveMonth((m) => nextMonth(m))}
-            disabled={isCurrentMonth || loading}
-          >
-            ›
-          </Button>
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              onClick={refreshCashCache}
+              aria-label="Refresh dashboard data"
+              loading={cashCacheLoading}
+            >
+              <IconRefresh size={14} />
+            </ActionIcon>
+          </Tooltip>
         </Group>
 
-        {loading ? (
+        {(loading || cashCacheLoading) && cashData === null ? (
           <GroveCardLoader label="Loading cash flow…" size="sm" />
         ) : cashUnavailable ? (
           <Text ta="center" mb="md" c="dimmed">
-            {cashRetrying ? (
+            {cashCacheLoading ? (
               "Retrying…"
             ) : (
               <>
                 Cash flow unavailable ·{" "}
-                <Button type="button" variant="default" size="xs" onClick={() => void loadCashSummary()}>
+                <Button type="button" variant="default" size="xs" onClick={loadCashSummary}>
                   Retry
                 </Button>
               </>

@@ -41,7 +41,7 @@ Checking accounts are liquid assets, not liabilities. The constant at `Dashboard
 
 ---
 
-### F-6: Dashboard + Net Worth page caching with session refresh icon
+### F-6: Dashboard + Net Worth page caching with session refresh icon ✅ SHIPPED (CR-192, 2026-05-19)
 Every Home page and Net Worth page load re-runs expensive aggregate SQL queries (cash summary, balance sheet history). For a self-hosted offline app, data does not change between page loads — only after a new import. Caching in `sessionStorage` with an explicit refresh button eliminates the per-navigation latency.
 
 **Scope:**
@@ -404,7 +404,7 @@ These items are removed from the active backlog. No plans to build.
 | R-1 | Post-restore `force_password_change` | ✅ Shipped | Security |
 | R-2 | BY ACCOUNT card — add YoY arrow alongside MoM arrow | ✅ Shipped | UX |
 | R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | ✅ Shipped | Bug fix |
-| F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
+| F-6 | Dashboard + Net Worth caching with refresh icon | ✅ Shipped | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | ✅ Shipped | Bug fix |
 | F-1 | In-app notification system + alerts | P2 | Feature |
 | F-2 | Balance sheet member subtotals | P2 | Feature |
@@ -428,4 +428,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. All P1 items now shipped. Recommended build order: F-6 → F-2 → F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
+*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. Recommended build order: F-2 → F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*

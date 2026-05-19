@@ -15,7 +15,8 @@ import {
   Table,
   Text,
   TextInput,
-  Title
+  Title,
+  Tooltip as MantineTooltip
 } from "@mantine/core";
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
@@ -29,12 +30,14 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis
 } from "recharts";
 
 import { apiJson, useAuthToken } from "../api";
+import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
+import { formatTimeAgo } from "../utils/format";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { GroveCardLoader } from "../components/GroveLoader";
@@ -115,8 +118,6 @@ type BalanceSheetHistoryResponse = {
 type PeriodPreset = "3m" | "6m" | "12m" | "2y" | "3y" | "ytd" | "custom";
 
 type BelongsToFilter = "" | "household" | `person:${string}`;
-
-const HISTORY_DEBOUNCE_MS = 280;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -241,9 +242,6 @@ export function NetWorthPage() {
   }, [periodPreset, customFrom, customTo]);
 
   const [histInterval, setHistInterval] = useState<"month" | "quarter" | "week" | "day">("month");
-  const [historyData, setHistoryData] = useState<BalanceSheetHistoryResponse | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
   const [accountHistoryById, setAccountHistoryById] = useState<Map<string, Array<{ month: string; balance: number }>>>(
     new Map()
@@ -302,23 +300,43 @@ export function NetWorthPage() {
     [ownerProfiles]
   );
 
-  const loadSheet = useCallback(async () => {
-    const qs = new URLSearchParams({ asOf: tableAsOf });
-    appendOwnerQuery(qs, belongsTo);
-    const res = await apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
-    setData(res);
-  }, [tableAsOf, belongsTo]);
-
-  const loadHistoryImmediate = useCallback(async () => {
+  const historyQs = (() => {
     const qs = new URLSearchParams({
       from: histRange.from,
       to: histRange.to,
       interval: histInterval
     });
     appendOwnerQuery(qs, belongsTo);
-    const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
-    setHistoryData(res);
-  }, [histRange.from, histRange.to, histInterval, belongsTo]);
+    return qs.toString();
+  })();
+  const historyCacheKey = `bs-history:${historyQs}`;
+
+  const {
+    data: historyData,
+    loading: historyLoading,
+    error: historyError,
+    lastUpdatedAt: historyLastUpdated,
+    refresh: refreshHistoryCache,
+  } = useLocalStorageCache<BalanceSheetHistoryResponse>(
+    historyCacheKey,
+    "networth",
+    () => {
+      const qs = new URLSearchParams({
+        from: histRange.from,
+        to: histRange.to,
+        interval: histInterval
+      });
+      appendOwnerQuery(qs, belongsTo);
+      return apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+    }
+  );
+
+  const loadSheet = useCallback(async () => {
+    const qs = new URLSearchParams({ asOf: tableAsOf });
+    appendOwnerQuery(qs, belongsTo);
+    const res = await apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
+    setData(res);
+  }, [tableAsOf, belongsTo]);
 
   useEffect(() => {
     if (!token) {
@@ -370,23 +388,6 @@ export function NetWorthPage() {
       })
       .finally(() => setLoading(false));
   }, [token, loadSheet]);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-    const t = window.setTimeout(() => {
-      setHistoryLoading(true);
-      setHistoryError(null);
-      void loadHistoryImmediate()
-        .catch((e: unknown) => {
-          setHistoryError(e instanceof Error ? e.message : "Failed to load history");
-          setHistoryData(null);
-        })
-        .finally(() => setHistoryLoading(false));
-    }, HISTORY_DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [token, loadHistoryImmediate]);
 
   const chartRows = useMemo(
     () =>
@@ -479,19 +480,16 @@ export function NetWorthPage() {
 
   const reloadAll = useCallback(async () => {
     setLoadError(null);
-    setHistoryError(null);
     setLoading(true);
-    setHistoryLoading(true);
     try {
       await loadSheet();
-      await loadHistoryImmediate();
+      refreshHistoryCache();
     } catch (e: unknown) {
       setLoadError(e instanceof Error ? e.message : "Reload failed");
     } finally {
       setLoading(false);
-      setHistoryLoading(false);
     }
-  }, [loadSheet, loadHistoryImmediate]);
+  }, [loadSheet, refreshHistoryCache]);
 
   const startEdit = useCallback((row: BalanceSheetAccountRow) => {
     setEditingId(row.financialAccountId);
@@ -543,14 +541,14 @@ export function NetWorthPage() {
         });
         cancelEdit();
         await loadSheet();
-        await loadHistoryImmediate();
+        refreshHistoryCache();
       } catch (err: unknown) {
         setRowSaveError(err instanceof Error ? err.message : "Could not save balance");
       } finally {
         setRowSaving(false);
       }
     },
-    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, loadHistoryImmediate, loadSheet]
+    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, loadSheet, refreshHistoryCache]
   );
 
   const runBulkAsOf = useCallback(async () => {
@@ -585,8 +583,8 @@ export function NetWorthPage() {
     setBulkWorking(false);
     setBulkSummary(`Updated ${okCount} account(s). Failed: ${fail}. Skipped (no balance): ${skipped}.`);
     await loadSheet();
-    await loadHistoryImmediate();
-  }, [allTableRows, bulkAsOfDraft, data, loadHistoryImmediate, loadSheet]);
+    refreshHistoryCache();
+  }, [allTableRows, bulkAsOfDraft, data, loadSheet, refreshHistoryCache]);
 
   const loadAccountHistory = useCallback(async (accountId: string) => {
     if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId)) {
@@ -726,7 +724,7 @@ export function NetWorthPage() {
         });
         cancelPropertyEdit();
         await loadSheet();
-        await loadHistoryImmediate();
+        refreshHistoryCache();
         if (propertyHistoryById.has(propertyId)) {
           setPropertyHistoryById((prev) => {
             const n = new Map(prev);
@@ -745,10 +743,10 @@ export function NetWorthPage() {
       cancelPropertyEdit,
       editPropertyAmount,
       editPropertyAsOf,
-      loadHistoryImmediate,
       loadPropertyHistory,
       loadSheet,
-      propertyHistoryById
+      propertyHistoryById,
+      refreshHistoryCache
     ]
   );
 
@@ -877,9 +875,26 @@ export function NetWorthPage() {
       ) : null}
 
       <Paper withBorder shadow="sm" radius="md" p="md">
-        <Group gap={8} align="center" mb="sm">
-          <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Trend</Title>
-          <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
+        <Group justify="space-between" align="center" mb="sm">
+          <Group gap={8} align="center">
+            <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Trend</Title>
+            <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
+          </Group>
+          <MantineTooltip
+            label={historyLastUpdated ? `Last updated ${formatTimeAgo(historyLastUpdated)}` : "Loading..."}
+            position="bottom"
+            withArrow
+          >
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              onClick={refreshHistoryCache}
+              aria-label="Refresh net worth history"
+              loading={historyLoading}
+            >
+              <IconRefresh size={14} />
+            </ActionIcon>
+          </MantineTooltip>
         </Group>
         <Group gap={6} wrap="wrap" role="group" aria-label="Trend period preset">
           {(["3m", "6m", "12m", "2y", "3y", "ytd", "custom"] as const).map((p) => (
@@ -990,7 +1005,7 @@ export function NetWorthPage() {
                       `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                     }
                   />
-                  <Tooltip
+                  <RechartsTooltip
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) {
                         return null;
@@ -1114,7 +1129,7 @@ export function NetWorthPage() {
                                     <LineChart data={historyPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
                                       <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                       <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-                                      <Tooltip
+                                      <RechartsTooltip
                                         formatter={(v: number | string) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                                         labelFormatter={(label) => `Month: ${String(label)}`}
                                       />
@@ -1258,7 +1273,7 @@ export function NetWorthPage() {
                                               `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                                             }
                                           />
-                                          <Tooltip
+                                          <RechartsTooltip
                                             formatter={(v: number | string) => [
                                               `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                                               "Market value"
@@ -1379,7 +1394,7 @@ export function NetWorthPage() {
                                     <LineChart data={historyPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
                                       <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                       <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-                                      <Tooltip
+                                      <RechartsTooltip
                                         formatter={(v: number | string) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                                         labelFormatter={(label) => `Month: ${String(label)}`}
                                       />

@@ -1,5 +1,7 @@
 # Balance sheet / net worth API
 
+> **Client-side cache:** `GET /reports/balance-sheet/history` is cached in `localStorage` under scope `networth`. The cache is invalidated automatically when any manual balance snapshot or property value write succeeds (see `docs/CACHING.md`). `GET /reports/balance-sheet` (current snapshot) is **not** cached — it runs fast (~15 indexed queries) and must be fresh immediately after balance edits on the Net Worth page. If you add a new write endpoint that affects balance-sheet data, add it to `CACHE_INVALIDATION_MAP` in `frontend/src/cache.ts`.
+
 **Auth:** Bearer JWT (same as other household APIs).
 
 ## `GET /reports/balance-sheet`

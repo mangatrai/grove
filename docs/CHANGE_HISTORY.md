@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-192 (2026-05-19): Client-side localStorage caching for Dashboard + Net Worth (F-6)
+
+- **Type:** Performance / UX (F-6, V4 plan)
+- **What:** Introduced `localStorage`-based caching for the two most expensive report endpoints (`GET /reports/cash-summary` — ~30–40 table scans; `GET /reports/balance-sheet/history` — up to 180 sequential queries). Subsequent page loads and tab opens serve cached data immediately with no network request. Cache is invalidated automatically by a URL-pattern interceptor in `apiJson()` that bumps a per-scope version counter whenever any relevant write endpoint succeeds. Two scopes: `dashboard` (staled by imports + ledger mutations) and `networth` (staled by balance-sheet/manual + property value writes). TTL safety net: 7 days. Logout clears all `hfa:*` localStorage keys.
+- **New files:**
+  - `frontend/src/cache.ts` — version counters, `CACHE_INVALIDATION_MAP`, read/write helpers, `invalidateCacheByUrl()`, `clearAllCaches()`
+  - `frontend/src/hooks/useLocalStorageCache.ts` — `useLocalStorageCache<T>()` hook; serves cache on mount, listens for `hfa:cache-invalidate` custom events for same-page invalidation, exposes `refresh()` that bumps scope version and force-refetches
+  - `docs/CACHING.md` — full architecture doc: scope map, invalidation table, hook API, storage impact, what is and isn't cached
+- **Modified files:**
+  - `frontend/src/api.ts` — added `invalidateCacheByUrl()` call after every successful non-GET in `apiJson()`; added `clearAllCaches()` call in `setToken(null)` (logout)
+  - `frontend/src/pages/DashboardPageV2.tsx` — `GET /reports/cash-summary` now goes through `useLocalStorageCache`; refresh icon added (top-right of inflow/outflow KPI card)
+  - `frontend/src/pages/NetWorthPage.tsx` — `GET /reports/balance-sheet/history` now goes through `useLocalStorageCache`; refresh icon added; `refresh()` called after balance/property write completes
+  - `docs/API_CASH_SUMMARY.md`, `docs/API_BALANCE_SHEET.md` — caching notes added
+  - `openapi/openapi.yaml` — `x-cache-scope` on cached GET endpoints; `x-cache-invalidates` on all write endpoints that affect a scope
+
+---
+
 ## FIX-192 (2026-05-19): Transfer date tolerance bumped from 2 → 4 days (TM-1)
 
 - **Type:** Bug fix (TM-1, V4 plan)
