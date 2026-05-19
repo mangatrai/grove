@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-116 (2026-05-18): BY ACCOUNT card — add YoY delta arrow alongside MoM arrow (R-2)
+
+- **Type:** UX enhancement (R-2, V4 plan)
+- **What:** Each account row in the "By Account — This Month" card now shows **two arrows side by side**: the existing MoM arrow (vs prior month) and a new YoY arrow (vs same month last year). Both are bare arrow symbols (↑↓→) — no year label. Meaning is conveyed via Mantine `Tooltip`: hover shows "vs April 2026" and "vs May 2025" respectively. Card heading also has a tooltip: "First arrow = vs last month · second arrow = vs same month last year". The count < 3 guard and ±5% threshold apply to both; same colour semantics apply (liabilities: ↑ terracotta, ↓ forest; assets: ↑ gold, ↓ forest).
+- **Implementation:** Added a separate `GET /transactions` fetch (8th in `Promise.allSettled`) for the prior-year month. `priorYearMap` useMemo builds a `Map<accountId, {outflow, count}>` from those transactions. `yoyArrow()` function mirrors `accountArrow()`. Recharts `Tooltip` aliased to `RechartsTooltip` to avoid naming conflict with Mantine `Tooltip`. No backend changes.
+- **Dev seed:** `dev_0006_seed_rolling_ledger.sql` — 72 transactions across 3 accounts (BoA Checking, BoA CC, Citi CC) using `CURRENT_DATE`-relative dates (M0–M5 + M-12) so the seed stays fresh in any month after `db:reset:dev`. Designed to show all three arrow-color paths: BoA Checking ↑gold/↑gold, BoA CC ↑terra/↓forest, Citi CC ↓forest/↑terra.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`, `backend/db/seeds/dev/dev_0006_seed_rolling_ledger.sql`
+
+---
+
 ## UX-115 (2026-05-18): BY ACCOUNT card — account filter, top-3 cap, empty state (F-8)
 
 - **Type:** UX redesign (F-8, V4 plan)

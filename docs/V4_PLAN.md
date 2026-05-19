@@ -25,18 +25,8 @@ The `force_password_change` column already exists; login already returns it; the
 
 ---
 
-### R-2: BY ACCOUNT card — add YoY delta arrow alongside existing MoM arrow
-The "By Account — This Month" card currently shows one MoM arrow per account (thisMonth vs priorMonth). R-2 adds a **second arrow** showing the same metric vs the same month last year, so each row displays both comparisons side by side:
-
-```
-Bank of America · 1001   $251   ↑ (vs Apr)   ↓ (vs May '25)
-```
-
-This gives the user two meaningful signals at once: short-term trend (MoM) and seasonal baseline (YoY). A month that looks fine MoM might still be running significantly hotter than the same month last year.
-
-**Implementation:** After F-8 switches the card to `account_balance_snapshot` as the data source, same-month-last-year balance is already in the snapshot table — no second fetch or backend change needed. Just pull the snapshot row for `month - 12` alongside the existing current and prior-month rows.
-
-**Dependency:** F-8 must ship first. R-2 is a column added on top of a stable card.
+### R-2: BY ACCOUNT card — add YoY delta arrow alongside existing MoM arrow ✅ SHIPPED (UX-116, 2026-05-18)
+Each account row now shows two arrows side by side: the existing MoM arrow (vs prior month) and a new YoY arrow labelled with the short year (e.g., `↑ '25`). Both use the same ±5% threshold, `count < 3` guard, and colour semantics. A separate 8th fetch loads same-month-prior-year transactions; `priorYearMap` useMemo builds the per-account aggregates; `yoyArrow()` mirrors `accountArrow()`. No backend changes.
 
 **Files:** `frontend/src/pages/DashboardPageV2.tsx`
 

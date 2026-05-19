@@ -12,7 +12,8 @@ import {
   SimpleGrid,
   Stack,
   Text,
-  Title
+  Title,
+  Tooltip,
 } from "@mantine/core";
 import {
   Bar,
@@ -22,7 +23,7 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis
 } from "recharts";
@@ -182,6 +183,10 @@ function currentYearMonth(): string {
 function prevMonth(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
   return m === 1 ? `${y! - 1}-12` : `${y}-${String(m! - 1).padStart(2, "0")}`;
+}
+
+function sameMonthPriorYear(ym: string): string {
+  return `${Number(ym.slice(0, 4)) - 1}-${ym.slice(5, 7)}`;
 }
 
 function nextMonth(ym: string): string {
@@ -359,6 +364,19 @@ function accountArrow(b: AccountBucket): { char: string; color: string } | null 
   return { char: "→", color: "dimmed" };
 }
 
+function yoyArrow(
+  b: AccountBucket,
+  pyData: { outflow: number; count: number } | undefined
+): { char: string; color: string } | null {
+  if (!pyData || pyData.count < 3) return null;
+  const isLiability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
+  if (pyData.outflow === 0) return { char: "→", color: "dimmed" };
+  const delta = (b.thisMonthOutflow - pyData.outflow) / pyData.outflow;
+  if (delta > 0.05) return { char: "↑", color: isLiability ? "fsTerracotta" : "fsGold" };
+  if (delta < -0.05) return { char: "↓", color: "fsForest" };
+  return { char: "→", color: "dimmed" };
+}
+
 function outflowSlices(cashData: CashSummaryResponse | null): Array<{ categoryId: string | null; categoryName: string; outflows: number }> {
   const rows = (cashData?.byCategory ?? []).filter((r) => r.outflows > 0).sort((a, b) => b.outflows - a.outflows);
   if (rows.length <= 5) {
@@ -378,6 +396,7 @@ export function DashboardPageV2() {
   const [netWorthHistory, setNetWorthHistory] = useState<NetWorthHistoryPoint[] | null>(null);
   const [budgetData, setBudgetData] = useState<BudgetMonthResponse | null>(null);
   const [recentTxns, setRecentTxns] = useState<LedgerRow[] | null>(null);
+  const [priorYearTxns, setPriorYearTxns] = useState<LedgerRow[] | null>(null);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [loading, setLoading] = useState(true);
   const [cashRetrying, setCashRetrying] = useState(false);
@@ -407,6 +426,7 @@ export function DashboardPageV2() {
     setLoading(true);
     const historyFrom = firstDayNMonthsBefore(activeMonth, 6);
     const monthEnd = lastDayOf(activeMonth);
+    const pyMonth = sameMonthPriorYear(activeMonth);
     const results = await Promise.allSettled([
       apiJson<CashSummaryResponse>(
         `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
@@ -424,6 +444,10 @@ export function DashboardPageV2() {
         { cache: "no-store" }
       ),
       apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" }),
+      apiJson<{ transactions: LedgerRow[] }>(
+        `/transactions?limit=200&dateFrom=${firstDayOf(pyMonth)}&dateTo=${lastDayOf(pyMonth)}`,
+        { cache: "no-store" }
+      ),
     ]);
     setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
     setResolutionData(results[1].status === "fulfilled" ? results[1].value : null);
@@ -436,6 +460,7 @@ export function DashboardPageV2() {
     setBudgetData(results[4].status === "fulfilled" ? results[4].value : null);
     setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
     setRecurringOverrides(results[6].status === "fulfilled" && results[6].value.ok ? results[6].value.data : []);
+    setPriorYearTxns(results[7].status === "fulfilled" ? results[7].value.transactions : null);
     setLoading(false);
   }, [activeMonth, token]);
 
@@ -523,6 +548,21 @@ export function DashboardPageV2() {
     () => (recentTxns ? computeAccountBuckets(recentTxns, activeMonth) : []),
     [recentTxns, activeMonth]
   );
+  const priorYearMap = useMemo(() => {
+    const map = new Map<string, { outflow: number; count: number }>();
+    if (!priorYearTxns) return map;
+    const pyMonth = sameMonthPriorYear(activeMonth);
+    for (const t of priorYearTxns) {
+      if (t.status !== "posted" || t.amount >= 0) continue;
+      if (!ACCOUNT_CARD_TYPES.has(t.accountType)) continue;
+      if (!t.txnDate.startsWith(pyMonth)) continue;
+      const entry = map.get(t.accountId) ?? { outflow: 0, count: 0 };
+      entry.outflow += Math.abs(t.amount);
+      entry.count += 1;
+      map.set(t.accountId, entry);
+    }
+    return map;
+  }, [priorYearTxns, activeMonth]);
   const showAccountModule = !loading && recentTxns !== null;
 
   const trendData = cashData && cashData !== "error" ? cashData.monthlyTrend : [];
@@ -964,9 +1004,24 @@ export function DashboardPageV2() {
 
         {showAccountModule ? (
           <Paper component="section" withBorder p="md" radius="md">
-            <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
-              By Account — This Month
-            </Text>
+            <Tooltip
+              label="First arrow = vs last month · second arrow = vs same month last year"
+              position="top"
+              withArrow
+              multiline
+              w={290}
+            >
+              <Text
+                size="xs"
+                tt="uppercase"
+                fw={500}
+                c="dimmed"
+                mb="xs"
+                style={{ letterSpacing: "0.06em", cursor: "help", display: "inline-block" }}
+              >
+                By Account — This Month
+              </Text>
+            </Tooltip>
             {accountBuckets.length === 0 ? (
               <Text size="sm" c="dimmed">
                 No spending recorded this month for linked accounts.
@@ -974,7 +1029,8 @@ export function DashboardPageV2() {
             ) : (
               <Stack gap={4}>
                 {accountBuckets.map((b) => {
-                  const arrow = accountArrow(b);
+                  const momArr = accountArrow(b);
+                  const yoyArr = yoyArrow(b, priorYearMap.get(b.accountId));
                   const href = `/transactions?accountId=${b.accountId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
                   return (
                     <Group key={b.accountId} justify="space-between" gap={4} wrap="nowrap">
@@ -983,10 +1039,19 @@ export function DashboardPageV2() {
                       </Anchor>
                       <Group gap={6} wrap="nowrap">
                         <Text size="sm">${formatNoCents(b.thisMonthOutflow)}</Text>
-                        {arrow ? (
-                          <Text size="sm" c={arrow.color} fw={600}>
-                            {arrow.char}
-                          </Text>
+                        {momArr ? (
+                          <Tooltip label={`vs ${formatMonthLabel(prevMonth(activeMonth))}`} position="top" withArrow>
+                            <Text size="sm" c={momArr.color} fw={600} style={{ cursor: "default" }}>
+                              {momArr.char}
+                            </Text>
+                          </Tooltip>
+                        ) : null}
+                        {yoyArr ? (
+                          <Tooltip label={`vs ${formatMonthLabel(sameMonthPriorYear(activeMonth))}`} position="top" withArrow>
+                            <Text size="sm" c={yoyArr.color} fw={600} style={{ cursor: "default" }}>
+                              {yoyArr.char}
+                            </Text>
+                          </Tooltip>
                         ) : null}
                       </Group>
                     </Group>
@@ -1016,7 +1081,7 @@ export function DashboardPageV2() {
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="month" tickFormatter={(v) => formatMonthShort(String(v))} />
               <YAxis tickFormatter={(v) => (trendUseK ? `$${(Number(v) / 1000).toFixed(0)}k` : `$${Number(v).toFixed(0)}`)} />
-              <Tooltip formatter={(v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+              <RechartsTooltip formatter={(v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
               <Legend />
               <Bar dataKey="inflows" fill={FS_FOREST} name="Income" />
               <Bar dataKey="outflows" fill={FS_TERRACOTTA} name="Spending" />
