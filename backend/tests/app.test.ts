@@ -1700,6 +1700,86 @@ describe("import sessions and file intake", () => {
     expect(creditRow.transfer_group_id).toBe(debitRow.transfer_group_id);
   });
 
+  it("pairs transfer across a 3-day ACH settlement gap (TM-1)", async () => {
+    const token = await loginAndGetToken();
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const debitAccountId = crypto.randomUUID();
+    const creditAccountId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'ACH Gap Test Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(debitAccountId, householdId, ownerUserId);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'savings', 'ACH Gap Test Savings', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(creditAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    await sqlStmt(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'ach-gap.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const debitDate = "2000-01-10";
+    const creditDate = "2000-01-13"; // 3-day ACH settlement lag
+    const debitDesc = "ONLINE TRANSFER to savings";
+    const creditDesc = "ONLINE TRANSFER from checking";
+    const rawCreditId = crypto.randomUUID();
+    const rawDebitId = crypto.randomUUID();
+
+    await sqlStmt(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      0,
+      JSON.stringify({ txn_date: creditDate, description: creditDesc, amount: 500, financial_account_id: creditAccountId })
+    );
+    await sqlStmt(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      1,
+      JSON.stringify({ txn_date: debitDate, description: debitDesc, amount: -500, financial_account_id: debitAccountId })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const creditRow = await sqlStmt(
+      `SELECT id, transfer_group_id FROM transaction_canonical
+       WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ?`
+    ).get(householdId, creditAccountId, creditDate, 500) as { id: string; transfer_group_id: string | null };
+    const debitRow = await sqlStmt(
+      `SELECT id, transfer_group_id FROM transaction_canonical
+       WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ?`
+    ).get(householdId, debitAccountId, debitDate, -500) as { id: string; transfer_group_id: string | null };
+
+    expect(creditRow).toBeDefined();
+    expect(debitRow).toBeDefined();
+    expect(creditRow.transfer_group_id).not.toBeNull();
+    expect(debitRow.transfer_group_id).not.toBeNull();
+    expect(creditRow.transfer_group_id).toBe(debitRow.transfer_group_id);
+  });
+
   it("sets transfer_group for directional internal transfer memos across accounts", async () => {
     const token = await loginAndGetToken();
     const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {

@@ -919,7 +919,7 @@ export async function canonicalizeImportSession(
           if (matched.has(c.id)) return false;
           if (c.accountId === debit.accountId) return false;
           if (c.centsAbs !== debit.centsAbs) return false;
-          return dateDiffDays(debit.txnDate, c.txnDate) <= 2;
+          return dateDiffDays(debit.txnDate, c.txnDate) <= 4;
         });
 
         if (matchingCredits.length > 1) {
@@ -961,7 +961,7 @@ export async function canonicalizeImportSession(
             debitId: debit.id,
             creditCandidateIds: matchingCredits.map((c) => c.id),
             dateWindow: { start: windowStart, end: windowEnd },
-            closeDateToleranceDays: 2,
+            closeDateToleranceDays: 4,
             matcherTelemetry: {
               phase: "debit_to_credits",
               debitLabel: debit.label,
@@ -1001,7 +1001,7 @@ export async function canonicalizeImportSession(
           if (matched.has(d.id)) return false;
           if (d.accountId === credit.accountId) return false;
           if (d.centsAbs !== credit.centsAbs) return false;
-          return dateDiffDays(d.txnDate, credit.txnDate) <= 2;
+          return dateDiffDays(d.txnDate, credit.txnDate) <= 4;
         });
 
         if (matchingDebitsForCredit.length > 1) {
@@ -1047,7 +1047,7 @@ export async function canonicalizeImportSession(
               debitLabel: debit.label,
               creditLabel: credit.label,
               dateWindow: { start: windowStart, end: windowEnd },
-              closeDateToleranceDays: 2,
+              closeDateToleranceDays: 4,
               matcherTelemetry: {
                 message:
                   "One-to-one amount/date match across accounts, but description pairing score is below the auto-match threshold."
@@ -1110,7 +1110,7 @@ export async function canonicalizeImportSession(
             debitId: debitCandidate.id,
             creditCandidateIds: [credit.id],
             dateWindow: { start: windowStart, end: windowEnd },
-            closeDateToleranceDays: 2,
+            closeDateToleranceDays: 4,
             matcherTelemetry: {
               phase: "credit_to_debits",
               creditLabel: credit.label,

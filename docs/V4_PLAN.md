@@ -56,12 +56,12 @@ Every Home page and Net Worth page load re-runs expensive aggregate SQL queries 
 
 ---
 
-### TM-1: Transfer matching — bump date tolerance from 2 → 4 days
+### TM-1: Transfer matching — bump date tolerance from 2 → 4 days ✅ SHIPPED (FIX-192, 2026-05-19)
 The current transfer auto-pairing window is ±2 days (`canonical-ingest.service.ts:922`). Real-world bank-to-bank ACH transfers routinely take 3 days, causing confirmed pairs to miss the window and land in the unmatched queue. Widening to 4 days catches the common 3-day lag without materially increasing false-pair risk: the pair score threshold (45) and same-account exclusion both still apply.
 
-**Implementation:** Change the `<= 2` check at line 922 to `<= 4`. Update the `closeDateToleranceDays` telemetry field (line 964) to match.
+**Implementation:** Changed `<= 2` to `<= 4` in both filter passes (lines 922 and 1004) and updated all three `closeDateToleranceDays` telemetry fields. Added integration test verifying a 3-day ACH gap is correctly paired.
 
-**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts` (lines 922, 964)
+**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/tests/app.test.ts`
 
 ---
 
@@ -405,7 +405,7 @@ These items are removed from the active backlog. No plans to build.
 | R-2 | BY ACCOUNT card — add YoY arrow alongside MoM arrow | ✅ Shipped | UX |
 | R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | ✅ Shipped | Bug fix |
 | F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
-| TM-1 | Transfer date tolerance 2 → 4 days | P1 | Bug fix |
+| TM-1 | Transfer date tolerance 2 → 4 days | ✅ Shipped | Bug fix |
 | F-1 | In-app notification system + alerts | P2 | Feature |
 | F-2 | Balance sheet member subtotals | P2 | Feature |
 | F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | P2 | Feature |
@@ -428,4 +428,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-18. R-1 shipped (SEC-003). R-2 re-scoped: MoM + YoY balance arrows on BY ACCOUNT card; simplified by F-8 switching to account_balance_snapshot (no extra fetch needed). F-8 design locked: credit_card/checking/savings only, top 3 per group (max 6 rows), balance from account_balance_snapshot as primary metric, loan/investment/retirement/property excluded. Recommended build order: R-3 (color fix) → F-8 (balance metric + filter + cap) → R-2 (YoY arrow) → TM-1 → F-6 → F-2 → F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
+*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. All P1 items now shipped. Recommended build order: F-6 → F-2 → F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*

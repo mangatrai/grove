@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-192 (2026-05-19): Transfer date tolerance bumped from 2 → 4 days (TM-1)
+
+- **Type:** Bug fix (TM-1, V4 plan)
+- **What:** Bank-to-bank ACH transfers routinely settle in 3 business days, causing confirmed transfer pairs to miss the ±2-day auto-pairing window and land in the unmatched resolution queue. Widened the tolerance to ±4 calendar days (3 business days). The pair score threshold (45) and same-account exclusion both still apply, so false-positive risk is unchanged — the scorer does not consider date proximity; only amount and account differ.
+- **Fix:** Changed `<= 2` to `<= 4` in the debit→credit and credit→debit filter passes; updated `closeDateToleranceDays` telemetry in all three ambiguity reason JSON blobs.
+- **Test:** New integration test `"pairs transfer across a 3-day ACH settlement gap (TM-1)"` in `app.test.ts` — debit on 2000-01-10, credit on 2000-01-13, verifies `transfer_group_id` is set on both rows.
+- **Files:** `backend/src/modules/canonical/canonical-ingest.service.ts` (lines 922, 1004, 964/1050/1113), `backend/tests/app.test.ts`
+
+---
+
 ## UX-116 (2026-05-18): BY ACCOUNT card — add YoY delta arrow alongside MoM arrow (R-2)
 
 - **Type:** UX enhancement (R-2, V4 plan)
