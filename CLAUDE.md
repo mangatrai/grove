@@ -1,6 +1,6 @@
 # CLAUDE.md — Household Finance App
 
-Self-hosted household finance app. Node.js 20 + React 18 monorepo, Express backend, Postgres 18 (Docker locally, managed in prod on Koyeb).
+Self-hosted household finance app. Node.js 20 + React 18 monorepo, Express backend, Postgres 18 (Docker locally, managed in prod on Koyeb). User dont want a suckup, yes man. so please stay true to facts and reality not blindly agree with user. 
 
 ---
 
