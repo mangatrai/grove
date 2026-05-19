@@ -1472,8 +1472,13 @@ describe("import sessions and file intake", () => {
     ).get(sess2)) as { id: string } | undefined;
     expect(riRow).toBeTruthy();
 
-    // Verify it appears in Needs Review ledger.
-    const needsReview = await request(app).get("/transactions?needsReview=true&limit=50").set("authorization", `Bearer ${token}`);
+    // Verify it appears in Needs Review ledger. Use sessionId to scope to sess2
+    // only — the unscoped household-wide query can return 50+ uncategorised rows
+    // from other tests ahead of this one in the date-desc sort, causing a
+    // limit=50 cut to miss the duplicate.
+    const needsReview = await request(app)
+      .get(`/transactions?needsReview=true&sessionId=${sess2}&limit=50`)
+      .set("authorization", `Bearer ${token}`);
     expect(needsReview.status).toBe(200);
     const dupInReview = (needsReview.body.transactions as Array<{ status: string; merchant: string }>).find(
       (t) => t.status === "duplicate" && t.merchant?.includes(`EXACT DUP COFFEE ${tag}`)
