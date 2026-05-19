@@ -402,7 +402,7 @@ These items are removed from the active backlog. No plans to build.
 | ID | Title | Priority | Type |
 |---|---|---|---|
 | R-1 | Post-restore `force_password_change` | ✅ Shipped | Security |
-| R-2 | BY ACCOUNT card — add YoY arrow alongside MoM arrow | P2 | UX |
+| R-2 | BY ACCOUNT card — add YoY arrow alongside MoM arrow | ✅ Shipped | UX |
 | R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | ✅ Shipped | Bug fix |
 | F-6 | Dashboard + Net Worth caching with refresh icon | P1 | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | P1 | Bug fix |
