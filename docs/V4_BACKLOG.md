@@ -750,4 +750,112 @@ After the fix, a user confirming `"CITY OF FRISCO UTILITI FRIS"` can type `"Fris
 
 ---
 
-*Last updated: 2026-05-20. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on. TM-3 dropped — empty-memo premise false, no real-world evidence. Added F-9: recurring payments display name — modal missing input field.*
+---
+
+## Near-Duplicate Detection — Remove Description Gate (TM-4)
+
+### Problem in detail
+
+The BoA CSV export masks sensitive digits in ACH/wire reference fields with `X` characters. The BoA PDF parser extracts the real digits. When both files are imported for the same account period, the canonicalization pipeline sees two transactions with the same account, date, and amount but descriptions that differ enough that neither passes the `descriptionsCompatibleForNearDuplicate()` substring check. Both land as live `posted` rows — a silent duplicate.
+
+### Real-world example pairs (all same transaction, different source)
+
+| CSV (masked) | PDF (real) |
+|---|---|
+| `CKPTUTOR DES:IAT PAYPAL ID:XXXXX50542835 INDN:MANGAT RAI CO ID:XXXXX0487C IAT PMT INFO: WEB XXXXXXXXXX00001199` | `CKPTUTOR DES:IAT PAYPAL ID:1049950542835 INDN:MANGAT RAI CO ID:XXXXXXXXXC IAT PMT INFO: WEB 00000` |
+| `IBM 3141 DES:PAYROLL ID:XXXXX73099 INDN:Mangat Rai CO ID:XXXXX71985 PPD PMT INFO:TRN*1*XXXXX73099` | `IBM 3141 DES:PAYROLL ID:1000073099 INDN:Mangat Rai CO ID:2130871985 PPD PMT INFO:TRN*1*10000730` |
+| `GOLDMAN SACHS BA DES:TRANSFER ID:000300008446968 INDN:Rai,Mangat CO ID:0124085260 WEB` | `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Rai,Mangat CO ID:XXXXX85260 WEB` |
+| `CHECKCARD 0430 TMOBILE AUTO P BELLEVUE WA 00000000000000000914798 RECURRING` | `TMOBILE AUTO P 04/30 PURCHASE BELLEVUE WA` |
+
+### Why the current check fails
+
+`normalizeDescriptionForFingerprint()` strips non-alphanumeric but preserves literal `X` as a letter. After normalization, `"idxxxxx50542835"` ≠ `"id1049950542835"`. Neither is a substring of the other, so `descriptionsCompatibleForNearDuplicate()` returns false and the near-duplicate path is never triggered.
+
+### Why NOT to fix the normalization
+
+Stripping X-runs and long digit sequences would fix these specific cases, but it hardcodes knowledge of BoA's masking format. Different banks, different parsers, or a future format change would silently re-break it. It's the wrong layer.
+
+### Option 1 (selected): Remove the description gate
+
+For same-account + same-date + same-amount pairs, drop `descriptionsCompatibleForNearDuplicate()` entirely. Any fingerprint mismatch routes the second transaction to `status = 'duplicate'` with a `duplicate_ambiguity` resolution item.
+
+**Trade-off:** Two genuinely different same-price same-day transactions (two $5.25 coffees, two $20 ATM withdrawals) will occasionally land in the resolution queue as false positives. The false-positive rate is low in practice — ACH, payroll, and transfer amounts are typically unique per day within an account — and the resolution queue is the designed path for ambiguity. Acceptable for a single-household app where the user resolves ambiguity themselves.
+
+**Why not fuzzy string matching (Levenshtein, Jaro-Winkler, Dice)?** These measure character-level distance. A 13-digit ID run or a long zero-padded reference adds significant character distance even when the merchant name is identical. The TMOBILE pair is worse: one description is ~2× the length. Character-level fuzzy matching doesn't handle token-level insertions cleanly, and a library won't help without additional preprocessing.
+
+---
+
+### Option 3 (upgrade path): Structural token Jaccard
+
+If false-positive resolution noise ever becomes a problem, replace the removed gate with a smarter check: strip any token that consists entirely of digits, X-characters, or a mix (`/^[x\d]+$/i`), then compute Jaccard similarity on the remaining structural word tokens. Those are the merchant name and type keywords — the stable part of any bank description, regardless of bank or format.
+
+```typescript
+function structuralTokens(normalizedDescription: string): Set<string> {
+  return new Set(
+    normalizedDescription.split(/\s+/).filter(t => t.length > 1 && !/^[x\d]+$/i.test(t))
+  );
+}
+
+function structuralJaccard(a: string, b: string): number {
+  const ta = structuralTokens(a);
+  const tb = structuralTokens(b);
+  const intersection = [...ta].filter(t => tb.has(t)).length;
+  const union = new Set([...ta, ...tb]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+```
+
+Replace `descriptionsCompatibleForNearDuplicate()` with `structuralJaccard(a, b) >= 0.4`. The 0.4 threshold is tunable; requires ~40% of structural tokens to overlap.
+
+**Why generic:** Stripping pure-digit/X tokens is valid for any bank — reference IDs and trace numbers are always digits or masked digits, never merchant names. No knowledge of BoA's masking format is hardcoded.
+
+**Validation against the four real-world pairs:**
+
+| Pair | Jaccard after stripping |
+|---|---|
+| CKPTUTOR (masked vs real IDs) | ~0.90 ✓ |
+| IBM PAYROLL (masked vs real IDs) | ~0.85 ✓ |
+| GOLDMAN SACHS (real vs masked IDs) | ~0.80 ✓ |
+| TMOBILE (CHECKCARD prefix + long zeros vs clean) | 5/8 = 0.625 ✓ |
+
+No new npm dependency. ~15 lines of code when ready to upgrade.
+
+### Scope
+
+Same-account near-duplicate path only. Transfer pairing (`transferPairScore()`) is a separate scoring path — not touched.
+
+---
+
+## Cash Account Auto-Balance (F-10)
+
+### The problem
+
+A cash account is tracked exclusively by manual transaction entry. Currently, recording a cash expense in the Transactions page only creates a `transaction_canonical` row — it does not touch `account_balance_snapshot`. The user must navigate to Net Worth, find the account, and manually update the balance after every cash transaction. This defeats the purpose of tracking cash spending.
+
+### Data model (existing)
+
+`account_balance_snapshot` has `source = 'manual' | 'import'`. Manual-source rows are exactly what auto-balance should write. `upsertManualBalanceSnapshot()` in `balance-sheet.service.ts` already does the upsert correctly. No schema change needed.
+
+### Design
+
+**Trigger:** `POST /ledger` (create), `DELETE /ledger/:id` (delete), `PATCH /ledger/:id` (edit amount) — only when `financial_account.type = 'cash'`.
+
+**Balance computation (delta model):**
+- On create: `new_balance = latest_snapshot_amount + txn.amount`
+- On delete: `new_balance = latest_snapshot_amount − txn.amount`
+- On edit: `new_balance = latest_snapshot_amount − old_amount + new_amount`
+- If no prior snapshot exists: treat `latest_snapshot_amount = 0` (assumes starting from zero; user can set opening balance via Net Worth manual entry UI)
+
+**Why not recompute from SUM(transactions):** A user may set an opening balance manually (e.g. "I have $200 cash right now") and then track future spending. Summing all transactions from an arbitrary start would ignore the opening balance. The delta model anchors each increment to whatever the user last confirmed the balance to be.
+
+**Only cash accounts.** Checking and savings have import-sourced snapshots from statement files; auto-updating those from manual transactions would introduce noise. The `type = 'cash'` guard is the fence.
+
+### Edge cases
+
+- **Out-of-order entries:** If user records transactions out of date order (e.g. enters last week's coffee today), the snapshot's `as_of_date` will be the transaction date but the snapshot amount will still be correctly incremented from today's latest value. The balance may not reflect chronological order. Acceptable for cash — the user can correct via manual Net Worth entry.
+- **Currency:** Cash accounts are typically single-currency. Use the account's currency or default `USD`. If the account has mixed currencies (unusual), skip auto-balance (do not create a snapshot).
+- **Transfer transactions:** Cash-to-cash transfers should not double-count. If the debit and credit sides are both cash accounts, each side independently updates its own snapshot. This is correct — moving $50 from one cash envelope to another reduces one account by $50 and increases the other by $50.
+
+---
+
+*Last updated: 2026-05-20. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on. TM-3 dropped — empty-memo premise false, no real-world evidence. Added F-9: recurring payments display name — modal missing input field. Added TM-4: near-duplicate detection for masked vs real description variants — normalization fix + token intersection. Added F-10: cash account auto-balance on manual transaction create/edit/delete — delta model, cash accounts only, no migration needed.*

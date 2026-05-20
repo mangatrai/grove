@@ -150,6 +150,26 @@ No way exists today to see which transactions are paired as transfers, or to man
 
 ---
 
+### TM-4: Near-duplicate detection — remove description gate (Option 1)
+
+**Bug.** The same real-world transaction imported from two sources (BoA CSV and BoA PDF parser) fails near-duplicate detection. The formats produce descriptions that differ in reference IDs and prefix tokens — masked digits (`XXXXX50542835`) vs real (`1049950542835`), or format prefixes (`CHECKCARD 0430 TMOBILE...` vs `TMOBILE AUTO P 04/30...`) — so `descriptionsCompatibleForNearDuplicate()` returns false and both land as live rows.
+
+**Root cause:** The near-duplicate path (same account + same date + same amount + different fingerprint) gates on substring containment between descriptions. This is too strict when descriptions differ across import formats.
+
+**Fix (Option 1 — selected):** Remove `descriptionsCompatibleForNearDuplicate()` as a prerequisite. For same-account + same-date + same-amount pairs, any fingerprint mismatch is sufficient to route the second transaction to `status = 'duplicate'` with a `duplicate_ambiguity` resolution item.
+
+**Trade-off:** Two genuinely different same-price same-day transactions (e.g. two $5.25 coffee purchases) will occasionally queue to resolution. The false-positive rate is low in practice (ACH, payroll, and transfer amounts are typically unique per day), and the resolution queue is the designed handling path for ambiguity. Acceptable for a household app.
+
+**Option 3 (future upgrade — structural token Jaccard):** If false-positive resolution noise ever becomes a problem, a smarter check can replace the removed gate. See `docs/V4_BACKLOG.md` §TM-4 for the full design.
+
+**Scope:** Same-account near-duplicate path only. Transfer pairing (`transferPairScore()`) is a separate path and is not touched.
+
+**Tests:** One integration test per example pair — assert second import lands as `status = 'duplicate'` with a `duplicate_ambiguity` resolution item.
+
+**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/tests/app.test.ts`
+
+---
+
 ### TM-3: Transfer matching — same-institution score boost ❌ NOT DOING
 
 **Dropped 2026-05-19.** The original premise — that empty OFX memos produce a score of 0, leaving same-institution pairs unmatched — is false. The OFX parser always produces a non-empty description (falls back to `"OFX Transaction"`); two truly-empty-memo transactions would score 100 (identical descriptions) and auto-pair. In practice, production transactions (3,500 over 3 years) have never exhibited the empty-memo failure mode. The transfer resolution queue is working well and does not show this as a real source of noise. Adding institution as a scoring signal would add complexity without a demonstrated benefit, and risks making cross-institution transfers (BofA checking → Chase savings) harder to reason about. Closed.
@@ -354,6 +374,35 @@ Confirmed recurring rules on the Dashboard show the raw `merchantKey` (the subst
 
 ---
 
+### F-10: Cash account — auto-update balance snapshot on manual transaction
+
+When a manual transaction is recorded against a `cash`-type account (`POST /ledger`), the `account_balance_snapshot` table is not touched. The user must manually go to the Net Worth page and re-enter the balance. For a cash account that is tracked exclusively by manual transaction entry, the balance should auto-update.
+
+**Current behaviour:** `createManualCanonicalTransaction()` inserts into `transaction_canonical` and returns. No snapshot is written. The Net Worth balance remains at whatever was last manually set.
+
+**Desired behaviour:**
+- **Money out (negative amount):** latest snapshot − |amount| → upsert as new snapshot on txn date
+- **Money in (positive amount):** latest snapshot + amount → upsert as new snapshot on txn date
+- **Delete transaction:** reverse the delta (snapshot + original amount for a deletion, effectively)
+- **Edit transaction amount:** snapshot − old_amount + new_amount
+
+**Scope restriction — cash accounts only.** Checking and savings accounts receive import-sourced snapshots from bank statements; auto-updating those from manual transactions would pollute the import-derived balance. Only `type = 'cash'` accounts get auto-balance.
+
+**Opening balance:** If no prior snapshot exists for the account (new cash account), treat the starting balance as 0 and derive the snapshot from the transaction alone. User can always correct the balance explicitly via the Net Worth manual entry UI.
+
+**Implementation:**
+1. In `ledger.routes.ts` POST handler — after transaction is created, fetch `financial_account.type`. If `'cash'`, call `computeAndUpsertCashBalance(householdId, accountId, txnDate)`.
+2. `computeAndUpsertCashBalance()` (new helper in `balance-sheet.service.ts`): read the latest snapshot, compute `snapshot.amount + txnAmount`, call `upsertManualBalanceSnapshot()`.
+3. Apply the same call site in the DELETE handler (with inverted delta) and the PATCH/update handler (with `new_amount − old_amount` delta).
+
+**No schema migration needed.** `account_balance_snapshot` with `source = 'manual'` is already the correct target.
+
+**Files:** `backend/src/modules/ledger/ledger.routes.ts`, `backend/src/modules/reports/balance-sheet.service.ts`, `backend/tests/app.test.ts`
+
+**Design notes:** See `docs/V4_BACKLOG.md` §Cash Account Auto-Balance (F-10) for edge cases.
+
+---
+
 ### T-1: Documentation consolidation
 Reduce 40+ markdown files in `docs/` to 5 canonical documents. Current state has multiple overlapping backlogs, archived PRDs with outdated status, and split deployment guides.
 
@@ -457,7 +506,9 @@ These items are removed from the active backlog. No plans to build.
 | F-6b | Net Worth snapshot + row-expansion cache | ✅ Shipped | Performance |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
+| TM-4 | Near-duplicate detection — masked vs real description variants | P1 | Bug fix |
 | F-9 | Recurring payments — display name field in tag modal | P2 | UX |
+| F-10 | Cash account — auto-update balance snapshot on manual transaction | P2 | Feature |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
@@ -467,4 +518,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-20. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b shipped (CR-194): Net Worth snapshot (1-hour TTL) + per-account row-expansion cache (7-day TTL) — both use existing `networth` scope and refresh icon. F-9 added (P2): recurring payments display name — modal missing input field; DB+backend+dashboard already wired, frontend-only fix. Recommended build order: F-9 → F-3 → TM-2 → F-7 → F-1 → remaining P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*
+*Last updated: 2026-05-20. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b shipped (CR-194): Net Worth snapshot (1-hour TTL) + per-account row-expansion cache (7-day TTL) — both use existing `networth` scope and refresh icon. F-9 added (P2): recurring payments display name — modal missing input field; DB+backend+dashboard already wired, frontend-only fix. TM-4 added (P1 bug): near-duplicate detection fails when same transaction imported from CSV (masked IDs) and PDF (real IDs) — X-preserving normalization + substring check both fail. F-10 added (P2): cash account auto-balance on manual transaction — no migration needed. Recommended build order: TM-4 → F-9 → F-3 → TM-2 → F-7 → F-1 → F-10 → remaining P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*
