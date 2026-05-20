@@ -167,7 +167,8 @@ reportsRouter.get("/balance-sheet", async (req: AuthenticatedRequest, res) => {
     assets: result.assets,
     liabilities: result.liabilities,
     properties: result.properties,
-    totals: result.totals
+    totals: result.totals,
+    memberSummary: result.memberSummary
   });
 });
 

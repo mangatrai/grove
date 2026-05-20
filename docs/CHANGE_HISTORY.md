@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-193 (2026-05-19): Balance sheet member subtotals + Household Breakdown card (F-2)
+
+- **Type:** Feature (F-2, V4 plan)
+- **What:** `GET /reports/balance-sheet` now includes **`memberSummary[]`** — per-person asset, liability, and net-worth totals when the household has ≥ 2 person profiles (empty array otherwise). Net Worth page shows a **Household Breakdown** table beside the liquidity card (side-by-side on tablet/desktop).
+- **Why:** F-2 — compare all household members at once without switching the belongs-to filter.
+- **Files:** `backend/src/modules/reports/balance-sheet.service.ts`, `frontend/src/pages/NetWorthPage.tsx`, `docs/API_BALANCE_SHEET.md`, `openapi/openapi.yaml`, `docs/V4_PLAN.md`, `backend/tests/app.test.ts`
+
+---
+
 ## CR-192 (2026-05-19): Client-side localStorage caching for Dashboard + Net Worth (F-6)
 
 - **Type:** Performance / UX (F-6, V4 plan)

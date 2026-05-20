@@ -73,6 +73,14 @@ type PropertySheetRow = {
   linkedMortgageAsOf: string | null;
 };
 
+type BalanceSheetMemberSummaryRow = {
+  personProfileId: string;
+  name: string;
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+};
+
 type BalanceSheetResponse = {
   asOf: string;
   assets: BalanceSheetAccountRow[];
@@ -83,6 +91,7 @@ type BalanceSheetResponse = {
     liabilities: number | null;
     netWorth: number | null;
   };
+  memberSummary?: BalanceSheetMemberSummaryRow[];
 };
 
 type AccountOption = {
@@ -842,37 +851,87 @@ export function NetWorthPage() {
         <Text size="xs" c="dimmed" ta="right" mt={4}>Balances as of {tableAsOf}</Text>
       </Stack>
 
-      {liquidityTiers ? (
-        <Paper withBorder shadow="sm" radius="md" p="md">
-          <Group gap={8} align="center" mb="sm">
-            <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Liquidity breakdown</Title>
-            <HelpIcon label="Liquid: accessible same day. Semi-liquid: marketable assets, days to settle. Restricted: retirement, HSA, property — penalty or time to access. Tag accounts in Settings → Accounts to see this breakdown." />
-          </Group>
-          <Stack gap={4} style={{ maxWidth: "28rem" }}>
-            <Group justify="space-between">
-              <Text size="sm" c="dimmed">Liquid</Text>
-              <Text size="sm" fw={600} style={{ color: "var(--color-success)" }}>{formatMoney(liquidityTiers.liquid)}</Text>
+      {(() => {
+        const showLiquidity = liquidityTiers != null;
+        const showMemberBreakdown = (data?.memberSummary?.length ?? 0) > 1;
+        if (!showLiquidity && !showMemberBreakdown) {
+          return null;
+        }
+
+        const liquidityCard = showLiquidity ? (
+          <Paper withBorder shadow="sm" radius="md" p="md">
+            <Group gap={8} align="center" mb="sm">
+              <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Liquidity breakdown</Title>
+              <HelpIcon label="Liquid: accessible same day. Semi-liquid: marketable assets, days to settle. Restricted: retirement, HSA, property — penalty or time to access. Tag accounts in Settings → Accounts to see this breakdown." />
             </Group>
-            <Group justify="space-between">
-              <Text size="sm" c="dimmed">Semi-liquid</Text>
-              <Text size="sm" fw={600}>{formatMoney(liquidityTiers.semiLiquid)}</Text>
-            </Group>
-            <Group justify="space-between">
-              <Text size="sm" c="dimmed">Restricted</Text>
-              <Text size="sm" fw={600}>{formatMoney(liquidityTiers.restricted)}</Text>
-            </Group>
-            {liquidityTiers.hasUncategorized ? (
+            <Stack gap={4} style={{ maxWidth: "28rem" }}>
               <Group justify="space-between">
-                <Group gap={4}>
-                  <Text size="sm" c="dimmed">Uncategorized</Text>
-                  <Anchor component={Link} to="/settings?tab=accounts" size="xs">Tag accounts</Anchor>
-                </Group>
-                <Text size="sm" c="dimmed">{formatMoney(liquidityTiers.uncategorized)}</Text>
+                <Text size="sm" c="dimmed">Liquid</Text>
+                <Text size="sm" fw={600} style={{ color: "var(--color-success)" }}>{formatMoney(liquidityTiers.liquid)}</Text>
               </Group>
-            ) : null}
-          </Stack>
-        </Paper>
-      ) : null}
+              <Group justify="space-between">
+                <Text size="sm" c="dimmed">Semi-liquid</Text>
+                <Text size="sm" fw={600}>{formatMoney(liquidityTiers.semiLiquid)}</Text>
+              </Group>
+              <Group justify="space-between">
+                <Text size="sm" c="dimmed">Restricted</Text>
+                <Text size="sm" fw={600}>{formatMoney(liquidityTiers.restricted)}</Text>
+              </Group>
+              {liquidityTiers.hasUncategorized ? (
+                <Group justify="space-between">
+                  <Group gap={4}>
+                    <Text size="sm" c="dimmed">Uncategorized</Text>
+                    <Anchor component={Link} to="/settings?tab=accounts" size="xs">Tag accounts</Anchor>
+                  </Group>
+                  <Text size="sm" c="dimmed">{formatMoney(liquidityTiers.uncategorized)}</Text>
+                </Group>
+              ) : null}
+            </Stack>
+          </Paper>
+        ) : null;
+
+        const memberBreakdownCard = showMemberBreakdown ? (
+          <Paper withBorder shadow="sm" radius="md" p="md">
+            <Text fw={600} mb="xs">Household Breakdown</Text>
+            <Table striped={false} withTableBorder withRowBorders verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Member</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }} ta="right">Assets</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }} ta="right">Liabilities</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }} ta="right">Net Worth</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                <Table.Tr>
+                  <Table.Td fw={700}>Household Total</Table.Td>
+                  <Table.Td ta="right" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(data?.totals.assets)}</Table.Td>
+                  <Table.Td ta="right" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(data?.totals.liabilities)}</Table.Td>
+                  <Table.Td ta="right" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(data?.totals.netWorth)}</Table.Td>
+                </Table.Tr>
+                {data!.memberSummary!.map((row) => (
+                  <Table.Tr key={row.personProfileId}>
+                    <Table.Td>{row.name}</Table.Td>
+                    <Table.Td ta="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(row.totalAssets)}</Table.Td>
+                    <Table.Td ta="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(row.totalLiabilities)}</Table.Td>
+                    <Table.Td ta="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(row.netWorth)}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Paper>
+        ) : null;
+
+        if (showLiquidity && showMemberBreakdown) {
+          return (
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+              {liquidityCard}
+              {memberBreakdownCard}
+            </SimpleGrid>
+          );
+        }
+        return liquidityCard ?? memberBreakdownCard;
+      })()}
 
       <Paper withBorder shadow="sm" radius="md" p="md">
         <Group justify="space-between" align="center" mb="sm">

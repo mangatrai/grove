@@ -94,7 +94,7 @@ Unified notification center — bell icon with unread badge in the top bar, drop
 
 ---
 
-### F-2: Balance sheet member subtotals
+### F-2: Balance sheet member subtotals ✅ SHIPPED (CR-193, 2026-05-19)
 The net worth page currently has a filter (show household OR one member). Member subtotals go one step further: a summary section at the bottom of the page showing ALL members simultaneously as a breakdown table:
 
 | Member | Assets | Liabilities | Net Worth |
@@ -273,6 +273,25 @@ Design decisions locked 2026-05-18:
 
 ---
 
+### F-6b: Net Worth page — cache balance-sheet snapshot + per-account row-expansion history
+
+F-6 shipped caching for the trend chart history (`bs-history:*` keys) and the Dashboard cash-summary. Two expensive queries on the Net Worth page remain uncached:
+
+1. **Balance-sheet snapshot** (`loadSheet` → `GET /reports/balance-sheet`): fires on every page load and on every member/scope filter change. This is the most expensive call — joins across accounts, properties, and snapshots. Currently bypasses `useLocalStorageCache` entirely.
+2. **Per-account row-expansion history**: each time a user expands an account row in the balance sheet table, one query fires to load that account's historical balance series. Expanding all rows can fire 10–20 sequential queries.
+
+**Implementation:**
+- **Snapshot:** wrap `loadSheet()` with `useLocalStorageCache`, key `bs-snapshot:{ownerScope}:{ownerPersonProfileId|'household'}`, scope `"networth"`, TTL **1 hour** (snapshot reflects current account balances; shorter stale-tolerance than the historical series).
+- **Per-account expansion:** wrap each account's history fetch with `useLocalStorageCache`, key `bs-acct-history:{accountId}:{fromDate}:{toDate}`, scope `"networth"`, TTL **7 days** (historical balance data is immutable once written).
+- Both keys use the existing `"networth"` scope → the existing refresh icon on the page (shipped in F-6) busts all cached data together. No new UI needed.
+- Uses the same `useLocalStorageCache` hook already wired in `NetWorthPage.tsx`.
+
+**Design notes:** See `docs/V4_BACKLOG.md` §Net Worth Caching Follow-on (F-6b) for cache key format and TTL rationale.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
 ### I-10: App-wide error logging audit
 
 Production issues are currently discovered by tracing code paths by hand because many async route handlers lack try-catch (errors cause process crashes with no log entry) and several service functions return early/silently on unexpected states.
@@ -407,7 +426,7 @@ These items are removed from the active backlog. No plans to build.
 | F-6 | Dashboard + Net Worth caching with refresh icon | ✅ Shipped | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | ✅ Shipped | Bug fix |
 | F-1 | In-app notification system + alerts | P2 | Feature |
-| F-2 | Balance sheet member subtotals | P2 | Feature |
+| F-2 | Balance sheet member subtotals | ✅ Shipped | Feature |
 | F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | P2 | Feature |
 | TM-2 | Transfer pair visibility + manual pair/unpair UI | P2 | Feature |
 | TM-3 | Transfer matching — same-institution score boost | P2 | Enhancement |
@@ -417,6 +436,7 @@ These items are removed from the active backlog. No plans to build.
 | F-4 | Delete property | P3 | Feature |
 | F-5 | Account closed/inactive status | P3 | Feature |
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
+| F-6b | Net Worth snapshot + row-expansion cache | P3 | Performance |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | P3 | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
@@ -428,4 +448,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. Recommended build order: F-2 → F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
+*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b added (P3): Net Worth snapshot + per-account row-expansion cache — follow-on to F-6, same scope/hook, no new UI. Recommended build order: F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*

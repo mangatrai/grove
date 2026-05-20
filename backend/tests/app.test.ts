@@ -4764,4 +4764,103 @@ describe("balance sheet (reports)", () => {
       true
     );
   });
+
+  it("GET balance-sheet returns memberSummary for multi-member household with owned accounts", async () => {
+    const householdId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const profileA = crypto.randomUUID();
+    const profileB = crypto.randomUUID();
+    const membershipA = crypto.randomUUID();
+    const membershipB = crypto.randomUUID();
+    const accountA = crypto.randomUUID();
+    const accountB = crypto.randomUUID();
+    const email = `f2-multi-member-${Date.now()}@example.com`;
+    const password = "ChangeMe123!";
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await sqlStmt(`INSERT INTO household (id, name) VALUES (?, 'F-2 multi member')`).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'all')`
+    ).run(userId, householdId, email, passwordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(userId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name)
+       VALUES (?, ?, ?, 'Member A'), (?, ?, NULL, 'Member B')`
+    ).run(profileA, householdId, userId, profileB, householdId);
+    await sqlStmt(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+       VALUES (?, ?, ?, 'head', 'self'), (?, ?, ?, 'member', 'spouse')`
+    ).run(membershipA, householdId, profileA, membershipB, householdId, profileB);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, owner_scope, owner_person_profile_id)
+       VALUES (?, ?, ?, 'checking', 'Bank A', 'person', ?), (?, ?, ?, 'savings', 'Bank B', 'person', ?)`
+    ).run(accountA, householdId, userId, profileA, accountB, householdId, userId, profileB);
+
+    const login = await request(app).post("/auth/login").send({ email, password });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const postA = await request(app)
+      .post("/reports/balance-sheet/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({ financialAccountId: accountA, asOfDate: "2026-06-15", amount: 10_000, currency: "USD" });
+    expect(postA.status).toBe(201);
+    const postB = await request(app)
+      .post("/reports/balance-sheet/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({ financialAccountId: accountB, asOfDate: "2026-06-15", amount: 3_000, currency: "USD" });
+    expect(postB.status).toBe(201);
+
+    const res = await request(app)
+      .get("/reports/balance-sheet?asOf=2026-06-30")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.memberSummary).toHaveLength(2);
+
+    const rowA = res.body.memberSummary.find((m: { personProfileId: string }) => m.personProfileId === profileA);
+    const rowB = res.body.memberSummary.find((m: { personProfileId: string }) => m.personProfileId === profileB);
+    expect(rowA).toMatchObject({ totalAssets: 10_000, totalLiabilities: 0, netWorth: 10_000 });
+    expect(rowB).toMatchObject({ totalAssets: 3_000, totalLiabilities: 0, netWorth: 3_000 });
+  });
+
+  it("GET balance-sheet returns empty memberSummary when household has one person profile", async () => {
+    const householdId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const profileId = crypto.randomUUID();
+    const membershipId = crypto.randomUUID();
+    const accountId = crypto.randomUUID();
+    const email = `f2-single-member-${Date.now()}@example.com`;
+    const password = "ChangeMe123!";
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await sqlStmt(`INSERT INTO household (id, name) VALUES (?, 'F-2 single member')`).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'all')`
+    ).run(userId, householdId, email, passwordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(userId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name)
+       VALUES (?, ?, ?, 'Solo Member')`
+    ).run(profileId, householdId, userId);
+    await sqlStmt(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+       VALUES (?, ?, ?, 'head', 'self')`
+    ).run(membershipId, householdId, profileId);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, owner_scope, owner_person_profile_id)
+       VALUES (?, ?, ?, 'checking', 'Test Bank', 'person', ?)`
+    ).run(accountId, householdId, userId, profileId);
+
+    const login = await request(app).post("/auth/login").send({ email, password });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const res = await request(app)
+      .get("/reports/balance-sheet?asOf=2026-06-30")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.memberSummary).toEqual([]);
+  });
 });

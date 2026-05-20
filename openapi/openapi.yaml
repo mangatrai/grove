@@ -3463,6 +3463,15 @@ components:
         linkedMortgageBalance: { type: number, nullable: true }
         linkedMortgageAsOf: { type: string, nullable: true, format: date }
 
+    BalanceSheetMemberSummaryRow:
+      type: object
+      properties:
+        personProfileId: { type: string, format: uuid }
+        name: { type: string }
+        totalAssets: { type: number }
+        totalLiabilities: { type: number }
+        netWorth: { type: number }
+
     BalanceSheetSnapshotResponse:
       type: object
       properties:
@@ -3485,6 +3494,11 @@ components:
             assets: { type: number, nullable: true }
             liabilities: { type: number, nullable: true }
             netWorth: { type: number, nullable: true }
+        memberSummary:
+          type: array
+          description: Per-person asset/liability/net-worth subtotals; empty when household has fewer than 2 person profiles
+          items:
+            $ref: '#/components/schemas/BalanceSheetMemberSummaryRow'
 
     PropertyRecord:
       type: object
