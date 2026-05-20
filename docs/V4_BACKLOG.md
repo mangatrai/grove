@@ -695,4 +695,59 @@ GET /reports/year-summary?year=2025
 
 ---
 
-*Last updated: 2026-05-19. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on. TM-3 dropped — empty-memo premise false, no real-world evidence.*
+---
+
+## Recurring Payments Display Name (F-9)
+
+### Problem
+
+Confirmed recurring rules on the Dashboard Recurring Payments card show the raw `merchantKey` value (the substring match pattern used for detection) as the display label. For auto-detected or manually-entered rules, this is often an ugly truncated bank string: `"CITY OF FRISCO UTILITI FRIS"`, `"MUNICIPAL ONLINE PAYME LUBB"`, etc.
+
+### What already exists
+
+| Layer | Status |
+|---|---|
+| DB column `recurring_merchant_override.display_name` (TEXT, nullable) | ✅ Exists |
+| Backend: `displayName?: z.string().optional()` in Zod schema | ✅ Already accepted |
+| Backend: `upsertOverride()` writes `display_name` if provided | ✅ Already handled |
+| Dashboard confirmed item rendering: `override.displayName ?? override.merchantKey` | ✅ Falls back correctly |
+| Settings > Recurring table: `o.displayName ?? "—"` column | ✅ Shows it read-only |
+
+The gap is entirely in the frontend collection layer.
+
+### What's missing
+
+`RecurringTagModal` (the modal launched from the Transactions page "Mark as recurring" button and from the Settings > Recurring edit button) collects only:
+- Match string (`merchantKey`)
+- Amount anchor (optional number)
+- Tolerance %
+
+There is no `displayName` input. Neither `TransactionsPage` nor `SettingsPage` passes `displayName` in the POST body, so it is always `null`.
+
+### Suggested items
+
+Suggested recurring items use the raw heuristic `item.merchant` (normalized transaction description, e.g. `"CLAUDE.AI SUBSCRIPTION SAN"`). This is intentional — they are unconfirmed candidates. When the user clicks to confirm a suggestion, the modal opens pre-filled with the merchant key; at that point they can set a display name. No change needed for the suggested rendering.
+
+### Fix
+
+**`frontend/src/components/RecurringTagModal.tsx`**
+- Add an optional "Display name" `TextInput` below the merchant key field.
+- Placeholder: the `merchantKey` value (so user sees what will be shown if left blank).
+- Pass `displayName` (trimmed, or `undefined` if blank) in the `onConfirm` callback.
+- When opened in edit mode (from Settings), pre-fill with existing `displayName` if set.
+
+**`frontend/src/pages/TransactionsPage.tsx`**
+- Include `displayName` in the POST body to `POST /recurring/overrides`.
+
+**`frontend/src/pages/SettingsPage.tsx`**
+- Include `displayName` in the POST body for both the "confirm new rule" and "edit existing rule" paths.
+
+No backend or migration changes needed.
+
+### Expected result
+
+After the fix, a user confirming `"CITY OF FRISCO UTILITI FRIS"` can type `"Frisco Utilities"` in the display name field. The Dashboard card shows `"Frisco Utilities"`, the Settings table shows `"Frisco Utilities"`, and the match string (used for detection) stays as `"CITY OF FRISCO UTILITI FRIS"` under the hood.
+
+---
+
+*Last updated: 2026-05-20. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on. TM-3 dropped — empty-memo premise false, no real-world evidence. Added F-9: recurring payments display name — modal missing input field.*

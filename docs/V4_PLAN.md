@@ -331,6 +331,29 @@ Top-5 spending category slices are `<Anchor>` links to the Transactions page fil
 
 ---
 
+### F-9: Recurring payments — display name field in tag modal
+
+Confirmed recurring rules on the Dashboard show the raw `merchantKey` (the substring match pattern) because `display_name` is never populated. The DB column, backend schema, and dashboard rendering are all already wired — the dashboard already does `displayName ?? merchantKey` fallback — but the `RecurringTagModal` has no input field for it, so it is always null.
+
+**Gap:**
+- `RecurringTagModal` collects `merchantKey`, `amountAnchor`, `amountTolerancePct` — no `displayName` field
+- Neither `TransactionsPage` nor `SettingsPage` passes `displayName` in the POST body
+- Result: confirmed recurring entries show raw match string (e.g. `"CITY OF FRISCO UTILITI FRIS"`) instead of a clean label
+
+**Suggested items** use the raw heuristic `item.merchant` (normalized transaction description). This is correct — they haven't been named by the user yet. When the user confirms a suggestion, they can set a display name at that point.
+
+**Fix (frontend-only, no migration needed):**
+1. `RecurringTagModal.tsx` — add optional "Display name" text input; include in `onConfirm` payload. Pre-fill with any existing `displayName` when opened from the Settings edit flow.
+2. `TransactionsPage.tsx` — pass `displayName` in the POST body to `POST /recurring/overrides`.
+3. `SettingsPage.tsx` — pass `displayName` in the POST body for both create and edit paths.
+4. No backend change needed: schema already accepts `displayName?: string` and upsert already writes it.
+
+**Files:** `frontend/src/components/RecurringTagModal.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/SettingsPage.tsx`
+
+**Design notes:** See `docs/V4_BACKLOG.md` §Recurring Payments Display Name (F-9) for data-flow details.
+
+---
+
 ### T-1: Documentation consolidation
 Reduce 40+ markdown files in `docs/` to 5 canonical documents. Current state has multiple overlapping backlogs, archived PRDs with outdated status, and split deployment guides.
 
@@ -434,6 +457,7 @@ These items are removed from the active backlog. No plans to build.
 | F-6b | Net Worth snapshot + row-expansion cache | ✅ Shipped | Performance |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
+| F-9 | Recurring payments — display name field in tag modal | P2 | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
@@ -443,4 +467,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-20. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b shipped (CR-194): Net Worth snapshot (1-hour TTL) + per-account row-expansion cache (7-day TTL) — both use existing `networth` scope and refresh icon. Recommended build order: F-3 → TM-2 → F-7 → F-1 → remaining P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*
+*Last updated: 2026-05-20. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b shipped (CR-194): Net Worth snapshot (1-hour TTL) + per-account row-expansion cache (7-day TTL) — both use existing `networth` scope and refresh icon. F-9 added (P2): recurring payments display name — modal missing input field; DB+backend+dashboard already wired, frontend-only fix. Recommended build order: F-9 → F-3 → TM-2 → F-7 → F-1 → remaining P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*
