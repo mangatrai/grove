@@ -380,14 +380,20 @@ function yoyArrow(
   return { char: "→", color: "dimmed" };
 }
 
-function outflowSlices(cashData: CashSummaryResponse | null): Array<{ categoryId: string | null; categoryName: string; outflows: number }> {
+function outflowSlices(
+  cashData: CashSummaryResponse | null
+): Array<{ categoryId: string | null; categoryIds?: string[]; categoryName: string; outflows: number }> {
   const rows = (cashData?.byCategory ?? []).filter((r) => r.outflows > 0).sort((a, b) => b.outflows - a.outflows);
   if (rows.length <= 5) {
     return rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.categoryName, outflows: r.outflows }));
   }
   const top = rows.slice(0, 5).map((r) => ({ categoryId: r.categoryId, categoryName: r.categoryName, outflows: r.outflows }));
-  const other = rows.slice(5).reduce((acc, row) => acc + row.outflows, 0);
-  return [...top, { categoryId: null, categoryName: "Other", outflows: other }];
+  const otherRows = rows.slice(5);
+  const other = otherRows.reduce((acc, row) => acc + row.outflows, 0);
+  const categoryIds = otherRows
+    .map((r) => r.categoryId)
+    .filter((id): id is string => id != null);
+  return [...top, { categoryId: null, categoryIds, categoryName: "Other", outflows: other }];
 }
 
 export function DashboardPageV2() {
@@ -817,12 +823,20 @@ export function DashboardPageV2() {
                   return sortedSlices.map((slice, idx) => {
                     const pct = (slice.outflows / maxOut) * 100;
                     const color = FS_CAT_PALETTE[idx % FS_CAT_PALETTE.length]!;
-                    const href =
-                      slice.categoryName === "Other"
-                        ? null
-                        : slice.categoryId
-                          ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
-                          : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    let href: string | null = null;
+                    if (slice.categoryIds != null && slice.categoryIds.length > 0) {
+                      const params = new URLSearchParams();
+                      for (const id of slice.categoryIds) {
+                        params.append("categoryIds", id);
+                      }
+                      params.set("dateFrom", monthStart);
+                      params.set("dateTo", monthEnd);
+                      href = `/transactions?${params.toString()}`;
+                    } else if (slice.categoryId) {
+                      href = `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    } else if (slice.categoryName !== "Other") {
+                      href = `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    }
                     return (
                       <Box
                         key={`${slice.categoryName}-${idx}`}

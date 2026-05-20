@@ -150,14 +150,9 @@ No way exists today to see which transactions are paired as transfers, or to man
 
 ---
 
-### TM-3: Transfer matching — same-institution score boost
-When two transactions share the same date, exact matching absolute amounts (opposite signs), and belong to accounts at the **same institution**, it is almost certainly an internal transfer (Citibank card → Citibank savings; BofA checking → BofA credit card payment). The current scorer returns 0 for these pairs when both memos are empty — below the auto-pair threshold (45) — so they land in the resolution queue instead of auto-pairing.
+### TM-3: Transfer matching — same-institution score boost ❌ NOT DOING
 
-**Fix:** Extend the candidates query to include `institution`. Pass institution to `transferPairScore`. Return 55 when `sameInstitution && dateDiff === 0`. Score 55 is above the auto-pair threshold but still subject to normal ambiguity resolution if multiple same-amount same-institution candidates exist.
-
-**Why not score 0 by default on same-day same-amount different accounts:** An Amazon purchase ($182.81) and a Citibank internal transfer ($182.81) could coincide — institution is the discriminating signal. Amazon is never the institution on a `financial_account` row.
-
-**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts` (candidates query + `transferPairScore` signature + call sites)
+**Dropped 2026-05-19.** The original premise — that empty OFX memos produce a score of 0, leaving same-institution pairs unmatched — is false. The OFX parser always produces a non-empty description (falls back to `"OFX Transaction"`); two truly-empty-memo transactions would score 100 (identical descriptions) and auto-pair. In practice, production transactions (3,500 over 3 years) have never exhibited the empty-memo failure mode. The transfer resolution queue is working well and does not show this as a real source of noise. Adding institution as a scoring signal would add complexity without a demonstrated benefit, and risks making cross-institution transfers (BofA checking → Chase savings) harder to reason about. Closed.
 
 ---
 
@@ -309,7 +304,7 @@ Production issues are currently discovered by tracing code paths by hand because
 
 ---
 
-### I-12: "Other" category hyperlink on WHERE MONEY WENT card
+### I-12: "Other" category hyperlink on WHERE MONEY WENT card ✅ SHIPPED (UX-117, 2026-05-19)
 Top-5 spending category slices are `<Anchor>` links to the Transactions page filtered by category. The "Other" catch-all bucket (categories 6+) renders as plain `<Text>` — not clickable — because it has no single `categoryId`.
 
 **Fix:** In `outflowSlices()` carry the constituent category IDs on the Other slice. Build a URL with all those IDs as `categoryIds[]=...` params — the Transactions page already supports multi-value category filter via `HierarchicalSearchPicker`.
@@ -429,7 +424,7 @@ These items are removed from the active backlog. No plans to build.
 | F-2 | Balance sheet member subtotals | ✅ Shipped | Feature |
 | F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | P2 | Feature |
 | TM-2 | Transfer pair visibility + manual pair/unpair UI | P2 | Feature |
-| TM-3 | Transfer matching — same-institution score boost | P2 | Enhancement |
+| TM-3 | Transfer matching — same-institution score boost | ❌ Not doing | Enhancement |
 | F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
 | I-8 | Playwright E2E spike | P3 | Testing |
 | I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
@@ -438,7 +433,7 @@ These items are removed from the active backlog. No plans to build.
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
 | F-6b | Net Worth snapshot + row-expansion cache | P3 | Performance |
 | I-10 | App-wide error logging audit | P3 | Reliability |
-| I-12 | "Other" category hyperlink on dashboard | P3 | UX |
+| I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
@@ -448,4 +443,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b added (P3): Net Worth snapshot + per-account row-expansion cache — follow-on to F-6, same scope/hook, no new UI. Recommended build order: F-3 → TM-2 + TM-3 → F-7 → F-1 → P3 items.*
+*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b added (P3): Net Worth snapshot + per-account row-expansion cache — follow-on to F-6, same scope/hook, no new UI. Recommended build order: F-3 → TM-2 → F-7 → F-1 → P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*

@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-117 (2026-05-19): "Other" slice link on WHERE MONEY WENT card (I-12)
+
+- **Type:** UX (I-12, V4 plan)
+- **What:** The **Other** spending slice on the dashboard WHERE MONEY WENT card is now a link to Transactions, filtered to all constituent categories (beyond the top 5) and the active month date window.
+- **Why:** I-12 — Other was the only unclickable slice; spending in Other was a dead end.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ## CR-193 (2026-05-19): Balance sheet member subtotals + Household Breakdown card (F-2)
 
 - **Type:** Feature (F-2, V4 plan)
