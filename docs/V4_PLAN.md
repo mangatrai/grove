@@ -268,7 +268,7 @@ Design decisions locked 2026-05-18:
 
 ---
 
-### F-6b: Net Worth page — cache balance-sheet snapshot + per-account row-expansion history
+### F-6b: Net Worth page — cache balance-sheet snapshot + per-account row-expansion history ✅ SHIPPED (CR-194, 2026-05-20)
 
 F-6 shipped caching for the trend chart history (`bs-history:*` keys) and the Dashboard cash-summary. Two expensive queries on the Net Worth page remain uncached:
 
@@ -431,7 +431,7 @@ These items are removed from the active backlog. No plans to build.
 | F-4 | Delete property | P3 | Feature |
 | F-5 | Account closed/inactive status | P3 | Feature |
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
-| F-6b | Net Worth snapshot + row-expansion cache | P3 | Performance |
+| F-6b | Net Worth snapshot + row-expansion cache | ✅ Shipped | Performance |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
@@ -443,4 +443,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-19. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b added (P3): Net Worth snapshot + per-account row-expansion cache — follow-on to F-6, same scope/hook, no new UI. Recommended build order: F-3 → TM-2 → F-7 → F-1 → P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*
+*Last updated: 2026-05-20. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b shipped (CR-194): Net Worth snapshot (1-hour TTL) + per-account row-expansion cache (7-day TTL) — both use existing `networth` scope and refresh icon. Recommended build order: F-3 → TM-2 → F-7 → F-1 → remaining P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*

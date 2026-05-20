@@ -1,6 +1,6 @@
 # Client-Side Caching Architecture
 
-**Shipped:** F-6, 2026-05-19. See `CHANGE_HISTORY.md` entry CR-192.
+**Shipped:** F-6, 2026-05-19 (CR-192); F-6b, 2026-05-20 (CR-194).
 
 The app uses `localStorage`-based caching to avoid re-running expensive backend aggregate queries on every page navigation or tab open. There is no server-side cache layer.
 
@@ -25,12 +25,14 @@ Two independent cache scopes, each with its own integer version counter in local
 
 ## What Is Cached
 
-Only the two genuinely expensive queries are cached. Everything else (budget, resolution summary, recurring overrides, household profile) is always fetched fresh.
+The four high-cost queries on the Dashboard and Net Worth pages are cached. Everything else (budget, resolution summary, recurring overrides, household profile) is always fetched fresh.
 
-| Endpoint | Scope | Why expensive |
-|---|---|---|
-| `GET /reports/cash-summary` | `dashboard` | ~30–40 `transaction_canonical` table scans per request (current + comparison + YoY × category breakdown) |
-| `GET /reports/balance-sheet/history` | `networth` | Up to 180 sequential queries (calls full `getBalanceSheet` for each date point in the range) |
+| Endpoint | Cache key | Scope | TTL | Why expensive |
+|---|---|---|---|---|
+| `GET /reports/cash-summary` | `cash-summary:{qs}` | `dashboard` | 7 days | ~30–40 `transaction_canonical` table scans per request (current + comparison + YoY × category breakdown) |
+| `GET /reports/balance-sheet/history` | `bs-history:{qs}` | `networth` | 7 days | Up to 180 sequential queries (calls full `getBalanceSheet` for each date point in the range) |
+| `GET /reports/balance-sheet` (snapshot) | `bs-snapshot:{ownerScope}:{asOf}` | `networth` | **1 hour** | Joins accounts, snapshots, and properties; fires on every page load and every filter change |
+| `GET /reports/balance-sheet/history?accountIds=…` (per-account expansion) | `bs-acct-history:{accountId}:{from}:{to}` | `networth` | 7 days | One call per expanded row; can be 10–20 calls if all rows are opened |
 
 ---
 
@@ -107,10 +109,12 @@ There are no per-component refresh icons. All data on a page stales from the sam
 ## Storage Impact
 
 Typical payload sizes:
-- `GET /reports/cash-summary`: ~5 KB per month
-- `GET /reports/balance-sheet/history`: ~15 KB per period view
+- `GET /reports/cash-summary`: ~5 KB per month-window
+- `GET /reports/balance-sheet/history` (trend chart): ~15 KB per period view
+- `GET /reports/balance-sheet` (snapshot): ~10–20 KB (accounts + properties + member summary)
+- `GET /reports/balance-sheet/history?accountIds=…` (per-account): ~2–3 KB each; up to ~60 KB if all rows are expanded
 
-For 12 months of browsed history: ~240 KB total. localStorage allows 5–10 MB. Not a practical constraint.
+Worst-case for a household with 20 accounts browsing all presets: ~400 KB. localStorage allows 5–10 MB. Not a practical constraint.
 
 ---
 
@@ -121,6 +125,5 @@ For 12 months of browsed history: ~240 KB total. localStorage allows 5–10 MB. 
 | `GET /resolution/summary` | Should always be fresh — actionable unresolved item count |
 | `GET /budget/:month` | User-editable; must reflect changes immediately |
 | `GET /recurring-overrides` | User-editable |
-| `GET /reports/balance-sheet` (current snapshot) | Only ~15 indexed queries; cheap enough to fetch fresh |
 | `GET /transactions` (ledger list) | User-filtered pagination; stale data is confusing |
 | `GET /household/*` | Tiny payloads, rarely change |

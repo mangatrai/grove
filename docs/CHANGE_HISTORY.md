@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-194 (2026-05-20): Net Worth snapshot + per-account row-expansion caching (F-6b)
+
+- **Type:** Performance (F-6b, V4 plan)
+- **What:** Extended the `localStorage` caching layer to the two remaining expensive Net Worth queries that F-6 left uncached. (1) **Balance-sheet snapshot** (`GET /reports/balance-sheet`) — now served from cache on all subsequent loads with a 1-hour TTL; re-fetches when `tableAsOf` or `belongsTo` filter changes. (2) **Per-account row-expansion history** (`GET /reports/balance-sheet/history?accountIds=…`) — first expand triggers a fetch and writes to cache under key `bs-acct-history:{accountId}:{from}:{to}`; subsequent expands (and re-mounts) read from cache with a 7-day TTL. Both use the existing `networth` scope so the refresh icon already on the page busts all keys together.
+- **Why:** F-6b — these were the two hot paths not covered by F-6: the snapshot fires on every page load + every filter change; the per-account history fires once per expanded row (10–20 calls if all rows open).
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
 ## UX-117 (2026-05-19): "Other" slice link on WHERE MONEY WENT card (I-12)
 
 - **Type:** UX (I-12, V4 plan)

@@ -36,6 +36,7 @@ import {
 } from "recharts";
 
 import { apiJson, useAuthToken } from "../api";
+import { readCache, writeCache } from "../cache";
 import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
 import { formatTimeAgo } from "../utils/format";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -228,12 +229,9 @@ function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void
 export function NetWorthPage() {
   const token = useAuthToken();
   const [tableAsOf, setTableAsOf] = useState(() => todayIso());
-  const [data, setData] = useState<BalanceSheetResponse | null>(null);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<Array<{ id: string; label: string }>>([]);
   const [belongsTo, setBelongsTo] = useState<BelongsToFilter>("");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("3m");
   const [customFrom, setCustomFrom] = useState(() => {
@@ -340,12 +338,22 @@ export function NetWorthPage() {
     }
   );
 
-  const loadSheet = useCallback(async () => {
-    const qs = new URLSearchParams({ asOf: tableAsOf });
-    appendOwnerQuery(qs, belongsTo);
-    const res = await apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
-    setData(res);
-  }, [tableAsOf, belongsTo]);
+  const snapshotCacheKey = `bs-snapshot:${belongsTo || "household"}:${tableAsOf}`;
+  const {
+    data,
+    loading,
+    error: loadError,
+    refresh: refreshSheetCache,
+  } = useLocalStorageCache<BalanceSheetResponse>(
+    snapshotCacheKey,
+    "networth",
+    () => {
+      const qs = new URLSearchParams({ asOf: tableAsOf });
+      appendOwnerQuery(qs, belongsTo);
+      return apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
+    },
+    60 * 60 * 1000
+  );
 
   useEffect(() => {
     if (!token) {
@@ -383,20 +391,6 @@ export function NetWorthPage() {
       setOwnerProfiles(mapped);
     });
   }, [token]);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-    setLoading(true);
-    setLoadError(null);
-    void loadSheet()
-      .catch((e: unknown) => {
-        setLoadError(e instanceof Error ? e.message : "Failed to load balance sheet");
-        setData(null);
-      })
-      .finally(() => setLoading(false));
-  }, [token, loadSheet]);
 
   const chartRows = useMemo(
     () =>
@@ -487,18 +481,24 @@ export function NetWorthPage() {
     setBulkAsOfDraft(tableAsOf);
   }, [tableAsOf]);
 
-  const reloadAll = useCallback(async () => {
-    setLoadError(null);
-    setLoading(true);
-    try {
-      await loadSheet();
-      refreshHistoryCache();
-    } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "Reload failed");
-    } finally {
-      setLoading(false);
+  // When the networth scope is invalidated (refresh icon or any write), clear the in-memory
+  // account history Maps so expanded rows re-fetch on next open rather than serving stale data.
+  useEffect(() => {
+    function onInvalidate(e: Event) {
+      const evt = e as CustomEvent<{ scope: string }>;
+      if (evt.detail.scope === "networth") {
+        setAccountHistoryById(new Map());
+        setAccountHistoryFailedIds(new Set());
+      }
     }
-  }, [loadSheet, refreshHistoryCache]);
+    window.addEventListener("hfa:cache-invalidate", onInvalidate);
+    return () => window.removeEventListener("hfa:cache-invalidate", onInvalidate);
+  }, []);
+
+  const reloadAll = useCallback(() => {
+    refreshSheetCache();
+    refreshHistoryCache();
+  }, [refreshSheetCache, refreshHistoryCache]);
 
   const startEdit = useCallback((row: BalanceSheetAccountRow) => {
     setEditingId(row.financialAccountId);
@@ -549,7 +549,7 @@ export function NetWorthPage() {
           })
         });
         cancelEdit();
-        await loadSheet();
+        refreshSheetCache();
         refreshHistoryCache();
       } catch (err: unknown) {
         setRowSaveError(err instanceof Error ? err.message : "Could not save balance");
@@ -557,7 +557,7 @@ export function NetWorthPage() {
         setRowSaving(false);
       }
     },
-    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, loadSheet, refreshHistoryCache]
+    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, refreshSheetCache, refreshHistoryCache]
   );
 
   const runBulkAsOf = useCallback(async () => {
@@ -591,9 +591,9 @@ export function NetWorthPage() {
     }
     setBulkWorking(false);
     setBulkSummary(`Updated ${okCount} account(s). Failed: ${fail}. Skipped (no balance): ${skipped}.`);
-    await loadSheet();
+    refreshSheetCache();
     refreshHistoryCache();
-  }, [allTableRows, bulkAsOfDraft, data, loadSheet, refreshHistoryCache]);
+  }, [allTableRows, bulkAsOfDraft, data, refreshSheetCache, refreshHistoryCache]);
 
   const loadAccountHistory = useCallback(async (accountId: string) => {
     if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId)) {
@@ -605,10 +605,27 @@ export function NetWorthPage() {
     fromDate.setUTCMonth(fromDate.getUTCMonth() - 12);
     const from = fromDate.toISOString().slice(0, 10);
 
+    const acctCacheKey = `bs-acct-history:${accountId}:${from}:${to}`;
+    const cached = readCache<BalanceSheetHistoryResponse>(acctCacheKey, "networth", 7 * 24 * 60 * 60 * 1000);
+    if (cached) {
+      const chartPoints = (cached.data.points ?? [])
+        .map((p) => {
+          const acct = p.accounts?.find((a) => a.financialAccountId === accountId);
+          const bal = acct?.balance ?? null;
+          return { month: p.asOf, balance: bal };
+        })
+        .filter((p): p is { month: string; balance: number } =>
+          p.balance !== null && Number.isFinite(p.balance)
+        );
+      setAccountHistoryById((prev) => new Map(prev).set(accountId, chartPoints));
+      return;
+    }
+
     setAccountHistoryLoadingIds((prev) => new Set(prev).add(accountId));
     try {
       const qs = new URLSearchParams({ from, to, accountIds: accountId, interval: "month" });
       const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+      writeCache(acctCacheKey, "networth", res);
       const chartPoints = (res.points ?? [])
         .map((p) => {
           const acct = p.accounts?.find((a) => a.financialAccountId === accountId);
@@ -732,7 +749,7 @@ export function NetWorthPage() {
           })
         });
         cancelPropertyEdit();
-        await loadSheet();
+        refreshSheetCache();
         refreshHistoryCache();
         if (propertyHistoryById.has(propertyId)) {
           setPropertyHistoryById((prev) => {
@@ -753,7 +770,7 @@ export function NetWorthPage() {
       editPropertyAmount,
       editPropertyAsOf,
       loadPropertyHistory,
-      loadSheet,
+      refreshSheetCache,
       propertyHistoryById,
       refreshHistoryCache
     ]
