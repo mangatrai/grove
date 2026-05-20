@@ -580,6 +580,49 @@ Do not cache the Transactions page or ledger — that list has user-driven filte
 
 ---
 
+## Net Worth Caching Follow-on (F-6b)
+
+F-6 shipped caching for the trend chart history (`bs-history:*` keys, `"networth"` scope, 7-day TTL) and the Dashboard cash-summary. Two expensive queries on the Net Worth page remain uncached after F-6.
+
+### What's still uncached
+
+| Query | When it fires | Cost |
+|---|---|---|
+| `GET /reports/balance-sheet` (snapshot) | Every page load; every member/scope filter change | High — joins accounts, properties, snapshots |
+| Per-account balance history (row expand) | Each time a user expands an account row | Medium × N (10–20 calls if all rows expanded) |
+
+### Cache keys and TTLs
+
+**Snapshot**
+```
+Key:   bs-snapshot:{ownerScope}:{ownerPersonProfileId|'household'}
+Scope: "networth"
+TTL:   1 hour
+```
+Rationale: snapshot reflects current account balances — it changes whenever a new import is finalized. 1 hour is short enough to feel fresh; the refresh icon handles the "I just imported" case explicitly.
+
+**Per-account row-expansion history**
+```
+Key:   bs-acct-history:{accountId}:{fromDate}:{toDate}
+Scope: "networth"
+TTL:   7 days
+```
+Rationale: historical balance data for a given account and date window is immutable once written. Same TTL as the trend chart history (already 7 days in F-6).
+
+### Invalidation
+
+Both keys use the existing `"networth"` scope. The refresh icon shipped in F-6 calls `refreshHistoryCache()` which invalidates the full scope — it already busts `bs-history:*` and will bust these new keys without any UI change.
+
+### Implementation notes
+
+- Wrap `loadSheet()` callback with `useLocalStorageCache`, same pattern as the history fetch already in the file.
+- For per-account expansion, locate the account-level history fetch in `NetWorthPage.tsx` and wrap it; the cache key must include accountId + the active from/to date window.
+- No new hook, no new scope, no new UI. Pure extension of the existing F-6 pattern.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
 ## Transfer Matching Improvements (TM-1 / TM-2 / TM-3)
 
 ### TM-2: API spec for manual pair/unpair
@@ -678,4 +721,4 @@ GET /reports/year-summary?year=2025
 
 ---
 
-*Last updated: 2026-05-16. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes.*
+*Last updated: 2026-05-19. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on.*
