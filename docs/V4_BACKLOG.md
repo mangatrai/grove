@@ -643,35 +643,9 @@ Validates:
 Response: 204 (nulls transfer_group_id on all rows with that groupId)
 ```
 
-### TM-3: `transferPairScore` signature change
+### TM-3: ❌ NOT DOING — dropped 2026-05-19
 
-Current:
-```typescript
-export function transferPairScore(
-  debitLabel: string, creditLabel: string,
-  debitDate: string, creditDate: string,
-  dateDiffDays: (a: string, b: string) => number
-): number
-```
-
-Extended:
-```typescript
-export function transferPairScore(
-  debitLabel: string, creditLabel: string,
-  debitDate: string, creditDate: string,
-  dateDiffDays: (a: string, b: string) => number,
-  opts?: { sameInstitution?: boolean }
-): number
-```
-
-Early return added before the existing `days <= 1` block:
-```typescript
-if (opts?.sameInstitution && dateDiffDays(debitDate, creditDate) === 0) {
-  return 55;  // same bank, same day — strong same-institution signal
-}
-```
-
-The candidates query in `canonicalizeImportSession` needs to join `financial_account` to get `institution` for each candidate row.
+Premise was wrong. OFX parser never produces a truly empty description (`"OFX Transaction"` fallback means identical-memo pairs score 100 and auto-pair). No evidence of this failure mode in 3,500 production transactions. Transfer resolution queue is healthy. Closed without implementation.
 
 ---
 
@@ -721,4 +695,4 @@ GET /reports/year-summary?year=2025
 
 ---
 
-*Last updated: 2026-05-19. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on.*
+*Last updated: 2026-05-19. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on. TM-3 dropped — empty-memo premise false, no real-world evidence.*
