@@ -858,4 +858,95 @@ A cash account is tracked exclusively by manual transaction entry. Currently, re
 
 ---
 
-*Last updated: 2026-05-20. Added F-6 (caching), TM-1/TM-2/TM-3 (transfer matching), F-7 (year-end summary) design notes. Added F-6b: Net Worth snapshot + per-account row-expansion cache follow-on. TM-3 dropped — empty-memo premise false, no real-world evidence. Added F-9: recurring payments display name — modal missing input field. Added TM-4: near-duplicate detection for masked vs real description variants — normalization fix + token intersection. Added F-10: cash account auto-balance on manual transaction create/edit/delete — delta model, cash accounts only, no migration needed.*
+---
+
+## PS-5: Tax Filing Profile + Stored Effective Federal Rate
+
+**Status:** Deferred — needs user due diligence before design is locked. Captured 2026-05-21. Mostly backend + import pipeline; frontend impact is a small per-person Settings section.
+
+### Problem
+
+`PS-4 TaxSufficiencyAlert` computes federal rate at runtime by scanning `payslip_line_item` rows for a line whose name or authority indicates federal withholding. This works but is fragile:
+
+- IBM: line name is `"TX Withholding Tax"`, authority `"Federal"` — name-only check misses it
+- Deloitte: line name is `"Federal Income Tax"` — name check works
+- A third employer could use a different format entirely
+
+**Root cause:** The federal line detection heuristic is brittle across payslip formats. The fix is to store the computed rate at import time — when the parsed data is already normalised — rather than re-detecting it on every page load.
+
+### The deeper signal gap
+
+The current tiered commentary (`< 10%`, `10–16%`, `16–28%`, `> 28%`) uses generic IRS benchmarks. A more precise signal — "you appear under-withheld by ~$3,200 for your filing situation" — requires knowing:
+
+1. **What was actually withheld** → already in `gross_pay_ytd` + `employee_taxes_ytd` + the federal line
+2. **What should be withheld** → requires filing status, number of allowances/credits, and IRS Pub 15-T withholding tables (or an LLM estimate)
+
+The W-4 context exists on some payslips (IBM shows marital status, filing status, credits) but not others (Deloitte does not). So storage must be hybrid: LLM-extracted where available, user-entered where not.
+
+### Proposed design
+
+#### Schema additions
+
+```sql
+-- Migration: 0049_ps5_tax_profile.sql
+
+-- Stored effective rate on the snapshot (avoids runtime line-item detection)
+ALTER TABLE payslip_snapshot
+  ADD COLUMN effective_federal_rate_ytd  NUMERIC,  -- fedTaxYtd / grossPayYtd * 100
+  ADD COLUMN effective_total_tax_rate_ytd NUMERIC; -- employeeTaxesYtd / grossPayYtd * 100
+
+-- Per-person tax filing profile (user-entered or LLM-populated at import)
+CREATE TABLE person_tax_profile (
+  id                   TEXT PRIMARY KEY,
+  household_id         TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE,
+  person_profile_id    TEXT NOT NULL REFERENCES person_profile(id) ON DELETE CASCADE,
+  tax_year             INTEGER NOT NULL,
+  filing_status        TEXT,  -- 'single' | 'married_jointly' | 'married_separately' | 'head_of_household'
+  w4_allowances        INTEGER,
+  w4_additional_amount NUMERIC,   -- additional withholding per period
+  w4_credits           NUMERIC,   -- Step 3 credits total
+  w4_extra_deductions  NUMERIC,   -- Step 4b deductions
+  state_code           TEXT,      -- 'TX' | 'CA' | etc.
+  notes                TEXT,
+  source               TEXT NOT NULL DEFAULT 'user',  -- 'user' | 'llm_extracted'
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(person_profile_id, tax_year)
+);
+```
+
+#### Import pipeline changes
+
+In the payslip finalization step (wherever the snapshot row is written or updated), compute and store `effective_federal_rate_ytd` from the already-parsed line items. No LLM call needed — pure arithmetic from the normalised extract data.
+
+If the LLM extract includes W-4 fields (IBM does, Deloitte doesn't), also upsert a `person_tax_profile` row with `source = 'llm_extracted'`. Don't overwrite a `source = 'user'` row.
+
+**Files:** `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/imports/payslip-async-import-reconcile.service.ts`
+
+#### Frontend changes (small)
+
+A "Tax Filing" sub-section on the **Payslips → person detail** or **Settings → People** page:
+- Per-person, per-year entry: filing status, credits, additional withholding
+- Pre-filled from LLM extraction if available; user can correct
+- If populated, `TaxSufficiencyAlert` can show a more precise "estimated annual liability vs withheld" comparison
+
+**No changes to `PayslipDetailPage` itself** — the alert reads from `payslip_snapshot.effective_federal_rate_ytd` directly once it exists, bypassing the line-item scan.
+
+### Open questions (user to resolve before building)
+
+- [ ] **Where should the filing profile live in the UI?** Settings → People → [person] → Tax profile? Or payslip list sidebar?
+- [ ] **Which years to scope?** Current tax year only, or rolling window (2 years: current + prior)?
+- [ ] **LLM extraction quality:** Do IBM and other formats reliably put W-4 data into `tax_profile_json` already? Check `canonical_extract_json` on a few real payslips to see what's populated.
+- [ ] **State tax handling:** CA, TX, NY, IL all have different withholding rules. For the first pass, should state-specific analysis be skipped (show federal only) and added later?
+- [ ] **Precision of "estimated liability":** Use IRS Pub 15-T tables (static lookup, no LLM) or ask the LLM? Pub 15-T tables are public and updatable annually; an LLM approach is softer but more flexible for state + AMT edge cases.
+
+### Build order dependency
+
+This is blocked on user due diligence above. The `effective_federal_rate_ytd` column (migration + backend write at import time) is an independent first step that can ship without the `person_tax_profile` table or any frontend UI — it just makes the existing `TaxSufficiencyAlert` more robust.
+
+Phase 1 (independent): migration + import pipeline write → `effective_federal_rate_ytd` on snapshot
+Phase 2 (after due diligence): `person_tax_profile` table + Settings UI + richer alert commentary
+
+---
+
+*Last updated: 2026-05-21. Added PS-5: Tax Filing Profile + Stored Effective Federal Rate — backend/import pipeline feature to eliminate runtime line-item detection fragility and enable a richer per-person tax sufficiency signal. Blocked on user due diligence (filing profile placement, state handling, LLM vs Pub 15-T for liability estimate). Original F-6/TM/F-7/F-9/TM-4/F-10 entries above unchanged.*

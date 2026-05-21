@@ -29,9 +29,12 @@ import { SavingsRateBanner } from "../payslip/SavingsRateBanner";
 import { SparklineMini } from "../payslip/SparklineMini";
 import { TaxSufficiencyAlert } from "../payslip/TaxSufficiencyAlert";
 import {
-  computeFederalRateAnnualised,
+  computeFederalRateCurrent,
+  computeFederalRateYtd,
   computeSavingsRate,
   computeSavingsRateYtd,
+  computeTotalTaxRateCurrent,
+  computeTotalTaxRateYtd,
 } from "../payslip/savingsUtils";
 import type {
   MatchedDeposit,
@@ -274,8 +277,8 @@ function LineItemRow({
       {showAuthority ? <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)", minWidth: 60, textAlign: "right" }}>{row.authority ?? "—"}</span> : null}
       {showHours ? <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)", minWidth: 50, textAlign: "right" }}>{row.hoursOrDaysCurrent != null ? String(row.hoursOrDaysCurrent) : "—"}</span> : null}
       {showRate ? <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)", minWidth: 60, textAlign: "right" }}>{row.rate != null ? formatMoney(row.rate) : "—"}</span> : null}
-      <span style={{ ...mono, fontSize: 12, minWidth: 72, textAlign: "right" }}>{formatMoney(row.amountCurrent)}</span>
-      <span style={{ ...mono, fontSize: 11.5, color: "var(--color-text-muted)", minWidth: 72, textAlign: "right" }}>{formatMoney(row.amountYtd)}</span>
+      <span style={{ ...mono, fontSize: 12, minWidth: 80, textAlign: "right" }}>{formatMoney(row.amountCurrent)}</span>
+      <span style={{ ...mono, fontSize: 11.5, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}>{formatMoney(row.amountYtd)}</span>
       <div style={{ display: "flex", gap: 2, marginLeft: 6, flexShrink: 0 }}>
         <ActionIcon type="button" variant="subtle" size="xs" onClick={() => ctx.onStartEdit(row)} title="Edit row" aria-label="Edit row">
           <IconPencil size={12} />
@@ -327,12 +330,44 @@ function SectionHdr({ label }: { label: string }) {
       >
         {label}
       </span>
-      <span style={{ ...mono, fontSize: 10.5, color: "var(--color-text-muted)", minWidth: 72, textAlign: "right" }}>
+      <span style={{ ...mono, fontSize: 10.5, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}>
         Current
       </span>
-      <span style={{ ...mono, fontSize: 10.5, color: "var(--color-text-muted)", minWidth: 72, textAlign: "right" }}>
+      <span style={{ ...mono, fontSize: 10.5, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}>
         YTD
       </span>
+      <div style={{ width: 52, flexShrink: 0 }} />
+    </div>
+  );
+}
+
+function LITotalRow({
+  label,
+  current,
+  ytd,
+}: {
+  label: string;
+  current: number | null | undefined;
+  ytd: number | null | undefined;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        padding: "5px 0 3px",
+        borderTop: "1px solid var(--color-border)",
+        fontSize: 12.5,
+        fontWeight: 600,
+        color: "var(--color-text)",
+      }}
+    >
+      <span style={{ flex: 1 }}>{label}</span>
+      <span style={{ ...mono, minWidth: 80, textAlign: "right" }}>{formatMoney(current)}</span>
+      <span style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}>
+        {formatMoney(ytd)}
+      </span>
+      <div style={{ width: 52, flexShrink: 0 }} />
     </div>
   );
 }
@@ -722,10 +757,14 @@ export function PayslipDetailPage() {
   const savingsRate = detail ? computeSavingsRate(detail) : null;
   const savingsRateYtd = detail ? computeSavingsRateYtd(detail) : null;
 
-  // PS-4 federal rate — only compute when backend supplies a real period count
-  const federalRate = detail && detail.payPeriodCountYtd != null
-    ? computeFederalRateAnnualised(detail, detail.payPeriodCountYtd)
-    : null;
+  // PS-4 tax rates — direct YTD percentages, no annualisation
+  const federalRateYtd = detail ? computeFederalRateYtd(detail) : null;
+  const federalRateCurrent = detail ? computeFederalRateCurrent(detail) : null;
+  const totalTaxRateYtd = detail ? computeTotalTaxRateYtd(detail) : null;
+  const totalTaxRateCurrent = detail ? computeTotalTaxRateCurrent(detail) : null;
+
+  // First name for sidebar header
+  const firstName = personInfo?.name?.split(" ")[0] ?? "";
 
   // Contribution groups for PS-2
   const contribGroups = useMemo(
@@ -745,7 +784,18 @@ export function PayslipDetailPage() {
         <Group gap={4} style={{ flex: 1, fontSize: 12, color: "var(--color-text-muted)" }}>
           <Anchor component={Link} to="/payslips" size="sm">Payslips</Anchor>
           <Text span c="dimmed" size="sm">›</Text>
-          <Text span size="sm" fw={500} c="var(--color-text-secondary)">{personName}</Text>
+          {detail?.ownerPersonProfileId ? (
+            <Anchor
+              component={Link}
+              to={`/payslips?ownerPersonProfileId=${encodeURIComponent(detail.ownerPersonProfileId)}`}
+              size="sm"
+              fw={500}
+            >
+              {personName}
+            </Anchor>
+          ) : (
+            <Text span size="sm" fw={500} c="var(--color-text-secondary)">{personName}</Text>
+          )}
           <Text span c="dimmed" size="sm">›</Text>
           <Text span size="sm" fw={500} c="var(--color-text)">{detail ? periodLabel(detail) : "…"}</Text>
         </Group>
@@ -849,7 +899,12 @@ export function PayslipDetailPage() {
 
           {/* Banners */}
           <SavingsRateBanner rate={savingsRate} rateYtd={savingsRateYtd} />
-          <TaxSufficiencyAlert rate={federalRate} />
+          <TaxSufficiencyAlert
+            federalRateYtd={federalRateYtd}
+            federalRateCurrent={federalRateCurrent}
+            totalTaxRateYtd={totalTaxRateYtd}
+            totalTaxRateCurrent={totalTaxRateCurrent}
+          />
 
           {/* 2-column body */}
           <div
@@ -880,6 +935,7 @@ export function PayslipDetailPage() {
                       showAuthority={false}
                       ctx={liCtx} />
                   ))}
+                  <LITotalRow label="Gross Pay" current={detail.grossPayCurrent} ytd={detail.grossPayYtd} />
                 </>
               ) : null}
 
@@ -892,6 +948,7 @@ export function PayslipDetailPage() {
                       showHours={false} showRate={false} showAuthority={false}
                       ctx={liCtx} />
                   ))}
+                  <LITotalRow label="Total pre-tax" current={detail.preTaxDeductionsCurrent} ytd={detail.preTaxDeductionsYtd} />
                 </>
               ) : null}
 
@@ -904,6 +961,7 @@ export function PayslipDetailPage() {
                       showHours={false} showRate={false} showAuthority={false}
                       ctx={liCtx} />
                   ))}
+                  <LITotalRow label="Total post-tax" current={detail.postTaxDeductionsCurrent} ytd={detail.postTaxDeductionsYtd} />
                 </>
               ) : null}
 
@@ -917,6 +975,7 @@ export function PayslipDetailPage() {
                       showAuthority={sectionHasAuthority(mergedLineItems!.tax_deductions)}
                       ctx={liCtx} />
                   ))}
+                  <LITotalRow label="Total taxes" current={detail.employeeTaxesCurrent} ytd={detail.employeeTaxesYtd} />
                 </>
               ) : null}
 
@@ -950,15 +1009,16 @@ export function PayslipDetailPage() {
                 }}
               >
                 <span style={{ flex: 1 }}>Net Pay</span>
-                <span style={{ ...mono, minWidth: 72, textAlign: "right" }} role="text">
+                <span style={{ ...mono, minWidth: 80, textAlign: "right" }} role="text">
                   {formatMoney(detail.netPayCurrent)}
                 </span>
                 <span
-                  style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)", minWidth: 72, textAlign: "right" }}
+                  style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}
                   role="text"
                 >
                   {formatMoney(detail.netPayYtd)}
                 </span>
+                <div style={{ width: 52, flexShrink: 0 }} />
               </div>
 
               {/* Add line item */}
@@ -1044,26 +1104,35 @@ export function PayslipDetailPage() {
                     marginBottom: 8,
                   }}
                 >
-                  YTD Totals
+                  {`${new Date().getFullYear()} YTD`}{firstName ? ` · ${firstName}` : ""}
                 </div>
                 {[
-                  { label: "Gross",    value: detail.grossPayYtd },
-                  { label: "Net",      value: detail.netPayYtd },
-                  { label: "Taxes",    value: detail.employeeTaxesYtd },
-                  { label: "Pre-Tax",  value: detail.preTaxDeductionsYtd },
-                  { label: "Post-Tax", value: detail.postTaxDeductionsYtd },
-                ].map(({ label, value }) => (
+                  { label: "Gross",    value: detail.grossPayYtd,          accent: false },
+                  { label: "Net",      value: detail.netPayYtd,            accent: true  },
+                  { label: "Taxes",    value: detail.employeeTaxesYtd,     accent: false },
+                  { label: "Pre-Tax",  value: detail.preTaxDeductionsYtd,  accent: false },
+                  { label: "Post-Tax", value: detail.postTaxDeductionsYtd, accent: false },
+                ].map(({ label, value, accent }) => (
                   <div
                     key={label}
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
                       padding: "3px 0",
+                      borderBottom: "1px solid var(--color-border)",
                       fontSize: 12,
                     }}
                   >
                     <span style={{ color: "var(--color-text-muted)" }}>{label}</span>
-                    <span style={{ ...mono, fontSize: 12, fontWeight: 500, color: "var(--color-text)" }} role="text">
+                    <span
+                      style={{
+                        ...mono,
+                        fontSize: 12,
+                        fontWeight: accent ? 600 : 500,
+                        color: accent ? "var(--fs-forest)" : "var(--color-text)",
+                      }}
+                      role="text"
+                    >
                       {formatMoney(value)}
                     </span>
                   </div>
@@ -1090,7 +1159,7 @@ export function PayslipDetailPage() {
                       marginBottom: 8,
                     }}
                   >
-                    Contributions YTD
+                    {`${new Date().getFullYear()} Contributions`}{firstName ? ` · ${firstName}` : ""}
                   </div>
                   {(mergedLineItems?.pre_tax_deductions ?? []).map((r) => (
                     <div

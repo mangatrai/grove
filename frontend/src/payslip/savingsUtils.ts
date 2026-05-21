@@ -1,15 +1,27 @@
 import type { PayslipLineItemRow, PayslipSnapshotDetail } from "./types";
 
-export const TAX_BENCHMARK_PCT = 20;
-
 function isFederalTaxLine(item: PayslipLineItemRow): boolean {
-  return (item.name ?? "").toLowerCase().includes("federal");
+  const name = (item.name ?? "").toLowerCase();
+  const authority = (item.authority ?? "").toLowerCase();
+  // "Federal Income Tax", "Federal Withholding", etc. — name contains "federal"
+  // IBM-style: "TX Withholding Tax" with authority="Federal" — name doesn't say federal but authority does
+  // Must NOT match SS / Medicare which also carry authority="Federal" — those never contain "withholding" or "income"
+  return (
+    name.includes("federal") ||
+    (authority === "federal" && (name.includes("withholding") || name.includes("income")))
+  );
 }
 
 function federalTaxYtd(ps: PayslipSnapshotDetail): number | null {
   const rows = ps.lineItems?.tax_deductions ?? [];
   const fed = rows.find(isFederalTaxLine);
   return fed?.amountYtd ?? null;
+}
+
+function federalTaxCurrent(ps: PayslipSnapshotDetail): number | null {
+  const rows = ps.lineItems?.tax_deductions ?? [];
+  const fed = rows.find(isFederalTaxLine);
+  return fed?.amountCurrent ?? null;
 }
 
 /** Pre-tax deductions as % of gross for this pay period. */
@@ -28,27 +40,34 @@ export function computeSavingsRateYtd(ps: PayslipSnapshotDetail): number | null 
   return (preTax / gross) * 100;
 }
 
-/**
- * Annualised federal withholding rate from YTD federal tax line item.
- * Formula: (fedYtd / grossYtd) * (26 / payPeriodCount) * 100
- */
-export function computeFederalRateAnnualised(
-  ps: PayslipSnapshotDetail,
-  payPeriodCount: number
-): number | null {
+/** Federal tax YTD as % of gross YTD — direct, no annualisation. */
+export function computeFederalRateYtd(ps: PayslipSnapshotDetail): number | null {
   const grossYtd = ps.grossPayYtd;
   const fedYtd = federalTaxYtd(ps);
-  if (
-    grossYtd == null ||
-    grossYtd === 0 ||
-    fedYtd == null ||
-    payPeriodCount <= 0
-  ) {
-    return null;
-  }
-  return (fedYtd / grossYtd) * (26 / payPeriodCount) * 100;
+  if (grossYtd == null || grossYtd === 0 || fedYtd == null) return null;
+  return (fedYtd / grossYtd) * 100;
 }
 
-export function isTaxRateLow(rate: number | null): boolean {
-  return rate !== null && rate < TAX_BENCHMARK_PCT;
+/** Federal tax this period as % of gross this period. */
+export function computeFederalRateCurrent(ps: PayslipSnapshotDetail): number | null {
+  const gross = ps.grossPayCurrent;
+  const fed = federalTaxCurrent(ps);
+  if (gross == null || gross === 0 || fed == null) return null;
+  return (fed / gross) * 100;
+}
+
+/** All employee taxes YTD as % of gross YTD. */
+export function computeTotalTaxRateYtd(ps: PayslipSnapshotDetail): number | null {
+  const grossYtd = ps.grossPayYtd;
+  const taxYtd = ps.employeeTaxesYtd;
+  if (grossYtd == null || grossYtd === 0 || taxYtd == null) return null;
+  return (taxYtd / grossYtd) * 100;
+}
+
+/** All employee taxes this period as % of gross this period. */
+export function computeTotalTaxRateCurrent(ps: PayslipSnapshotDetail): number | null {
+  const gross = ps.grossPayCurrent;
+  const tax = ps.employeeTaxesCurrent;
+  if (gross == null || gross === 0 || tax == null) return null;
+  return (tax / gross) * 100;
 }

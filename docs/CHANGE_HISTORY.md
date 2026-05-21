@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-199 (2026-05-21): PayslipDetailPage — PS-4 redesign, bold total rows, column alignment, breadcrumb link + seed payslips
+
+- **Type:** UX redesign + feature + dev tooling
+- **What:**
+  - **PS-4 TaxSufficiencyAlert complete redesign:** Dropped annualisation entirely. Now uses direct YTD percentages: `fedTaxYtd / grossPayYtd` and `employeeTaxesYtd / grossPayYtd`. Always renders when data is available (was: conditional on < 20%). New tiered badge: < 10% = Under-withheld (amber), 10–16% = Below average (amber), 16–28% = On track (green), > 28% = Over-withheld (blue). Shows both Federal and All-employee tax rates (current + YTD) in monospace. Commentary explains what to do.
+  - **`savingsUtils.ts` refactored:** Removed `TAX_BENCHMARK_PCT`, `computeFederalRateAnnualised`, `isTaxRateLow`. Added `computeFederalRateYtd`, `computeFederalRateCurrent`, `computeTotalTaxRateYtd`, `computeTotalTaxRateCurrent`.
+  - **Bold section total rows:** Added `LITotalRow` component (bold, `borderTop: 1px solid border`). Renders "Gross Pay" after earnings, "Total pre-tax" after pre-tax deductions, "Total taxes" after tax deductions, "Total post-tax" after post-tax deductions. Net Pay at bottom unchanged (heavier `2px` border).
+  - **Column alignment fix:** `SectionHdr` "Current"/"YTD" headers now include a 52 px placeholder div at the end to align with data rows (which have pencil/trash icon gutter). `minWidth` on all amount columns bumped 72 → 80 for clearer number boundaries.
+  - **Breadcrumb person link:** Person name in `Payslips › Owner › period` breadcrumb is now a clickable `<Anchor>` linking to `/payslips?ownerPersonProfileId=<id>` when the payslip is person-scoped.
+  - **`PayslipsPage.tsx`:** Added `useSearchParams` lazy init — reads `ownerPersonProfileId` from URL on mount and pre-selects the person filter pill.
+  - **YTD sidebar:** Net row value uses `var(--fs-forest)` (green). Each row has a bottom border. Header shows `{year} YTD · {firstName}`.
+  - **Dev seed `dev_0007_seed_payslips.sql`:** 6 bi-weekly IBM payslips for Alex Owner (Texas, 18.5% federal = on track) + 3 monthly Deloitte payslips for Sam Spouse (California, 16% federal = below average, CA state tax rows). All payslips `owner_scope = 'person'` + `owner_person_profile_id`. Detailed line items on the two most recent payslips per person.
+- **Why:** Annualisation was wrong for real-world data (users have 24 or 26 pay periods, not always 26). Drop it in favour of direct YTD ratios which need no pay-period count. Column header misalignment and missing bold totals were spec regressions. Seed data needed to exercise person filters.
+- **Files:** `frontend/src/payslip/savingsUtils.ts`, `frontend/src/payslip/TaxSufficiencyAlert.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/pages/PayslipsPage.tsx`, `backend/db/seeds/dev/dev_0007_seed_payslips.sql`
+
+---
+
 ## UX-198 (2026-05-21): PayslipDetailPage — spec-correct line item layout + PS-4 fix + remove invented section
 
 - **Type:** UX fix + bug fix

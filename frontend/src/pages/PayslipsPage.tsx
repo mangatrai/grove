@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Alert, Button, Collapse, Group, Stack, Text, Title } from "@mantine/core";
 import { IconChevronDown, IconChevronRight, IconFilePlus, IconPlus } from "@tabler/icons-react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -171,13 +171,16 @@ function TrendCard({
 export function PayslipsPage() {
   const token = useAuthToken();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState<ListResponse | null>(null);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [_deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [selectedPerson, setSelectedPerson] = useState<string | null>(null); // null = all
+  const [selectedPerson, setSelectedPerson] = useState<string | null>(
+    () => searchParams.get("ownerPersonProfileId")
+  ); // null = all
   const [chartsOpen, setChartsOpen] = useState(false);
 
   const load = useCallback(async () => {

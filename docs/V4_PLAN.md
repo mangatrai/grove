@@ -403,6 +403,30 @@ When a manual transaction is recorded against a `cash`-type account (`POST /ledg
 
 ---
 
+### PS-5: Tax Filing Profile + Stored Effective Federal Rate
+
+**Blocked on due diligence — do not build until open questions are resolved.** See `docs/V4_BACKLOG.md` §PS-5 for full spec and open questions.
+
+**Why this exists:** `PS-4 TaxSufficiencyAlert` computes the federal tax rate at runtime by scanning `payslip_line_item` rows for a "federal" line. This is brittle — IBM uses `"TX Withholding Tax"` with authority `"Federal"` rather than the word "federal" in the name, and future employer formats could differ again. The fix is to store the computed rate on `payslip_snapshot` at import time and read it directly, eliminating the heuristic.
+
+**Phase 1 (independent — no due diligence needed):**
+- Migration: add `effective_federal_rate_ytd` + `effective_total_tax_rate_ytd` to `payslip_snapshot`
+- Import pipeline: compute and write these from normalised line items at finalization time
+- `TaxSufficiencyAlert` reads from the stored columns instead of scanning line items
+- **Files:** `backend/db/migrations/0049_ps5_tax_profile.sql`, `payslip.service.ts`, `payslip-async-import-reconcile.service.ts`
+
+**Phase 2 (needs due diligence):**
+- New table `person_tax_profile` — filing status, W-4 fields (credits, additional withholding), state code, per-year, per-person
+- LLM extraction at import populates the profile when W-4 data is present in the payslip (IBM has it; Deloitte does not)
+- User can view and correct via a Tax Profile section in Settings → People
+- When populated, `TaxSufficiencyAlert` can show a more precise "estimated annual liability vs. withheld" comparison
+
+**Open questions for due diligence:** Where should the filing profile live in the UI? State tax handling in scope for v1? IRS Pub 15-T tables vs. LLM for liability estimate? Check `canonical_extract_json` on real IBM payslips to confirm LLM extraction quality.
+
+**Note:** Phase 2 only touches frontend for a small Settings sub-section. `PayslipDetailPage` itself doesn't change — it reads `effective_federal_rate_ytd` directly from the snapshot response.
+
+---
+
 ### T-1: Documentation consolidation
 Reduce 40+ markdown files in `docs/` to 5 canonical documents. Current state has multiple overlapping backlogs, archived PRDs with outdated status, and split deployment guides.
 
@@ -509,6 +533,7 @@ These items are removed from the active backlog. No plans to build.
 | TM-4 | Near-duplicate detection — masked vs real description variants | P1 | Bug fix |
 | F-9 | Recurring payments — display name field in tag modal | P2 | UX |
 | F-10 | Cash account — auto-update balance snapshot on manual transaction | P2 | Feature |
+| PS-5 | Tax filing profile + stored effective federal rate | P3 (blocked on due diligence) | Feature |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
@@ -518,4 +543,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-20. TM-1 shipped (FIX-192): transfer date tolerance widened to ±4 days. F-6 shipped (CR-192): localStorage caching for cash-summary + balance-sheet/history; URL-pattern invalidation in apiJson; useLocalStorageCache hook; full docs. F-2 shipped (CR-193): balance-sheet `memberSummary[]` + Net Worth Household Breakdown card. F-6b shipped (CR-194): Net Worth snapshot (1-hour TTL) + per-account row-expansion cache (7-day TTL) — both use existing `networth` scope and refresh icon. F-9 added (P2): recurring payments display name — modal missing input field; DB+backend+dashboard already wired, frontend-only fix. TM-4 added (P1 bug): near-duplicate detection fails when same transaction imported from CSV (masked IDs) and PDF (real IDs) — X-preserving normalization + substring check both fail. F-10 added (P2): cash account auto-balance on manual transaction — no migration needed. Recommended build order: TM-4 → F-9 → F-3 → TM-2 → F-7 → F-1 → F-10 → remaining P3 items. TM-3 dropped 2026-05-19 — empty-memo premise false, no real-world evidence of the failure mode.*
+*Last updated: 2026-05-21. PS-5 added (P3, blocked on due diligence): Tax Filing Profile + Stored Effective Federal Rate — migration to store `effective_federal_rate_ytd` on `payslip_snapshot` at import time (Phase 1, independent) + `person_tax_profile` table + Settings UI for per-person filing status / W-4 data (Phase 2, needs due diligence on UI placement, state handling, and liability estimation approach). Mostly backend + import pipeline; no `PayslipDetailPage` changes needed. Previous: TM-1, F-6, F-2, F-6b shipped. F-9, TM-4, F-10 added. TM-3 dropped.*
