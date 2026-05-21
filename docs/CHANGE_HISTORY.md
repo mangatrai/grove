@@ -18,7 +18,39 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## CR-194 (2026-05-21): F-3 backend — prior-period window function + payPeriodCountYtd
+## CR-197 (2026-05-21): F-3 frontend — payslip pages full redesign (PS-1 through PS-4)
+
+- **Type:** Feature (F-3 V4 plan — full payslip UI overhaul)
+- **What:**
+  - **New utility/component files** (all in `frontend/src/payslip/`):
+    - `deltaUtils.ts` — `computeDelta()` + `DeltaBadge` colored pill (↑↓ + abs + pct)
+    - `contributions.ts` — `groupContributions()` with regex name-pattern matching for 401k/HSA/ESPP/pension buckets
+    - `savingsUtils.ts` — savings rate, YTD rate, annualised federal rate, tax sufficiency threshold
+    - `SparklineMini.tsx` — SVG polyline + area + animated draw; skips animation under `prefers-reduced-motion`
+    - `PayslipListCard.tsx` — per-payslip row with avatar, period dates, Gross/Net/Taxes + DeltaBadge
+    - `ContribBucket.tsx` — collapsible accordion for grouped contribution line items
+    - `KpiStrip.tsx` — 4-column KPI grid with forest-green accent on Net Pay
+    - `SavingsRateBanner.tsx` — green banner showing savings rate this period + YTD (PS-3)
+    - `TaxSufficiencyAlert.tsx` — amber alert when annualised federal rate < 20% (PS-4)
+  - **`PayslipsPage.tsx`** — complete rewrite: person filter pills, TrendCard per person with SparklineMini, month-grouped list using PayslipListCard, collapsible "Income analytics" section, client-side person filtering (loads all 200)
+  - **`PayslipDetailPage.tsx`** — complete rewrite of layout, all CRUD logic preserved: KpiStrip + SavingsRateBanner + TaxSufficiencyAlert above 2-column body (line items left, YTD sidebar right); edit mode via `<Collapse>` panel; contributions grouped with ContribBucket; sparkline from person's payslip list secondary fetch
+  - **`AddPayslipPage.tsx`** — new add form replacing `PayslipManualPage`: 1fr 270px grid, 5 editable line tables (Earnings/Tax/Pre-Tax/Post-Tax/Other), live sidebar with balance check badge; routes `/payslips/new`
+  - `App.tsx` updated to route `/payslips/new` → `AddPayslipPage`; `PayslipManualPage.tsx` deleted
+- **Why:** F-3 V4 — full payslip UX overhaul per `docs/payslip-redesign/` spec. Features: PS-1 delta badges, PS-2 contribution grouping, PS-3 savings rate banner, PS-4 tax sufficiency signal. Edit capability preserved (Deloitte extraction is unreliable).
+- **Files:** `frontend/src/payslip/` (9 new files), `frontend/src/pages/PayslipsPage.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/pages/AddPayslipPage.tsx`, `frontend/src/App.tsx`, deleted `frontend/src/pages/PayslipManualPage.tsx`
+
+---
+
+## CR-196 (2026-05-21): F-3 AddPayslipPage — post-tax deductions section added
+
+- **Type:** Feature (gap vs. spec)
+- **What:** `AddPayslipPage` includes a fifth editable line-item table for **Post-Tax Deductions** (section `post_tax_deductions`), and `PayslipDetailPage` renders post-tax deductions in both view mode and edit mode. The original redesign spec omitted this section.
+- **Why:** User identified the omission — post-tax deductions (e.g. Roth after-tax, garnishments) exist in the data model and must be editable since LLM extraction can hallucinate or miss them.
+- **Files:** `frontend/src/pages/AddPayslipPage.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
+## CR-195 (2026-05-21): F-3 backend — prior-period window function + payPeriodCountYtd
 
 - **Type:** Feature (PS-1 / PS-4 backend prerequisite)
 - **What:**

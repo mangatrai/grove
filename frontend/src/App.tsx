@@ -10,7 +10,7 @@ import { NetWorthPage } from "./pages/NetWorthPage";
 import { ImportWorkspacePage } from "./pages/ImportWorkspacePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PayslipDetailPage } from "./pages/PayslipDetailPage";
-import { PayslipManualPage } from "./pages/PayslipManualPage";
+import { AddPayslipPage } from "./pages/AddPayslipPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
@@ -29,7 +29,7 @@ export function App() {
           <Route path="/net-worth" element={<NetWorthPage />} />
           <Route path="/transactions" element={<TransactionsPage />} />
           <Route path="/resolution-queue" element={<Navigate to="/transactions?needsReview=true" replace />} />
-          <Route path="/payslips/new" element={<PayslipManualPage />} />
+          <Route path="/payslips/new" element={<AddPayslipPage />} />
           <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
