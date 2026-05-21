@@ -1,3 +1,10 @@
+export type PriorPayslipValues = {
+  grossPayCurrent: number | null;
+  netPayCurrent: number | null;
+  employeeTaxesCurrent: number | null;
+  preTaxDeductionsCurrent: number | null;
+};
+
 export type ValidationWarningCode =
   | "EARNINGS_SUM_MISMATCH"
   | "PRE_TAX_SUM_MISMATCH"
@@ -102,6 +109,10 @@ export type PayslipSnapshotDetail = {
   lineItems?: PayslipLineItemsGrouped;
   /** Cross-validation warnings between line item sums and summary columns (CR-117) */
   validationWarnings?: ValidationWarning[];
+  /** Prior-period values for the same person — present on list responses (PS-1). */
+  prior?: PriorPayslipValues | null;
+  /** Number of payslips in the same calendar year for this person — present on detail response (PS-4). */
+  payPeriodCountYtd?: number;
 };
 
 export const SECTION_LABELS: Record<PayslipLineItemSection, string> = {

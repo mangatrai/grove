@@ -2016,7 +2016,51 @@ paths:
     get:
       tags: [payslips]
       summary: List payslips
+      description: |
+        Returns paginated payslip snapshots. Each item includes a `prior` object (PS-1, F-3)
+        with the immediately preceding payslip values for the same person (LAG window function).
+        `prior` is null for a person's first payslip.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: ownerScope
+          in: query
+          schema: { type: string, enum: [household, person] }
+        - name: ownerPersonProfileId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated payslip list with prior-period delta values (PS-1)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/PayslipSnapshotSummary'
+                        - type: object
+                          properties:
+                            prior:
+                              description: Prior-period values for the same person (PS-1). Null for first payslip.
+                              nullable: true
+                              type: object
+                              properties:
+                                grossPayCurrent: { type: number, nullable: true }
+                                netPayCurrent: { type: number, nullable: true }
+                                employeeTaxesCurrent: { type: number, nullable: true }
+                                preTaxDeductionsCurrent: { type: number, nullable: true }
   /payslips/upload:
     post:
       tags: [payslips]
@@ -2241,6 +2285,9 @@ paths:
                     type: array
                     description: Cross-validation results between line item sums and summary columns (CR-117)
                     items: { $ref: '#/components/schemas/ValidationWarning' }
+                  payPeriodCountYtd:
+                    type: integer
+                    description: Count of payslips in the same calendar year for the same person — used for PS-4 annualised tax rate (F-3)
         "404":
           description: Payslip not found or not owned by this household
     patch:

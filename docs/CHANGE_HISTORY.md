@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-194 (2026-05-21): F-3 backend — prior-period window function + payPeriodCountYtd
+
+- **Type:** Feature (PS-1 / PS-4 backend prerequisite)
+- **What:**
+  - `listPayslipSnapshots()` now uses a CTE with `LAG()` window function (partitioned by `owner_person_profile_id`, ordered by `COALESCE(pay_period_end, pay_date, created_at::text) ASC`) to attach `prior: { grossPayCurrent, netPayCurrent, employeeTaxesCurrent, preTaxDeductionsCurrent }` to each list item. `prior` is `null` for a person's first payslip.
+  - `getPayslipSnapshotForHousehold()` adds a COUNT subquery returning `payPeriodCountYtd` — number of payslips in the same calendar year for the same person. Used by the frontend to annualise the federal withholding rate (PS-4).
+  - `PayslipSnapshotRow` backend type and `PayslipSnapshotDetail` frontend type both extended. New `PriorPayslipValues` type exported from `types.ts`.
+- **Why:** F-3 payslip redesign requires delta badges (PS-1) on the list page and tax sufficiency signal (PS-4) on the detail page. Both need prior-period data not previously returned by the API.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`, `frontend/src/payslip/types.ts`, `openapi/openapi.yaml`
+
+---
+
 ## FIX-193 (2026-05-20): TM-4 near-duplicate detection: drop description gate (TM-4)
 
 - **Type:** Bug fix

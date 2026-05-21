@@ -83,6 +83,15 @@ export type PayslipSnapshotRow = {
   extractionMetadataJson: Record<string, unknown> | null;
   updatedAt: string;
   createdAt: string;
+  /** Prior-period values for the same person — populated by list query only (PS-1). */
+  prior?: {
+    grossPayCurrent: number | null;
+    netPayCurrent: number | null;
+    employeeTaxesCurrent: number | null;
+    preTaxDeductionsCurrent: number | null;
+  } | null;
+  /** Count of payslips in the same calendar year for the same person — detail query only (PS-4). */
+  payPeriodCountYtd?: number;
 };
 
 function parseJsonRecord(s: unknown, fallback: Record<string, unknown>): Record<string, unknown> {
@@ -161,7 +170,18 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
         ? null
         : parseJsonRecord(r.extraction_metadata_json, {}),
     updatedAt: String(r.updated_at ?? r.created_at),
-    createdAt: String(r.created_at)
+    createdAt: String(r.created_at),
+    prior: 'prior_gross' in r
+      ? {
+          grossPayCurrent: r.prior_gross == null ? null : Number(r.prior_gross),
+          netPayCurrent: r.prior_net == null ? null : Number(r.prior_net),
+          employeeTaxesCurrent: r.prior_taxes == null ? null : Number(r.prior_taxes),
+          preTaxDeductionsCurrent: r.prior_pre_tax == null ? null : Number(r.prior_pre_tax),
+        }
+      : undefined,
+    payPeriodCountYtd: 'pay_period_count_ytd' in r && r.pay_period_count_ytd != null
+      ? Number(r.pay_period_count_ytd)
+      : undefined,
   };
 }
 
@@ -485,10 +505,22 @@ export async function listPayslipSnapshots(
   );
   const total = Number(totalRow?.c) || 0;
   const rows = await qAll<Record<string, unknown>>(
-    `SELECT * FROM payslip_snapshot
+    `WITH ranked AS (
+       SELECT *,
+         LAG(gross_pay_current)          OVER w AS prior_gross,
+         LAG(net_pay_current)            OVER w AS prior_net,
+         LAG(employee_taxes_current)     OVER w AS prior_taxes,
+         LAG(pre_tax_deductions_current) OVER w AS prior_pre_tax
+       FROM payslip_snapshot
        WHERE ${where.join(" AND ")}
-       ORDER BY pay_period_end DESC NULLS LAST, pay_period_start DESC NULLS LAST, created_at DESC, id DESC
-       LIMIT ? OFFSET ?`,
+       WINDOW w AS (
+         PARTITION BY owner_person_profile_id
+         ORDER BY COALESCE(pay_period_end, pay_date, created_at::text) ASC NULLS LAST, id ASC
+       )
+     )
+     SELECT * FROM ranked
+     ORDER BY pay_period_end DESC NULLS LAST, pay_period_start DESC NULLS LAST, created_at DESC, id DESC
+     LIMIT ? OFFSET ?`,
     ...params,
     opts.limit,
     opts.offset
@@ -501,7 +533,16 @@ export async function getPayslipSnapshotForHousehold(
   id: string
 ): Promise<PayslipSnapshotRow | null> {
   const row = await qGet<Record<string, unknown>>(
-    `SELECT * FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
+    `SELECT s.*,
+       (SELECT COUNT(*)::int
+        FROM payslip_snapshot s2
+        WHERE s2.household_id = s.household_id
+          AND s2.owner_person_profile_id IS NOT DISTINCT FROM s.owner_person_profile_id
+          AND EXTRACT(year FROM COALESCE(s2.pay_period_end::date, s2.pay_date::date, s2.created_at::date))
+            = EXTRACT(year FROM COALESCE(s.pay_period_end::date, s.pay_date::date, s.created_at::date))
+       ) AS pay_period_count_ytd
+     FROM payslip_snapshot s
+     WHERE s.id = ? AND s.household_id = ?`,
     id,
     householdId
   );
