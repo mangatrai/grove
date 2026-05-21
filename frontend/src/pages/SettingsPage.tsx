@@ -2299,10 +2299,16 @@ export function SettingsPage() {
                 txnAmount={editingOverride.amountAnchor ?? 0}
                 allTxns={[]}
                 existingOverride={editingOverride}
-                onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+                onConfirm={async ({ merchantKey, displayName, amountAnchor, amountTolerancePct }) => {
                   const res = await apiFetch("/recurring-overrides", {
                     method: "POST",
-                    body: JSON.stringify({ merchantKey, verdict: "confirmed", amountAnchor, amountTolerancePct })
+                    body: JSON.stringify({
+                      merchantKey,
+                      displayName,
+                      verdict: "confirmed",
+                      amountAnchor,
+                      amountTolerancePct
+                    })
                   });
                   if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`);
                   const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");

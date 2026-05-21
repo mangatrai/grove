@@ -2486,11 +2486,12 @@ export function TransactionsPage() {
           txnAmount={Math.abs(recurringModalTxn.amount)}
           allTxns={data?.transactions ?? []}
           existingOverride={findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides)}
-          onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+          onConfirm={async ({ merchantKey, displayName, amountAnchor, amountTolerancePct }) => {
             const postRes = await apiFetch("/recurring-overrides", {
               method: "POST",
               body: JSON.stringify({
                 merchantKey,
+                displayName,
                 verdict: "confirmed",
                 amountAnchor,
                 amountTolerancePct
