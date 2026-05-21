@@ -4,10 +4,7 @@ import {
   Alert,
   Anchor,
   Badge,
-  Box,
   Button,
-  Code,
-  Collapse,
   Group,
   Loader,
   Modal,
@@ -20,14 +17,12 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import { IconChevronDown, IconChevronRight, IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconPencil, IconTrash } from "@tabler/icons-react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GroveCardLoader } from "../components/GroveLoader";
-import { ContribBucket } from "../payslip/ContribBucket";
-import type { ContribBucketItem } from "../payslip/ContribBucket";
 import { groupContributions } from "../payslip/contributions";
 import { KpiStrip } from "../payslip/KpiStrip";
 import { SavingsRateBanner } from "../payslip/SavingsRateBanner";
@@ -46,7 +41,7 @@ import type {
   PayslipSnapshotDetail,
   ValidationWarning
 } from "../payslip/types";
-import { SECTION_LABELS, SECTION_ORDER } from "../payslip/types";
+import { SECTION_LABELS } from "../payslip/types";
 import { formatUsd } from "../utils/format";
 
 export type { PayslipSnapshotDetail };
@@ -73,13 +68,6 @@ const ADD_SECTION_OPTIONS: { value: PayslipLineItemSection; label: string }[] = 
 ];
 
 const PERSON_COLORS = ["#2d6a4f", "#c8860a", "#7a8a6e", "#8b3a26", "#4a8a6e", "#7c3aed"];
-
-const CONTRIB_DOT_COLORS: Record<string, string> = {
-  retirement: "var(--fs-gold)",
-  health:     "var(--fs-sage)",
-  equity:     "var(--fs-terracotta)",
-  other:      "var(--color-text-muted)",
-};
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -441,63 +429,6 @@ function LineItemRow({
   );
 }
 
-function LineItemsSection({
-  section, rows, ctx,
-}: {
-  section: PayslipLineItemSection;
-  rows: PayslipLineItemRow[];
-  ctx: LineItemEditCtx;
-}) {
-  const showHours = sectionHasHours(section, rows);
-  const showRate = sectionHasRate(rows);
-  const showAuthority = sectionHasAuthority(rows);
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Stack mb="sm">
-      <Group>
-        <Button
-          type="button"
-          variant="subtle"
-          onClick={() => setOpen((v) => !v)}
-          leftSection={open ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-        >
-          {SECTION_LABELS[section]}
-        </Button>
-        <Text c="dimmed" size="sm">
-          ({rows.length} row{rows.length !== 1 ? "s" : ""})
-        </Text>
-      </Group>
-      {open ? (
-        <Table withTableBorder striped highlightOnHover>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th miw={160}>Name</Table.Th>
-              {showAuthority ? <Table.Th miw={90}>Authority</Table.Th> : null}
-              {showHours ? <Table.Th>Hours</Table.Th> : null}
-              {showRate ? <Table.Th>Rate</Table.Th> : null}
-              <Table.Th>Current</Table.Th>
-              <Table.Th>YTD</Table.Th>
-              <Table.Th w={64} />
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rows.map((row) => (
-              <LineItemRow
-                key={row.id}
-                row={row}
-                showHours={showHours}
-                showRate={showRate}
-                showAuthority={showAuthority}
-                ctx={ctx}
-              />
-            ))}
-          </Table.Tbody>
-        </Table>
-      ) : null}
-    </Stack>
-  );
-}
 
 type TxnSearchRow = {
   id: string;
@@ -511,34 +442,7 @@ type TxnSearchRow = {
   accountMask: string | null;
 };
 
-// ─── View-mode line item row ──────────────────────────────────────────────────
-
 const mono: CSSProperties = { fontFamily: "'JetBrains Mono', monospace" };
-
-function LiViewRow({ row, indent }: { row: PayslipLineItemRow; indent?: boolean }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "3px 0",
-        fontSize: 12.5,
-        color: "var(--color-text-secondary)",
-      }}
-    >
-      <span style={{ flex: 1, paddingLeft: indent ? 12 : 0 }}>{row.name ?? "—"}</span>
-      <span style={{ ...mono, fontSize: 12, minWidth: 72, textAlign: "right" }} role="text">
-        {formatMoney(row.amountCurrent)}
-      </span>
-      <span
-        style={{ ...mono, fontSize: 11.5, color: "var(--color-text-muted)", minWidth: 72, textAlign: "right" }}
-        role="text"
-      >
-        {formatMoney(row.amountYtd)}
-      </span>
-    </div>
-  );
-}
 
 function SectionHdr({ label }: { label: string }) {
   return (
@@ -617,13 +521,6 @@ export function PayslipDetailPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<TxnSearchRow[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
-
-  // Edit mode toggle
-  const [editMode, setEditMode] = useState(false);
-
-  // Collapsible sections
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-  const [stubInfoOpen, setStubInfoOpen] = useState(false);
 
   // Person payslips (for sparkline + prior values) + person map
   const [personPayslips, setPersonPayslips] = useState<PayslipSnapshotDetail[]>([]);
@@ -980,10 +877,6 @@ export function PayslipDetailPage() {
       })()
     : detail?.lineItems;
 
-  const nonEmptySections = mergedLineItems
-    ? SECTION_ORDER.filter((s) => (mergedLineItems[s]?.length ?? 0) > 0)
-    : [];
-
   const validationWarnings = detail?.validationWarnings ?? [];
 
   // Prior values from the person payslips list (list endpoint has LAG results)
@@ -1048,16 +941,6 @@ export function PayslipDetailPage() {
           <Text span size="sm" fw={500} c="var(--color-text)">{detail ? periodLabel(detail) : "…"}</Text>
         </Group>
         <Group gap={7} wrap="nowrap">
-          {!loading && detail ? (
-            <Button
-              type="button"
-              size="xs"
-              variant={editMode ? "filled" : "default"}
-              onClick={() => setEditMode((v) => !v)}
-            >
-              {editMode ? "Done editing" : "Edit"}
-            </Button>
-          ) : null}
           <Button
             type="button"
             size="xs"
@@ -1181,33 +1064,51 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.earnings?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Earnings" />
-                  {mergedLineItems!.earnings.map((r) => (
-                    <LiViewRow key={r.id} row={r} />
-                  ))}
+                  <Table withTableBorder striped highlightOnHover mb="xs">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th miw={140}>Name</Table.Th>
+                        {sectionHasHours("earnings", mergedLineItems!.earnings) ? <Table.Th>Hours</Table.Th> : null}
+                        {sectionHasRate(mergedLineItems!.earnings) ? <Table.Th>Rate</Table.Th> : null}
+                        <Table.Th>Current</Table.Th>
+                        <Table.Th>YTD</Table.Th>
+                        <Table.Th w={64} />
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {mergedLineItems!.earnings.map((r) => (
+                        <LineItemRow key={r.id} row={r}
+                          showHours={sectionHasHours("earnings", mergedLineItems!.earnings)}
+                          showRate={sectionHasRate(mergedLineItems!.earnings)}
+                          showAuthority={false}
+                          ctx={liCtx} />
+                      ))}
+                    </Table.Tbody>
+                  </Table>
                 </>
               ) : null}
 
-              {/* Pre-tax contributions (PS-2) */}
-              {contribGroups ? (
+              {/* Pre-tax deductions */}
+              {(mergedLineItems?.pre_tax_deductions?.length ?? 0) > 0 ? (
                 <>
-                  <SectionHdr label="Pre-Tax Contributions" />
-                  {(["retirement", "health", "equity", "other"] as const).map((key) => {
-                    const rows = contribGroups[key] ?? [];
-                    if (rows.length === 0) return null;
-                    const items: ContribBucketItem[] = rows.map((r) => ({
-                      name: r.name ?? "—",
-                      amountCurrent: r.amountCurrent,
-                      amountYtd: r.amountYtd,
-                    }));
-                    return (
-                      <ContribBucket
-                        key={key}
-                        label={key.charAt(0).toUpperCase() + key.slice(1)}
-                        colorDot={CONTRIB_DOT_COLORS[key] ?? "var(--color-text-muted)"}
-                        items={items}
-                      />
-                    );
-                  })}
+                  <SectionHdr label="Pre-Tax Deductions" />
+                  <Table withTableBorder striped highlightOnHover mb="xs">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th miw={140}>Name</Table.Th>
+                        <Table.Th>Current</Table.Th>
+                        <Table.Th>YTD</Table.Th>
+                        <Table.Th w={64} />
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {mergedLineItems!.pre_tax_deductions.map((r) => (
+                        <LineItemRow key={r.id} row={r}
+                          showHours={false} showRate={false} showAuthority={false}
+                          ctx={liCtx} />
+                      ))}
+                    </Table.Tbody>
+                  </Table>
                 </>
               ) : null}
 
@@ -1215,9 +1116,23 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.post_tax_deductions?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Post-Tax Deductions" />
-                  {mergedLineItems!.post_tax_deductions.map((r) => (
-                    <LiViewRow key={r.id} row={r} />
-                  ))}
+                  <Table withTableBorder striped highlightOnHover mb="xs">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th miw={140}>Name</Table.Th>
+                        <Table.Th>Current</Table.Th>
+                        <Table.Th>YTD</Table.Th>
+                        <Table.Th w={64} />
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {mergedLineItems!.post_tax_deductions.map((r) => (
+                        <LineItemRow key={r.id} row={r}
+                          showHours={false} showRate={false} showAuthority={false}
+                          ctx={liCtx} />
+                      ))}
+                    </Table.Tbody>
+                  </Table>
                 </>
               ) : null}
 
@@ -1225,9 +1140,25 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.tax_deductions?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Tax Deductions" />
-                  {mergedLineItems!.tax_deductions.map((r) => (
-                    <LiViewRow key={r.id} row={r} />
-                  ))}
+                  <Table withTableBorder striped highlightOnHover mb="xs">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th miw={140}>Name</Table.Th>
+                        {sectionHasAuthority(mergedLineItems!.tax_deductions) ? <Table.Th>Authority</Table.Th> : null}
+                        <Table.Th>Current</Table.Th>
+                        <Table.Th>YTD</Table.Th>
+                        <Table.Th w={64} />
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {mergedLineItems!.tax_deductions.map((r) => (
+                        <LineItemRow key={r.id} row={r}
+                          showHours={false} showRate={false}
+                          showAuthority={sectionHasAuthority(mergedLineItems!.tax_deductions)}
+                          ctx={liCtx} />
+                      ))}
+                    </Table.Tbody>
+                  </Table>
                 </>
               ) : null}
 
@@ -1238,7 +1169,23 @@ export function PayslipDetailPage() {
                 return (
                   <div key={sec}>
                     <SectionHdr label={SECTION_LABELS[sec]} />
-                    {rows.map((r) => <LiViewRow key={r.id} row={r} />)}
+                    <Table withTableBorder striped highlightOnHover mb="xs">
+                      <Table.Thead>
+                        <Table.Tr>
+                          <Table.Th miw={140}>Name</Table.Th>
+                          <Table.Th>Current</Table.Th>
+                          <Table.Th>YTD</Table.Th>
+                          <Table.Th w={64} />
+                        </Table.Tr>
+                      </Table.Thead>
+                      <Table.Tbody>
+                        {rows.map((r) => (
+                          <LineItemRow key={r.id} row={r}
+                            showHours={false} showRate={false} showAuthority={false}
+                            ctx={liCtx} />
+                        ))}
+                      </Table.Tbody>
+                    </Table>
                   </div>
                 );
               })}
@@ -1266,6 +1213,67 @@ export function PayslipDetailPage() {
                 >
                   {formatMoney(detail.netPayYtd)}
                 </span>
+              </div>
+
+              {/* Add line item */}
+              <div style={{ marginTop: 10 }}>
+                {!addFormOpen ? (
+                  <Button type="button" variant="default" size="xs" onClick={() => { setAddFormOpen(true); setAddError(null); }}>
+                    + Add row
+                  </Button>
+                ) : (
+                  <Paper withBorder p="md" mt="xs">
+                    <Text fw={600} size="sm" mb="sm">Add line item</Text>
+                    <Group gap="sm" align="flex-end" wrap="wrap">
+                      <Select
+                        label="Section"
+                        value={addSection}
+                        onChange={(value) => value && setAddSection(value as PayslipLineItemSection)}
+                        data={ADD_SECTION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                        disabled={addSaving}
+                        maw={220}
+                      />
+                      <TextInput
+                        label="Name"
+                        value={addName}
+                        onChange={(e) => setAddName(e.target.value)}
+                        placeholder="e.g. Regular Pay"
+                        disabled={addSaving}
+                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                        miw={220}
+                      />
+                      <NumberInput
+                        label="Current"
+                        decimalScale={2}
+                        value={addAmountCurrent}
+                        onChange={(v) => setAddAmountCurrent(String(v ?? ""))}
+                        placeholder="0.00"
+                        disabled={addSaving}
+                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                        maw={120}
+                      />
+                      <NumberInput
+                        label="YTD"
+                        decimalScale={2}
+                        value={addAmountYtd}
+                        onChange={(v) => setAddAmountYtd(String(v ?? ""))}
+                        placeholder="0.00"
+                        disabled={addSaving}
+                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
+                        maw={120}
+                      />
+                      <Group gap={6}>
+                        <Button type="button" size="xs" onClick={() => void handleAddLineItem()} disabled={addSaving}>
+                          {addSaving ? "..." : "Add"}
+                        </Button>
+                        <Button type="button" variant="default" size="xs" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}>
+                          Cancel
+                        </Button>
+                      </Group>
+                    </Group>
+                    {addError ? <Text c="red" size="sm" mt="sm">{addError}</Text> : null}
+                  </Paper>
+                )}
               </div>
             </div>
 
@@ -1387,17 +1395,7 @@ export function PayslipDetailPage() {
 
           {/* Bank deposit card */}
           <Paper withBorder p="md">
-            <Group justify="space-between" mb="xs" align="center">
-              <Title order={5} m={0}>Bank deposit</Title>
-              <Button
-                type="button"
-                size="xs"
-                variant="subtle"
-                onClick={() => { setSearchQuery(""); setSearchResults([]); setSearchOpen(true); }}
-              >
-                {(detail.confirmedDeposits?.length ?? 0) > 0 ? "Link another…" : "Search ledger…"}
-              </Button>
-            </Group>
+            <Title order={5} m={0} mb="xs">Bank deposit</Title>
 
             {depositError ? (
               <Alert color="red" mb="sm" withCloseButton onClose={() => setDepositError(null)}>
@@ -1496,238 +1494,50 @@ export function PayslipDetailPage() {
               <Text c="dimmed" size="sm" mt="xs">
                 No matching deposit found.{" "}
                 {detail.payDate
-                  ? `Searched near ${detail.payDate}`
+                  ? `Searched near ${detail.payDate}.`
                   : detail.payPeriodEnd
-                    ? `Searched near period end ${detail.payPeriodEnd}`
+                    ? `Searched near period end ${detail.payPeriodEnd}.`
                     : "Add a pay date to enable automatic suggestions."}{" "}
-                Use "Search ledger…" to link manually.
+                Use "Match Deposit" above to link manually.
               </Text>
             ) : null}
           </Paper>
 
-          {/* Edit mode panel */}
-          <Collapse in={editMode}>
-            <Stack gap={10}>
-              <Paper withBorder p="md">
-                <Title order={5} mb="sm">Edit amounts</Title>
-                <Text c="dimmed" size="xs" mb="sm">Click ✏ to correct extracted values. Line item edits cascade to summary columns.</Text>
-                <Table withTableBorder striped highlightOnHover>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th /><Table.Th>Current</Table.Th><Table.Th>YTD</Table.Th><Table.Th w={48} />
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {AMOUNT_ROWS.map((def) => (
-                      <SummaryAmountRow
-                        key={def.key}
-                        def={def}
-                        currentVal={detail[def.currentField as keyof PayslipSnapshotDetail] as number | null}
-                        ytdVal={detail[def.ytdField as keyof PayslipSnapshotDetail] as number | null}
-                        editState={summaryEdit?.rowKey === def.key ? summaryEdit : null}
-                        saving={summarySaving}
-                        saveError={summaryEdit?.rowKey === def.key ? summarySaveError : null}
-                        onStartEdit={() => {
-                          setSummarySaveError(null);
-                          const cv = detail[def.currentField as keyof PayslipSnapshotDetail] as number | null;
-                          const yv = detail[def.ytdField as keyof PayslipSnapshotDetail] as number | null;
-                          setSummaryEdit({ rowKey: def.key, currentVal: cv != null ? String(cv) : "", ytdVal: yv != null ? String(yv) : "" });
-                        }}
-                        onEditChange={setSummaryEdit}
-                        onSave={() => { if (summaryEdit) void handleSaveSummaryRow(def, summaryEdit); }}
-                        onCancel={() => { setSummaryEdit(null); setSummarySaveError(null); }}
-                      />
-                    ))}
-                  </Table.Tbody>
-                </Table>
-              </Paper>
-
-              <Paper withBorder p="md">
-                <Group justify="space-between" mb={nonEmptySections.length > 0 ? "xs" : 0}>
-                  <Title order={5} m={0}>Edit line items</Title>
-                  {!addFormOpen ? (
-                    <Button type="button" variant="default" size="xs" onClick={() => { setAddFormOpen(true); setAddError(null); }}>
-                      + Add row
-                    </Button>
-                  ) : null}
-                </Group>
-                {nonEmptySections.length === 0 ? (
-                  <Text c="dimmed" size="sm" mt="xs" mb="sm">No line items yet. Use "+ Add row" to enter individual earnings and deduction rows.</Text>
-                ) : null}
-                {nonEmptySections.map((section) => (
-                  <LineItemsSection key={section} section={section} rows={mergedLineItems![section]} ctx={liCtx} />
+          {/* Correct pay amounts (always accessible) */}
+          <Paper withBorder p="md">
+            <Title order={5} mb="xs">Correct pay amounts</Title>
+            <Text c="dimmed" size="xs" mb="sm">Edit extracted summary values. Use ✏ on line items above to correct individual rows.</Text>
+            <Table withTableBorder striped highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th /><Table.Th>Current</Table.Th><Table.Th>YTD</Table.Th><Table.Th w={48} />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {AMOUNT_ROWS.map((def) => (
+                  <SummaryAmountRow
+                    key={def.key}
+                    def={def}
+                    currentVal={detail[def.currentField as keyof PayslipSnapshotDetail] as number | null}
+                    ytdVal={detail[def.ytdField as keyof PayslipSnapshotDetail] as number | null}
+                    editState={summaryEdit?.rowKey === def.key ? summaryEdit : null}
+                    saving={summarySaving}
+                    saveError={summaryEdit?.rowKey === def.key ? summarySaveError : null}
+                    onStartEdit={() => {
+                      setSummarySaveError(null);
+                      const cv = detail[def.currentField as keyof PayslipSnapshotDetail] as number | null;
+                      const yv = detail[def.ytdField as keyof PayslipSnapshotDetail] as number | null;
+                      setSummaryEdit({ rowKey: def.key, currentVal: cv != null ? String(cv) : "", ytdVal: yv != null ? String(yv) : "" });
+                    }}
+                    onEditChange={setSummaryEdit}
+                    onSave={() => { if (summaryEdit) void handleSaveSummaryRow(def, summaryEdit); }}
+                    onCancel={() => { setSummaryEdit(null); setSummarySaveError(null); }}
+                  />
                 ))}
-                {addFormOpen ? (
-                  <Paper withBorder p="md" mt={nonEmptySections.length > 0 ? "md" : 0}>
-                    <Text fw={600} size="sm" mb="sm">Add line item</Text>
-                    <Group gap="sm" align="flex-end" wrap="wrap">
-                      <Select
-                        label="Section"
-                        value={addSection}
-                        onChange={(value) => value && setAddSection(value as PayslipLineItemSection)}
-                        data={ADD_SECTION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-                        disabled={addSaving}
-                        maw={220}
-                      />
-                      <TextInput
-                        label="Name"
-                        value={addName}
-                        onChange={(e) => setAddName(e.target.value)}
-                        placeholder="e.g. Regular Pay"
-                        disabled={addSaving}
-                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
-                        miw={220}
-                      />
-                      <NumberInput
-                        label="Current"
-                        decimalScale={2}
-                        value={addAmountCurrent}
-                        onChange={(v) => setAddAmountCurrent(String(v ?? ""))}
-                        placeholder="0.00"
-                        disabled={addSaving}
-                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
-                        maw={120}
-                      />
-                      <NumberInput
-                        label="YTD"
-                        decimalScale={2}
-                        value={addAmountYtd}
-                        onChange={(v) => setAddAmountYtd(String(v ?? ""))}
-                        placeholder="0.00"
-                        disabled={addSaving}
-                        onKeyDown={(e) => { if (e.key === "Enter") void handleAddLineItem(); if (e.key === "Escape") setAddFormOpen(false); }}
-                        maw={120}
-                      />
-                      <Group gap={6}>
-                        <Button type="button" size="xs" onClick={() => void handleAddLineItem()} disabled={addSaving}>
-                          {addSaving ? "..." : "Add"}
-                        </Button>
-                        <Button type="button" variant="default" size="xs" onClick={() => { setAddFormOpen(false); setAddError(null); }} disabled={addSaving}>
-                          Cancel
-                        </Button>
-                      </Group>
-                    </Group>
-                    {addError ? <Text c="red" size="sm" mt="sm">{addError}</Text> : null}
-                  </Paper>
-                ) : null}
-              </Paper>
-            </Stack>
-          </Collapse>
+              </Table.Tbody>
+            </Table>
+          </Paper>
 
-          {/* Stub info (collapsible) */}
-          <div
-            style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 9,
-              overflow: "hidden",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setStubInfoOpen((v) => !v)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "10px 16px",
-                width: "100%",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--color-text-muted)",
-                fontSize: 12.5,
-                minHeight: 44,
-              }}
-            >
-              {stubInfoOpen ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
-              Payslip details
-            </button>
-            <Collapse in={stubInfoOpen}>
-              <div style={{ padding: "0 16px 14px", fontSize: 12.5 }}>
-                <Stack gap={5}>
-                  <Group gap={8}>
-                    <Text fw={600} miw={100} size="sm">Pay period</Text>
-                    <Text size="sm">{periodLabel(detail)}</Text>
-                  </Group>
-                  <Group gap={8}>
-                    <Text fw={600} miw={100} size="sm">Pay date</Text>
-                    <Text size="sm">{detail.payDate ?? "—"}</Text>
-                  </Group>
-                  <Group gap={8}>
-                    <Text fw={600} miw={100} size="sm">Hours worked</Text>
-                    <Text size="sm">
-                      {detail.hoursOrDaysCurrent ?? "—"}
-                      {detail.hoursOrDaysYtd != null ? ` · YTD: ${detail.hoursOrDaysYtd}` : ""}
-                    </Text>
-                  </Group>
-                  {detail.employmentRate != null ? (
-                    <Group gap={8}>
-                      <Text fw={600} miw={100} size="sm">Salary / Rate</Text>
-                      <Text size="sm">
-                        {formatMoney(detail.employmentRate)}
-                        {detail.employmentRateType ? ` (${detail.employmentRateType})` : ""}
-                      </Text>
-                    </Group>
-                  ) : null}
-                  <Group gap={8}>
-                    <Text fw={600} miw={100} size="sm">File</Text>
-                    <Text size="sm">{detail.fileName}</Text>
-                  </Group>
-                  <Group gap={8}>
-                    <Text fw={600} miw={100} size="sm">Uploaded</Text>
-                    <Text size="sm">{detail.createdAt}</Text>
-                  </Group>
-                  <Group gap={8}>
-                    <Text fw={600} miw={100} size="sm">Parser</Text>
-                    <Code>{detail.parserProfileId}</Code>
-                  </Group>
-                  {detail.importFileId ? (
-                    <Group gap={8}>
-                      <Text fw={600} miw={100} size="sm">Import file</Text>
-                      <Code>{detail.importFileId}</Code>
-                    </Group>
-                  ) : null}
-                </Stack>
-              </div>
-            </Collapse>
-          </div>
-
-          {/* Parser diagnostics */}
-          <div
-            style={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              borderRadius: 9,
-              overflow: "hidden",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setDiagnosticsOpen((v) => !v)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-                padding: "10px 16px",
-                width: "100%",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                color: "var(--color-text-muted)",
-                fontSize: 12.5,
-                minHeight: 44,
-              }}
-            >
-              {diagnosticsOpen ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
-              Parser diagnostics (raw JSON)
-            </button>
-            <Collapse in={diagnosticsOpen}>
-              <Box p="md">
-                <Code block>{JSON.stringify(detail.rawExtractJson, null, 2)}</Code>
-              </Box>
-            </Collapse>
-          </div>
         </>
       ) : null}
 

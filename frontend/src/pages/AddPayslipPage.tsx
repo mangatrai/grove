@@ -15,7 +15,6 @@ import {
   Button,
   Collapse,
   Group,
-  NumberInput,
   Paper,
   Select,
   Stack,
@@ -27,7 +26,6 @@ import { IconChevronDown, IconChevronRight, IconPlus, IconX } from "@tabler/icon
 import { Link, Navigate, useNavigate } from "react-router-dom";
 
 import { apiJson, useAuthToken } from "../api";
-import { CurrencyInput } from "../components/CurrencyInput";
 import type { PayslipLineItemSection, PayslipSnapshotDetail, ValidationWarning } from "../payslip/types";
 import { formatUsd } from "../utils/format";
 
@@ -40,11 +38,6 @@ type HouseholdMemberResponse = {
 };
 type HouseholdMembersPayload = { members: HouseholdMemberResponse[] };
 type HouseholdProfileResponse = { profile: { id: string; fullName?: string } };
-
-const PARSER_OPTIONS = [
-  { value: "ibm_pay_contributions_pdf", label: "IBM Pay & Contributions" },
-  { value: "deloitte_payslip_pdf", label: "Deloitte Pay Statement" }
-] as const;
 
 type LineRow = {
   draftId: string;
@@ -73,10 +66,7 @@ function parseNum(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function currencyFieldValue(raw: string): number | undefined {
-  const parsed = parseNum(raw);
-  return parsed == null ? undefined : parsed;
-}
+
 
 function parseDate(raw: string): string | null {
   const t = raw.trim();
@@ -249,13 +239,10 @@ export function AddPayslipPage() {
 
   const [personProfileId, setPersonProfileId] = useState<string | null>(null);
   const [employerText, setEmployerText] = useState("");
-  const [parserProfileId, setParserProfileId] = useState<string>("ibm_pay_contributions_pdf");
 
   const [payPeriodStart, setPayPeriodStart] = useState("");
   const [payPeriodEnd, setPayPeriodEnd] = useState("");
   const [payDate, setPayDate] = useState("");
-  const [employmentRate, setEmploymentRate] = useState("");
-  const [employmentRateType, setEmploymentRateType] = useState<string | null>(null);
 
   const [earningsRows, setEarningsRows] = useState<LineRow[]>([
     { draftId: makeDraftId(), name: "", current: "", ytd: "" }
@@ -270,10 +257,12 @@ export function AddPayslipPage() {
     { draftId: makeDraftId(), name: "", current: "", ytd: "" }
   ]);
 
-  const [taxableEarningsCurrent, setTaxableEarningsCurrent] = useState("");
-  const [taxableEarningsYtd, setTaxableEarningsYtd] = useState("");
-  const [otherInformationCurrent, setOtherInformationCurrent] = useState("");
-  const [otherInformationYtd, setOtherInformationYtd] = useState("");
+  const [taxableEarningsRows, setTaxableEarningsRows] = useState<LineRow[]>([
+    { draftId: makeDraftId(), name: "", current: "", ytd: "" }
+  ]);
+  const [otherInformationRows, setOtherInformationRows] = useState<LineRow[]>([
+    { draftId: makeDraftId(), name: "", current: "", ytd: "" }
+  ]);
   const [otherOpen, setOtherOpen] = useState(false);
 
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -342,7 +331,9 @@ export function AddPayslipPage() {
       { section: "earnings", rows: earningsRows },
       { section: "tax_deductions", rows: taxRows },
       { section: "pre_tax_deductions", rows: preTaxRows },
-      { section: "post_tax_deductions", rows: postTaxRows }
+      { section: "post_tax_deductions", rows: postTaxRows },
+      { section: "taxable_earnings", rows: taxableEarningsRows },
+      { section: "other_information", rows: otherInformationRows }
     ];
     return sections.flatMap(({ section, rows }) =>
       rows
@@ -354,7 +345,7 @@ export function AddPayslipPage() {
           amountYtd: parseNum(d.ytd)
         }))
     );
-  }, [earningsRows, taxRows, preTaxRows, postTaxRows]);
+  }, [earningsRows, taxRows, preTaxRows, postTaxRows, taxableEarningsRows, otherInformationRows]);
 
   const onSubmit = useCallback(
     async (e: FormEvent) => {
@@ -398,19 +389,16 @@ export function AddPayslipPage() {
         postTaxDeductionsYtd: sumSectionYtd(postTaxRows) || null,
         netPayCurrent: net || null,
         netPayYtd: null,
-        taxableEarningsCurrent: parseNum(taxableEarningsCurrent),
-        taxableEarningsYtd: parseNum(taxableEarningsYtd),
-        otherInformationCurrent: parseNum(otherInformationCurrent),
-        otherInformationYtd: parseNum(otherInformationYtd),
-        employmentRate: parseNum(employmentRate),
-        employmentRateType: employmentRateType?.trim() ? employmentRateType : null,
+        taxableEarningsCurrent: sumSectionRows(taxableEarningsRows) || null,
+        taxableEarningsYtd: sumSectionYtd(taxableEarningsRows) || null,
+        otherInformationCurrent: sumSectionRows(otherInformationRows) || null,
+        otherInformationYtd: sumSectionYtd(otherInformationRows) || null,
         ownerScope: "person",
         ownerPersonProfileId: personProfileId,
         lineItems: buildLineItems()
       };
 
       if (employerId) body.employerId = employerId;
-      if (!hasEmployers) body.parserProfileId = parserProfileId;
 
       setSubmitting(true);
       try {
@@ -432,13 +420,10 @@ export function AddPayslipPage() {
       buildLineItems,
       earningsRows,
       employerText,
-      employmentRate,
-      employmentRateType,
       gross,
       hasEmployers,
       net,
       needsEmployerPick,
-      parserProfileId,
       payDate,
       payPeriodEnd,
       payPeriodStart,
@@ -448,10 +433,8 @@ export function AddPayslipPage() {
       preTax,
       preTaxRows,
       resolveEmployerId,
-      taxableEarningsCurrent,
-      taxableEarningsYtd,
-      otherInformationCurrent,
-      otherInformationYtd,
+      taxableEarningsRows,
+      otherInformationRows,
       taxRows,
       navigate
     ]
@@ -533,36 +516,6 @@ export function AddPayslipPage() {
                 onChange={(e) => setPayDate(e.target.value)}
               />
             </Group>
-            <Group grow align="flex-end">
-              <NumberInput
-                label="Pay rate"
-                description="Annual salary or hourly rate"
-                value={employmentRate}
-                onChange={(v) => setEmploymentRate(String(v ?? ""))}
-                placeholder="e.g. 85000"
-              />
-              <Select
-                label="Rate type"
-                value={employmentRateType}
-                onChange={setEmploymentRateType}
-                data={[
-                  { value: "annual", label: "Annual" },
-                  { value: "biweekly", label: "Biweekly" },
-                  { value: "hourly", label: "Hourly" }
-                ]}
-                placeholder="Select…"
-                clearable
-              />
-            </Group>
-            {!hasEmployers ? (
-              <Select
-                mt="md"
-                label="Statement template"
-                value={parserProfileId}
-                onChange={(v) => setParserProfileId(v ?? "ibm_pay_contributions_pdf")}
-                data={PARSER_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
-              />
-            ) : null}
           </SectionCard>
 
           <SectionCard title="Earnings">
@@ -616,42 +569,16 @@ export function AddPayslipPage() {
             </UnstyledButton>
             <Collapse in={otherOpen}>
               <Stack gap="sm" mt="sm">
-                <Group grow>
-                  <Box>
-                    <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={6}>
-                      Taxable earnings
-                    </Text>
-                    <Group grow>
-                      <CurrencyInput
-                        label="Current"
-                        value={currencyFieldValue(taxableEarningsCurrent)}
-                        onChange={(v) => setTaxableEarningsCurrent(v == null ? "" : String(v))}
-                      />
-                      <CurrencyInput
-                        label="YTD"
-                        value={currencyFieldValue(taxableEarningsYtd)}
-                        onChange={(v) => setTaxableEarningsYtd(v == null ? "" : String(v))}
-                      />
-                    </Group>
-                  </Box>
-                  <Box>
-                    <Text size="xs" fw={700} tt="uppercase" c="dimmed" mb={6}>
-                      Other information
-                    </Text>
-                    <Group grow>
-                      <CurrencyInput
-                        label="Current"
-                        value={currencyFieldValue(otherInformationCurrent)}
-                        onChange={(v) => setOtherInformationCurrent(v == null ? "" : String(v))}
-                      />
-                      <CurrencyInput
-                        label="YTD"
-                        value={currencyFieldValue(otherInformationYtd)}
-                        onChange={(v) => setOtherInformationYtd(v == null ? "" : String(v))}
-                      />
-                    </Group>
-                  </Box>
-                </Group>
+                <Text size="xs" fw={700} tt="uppercase" c="dimmed">Taxable earnings</Text>
+                <EditableLineTable
+                  rows={taxableEarningsRows}
+                  onChange={setTaxableEarningsRows}
+                />
+                <Text size="xs" fw={700} tt="uppercase" c="dimmed" mt="xs">Other information</Text>
+                <EditableLineTable
+                  rows={otherInformationRows}
+                  onChange={setOtherInformationRows}
+                />
               </Stack>
             </Collapse>
           </Paper>

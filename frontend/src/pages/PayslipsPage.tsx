@@ -363,7 +363,7 @@ export function PayslipsPage() {
             size="sm"
             leftSection={<IconPlus size={14} />}
           >
-            + Add Payslip
+            Add Payslip
           </Button>
         </Group>
       </div>
@@ -380,7 +380,7 @@ export function PayslipsPage() {
       {!loading && data ? (
         <>
           {/* ── Person filter pills ──────────────────────────────────────── */}
-          {personIds.length > 1 ? (
+          {personIds.length > 0 ? (
             <Group gap={6} wrap="wrap">
               <button
                 type="button"
@@ -423,6 +423,45 @@ export function PayslipsPage() {
                   />
                 );
               })}
+            </div>
+          ) : null}
+
+          {/* ── Income analytics (collapsible) ───────────────────────────── */}
+          {filteredItems.length > 0 ? (
+            <div
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 9,
+                overflow: "hidden",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setChartsOpen((v) => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "11px 16px",
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--color-text)",
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  minHeight: 44,
+                }}
+              >
+                {chartsOpen ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
+                Income analytics
+              </button>
+              <Collapse in={chartsOpen}>
+                <div style={{ padding: "0 16px 16px" }}>
+                  <PayslipIncomeCharts items={filteredItems} />
+                </div>
+              </Collapse>
             </div>
           ) : null}
 
@@ -514,44 +553,6 @@ export function PayslipsPage() {
             </div>
           ))}
 
-          {/* ── Income analytics (collapsible) ───────────────────────────── */}
-          {filteredItems.length > 0 ? (
-            <div
-              style={{
-                background: "var(--color-surface)",
-                border: "1px solid var(--color-border)",
-                borderRadius: 9,
-                overflow: "hidden",
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setChartsOpen((v) => !v)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  padding: "11px 16px",
-                  width: "100%",
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  color: "var(--color-text)",
-                  fontSize: 13.5,
-                  fontWeight: 600,
-                  minHeight: 44,
-                }}
-              >
-                {chartsOpen ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
-                Income analytics
-              </button>
-              <Collapse in={chartsOpen}>
-                <div style={{ padding: "0 16px 16px" }}>
-                  <PayslipIncomeCharts items={filteredItems} />
-                </div>
-              </Collapse>
-            </div>
-          ) : null}
         </>
       ) : null}
 
