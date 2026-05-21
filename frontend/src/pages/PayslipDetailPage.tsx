@@ -78,36 +78,6 @@ type HouseholdProfileResponse = { profile: { id: string; fullName?: string; firs
 type PersonInfo = { id: string; name: string; initials: string; color: string };
 type ListResponse = { items: PayslipSnapshotDetail[] };
 
-/** Keys that can be patched via PATCH /payslips/:id */
-type PatchableAmountField =
-  | "grossPayCurrent" | "grossPayYtd"
-  | "taxableEarningsCurrent" | "taxableEarningsYtd"
-  | "employeeTaxesCurrent" | "employeeTaxesYtd"
-  | "preTaxDeductionsCurrent" | "preTaxDeductionsYtd"
-  | "postTaxDeductionsCurrent" | "postTaxDeductionsYtd"
-  | "otherInformationCurrent" | "otherInformationYtd"
-  | "netPayCurrent" | "netPayYtd";
-
-type AmountRowDef = {
-  key: string;
-  label: string;
-  muted?: boolean;
-  currentField: PatchableAmountField;
-  ytdField: PatchableAmountField;
-};
-
-const AMOUNT_ROWS: AmountRowDef[] = [
-  { key: "gross",    label: "Gross pay",          currentField: "grossPayCurrent",          ytdField: "grossPayYtd" },
-  { key: "taxable",  label: "↳ Taxable earnings", currentField: "taxableEarningsCurrent",   ytdField: "taxableEarningsYtd",   muted: true },
-  { key: "pretax",   label: "Pre-tax deductions",  currentField: "preTaxDeductionsCurrent",  ytdField: "preTaxDeductionsYtd" },
-  { key: "taxes",    label: "Employee taxes",      currentField: "employeeTaxesCurrent",     ytdField: "employeeTaxesYtd" },
-  { key: "posttax",  label: "Post-tax deductions", currentField: "postTaxDeductionsCurrent", ytdField: "postTaxDeductionsYtd" },
-  { key: "otherinfo",label: "Other information",   currentField: "otherInformationCurrent",  ytdField: "otherInformationYtd", muted: true },
-  { key: "net",      label: "Net pay",             currentField: "netPayCurrent",            ytdField: "netPayYtd" },
-];
-
-type SummaryEditState = { rowKey: string; currentVal: string; ytdVal: string };
-
 type LineItemEditFields = {
   name: string;
   authority: string;
@@ -193,96 +163,10 @@ function ValidationWarningsBanner({ warnings }: { warnings: ValidationWarning[] 
           </Text>
         ))}
         <Text size="xs" c="dimmed">
-          Use "Edit" to correct amounts and line items. Warnings are non-blocking.
+          Use the ✏ icon on each line item to make corrections. Warnings are non-blocking.
         </Text>
       </Stack>
     </Alert>
-  );
-}
-
-function SummaryAmountRow({
-  def, currentVal, ytdVal, editState, saving, saveError,
-  onStartEdit, onEditChange, onSave, onCancel,
-}: {
-  def: AmountRowDef;
-  currentVal: number | null | undefined;
-  ytdVal: number | null | undefined;
-  editState: SummaryEditState | null;
-  saving: boolean;
-  saveError: string | null;
-  onStartEdit: () => void;
-  onEditChange: (s: SummaryEditState) => void;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  const isEditing = editState?.rowKey === def.key;
-  const currentInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (isEditing) currentInputRef.current?.select();
-  }, [isEditing]);
-
-  if (isEditing) {
-    return (
-      <>
-        <Table.Tr>
-          <Table.Td>
-            <Text size="sm" c={def.muted ? "dimmed" : undefined}>{def.label}</Text>
-          </Table.Td>
-          <Table.Td>
-            <NumberInput
-              ref={currentInputRef}
-              value={editState!.currentVal}
-              onChange={(v) => onEditChange({ ...editState!, currentVal: String(v ?? "") })}
-              onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCancel(); }}
-              disabled={saving}
-              placeholder="null"
-              decimalScale={2}
-              maw={150}
-            />
-          </Table.Td>
-          <Table.Td>
-            <NumberInput
-              value={editState!.ytdVal}
-              onChange={(v) => onEditChange({ ...editState!, ytdVal: String(v ?? "") })}
-              onKeyDown={(e) => { if (e.key === "Enter") onSave(); if (e.key === "Escape") onCancel(); }}
-              disabled={saving}
-              placeholder="null"
-              decimalScale={2}
-              maw={150}
-            />
-          </Table.Td>
-          <Table.Td>
-            <Group gap={6} wrap="nowrap">
-              <Button type="button" onClick={onSave} disabled={saving} size="xs">
-                {saving ? "..." : "Save"}
-              </Button>
-              <Button type="button" variant="default" onClick={onCancel} disabled={saving} size="xs">
-                Cancel
-              </Button>
-            </Group>
-          </Table.Td>
-        </Table.Tr>
-        {saveError ? (
-          <Table.Tr>
-            <Table.Td colSpan={4}><Text size="sm" c="red">{saveError}</Text></Table.Td>
-          </Table.Tr>
-        ) : null}
-      </>
-    );
-  }
-
-  return (
-    <Table.Tr>
-      <Table.Td><Text size="sm" c={def.muted ? "dimmed" : undefined}>{def.label}</Text></Table.Td>
-      <Table.Td><Text size="sm">{formatMoney(currentVal)}</Text></Table.Td>
-      <Table.Td><Text size="sm">{formatMoney(ytdVal)}</Text></Table.Td>
-      <Table.Td>
-        <ActionIcon type="button" variant="subtle" onClick={onStartEdit} title={`Edit ${def.label}`} aria-label={`Edit ${def.label}`}>
-          <IconPencil size={14} />
-        </ActionIcon>
-      </Table.Td>
-    </Table.Tr>
   );
 }
 
@@ -305,7 +189,6 @@ function LineItemRow({
   row, showHours, showRate, showAuthority, ctx,
 }: {
   row: PayslipLineItemRow;
-  section?: PayslipLineItemSection;
   showHours: boolean;
   showRate: boolean;
   showAuthority: boolean;
@@ -319,113 +202,89 @@ function LineItemRow({
     if (isEditing) nameInputRef.current?.focus();
   }, [isEditing]);
 
-  const colSpan = 2 + (showHours ? 1 : 0) + (showRate ? 1 : 0) + (showAuthority ? 1 : 0) + 1;
-
   if (isDeleting) {
     return (
-      <Table.Tr>
-        <Table.Td colSpan={colSpan}>
-          <Group gap="sm" wrap="wrap">
-            <Text size="sm" c="red">Delete <strong>{row.name ?? "this row"}</strong>?</Text>
-            <Button type="button" color="red" onClick={() => ctx.onConfirmDelete(row.id)} disabled={ctx.saving} size="xs">
-              {ctx.saving ? "..." : "Delete"}
-            </Button>
-            <Button type="button" variant="default" onClick={ctx.onCancelDelete} disabled={ctx.saving} size="xs">
-              Cancel
-            </Button>
-            {ctx.saveError ? <Text size="sm" c="red">{ctx.saveError}</Text> : null}
-          </Group>
-        </Table.Td>
-      </Table.Tr>
+      <div style={{ padding: "3px 0" }}>
+        <Group gap="sm" wrap="wrap">
+          <Text size="sm" c="red">Delete <strong>{row.name ?? "this row"}</strong>?</Text>
+          <Button type="button" color="red" onClick={() => ctx.onConfirmDelete(row.id)} disabled={ctx.saving} size="xs">
+            {ctx.saving ? "..." : "Delete"}
+          </Button>
+          <Button type="button" variant="default" onClick={ctx.onCancelDelete} disabled={ctx.saving} size="xs">
+            Cancel
+          </Button>
+          {ctx.saveError ? <Text size="sm" c="red">{ctx.saveError}</Text> : null}
+        </Group>
+      </div>
     );
   }
 
   if (isEditing && ctx.editFields) {
     const f = ctx.editFields;
     return (
-      <>
-        <Table.Tr>
-          <Table.Td>
-            <TextInput ref={nameInputRef} value={f.name}
-              onChange={(e) => ctx.onEditChange({ ...f, name: e.target.value })}
-              onKeyDown={(e) => { if (e.key === "Escape") ctx.onCancelEdit(); }}
-              disabled={ctx.saving} placeholder="Name" />
-          </Table.Td>
+      <Paper withBorder p="xs" my={2}>
+        <Group gap="xs" align="flex-end" wrap="wrap">
+          <TextInput ref={nameInputRef} label="Name" value={f.name}
+            onChange={(e) => ctx.onEditChange({ ...f, name: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Escape") ctx.onCancelEdit(); }}
+            disabled={ctx.saving} placeholder="Name" miw={150} />
           {showAuthority ? (
-            <Table.Td>
-              <TextInput value={f.authority}
-                onChange={(e) => ctx.onEditChange({ ...f, authority: e.target.value })}
-                disabled={ctx.saving} placeholder="Authority" />
-            </Table.Td>
+            <TextInput label="Authority" value={f.authority}
+              onChange={(e) => ctx.onEditChange({ ...f, authority: e.target.value })}
+              disabled={ctx.saving} placeholder="Authority" miw={90} />
           ) : null}
           {showHours ? (
-            <Table.Td>
-              <NumberInput decimalScale={2} value={f.hoursOrDaysCurrent}
-                onChange={(v) => ctx.onEditChange({ ...f, hoursOrDaysCurrent: String(v ?? "") })}
-                disabled={ctx.saving} placeholder="Hours" />
-            </Table.Td>
+            <NumberInput label="Hours" decimalScale={2} value={f.hoursOrDaysCurrent}
+              onChange={(v) => ctx.onEditChange({ ...f, hoursOrDaysCurrent: String(v ?? "") })}
+              disabled={ctx.saving} placeholder="Hours" maw={80} />
           ) : null}
           {showRate ? (
-            <Table.Td>
-              <NumberInput decimalScale={2} value={f.rate}
-                onChange={(v) => ctx.onEditChange({ ...f, rate: String(v ?? "") })}
-                disabled={ctx.saving} placeholder="Rate" />
-            </Table.Td>
+            <NumberInput label="Rate" decimalScale={2} value={f.rate}
+              onChange={(v) => ctx.onEditChange({ ...f, rate: String(v ?? "") })}
+              disabled={ctx.saving} placeholder="Rate" maw={80} />
           ) : null}
-          <Table.Td>
-            <NumberInput decimalScale={2} value={f.amountCurrent}
-              onChange={(v) => ctx.onEditChange({ ...f, amountCurrent: String(v ?? "") })}
-              onKeyDown={(e) => { if (e.key === "Enter") ctx.onSaveEdit(row.id); if (e.key === "Escape") ctx.onCancelEdit(); }}
-              disabled={ctx.saving} placeholder="Current" />
-          </Table.Td>
-          <Table.Td>
-            <NumberInput decimalScale={2} value={f.amountYtd}
-              onChange={(v) => ctx.onEditChange({ ...f, amountYtd: String(v ?? "") })}
-              onKeyDown={(e) => { if (e.key === "Enter") ctx.onSaveEdit(row.id); if (e.key === "Escape") ctx.onCancelEdit(); }}
-              disabled={ctx.saving} placeholder="YTD" />
-          </Table.Td>
-          <Table.Td>
-            <Group gap={6} wrap="nowrap">
-              <Button type="button" onClick={() => ctx.onSaveEdit(row.id)} disabled={ctx.saving} size="xs">
-                {ctx.saving ? "..." : "Save"}
-              </Button>
-              <Button type="button" variant="default" onClick={ctx.onCancelEdit} disabled={ctx.saving} size="xs">
-                Cancel
-              </Button>
-            </Group>
-          </Table.Td>
-        </Table.Tr>
-        {ctx.saveError ? (
-          <Table.Tr>
-            <Table.Td colSpan={colSpan}><Text size="sm" c="red">{ctx.saveError}</Text></Table.Td>
-          </Table.Tr>
-        ) : null}
-      </>
+          <NumberInput label="Current" decimalScale={2} value={f.amountCurrent}
+            onChange={(v) => ctx.onEditChange({ ...f, amountCurrent: String(v ?? "") })}
+            onKeyDown={(e) => { if (e.key === "Enter") ctx.onSaveEdit(row.id); if (e.key === "Escape") ctx.onCancelEdit(); }}
+            disabled={ctx.saving} placeholder="Current" maw={110} />
+          <NumberInput label="YTD" decimalScale={2} value={f.amountYtd}
+            onChange={(v) => ctx.onEditChange({ ...f, amountYtd: String(v ?? "") })}
+            onKeyDown={(e) => { if (e.key === "Enter") ctx.onSaveEdit(row.id); if (e.key === "Escape") ctx.onCancelEdit(); }}
+            disabled={ctx.saving} placeholder="YTD" maw={110} />
+          <Group gap={6} style={{ marginTop: 20 }}>
+            <Button type="button" onClick={() => ctx.onSaveEdit(row.id)} disabled={ctx.saving} size="xs">
+              {ctx.saving ? "..." : "Save"}
+            </Button>
+            <Button type="button" variant="default" onClick={ctx.onCancelEdit} disabled={ctx.saving} size="xs">
+              Cancel
+            </Button>
+          </Group>
+        </Group>
+        {ctx.saveError ? <Text size="sm" c="red" mt="xs">{ctx.saveError}</Text> : null}
+      </Paper>
     );
   }
 
   return (
-    <Table.Tr>
-      <Table.Td>
-        {row.name ?? <Text span c="dimmed">—</Text>}
-        {row.dateRaw ? <Text span c="dimmed" size="xs" ml={6}>{row.dateRaw}</Text> : null}
-      </Table.Td>
-      {showAuthority ? <Table.Td><Text size="sm" c="dimmed">{row.authority ?? "—"}</Text></Table.Td> : null}
-      {showHours ? <Table.Td>{row.hoursOrDaysCurrent != null ? row.hoursOrDaysCurrent : "—"}</Table.Td> : null}
-      {showRate ? <Table.Td>{row.rate != null ? formatMoney(row.rate) : "—"}</Table.Td> : null}
-      <Table.Td>{formatMoney(row.amountCurrent)}</Table.Td>
-      <Table.Td>{formatMoney(row.amountYtd)}</Table.Td>
-      <Table.Td>
-        <Group gap={4} wrap="nowrap">
-          <ActionIcon type="button" variant="subtle" onClick={() => ctx.onStartEdit(row)} title="Edit row" aria-label="Edit row">
-            <IconPencil size={14} />
-          </ActionIcon>
-          <ActionIcon type="button" variant="subtle" color="red" onClick={() => ctx.onStartDelete(row.id)} title="Delete row" aria-label="Delete row">
-            <IconTrash size={14} />
-          </ActionIcon>
-        </Group>
-      </Table.Td>
-    </Table.Tr>
+    <div style={{ display: "flex", alignItems: "center", padding: "3px 0", fontSize: 12.5, color: "var(--color-text-secondary)" }}>
+      <span style={{ flex: 1, overflow: "hidden" }}>
+        {row.name ?? <span style={{ color: "var(--color-text-muted)" }}>—</span>}
+        {row.dateRaw ? <span style={{ color: "var(--color-text-muted)", fontSize: 11, marginLeft: 6 }}>{row.dateRaw}</span> : null}
+      </span>
+      {showAuthority ? <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)", minWidth: 60, textAlign: "right" }}>{row.authority ?? "—"}</span> : null}
+      {showHours ? <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)", minWidth: 50, textAlign: "right" }}>{row.hoursOrDaysCurrent != null ? String(row.hoursOrDaysCurrent) : "—"}</span> : null}
+      {showRate ? <span style={{ ...mono, fontSize: 11, color: "var(--color-text-muted)", minWidth: 60, textAlign: "right" }}>{row.rate != null ? formatMoney(row.rate) : "—"}</span> : null}
+      <span style={{ ...mono, fontSize: 12, minWidth: 72, textAlign: "right" }}>{formatMoney(row.amountCurrent)}</span>
+      <span style={{ ...mono, fontSize: 11.5, color: "var(--color-text-muted)", minWidth: 72, textAlign: "right" }}>{formatMoney(row.amountYtd)}</span>
+      <div style={{ display: "flex", gap: 2, marginLeft: 6, flexShrink: 0 }}>
+        <ActionIcon type="button" variant="subtle" size="xs" onClick={() => ctx.onStartEdit(row)} title="Edit row" aria-label="Edit row">
+          <IconPencil size={12} />
+        </ActionIcon>
+        <ActionIcon type="button" variant="subtle" color="red" size="xs" onClick={() => ctx.onStartDelete(row.id)} title="Delete row" aria-label="Delete row">
+          <IconTrash size={12} />
+        </ActionIcon>
+      </div>
+    </div>
   );
 }
 
@@ -490,11 +349,6 @@ export function PayslipDetailPage() {
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
-
-  // Summary row edit state
-  const [summaryEdit, setSummaryEdit] = useState<SummaryEditState | null>(null);
-  const [summarySaving, setSummarySaving] = useState(false);
-  const [summarySaveError, setSummarySaveError] = useState<string | null>(null);
 
   // Line item edit/delete state
   const [liEditingId, setLiEditingId] = useState<string | null>(null);
@@ -613,51 +467,6 @@ export function PayslipDetailPage() {
   }, [token]);
 
   // ── Callbacks ─────────────────────────────────────────────────────────────
-
-  const patchSummary = useCallback(async (fields: Record<string, number | null>) => {
-    if (!payslipId) return false;
-    setSummarySaving(true);
-    setSummarySaveError(null);
-    try {
-      const res = await apiFetch(`/payslips/${encodeURIComponent(payslipId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(fields),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        let msg = text || res.statusText;
-        try { const j = JSON.parse(text) as { message?: string }; if (j.message) msg = j.message; } catch { /* raw */ }
-        setSummarySaveError(msg);
-        return false;
-      }
-      const data = await res.json() as { snapshot: PayslipSnapshotDetail; validationWarnings?: ValidationWarning[] };
-      setDetail((prev) => prev
-        ? { ...data.snapshot, lineItems: prev.lineItems, confirmedDeposits: prev.confirmedDeposits, suggestedDeposits: prev.suggestedDeposits, validationWarnings: data.validationWarnings }
-        : data.snapshot
-      );
-      setSummaryEdit(null);
-      return true;
-    } catch (e) {
-      setSummarySaveError(e instanceof Error ? e.message : "Save failed");
-      return false;
-    } finally {
-      setSummarySaving(false);
-    }
-  }, [payslipId]);
-
-  const handleSaveSummaryRow = useCallback(async (def: AmountRowDef, es: SummaryEditState) => {
-    const currentV = es.currentVal.trim() === "" ? null : parseAmountInput(es.currentVal);
-    const ytdV = es.ytdVal.trim() === "" ? null : parseAmountInput(es.ytdVal);
-    if (
-      (es.currentVal.trim() !== "" && currentV === null) ||
-      (es.ytdVal.trim() !== "" && ytdV === null)
-    ) {
-      setSummarySaveError("Enter a valid number or leave blank to clear.");
-      return;
-    }
-    await patchSummary({ [def.currentField]: currentV, [def.ytdField]: ytdV });
-  }, [patchSummary]);
 
   type LiMutationResponse = {
     snapshot: PayslipSnapshotDetail;
@@ -913,9 +722,9 @@ export function PayslipDetailPage() {
   const savingsRate = detail ? computeSavingsRate(detail) : null;
   const savingsRateYtd = detail ? computeSavingsRateYtd(detail) : null;
 
-  // PS-4 federal rate
-  const federalRate = detail
-    ? computeFederalRateAnnualised(detail, detail.payPeriodCountYtd ?? 1)
+  // PS-4 federal rate — only compute when backend supplies a real period count
+  const federalRate = detail && detail.payPeriodCountYtd != null
+    ? computeFederalRateAnnualised(detail, detail.payPeriodCountYtd)
     : null;
 
   // Contribution groups for PS-2
@@ -1064,27 +873,13 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.earnings?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Earnings" />
-                  <Table withTableBorder striped highlightOnHover mb="xs">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th miw={140}>Name</Table.Th>
-                        {sectionHasHours("earnings", mergedLineItems!.earnings) ? <Table.Th>Hours</Table.Th> : null}
-                        {sectionHasRate(mergedLineItems!.earnings) ? <Table.Th>Rate</Table.Th> : null}
-                        <Table.Th>Current</Table.Th>
-                        <Table.Th>YTD</Table.Th>
-                        <Table.Th w={64} />
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {mergedLineItems!.earnings.map((r) => (
-                        <LineItemRow key={r.id} row={r}
-                          showHours={sectionHasHours("earnings", mergedLineItems!.earnings)}
-                          showRate={sectionHasRate(mergedLineItems!.earnings)}
-                          showAuthority={false}
-                          ctx={liCtx} />
-                      ))}
-                    </Table.Tbody>
-                  </Table>
+                  {mergedLineItems!.earnings.map((r) => (
+                    <LineItemRow key={r.id} row={r}
+                      showHours={sectionHasHours("earnings", mergedLineItems!.earnings)}
+                      showRate={sectionHasRate(mergedLineItems!.earnings)}
+                      showAuthority={false}
+                      ctx={liCtx} />
+                  ))}
                 </>
               ) : null}
 
@@ -1092,23 +887,11 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.pre_tax_deductions?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Pre-Tax Deductions" />
-                  <Table withTableBorder striped highlightOnHover mb="xs">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th miw={140}>Name</Table.Th>
-                        <Table.Th>Current</Table.Th>
-                        <Table.Th>YTD</Table.Th>
-                        <Table.Th w={64} />
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {mergedLineItems!.pre_tax_deductions.map((r) => (
-                        <LineItemRow key={r.id} row={r}
-                          showHours={false} showRate={false} showAuthority={false}
-                          ctx={liCtx} />
-                      ))}
-                    </Table.Tbody>
-                  </Table>
+                  {mergedLineItems!.pre_tax_deductions.map((r) => (
+                    <LineItemRow key={r.id} row={r}
+                      showHours={false} showRate={false} showAuthority={false}
+                      ctx={liCtx} />
+                  ))}
                 </>
               ) : null}
 
@@ -1116,23 +899,11 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.post_tax_deductions?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Post-Tax Deductions" />
-                  <Table withTableBorder striped highlightOnHover mb="xs">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th miw={140}>Name</Table.Th>
-                        <Table.Th>Current</Table.Th>
-                        <Table.Th>YTD</Table.Th>
-                        <Table.Th w={64} />
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {mergedLineItems!.post_tax_deductions.map((r) => (
-                        <LineItemRow key={r.id} row={r}
-                          showHours={false} showRate={false} showAuthority={false}
-                          ctx={liCtx} />
-                      ))}
-                    </Table.Tbody>
-                  </Table>
+                  {mergedLineItems!.post_tax_deductions.map((r) => (
+                    <LineItemRow key={r.id} row={r}
+                      showHours={false} showRate={false} showAuthority={false}
+                      ctx={liCtx} />
+                  ))}
                 </>
               ) : null}
 
@@ -1140,25 +911,12 @@ export function PayslipDetailPage() {
               {(mergedLineItems?.tax_deductions?.length ?? 0) > 0 ? (
                 <>
                   <SectionHdr label="Tax Deductions" />
-                  <Table withTableBorder striped highlightOnHover mb="xs">
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th miw={140}>Name</Table.Th>
-                        {sectionHasAuthority(mergedLineItems!.tax_deductions) ? <Table.Th>Authority</Table.Th> : null}
-                        <Table.Th>Current</Table.Th>
-                        <Table.Th>YTD</Table.Th>
-                        <Table.Th w={64} />
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {mergedLineItems!.tax_deductions.map((r) => (
-                        <LineItemRow key={r.id} row={r}
-                          showHours={false} showRate={false}
-                          showAuthority={sectionHasAuthority(mergedLineItems!.tax_deductions)}
-                          ctx={liCtx} />
-                      ))}
-                    </Table.Tbody>
-                  </Table>
+                  {mergedLineItems!.tax_deductions.map((r) => (
+                    <LineItemRow key={r.id} row={r}
+                      showHours={false} showRate={false}
+                      showAuthority={sectionHasAuthority(mergedLineItems!.tax_deductions)}
+                      ctx={liCtx} />
+                  ))}
                 </>
               ) : null}
 
@@ -1169,23 +927,11 @@ export function PayslipDetailPage() {
                 return (
                   <div key={sec}>
                     <SectionHdr label={SECTION_LABELS[sec]} />
-                    <Table withTableBorder striped highlightOnHover mb="xs">
-                      <Table.Thead>
-                        <Table.Tr>
-                          <Table.Th miw={140}>Name</Table.Th>
-                          <Table.Th>Current</Table.Th>
-                          <Table.Th>YTD</Table.Th>
-                          <Table.Th w={64} />
-                        </Table.Tr>
-                      </Table.Thead>
-                      <Table.Tbody>
-                        {rows.map((r) => (
-                          <LineItemRow key={r.id} row={r}
-                            showHours={false} showRate={false} showAuthority={false}
-                            ctx={liCtx} />
-                        ))}
-                      </Table.Tbody>
-                    </Table>
+                    {rows.map((r) => (
+                      <LineItemRow key={r.id} row={r}
+                        showHours={false} showRate={false} showAuthority={false}
+                        ctx={liCtx} />
+                    ))}
                   </div>
                 );
               })}
@@ -1501,41 +1247,6 @@ export function PayslipDetailPage() {
                 Use "Match Deposit" above to link manually.
               </Text>
             ) : null}
-          </Paper>
-
-          {/* Correct pay amounts (always accessible) */}
-          <Paper withBorder p="md">
-            <Title order={5} mb="xs">Correct pay amounts</Title>
-            <Text c="dimmed" size="xs" mb="sm">Edit extracted summary values. Use ✏ on line items above to correct individual rows.</Text>
-            <Table withTableBorder striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th /><Table.Th>Current</Table.Th><Table.Th>YTD</Table.Th><Table.Th w={48} />
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {AMOUNT_ROWS.map((def) => (
-                  <SummaryAmountRow
-                    key={def.key}
-                    def={def}
-                    currentVal={detail[def.currentField as keyof PayslipSnapshotDetail] as number | null}
-                    ytdVal={detail[def.ytdField as keyof PayslipSnapshotDetail] as number | null}
-                    editState={summaryEdit?.rowKey === def.key ? summaryEdit : null}
-                    saving={summarySaving}
-                    saveError={summaryEdit?.rowKey === def.key ? summarySaveError : null}
-                    onStartEdit={() => {
-                      setSummarySaveError(null);
-                      const cv = detail[def.currentField as keyof PayslipSnapshotDetail] as number | null;
-                      const yv = detail[def.ytdField as keyof PayslipSnapshotDetail] as number | null;
-                      setSummaryEdit({ rowKey: def.key, currentVal: cv != null ? String(cv) : "", ytdVal: yv != null ? String(yv) : "" });
-                    }}
-                    onEditChange={setSummaryEdit}
-                    onSave={() => { if (summaryEdit) void handleSaveSummaryRow(def, summaryEdit); }}
-                    onCancel={() => { setSummaryEdit(null); setSummarySaveError(null); }}
-                  />
-                ))}
-              </Table.Tbody>
-            </Table>
           </Paper>
 
         </>

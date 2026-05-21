@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-198 (2026-05-21): PayslipDetailPage — spec-correct line item layout + PS-4 fix + remove invented section
+
+- **Type:** UX fix + bug fix
+- **What:**
+  - **Line item layout regression fixed:** Replaced all `<Table withTableBorder striped highlightOnHover>` wrappers in the line items panel with spec-correct compact div-based rows (flex layout: name left, Current/YTD right-aligned, pencil/trash icons). Matches `LIRow` in `docs/payslip-redesign/shared.jsx`. Edit mode expands to an inline `<Paper>` form with labelled inputs; delete mode shows inline confirmation — no table context required.
+  - **"Correct pay amounts" section removed:** The section was invented and not in the redesign spec. Removed the Paper block and all supporting code (`SummaryAmountRow`, `AmountRowDef`, `PatchableAmountField`, `AMOUNT_ROWS`, `SummaryEditState`, `patchSummary`, `handleSaveSummaryRow`, related state variables). Line item pencil/trash icons provide the spec-correct correction path.
+  - **PS-4 TaxSufficiencyAlert fix:** `federalRate` was computed as `computeFederalRateAnnualised(detail, detail.payPeriodCountYtd ?? 1)`. The `?? 1` fallback inflated the annualised rate 26× when `payPeriodCountYtd` was absent, keeping the alert permanently suppressed. Changed to only call `computeFederalRateAnnualised` when `payPeriodCountYtd != null`; otherwise `federalRate` stays `null` (no alert, correct).
+- **Why:** UI regression from prior session where LineItemRow was Table.Tr-based; spec uses compact flex rows. "Correct pay amounts" Paper was not in spec and confused users. PS-4 alert was silently broken by an aggressive numeric fallback.
+- **Files:** `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
 ## CR-197 (2026-05-21): F-3 frontend — payslip pages full redesign (PS-1 through PS-4)
 
 - **Type:** Feature (F-3 V4 plan — full payslip UI overhaul)
