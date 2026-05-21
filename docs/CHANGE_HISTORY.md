@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-193 (2026-05-20): TM-4 near-duplicate detection: drop description gate (TM-4)
+
+- **Type:** Bug fix
+- **What:** Near-duplicate detection now flags **any** rows with same `account_id` + `txn_date` + amount (±0.0001 tolerance) but different fingerprint as a `duplicate_ambiguity` resolution item, **regardless of description similarity**. Removed the `descriptionsCompatibleForNearDuplicate()` gate that was allowing masked ACH descriptions (from CSV: "XXXXX1234") to slip past when they differed from PDFs with real digits ("ACH123451234").
+- **Why:** TM-4 — Bank descriptions from different sources (CSV vs PDF) can differ while representing the same transaction. The gate was too conservative; same account/date/amount is sufficient to flag duplicates. False positives (two unrelated same-day same-amount charges) land in the resolution queue, not silently duplicated or deleted. Transfer matching is unaffected (cross-account only).
+- **Files:** `backend/src/modules/canonical/transaction-fingerprint.ts` (removed function), `backend/src/modules/canonical/canonical-ingest.service.ts` (removed description gates at lines ~705 and ~728)
+
+---
+
+## UX-118 (2026-05-20): Display name field on recurring payments tag modal
+
+- **Type:** UX
+- **What:** **RecurringTagModal** now includes a **Display name** field; saved value is sent as `displayName` on confirm (blank clears to merchant-key default on the server).
+- **Why:** Backend and dashboard/settings already support `display_name`; the modal was the only missing edit surface.
+- **Files:** `frontend/src/components/RecurringTagModal.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
 ## CR-194 (2026-05-20): Net Worth snapshot + per-account row-expansion caching (F-6b)
 
 - **Type:** Performance (F-6b, V4 plan)

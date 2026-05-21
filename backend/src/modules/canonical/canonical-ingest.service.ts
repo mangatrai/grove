@@ -8,7 +8,6 @@ import { classifyWithRules, type ClassificationResult } from "../category/catego
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
 import {
   computeTransactionFingerprint,
-  descriptionsCompatibleForNearDuplicate,
   normalizeAmountForFingerprint,
   normalizeDescriptionForFingerprint,
   normalizeTxnDateForFingerprint
@@ -703,25 +702,22 @@ export async function canonicalizeImportSession(
 
     let isNear = false;
     for (const c of nearCandidates) {
-      const existingNorm = existingDescriptionFingerprint(c.merchant, c.memo);
-      if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
-        isNear = true;
-        await qExec(
-          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
-          crypto.randomUUID(),
-          householdId,
-          row.raw_id,
-          JSON.stringify({
-            kind: "near_duplicate",
-            existingCanonicalId: c.id,
-            rawId: row.raw_id,
-            message:
-              "Same account, date, and amount as an existing ledger row with a similar but non-identical description fingerprint."
-          })
-        );
-        break;
-      }
+      isNear = true;
+      await qExec(
+        `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+   VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
+        crypto.randomUUID(),
+        householdId,
+        row.raw_id,
+        JSON.stringify({
+          kind: "near_duplicate",
+          existingCanonicalId: c.id,
+          rawId: row.raw_id,
+          message:
+            "Same account, date, and amount as an existing ledger row but different fingerprint. Resolve to keep or move to another account."
+        })
+      );
+      break;
     }
 
     if (!isNear) {
@@ -734,25 +730,22 @@ export async function canonicalizeImportSession(
         ) {
           continue;
         }
-        const existingNorm = existingDescriptionFingerprint(pr.merchant, pr.memo);
-        if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
-          isNear = true;
-          await qExec(
-            `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
-            crypto.randomUUID(),
-            householdId,
-            row.raw_id,
-            JSON.stringify({
-              kind: "near_duplicate",
-              existingCanonicalId: null,
-              rawId: row.raw_id,
-              message:
-                "Same account, date, and amount as another row in this import with a similar but non-identical description fingerprint (pending insert)."
-            })
-          );
-          break;
-        }
+        isNear = true;
+        await qExec(
+          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+   VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
+          crypto.randomUUID(),
+          householdId,
+          row.raw_id,
+          JSON.stringify({
+            kind: "near_duplicate",
+            existingCanonicalId: null,
+            rawId: row.raw_id,
+            message:
+              "Same account, date, and amount as another row in this import but different fingerprint (pending insert). Resolve to keep or move to another account."
+          })
+        );
+        break;
       }
     }
 

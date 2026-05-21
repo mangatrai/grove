@@ -1269,6 +1269,57 @@ describe("import sessions and file intake", () => {
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
 
+  it("TM-4: routes masked ACH (CSV) vs real reference (PDF) as near-duplicate despite description difference", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const txnDate = new Date(Date.UTC(2025, 0, 1 + crypto.randomInt(0, 8000))).toISOString().slice(0, 10);
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},ACH XXXXX1234,-42.50,ref-masked`,
+      `${txnDate},ACH123451234,-42.50,ref-real`
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "ach-masked.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.nearDuplicates).toBe(1);
+    expect(canRes.body.duplicates).toBe(0);
+
+    const openResolution = (await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM resolution_item WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND type = 'duplicate_ambiguity' AND status = 'open'`
+    ).get(sessionId)) as { c: number };
+    expect(openResolution.c).toBeGreaterThanOrEqual(1);
+  });
+
   it("routes same-import same-fingerprint different-FITID rows to Needs Review", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
