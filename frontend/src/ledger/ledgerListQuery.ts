@@ -150,6 +150,7 @@ export function appendLedgerListFilters(
     effectivePersonIds: string[];
     amountMinUrl: string;
     amountMaxUrl: string;
+    transferPaired?: boolean;
   }
 ): void {
   if (filters.sessionFilter) {
@@ -215,5 +216,8 @@ export function appendLedgerListFilters(
     if (Number.isFinite(n)) {
       qs.set("amountMax", String(n));
     }
+  }
+  if (filters.transferPaired) {
+    qs.set("transferPaired", "true");
   }
 }

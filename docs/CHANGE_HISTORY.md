@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-204 (2026-05-22): Transfer pair visibility + manual pair/unpair UI (TM-2)
+
+- **Type:** Feature (V4 backlog item TM-2)
+- **What:** Users can now see, manually create, and dissolve confirmed transfer pairs directly from the Transactions → All tab.
+  - **`GET /transactions`** now returns `transferGroupId` (UUID or null) on every row.
+  - **`GET /transactions?transferPaired=true`** filters to only paired rows.
+  - **`POST /transactions/pair`** — body `{ ids: [uuid, uuid] }` — pairs two transactions: must be posted, different accounts, opposite directions (one debit / one credit), abs amounts within 0.01. Returns `{ transferGroupId }`.
+  - **`DELETE /transactions/pair/:groupId`** — nulls `transfer_group_id` on all rows sharing that group; returns 204.
+  - **Frontend:** "Has transfer pair" checkbox in the More Filters section (server-side filter). `↔` badge on paired rows in the Amount cell. Bulk bar: when exactly 2 rows are selected, "↔ Link as transfer" appears when amounts match and directions are opposite; "✕ Unlink transfer" appears when both share the same `transferGroupId`.
+- **Why:** No way existed to see which transactions were paired as transfers, or to pair/unpair manually (e.g., check float > 4 days, missed by auto-detection). The Needs Review queue handles detection-based ambiguity; TM-2 adds general-purpose visibility and control. Resolution queue is untouched.
+- **Files:**
+  - `backend/src/modules/ledger/ledger.service.ts` — `transferGroupId` on `CanonicalTransactionRow`; `transferPaired` on `LedgerListFilters`; updated `txSelectSql`, `mapRow`, `ledgerFilterClause`; added `pairTransactions()`, `unpairTransactions()`
+  - `backend/src/modules/ledger/ledger.routes.ts` — `transferPaired` in query schema; new `POST /pair`, `DELETE /pair/:groupId`
+  - `frontend/src/ledger/ledgerListQuery.ts` — `transferPaired` in `appendLedgerListFilters`
+  - `frontend/src/pages/TransactionsPage.tsx` — `transferGroupId` on `TxRow`; filter toggle; `↔` badge; bulk bar Link/Unlink buttons
+  - `backend/tests/app.test.ts` — 6 integration tests
+
+---
+
 ## CR-203 (2026-05-22): Cash account — auto-update balance snapshot on manual transaction (F-10)
 
 - **Type:** Feature (V4 backlog item F-10)

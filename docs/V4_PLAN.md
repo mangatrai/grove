@@ -132,7 +132,7 @@ A cohesive pass over the payslip feature covering: month-over-month comparison, 
 
 ---
 
-### TM-2: Transfer pair visibility + manual pair/unpair UI
+### TM-2: Transfer pair visibility + manual pair/unpair UI ✅ SHIPPED (CR-204, 2026-05-22)
 No way exists today to see which transactions are paired as transfers, or to manually pair unmatched ones. Edge cases that auto-detection misses (check float > 4 days, empty-memo same-institution transfers) require raw SQL to resolve.
 
 **Scope:**
@@ -519,7 +519,7 @@ These items are removed from the active backlog. No plans to build.
 | F-1 | In-app notification system + alerts | P2 | Feature |
 | F-2 | Balance sheet member subtotals | ✅ Shipped | Feature |
 | F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | ✅ Shipped | Feature |
-| TM-2 | Transfer pair visibility + manual pair/unpair UI | P2 | Feature |
+| TM-2 | Transfer pair visibility + manual pair/unpair UI | ✅ Shipped | Feature |
 | TM-3 | Transfer matching — same-institution score boost | ❌ Not doing | Enhancement |
 | F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
 | I-8 | Playwright E2E spike | P3 | Testing |
@@ -543,4 +543,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-22. F-3 (payslip pass PS-1–PS-4) and F-10 (cash balance auto-update) shipped. Previous: TM-1, F-6, F-2, F-6b, F-8, I-12, R-1/R-2/R-3 shipped. PS-5 added (P3, blocked on due diligence): Tax Filing Profile + Stored Effective Federal Rate.*
+*Last updated: 2026-05-22. TM-2 (transfer pair visibility + pair/unpair UI) shipped (CR-204). Previous: F-3, F-10, TM-1, F-6, F-2, F-6b, F-8, I-12, R-1/R-2/R-3 shipped.*
