@@ -23,6 +23,8 @@ import {
   updateManualTransactionAmount,
   updateCanonicalTransactionCategory,
   updateCanonicalTransactionMemo,
+  pairTransactions,
+  unpairTransactions,
   type LedgerListFilters
 } from "./ledger.service.js";
 
@@ -110,6 +112,10 @@ const querySchema = z.object({
   trashOnly: z
     .enum(["true", "false"])
     .optional()
+    .transform((v) => v === "true"),
+  transferPaired: z
+    .enum(["true", "false"])
+    .optional()
     .transform((v) => v === "true")
 });
 
@@ -175,7 +181,8 @@ ledgerRouter.get("/aggregate", async (req: AuthenticatedRequest, res) => {
     ownerPersonProfileId,
     ownerPersonProfileIds,
     belongsTo,
-    trashOnly
+    trashOnly,
+    transferPaired
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
@@ -216,6 +223,7 @@ ledgerRouter.get("/aggregate", async (req: AuthenticatedRequest, res) => {
     accountId: accountId ?? undefined,
     accountIds: accountIds ?? undefined,
     trashOnly: trashOnly || undefined,
+    transferPaired: transferPaired || undefined,
     ...(belongsTo?.length
       ? { belongsTo }
       : {
@@ -268,7 +276,8 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     ownerPersonProfileId,
     ownerPersonProfileIds,
     belongsTo,
-    trashOnly
+    trashOnly,
+    transferPaired
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
@@ -309,6 +318,7 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     accountId: accountId ?? undefined,
     accountIds: accountIds ?? undefined,
     trashOnly: trashOnly || undefined,
+    transferPaired: transferPaired || undefined,
     ...(belongsTo?.length
       ? { belongsTo }
       : {
@@ -625,6 +635,46 @@ ledgerRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
     );
   }
   res.status(204).send();
+});
+
+const pairSchema = z.object({
+  ids: z.array(z.string().uuid()).length(2)
+});
+
+const groupIdParamSchema = z.object({
+  groupId: z.string().uuid()
+});
+
+ledgerRouter.post("/pair", async (req: AuthenticatedRequest, res) => {
+  const parsed = pairSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload — provide ids: [uuid, uuid]", issues: parsed.error.flatten() });
+    return;
+  }
+  const [id1, id2] = parsed.data.ids as [string, string];
+  const householdId = req.authUser!.householdId;
+  const out = await pairTransactions(householdId, id1, id2);
+  if (!out.ok) {
+    const status = out.code === "NOT_FOUND" ? 404 : 400;
+    res.status(status).json({ message: out.message, code: out.code });
+    return;
+  }
+  res.status(200).json({ transferGroupId: out.transferGroupId });
+});
+
+ledgerRouter.delete("/pair/:groupId", async (req: AuthenticatedRequest, res) => {
+  const parsed = groupIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid groupId — must be a UUID" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await unpairTransactions(householdId, parsed.data.groupId);
+  if (!out.ok) {
+    res.status(404).json({ message: "Transfer pair not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ unlinked: out.unlinked });
 });
 
 const bulkIdsSchema = z.object({

@@ -5021,3 +5021,148 @@ describe("cash balance auto-update on manual transaction (F-10)", () => {
     expect(after?.amount).toEqual(before?.amount);
   });
 });
+
+describe("transfer pair / unpair (TM-2)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+  const CHECKING_A = "40000000-0000-0000-0000-000000000001"; // SEED_BOA_CHECKING
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  async function createCheckingAccount() {
+    const id = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Test Bank', 'USD', CURRENT_TIMESTAMP)`
+    ).run(id, HOUSEHOLD_ID, OWNER_USER_ID);
+    return id;
+  }
+
+  async function createPostedTx(token: string, accountId: string, amount: number) {
+    const res = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId, txnDate: "2026-05-10", amount, merchant: "TM2 test" });
+    expect(res.status).toBe(201);
+    return res.body.id as string;
+  }
+
+  it("pairs two transactions and returns transferGroupId", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const debitId = await createPostedTx(token, CHECKING_A, -100);
+    const creditId = await createPostedTx(token, acctB, 100);
+
+    const res = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [debitId, creditId] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.transferGroupId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+
+    const groupId = res.body.transferGroupId as string;
+    const rows = await sqlStmt(
+      `SELECT id, transfer_group_id FROM transaction_canonical WHERE id = ANY(?) AND household_id = ?`
+    ).all<{ id: string; transfer_group_id: string }>(
+      [debitId, creditId], HOUSEHOLD_ID
+    );
+    expect(rows.every((r) => r.transfer_group_id === groupId)).toBe(true);
+  });
+
+  it("rejects pairing transactions on the same account", async () => {
+    const token = await login();
+    const id1 = await createPostedTx(token, CHECKING_A, -50);
+    const id2 = await createPostedTx(token, CHECKING_A, 50);
+
+    const res = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [id1, id2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("SAME_ACCOUNT");
+  });
+
+  it("rejects pairing transactions with mismatched amounts", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const id1 = await createPostedTx(token, CHECKING_A, -75);
+    const id2 = await createPostedTx(token, acctB, 100);
+
+    const res = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [id1, id2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("AMOUNT_MISMATCH");
+  });
+
+  it("unpairs a transfer pair (204, nulls transfer_group_id on both legs)", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const debitId = await createPostedTx(token, CHECKING_A, -200);
+    const creditId = await createPostedTx(token, acctB, 200);
+
+    const pair = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [debitId, creditId] });
+    expect(pair.status).toBe(200);
+    const groupId = pair.body.transferGroupId as string;
+
+    const del = await request(app)
+      .delete(`/transactions/pair/${groupId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(del.status).toBe(200);
+    expect(del.body.unlinked).toBe(2);
+
+    const rows = await sqlStmt(
+      `SELECT transfer_group_id FROM transaction_canonical WHERE id = ANY(?) AND household_id = ?`
+    ).all<{ transfer_group_id: string | null }>(
+      [debitId, creditId], HOUSEHOLD_ID
+    );
+    expect(rows.every((r) => r.transfer_group_id === null)).toBe(true);
+  });
+
+  it("returns 404 when unpairing a groupId that does not exist", async () => {
+    const token = await login();
+    const fakeGroupId = crypto.randomUUID();
+
+    const res = await request(app)
+      .delete(`/transactions/pair/${fakeGroupId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("transferPaired filter returns only paired transactions", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const debitId = await createPostedTx(token, CHECKING_A, -300);
+    const creditId = await createPostedTx(token, acctB, 300);
+
+    await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [debitId, creditId] });
+
+    const res = await request(app)
+      .get("/transactions?transferPaired=true")
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const ids = (res.body.transactions as Array<{ id: string; transferGroupId: string | null }>).map((t) => t.id);
+    expect(ids).toContain(debitId);
+    expect(ids).toContain(creditId);
+    for (const t of res.body.transactions as Array<{ transferGroupId: string | null }>) {
+      expect(t.transferGroupId).not.toBeNull();
+    }
+  });
+});
