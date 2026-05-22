@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-200 (2026-05-22): BoA PDF parser — balance date regex misses spelled-out month format
+
+- **Type:** Bug fix
+- **What:** `extractBoaEStatementBalancesFromText` in `boa-estatement-pdf.ts` used a regex that only matched dates in `MM/DD/YYYY` format. Real BoA eStatements use `"April 21, 2026"` (spelled-out month). Result: `statementBalances` was always `null` for BoA PDFs → ending balance never written to `account_balance_snapshot` → users had to manually update balances after every import.
+- **Fix:** Replaced the single date-format regex with a combined pattern matching both `MM/DD/YYYY` and `"Month DD, YYYY"` (full and abbreviated month names). Added `parseDateToIso()` helper that handles both formats, replacing `mmddyyyyToIsoFlexible()`. The rest of the pipeline (writing the ending balance to `account_balance_snapshot` via `upsertImportBalanceSnapshotFromStatement`) was already correct — only the regex was broken.
+- **Why:** The balance snapshot write path in `import-parser.service.ts` was wired and working; `statementBalances` was just never populated due to the date mismatch.
+- **Files:** `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`
+
+## UX-200 (2026-05-22): TaxSufficiencyAlert — revert to compact banner (spec-correct)
+
+- **Type:** UX correction
+- **What:** The redesigned `TaxSufficiencyAlert` (UX-199) used a large card with stat blocks that made it the visual centrepiece of the payslip detail page. The spec prototype shows a compact single-line amber banner (same visual weight as `SavingsRateBanner`). Reverted to a compact inline banner: icon + bold `"Federal X.X% YTD · current period"` + `"all taxes Y.Y%"` secondary + tier hint sentence. Coloured background per tier (amber for under-withheld/below-average, forest-subtle for on-track, info-subtle for over-withheld).
+- **Why:** Visual hierarchy was wrong — the tax signal should be a quiet informational note, not the dominant element on the page.
+- **Files:** `frontend/src/payslip/TaxSufficiencyAlert.tsx`
+
+---
+
 ## UX-199 (2026-05-21): PayslipDetailPage — PS-4 redesign, bold total rows, column alignment, breadcrumb link + seed payslips
 
 - **Type:** UX redesign + feature + dev tooling
