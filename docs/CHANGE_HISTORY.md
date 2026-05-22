@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-203 (2026-05-22): Cash account — auto-update balance snapshot on manual transaction (F-10)
+
+- **Type:** Feature (V4 backlog item F-10)
+- **What:** When a manual transaction is created, edited, or hard-deleted against a `type='cash'` financial account, the `account_balance_snapshot` table is now automatically updated. Delta model: create → `+amount`; hard delete → `−amount`; amount edit → `+newAmount − oldAmount`. If no prior snapshot exists, the starting balance is treated as 0. Non-cash accounts (checking, savings, etc.) are unaffected.
+- **Why:** Cash accounts are tracked exclusively through manual entry. Without auto-update, users had to visit the Net Worth page after every transaction to keep the balance current.
+- **Known limitation (deferred):** Backdated transactions read the *latest* snapshot as the base, then write the result to the *transaction's* date. This can produce a logically inverted snapshot (a past-dated row with a value derived from a future balance). User can correct via the Net Worth manual balance entry. Fixing this properly requires summing all manual transactions from scratch — deferred to a future pass.
+- **Files:**
+  - `backend/src/modules/reports/balance-sheet.service.ts` — added `computeAndUpsertCashBalanceIfApplicable()`
+  - `backend/src/modules/ledger/ledger.service.ts` — added `updateManualTransactionAmount()`, updated `CreateManualTransactionResult` to carry `amount`
+  - `backend/src/modules/ledger/ledger.routes.ts` — POST/PATCH/DELETE wired to cash balance helper; `amount` field added to PATCH schema
+  - `backend/tests/app.test.ts` — 4 integration tests covering create, delete, amount-edit, and non-cash guard
+
+---
+
 ## FIX-202 (2026-05-22): BoA eStatement — store both beginning and ending balance snapshots
 
 - **Type:** Bug fix

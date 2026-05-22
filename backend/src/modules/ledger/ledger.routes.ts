@@ -5,6 +5,7 @@ import { qAll, qGet } from "../../db/query.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
+import { computeAndUpsertCashBalanceIfApplicable } from "../reports/balance-sheet.service.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
   aggregateCanonicalTransactions,
@@ -19,6 +20,7 @@ import {
   listCanonicalTransactionsForImportSession,
   restoreTransaction,
   trashTransaction,
+  updateManualTransactionAmount,
   updateCanonicalTransactionCategory,
   updateCanonicalTransactionMemo,
   type LedgerListFilters
@@ -366,6 +368,7 @@ ledgerRouter.post("/", async (req: AuthenticatedRequest, res) => {
   });
 
   if (out.ok) {
+    await computeAndUpsertCashBalanceIfApplicable(householdId, body.accountId, body.txnDate, out.amount);
     res.status(201).json({ id: out.id });
     return;
   }
@@ -425,7 +428,8 @@ const patchCategorySchema = z.object({
   ownerScope: z.enum(["household", "person"]).optional(),
   ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
   status: z.enum(["trashed", "posted"]).optional(),
-  memo: z.union([z.string().max(500).trim(), z.null()]).optional()
+  memo: z.union([z.string().max(500).trim(), z.null()]).optional(),
+  amount: z.number().finite().refine((n) => n !== 0, "Amount must not be zero").optional()
 });
 
 const txnIdParamSchema = z.object({
@@ -471,6 +475,33 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
       res.status(403).json({ message: "You can only modify your own transactions." });
       return;
     }
+  }
+
+  // Amount-only update (manual transactions only).
+  if (
+    parsed.data.amount !== undefined &&
+    parsed.data.memo === undefined &&
+    parsed.data.status === undefined &&
+    parsed.data.categoryId === undefined &&
+    !parsed.data.ownerScope
+  ) {
+    const out = await updateManualTransactionAmount(householdId, req.params.id, parsed.data.amount);
+    if (!out.ok) {
+      if (out.code === "INVALID_AMOUNT") {
+        res.status(400).json({ message: "Amount must be a non-zero finite number", code: out.code });
+        return;
+      }
+      if (out.code === "NOT_MANUAL") {
+        res.status(400).json({ message: "Cannot edit amount of an imported transaction", code: out.code });
+        return;
+      }
+      res.status(404).json({ message: "Transaction not found" });
+      return;
+    }
+    const delta = out.newAmount - out.oldAmount;
+    await computeAndUpsertCashBalanceIfApplicable(householdId, out.accountId, out.txnDate, delta);
+    res.status(200).json({ amount: out.newAmount });
+    return;
   }
 
   // Memo-only update.
@@ -573,10 +604,25 @@ ledgerRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
     }
   }
 
+  const txnSnap = await qGet<{ account_id: string; amount: string; txn_date: string }>(
+    `SELECT account_id, amount, txn_date FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    parsed.data.id,
+    householdId
+  );
+
   const out = await hardDeleteTransaction(householdId, parsed.data.id);
   if (!out.ok) {
     res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
     return;
+  }
+
+  if (txnSnap) {
+    await computeAndUpsertCashBalanceIfApplicable(
+      householdId,
+      txnSnap.account_id,
+      String(txnSnap.txn_date).slice(0, 10),
+      -Number(txnSnap.amount)
+    );
   }
   res.status(204).send();
 });

@@ -797,7 +797,7 @@ export async function bulkUpdateCategory(
 }
 
 export type CreateManualTransactionResult =
-  | { ok: true; id: string }
+  | { ok: true; id: string; amount: number }
   | {
       ok: false;
       code: "INVALID_ACCOUNT" | "INVALID_CATEGORY" | "INVALID_AMOUNT" | "DUPLICATE_FINGERPRINT";
@@ -885,7 +885,7 @@ export async function createManualCanonicalTransaction(
     throw err;
   }
 
-  return { ok: true, id };
+  return { ok: true, id, amount: rounded };
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,4 +1031,48 @@ export async function bulkReassignOwner(
     toPersonProfileId
   );
   return { updated: Number(row?.cnt ?? 0) };
+}
+
+export type UpdateManualAmountResult =
+  | { ok: true; oldAmount: number; newAmount: number; accountId: string; txnDate: string }
+  | { ok: false; code: "NOT_FOUND" | "NOT_MANUAL" | "INVALID_AMOUNT" };
+
+export async function updateManualTransactionAmount(
+  householdId: string,
+  id: string,
+  rawAmount: number
+): Promise<UpdateManualAmountResult> {
+  const rounded = normalizeAmountForFingerprint(rawAmount);
+  if (!Number.isFinite(rounded) || rounded === 0) {
+    return { ok: false, code: "INVALID_AMOUNT" };
+  }
+
+  const row = await qGet<{ amount: string; source_ref: string; account_id: string; txn_date: string }>(
+    `SELECT amount, source_ref, account_id, txn_date
+     FROM transaction_canonical
+     WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+  if (!row.source_ref.startsWith("manual:")) {
+    return { ok: false, code: "NOT_MANUAL" };
+  }
+
+  const direction = rounded >= 0 ? "credit" : "debit";
+  await qExec(
+    `UPDATE transaction_canonical SET amount = ?, direction = ? WHERE id = ? AND household_id = ?`,
+    rounded,
+    direction,
+    id,
+    householdId
+  );
+
+  return {
+    ok: true,
+    oldAmount: Number(row.amount),
+    newAmount: rounded,
+    accountId: row.account_id,
+    txnDate: String(row.txn_date).slice(0, 10)
+  };
 }

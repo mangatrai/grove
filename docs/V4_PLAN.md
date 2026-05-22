@@ -113,7 +113,7 @@ This gives the household overview without requiring the user to switch filters. 
 
 ---
 
-### F-3: Payslip enhancement pass
+### F-3: Payslip enhancement pass ✅ SHIPPED (CR-197/UX-196/UX-198/UX-199/UX-200/UX-201, 2026-05-22)
 A cohesive pass over the payslip feature covering: month-over-month comparison, investment contribution grouping, savings/wealth-building rate, and tax sufficiency signal. All payslip-related improvements in one release rather than scattered commits.
 
 **Design details:** See `docs/V4_BACKLOG.md` §Payslip Enhancement Pass for full spec.
@@ -374,7 +374,7 @@ Confirmed recurring rules on the Dashboard show the raw `merchantKey` (the subst
 
 ---
 
-### F-10: Cash account — auto-update balance snapshot on manual transaction
+### F-10: Cash account — auto-update balance snapshot on manual transaction ✅ SHIPPED (CR-203, 2026-05-22)
 
 When a manual transaction is recorded against a `cash`-type account (`POST /ledger`), the `account_balance_snapshot` table is not touched. The user must manually go to the Net Worth page and re-enter the balance. For a cash account that is tracked exclusively by manual transaction entry, the balance should auto-update.
 
@@ -518,7 +518,7 @@ These items are removed from the active backlog. No plans to build.
 | TM-1 | Transfer date tolerance 2 → 4 days | ✅ Shipped | Bug fix |
 | F-1 | In-app notification system + alerts | P2 | Feature |
 | F-2 | Balance sheet member subtotals | ✅ Shipped | Feature |
-| F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | P2 | Feature |
+| F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | ✅ Shipped | Feature |
 | TM-2 | Transfer pair visibility + manual pair/unpair UI | P2 | Feature |
 | TM-3 | Transfer matching — same-institution score boost | ❌ Not doing | Enhancement |
 | F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
@@ -532,7 +532,7 @@ These items are removed from the active backlog. No plans to build.
 | I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
 | TM-4 | Near-duplicate detection — masked vs real description variants | P1 | Bug fix |
 | F-9 | Recurring payments — display name field in tag modal | P2 | UX |
-| F-10 | Cash account — auto-update balance snapshot on manual transaction | P2 | Feature |
+| F-10 | Cash account — auto-update balance snapshot on manual transaction | ✅ Shipped | Feature |
 | PS-5 | Tax filing profile + stored effective federal rate | P3 (blocked on due diligence) | Feature |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
@@ -543,4 +543,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-21. PS-5 added (P3, blocked on due diligence): Tax Filing Profile + Stored Effective Federal Rate — migration to store `effective_federal_rate_ytd` on `payslip_snapshot` at import time (Phase 1, independent) + `person_tax_profile` table + Settings UI for per-person filing status / W-4 data (Phase 2, needs due diligence on UI placement, state handling, and liability estimation approach). Mostly backend + import pipeline; no `PayslipDetailPage` changes needed. Previous: TM-1, F-6, F-2, F-6b shipped. F-9, TM-4, F-10 added. TM-3 dropped.*
+*Last updated: 2026-05-22. F-3 (payslip pass PS-1–PS-4) and F-10 (cash balance auto-update) shipped. Previous: TM-1, F-6, F-2, F-6b, F-8, I-12, R-1/R-2/R-3 shipped. PS-5 added (P3, blocked on due diligence): Tax Filing Profile + Stored Effective Federal Rate.*

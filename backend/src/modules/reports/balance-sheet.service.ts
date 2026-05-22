@@ -574,6 +574,39 @@ export async function upsertManualBalanceSnapshot(
   return { id };
 }
 
+export async function computeAndUpsertCashBalanceIfApplicable(
+  householdId: string,
+  accountId: string,
+  txnDate: string,
+  delta: number
+): Promise<void> {
+  const acc = await qGet<{ type: string; currency: string }>(
+    `SELECT type, currency FROM financial_account WHERE id = ? AND household_id = ?`,
+    accountId,
+    householdId
+  );
+  if (!acc || acc.type !== "cash") return;
+
+  const latest = await qGet<{ amount: string }>(
+    `SELECT amount FROM account_balance_snapshot
+     WHERE financial_account_id = ? AND household_id = ?
+     ORDER BY as_of_date DESC, updated_at DESC
+     LIMIT 1`,
+    accountId,
+    householdId
+  );
+
+  const current = latest ? Number(latest.amount) : 0;
+  const newBalance = current + delta;
+
+  await upsertManualBalanceSnapshot(householdId, {
+    financialAccountId: accountId,
+    asOfDate: txnDate,
+    amount: newBalance,
+    currency: acc.currency
+  });
+}
+
 export type UpsertImportBalanceResult =
   | { ok: true }
   | { ok: false; code: "ACCOUNT_NOT_FOUND" | "PAYSLIP_ACCOUNT_NOT_ALLOWED" };

@@ -4915,3 +4915,109 @@ describe("balance sheet (reports)", () => {
     expect(res.body.memberSummary).toEqual([]);
   });
 });
+
+describe("cash balance auto-update on manual transaction (F-10)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  async function createCashAccount() {
+    const id = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, currency, created_at)
+       VALUES (?, ?, ?, 'cash', 'Wallet', 'USD', CURRENT_TIMESTAMP)`
+    ).run(id, HOUSEHOLD_ID, OWNER_USER_ID);
+    return id;
+  }
+
+  async function latestSnapshot(accountId: string) {
+    return sqlStmt(
+      `SELECT amount FROM account_balance_snapshot
+       WHERE financial_account_id = ? AND household_id = ?
+       ORDER BY as_of_date DESC, updated_at DESC LIMIT 1`
+    ).get<{ amount: string }>(accountId, HOUSEHOLD_ID);
+  }
+
+  it("creates snapshot on cash transaction create (no prior snapshot → treat as 0)", async () => {
+    const token = await login();
+    const cashAccountId = await createCashAccount();
+
+    const res = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: cashAccountId, txnDate: "2026-05-01", amount: 200, merchant: "Cash deposit" });
+    expect(res.status).toBe(201);
+
+    const snap = await latestSnapshot(cashAccountId);
+    expect(snap).not.toBeNull();
+    expect(Number(snap!.amount)).toBeCloseTo(200, 2);
+  });
+
+  it("reverses snapshot on hard delete", async () => {
+    const token = await login();
+    const cashAccountId = await createCashAccount();
+
+    const create = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: cashAccountId, txnDate: "2026-05-02", amount: 150, merchant: "Cash in" });
+    expect(create.status).toBe(201);
+    const txnId = create.body.id as string;
+
+    await request(app)
+      .patch(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "trashed" });
+
+    const del = await request(app)
+      .delete(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(del.status).toBe(204);
+
+    const snap = await latestSnapshot(cashAccountId);
+    expect(snap).not.toBeNull();
+    expect(Number(snap!.amount)).toBeCloseTo(0, 2);
+  });
+
+  it("applies delta on amount edit", async () => {
+    const token = await login();
+    const cashAccountId = await createCashAccount();
+
+    const create = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: cashAccountId, txnDate: "2026-05-03", amount: 100, merchant: "Initial" });
+    expect(create.status).toBe(201);
+    const txnId = create.body.id as string;
+
+    const patch = await request(app)
+      .patch(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ amount: 250 });
+    expect(patch.status).toBe(200);
+    expect(patch.body.amount).toBeCloseTo(250, 2);
+
+    const snap = await latestSnapshot(cashAccountId);
+    expect(snap).not.toBeNull();
+    expect(Number(snap!.amount)).toBeCloseTo(250, 2);
+  });
+
+  it("does not create snapshot for non-cash account", async () => {
+    const token = await login();
+    const nonCashId = SEED_BOA_CHECKING;
+
+    const before = await latestSnapshot(nonCashId);
+
+    await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: nonCashId, txnDate: "2026-05-04", amount: -99, merchant: "Non-cash test" });
+
+    const after = await latestSnapshot(nonCashId);
+    expect(after?.amount).toEqual(before?.amount);
+  });
+});

@@ -147,15 +147,29 @@ Insert one **posted** canonical row (manual entry). **`user_id`** is taken from 
 
 ## `PATCH /transactions/:id`
 
-Update the **category** for one posted ledger row (household-scoped).
+Update one or more fields on a posted ledger row. Send a single-purpose body — the handler dispatches based on which field is present.
 
-**Body:**
+### Amount update (manual transactions only)
+
+```json
+{ "amount": 150.00 }
+```
+
+- Only allowed on manual transactions (`source_ref` starts with `manual:`). Returns **400 `NOT_MANUAL`** for imported rows.
+- For `type=’cash’` accounts the `account_balance_snapshot` is automatically updated (delta = `newAmount − oldAmount`).
+
+**200:**
+```json
+{ "amount": 150.00 }
+```
+
+### Category update
 
 ```json
 { "categoryId": "uuid" }
 ```
 
-or clear the category:
+or clear it:
 
 ```json
 { "categoryId": null }
@@ -173,11 +187,15 @@ or clear the category:
 }
 ```
 
-**400:** invalid body, or category not available for this household.  
+When **`categoryId`** is set to a non-null value, any **`resolution_item`** with **`type = unknown_category`** and **`target_id`** equal to this transaction’s id is marked **`resolved`** (attention path).
+
+### Status / memo / owner
+
+See existing fields: `status` (`"trashed"` / `"posted"`), `memo`, `ownerScope`, `ownerPersonProfileId`.
+
+**400:** invalid body, category not available, amount is zero/non-finite, or attempting to edit amount of an imported transaction.  
 **404:** transaction not found for this household.  
 **401:** missing or invalid token.
-
-When **`categoryId`** is set to a non-null value, any **`resolution_item`** with **`type = unknown_category`** and **`target_id`** equal to this transaction’s id is marked **`resolved`** (attention path).
 
 ## `GET /transactions/:id/open-review`
 
