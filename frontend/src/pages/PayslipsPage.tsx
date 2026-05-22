@@ -83,16 +83,32 @@ function getPersonNetSeries(items: PayslipSnapshotDetail[], personId: string): n
     .map((p) => p.netPayCurrent ?? 0);
 }
 
+function getPersonLatestPayslip(
+  items: PayslipSnapshotDetail[],
+  personId: string
+): PayslipSnapshotDetail | null {
+  return (
+    items
+      .filter((p) => p.ownerPersonProfileId === personId)
+      .sort((a, b) => {
+        const da = a.payDate ?? a.payPeriodEnd ?? a.createdAt;
+        const db = b.payDate ?? b.payPeriodEnd ?? b.createdAt;
+        return da > db ? -1 : 1;
+      })[0] ?? null
+  );
+}
+
 function getPersonYtdNet(items: PayslipSnapshotDetail[], personId: string): number | null {
-  // latest payslip for person, use its netPayYtd
-  const latest = items
-    .filter((p) => p.ownerPersonProfileId === personId)
-    .sort((a, b) => {
-      const da = a.payDate ?? a.payPeriodEnd ?? a.createdAt;
-      const db = b.payDate ?? b.payPeriodEnd ?? b.createdAt;
-      return da > db ? -1 : 1;
-    })[0];
-  return latest?.netPayYtd ?? null;
+  return getPersonLatestPayslip(items, personId)?.netPayYtd ?? null;
+}
+
+function getPersonTotalTaxRateYtd(items: PayslipSnapshotDetail[], personId: string): number | null {
+  const latest = getPersonLatestPayslip(items, personId);
+  if (!latest) return null;
+  const gross = latest.grossPayYtd;
+  const taxes = latest.employeeTaxesYtd;
+  if (gross == null || gross === 0 || taxes == null) return null;
+  return (taxes / gross) * 100;
 }
 
 // ─── TrendCard ───────────────────────────────────────────────────────────────
@@ -103,11 +119,17 @@ function TrendCard({
   person,
   netSeries,
   ytdNet,
+  totalTaxRateYtd,
 }: {
   person: PersonInfo;
   netSeries: number[];
   ytdNet: number | null;
+  totalTaxRateYtd: number | null;
 }) {
+  // ⚠ only for clearly concerning rates (< ~24% total ≈ < 16% federal after FICA).
+  // No green tick — the list should be quiet when things are healthy.
+  const taxWarning = totalTaxRateYtd != null && totalTaxRateYtd < 24;
+
   return (
     <div
       style={{
@@ -145,22 +167,51 @@ function TrendCard({
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{person.name}</span>
       </div>
       <SparklineMini data={netSeries} width={120} height={30} color={person.color} />
-      <div>
-        <div
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            color: "var(--color-text-muted)",
-            marginBottom: 2,
-          }}
-        >
-          Net YTD
+      <div style={{ display: "flex", gap: 16 }}>
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "var(--color-text-muted)",
+              marginBottom: 2,
+            }}
+          >
+            Net YTD
+          </div>
+          <div style={{ ...mono, fontSize: 15, fontWeight: 600, color: person.color }}>
+            {formatMoney(ytdNet)}
+          </div>
         </div>
-        <div style={{ ...mono, fontSize: 15, fontWeight: 600, color: person.color }}>
-          {formatMoney(ytdNet)}
-        </div>
+        {totalTaxRateYtd != null ? (
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "var(--color-text-muted)",
+                marginBottom: 2,
+              }}
+            >
+              Tax Rate
+            </div>
+            <div
+              style={{
+                ...mono,
+                fontSize: 15,
+                fontWeight: 600,
+                color: taxWarning ? "#92400e" : "var(--color-text-secondary)",
+              }}
+              title="Total tax rate YTD (all employee taxes ÷ gross pay)"
+            >
+              {taxWarning ? "⚠ " : ""}{totalTaxRateYtd.toFixed(1)}%
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -417,12 +468,14 @@ export function PayslipsPage() {
                 if (!info) return null;
                 const netSeries = getPersonNetSeries(allItems, pid);
                 const ytdNet = getPersonYtdNet(allItems, pid);
+                const totalTaxRateYtd = getPersonTotalTaxRateYtd(allItems, pid);
                 return (
                   <TrendCard
                     key={pid}
                     person={info}
                     netSeries={netSeries}
                     ytdNet={ytdNet}
+                    totalTaxRateYtd={totalTaxRateYtd}
                   />
                 );
               })}

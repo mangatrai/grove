@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-201 (2026-05-22): PayslipsPage TrendCard — total tax rate YTD next to Net YTD
+
+- **Type:** UX enhancement
+- **What:** Added `totalTaxRateYtd` (all employee taxes ÷ gross, from the most recent payslip for the person) to the `TrendCard` component on the payslip list page. Displays inline next to the Net YTD dollar value in a smaller muted monospace label: `"26.2% tax"`. Shows `⚠` prefix in amber only when the rate is below 24% (≈ below-average federal threshold adjusted for FICA — roughly < 16% federal + 7.65% SS+Medicare). No green tick for healthy cases — the list stays quiet when things are fine. Tooltip on hover explains the metric.
+- **Why:** Surfaces a key health signal (are you withholding enough?) at the list level without requiring the user to open each detail page.
+- **Files:** `frontend/src/pages/PayslipsPage.tsx`
+
+---
+
 ## FIX-200 (2026-05-22): BoA PDF parser — balance date regex misses spelled-out month format
 
 - **Type:** Bug fix
