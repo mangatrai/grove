@@ -30,7 +30,7 @@ describe("BOA checking/savings CSV parser", () => {
     expect(out.statementBalances?.asOfEnd).toBe("2026-03-23");
   });
 
-  it("extracts beginning and ending balance from BoA eStatement text snippet", () => {
+  it("extracts beginning and ending balance from BoA eStatement text snippet (MM/DD/YYYY format)", () => {
     const text =
       "Account summary. Beginning balance as of 01/01/2025 12,345.67 foo Ending balance as of 01/31/2025 98,765.43 trailer";
     const b = extractBoaEStatementBalancesFromText(text);
@@ -40,6 +40,33 @@ describe("BOA checking/savings CSV parser", () => {
     expect(b?.ending).toBeCloseTo(98765.43, 2);
     expect(b?.asOfStart).toBe("2025-01-01");
     expect(b?.asOfEnd).toBe("2025-01-31");
+  });
+
+  it("extracts beginning and ending balance from BoA eStatement with 'Month DD, YYYY' date format", () => {
+    // Real BoA eStatement PDFs use this format (pdf-parse concatenates date and amount with no space)
+    const text =
+      "Account summary Beginning balance on April 21, 2026$23,547.79 Deposits and other additions19,385.48 Ending balance on May 18, 2026$24,997.22";
+    const b = extractBoaEStatementBalancesFromText(text);
+    expect(b).not.toBeNull();
+    expect(b?.beginning).toBeCloseTo(23547.79, 2);
+    expect(b?.ending).toBeCloseTo(24997.22, 2);
+    expect(b?.asOfStart).toBe("2026-04-21");
+    expect(b?.asOfEnd).toBe("2026-05-18");
+  });
+
+  it("extracts balances from actual BoA eStatement PDF if present", async () => {
+    const pdfPath = path.join(repoRoot, "data/imports/banks/eStmt_2026-05-18.pdf");
+    if (!fs.existsSync(pdfPath)) return;
+    const { parseBoaEStatementFromTextDetailed } = await import("../src/modules/imports/profiles/boa-estatement-pdf.js");
+    const { extractPdfText } = await import("../src/modules/imports/profiles/pdf-text.js");
+    const buf = fs.readFileSync(pdfPath);
+    const text = await extractPdfText(buf);
+    const out = parseBoaEStatementFromTextDetailed(text);
+    expect(out.statementBalances).not.toBeNull();
+    expect(out.statementBalances?.beginning).toBeCloseTo(23547.79, 2);
+    expect(out.statementBalances?.ending).toBeCloseTo(24997.22, 2);
+    expect(out.statementBalances?.asOfStart).toBe("2026-04-21");
+    expect(out.statementBalances?.asOfEnd).toBe("2026-05-18");
   });
 
   it("extracts summary block balances from BoA CSV preamble only", () => {

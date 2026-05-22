@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-202 (2026-05-22): BoA eStatement — store both beginning and ending balance snapshots
+
+- **Type:** Bug fix
+- **What:** Import pipeline only stored the ending balance in `account_balance_snapshot` after parsing a BoA eStatement PDF. Beginning balance was extracted but silently discarded. Now both the beginning (`asOfStart`) and ending (`asOfEnd`) balance points are written as separate `source='import'` snapshots, giving the Net Worth page two data points per statement period.
+- **Why:** BoA PDFs have both "Beginning balance on {date}" and "Ending balance on {date}" in their account summary. Only storing the ending balance meant no historical beginning balance was ever recorded.
+- **Files:** `backend/src/modules/imports/import-parser.service.ts`, `backend/tests/boa-parser.test.ts`
+
+---
+
 ## UX-201 (2026-05-22): PayslipsPage TrendCard — total tax rate YTD next to Net YTD
 
 - **Type:** UX enhancement

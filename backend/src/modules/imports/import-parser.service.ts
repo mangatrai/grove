@@ -556,38 +556,48 @@ export async function parseSessionImportFiles(
       );
 
       const sb = extracted.statementBalances;
-      if (file.financial_account_id && sb != null && sb.ending != null && Number.isFinite(Number(sb.ending))) {
+      if (file.financial_account_id && sb != null) {
         const rawEnd = sb.asOfEnd?.trim() ? String(sb.asOfEnd).slice(0, 10) : "";
-        if (/^\d{4}-\d{2}-\d{2}$/.test(rawEnd)) {
+        const rawStart = sb.asOfStart?.trim() ? String(sb.asOfStart).slice(0, 10) : "";
+        const hasEnd = /^\d{4}-\d{2}-\d{2}$/.test(rawEnd) && sb.ending != null && Number.isFinite(Number(sb.ending));
+        const hasStart = /^\d{4}-\d{2}-\d{2}$/.test(rawStart) && sb.beginning != null && Number.isFinite(Number(sb.beginning));
+
+        if (hasEnd || hasStart) {
           const acct = await qGet<{ currency: string; type: string }>(
             `SELECT currency, type FROM financial_account WHERE id = ? AND household_id = ? LIMIT 1`,
             file.financial_account_id,
             householdId
           );
           if (acct) {
-            let amount = Number(sb.ending);
+            const currency = String(acct.currency ?? "USD");
             // OFX and some PDF parsers report liability balances as negative values
             // (e.g. credit card -$500 = you owe $500). The net-worth formula stores
             // liability magnitudes as positive (netWorth = assetSum − liabilitySum),
             // so negate here when the stored value would be negative for a liability.
             const LIABILITY_TYPES = ["credit_card", "loan", "mortgage"];
-            if (LIABILITY_TYPES.includes(String(acct.type)) && amount < 0) {
-              amount = -amount;
-            }
-            const snap = await upsertImportBalanceSnapshotFromStatement(householdId, {
-              financialAccountId: file.financial_account_id,
-              importFileId: file.id,
-              asOfDate: rawEnd,
-              amount,
-              currency: String(acct.currency ?? "USD")
-            });
-            if (!snap.ok) {
-              log.warn("[Import parse] could not persist statement balance snapshot", {
+
+            const upsertPoint = async (asOfDate: string, raw: number) => {
+              let amount = raw;
+              if (LIABILITY_TYPES.includes(String(acct.type)) && amount < 0) amount = -amount;
+              const snap = await upsertImportBalanceSnapshotFromStatement(householdId, {
+                financialAccountId: file.financial_account_id!,
                 importFileId: file.id,
-                financialAccountId: file.financial_account_id,
-                code: snap.ok ? undefined : snap.code
+                asOfDate,
+                amount,
+                currency
               });
-            }
+              if (!snap.ok) {
+                log.warn("[Import parse] could not persist statement balance snapshot", {
+                  importFileId: file.id,
+                  financialAccountId: file.financial_account_id,
+                  asOfDate,
+                  code: snap.ok ? undefined : snap.code
+                });
+              }
+            };
+
+            if (hasEnd) await upsertPoint(rawEnd, Number(sb.ending));
+            if (hasStart) await upsertPoint(rawStart, Number(sb.beginning));
           }
         }
       }
