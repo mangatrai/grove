@@ -1,4 +1,4 @@
-import { IconChevronDown, IconChevronRight, IconPencil, IconRefresh } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconPencil, IconRefresh, IconTrash } from "@tabler/icons-react";
 import {
   ActionIcon,
   Alert,
@@ -268,6 +268,8 @@ export function NetWorthPage() {
   const [propertyRowSaving, setPropertyRowSaving] = useState(false);
   const [propertyRowSaveError, setPropertyRowSaveError] = useState<string | null>(null);
   const [propertyRowRetrieving, setPropertyRowRetrieving] = useState(false);
+  const [deletePropertyTarget, setDeletePropertyTarget] = useState<PropertySheetRow | null>(null);
+  const [deletePropertyError, setDeletePropertyError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -796,6 +798,26 @@ export function NetWorthPage() {
     []
   );
 
+  const doDeleteProperty = useCallback(async () => {
+    if (!deletePropertyTarget) return;
+    try {
+      await apiJson<{ unlinkedAccounts: number }>(
+        `/household/properties/${deletePropertyTarget.propertyId}`,
+        { method: "DELETE" }
+      );
+      const pid = deletePropertyTarget.propertyId;
+      setDeletePropertyTarget(null);
+      setDeletePropertyError(null);
+      setPropertyHistoryById((prev) => { const n = new Map(prev); n.delete(pid); return n; });
+      setExpandedPropertyIds((prev) => { const n = new Set(prev); n.delete(pid); return n; });
+      refreshSheetCache();
+      refreshHistoryCache();
+    } catch (err) {
+      setDeletePropertyError(err instanceof Error ? err.message : "Could not delete property");
+      throw err;
+    }
+  }, [deletePropertyTarget, refreshSheetCache, refreshHistoryCache]);
+
   const onPresetChange = (next: PeriodPreset) => {
     setPeriodPreset(next);
     if (next !== "custom") {
@@ -1317,19 +1339,35 @@ export function NetWorthPage() {
                             <Table.Td><Text size="sm">{p.marketValueAsOf ?? "—"}</Text></Table.Td>
                             <Table.Td>
                               {!isEditing ? (
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="gray"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startPropertyEdit(p);
-                                  }}
-                                  aria-label="Edit market value"
-                                  title="Edit market value"
-                                >
-                                  <IconPencil size={15} />
-                                </ActionIcon>
+                                <Group gap={4} wrap="nowrap">
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="gray"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startPropertyEdit(p);
+                                    }}
+                                    aria-label="Edit market value"
+                                    title="Edit market value"
+                                  >
+                                    <IconPencil size={15} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="red"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeletePropertyError(null);
+                                      setDeletePropertyTarget(p);
+                                    }}
+                                    aria-label="Delete property"
+                                    title="Delete property"
+                                  >
+                                    <IconTrash size={15} />
+                                  </ActionIcon>
+                                </Group>
                               ) : null}
                             </Table.Td>
                           </Table.Tr>
@@ -1568,6 +1606,30 @@ export function NetWorthPage() {
         closeOnClickOutside={false}
         onClose={() => setBulkConfirmOpen(false)}
         onConfirm={runBulkAsOf}
+      />
+
+      <ConfirmDialog
+        opened={deletePropertyTarget !== null}
+        title="Delete property?"
+        danger
+        confirmLabel="Delete"
+        closeOnClickOutside={false}
+        onClose={() => { setDeletePropertyTarget(null); setDeletePropertyError(null); }}
+        onConfirm={doDeleteProperty}
+        message={
+          <Stack gap="xs">
+            <Text size="sm">
+              This will permanently remove the property record and all value history.
+              {deletePropertyTarget?.linkedMortgageAccountId
+                ? " The linked mortgage account will be unlinked."
+                : null}
+              {" "}This cannot be undone.
+            </Text>
+            {deletePropertyError ? (
+              <Alert color="red" variant="light" radius="sm">{deletePropertyError}</Alert>
+            ) : null}
+          </Stack>
+        }
       />
     </Stack>
   );

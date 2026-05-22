@@ -22,6 +22,7 @@ import {
 import {
   addPropertyValueSnapshot,
   createProperty,
+  deleteProperty,
   getProperty,
   listPropertiesForHousehold,
   listPropertyValueSnapshots,
@@ -457,6 +458,21 @@ householdRouter.patch("/properties/:propertyId", requireRole(["owner", "admin"])
     return;
   }
   res.status(200).json({ updated: true });
+});
+
+householdRouter.delete("/properties/:propertyId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await deleteProperty(params.data.propertyId, householdId);
+  if (!out.ok) {
+    res.status(404).json({ message: "Property not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ unlinkedAccounts: out.unlinkedAccounts });
 });
 
 const valueSnapshotSchema = z.object({

@@ -254,3 +254,17 @@ Lists all **`property_value_snapshot`** rows for the property, **ascending** by 
 **400** — validation or business rule (`INVALID_VALUE`).
 
 **404** — property not found.
+
+### `DELETE /household/properties/:propertyId`
+
+**Owner/admin only.** Permanently removes a property record and all its value snapshots. If any `financial_account` has `property_id` pointing to this property, the FK (`ON DELETE SET NULL`) clears those references automatically; the number of unlinked accounts is reported in the response.
+
+**200:** `{ "unlinkedAccounts": N }` — N is the count of mortgage/loan accounts whose `property_id` was cleared (0 when no accounts were linked).
+
+**400** — `propertyId` is not a valid UUID.
+
+**401** — missing or invalid token.
+
+**403** — caller is not owner or admin.
+
+**404** — property not found in household (`NOT_FOUND`).

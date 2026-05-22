@@ -5166,3 +5166,91 @@ describe("transfer pair / unpair (TM-2)", () => {
     }
   });
 });
+
+describe("delete property (F-4)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  async function createProperty(token: string, opts: { accountId?: string } = {}) {
+    const body: Record<string, unknown> = { addressLine1: "123 Main St", city: "Austin", state: "TX", zip: "78701" };
+    if (opts.accountId) body.accountId = opts.accountId;
+    const res = await request(app).post("/household/properties").set("authorization", `Bearer ${token}`).send(body);
+    expect(res.status).toBe(201);
+    return res.body.id as string;
+  }
+
+  async function createLoanAccount() {
+    const id = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, currency, created_at)
+       VALUES (?, ?, ?, 'loan', 'Test Mortgage', 'USD', CURRENT_TIMESTAMP)`
+    ).run(id, HOUSEHOLD_ID, OWNER_USER_ID);
+    return id;
+  }
+
+  it("deletes a property and returns 200 with unlinkedAccounts: 0", async () => {
+    const token = await login();
+    const propertyId = await createProperty(token);
+
+    const del = await request(app)
+      .delete(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(del.status).toBe(200);
+    expect(del.body.unlinkedAccounts).toBe(0);
+
+    const get = await request(app)
+      .get(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(get.status).toBe(404);
+  });
+
+  it("cascades deletion of value snapshots", async () => {
+    const token = await login();
+    const propertyId = await createProperty(token);
+
+    await request(app)
+      .post(`/household/properties/${propertyId}/values`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ marketValueUsd: 500000, asOfDate: "2026-01-01" });
+
+    const del = await request(app)
+      .delete(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(del.status).toBe(200);
+
+    const snap = await sqlStmt(`SELECT id FROM property_value_snapshot WHERE property_id = ?`).all(propertyId);
+    expect(snap).toHaveLength(0);
+  });
+
+  it("nulls financial_account.property_id (unlinks mortgage) and reports unlinkedAccounts: 1", async () => {
+    const token = await login();
+    const loanAccountId = await createLoanAccount();
+    const propertyId = await createProperty(token, { accountId: loanAccountId });
+
+    const del = await request(app)
+      .delete(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(del.status).toBe(200);
+    expect(del.body.unlinkedAccounts).toBe(1);
+
+    const row = await sqlStmt(`SELECT property_id FROM financial_account WHERE id = ?`).get(loanAccountId) as { property_id: string | null } | undefined;
+    expect(row?.property_id).toBeNull();
+  });
+
+  it("returns 404 for a non-existent property", async () => {
+    const token = await login();
+    const fakeId = crypto.randomUUID();
+    const res = await request(app)
+      .delete(`/household/properties/${fakeId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("NOT_FOUND");
+  });
+});

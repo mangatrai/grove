@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-205 (2026-05-22): Delete property (F-4)
+
+- **Type:** Feature (V4 backlog item F-4)
+- **What:** Owner/admin can now delete a property from the Net Worth page.
+  - **`DELETE /household/properties/:propertyId`** — permanently removes the property and all its value snapshots (cascade). Any `financial_account` with `property_id` pointing to the deleted property is auto-unlinked via `ON DELETE SET NULL`; count returned in `unlinkedAccounts`.
+  - **Frontend:** Trash icon added to each property row in the Real Estate section (Net Worth page). Confirmation dialog warns when a linked mortgage account will be unlinked.
+- **Why:** No way existed to remove a property created by mistake or sold. Every other entity has a delete path; properties were stuck forever.
+- **Files:**
+  - `backend/src/modules/household/property.service.ts` — added `deleteProperty()`
+  - `backend/src/modules/household/household.routes.ts` — added `DELETE /household/properties/:propertyId`; imported `deleteProperty`
+  - `frontend/src/pages/NetWorthPage.tsx` — `IconTrash` import; `deletePropertyTarget` / `deletePropertyError` state; `doDeleteProperty` callback; trash icon in property row; ConfirmDialog with linked-mortgage warning
+  - `backend/tests/app.test.ts` — 4 integration tests (delete success, snapshot cascade, mortgage unlink, 404)
+  - `docs/API_HOUSEHOLD.md` — documented new endpoint
+
+---
+
 ## CR-204 (2026-05-22): Transfer pair visibility + manual pair/unpair UI (TM-2)
 
 - **Type:** Feature (V4 backlog item TM-2)

@@ -230,14 +230,11 @@ Complement existing exact-regex rules with a fuzzy merchant name matching layer.
 
 ---
 
-### F-4: Delete property
+### F-4: Delete property ✅ SHIPPED (CR-205, 2026-05-22)
 
 Remove a property record and its value snapshot history. Useful when a property was created by mistake or a home is sold and equity no longer applies.
 
-**Scope:**
-- `DELETE /household/properties/:propertyId` — soft-guard: reject if any `financial_account.property_id` still references the property (user must unlink the account first). Delete cascades `property_value_snapshot` rows.
-- Frontend: small trash icon button in the Net Worth page Real Estate section (owner/admin only); confirmation modal with a warning if the property has value history.
-- No migration needed: cascade delete on `property_value_snapshot` via FK (already `ON DELETE CASCADE` or add it); `financial_account.property_id` FK is nullable — just null it on unlink before delete.
+**Shipped:** Auto-unlink with warning (not reject). `DELETE /household/properties/:propertyId` — returns `{ unlinkedAccounts: N }`. Frontend: trash icon + ConfirmDialog warning when mortgage is linked. Cascades snapshots via existing FK.
 
 **Files:** `backend/src/modules/household/property.service.ts`, `household.routes.ts`, `frontend/src/pages/NetWorthPage.tsx`
 
@@ -524,7 +521,7 @@ These items are removed from the active backlog. No plans to build.
 | F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
 | I-8 | Playwright E2E spike | P3 | Testing |
 | I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
-| F-4 | Delete property | P3 | Feature |
+| F-4 | Delete property | ✅ Shipped | Feature |
 | F-5 | Account closed/inactive status | P3 | Feature |
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
 | F-6b | Net Worth snapshot + row-expansion cache | ✅ Shipped | Performance |
