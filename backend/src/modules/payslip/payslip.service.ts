@@ -92,6 +92,10 @@ export type PayslipSnapshotRow = {
   } | null;
   /** Count of payslips in the same calendar year for the same person — detail query only (PS-4). */
   payPeriodCountYtd?: number;
+  /** Federal income tax YTD ÷ gross YTD (decimal ratio). Null for snapshots before migration 0048. */
+  effectiveFederalRateYtd: number | null;
+  /** All employee taxes YTD ÷ gross YTD (decimal ratio). Null for snapshots before migration 0048. */
+  effectiveTotalTaxRateYtd: number | null;
 };
 
 function parseJsonRecord(s: unknown, fallback: Record<string, unknown>): Record<string, unknown> {
@@ -182,6 +186,32 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
     payPeriodCountYtd: 'pay_period_count_ytd' in r && r.pay_period_count_ytd != null
       ? Number(r.pay_period_count_ytd)
       : undefined,
+    effectiveFederalRateYtd: r.effective_federal_rate_ytd == null ? null : Number(r.effective_federal_rate_ytd),
+    effectiveTotalTaxRateYtd: r.effective_total_tax_rate_ytd == null ? null : Number(r.effective_total_tax_rate_ytd),
+  };
+}
+
+function computeTaxRatesFromLineItems(
+  grossPayYtd: number | null,
+  employeeTaxesYtd: number | null,
+  items: LineItemForInsert[]
+): { effectiveFederalRateYtd: number | null; effectiveTotalTaxRateYtd: number | null } {
+  if (!grossPayYtd || grossPayYtd === 0) {
+    return { effectiveFederalRateYtd: null, effectiveTotalTaxRateYtd: null };
+  }
+  const federalItems = items.filter((item) => {
+    if (item.section !== "tax_deductions") return false;
+    const name = (item.name ?? "").toLowerCase();
+    const auth = (item.authority ?? "").toLowerCase();
+    return (
+      name.includes("federal") ||
+      (auth === "federal" && (name.includes("withholding") || name.includes("income")))
+    );
+  });
+  const federalYtdSum = federalItems.reduce((sum, item) => sum + (item.amountYtd ?? 0), 0);
+  return {
+    effectiveFederalRateYtd: federalItems.length > 0 ? federalYtdSum / grossPayYtd : null,
+    effectiveTotalTaxRateYtd: employeeTaxesYtd != null ? employeeTaxesYtd / grossPayYtd : null,
   };
 }
 
@@ -316,6 +346,12 @@ export async function insertPayslipSnapshot(
   const h = hybrid ?? null;
   const items = lineItems ?? [];
 
+  const { effectiveFederalRateYtd, effectiveTotalTaxRateYtd } = computeTaxRatesFromLineItems(
+    parsed.grossPayYtd,
+    parsed.employeeTaxesYtd,
+    items
+  );
+
   return qBegin(async (tx) => {
     const { text: insertText, values: insertValues } = sqlBind(
       `INSERT INTO payslip_snapshot (
@@ -336,6 +372,7 @@ export async function insertPayslipSnapshot(
         employee_id, personnel_number, talent_id,
         tax_profile_json, payment_summary_json, extraction_metadata_json,
         employment_rate, employment_rate_type,
+        effective_federal_rate_ytd, effective_total_tax_rate_ytd,
         updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -350,6 +387,7 @@ export async function insertPayslipSnapshot(
         ?, ?,
         ?,
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?,
         ?, ?,
         NOW()
       )`,
@@ -395,7 +433,9 @@ export async function insertPayslipSnapshot(
         h?.paymentSummaryJson ?? null,
         h?.extractionMetadataJson ?? null,
         h?.employmentRate ?? null,
-        h?.employmentRateType ?? null
+        h?.employmentRateType ?? null,
+        effectiveFederalRateYtd ?? null,
+        effectiveTotalTaxRateYtd ?? null
       ]
     );
     await tx.unsafe(insertText, insertValues as never[]);

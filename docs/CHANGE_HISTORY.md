@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-207 (2026-05-23): PS-5 Phase 1 — store effective tax rates at payslip import
+
+- **Type:** Reliability fix / data quality (V4 backlog item PS-5 Phase 1)
+- **What:** At payslip import time, `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` are now computed from extracted line items and stored on `payslip_snapshot`. `TaxSufficiencyAlert` and `computeFederalRateYtd` prefer the stored values; fall back to runtime line-item scan for older snapshots.
+  - Migration **0048**: adds `effective_federal_rate_ytd NUMERIC` and `effective_total_tax_rate_ytd NUMERIC` to `payslip_snapshot`.
+  - Federal rate: sums `tax_deductions` line items matching the federal heuristic (name contains "federal", or `authority="Federal"` + name contains "withholding"/"income"), divides by `gross_pay_ytd`. Handles both Deloitte-style ("Federal Income Tax") and IBM-style ("TX Withholding Tax" with `authority="Federal"`).
+  - Total tax rate: `employee_taxes_ytd / gross_pay_ytd` (aggregate column, not line-item sum).
+  - No LLM prompt or JSON schema changes — pure service-layer arithmetic on already-extracted data.
+- **Why:** Runtime heuristic in `TaxSufficiencyAlert` was brittle — IBM uses "TX Withholding Tax" with authority="Federal", not "federal" in the name. Moving computation to import time eliminates rendering-layer string matching and is format-agnostic via the `authority` field.
+- **Files:** `backend/db/migrations/0048_ps5_tax_rate_columns.sql`, `backend/src/modules/payslip/payslip.service.ts` (type + `computeTaxRatesFromLineItems` helper + INSERT), `frontend/src/payslip/types.ts`, `frontend/src/payslip/savingsUtils.ts`, `backend/tests/app.test.ts` (3 new PS-5 tests)
+
+---
+
 ## CR-206 (2026-05-22): Account closed/inactive status (F-5)
 
 - **Type:** Feature (V4 backlog item F-5)

@@ -396,17 +396,28 @@ When a manual transaction is recorded against a `cash`-type account (`POST /ledg
 
 ---
 
+### PS-2b: Post-tax contribution grouping (ESPP, after-tax 401k, mega backdoor Roth)
+
+PS-2 (shipped in F-3) groups pre-tax deduction line items into contribution buckets (retirement, equity, health). ESPP and after-tax 401k contributions — including mega backdoor Roth (after-tax 401k + in-plan conversion) — are also wealth-building savings, but they land in `post_tax_deductions` with no further categorization. The data is already extracted by the LLM; it just needs grouping and display.
+
+**Scope:**
+- Apply the same bucket logic to `post_tax_deductions` line items: after-tax retirement bucket (`401k After Tax`, `Roth In-Plan`, `Roth`), equity participation bucket (`ESPP`).
+- Display on `PayslipDetailPage`: a "Post-Tax Savings" grouping card alongside the existing pre-tax contribution breakdown.
+- Extend `computeSavingsRate` / `computeSavingsRateYtd` (PS-3) to optionally include post-tax savings in the wealth-building rate numerator. Keeps the current pre-tax-only rate unchanged by default; adds a second `wealthBuildingRate` that includes both.
+
+**No schema or LLM changes needed** — data is in `payslip_line_item.post_tax_deductions` with names like `"ESPP (Stock Salary)"`, `"401k After Tax Base Pay"`, `"Roth In-Plan Conversion"`.
+
+**Files:** `frontend/src/payslip/savingsUtils.ts`, `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
 ### PS-5: Tax Filing Profile + Stored Effective Federal Rate
 
-**Blocked on due diligence — do not build until open questions are resolved.** See `docs/V4_BACKLOG.md` §PS-5 for full spec and open questions.
+**Phase 1 ✅ SHIPPED (CR-207, 2026-05-23).** `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` stored at import; `TaxSufficiencyAlert` prefers stored values with fallback for older snapshots. Migration 0048. No LLM changes.
 
-**Why this exists:** `PS-4 TaxSufficiencyAlert` computes the federal tax rate at runtime by scanning `payslip_line_item` rows for a "federal" line. This is brittle — IBM uses `"TX Withholding Tax"` with authority `"Federal"` rather than the word "federal" in the name, and future employer formats could differ again. The fix is to store the computed rate on `payslip_snapshot` at import time and read it directly, eliminating the heuristic.
+**Phase 2 — Blocked on due diligence.** See `docs/V4_BACKLOG.md` §PS-5 for full spec and open questions.
 
-**Phase 1 (independent — no due diligence needed):**
-- Migration: add `effective_federal_rate_ytd` + `effective_total_tax_rate_ytd` to `payslip_snapshot`
-- Import pipeline: compute and write these from normalised line items at finalization time
-- `TaxSufficiencyAlert` reads from the stored columns instead of scanning line items
-- **Files:** `backend/db/migrations/0049_ps5_tax_profile.sql`, `payslip.service.ts`, `payslip-async-import-reconcile.service.ts`
+**Why this exists:** `PS-4 TaxSufficiencyAlert` computes the federal tax rate at runtime by scanning `payslip_line_item` rows for a "federal" line. This is brittle — IBM uses `"TX Withholding Tax"` with authority `"Federal"` rather than the word "federal" in the name, and future employer formats could differ again. Phase 1 moves computation to import time. Phase 2 adds `person_tax_profile` + LLM W-4 extraction.
 
 **Phase 2 (needs due diligence):**
 - New table `person_tax_profile` — filing status, W-4 fields (credits, additional withholding), state code, per-year, per-person
@@ -526,7 +537,8 @@ These items are removed from the active backlog. No plans to build.
 | TM-4 | Near-duplicate detection — masked vs real description variants | ✅ Shipped | Bug fix |
 | F-9 | Recurring payments — display name field in tag modal | ✅ Shipped | UX |
 | F-10 | Cash account — auto-update balance snapshot on manual transaction | ✅ Shipped | Feature |
-| PS-5 | Tax filing profile + stored effective federal rate | P3 (blocked on due diligence) | Feature |
+| PS-2b | Post-tax contribution grouping (ESPP, after-tax 401k, mega backdoor Roth) | P3 | Feature |
+| PS-5 | Tax filing profile — Phase 1 ✅ Shipped, Phase 2 blocked on due diligence | P3 | Feature |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
 | D-1 | Data archival + encrypted Drive archive | Deferred | Infrastructure |
 | D-4 | Multi-household | Deferred | Architecture |
@@ -536,4 +548,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-22. F-5 (account closed status) shipped (CR-206). F-4 (delete property) shipped (CR-205). TM-4, F-9 marked shipped (were missing ✅). Previous: TM-2, F-3, F-10, TM-1, F-6, F-2, F-6b, F-8, I-12, R-1/R-2/R-3 shipped.*
+*Last updated: 2026-05-23. PS-5 Phase 1 shipped (CR-207, migration 0048). PS-2b added to backlog. Previous: F-5 (CR-206), F-4 (CR-205), TM-4, F-9.*

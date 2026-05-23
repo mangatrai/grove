@@ -4,7 +4,7 @@ import path from "node:path";
 
 import bcrypt from "bcryptjs";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import unzipper from "unzipper";
 import * as XLSX from "xlsx";
 
@@ -5370,5 +5370,80 @@ describe("account status (F-5)", () => {
     expect(list.status).toBe(200);
     const ids = list.body.accounts.map((a: { id: string }) => a.id);
     expect(ids).not.toContain(TEST_ACCOUNT_ID);
+  });
+});
+
+describe("PS-5 Phase 1 — tax rate stored at insert", () => {
+  async function loginOwner(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  beforeAll(async () => {
+    // Clear any employers added by prior tests so resolvePayslipUploadContext returns ok with 0 employers.
+    const token = await loginOwner();
+    await request(app).patch("/household/profile").set("authorization", `Bearer ${token}`).send({ employers: [] });
+  });
+
+  it("stores effectiveFederalRateYtd from Deloitte-style federal line item", async () => {
+    const token = await loginOwner();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        grossPayYtd: 100000,
+        employeeTaxesYtd: 30000,
+        netPayCurrent: 5000,
+        lineItems: [
+          { section: "tax_deductions", name: "Federal Income Tax", authority: "Federal", amountCurrent: 1800, amountYtd: 22000 },
+          { section: "tax_deductions", name: "State Income Tax", authority: "State", amountCurrent: 400, amountYtd: 4800 },
+          { section: "tax_deductions", name: "Social Security", authority: "Federal", amountCurrent: 300, amountYtd: 3600 }
+        ]
+      });
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    // Federal rate: only "Federal Income Tax" matches (Social Security does not contain "withholding" or "income" in name)
+    expect(snap.effectiveFederalRateYtd).toBeCloseTo(0.22, 5);
+    // Total tax rate: employeeTaxesYtd / grossPayYtd
+    expect(snap.effectiveTotalTaxRateYtd).toBeCloseTo(0.3, 5);
+  });
+
+  it("stores effectiveFederalRateYtd from IBM-style TX Withholding Tax line item", async () => {
+    const token = await loginOwner();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        grossPayYtd: 80000,
+        employeeTaxesYtd: 20000,
+        netPayCurrent: 4000,
+        lineItems: [
+          { section: "tax_deductions", name: "TX Withholding Tax", authority: "Federal", amountCurrent: 1600, amountYtd: 17600 }
+        ]
+      });
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    // IBM-style: authority="Federal" + name contains "withholding" → matches
+    expect(snap.effectiveFederalRateYtd).toBeCloseTo(0.22, 5);
+    expect(snap.effectiveTotalTaxRateYtd).toBeCloseTo(0.25, 5);
+  });
+
+  it("returns null effectiveFederalRateYtd when no federal tax line items are present", async () => {
+    const token = await loginOwner();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        grossPayYtd: 50000,
+        employeeTaxesYtd: 10000,
+        netPayCurrent: 3000,
+        lineItems: [
+          { section: "earnings", name: "Base Pay", amountCurrent: 4000, amountYtd: 48000 }
+        ]
+      });
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    expect(snap.effectiveFederalRateYtd).toBeNull();
+    expect(snap.effectiveTotalTaxRateYtd).toBeCloseTo(0.2, 5);
   });
 });

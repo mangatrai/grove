@@ -42,6 +42,8 @@ export function computeSavingsRateYtd(ps: PayslipSnapshotDetail): number | null 
 
 /** Federal tax YTD as % of gross YTD — direct, no annualisation. */
 export function computeFederalRateYtd(ps: PayslipSnapshotDetail): number | null {
+  // Prefer stored rate (PS-5 Phase 1); fall back to runtime line-item scan for older snapshots.
+  if (ps.effectiveFederalRateYtd != null) return ps.effectiveFederalRateYtd * 100;
   const grossYtd = ps.grossPayYtd;
   const fedYtd = federalTaxYtd(ps);
   if (grossYtd == null || grossYtd === 0 || fedYtd == null) return null;
@@ -58,6 +60,8 @@ export function computeFederalRateCurrent(ps: PayslipSnapshotDetail): number | n
 
 /** All employee taxes YTD as % of gross YTD. */
 export function computeTotalTaxRateYtd(ps: PayslipSnapshotDetail): number | null {
+  // Prefer stored rate (PS-5 Phase 1); fall back to aggregate column for older snapshots.
+  if (ps.effectiveTotalTaxRateYtd != null) return ps.effectiveTotalTaxRateYtd * 100;
   const grossYtd = ps.grossPayYtd;
   const taxYtd = ps.employeeTaxesYtd;
   if (grossYtd == null || grossYtd === 0 || taxYtd == null) return null;

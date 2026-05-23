@@ -113,6 +113,10 @@ export type PayslipSnapshotDetail = {
   prior?: PriorPayslipValues | null;
   /** Number of payslips in the same calendar year for this person — present on detail response (PS-4). */
   payPeriodCountYtd?: number;
+  /** Federal income tax YTD ÷ gross YTD (decimal ratio). Null for snapshots before migration 0048. */
+  effectiveFederalRateYtd: number | null;
+  /** All employee taxes YTD ÷ gross YTD (decimal ratio). Null for snapshots before migration 0048. */
+  effectiveTotalTaxRateYtd: number | null;
 };
 
 export const SECTION_LABELS: Record<PayslipLineItemSection, string> = {
