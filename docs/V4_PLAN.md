@@ -413,7 +413,7 @@ PS-2 (shipped in F-3) groups pre-tax deduction line items into contribution buck
 
 ### PS-5: Tax Filing Profile + Stored Effective Federal Rate
 
-**Phase 1 ✅ SHIPPED (CR-207, 2026-05-23).** `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` stored at import; `TaxSufficiencyAlert` prefers stored values with fallback for older snapshots. Migration 0048. No LLM changes.
+**Phase 1 ✅ SHIPPED (CR-207 + CR-208, 2026-05-23).** `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` stored at import; `TaxSufficiencyAlert` prefers stored values with fallback for older snapshots. Migration 0048. No LLM changes. Rates are recomputed on every payslip edit (summary field PATCH or line item add/edit/delete) so correcting LLM extraction errors always updates the stored rates.
 
 **Phase 2 — Blocked on due diligence.** See `docs/V4_BACKLOG.md` §PS-5 for full spec and open questions.
 
@@ -548,4 +548,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-23. PS-5 Phase 1 shipped (CR-207, migration 0048). PS-2b added to backlog. Previous: F-5 (CR-206), F-4 (CR-205), TM-4, F-9.*
+*Last updated: 2026-05-23. PS-5 Phase 1 shipped (CR-207 + CR-208). PS-2b added to backlog. Previous: F-5 (CR-206), F-4 (CR-205), TM-4, F-9.*
