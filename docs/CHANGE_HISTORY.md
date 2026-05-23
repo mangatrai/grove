@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-208 (2026-05-23): PS-5 — recalculate stored tax rates on payslip edit
+
+- **Type:** Correctness fix (follow-on to CR-207)
+- **What:** When a payslip is edited — either its summary fields (`grossPayYtd`, `employeeTaxesYtd`, etc.) or any line item (add, edit, delete) — the stored `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` are now recomputed and written in the same operation.
+  - **`PATCH /payslips/:id`** (summary edit): fetches current line items before the UPDATE, merges patched values with existing values to compute new rates, includes rate columns in the single UPDATE.
+  - **`PATCH /payslips/:id/line-items/:itemId`**, **`POST /payslips/:id/line-items`**, **`DELETE /payslips/:id/line-items/:itemId`**: all three run inside a transaction; `computeAndWriteTaxRatesInTx()` executes after `applyDerivedSummary` (so `employee_taxes_ytd` is already re-summed) but before the final snapshot SELECT, so the returned snapshot carries fresh rates.
+- **Why:** Without recalculation on edit, stored rates became stale after any correction to LLM-extracted numbers. The stored value preference in `savingsUtils.ts` means stale stored rates would shadow the correct runtime fallback.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`
+
+---
+
 ## CR-207 (2026-05-23): PS-5 Phase 1 — store effective tax rates at payslip import
 
 - **Type:** Reliability fix / data quality (V4 backlog item PS-5 Phase 1)
