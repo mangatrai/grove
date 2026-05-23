@@ -150,7 +150,7 @@ No way exists today to see which transactions are paired as transfers, or to man
 
 ---
 
-### TM-4: Near-duplicate detection — remove description gate (Option 1)
+### TM-4: Near-duplicate detection — remove description gate (Option 1) ✅ SHIPPED (FIX-TM-4, 2026-05-22)
 
 **Bug.** The same real-world transaction imported from two sources (BoA CSV and BoA PDF parser) fails near-duplicate detection. The formats produce descriptions that differ in reference IDs and prefix tokens — masked digits (`XXXXX50542835`) vs real (`1049950542835`), or format prefixes (`CHECKCARD 0430 TMOBILE...` vs `TMOBILE AUTO P 04/30...`) — so `descriptionsCompatibleForNearDuplicate()` returns false and both land as live rows.
 
@@ -240,22 +240,18 @@ Remove a property record and its value snapshot history. Useful when a property 
 
 ---
 
-### F-5: Account closed/inactive status
+### F-5: Account closed/inactive status ✅ SHIPPED (CR-206, 2026-05-22)
 
 Mark a financial account as closed. A closed account:
-- No longer appears in import binding dropdowns
-- Is excluded from AI insights spending analysis
+- No longer appears in import binding dropdowns (default `GET /imports/accounts`)
+- Is excluded from AI insights net-worth context
 - Shows as "Closed" badge in Settings → Accounts (collapsed by default)
-- Still appears in Net Worth balance sheet with its last snapshot (for historical accuracy); can be toggled off with a "Show closed" filter
-- Still shows in Transactions ledger (historical data preserved); filter can hide closed accounts
+- Still appears in Net Worth balance sheet API with its last snapshot (for historical accuracy); UI "Show closed" filter hides rows by default
+- Still shows in Transactions ledger (historical data preserved)
 
-**Schema:** `financial_account.status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed'))`, plus `closed_at TIMESTAMPTZ`. One migration; no data migration needed (existing rows stay `active`).
+**Shipped:** Migration `0047_account_status.sql`. `PATCH /imports/accounts/:id` accepts `status`; `GET /imports/accounts?includeClosedAccounts=true`. Settings: Close/Reopen + toggle. Net Worth: Show closed toggle + badge.
 
-**UI entry points:**
-- Settings → Accounts: kebab menu on each account row → "Close account" (with confirmation modal that explains what this does)
-- Settings → Accounts: "Show closed accounts" toggle at top of table
-
-**Files:** `backend/db/migrations/0047_account_status.sql`, `import-file-binding.service.ts` (filter active accounts in binding), `balance-sheet.service.ts` (keep last snapshot for closed), `insight-prompt.service.ts` (skip closed), `imports.routes.ts` (account list filter), `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`
+**Files:** `backend/db/migrations/0047_account_status.sql`, `import-file-binding.service.ts`, `balance-sheet.service.ts`, `insight-prompt.service.ts`, `imports.routes.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`
 
 ---
 
@@ -348,7 +344,7 @@ Top-5 spending category slices are `<Anchor>` links to the Transactions page fil
 
 ---
 
-### F-9: Recurring payments — display name field in tag modal
+### F-9: Recurring payments — display name field in tag modal ✅ SHIPPED (CR-F9, 2026-05-22)
 
 Confirmed recurring rules on the Dashboard show the raw `merchantKey` (the substring match pattern) because `display_name` is never populated. The DB column, backend schema, and dashboard rendering are all already wired — the dashboard already does `displayName ?? merchantKey` fallback — but the `RecurringTagModal` has no input field for it, so it is always null.
 
@@ -522,13 +518,13 @@ These items are removed from the active backlog. No plans to build.
 | I-8 | Playwright E2E spike | P3 | Testing |
 | I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
 | F-4 | Delete property | ✅ Shipped | Feature |
-| F-5 | Account closed/inactive status | P3 | Feature |
+| F-5 | Account closed/inactive status | ✅ Shipped | Feature |
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
 | F-6b | Net Worth snapshot + row-expansion cache | ✅ Shipped | Performance |
 | I-10 | App-wide error logging audit | P3 | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
-| TM-4 | Near-duplicate detection — masked vs real description variants | P1 | Bug fix |
-| F-9 | Recurring payments — display name field in tag modal | P2 | UX |
+| TM-4 | Near-duplicate detection — masked vs real description variants | ✅ Shipped | Bug fix |
+| F-9 | Recurring payments — display name field in tag modal | ✅ Shipped | UX |
 | F-10 | Cash account — auto-update balance snapshot on manual transaction | ✅ Shipped | Feature |
 | PS-5 | Tax filing profile + stored effective federal rate | P3 (blocked on due diligence) | Feature |
 | T-1 | Documentation consolidation (40 → 5 docs) | P3 | Maintenance |
@@ -540,4 +536,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-22. TM-2 (transfer pair visibility + pair/unpair UI) shipped (CR-204). Previous: F-3, F-10, TM-1, F-6, F-2, F-6b, F-8, I-12, R-1/R-2/R-3 shipped.*
+*Last updated: 2026-05-22. F-5 (account closed status) shipped (CR-206). F-4 (delete property) shipped (CR-205). TM-4, F-9 marked shipped (were missing ✅). Previous: TM-2, F-3, F-10, TM-1, F-6, F-2, F-6b, F-8, I-12, R-1/R-2/R-3 shipped.*

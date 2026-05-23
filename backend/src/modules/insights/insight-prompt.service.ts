@@ -208,7 +208,10 @@ async function buildNetWorthBlock(householdId: string): Promise<InsightPromptInp
   let creditCardLiabilities = 0;
   let loanLiabilities = 0;
 
-  for (const a of sheet.assets) {
+  const activeAssets = sheet.assets.filter((a) => a.status !== "closed");
+  const activeLiabilities = sheet.liabilities.filter((a) => a.status !== "closed");
+
+  for (const a of activeAssets) {
     const b = a.balance ?? 0;
     if (a.type === "checking" || a.type === "savings" || a.type === "cash") {
       checkingSavingsTotal += b;
@@ -222,7 +225,7 @@ async function buildNetWorthBlock(householdId: string): Promise<InsightPromptInp
       educationSavingsTotal += b;
     }
   }
-  for (const l of sheet.liabilities) {
+  for (const l of activeLiabilities) {
     const b = Math.abs(l.balance ?? 0);
     if (l.type === "credit_card") {
       creditCardLiabilities += b;
@@ -236,7 +239,7 @@ async function buildNetWorthBlock(householdId: string): Promise<InsightPromptInp
   const netWorth = assetsSum - liabSum;
 
   const types = await qAll<{ type: string }>(
-    `SELECT DISTINCT type FROM financial_account WHERE household_id = ? AND type <> 'payslip'`,
+    `SELECT DISTINCT type FROM financial_account WHERE household_id = ? AND type <> 'payslip' AND status = 'active'`,
     householdId
   );
   const typeSet = new Set(types.map((t) => t.type));

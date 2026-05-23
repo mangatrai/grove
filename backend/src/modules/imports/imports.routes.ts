@@ -91,7 +91,8 @@ const accountUpsertSchema = z.object({
   defaultParserProfileId: z.union([z.string().refine(isParserProfileId, "Unknown parser profile id"), z.null()]).optional(),
   /** Optional starting balance (only used on account creation, ignored on PATCH). */
   initialBalance: z.number().finite().optional().nullable(),
-  initialBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable()
+  initialBalanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().nullable(),
+  status: z.enum(["active", "closed"]).optional()
 });
 const importUploadSchema = z
   .object({
@@ -348,7 +349,8 @@ importsRouter.patch("/sessions/:sessionId/status", async (req: AuthenticatedRequ
 importsRouter.get("/accounts", async (req: AuthenticatedRequest, res) => {
   const { householdId, userId } = req.authUser!;
   await ensurePayslipImportBucketAccount(householdId, userId);
-  const accounts = await listHouseholdFinancialAccounts(householdId);
+  const includeClosedAccounts = req.query.includeClosedAccounts === "true";
+  const accounts = await listHouseholdFinancialAccounts(householdId, { includeClosedAccounts });
   res.status(200).json({ accounts });
 });
 
@@ -475,7 +477,8 @@ importsRouter.patch("/accounts/:accountId", async (req: AuthenticatedRequest, re
     accountMask: parsed.data.accountMask ?? null,
     ownerScope,
     ownerPersonProfileId,
-    defaultParserProfileId: parsed.data.defaultParserProfileId ?? null
+    defaultParserProfileId: parsed.data.defaultParserProfileId ?? null,
+    status: parsed.data.status
   });
   if (!ok) {
     res.status(404).json({ message: "Financial account not found" });

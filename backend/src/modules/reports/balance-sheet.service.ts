@@ -11,6 +11,7 @@ export type BalanceSheetAccountRow = {
   type: string;
   currency: string;
   liquidity: "liquid" | "semi_liquid" | "restricted" | null;
+  status: string;
   side: BalanceSheetSide;
   balance: number | null;
   balanceAsOf: string | null;
@@ -334,7 +335,7 @@ export async function getBalanceSheet(
 ): Promise<BalanceSheetResult> {
   const own = financialAccountOwnerFragment(options);
   const accounts = await qAll<Record<string, unknown>>(
-    `SELECT id, institution, account_mask, type, currency, liquidity
+    `SELECT id, institution, account_mask, type, currency, liquidity, status
        FROM financial_account
       WHERE household_id = ?
         AND type <> 'payslip'${own.fragment}
@@ -410,6 +411,7 @@ export async function getBalanceSheet(
       type,
       currency: String(a.currency ?? "USD"),
       liquidity: a.liquidity == null ? null : (String(a.liquidity) as "liquid" | "semi_liquid" | "restricted"),
+      status: String(a.status ?? "active"),
       side,
       balance,
       balanceAsOf,

@@ -4,7 +4,7 @@ import path from "node:path";
 
 import bcrypt from "bcryptjs";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import unzipper from "unzipper";
 import * as XLSX from "xlsx";
 
@@ -5252,5 +5252,123 @@ describe("delete property (F-4)", () => {
       .set("authorization", `Bearer ${token}`);
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("account status (F-5)", () => {
+  const TEST_ACCOUNT_ID = SEED_BOA_CHECKING;
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  function patchBody(status: "active" | "closed") {
+    return {
+      type: "checking",
+      institution: "Bank of America",
+      accountMask: "1001",
+      status
+    };
+  }
+
+  async function ensureAccountActive(token: string) {
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("active"));
+  }
+
+  afterEach(async () => {
+    const token = await login();
+    await ensureAccountActive(token);
+  });
+
+  it("PATCH with status closed sets status and closedAt", async () => {
+    const token = await login();
+    const patch = await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+    expect(patch.status).toBe(200);
+
+    const row = await sqlStmt(
+      `SELECT status, closed_at FROM financial_account WHERE id = ?`
+    ).get(TEST_ACCOUNT_ID) as { status: string; closed_at: string | null };
+    expect(row.status).toBe("closed");
+    expect(row.closed_at).not.toBeNull();
+
+    const listed = await request(app)
+      .get("/imports/accounts?includeClosedAccounts=true")
+      .set("authorization", `Bearer ${token}`);
+    const acct = listed.body.accounts.find((a: { id: string }) => a.id === TEST_ACCOUNT_ID);
+    expect(acct?.status).toBe("closed");
+    expect(acct?.closed_at).not.toBeNull();
+  });
+
+  it("GET /imports/accounts excludes closed accounts by default", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const res = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.accounts.some((a: { id: string }) => a.id === TEST_ACCOUNT_ID)).toBe(false);
+  });
+
+  it("GET /imports/accounts?includeClosedAccounts=true includes closed account with status", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const res = await request(app)
+      .get("/imports/accounts?includeClosedAccounts=true")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const acct = res.body.accounts.find((a: { id: string }) => a.id === TEST_ACCOUNT_ID);
+    expect(acct).toBeDefined();
+    expect(acct.status).toBe("closed");
+    expect(acct.closed_at).not.toBeNull();
+  });
+
+  it("PATCH with status active clears closedAt and account reappears in default list", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const reopen = await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("active"));
+    expect(reopen.status).toBe(200);
+
+    const row = await sqlStmt(
+      `SELECT status, closed_at FROM financial_account WHERE id = ?`
+    ).get(TEST_ACCOUNT_ID) as { status: string; closed_at: string | null };
+    expect(row.status).toBe("active");
+    expect(row.closed_at).toBeNull();
+
+    const list = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(list.body.accounts.some((a: { id: string }) => a.id === TEST_ACCOUNT_ID)).toBe(true);
+  });
+
+  it("closed account is excluded from import binding account list", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const list = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const ids = list.body.accounts.map((a: { id: string }) => a.id);
+    expect(ids).not.toContain(TEST_ACCOUNT_ID);
   });
 });

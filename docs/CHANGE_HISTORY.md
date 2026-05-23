@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-206 (2026-05-22): Account closed/inactive status (F-5)
+
+- **Type:** Feature (V4 backlog item F-5)
+- **What:** Financial accounts can be marked **closed** without deleting history.
+  - Migration **0047**: `financial_account.status` (`active` | `closed`) and `closed_at`.
+  - **`GET /imports/accounts`**: active-only by default; `?includeClosedAccounts=true` returns closed rows with `status` and `closed_at`.
+  - **`PATCH /imports/accounts/:id`**: optional `status` — closing sets `closed_at` (preserved on re-close); reopen clears `closed_at`.
+  - Closed accounts excluded from import binding list and AI insight net-worth context; still on balance sheet API for historical snapshots.
+  - **Settings → Accounts:** Close/Reopen actions, “Show closed accounts” toggle, Closed badge.
+  - **Net Worth:** “Show closed” toggle, Closed badge on closed rows (UI filter only; API returns all).
+- **Files:** `backend/db/migrations/0047_account_status.sql`, `import-file-binding.service.ts`, `imports.routes.ts`, `insight-prompt.service.ts`, `balance-sheet.service.ts`, `backend/tests/app.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `docs/API_IMPORT_SESSIONS.md`, `openapi/openapi.yaml`, `docs/V4_PLAN.md`
+
+---
+
 ## CR-205 (2026-05-22): Delete property (F-4)
 
 - **Type:** Feature (V4 backlog item F-4)

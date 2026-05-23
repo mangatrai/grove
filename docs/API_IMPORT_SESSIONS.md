@@ -136,6 +136,12 @@ items, and a derived “skipped” bucket. All per-file numbers come from one re
 
 Lists **financial accounts** for the caller’s household (for binding uploads before parse).
 
+**Query (optional):**
+
+| Param | Default | Description |
+|--------|---------|-------------|
+| `includeClosedAccounts` | `false` | When `true`, includes accounts with `status=closed`. Default list is **active only** (for import binding dropdowns). |
+
 **200:** `{ "accounts": [ { ... } ] }`
 
 Each account row includes:
@@ -148,8 +154,23 @@ Each account row includes:
 - `owner_scope`
 - `owner_person_profile_id`
 - `default_parser_profile_id`
+- `status` — `active` or `closed`
+- `closed_at` (`date-time` or `null`) — set when the account was closed; cleared on reopen
 - `last_uploaded_at` (`date-time` or `null`) — latest **successfully parsed** statement upload timestamp for this account.
 - `last_statement_end_date` (`YYYY-MM-DD` or `null`) — latest statement period end detected from parsed statement metadata (`confidence_summary.statementBalances.asOfEnd`) for this account.
+
+---
+
+### `PATCH /imports/accounts/:accountId`
+
+Updates a connected account (same body shape as **POST** `/imports/accounts`, except `initialBalance` / `initialBalanceDate` are ignored).
+
+**Writable fields:** `type`, `subType`, `memo`, `liquidity`, `institution`, `accountMask`, `ownerScope`, `ownerPersonProfileId`, `defaultParserProfileId`, **`status`** (`active` | `closed`).
+
+- **`status: "closed"`** — hides the account from default `GET /imports/accounts` and import binding; sets `closed_at` to now if not already set.
+- **`status: "active"`** — reopens the account and clears `closed_at`.
+
+**200:** `{ "updated": true }`
 
 ---
 

@@ -16,7 +16,9 @@ import {
   PasswordInput,
   SegmentedControl,
   Select,
+  Badge,
   Stack,
+  Switch,
   Table,
   Tabs,
   Text,
@@ -73,6 +75,8 @@ type AccountRow = {
   owner_scope?: "household" | "person";
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
+  status?: string;
+  closed_at?: string | null;
 };
 
 // ─── Account type / sub-type picker data ─────────────────────────────────────
@@ -365,6 +369,7 @@ export function SettingsPage() {
   const [householdStateDraft, setHouseholdStateDraft] = useState("");
   const [householdIncomeDraft, setHouseholdIncomeDraft] = useState("");
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [showClosedAccounts, setShowClosedAccounts] = useState(false);
   const [loadingHousehold, setLoadingHousehold] = useState(true);
   const [savingHousehold, setSavingHousehold] = useState(false);
   const [householdError, setHouseholdError] = useState<string | null>(null);
@@ -431,6 +436,7 @@ export function SettingsPage() {
     memo: "",
     liquidity: "" as "" | "liquid" | "semi_liquid" | "restricted",
     belongsTo: "household" as BelongsToChoice,
+    status: "active" as "active" | "closed",
     initialBalance: "",
     initialBalanceDate: new Date().toISOString().slice(0, 10)
   });
@@ -495,6 +501,12 @@ export function SettingsPage() {
     ];
   }, [institutionCatalogList, institutionCustom]);
 
+  const fetchAccountsList = useCallback(async (includeClosed = showClosedAccounts) => {
+    const qs = includeClosed ? "?includeClosedAccounts=true" : "";
+    const r = await apiJson<{ accounts: AccountRow[] }>(`/imports/accounts${qs}`);
+    setAccounts(r.accounts);
+  }, [showClosedAccounts]);
+
   const loadProfile = useCallback(async () => {
     setLoadingProfile(true);
     setProfileError(null);
@@ -503,7 +515,9 @@ export function SettingsPage() {
       const [response, settings, acct] = await Promise.all([
         apiJson<HouseholdProfileResponse>("/household/profile"),
         apiJson<HouseholdSettingsResponse>("/household/settings"),
-        apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+        apiJson<{ accounts: AccountRow[] }>(
+          showClosedAccounts ? "/imports/accounts?includeClosedAccounts=true" : "/imports/accounts"
+        )
       ]);
       setAccounts(acct.accounts);
       const base = normalizeProfileDraft(response);
@@ -524,7 +538,7 @@ export function SettingsPage() {
     } finally {
       setLoadingProfile(false);
     }
-  }, []);
+  }, [showClosedAccounts]);
 
   const loadMembers = useCallback(async () => {
     setLoadingMembers(true);
@@ -552,7 +566,9 @@ export function SettingsPage() {
     try {
       const [r, acct] = await Promise.all([
         apiJson<HouseholdSettingsResponse>("/household/settings"),
-        apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+        apiJson<{ accounts: AccountRow[] }>(
+          showClosedAccounts ? "/imports/accounts?includeClosedAccounts=true" : "/imports/accounts"
+        )
       ]);
       setAccounts(acct.accounts);
       setTargetDraft(r.monthlySavingsTargetUsd != null ? String(r.monthlySavingsTargetUsd) : "");
@@ -568,7 +584,7 @@ export function SettingsPage() {
     } finally {
       setLoadingHousehold(false);
     }
-  }, []);
+  }, [showClosedAccounts]);
 
   useEffect(() => {
     void (async () => {
@@ -631,9 +647,9 @@ export function SettingsPage() {
     }
     setAccountError(null);
     setAccountSuccess(null);
-    void apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
-      .then((r) => setAccounts(r.accounts))
-      .catch((e: unknown) => setAccountError(e instanceof Error ? e.message : "Could not load accounts"));
+    void fetchAccountsList().catch((e: unknown) =>
+      setAccountError(e instanceof Error ? e.message : "Could not load accounts")
+    );
     if (canManageHousehold) {
       void apiJson<HouseholdMembersPayload>("/household/members")
         .then((r) => {
@@ -652,7 +668,7 @@ export function SettingsPage() {
         .catch(() => setAccountOwners([]));
     }
     void loadInstitutions();
-  }, [token, tab, canManageHousehold, loadInstitutions]);
+  }, [token, tab, canManageHousehold, loadInstitutions, fetchAccountsList, showClosedAccounts]);
 
   useEffect(() => {
     if (!token || tab !== "recurring") return;
@@ -735,6 +751,7 @@ export function SettingsPage() {
       }
       let newAccountId: string | null = null;
       if (accountDraft.id) {
+        body.status = accountDraft.status;
         await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
           method: "PATCH",
           body: JSON.stringify(body)
@@ -743,8 +760,7 @@ export function SettingsPage() {
         const created = await apiJson<{ id: string }>("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
         newAccountId = created.id;
       }
-      const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
-      setAccounts(r.accounts);
+      await fetchAccountsList();
       setAccountSuccess(accountDraft.id ? "Account updated." : "Account created.");
 
       // Auto-open property modal when a mortgage account is newly created
@@ -760,6 +776,7 @@ export function SettingsPage() {
         memo: "",
         liquidity: "",
         belongsTo: "household",
+        status: "active",
         initialBalance: "",
         initialBalanceDate: new Date().toISOString().slice(0, 10)
       });
@@ -1844,6 +1861,11 @@ export function SettingsPage() {
           <Stack mt="md">
             <Title order={3}>Connected accounts</Title>
             <Text c="dimmed">Link accounts for import. Parser is chosen from institution, account type, and file when you import.</Text>
+            <Switch
+              label="Show closed accounts"
+              checked={showClosedAccounts}
+              onChange={(e) => setShowClosedAccounts(e.currentTarget.checked)}
+            />
             {accountError ? <Alert color="red">{accountError}</Alert> : null}
             {accountSuccess ? <Alert color="green">{accountSuccess}</Alert> : null}
             <Stack>
@@ -1922,6 +1944,20 @@ export function SettingsPage() {
                   disabled={savingAccount}
                 />
               </Fieldset>
+              {accountDraft.id ? (
+                <Checkbox
+                  label="Active"
+                  checked={accountDraft.status !== "closed"}
+                  onChange={(e) =>
+                    setAccountDraft((d) => ({
+                      ...d,
+                      status: e.currentTarget.checked ? "active" : "closed"
+                    }))
+                  }
+                  disabled={savingAccount}
+                  mt="xs"
+                />
+              ) : null}
               {!accountDraft.id ? (
                 <Group align="end" grow>
                   <CurrencyInput
@@ -1969,6 +2005,7 @@ export function SettingsPage() {
                         memo: "",
                         liquidity: "",
                         belongsTo: "household",
+                        status: "active",
                         initialBalance: "",
                         initialBalanceDate: new Date().toISOString().slice(0, 10)
                       })
@@ -1995,7 +2032,14 @@ export function SettingsPage() {
                     const isMortgage = a.type === "loan" && MORTGAGE_SUBTYPES.has(a.sub_type ?? "");
                     return (
                     <Table.Tr key={a.id}>
-                      <Table.Td>{a.institution}</Table.Td>
+                      <Table.Td>
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{a.institution}</Text>
+                          {a.status === "closed" ? (
+                            <Badge color="gray" variant="light" size="xs">Closed</Badge>
+                          ) : null}
+                        </Group>
+                      </Table.Td>
                       <Table.Td>
                         <Text size="sm">{formatAccountTypeLabel(a.type, a.sub_type)}</Text>
                         {a.memo ? <Text size="xs" c="dimmed" truncate maw={200}>{a.memo}</Text> : null}
@@ -2034,6 +2078,7 @@ export function SettingsPage() {
                                   a.owner_scope === "person" && a.owner_person_profile_id
                                     ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
                                     : "household",
+                                status: a.status === "closed" ? "closed" : "active",
                                 initialBalance: "",
                                 initialBalanceDate: new Date().toISOString().slice(0, 10)
                               })

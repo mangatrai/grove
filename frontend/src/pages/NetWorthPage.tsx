@@ -3,6 +3,7 @@ import {
   ActionIcon,
   Alert,
   Anchor,
+  Badge,
   Box,
   Button,
   Collapse,
@@ -12,6 +13,7 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
@@ -54,6 +56,7 @@ type BalanceSheetAccountRow = {
   currency: string;
   /** Present when API returns F-1 enrichment; missing balances bucket as uncategorized in liquidity breakdown. */
   liquidity?: "liquid" | "semi_liquid" | "restricted" | null;
+  status?: string;
   side: "asset" | "liability";
   balance: number | null;
   balanceAsOf: string | null;
@@ -232,6 +235,7 @@ export function NetWorthPage() {
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<Array<{ id: string; label: string }>>([]);
   const [belongsTo, setBelongsTo] = useState<BelongsToFilter>("");
+  const [showClosedAccounts, setShowClosedAccounts] = useState(false);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("3m");
   const [customFrom, setCustomFrom] = useState(() => {
@@ -423,6 +427,22 @@ export function NetWorthPage() {
           balance: r.balance ?? 0
         })),
     [data?.assets]
+  );
+
+  const balanceSheetAssets = useMemo(
+    () =>
+      showClosedAccounts
+        ? (data?.assets ?? [])
+        : (data?.assets ?? []).filter((r) => r.status !== "closed"),
+    [data?.assets, showClosedAccounts]
+  );
+
+  const balanceSheetLiabilities = useMemo(
+    () =>
+      showClosedAccounts
+        ? (data?.liabilities ?? [])
+        : (data?.liabilities ?? []).filter((r) => r.status !== "closed"),
+    [data?.liabilities, showClosedAccounts]
   );
 
   const topLiabilities = useMemo(
@@ -1141,11 +1161,18 @@ export function NetWorthPage() {
           <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Balance sheet</Title>
           <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
         </Group>
-        <Box mb="sm" style={{ maxWidth: "12rem" }}>
-          <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
-        </Box>
+        <Group align="flex-end" gap="md" mb="sm" wrap="wrap">
+          <Box style={{ maxWidth: "12rem" }}>
+            <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
+          </Box>
+          <Switch
+            label="Show closed"
+            checked={showClosedAccounts}
+            onChange={(e) => setShowClosedAccounts(e.currentTarget.checked)}
+          />
+        </Group>
         {loading ? <GroveCardLoader label="Loading balance sheet…" size="sm" /> : null}
-        {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
+        {!loading && data && (balanceSheetAssets.length > 0 || (data.properties ?? []).length > 0) ? (
           <Box style={{ overflowX: "auto" }}>
             {editDirty ? (
               <Text size="sm" c="dimmed" mb="xs" style={{ maxWidth: "40rem" }}>
@@ -1165,7 +1192,7 @@ export function NetWorthPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {data.assets.map((r) => {
+                {balanceSheetAssets.map((r) => {
                   const signed = signedDisplayBalance(r);
                   const isEditing = editingId === r.financialAccountId;
                   const isExpanded = expandedAccountIds.has(r.financialAccountId);
@@ -1182,6 +1209,9 @@ export function NetWorthPage() {
                               {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                             </ActionIcon>
                             <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                            {r.status === "closed" ? (
+                              <Badge color="gray" variant="light" size="xs">Closed</Badge>
+                            ) : null}
                           </Group>
                         </Table.Td>
                         <Table.Td>
@@ -1428,9 +1458,9 @@ export function NetWorthPage() {
             </Table>
           </Box>
         ) : null}
-        {!loading && data && data.liabilities.length > 0 ? (
+        {!loading && data && balanceSheetLiabilities.length > 0 ? (
           <>
-            {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
+            {!loading && data && (balanceSheetAssets.length > 0 || (data.properties ?? []).length > 0) ? (
               <Divider my="md" />
             ) : null}
             <Box style={{ overflowX: "auto", marginTop: "1rem" }}>
@@ -1446,7 +1476,7 @@ export function NetWorthPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {data.liabilities.map((r) => {
+                {balanceSheetLiabilities.map((r) => {
                   const signed = signedDisplayBalance(r);
                   const isEditing = editingId === r.financialAccountId;
                   const isExpanded = expandedAccountIds.has(r.financialAccountId);
@@ -1463,6 +1493,9 @@ export function NetWorthPage() {
                               {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                             </ActionIcon>
                             <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                            {r.status === "closed" ? (
+                              <Badge color="gray" variant="light" size="xs">Closed</Badge>
+                            ) : null}
                           </Group>
                         </Table.Td>
                         <Table.Td>

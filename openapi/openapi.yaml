@@ -1458,6 +1458,14 @@ paths:
       tags: [imports]
       summary: List financial accounts
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: includeClosedAccounts
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, includes closed accounts. Default returns active accounts only.
       responses:
         "200":
           description: Household financial accounts with import freshness metadata
@@ -3478,6 +3486,15 @@ components:
           type: string
           nullable: true
           description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
+        status:
+          type: string
+          enum: [active, closed]
+          description: Account lifecycle status. Closed accounts are hidden from default list and import binding.
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the account was closed; null while active.
 
     ImportAccountUpsertRequest:
       type: object
@@ -3506,6 +3523,10 @@ components:
         defaultParserProfileId: { type: string, nullable: true }
         initialBalance: { type: number, nullable: true }
         initialBalanceDate: { type: string, format: date, nullable: true }
+        status:
+          type: string
+          enum: [active, closed]
+          description: Close or reopen the account. Ignored on POST (accounts are created active).
 
     BalanceSheetAccountRow:
       type: object
@@ -3519,6 +3540,10 @@ components:
           type: string
           nullable: true
           enum: [liquid, semi_liquid, restricted]
+        status:
+          type: string
+          enum: [active, closed]
+          description: Closed accounts remain on the balance sheet with last known snapshot.
         side: { type: string, enum: [asset, liability] }
         balance: { type: number, nullable: true }
         balanceAsOf: { type: string, nullable: true, format: date }
