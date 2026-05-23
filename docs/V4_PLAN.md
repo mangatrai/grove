@@ -221,12 +221,9 @@ Time-boxed spike to evaluate Playwright for browser-level test coverage. V3 foun
 
 ---
 
-### I-9: Fuzzy match categorization (Tier B)
-Complement existing exact-regex rules with a fuzzy merchant name matching layer. Catches variants like `AMAZON.COM*AB12CD` vs `AMAZON.COM*XY34ZF` or `WHOLEFDS #123` vs `WHOLE FOODS MKT`. Runs after exact rules fail, before Unknown fallback.
+### I-9: Fuzzy match categorization (Tier B) ❌ NOT DOING
 
-**Approach:** Normalize merchant name (uppercase, strip non-alpha/digits, collapse whitespace, strip trailing alphanumeric codes after `*` / `#`). Compute Jaro-Winkler or normalized edit distance against confirmed household merchant→category pairings. Threshold configurable; below threshold → Unknown (no false positives).
-
-**Files:** `backend/src/modules/category/fuzzy-match.service.ts` (new), `backend/src/modules/canonical/canonical-ingest.service.ts`
+**Dropped 2026-05-23.** The problem is already solved: `contains` rules match all trailing-code variants (`AMAZON.COM*AB12CD`, `WHOLEFDS #0521`) without fuzzy matching. The rule-from-assignment popup (create rule on first categorization) + existing recategorization backfill covers the merchant memory angle with zero new schema. The only remaining case — genuinely different strings for the same merchant — is a niche edge case, and Jaro-Winkler on short messy bank strings is prone to false positives. Complexity outweighs benefit.
 
 ---
 
@@ -527,7 +524,7 @@ These items are removed from the active backlog. No plans to build.
 | TM-3 | Transfer matching — same-institution score boost | ❌ Not doing | Enhancement |
 | F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
 | I-8 | Playwright E2E spike | P3 | Testing |
-| I-9 | Fuzzy match categorization (Tier B) | P3 | Enhancement |
+| I-9 | Fuzzy match categorization (Tier B) | ❌ Not doing | Enhancement |
 | F-4 | Delete property | ✅ Shipped | Feature |
 | F-5 | Account closed/inactive status | ✅ Shipped | Feature |
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
@@ -548,4 +545,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-23. PS-5 Phase 1 shipped (CR-207 + CR-208). PS-2b added to backlog. Previous: F-5 (CR-206), F-4 (CR-205), TM-4, F-9.*
+*Last updated: 2026-05-23. I-9 dropped (fuzzy categorization redundant with contains rules + rule-from-assignment). Previous: PS-5 Phase 1 shipped (CR-207 + CR-208), PS-2b added.*
