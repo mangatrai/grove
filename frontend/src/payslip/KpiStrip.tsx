@@ -69,7 +69,7 @@ export function KpiStrip({ kpis }: KpiStripProps) {
           >
             {fmtMoney(value)}
           </div>
-          <DeltaBadge current={value} prior={prior} inverseSign={inverseSign} />
+          <DeltaBadge current={value} prior={prior} inverseSign={inverseSign} onDark={accent} />
         </div>
       ))}
     </div>

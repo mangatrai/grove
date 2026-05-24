@@ -23,7 +23,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { GroveCardLoader } from "../components/GroveLoader";
-import { groupContributions } from "../payslip/contributions";
+import { isContributionItem } from "../payslip/contributions";
 import { KpiStrip } from "../payslip/KpiStrip";
 import { SavingsRateBanner } from "../payslip/SavingsRateBanner";
 import { SparklineMini } from "../payslip/SparklineMini";
@@ -31,6 +31,7 @@ import { TaxSufficiencyAlert } from "../payslip/TaxSufficiencyAlert";
 import {
   computeFederalRateCurrent,
   computeFederalRateYtd,
+  computeFilteredPostTaxSavingsRate,
   computeSavingsRate,
   computeSavingsRateYtd,
   computeTotalTaxRateCurrent,
@@ -756,6 +757,7 @@ export function PayslipDetailPage() {
   // PS-3 savings rate
   const savingsRate = detail ? computeSavingsRate(detail) : null;
   const savingsRateYtd = detail ? computeSavingsRateYtd(detail) : null;
+  const postTaxSavingsRate = detail ? computeFilteredPostTaxSavingsRate(detail) : null;
 
   // PS-4 tax rates — direct YTD percentages, no annualisation
   const federalRateYtd = detail ? computeFederalRateYtd(detail) : null;
@@ -766,14 +768,6 @@ export function PayslipDetailPage() {
   // First name for sidebar header
   const firstName = personInfo?.name?.split(" ")[0] ?? "";
 
-  // Contribution groups for PS-2
-  const contribGroups = useMemo(
-    () =>
-      mergedLineItems
-        ? groupContributions(mergedLineItems.pre_tax_deductions ?? [])
-        : null,
-    [mergedLineItems]
-  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -898,7 +892,7 @@ export function PayslipDetailPage() {
           />
 
           {/* Banners */}
-          <SavingsRateBanner rate={savingsRate} rateYtd={savingsRateYtd} />
+          <SavingsRateBanner rate={savingsRate} rateYtd={savingsRateYtd} postTaxRate={postTaxSavingsRate} />
           <TaxSufficiencyAlert
             federalRateYtd={federalRateYtd}
             federalRateCurrent={federalRateCurrent}
@@ -1139,43 +1133,64 @@ export function PayslipDetailPage() {
                 ))}
               </div>
 
-              {/* Contributions YTD */}
-              {contribGroups && Object.values(contribGroups).some((g) => g.length > 0) ? (
-                <div
-                  style={{
-                    background: "var(--color-surface)",
-                    border: "1px solid var(--color-border)",
-                    borderRadius: 9,
-                    padding: "12px 14px",
-                  }}
-                >
+              {/* Contributions YTD — pre-tax + post-tax */}
+              {(() => {
+                const preTaxRows = (mergedLineItems?.pre_tax_deductions ?? []).filter(isContributionItem);
+                const postTaxRows = (detail.lineItems?.post_tax_deductions ?? []).filter(isContributionItem);
+                const hasPre = preTaxRows.length > 0;
+                const hasPost = postTaxRows.length > 0;
+                if (!hasPre && !hasPost) return null;
+                const showLabels = hasPre && hasPost;
+                const rowStyle: CSSProperties = { display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11.5 };
+                const nameStyle: CSSProperties = { color: "var(--color-text-secondary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+                const amtStyle: CSSProperties = { ...mono, fontSize: 11.5, color: "var(--color-text-muted)", marginLeft: 6 };
+                const sectionLabelStyle: CSSProperties = { fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 3 };
+                return (
                   <div
                     style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                      color: "var(--color-text-muted)",
-                      marginBottom: 8,
+                      background: "var(--color-surface)",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: 9,
+                      padding: "12px 14px",
                     }}
                   >
-                    {`${new Date().getFullYear()} Contributions`}{firstName ? ` · ${firstName}` : ""}
-                  </div>
-                  {(mergedLineItems?.pre_tax_deductions ?? []).map((r) => (
                     <div
-                      key={r.id}
-                      style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11.5 }}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        textTransform: "uppercase",
+                        letterSpacing: "0.07em",
+                        color: "var(--color-text-muted)",
+                        marginBottom: 8,
+                      }}
                     >
-                      <span style={{ color: "var(--color-text-secondary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {r.name ?? "—"}
-                      </span>
-                      <span style={{ ...mono, fontSize: 11.5, color: "var(--color-text-muted)", marginLeft: 6 }} role="text">
-                        {formatMoney(r.amountYtd)}
-                      </span>
+                      {`${new Date().getFullYear()} Contributions`}{firstName ? ` · ${firstName}` : ""}
                     </div>
-                  ))}
-                </div>
-              ) : null}
+                    {hasPre && (
+                      <>
+                        {showLabels && <div style={sectionLabelStyle}>Pre-Tax</div>}
+                        {preTaxRows.map((r) => (
+                          <div key={r.id} style={rowStyle}>
+                            <span style={nameStyle}>{r.name ?? "—"}</span>
+                            <span style={amtStyle} role="text">{formatMoney(r.amountYtd)}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                    {hasPost && (
+                      <>
+                        <div style={{ ...sectionLabelStyle, marginTop: hasPre ? 8 : 0 }}>Post-Tax</div>
+                        {postTaxRows.map((r) => (
+                          <div key={r.id} style={rowStyle}>
+                            <span style={nameStyle}>{r.name ?? "—"}</span>
+                            <span style={amtStyle} role="text">{formatMoney(r.amountYtd)}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Net pay sparkline */}
               {sparklineData.length >= 2 ? (

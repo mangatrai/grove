@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-210 (2026-05-23): PS-2b follow-on — filter insurance from contributions card; add post-tax savings rate badge
+
+- **Type:** Correctness fix + UX enhancement
+- **What:**
+  - Added `isContributionItem(item)` classifier to `contributions.ts` using a regex that matches investment/savings items (401k, 403b, 457, Roth, ESPP, RSU, HSA, FSA, deferred comp, pension, after-tax, stock salary/other/purchase, profit sharing, savings plan). Items like Group Life Insurance, AD&D, LTD, Health Care Premium, Legal Insurance, and dental/vision premiums do NOT match and are excluded.
+  - Contributions YTD sidebar card now filters both pre-tax and post-tax sections through `isContributionItem` — only true investment contributions appear.
+  - Added `computeFilteredPostTaxSavingsRate(ps)` to `savingsUtils.ts` — sums `amountCurrent` for filtered post-tax line items divided by gross.
+  - `SavingsRateBanner` extended with `postTaxRate` prop; shows a second `📈 X% of gross to post-tax investments this period` row when non-null. Banner now renders if either pre-tax or post-tax rate is present.
+- **Why:** Post-tax deductions include both insurance (non-savings) and investment contributions. Displaying all post-tax items as "contributions" was misleading.
+- **Files:** `frontend/src/payslip/contributions.ts`, `frontend/src/payslip/savingsUtils.ts`, `frontend/src/payslip/SavingsRateBanner.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
+## UX-209 (2026-05-23): PS-2b — post-tax contribution grouping in payslip sidebar
+
+- **Type:** UI enhancement (V4 backlog item PS-2b)
+- **What:** The "Contributions YTD" sidebar card on `PayslipDetailPage` now shows both pre-tax and post-tax deduction line items. When both sections are present, "Pre-Tax" / "Post-Tax" section labels appear; if only one type exists the label is omitted. Post-tax items are sourced from `detail.lineItems.post_tax_deductions` (raw, not merged with `other_deductions`). Null `amountYtd` renders as `—` via `formatMoney`, same as pre-tax.
+- **Also:** Added `computePostTaxSavingsRate`, `computePostTaxSavingsRateYtd`, and `computeWealthBuildingRateYtd` to `savingsUtils.ts` for future use.
+- **Cleanup:** Removed unused `contribGroups` useMemo + `groupContributions` import (the IIFE in the card handles the show/hide logic directly). Fixed pre-existing test fixture gap: `payslipChartsModel.test.ts` `base()` fixture missing `effectiveFederalRateYtd`/`effectiveTotalTaxRateYtd`.
+- **Files:** `frontend/src/payslip/savingsUtils.ts`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/payslip/payslipChartsModel.test.ts`
+
+---
+
 ## CR-208 (2026-05-23): PS-5 — recalculate stored tax rates on payslip edit
 
 - **Type:** Correctness fix (follow-on to CR-207)

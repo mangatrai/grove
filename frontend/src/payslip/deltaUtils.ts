@@ -22,6 +22,7 @@ export type DeltaBadgeProps = {
   current: number | null | undefined;
   prior: number | null | undefined;
   inverseSign?: boolean;
+  onDark?: boolean;
 };
 
 const mutedStyle: CSSProperties = {
@@ -29,20 +30,26 @@ const mutedStyle: CSSProperties = {
   fontSize: 11
 };
 
-const forest = "var(--fs-forest)";
-const terracotta = "var(--fs-terracotta)";
+const mutedOnDarkStyle: CSSProperties = {
+  color: "rgba(240,233,216,0.45)",
+  fontSize: 11
+};
 
-export function DeltaBadge({ current, prior, inverseSign = false }: DeltaBadgeProps): ReactNode {
+export function DeltaBadge({ current, prior, inverseSign = false, onDark = false }: DeltaBadgeProps): ReactNode {
   if (current == null) {
-    return createElement("span", { style: mutedStyle }, "—");
+    return createElement("span", { style: onDark ? mutedOnDarkStyle : mutedStyle }, "—");
   }
   const d = computeDelta(current, prior, inverseSign);
   if (!d) {
-    return createElement("span", { style: mutedStyle }, "—");
+    return createElement("span", { style: onDark ? mutedOnDarkStyle : mutedStyle }, "—");
   }
   const { abs, pct, up } = d;
-  const color = up ? forest : terracotta;
-  const bg = up ? "rgba(45,106,79,0.11)" : "rgba(139,58,38,0.11)";
+  const color = onDark
+    ? (up ? "var(--fs-sidebar-active)" : "var(--fs-clay)")
+    : (up ? "var(--fs-forest)" : "var(--fs-terracotta)");
+  const bg = onDark
+    ? (up ? "rgba(240,233,216,0.12)" : "rgba(184,107,74,0.2)")
+    : (up ? "rgba(45,106,79,0.11)" : "rgba(139,58,38,0.11)");
   const arrow = abs > 0 ? "↑" : "↓";
   const pillStyle: CSSProperties = {
     display: "inline-flex",

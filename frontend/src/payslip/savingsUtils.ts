@@ -1,3 +1,4 @@
+import { isContributionItem } from "./contributions";
 import type { PayslipLineItemRow, PayslipSnapshotDetail } from "./types";
 
 function isFederalTaxLine(item: PayslipLineItemRow): boolean {
@@ -38,6 +39,42 @@ export function computeSavingsRateYtd(ps: PayslipSnapshotDetail): number | null 
   const preTax = ps.preTaxDeductionsYtd;
   if (gross == null || gross === 0 || preTax == null) return null;
   return (preTax / gross) * 100;
+}
+
+/** Post-tax deductions as % of gross for this pay period (all post-tax, including insurance). */
+export function computePostTaxSavingsRate(ps: PayslipSnapshotDetail): number | null {
+  const gross = ps.grossPayCurrent;
+  const postTax = ps.postTaxDeductionsCurrent;
+  if (gross == null || gross === 0 || postTax == null) return null;
+  return (postTax / gross) * 100;
+}
+
+/** Investment-only post-tax items (ESPP, after-tax 401k, Roth) as % of gross for this period. */
+export function computeFilteredPostTaxSavingsRate(ps: PayslipSnapshotDetail): number | null {
+  const gross = ps.grossPayCurrent;
+  if (gross == null || gross === 0) return null;
+  const rows = ps.lineItems?.post_tax_deductions ?? [];
+  const total = rows
+    .filter(isContributionItem)
+    .reduce((s, r) => s + (r.amountCurrent ?? 0), 0);
+  return total === 0 ? null : (total / gross) * 100;
+}
+
+/** Post-tax deductions as % of gross YTD. */
+export function computePostTaxSavingsRateYtd(ps: PayslipSnapshotDetail): number | null {
+  const gross = ps.grossPayYtd;
+  const postTax = ps.postTaxDeductionsYtd;
+  if (gross == null || gross === 0 || postTax == null) return null;
+  return (postTax / gross) * 100;
+}
+
+/** Pre-tax + post-tax deductions as % of gross YTD — total wealth-building rate. */
+export function computeWealthBuildingRateYtd(ps: PayslipSnapshotDetail): number | null {
+  const gross = ps.grossPayYtd;
+  if (gross == null || gross === 0) return null;
+  const total = (ps.preTaxDeductionsYtd ?? 0) + (ps.postTaxDeductionsYtd ?? 0);
+  if (total === 0) return null;
+  return (total / gross) * 100;
 }
 
 /** Federal tax YTD as % of gross YTD — direct, no annualisation. */
