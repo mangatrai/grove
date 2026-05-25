@@ -41,6 +41,7 @@ import {
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
 import { YearInReviewOverlay } from "../components/year-review/YearInReviewOverlay";
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { bumpCacheVersion } from "../cache";
 import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
 import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
 import { formatTimeAgo, formatUsd } from "../utils/format";
@@ -449,6 +450,66 @@ export function DashboardPageV2() {
     }
   }, [cachedCashData, cashCacheError]);
 
+  // Helper values for the cache-keyed fetchers below (pure functions, stable per activeMonth)
+  const dashHistoryFrom = firstDayNMonthsBefore(activeMonth, 6);
+  const dashMonthEnd = lastDayOf(activeMonth);
+
+  const { data: netWorthCached, loading: netWorthCacheLoading } =
+    useLocalStorageCache<NetWorthSnapshot>(
+      "bs-snapshot-dashboard",
+      "networth",
+      () => apiJson<NetWorthSnapshot>("/reports/balance-sheet")
+    );
+
+  useEffect(() => {
+    if (netWorthCached !== null) setNetWorthData(netWorthCached);
+  }, [netWorthCached]);
+
+  const { data: netWorthHistoryCached } =
+    useLocalStorageCache<{ points: Array<{ asOf: string; totals: { netWorth: number | null } }> }>(
+      `bs-history:${activeMonth}`,
+      "networth",
+      () =>
+        apiJson<{ points: Array<{ asOf: string; totals: { netWorth: number | null } }> }>(
+          `/reports/balance-sheet/history?from=${dashHistoryFrom}&to=${dashMonthEnd}&interval=month`
+        )
+    );
+
+  useEffect(() => {
+    if (netWorthHistoryCached !== null) {
+      setNetWorthHistory(
+        netWorthHistoryCached.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
+      );
+    }
+  }, [netWorthHistoryCached]);
+
+  const { data: recentTxnsCached, loading: recentTxnsCacheLoading } =
+    useLocalStorageCache<{ transactions: LedgerRow[] }>(
+      `txns-6mo:${activeMonth}`,
+      "dashboard",
+      () =>
+        apiJson<{ transactions: LedgerRow[] }>(
+          `/transactions?limit=200&dateFrom=${dashHistoryFrom}&dateTo=${dashMonthEnd}`
+        )
+    );
+
+  useEffect(() => {
+    if (recentTxnsCached !== null) setRecentTxns(recentTxnsCached.transactions);
+  }, [recentTxnsCached]);
+
+  const { data: recurringCached, loading: recurringCacheLoading } =
+    useLocalStorageCache<{ ok: boolean; data: RecurringOverride[] }>(
+      "recurring-overrides",
+      "recurring",
+      () => apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides")
+    );
+
+  useEffect(() => {
+    if (recurringCached !== null) {
+      setRecurringOverrides(recurringCached.ok ? recurringCached.data : []);
+    }
+  }, [recurringCached]);
+
   const loadCashSummary = useCallback(() => {
     refreshCashCache();
   }, [refreshCashCache]);
@@ -458,38 +519,18 @@ export function DashboardPageV2() {
       return;
     }
     setLoading(true);
-    const historyFrom = firstDayNMonthsBefore(activeMonth, 6);
-    const monthEnd = lastDayOf(activeMonth);
     const pyMonth = sameMonthPriorYear(activeMonth);
     const results = await Promise.allSettled([
       apiJson<ResolutionSummary>("/resolution/summary", { cache: "no-store" }),
-      apiJson<NetWorthSnapshot>("/reports/balance-sheet", { cache: "no-store" }),
-      apiJson<{ points: Array<{ asOf: string; totals: { netWorth: number | null } }> }>(
-        `/reports/balance-sheet/history?from=${historyFrom}&to=${monthEnd}&interval=month`,
-        { cache: "no-store" }
-      ),
       apiJson<BudgetMonthResponse>(`/budget/${encodeURIComponent(activeMonth)}`, { cache: "no-store" }),
-      apiJson<{ transactions: LedgerRow[] }>(
-        `/transactions?limit=200&dateFrom=${historyFrom}&dateTo=${monthEnd}`,
-        { cache: "no-store" }
-      ),
-      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" }),
       apiJson<{ transactions: LedgerRow[] }>(
         `/transactions?limit=200&dateFrom=${firstDayOf(pyMonth)}&dateTo=${lastDayOf(pyMonth)}`,
         { cache: "no-store" }
       ),
     ]);
     setResolutionData(results[0].status === "fulfilled" ? results[0].value : null);
-    setNetWorthData(results[1].status === "fulfilled" ? results[1].value : null);
-    setNetWorthHistory(
-      results[2].status === "fulfilled"
-        ? results[2].value.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
-        : null
-    );
-    setBudgetData(results[3].status === "fulfilled" ? results[3].value : null);
-    setRecentTxns(results[4].status === "fulfilled" ? results[4].value.transactions : null);
-    setRecurringOverrides(results[5].status === "fulfilled" && results[5].value.ok ? results[5].value.data : []);
-    setPriorYearTxns(results[6].status === "fulfilled" ? results[6].value.transactions : null);
+    setBudgetData(results[1].status === "fulfilled" ? results[1].value : null);
+    setPriorYearTxns(results[2].status === "fulfilled" ? results[2].value.transactions : null);
     setLoading(false);
   }, [activeMonth, token]);
 
@@ -520,6 +561,7 @@ export function DashboardPageV2() {
       const json = (await res.json()) as { ok: boolean; data: RecurringOverride };
       if (json.ok) {
         setRecurringOverrides((prev) => [...prev.filter((row) => row.merchantKey !== normalized), json.data]);
+        bumpCacheVersion("recurring");
       }
     } catch {
       setRecurringOverrides((prev) => prev.filter((row) => row.id !== optimistic.id));
@@ -592,7 +634,7 @@ export function DashboardPageV2() {
     }
     return map;
   }, [priorYearTxns, activeMonth]);
-  const showAccountModule = !loading && recentTxns !== null;
+  const showAccountModule = !recentTxnsCacheLoading && recentTxns !== null;
 
   const trendData = cashData && cashData !== "error" ? cashData.monthlyTrend : [];
   const trendMax = useMemo(
@@ -822,7 +864,7 @@ export function DashboardPageV2() {
 
       <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, lg: 4 }} spacing="md" mt="lg">
         <Paper component="section" withBorder p="md" radius="md">
-          {loading ? (
+          {cashCacheLoading && cashData === null ? (
             <GroveCardLoader label="Loading spending…" />
           ) : cashUnavailable ? (
             <Text size="sm" c="dimmed">
@@ -842,7 +884,11 @@ export function DashboardPageV2() {
               </Text>
               <Stack gap={8} mt="xs">
                 {(() => {
-                  const sortedSlices = [...slices].sort((a, b) => b.outflows - a.outflows);
+                  const sortedSlices = [...slices].sort((a, b) => {
+                    if (a.categoryName === "Other") return 1;
+                    if (b.categoryName === "Other") return -1;
+                    return b.outflows - a.outflows;
+                  });
                   const maxOut = Math.max(...sortedSlices.map((s) => s.outflows), 1);
                   return sortedSlices.map((slice, idx) => {
                     const pct = (slice.outflows / maxOut) * 100;
@@ -928,7 +974,7 @@ export function DashboardPageV2() {
           <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
             Net Worth
           </Text>
-          {loading ? (
+          {netWorthCacheLoading && netWorthData === null ? (
             <GroveCardLoader label="Calculating your net worth…" />
           ) : (
             <>
@@ -1008,7 +1054,7 @@ export function DashboardPageV2() {
           <Text size="xs" c="dimmed" mb="xs">
             Estimated from repeated charges
           </Text>
-          {loading ? (
+          {recurringCacheLoading && recurringOverrides.length === 0 ? (
             <GroveCardLoader label="Detecting recurring payments…" />
           ) : recurringAll.length === 0 ? (
             <Text size="sm" c="dimmed">

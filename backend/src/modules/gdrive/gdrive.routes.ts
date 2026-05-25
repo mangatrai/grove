@@ -224,7 +224,7 @@ gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: Authen
       return;
     }
     if (result.reason === "needs_reauth") {
-      res.status(401).json({
+      res.status(409).json({
         code: "GDRIVE_NEEDS_REAUTH",
         message: "Google Drive authorization has expired. Reconnect in Settings."
       });
