@@ -67,8 +67,8 @@ The current transfer auto-pairing window is ±2 days (`canonical-ingest.service.
 
 ## P2 — High-Value Features
 
-### F-1: In-app notification system + budget/operation alerts
-Unified notification center — bell icon with unread badge in the top bar, dropdown notification panel, configurable per-type preferences. Settings → Notifications tab (currently a confirmed placeholder) becomes functional.
+### F-1: In-app notification system + budget/operation alerts ✅ SHIPPED (CR-216, 2026-05-25)
+Unified notification center — bell icon with unread badge in the top bar, dropdown notification panel, configurable per-type preferences. Settings → Notifications tab (previously a placeholder) is fully functional.
 
 **Design details:** See `docs/V4_BACKLOG.md` §Notification System for full schema, API, and trigger spec.
 
@@ -193,9 +193,9 @@ A "Spotify Wrapped for your finances" — triggered manually in January after th
 
 **UI:** "Year in Review" modal or dedicated page — card-per-stat layout, AI narrative at top, data cards below.
 
-**Email:** When F-1 (notification system) has shipped, deliver via `year_summary_ready` notification with email.
+**Email:** F-1 shipped (CR-216, 2026-05-25) — `year_summary_ready` notification type can now be added here to deliver via in-app + email.
 
-**Dependency:** F-1 for email delivery; UI-only mode works without it.
+**Dependency:** F-1 now shipped; email delivery is unblocked.
 
 **Design notes:** See `docs/V4_BACKLOG.md` §AI Year-End Summary for prompt design.
 
@@ -509,19 +509,19 @@ These items are removed from the active backlog. No plans to build.
 | R-3 | Remove `checking` from `LIABILITY_ACCOUNT_TYPES` | ✅ Shipped | Bug fix |
 | F-6 | Dashboard + Net Worth caching with refresh icon | ✅ Shipped | Performance |
 | TM-1 | Transfer date tolerance 2 → 4 days | ✅ Shipped | Bug fix |
-| F-1 | In-app notification system + alerts | P2 | Feature |
+| F-1 | In-app notification system + alerts | ✅ Shipped | Feature |
 | F-2 | Balance sheet member subtotals | ✅ Shipped | Feature |
 | F-3 | Payslip enhancement pass (PS-1/PS-2/PS-3/PS-4) | ✅ Shipped | Feature |
 | TM-2 | Transfer pair visibility + manual pair/unpair UI | ✅ Shipped | Feature |
 | TM-3 | Transfer matching — same-institution score boost | ❌ Not doing | Enhancement |
-| F-7 | AI Year-End "Wrapped" financial summary | P2 | Feature |
-| I-8 | Playwright E2E spike | P3 | Testing |
+| F-7 | AI Year-End "Wrapped" financial summary | ✅ Shipped | Feature |
+| I-8 | Playwright E2E spike | Deferred | Testing |
 | I-9 | Fuzzy match categorization (Tier B) | ❌ Not doing | Enhancement |
 | F-4 | Delete property | ✅ Shipped | Feature |
 | F-5 | Account closed/inactive status | ✅ Shipped | Feature |
 | F-8 | BY ACCOUNT card — account filter, row cap, full pass | ✅ Shipped | UX |
 | F-6b | Net Worth snapshot + row-expansion cache | ✅ Shipped | Performance |
-| I-10 | App-wide error logging audit | P3 | Reliability |
+| I-10 | App-wide error logging audit | ✅ Shipped | Reliability |
 | I-12 | "Other" category hyperlink on dashboard | ✅ Shipped | UX |
 | TM-4 | Near-duplicate detection — masked vs real description variants | ✅ Shipped | Bug fix |
 | F-9 | Recurring payments — display name field in tag modal | ✅ Shipped | UX |
@@ -537,4 +537,4 @@ These items are removed from the active backlog. No plans to build.
 
 ---
 
-*Last updated: 2026-05-24. PS-5 Phase 2 dropped (too complex for marginal gain; rough tax signal deferred to F-7 Year-End Summary). PS-2b shipped (UX-209/UX-210).*
+*Last updated: 2026-05-25. F-1 shipped (CR-216) — notification system fully live. F-7 email delivery (year_summary_ready) now unblocked. I-8 Playwright spike deferred post-V4. T-1 doc consolidation deferred post-V4. All P1/P2 items shipped; V4 complete.*
