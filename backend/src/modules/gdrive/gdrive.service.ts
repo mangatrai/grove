@@ -63,6 +63,7 @@ export type GDriveStatus = {
   backupFrequencyHours: number;
   backupRetentionCount: number;
   lastScheduledBackupAt: string | null;
+  needsReauth: boolean;
 };
 
 type GDriveRow = {
@@ -76,6 +77,7 @@ type GDriveRow = {
   backup_frequency_hours: number;
   backup_retention_count: number;
   last_scheduled_backup_at: string | null;
+  needs_reauth: boolean;
 };
 
 function mapRow(r: GDriveRow): GDriveStatus {
@@ -88,7 +90,8 @@ function mapRow(r: GDriveRow): GDriveStatus {
     lastError: r.last_error ?? null,
     backupFrequencyHours: Number(r.backup_frequency_hours),
     backupRetentionCount: Number(r.backup_retention_count),
-    lastScheduledBackupAt: r.last_scheduled_backup_at != null ? String(r.last_scheduled_backup_at) : null
+    lastScheduledBackupAt: r.last_scheduled_backup_at != null ? String(r.last_scheduled_backup_at) : null,
+    needsReauth: Boolean(r.needs_reauth)
   };
 }
 
@@ -228,8 +231,8 @@ export async function connectGDrive(
 ): Promise<void> {
   await qExec(
     `INSERT INTO household_gdrive_config
-       (household_id, oauth2_refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error)
-     VALUES (?, ?, ?, ?, ?, NOW(), NULL)
+       (household_id, oauth2_refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error, needs_reauth)
+     VALUES (?, ?, ?, ?, ?, NOW(), NULL, FALSE)
      ON CONFLICT (household_id) DO UPDATE SET
        oauth2_refresh_token              = EXCLUDED.oauth2_refresh_token,
        folder_id                         = EXCLUDED.folder_id,
@@ -237,12 +240,20 @@ export async function connectGDrive(
        connected_at                      = NOW(),
        connected_by_user_id              = EXCLUDED.connected_by_user_id,
        last_verified_at                  = NOW(),
-       last_error                        = NULL`,
+       last_error                        = NULL,
+       needs_reauth                      = FALSE`,
     householdId,
     encryptToken(refreshToken),
     folderId,
     folderName,
     userId
+  );
+}
+
+export async function markGDriveNeedsReauth(householdId: string): Promise<void> {
+  await qExec(
+    `UPDATE household_gdrive_config SET needs_reauth = TRUE WHERE household_id = ?`,
+    householdId
   );
 }
 
@@ -253,7 +264,7 @@ export async function disconnectGDrive(householdId: string): Promise<void> {
 export async function getGDriveStatus(householdId: string): Promise<GDriveStatus | null> {
   const r = await qGet<GDriveRow>(
     `SELECT household_id, folder_id, folder_name, connected_at, connected_by_user_id, last_verified_at, last_error,
-            backup_frequency_hours, backup_retention_count, last_scheduled_backup_at
+            backup_frequency_hours, backup_retention_count, last_scheduled_backup_at, needs_reauth
        FROM household_gdrive_config WHERE household_id = ?`,
     householdId
   );

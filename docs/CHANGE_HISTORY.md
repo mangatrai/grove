@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-215 (2026-05-25): Google Drive — handle expired refresh token (invalid_grant)
+
+- **Type:** Bug fix — production backup failure with no recovery path
+- **What:** Google OAuth refresh tokens issued by apps in "Testing" status expire after 7 days. Previously the backup job and list-backups endpoint logged `invalid_grant` and failed silently with no user-visible signal.
+  - Migration `0050`: added `needs_reauth BOOLEAN DEFAULT FALSE` to `household_gdrive_config`
+  - `gdrive-backup.service.ts` `runBackupJob`: catches `invalid_grant` GaxiosError, sets `needs_reauth = TRUE` on the config, and sends an email to the household owner
+  - `gdrive-backup.service.ts` `listDriveBackups`: catches `invalid_grant`, sets `needs_reauth = TRUE`, returns new `needs_reauth` reason (→ 401 from route)
+  - `gdrive.service.ts`: `markGDriveNeedsReauth()` helper; `connectGDrive()` clears `needs_reauth = FALSE` on successful reconnect; `needsReauth` field added to `GDriveStatus` type and SELECT
+  - `gdrive.routes.ts` `/backups`: handles `needs_reauth` reason → 401 `GDRIVE_NEEDS_REAUTH`
+  - `BackupRestoreSection.tsx`: orange alert banner + "Reconnect Google Drive" button shown when `needsReauth = true`
+- **Why:** App is in Google OAuth "Testing" status (personal use, no Google verification); tokens expire every 7 days. Backup had been silently failing for ~3 days before user noticed. Fix surfaces the expiry via email + in-app banner with a one-click reconnect.
+- **Files:** `backend/db/migrations/0050_gdrive_needs_reauth.sql`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`
+
+---
+
 ## UX-214 (2026-05-24): Year in Review — revised LLM narrative prompt
 
 - **Type:** Prompt quality — narrative tone and structure

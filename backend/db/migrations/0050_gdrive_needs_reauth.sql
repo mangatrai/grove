@@ -1,0 +1,2 @@
+ALTER TABLE household_gdrive_config
+  ADD COLUMN IF NOT EXISTS needs_reauth BOOLEAN NOT NULL DEFAULT FALSE;

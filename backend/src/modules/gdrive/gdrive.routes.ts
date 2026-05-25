@@ -223,6 +223,13 @@ gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: Authen
       });
       return;
     }
+    if (result.reason === "needs_reauth") {
+      res.status(401).json({
+        code: "GDRIVE_NEEDS_REAUTH",
+        message: "Google Drive authorization has expired. Reconnect in Settings."
+      });
+      return;
+    }
     log.error("gdrive list backups failed", {
       householdId: req.authUser!.householdId,
       message: result.message
