@@ -199,6 +199,8 @@ export async function listDriveBackups(householdId: string): Promise<ListDriveBa
       if (status === 404) {
         return { ok: false, reason: "drive_error", message: "Drive folder not found." };
       }
+    } else {
+      log.error("listDriveBackups failed", { householdId, err });
     }
     return { ok: false, reason: "drive_error", message: mapDriveListError(err) };
   }

@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-213 (2026-05-24): Error logging — GDrive and export preview routes (I-10)
+
+- **Type:** Observability — log Drive/OAuth/HFB failures before 4xx/5xx responses
+- **What:** `gdrive.service.ts` OAuth exchange; `gdrive-backup.service.ts` non-Gaxios list errors; `gdrive.routes.ts` connect/list/download/preview/restore; `exports.routes.ts` HFB manifest preview.
+- **Why:** I-10 audit cluster 2 — GDrive module failures were invisible in server logs.
+- **Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/exports.routes.ts`
+
+---
+
 ## FIX-212 (2026-05-24): Error logging — imports, payslips, startup, background jobs (I-10)
 
 - **Type:** Observability — log swallowed import/payslip/startup/job errors

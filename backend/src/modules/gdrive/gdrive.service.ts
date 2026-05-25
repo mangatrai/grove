@@ -5,6 +5,7 @@ import { google } from "googleapis";
 
 import { env } from "../../config/env.js";
 import { qExec, qGet } from "../../db/query.js";
+import { log } from "../../logger.js";
 import { logGoogleDriveApiError } from "./log-google-drive-api-error.js";
 
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
@@ -190,6 +191,7 @@ export async function exchangeAndConnect(
     refreshToken = tokens.refresh_token;
     client.setCredentials(tokens);
   } catch (err: unknown) {
+    log.error("gdrive OAuth code exchange failed", { householdId, err });
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, message: `OAuth2 code exchange failed: ${msg}` };
   }
