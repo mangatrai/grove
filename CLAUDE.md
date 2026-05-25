@@ -25,7 +25,7 @@ docker compose up -d     # Local Postgres 18 on port 5433 (DATABASE_SSL=0 locall
 ## Code Conventions
 
 - **No default exports** — named exports only
-- **No `console.*`** outside `logger.ts` and `scripts/` — use `logger.info/warn/error`
+- **No `console.*`** outside `logger.ts` and `scripts/` — use `log.info` / `log.warn` / `log.error` / `log.debug` from `backend/src/logger.ts`
 - Unused vars: prefix `_` to suppress ESLint; ESM throughout (`"type": "module"`)
 - File naming: `<domain>.routes.ts` / `.service.ts` / `.middleware.ts` / `.types.ts`
 - DB columns `snake_case` → TypeScript `camelCase`; API routes `kebab-case`; env vars `SCREAMING_SNAKE_CASE`

@@ -1,3 +1,4 @@
+import { log } from "../../logger.js";
 import { extractPdfText } from "../imports/profiles/pdf-text.js";
 import { normalizePdfExtractText } from "./profiles/ibm-payslip-pdf.js";
 import { DELOITTE_PAYSLIP_PDF_PROFILE_ID, IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
@@ -125,7 +126,8 @@ export async function sniffPayslipPdfBuffer(
   let text: string;
   try {
     text = await extractPdfText(buffer);
-  } catch {
+  } catch (err) {
+    log.warn("payslip sniff: PDF read failed", { householdId, err });
     return { ok: false, reason: "pdf_read_error" };
   }
   const normalizedText = normalizePdfExtractText(text).trim();

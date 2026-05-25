@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-212 (2026-05-24): Error logging — imports, payslips, startup, background jobs (I-10)
+
+- **Type:** Observability — log swallowed import/payslip/startup/job errors
+- **What:** Startup IIFE try/catch + `process.exit(1)`; `import-parser` / `import-upload` parse failures; payslip LLM/PDF sniff failures; export/import/backup job handlers pass full `err` to `log.error`. `CLAUDE.md` documents `log.*` API (not `logger.*`).
+- **Why:** I-10 audit cluster 1 — core user flows failed with no stack trace in logs.
+- **Files:** `backend/src/server.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/src/modules/imports/import-upload.service.ts`, `backend/src/modules/payslip/payslip-parse.service.ts`, `backend/src/modules/payslip/payslip-sniff.service.ts`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `CLAUDE.md`
+
+---
+
 ## CR-211 (2026-05-24): Year in Review — backend service, migration, and routes (F-7)
 
 - **Type:** New feature — backend half of F-7 Year-End Wrapped

@@ -601,7 +601,15 @@ export async function parseSessionImportFiles(
           }
         }
       }
-    } catch {
+    } catch (err) {
+      log.error("import parse failed", {
+        sessionId,
+        householdId,
+        importFileId: file.id,
+        fileName: file.file_name,
+        parserProfileId: profileId,
+        err
+      });
       await qExec(
         `UPDATE import_file
      SET status = ?, confidence_summary = ?

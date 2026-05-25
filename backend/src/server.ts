@@ -37,31 +37,36 @@ if (env.MODE === "PROD" && !fs.existsSync(frontendDist)) {
 const port = Number(env.PORT);
 
 void (async () => {
-  await getSql();
-  await checkExportCoverage();
-  if (env.MODE !== "TEST") {
-    startBackupScheduler();
-    startRealtyScheduler();
-  }
-  const server = app.listen(port, () => {
-    log.info(`Backend listening on http://localhost:${port}`);
-    log.info(`Postgres: ${env.DATABASE_HOST}:${env.DATABASE_PORT}/${env.DATABASE_NAME}`);
-  });
-
-  function shutdown(signal: string) {
-    log.info(`${signal} received — shutting down gracefully`);
-    server.close(async () => {
-      await closeSql();
-      log.info("Server closed, process exiting");
-      process.exit(0);
+  try {
+    await getSql();
+    await checkExportCoverage();
+    if (env.MODE !== "TEST") {
+      startBackupScheduler();
+      startRealtyScheduler();
+    }
+    const server = app.listen(port, () => {
+      log.info(`Backend listening on http://localhost:${port}`);
+      log.info(`Postgres: ${env.DATABASE_HOST}:${env.DATABASE_PORT}/${env.DATABASE_NAME}`);
     });
-    // Force-exit if graceful drain takes too long (e.g. hung websocket or keep-alive)
-    setTimeout(() => {
-      log.warn("Graceful shutdown timed out — forcing exit");
-      process.exit(1);
-    }, 10_000).unref();
-  }
 
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
-  process.on("SIGINT", () => shutdown("SIGINT"));
+    function shutdown(signal: string) {
+      log.info(`${signal} received — shutting down gracefully`);
+      server.close(async () => {
+        await closeSql();
+        log.info("Server closed, process exiting");
+        process.exit(0);
+      });
+      // Force-exit if graceful drain takes too long (e.g. hung websocket or keep-alive)
+      setTimeout(() => {
+        log.warn("Graceful shutdown timed out — forcing exit");
+        process.exit(1);
+      }, 10_000).unref();
+    }
+
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    process.on("SIGINT", () => shutdown("SIGINT"));
+  } catch (err) {
+    log.error("Backend startup failed", err);
+    process.exit(1);
+  }
 })();

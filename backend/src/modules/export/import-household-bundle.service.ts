@@ -444,7 +444,7 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     await qExec(`UPDATE import_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);
-    log.error(`Import job ${jobId} failed: ${msg}`);
+    log.error("Import job failed", { jobId, householdId, err });
   } finally {
     try {
       await fsp.unlink(storagePath);

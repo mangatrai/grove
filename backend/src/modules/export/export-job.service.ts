@@ -179,7 +179,7 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     await qExec(`UPDATE export_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);
-    log.error(`Export job ${jobId} failed: ${msg}`);
+    log.error("Export job failed", { jobId, householdId, err });
   }
 }
 

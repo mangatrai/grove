@@ -1,5 +1,6 @@
 import type { ParserProfileId } from "../imports/profiles/profile-ids.js";
 import { env } from "../../config/env.js";
+import { log } from "../../logger.js";
 import { extractPayslipFromPdf } from "./llm-extract/extract-payslip-llm.js";
 import { mapCanonicalExtractToPersist, validateCanonicalForImport } from "./llm-extract/payslip-canonical-map.js";
 import type { ParsedPayslipSummary, PayslipHybridColumns, LineItemForInsert } from "./payslip.types.js";
@@ -41,6 +42,7 @@ export async function parsePayslipPdfByProfile(
       const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
       return { ok: true, summary, hybrid, lineItems, usageTokens: usage?.total_tokens ?? null };
     } catch (e) {
+      log.error("payslip LLM extraction failed", { parserProfileId, err: e });
       const message = e instanceof Error ? e.message : String(e);
       return { ok: false, reason: "llm_extraction_failed", message };
     }

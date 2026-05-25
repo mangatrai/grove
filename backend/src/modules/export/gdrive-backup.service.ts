@@ -358,7 +358,7 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
       msg,
       jobId
     );
-    log.error(`Backup job ${jobId} failed: ${msg}`);
+    log.error("Backup job failed", { jobId, householdId, err });
   } finally {
     try {
       fs.unlinkSync(tempPath);
