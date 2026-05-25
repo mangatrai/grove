@@ -18,6 +18,27 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-211 (2026-05-24): Year in Review — backend service, migration, and routes (F-7)
+
+- **Type:** New feature — backend half of F-7 Year-End Wrapped
+- **Migration:** `0049_year_summary_cache.sql` — `year_summary_cache` table (Postgres); stores `data_json`, `narrative_json`, SHA-256 `data_hash` for lazy invalidation; `UNIQUE(household_id, year)`.
+- **Service:** `year-summary.service.ts` — aggregates income/spending from `transaction_canonical`, net worth + investment + bank balance growth from `account_balance_snapshot`, top categories, best/worst month, largest transaction, top merchant, payslip YTD aggregates from last payslip per household member. Generates 3-paragraph LLM narrative (OpenAI gpt-4o, cached). Hash-based cache invalidation — never auto-regenerates on import; waits for user to open overlay.
+- **Routes:** `GET /reports/year-summary?year=YYYY` (returns `YearSummaryResponse`), `POST /reports/year-summary/:year/email` (sends static summary email via existing mailer).
+- **Env:** Added `VITE_MODE=TEST` to `.env` — frontend reads `import.meta.env.VITE_MODE === 'TEST'` to show Year in Review button outside the Feb–Mar production window.
+- **Why:** F-7 Year-End Wrapped feature. F-1 (notification system) dependency removed — existing SMTP/nodemailer is sufficient for the email endpoint.
+- **Files:** `backend/db/migrations/0049_year_summary_cache.sql`, `backend/src/modules/reports/year-summary.types.ts`, `backend/src/modules/reports/year-summary.service.ts`, `backend/src/modules/reports/reports.routes.ts`, `.env`
+
+---
+
+## UX-211 (2026-05-24): Year in Review — frontend wrapped summary overlay
+
+- **Type:** New feature (frontend only; backend `GET /reports/year-summary` built in parallel)
+- **What:** Dashboard button (Feb–Mar, or always in `VITE_MODE=TEST`) opens a confirmation modal, then a full-screen 12-slide “Year in Review” overlay with animated stats, charts, and AI narrative. New files: `year-review/types.ts`, `useYearSummary.ts`, `YearInReviewOverlay.tsx`, `YearInReviewSlides.tsx`; CSS in `index.css`. Slide 12 email CTA (when `emailEnabled` from `/auth/capabilities`) posts `POST /reports/year-summary/:year/email` with JSON body `{ email }`, not a query param.
+- **Why:** Spotify-style year-end household finance recap for prior calendar year.
+- **Files:** `frontend/src/components/year-review/*`, `frontend/src/hooks/useYearSummary.ts`, `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/index.css`
+
+---
+
 ## UX-210 (2026-05-23): PS-2b follow-on — filter insurance from contributions card; add post-tax savings rate badge
 
 - **Type:** Correctness fix + UX enhancement

@@ -66,6 +66,9 @@ Apply this whenever the investigation would require reading more than 2–3 file
 - **Classification is rule-based only.** LLM/Anthropic categorization was fully removed. OpenAI is used only for payslip PDF extraction.
 - **After restore:** canonical transactions may reference deleted custom categories. Always `LEFT JOIN category`, never `INNER JOIN`.
 - **Bank adapters** live in `backend/src/modules/imports/profiles/`. BoA is MVP/primary. Adding a new one: create file in `profiles/`, register in the profile IDs enum, wire into `import-parser.service.ts`.
+- **Export registry:** Every new DB table must be registered in `EXPORT_REGISTRY` or `EXPORT_EPHEMERAL_TABLES` (check `backend/src/modules/export/`). Missing tables produce a `[export-coverage]` WARN on startup and will be silently excluded from backups. Check this on every migration.
+- **DB query API:** `qAll/qGet/qExec` take `(sqlStr, ...params)` — SQL with `?` placeholders, params spread as individual args. `sqlBind` returns `{ text, values }` for use inside `qBegin` transactions only. Do NOT wrap `sqlBind(...)` inside `qAll/qGet/qExec` — that passes an object where a string is expected and crashes at runtime.
+- **Date column types:** `transaction_canonical.txn_date` and `payslip_snapshot.pay_date` are `TEXT` (ISO YYYY-MM-DD). Compare with plain string params — no `::date` cast on the param. For `EXTRACT`/`date_part`, cast the column: `EXTRACT(MONTH FROM txn_date::date)`. `account_balance_snapshot.as_of_date` IS a real date — `::date` cast on params works there.
 
 ---
 

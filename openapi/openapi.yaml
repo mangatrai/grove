@@ -2049,6 +2049,74 @@ paths:
       summary: Update manual balance snapshot amount/currency
       x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
+  /reports/year-summary:
+    get:
+      tags: [reports]
+      summary: Year-End Wrapped — compute or return cached annual financial summary
+      description: >-
+        Returns pre-computed YearSummaryData (income, spending, net worth, top categories,
+        best/worst month, investment growth, payslip tax aggregates) plus a 3-paragraph LLM
+        narrative. First call for a given year triggers data computation + OpenAI narrative
+        (~30s); subsequent calls return the Postgres-cached result instantly. Cache is
+        invalidated by SHA-256 hash of source data; regeneration happens on next open, not
+        on import.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, example: 2025 }
+      responses:
+        "200":
+          description: Year summary data + narrative
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  year: { type: integer }
+                  data: { type: object, description: YearSummaryData — see year-summary.types.ts }
+                  narrative: { type: array, items: { type: string }, minItems: 3, maxItems: 3 }
+                  generatedAt: { type: string, format: date-time }
+                  fromCache: { type: boolean }
+        "400":
+          description: Invalid year parameter
+  /reports/year-summary/{year}/email:
+    post:
+      tags: [reports]
+      summary: Email the year-end summary to the provided address
+      description: >-
+        Generates (or uses cached) summary and sends a static HTML email via the
+        household's configured SMTP transport. Body must include recipient email.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema: { type: integer, example: 2025 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Email sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400":
+          description: Invalid year or email
+        "500":
+          description: Email send failed
+
   /payslips:
     get:
       tags: [payslips]

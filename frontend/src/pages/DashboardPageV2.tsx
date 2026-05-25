@@ -8,6 +8,7 @@ import {
   Box,
   Button,
   Group,
+  Modal,
   Paper,
   Progress,
   SimpleGrid,
@@ -34,9 +35,11 @@ import {
   IconArrowsExchange,
   IconCopy,
   IconRefresh,
+  IconSparkles,
 } from "@tabler/icons-react";
 
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
+import { YearInReviewOverlay } from "../components/year-review/YearInReviewOverlay";
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
 import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
@@ -409,6 +412,15 @@ export function DashboardPageV2() {
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAllRecurring, setShowAllRecurring] = useState(false);
+  const [showYearReview, setShowYearReview] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  function isYearReviewVisible(): boolean {
+    if (import.meta.env.VITE_MODE === "TEST") return true;
+    const m = new Date().getMonth() + 1;
+    return m === 2 || m === 3;
+  }
+  const reviewYear = new Date().getFullYear() - 1;
 
   const isCurrentMonth = activeMonth === currentYearMonth();
 
@@ -642,11 +654,22 @@ export function DashboardPageV2() {
               ›
             </Button>
           </Group>
-          <Tooltip
-            label={cashLastUpdated ? `Last updated ${formatTimeAgo(cashLastUpdated)}` : "Loading..."}
-            position="bottom"
-            withArrow
-          >
+          <Group gap="sm">
+            {isYearReviewVisible() ? (
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<IconSparkles size={14} />}
+                onClick={() => setConfirmOpen(true)}
+              >
+                {reviewYear} Year in Review
+              </Button>
+            ) : null}
+            <Tooltip
+              label={cashLastUpdated ? `Last updated ${formatTimeAgo(cashLastUpdated)}` : "Loading..."}
+              position="bottom"
+              withArrow
+            >
             <ActionIcon
               variant="subtle"
               size="sm"
@@ -656,7 +679,8 @@ export function DashboardPageV2() {
             >
               <IconRefresh size={14} />
             </ActionIcon>
-          </Tooltip>
+            </Tooltip>
+          </Group>
         </Group>
 
         {(loading || cashCacheLoading) && cashData === null ? (
@@ -1130,6 +1154,35 @@ export function DashboardPageV2() {
             </BarChart>
           </ResponsiveContainer>
         </Box>
+      ) : null}
+
+      <Modal
+        opened={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={`Ready for your ${reviewYear} Year in Review?`}
+        centered
+      >
+        <Text size="sm" mb="lg">
+          We&apos;ll pull all your data from {reviewYear} and generate a personalised summary. Takes about 30
+          seconds the first time — instant on return visits.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmOpen(false);
+              setShowYearReview(true);
+            }}
+          >
+            Let&apos;s go!
+          </Button>
+        </Group>
+      </Modal>
+
+      {showYearReview ? (
+        <YearInReviewOverlay year={reviewYear} onClose={() => setShowYearReview(false)} />
       ) : null}
     </Box>
   );

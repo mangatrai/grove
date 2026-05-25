@@ -194,6 +194,13 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 19,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "year_summary_cache",
+    tableName: "year_summary_cache",
+    restoreOrder: 20,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
   }
 ];
 
