@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ActionIcon, Alert, Badge, Box, Button, Group, Paper, SimpleGrid, Stack, Text, Title } from "@mantine/core";
-import { GroveLoader } from "../components/GroveLoader";
-import { IconEye, IconFilePlus, IconPlus, IconTrash } from "@tabler/icons-react";
-import { Link, Navigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Alert, Button, Collapse, Group, Stack, Text, Title } from "@mantine/core";
+import { IconChevronDown, IconChevronRight, IconFilePlus, IconPlus } from "@tabler/icons-react";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { HelpIcon } from "../components/HelpIcon";
-import { HierarchicalSearchPicker, type HierarchicalPickerGroup } from "../components/HierarchicalSearchPicker";
+import { GroveLoader } from "../components/GroveLoader";
 import { PayslipIncomeCharts } from "../payslip/PayslipIncomeCharts";
+import { PayslipListCard } from "../payslip/PayslipListCard";
+import { SparklineMini } from "../payslip/SparklineMini";
 import type { PayslipSnapshotDetail } from "../payslip/types";
 import { formatUsd } from "../utils/format";
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 type ListResponse = {
   total: number;
@@ -22,64 +24,239 @@ type ListResponse = {
 type OwnerProfileOption = { id: string; label: string };
 type HouseholdMemberResponse = { id: string; fullName?: string; firstName?: string; lastName?: string };
 type HouseholdMembersPayload = { members: HouseholdMemberResponse[] };
-type HouseholdProfileResponse = {
-  profile: {
-    id: string;
-    fullName?: string;
-    firstName?: string;
-    lastName?: string;
-  };
-};
+type HouseholdProfileResponse = { profile: { id: string; fullName?: string; firstName?: string; lastName?: string } };
 
-function formatMoney(n: number | null): string {
-  if (n == null || !Number.isFinite(n)) {
-    return "—";
-  }
+type PersonInfo = { id: string; name: string; initials: string; color: string };
+
+// ─── Constants ──────────────────────────────────────────────────────────────
+
+const PERSON_COLORS = ["#2d6a4f", "#c8860a", "#7a8a6e", "#8b3a26", "#4a8a6e", "#7c3aed"];
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return "?";
+}
+
+function monthOf(ps: PayslipSnapshotDetail): string {
+  const d = ps.payDate ?? ps.payPeriodEnd;
+  if (!d) return "Unknown";
+  const parsed = new Date(`${d}T12:00:00`);
+  if (Number.isNaN(parsed.getTime())) return d.slice(0, 7);
+  return parsed.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+function formatMoney(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   return `$${formatUsd(n)}`;
 }
 
+type MonthGroup = { key: string; items: PayslipSnapshotDetail[] };
+
+function groupByMonth(items: PayslipSnapshotDetail[]): MonthGroup[] {
+  const groups: MonthGroup[] = [];
+  const seen = new Map<string, MonthGroup>();
+  for (const item of items) {
+    const key = monthOf(item);
+    if (!seen.has(key)) {
+      const g: MonthGroup = { key, items: [] };
+      groups.push(g);
+      seen.set(key, g);
+    }
+    seen.get(key)!.items.push(item);
+  }
+  return groups;
+}
+
+function getPersonNetSeries(items: PayslipSnapshotDetail[], personId: string): number[] {
+  return items
+    .filter((p) => p.ownerPersonProfileId === personId)
+    .sort((a, b) => {
+      const da = a.payDate ?? a.payPeriodEnd ?? a.createdAt;
+      const db = b.payDate ?? b.payPeriodEnd ?? b.createdAt;
+      return da < db ? -1 : 1;
+    })
+    .slice(-10)
+    .map((p) => p.netPayCurrent ?? 0);
+}
+
+function getPersonLatestPayslip(
+  items: PayslipSnapshotDetail[],
+  personId: string
+): PayslipSnapshotDetail | null {
+  return (
+    items
+      .filter((p) => p.ownerPersonProfileId === personId)
+      .sort((a, b) => {
+        const da = a.payDate ?? a.payPeriodEnd ?? a.createdAt;
+        const db = b.payDate ?? b.payPeriodEnd ?? b.createdAt;
+        return da > db ? -1 : 1;
+      })[0] ?? null
+  );
+}
+
+function getPersonYtdNet(items: PayslipSnapshotDetail[], personId: string): number | null {
+  return getPersonLatestPayslip(items, personId)?.netPayYtd ?? null;
+}
+
+function getPersonTotalTaxRateYtd(items: PayslipSnapshotDetail[], personId: string): number | null {
+  const latest = getPersonLatestPayslip(items, personId);
+  if (!latest) return null;
+  const gross = latest.grossPayYtd;
+  const taxes = latest.employeeTaxesYtd;
+  if (gross == null || gross === 0 || taxes == null) return null;
+  return (taxes / gross) * 100;
+}
+
+// ─── TrendCard ───────────────────────────────────────────────────────────────
+
+const mono: CSSProperties = { fontFamily: "'JetBrains Mono', monospace" };
+
+function TrendCard({
+  person,
+  netSeries,
+  ytdNet,
+  totalTaxRateYtd,
+}: {
+  person: PersonInfo;
+  netSeries: number[];
+  ytdNet: number | null;
+  totalTaxRateYtd: number | null;
+}) {
+  // ⚠ only for clearly concerning rates (< ~24% total ≈ < 16% federal after FICA).
+  // No green tick — the list should be quiet when things are healthy.
+  const taxWarning = totalTaxRateYtd != null && totalTaxRateYtd < 24;
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        minWidth: 140,
+        padding: "12px 14px",
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 9,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 26,
+            height: 26,
+            borderRadius: "50%",
+            background: person.color,
+            color: "#fff",
+            fontSize: 11,
+            fontWeight: 700,
+            flexShrink: 0,
+            fontFamily: "'Inter Tight', 'Inter', sans-serif",
+          }}
+          aria-hidden
+        >
+          {person.initials}
+        </span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{person.name}</span>
+      </div>
+      <SparklineMini data={netSeries} width={120} height={30} color={person.color} />
+      <div style={{ display: "flex", gap: 16 }}>
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              color: "var(--color-text-muted)",
+              marginBottom: 2,
+            }}
+          >
+            Net YTD
+          </div>
+          <div style={{ ...mono, fontSize: 15, fontWeight: 600, color: person.color }}>
+            {formatMoney(ytdNet)}
+          </div>
+        </div>
+        {totalTaxRateYtd != null ? (
+          <div>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: "var(--color-text-muted)",
+                marginBottom: 2,
+              }}
+            >
+              Tax Rate
+            </div>
+            <div
+              style={{
+                ...mono,
+                fontSize: 15,
+                fontWeight: 600,
+                color: taxWarning ? "#92400e" : "var(--color-text-secondary)",
+              }}
+              title="Total tax rate YTD (all employee taxes ÷ gross pay)"
+            >
+              {taxWarning ? "⚠ " : ""}{totalTaxRateYtd.toFixed(1)}%
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main page ───────────────────────────────────────────────────────────────
+
 export function PayslipsPage() {
   const token = useAuthToken();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState<ListResponse | null>(null);
   const [ownerProfiles, setOwnerProfiles] = useState<OwnerProfileOption[]>([]);
-  const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [_deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<string | null>(
+    () => searchParams.get("ownerPersonProfileId")
+  ); // null = all
+  const [chartsOpen, setChartsOpen] = useState(false);
 
   const load = useCallback(async () => {
-    const params = new URLSearchParams({ limit: "200", offset: "0" });
-    if (ownerFilter === "household") {
-      params.set("ownerScope", "household");
-    } else if (ownerFilter?.startsWith("person:")) {
-      const id = ownerFilter.slice("person:".length);
-      if (id) {
-        params.set("ownerScope", "person");
-        params.set("ownerPersonProfileId", id);
-      }
-    }
-    const res = await apiJson<ListResponse>(`/payslips?${params.toString()}`);
+    const res = await apiJson<ListResponse>("/payslips?limit=200&offset=0");
     setData(res);
-  }, [ownerFilter]);
+  }, []);
 
   const loadOwners = useCallback(async () => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     const [membersRes, profileRes] = await Promise.all([
       apiJson<HouseholdMembersPayload>("/household/members").catch(
         () => ({ members: [] as HouseholdMemberResponse[] }) as HouseholdMembersPayload
       ),
       apiJson<HouseholdProfileResponse>("/household/profile").catch(
         () => ({ profile: { id: "", fullName: "Household" } }) as HouseholdProfileResponse
-      )
+      ),
     ]);
     const members = membersRes.members ?? [];
     const profile = profileRes.profile;
-    const mapped = members.map((m) => ({
+    const mapped: OwnerProfileOption[] = members.map((m) => ({
       id: m.id,
-      label: [m.fullName, [m.firstName, m.lastName].filter(Boolean).join(" ").trim()].find((x) => x && x.trim()) || m.id
+      label:
+        [m.fullName, [m.firstName, m.lastName].filter(Boolean).join(" ").trim()].find(
+          (x) => x && x.trim()
+        ) || m.id,
     }));
     if (profile?.id && !mapped.some((m) => m.id === profile.id)) {
       mapped.unshift({
@@ -87,7 +264,7 @@ export function PayslipsPage() {
         label:
           [profile.fullName, [profile.firstName, profile.lastName].filter(Boolean).join(" ").trim()].find(
             (x) => x && x.trim()
-          ) || "Me"
+          ) || "Me",
       });
     }
     setOwnerProfiles(mapped);
@@ -103,9 +280,7 @@ export function PayslipsPage() {
           let msg = text || res.statusText;
           try {
             const j = JSON.parse(text) as { message?: string };
-            if (j.message) {
-              msg = j.message;
-            }
+            if (j.message) msg = j.message;
           } catch {
             /* use raw */
           }
@@ -122,29 +297,8 @@ export function PayslipsPage() {
     [load]
   );
 
-  const belongsToGroups = useMemo<HierarchicalPickerGroup[]>(
-    () => [
-      {
-        group: "Household",
-        items: [{ value: "household", label: "Household", displayLabel: "Household", searchText: "household" }]
-      },
-      {
-        group: "Members",
-        items: ownerProfiles.map((p) => ({
-          value: `person:${p.id}`,
-          label: `Household > ${p.label}`,
-          displayLabel: p.label,
-          searchText: p.label
-        }))
-      }
-    ],
-    [ownerProfiles]
-  );
-
   useEffect(() => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     setLoading(true);
     setLoadError(null);
     void Promise.all([load(), loadOwners()])
@@ -155,142 +309,308 @@ export function PayslipsPage() {
       .finally(() => setLoading(false));
   }, [token, load, loadOwners]);
 
-  if (!token) {
-    return <Navigate to="/" replace />;
-  }
+  // ── Derived data ──────────────────────────────────────────────────────────
 
-  const latest = data?.items[0] ?? null;
+  const personMap = useMemo((): Map<string, PersonInfo> => {
+    const map = new Map<string, PersonInfo>();
+    ownerProfiles.forEach((p, idx) => {
+      map.set(p.id, {
+        id: p.id,
+        name: p.label,
+        initials: getInitials(p.label),
+        color: PERSON_COLORS[idx % PERSON_COLORS.length]!,
+      });
+    });
+    return map;
+  }, [ownerProfiles]);
+
+  const allItems = data?.items ?? [];
+
+  const filteredItems = useMemo(
+    () =>
+      selectedPerson
+        ? allItems.filter((ps) => ps.ownerPersonProfileId === selectedPerson)
+        : allItems,
+    [allItems, selectedPerson]
+  );
+
+  const householdGrossYtd = useMemo(() => {
+    const latestByPerson = new Map<string, number>();
+    for (const item of allItems) {
+      const pid = item.ownerPersonProfileId ?? "__household__";
+      if (!latestByPerson.has(pid) && item.grossPayYtd != null) {
+        latestByPerson.set(pid, item.grossPayYtd);
+      }
+    }
+    return Array.from(latestByPerson.values()).reduce((s, v) => s + v, 0);
+  }, [allItems]);
+
+  const personIds = useMemo(() => {
+    const seen = new Set<string>();
+    const ids: string[] = [];
+    for (const item of allItems) {
+      if (item.ownerPersonProfileId && !seen.has(item.ownerPersonProfileId)) {
+        seen.add(item.ownerPersonProfileId);
+        ids.push(item.ownerPersonProfileId);
+      }
+    }
+    return ids;
+  }, [allItems]);
+
+  const monthGroups = useMemo(() => groupByMonth(filteredItems), [filteredItems]);
+
+  // ── Guard ─────────────────────────────────────────────────────────────────
+
+  if (!token) return <Navigate to="/" replace />;
+
+  // ── Styles ────────────────────────────────────────────────────────────────
+
+  const pillBase: CSSProperties = {
+    padding: "4px 12px",
+    borderRadius: 20,
+    fontSize: 12.5,
+    fontWeight: 500,
+    cursor: "pointer",
+    border: "1px solid var(--color-border)",
+    background: "var(--color-surface)",
+    color: "var(--color-text-secondary)",
+    transition: "background 0.12s, border-color 0.12s",
+    minHeight: 30,
+  };
+
+  const pillActive: CSSProperties = {
+    ...pillBase,
+    background: "var(--color-accent-subtle)",
+    borderColor: "var(--fs-forest)",
+    color: "var(--fs-forest)",
+    fontWeight: 600,
+  };
 
   return (
-    <Stack>
-      {/* Page header */}
-      <Paper withBorder p="lg">
-        <Group align="center" gap={8} wrap="wrap">
-          <Title order={2} m={0}>Payslips</Title>
-          <HelpIcon label="Add payslip PDFs via New Import, or add a manual stub with no PDF. Manage employers in Settings → Profile." />
-          <Group ml="auto" gap={8}>
-            <Button component={Link} to="/imports" variant="default" leftSection={<IconFilePlus size={14} />}>
-              Import PDF
-            </Button>
-            <Button component={Link} to="/payslips/new" leftSection={<IconPlus size={14} />}>
-              Add manually
-            </Button>
-          </Group>
+    <Stack gap={12}>
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <div>
+          <Title order={1} style={{ fontFamily: "'Inter Tight', 'Inter', sans-serif", marginBottom: 2 }}>
+            Payslips
+          </Title>
+          {!loading && data ? (
+            <Text size="sm" c="dimmed">
+              {data.total} payslip{data.total !== 1 ? "s" : ""}
+              {householdGrossYtd > 0 ? ` · ${formatMoney(householdGrossYtd)} gross YTD` : ""}
+            </Text>
+          ) : null}
+        </div>
+        <Group gap={8} ml="auto" wrap="nowrap">
+          <Button
+            component={Link}
+            to="/imports"
+            variant="default"
+            size="sm"
+            leftSection={<IconFilePlus size={14} />}
+          >
+            Import PDF
+          </Button>
+          <Button
+            component={Link}
+            to="/payslips/new"
+            size="sm"
+            leftSection={<IconPlus size={14} />}
+          >
+            Add Payslip
+          </Button>
         </Group>
-      </Paper>
+      </div>
 
-      {/* Hero KPI cards — latest payslip stats */}
-      {latest ? (
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
-          {([
-            { label: "Latest gross", value: formatMoney(latest.grossPayCurrent), borderColor: "var(--fs-forest)", c: "fsForest" as const },
-            { label: "Latest net",   value: formatMoney(latest.netPayCurrent),   borderColor: "var(--fs-gold)", c: "fsGold" as const },
-            { label: "YTD gross",    value: formatMoney(latest.grossPayYtd),     borderColor: "var(--mantine-color-gray-4)", c: "dimmed" as const },
-            { label: "YTD net",      value: formatMoney(latest.netPayYtd),       borderColor: "var(--mantine-color-gray-4)", c: "dimmed" as const },
-          ] as const).map(({ label, value, borderColor, c }) => (
-            <Paper key={label} withBorder p="md" ta="center" style={{ borderTop: `3px solid ${borderColor}` }}>
-              <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={4}>{label}</Text>
-              <Text size="xl" fw={700} c={c}>{value}</Text>
-            </Paper>
+      {loadError ? <Alert color="red">{loadError}</Alert> : null}
+
+      {loading ? (
+        <Group gap="sm" py="md">
+          <GroveLoader size="sm" color="muted" />
+          <Text size="sm" c="dimmed">Loading payslips…</Text>
+        </Group>
+      ) : null}
+
+      {!loading && data ? (
+        <>
+          {/* ── Person filter pills ──────────────────────────────────────── */}
+          {personIds.length > 0 ? (
+            <Group gap={6} wrap="wrap">
+              <button
+                type="button"
+                style={selectedPerson === null ? pillActive : pillBase}
+                onClick={() => setSelectedPerson(null)}
+              >
+                All people
+              </button>
+              {personIds.map((pid) => {
+                const info = personMap.get(pid);
+                if (!info) return null;
+                return (
+                  <button
+                    key={pid}
+                    type="button"
+                    style={selectedPerson === pid ? pillActive : pillBase}
+                    onClick={() => setSelectedPerson(pid === selectedPerson ? null : pid)}
+                  >
+                    {info.name}
+                  </button>
+                );
+              })}
+            </Group>
+          ) : null}
+
+          {/* ── Trend row ────────────────────────────────────────────────── */}
+          {personIds.length > 0 ? (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {(selectedPerson ? [selectedPerson] : personIds).map((pid) => {
+                const info = personMap.get(pid);
+                if (!info) return null;
+                const netSeries = getPersonNetSeries(allItems, pid);
+                const ytdNet = getPersonYtdNet(allItems, pid);
+                const totalTaxRateYtd = getPersonTotalTaxRateYtd(allItems, pid);
+                return (
+                  <TrendCard
+                    key={pid}
+                    person={info}
+                    netSeries={netSeries}
+                    ytdNet={ytdNet}
+                    totalTaxRateYtd={totalTaxRateYtd}
+                  />
+                );
+              })}
+            </div>
+          ) : null}
+
+          {/* ── Income analytics (collapsible) ───────────────────────────── */}
+          {filteredItems.length > 0 ? (
+            <div
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 9,
+                overflow: "hidden",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setChartsOpen((v) => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                  padding: "11px 16px",
+                  width: "100%",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--color-text)",
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  minHeight: 44,
+                }}
+              >
+                {chartsOpen ? <IconChevronDown size={15} /> : <IconChevronRight size={15} />}
+                Income analytics
+              </button>
+              <Collapse in={chartsOpen}>
+                <div style={{ padding: "0 16px 16px" }}>
+                  <PayslipIncomeCharts items={filteredItems} />
+                </div>
+              </Collapse>
+            </div>
+          ) : null}
+
+          {/* ── Month-grouped list ───────────────────────────────────────── */}
+          {filteredItems.length === 0 ? (
+            <Text c="dimmed" py="sm">
+              No payslips yet.{" "}
+              <Text component={Link} to="/imports" c="var(--fs-forest)">
+                Import a PDF
+              </Text>{" "}
+              or{" "}
+              <Text component={Link} to="/payslips/new" c="var(--fs-forest)">
+                add manually
+              </Text>
+              .
+            </Text>
+          ) : null}
+
+          {monthGroups.map((group) => (
+            <div key={group.key}>
+              {/* Month divider */}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 8,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    color: "var(--color-text-muted)",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {group.key}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-muted)",
+                    background: "var(--color-surface-alt)",
+                    borderRadius: 10,
+                    padding: "0 6px",
+                  }}
+                >
+                  {group.items.length}
+                </span>
+                <div
+                  style={{
+                    flex: 1,
+                    height: 1,
+                    background: "var(--color-border)",
+                  }}
+                />
+              </div>
+
+              {group.items.map((ps) => {
+                const personInfo = ps.ownerPersonProfileId
+                  ? (personMap.get(ps.ownerPersonProfileId) ?? {
+                      id: ps.ownerPersonProfileId,
+                      name: "Unknown",
+                      initials: "?",
+                      color: PERSON_COLORS[0]!,
+                    })
+                  : {
+                      id: "household",
+                      name: "Household",
+                      initials: "HH",
+                      color: PERSON_COLORS[0]!,
+                    };
+
+                return (
+                  <PayslipListCard
+                    key={ps.id}
+                    payslip={ps}
+                    personName={personInfo.name}
+                    personInitials={personInfo.initials}
+                    personColor={personInfo.color}
+                    employerName={null}
+                    onClick={() => navigate(`/payslips/${ps.id}`)}
+                  />
+                );
+              })}
+            </div>
           ))}
-        </SimpleGrid>
+
+        </>
       ) : null}
-
-      {/* Belongs-to filter */}
-      <Paper withBorder p="lg">
-        <Group align="center" gap={8}>
-          <Text size="sm" fw={500}>Belongs-to</Text>
-          <HelpIcon label="Household: shared payslips only. Member: that person’s payslips. Clear to include everyone." />
-          <Box style={{ flex: 1, maxWidth: 260 }}>
-            <HierarchicalSearchPicker
-              value={ownerFilter}
-              onChange={(v) => setOwnerFilter(v)}
-              groups={belongsToGroups}
-              placeholder="All household activity"
-              ariaLabel="Filter payslips by belongs-to"
-              clearable
-            />
-          </Box>
-        </Group>
-      </Paper>
-
-      {/* Income charts */}
-      {!loading && data && data.items.length > 0 ? (
-        <Paper withBorder p="lg">
-          <Group align="center" gap={8} mb="md">
-            <Title order={4} m={0}>Income &amp; payroll</Title>
-            <HelpIcon label="Charts derived from all payslips matching the current filter. Area chart shows gross vs net over time. Bar chart shows monthly breakdown." />
-          </Group>
-          <PayslipIncomeCharts items={data.items} />
-        </Paper>
-      ) : null}
-
-      {/* Payslip list */}
-      <Paper withBorder p="lg">
-        <Group align="center" gap={8} mb="md">
-          <Title order={4} m={0}>Saved stubs</Title>
-          {data ? <Badge variant="light">{data.total} total</Badge> : null}
-        </Group>
-        {loadError ? <Alert color="red" mb="sm">{loadError}</Alert> : null}
-        {loading ? (
-          <Group gap="sm" py="sm">
-            <GroveLoader size="sm" color="muted" />
-            <Text size="sm" c="dimmed">Loading payslips…</Text>
-          </Group>
-        ) : null}
-        {!loading && data && data.items.length === 0 ? (
-          <Text c="dimmed">No payslips yet. Use "Import PDF" or "Add manually" above.</Text>
-        ) : null}
-        {!loading && data && data.items.length > 0 ? (
-          <Stack gap={6}>
-            {data.items.map((r) => (
-              <Paper key={r.id} withBorder p="xs" radius="sm">
-                <Group gap="md" wrap="nowrap" align="center">
-                  {/* Period */}
-                  <Text size="sm" fw={600} style={{ minWidth: 90 }}>
-                    {r.payPeriodStart ?? "—"}
-                  </Text>
-                  <Text size="xs" c="dimmed" style={{ flex: 1 }}>
-                    {r.payPeriodEnd ? `→ ${r.payPeriodEnd}` : ""}
-                    {r.payDate ? ` · paid ${r.payDate}` : null}
-                  </Text>
-                  {/* Gross / Net */}
-                  <Group gap="xl">
-                    <Box>
-                      <Text size="xs" c="dimmed" lh={1.2}>Gross</Text>
-                      <Text size="sm" fw={600}>{formatMoney(r.grossPayCurrent)}</Text>
-                    </Box>
-                    <Box>
-                      <Text size="xs" c="dimmed" lh={1.2}>Net</Text>
-                      <Text size="sm" fw={600} style={{ color: "var(--fs-forest)" }}>{formatMoney(r.netPayCurrent)}</Text>
-                    </Box>
-                  </Group>
-                  {/* Actions */}
-                  <Group gap={6} wrap="nowrap">
-                    <ActionIcon
-                      component={Link}
-                      to={`/payslips/${r.id}`}
-                      title="View payslip"
-                      variant="default"
-                    >
-                      <IconEye size={14} />
-                    </ActionIcon>
-                    <ActionIcon
-                      title="Delete payslip"
-                      disabled={deletingId === r.id}
-                      onClick={() => setDeleteConfirmId(r.id)}
-                      variant="default"
-                      color="red"
-                    >
-                      <IconTrash size={14} />
-                    </ActionIcon>
-                  </Group>
-                </Group>
-              </Paper>
-            ))}
-          </Stack>
-        ) : null}
-      </Paper>
 
       <ConfirmDialog
         opened={deleteConfirmId !== null}

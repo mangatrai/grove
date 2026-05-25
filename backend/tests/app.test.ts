@@ -4,7 +4,7 @@ import path from "node:path";
 
 import bcrypt from "bcryptjs";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import unzipper from "unzipper";
 import * as XLSX from "xlsx";
 
@@ -1269,6 +1269,57 @@ describe("import sessions and file intake", () => {
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
   });
 
+  it("TM-4: routes masked ACH (CSV) vs real reference (PDF) as near-duplicate despite description difference", async () => {
+    const token = await loginAndGetToken();
+    const sessionResponse = await request(app)
+      .post("/imports/sessions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ sourceType: "upload" });
+    const sessionId = sessionResponse.body.session.id as string;
+
+    const txnDate = new Date(Date.UTC(2025, 0, 1 + crypto.randomInt(0, 8000))).toISOString().slice(0, 10);
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},ACH XXXXX1234,-42.50,ref-masked`,
+      `${txnDate},ACH123451234,-42.50,ref-real`
+    ].join("\n");
+
+    const uploadRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/files`)
+      .set("authorization", `Bearer ${token}`)
+      .attach("files", Buffer.from(csv), "ach-masked.csv");
+    expect(uploadRes.status).toBe(201);
+    const fileId = uploadRes.body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    const parseRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        mapping: {
+          date: "Date",
+          description: "Description",
+          amount: "Amount",
+          referenceId: "Reference"
+        }
+      });
+    expect(parseRes.status).toBe(200);
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(1);
+    expect(canRes.body.nearDuplicates).toBe(1);
+    expect(canRes.body.duplicates).toBe(0);
+
+    const openResolution = (await sqlStmt(
+      `SELECT COUNT(*)::int AS c FROM resolution_item WHERE household_id = (SELECT household_id FROM import_session WHERE id = ?) AND type = 'duplicate_ambiguity' AND status = 'open'`
+    ).get(sessionId)) as { c: number };
+    expect(openResolution.c).toBeGreaterThanOrEqual(1);
+  });
+
   it("routes same-import same-fingerprint different-FITID rows to Needs Review", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
@@ -1472,8 +1523,13 @@ describe("import sessions and file intake", () => {
     ).get(sess2)) as { id: string } | undefined;
     expect(riRow).toBeTruthy();
 
-    // Verify it appears in Needs Review ledger.
-    const needsReview = await request(app).get("/transactions?needsReview=true&limit=50").set("authorization", `Bearer ${token}`);
+    // Verify it appears in Needs Review ledger. Use sessionId to scope to sess2
+    // only — the unscoped household-wide query can return 50+ uncategorised rows
+    // from other tests ahead of this one in the date-desc sort, causing a
+    // limit=50 cut to miss the duplicate.
+    const needsReview = await request(app)
+      .get(`/transactions?needsReview=true&sessionId=${sess2}&limit=50`)
+      .set("authorization", `Bearer ${token}`);
     expect(needsReview.status).toBe(200);
     const dupInReview = (needsReview.body.transactions as Array<{ status: string; merchant: string }>).find(
       (t) => t.status === "duplicate" && t.merchant?.includes(`EXACT DUP COFFEE ${tag}`)
@@ -1692,6 +1748,86 @@ describe("import sessions and file intake", () => {
       `SELECT id, transfer_group_id FROM transaction_canonical
        WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ? AND merchant = ?`
     ).get(householdId, debitAccountId, txnDate, -200, debitDesc) as { id: string; transfer_group_id: string | null };
+
+    expect(creditRow).toBeDefined();
+    expect(debitRow).toBeDefined();
+    expect(creditRow.transfer_group_id).not.toBeNull();
+    expect(debitRow.transfer_group_id).not.toBeNull();
+    expect(creditRow.transfer_group_id).toBe(debitRow.transfer_group_id);
+  });
+
+  it("pairs transfer across a 3-day ACH settlement gap (TM-1)", async () => {
+    const token = await loginAndGetToken();
+    const owner = await sqlStmt(`SELECT id, household_id FROM app_user WHERE email = ?`).get("owner@example.com") as {
+      id: string;
+      household_id: string;
+    };
+    const householdId = owner.household_id;
+    const ownerUserId = owner.id;
+
+    const debitAccountId = crypto.randomUUID();
+    const creditAccountId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'ACH Gap Test Checking', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(debitAccountId, householdId, ownerUserId);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
+       VALUES (?, ?, ?, 'savings', 'ACH Gap Test Savings', NULL, 'USD', CURRENT_TIMESTAMP)`
+    ).run(creditAccountId, householdId, ownerUserId);
+
+    const sessionId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO import_session (id, household_id, source_type, status, started_at)
+       VALUES (?, ?, 'upload', 'review', CURRENT_TIMESTAMP)`
+    ).run(sessionId, householdId);
+    await sqlStmt(
+      `INSERT INTO import_file (id, session_id, file_name, checksum, parser_profile_id, status, confidence_summary)
+       VALUES (?, ?, 'ach-gap.csv', ?, NULL, 'parsed', '{}')`
+    ).run(fileId, sessionId, crypto.randomBytes(32).toString("hex"));
+
+    const debitDate = "2000-01-10";
+    const creditDate = "2000-01-13"; // 3-day ACH settlement lag
+    const debitDesc = "ONLINE TRANSFER to savings";
+    const creditDesc = "ONLINE TRANSFER from checking";
+    const rawCreditId = crypto.randomUUID();
+    const rawDebitId = crypto.randomUUID();
+
+    await sqlStmt(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawCreditId,
+      fileId,
+      0,
+      JSON.stringify({ txn_date: creditDate, description: creditDesc, amount: 500, financial_account_id: creditAccountId })
+    );
+    await sqlStmt(
+      `INSERT INTO transaction_raw (id, file_id, row_index, extracted_payload_json, confidence)
+       VALUES (?, ?, ?, ?, 0.9)`
+    ).run(
+      rawDebitId,
+      fileId,
+      1,
+      JSON.stringify({ txn_date: debitDate, description: debitDesc, amount: -500, financial_account_id: debitAccountId })
+    );
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.inserted).toBe(2);
+
+    const creditRow = await sqlStmt(
+      `SELECT id, transfer_group_id FROM transaction_canonical
+       WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ?`
+    ).get(householdId, creditAccountId, creditDate, 500) as { id: string; transfer_group_id: string | null };
+    const debitRow = await sqlStmt(
+      `SELECT id, transfer_group_id FROM transaction_canonical
+       WHERE household_id = ? AND account_id = ? AND txn_date = ? AND amount = ?`
+    ).get(householdId, debitAccountId, debitDate, -500) as { id: string; transfer_group_id: string | null };
 
     expect(creditRow).toBeDefined();
     expect(debitRow).toBeDefined();
@@ -4678,5 +4814,636 @@ describe("balance sheet (reports)", () => {
     expect(p0.accounts.some((a: { financialAccountId: string }) => a.financialAccountId === SEED_BOA_CHECKING)).toBe(
       true
     );
+  });
+
+  it("GET balance-sheet returns memberSummary for multi-member household with owned accounts", async () => {
+    const householdId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const profileA = crypto.randomUUID();
+    const profileB = crypto.randomUUID();
+    const membershipA = crypto.randomUUID();
+    const membershipB = crypto.randomUUID();
+    const accountA = crypto.randomUUID();
+    const accountB = crypto.randomUUID();
+    const email = `f2-multi-member-${Date.now()}@example.com`;
+    const password = "ChangeMe123!";
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await sqlStmt(`INSERT INTO household (id, name) VALUES (?, 'F-2 multi member')`).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'all')`
+    ).run(userId, householdId, email, passwordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(userId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name)
+       VALUES (?, ?, ?, 'Member A'), (?, ?, NULL, 'Member B')`
+    ).run(profileA, householdId, userId, profileB, householdId);
+    await sqlStmt(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+       VALUES (?, ?, ?, 'head', 'self'), (?, ?, ?, 'member', 'spouse')`
+    ).run(membershipA, householdId, profileA, membershipB, householdId, profileB);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, owner_scope, owner_person_profile_id)
+       VALUES (?, ?, ?, 'checking', 'Bank A', 'person', ?), (?, ?, ?, 'savings', 'Bank B', 'person', ?)`
+    ).run(accountA, householdId, userId, profileA, accountB, householdId, userId, profileB);
+
+    const login = await request(app).post("/auth/login").send({ email, password });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const postA = await request(app)
+      .post("/reports/balance-sheet/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({ financialAccountId: accountA, asOfDate: "2026-06-15", amount: 10_000, currency: "USD" });
+    expect(postA.status).toBe(201);
+    const postB = await request(app)
+      .post("/reports/balance-sheet/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({ financialAccountId: accountB, asOfDate: "2026-06-15", amount: 3_000, currency: "USD" });
+    expect(postB.status).toBe(201);
+
+    const res = await request(app)
+      .get("/reports/balance-sheet?asOf=2026-06-30")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.memberSummary).toHaveLength(2);
+
+    const rowA = res.body.memberSummary.find((m: { personProfileId: string }) => m.personProfileId === profileA);
+    const rowB = res.body.memberSummary.find((m: { personProfileId: string }) => m.personProfileId === profileB);
+    expect(rowA).toMatchObject({ totalAssets: 10_000, totalLiabilities: 0, netWorth: 10_000 });
+    expect(rowB).toMatchObject({ totalAssets: 3_000, totalLiabilities: 0, netWorth: 3_000 });
+  });
+
+  it("GET balance-sheet returns empty memberSummary when household has one person profile", async () => {
+    const householdId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+    const profileId = crypto.randomUUID();
+    const membershipId = crypto.randomUUID();
+    const accountId = crypto.randomUUID();
+    const email = `f2-single-member-${Date.now()}@example.com`;
+    const password = "ChangeMe123!";
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await sqlStmt(`INSERT INTO household (id, name) VALUES (?, 'F-2 single member')`).run(householdId);
+    await sqlStmt(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', ?, 'all')`
+    ).run(userId, householdId, email, passwordHash);
+    await sqlStmt(`UPDATE household SET owner_user_id = ? WHERE id = ?`).run(userId, householdId);
+    await sqlStmt(
+      `INSERT INTO person_profile (id, household_id, linked_user_id, full_name)
+       VALUES (?, ?, ?, 'Solo Member')`
+    ).run(profileId, householdId, userId);
+    await sqlStmt(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship)
+       VALUES (?, ?, ?, 'head', 'self')`
+    ).run(membershipId, householdId, profileId);
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, owner_scope, owner_person_profile_id)
+       VALUES (?, ?, ?, 'checking', 'Test Bank', 'person', ?)`
+    ).run(accountId, householdId, userId, profileId);
+
+    const login = await request(app).post("/auth/login").send({ email, password });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const res = await request(app)
+      .get("/reports/balance-sheet?asOf=2026-06-30")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.memberSummary).toEqual([]);
+  });
+});
+
+describe("cash balance auto-update on manual transaction (F-10)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  async function createCashAccount() {
+    const id = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, currency, created_at)
+       VALUES (?, ?, ?, 'cash', 'Wallet', 'USD', CURRENT_TIMESTAMP)`
+    ).run(id, HOUSEHOLD_ID, OWNER_USER_ID);
+    return id;
+  }
+
+  async function latestSnapshot(accountId: string) {
+    return sqlStmt(
+      `SELECT amount FROM account_balance_snapshot
+       WHERE financial_account_id = ? AND household_id = ?
+       ORDER BY as_of_date DESC, updated_at DESC LIMIT 1`
+    ).get<{ amount: string }>(accountId, HOUSEHOLD_ID);
+  }
+
+  it("creates snapshot on cash transaction create (no prior snapshot → treat as 0)", async () => {
+    const token = await login();
+    const cashAccountId = await createCashAccount();
+
+    const res = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: cashAccountId, txnDate: "2026-05-01", amount: 200, merchant: "Cash deposit" });
+    expect(res.status).toBe(201);
+
+    const snap = await latestSnapshot(cashAccountId);
+    expect(snap).not.toBeNull();
+    expect(Number(snap!.amount)).toBeCloseTo(200, 2);
+  });
+
+  it("reverses snapshot on hard delete", async () => {
+    const token = await login();
+    const cashAccountId = await createCashAccount();
+
+    const create = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: cashAccountId, txnDate: "2026-05-02", amount: 150, merchant: "Cash in" });
+    expect(create.status).toBe(201);
+    const txnId = create.body.id as string;
+
+    await request(app)
+      .patch(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ status: "trashed" });
+
+    const del = await request(app)
+      .delete(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(del.status).toBe(204);
+
+    const snap = await latestSnapshot(cashAccountId);
+    expect(snap).not.toBeNull();
+    expect(Number(snap!.amount)).toBeCloseTo(0, 2);
+  });
+
+  it("applies delta on amount edit", async () => {
+    const token = await login();
+    const cashAccountId = await createCashAccount();
+
+    const create = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: cashAccountId, txnDate: "2026-05-03", amount: 100, merchant: "Initial" });
+    expect(create.status).toBe(201);
+    const txnId = create.body.id as string;
+
+    const patch = await request(app)
+      .patch(`/transactions/${txnId}`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ amount: 250 });
+    expect(patch.status).toBe(200);
+    expect(patch.body.amount).toBeCloseTo(250, 2);
+
+    const snap = await latestSnapshot(cashAccountId);
+    expect(snap).not.toBeNull();
+    expect(Number(snap!.amount)).toBeCloseTo(250, 2);
+  });
+
+  it("does not create snapshot for non-cash account", async () => {
+    const token = await login();
+    const nonCashId = SEED_BOA_CHECKING;
+
+    const before = await latestSnapshot(nonCashId);
+
+    await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId: nonCashId, txnDate: "2026-05-04", amount: -99, merchant: "Non-cash test" });
+
+    const after = await latestSnapshot(nonCashId);
+    expect(after?.amount).toEqual(before?.amount);
+  });
+});
+
+describe("transfer pair / unpair (TM-2)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+  const CHECKING_A = "40000000-0000-0000-0000-000000000001"; // SEED_BOA_CHECKING
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  async function createCheckingAccount() {
+    const id = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, currency, created_at)
+       VALUES (?, ?, ?, 'checking', 'Test Bank', 'USD', CURRENT_TIMESTAMP)`
+    ).run(id, HOUSEHOLD_ID, OWNER_USER_ID);
+    return id;
+  }
+
+  async function createPostedTx(token: string, accountId: string, amount: number) {
+    const res = await request(app)
+      .post("/transactions")
+      .set("authorization", `Bearer ${token}`)
+      .send({ accountId, txnDate: "2026-05-10", amount, merchant: "TM2 test" });
+    expect(res.status).toBe(201);
+    return res.body.id as string;
+  }
+
+  it("pairs two transactions and returns transferGroupId", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const debitId = await createPostedTx(token, CHECKING_A, -100);
+    const creditId = await createPostedTx(token, acctB, 100);
+
+    const res = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [debitId, creditId] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.transferGroupId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    );
+
+    const groupId = res.body.transferGroupId as string;
+    const rows = await sqlStmt(
+      `SELECT id, transfer_group_id FROM transaction_canonical WHERE id = ANY(?) AND household_id = ?`
+    ).all<{ id: string; transfer_group_id: string }>(
+      [debitId, creditId], HOUSEHOLD_ID
+    );
+    expect(rows.every((r) => r.transfer_group_id === groupId)).toBe(true);
+  });
+
+  it("rejects pairing transactions on the same account", async () => {
+    const token = await login();
+    const id1 = await createPostedTx(token, CHECKING_A, -50);
+    const id2 = await createPostedTx(token, CHECKING_A, 50);
+
+    const res = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [id1, id2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("SAME_ACCOUNT");
+  });
+
+  it("rejects pairing transactions with mismatched amounts", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const id1 = await createPostedTx(token, CHECKING_A, -75);
+    const id2 = await createPostedTx(token, acctB, 100);
+
+    const res = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [id1, id2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("AMOUNT_MISMATCH");
+  });
+
+  it("unpairs a transfer pair (204, nulls transfer_group_id on both legs)", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const debitId = await createPostedTx(token, CHECKING_A, -200);
+    const creditId = await createPostedTx(token, acctB, 200);
+
+    const pair = await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [debitId, creditId] });
+    expect(pair.status).toBe(200);
+    const groupId = pair.body.transferGroupId as string;
+
+    const del = await request(app)
+      .delete(`/transactions/pair/${groupId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(del.status).toBe(200);
+    expect(del.body.unlinked).toBe(2);
+
+    const rows = await sqlStmt(
+      `SELECT transfer_group_id FROM transaction_canonical WHERE id = ANY(?) AND household_id = ?`
+    ).all<{ transfer_group_id: string | null }>(
+      [debitId, creditId], HOUSEHOLD_ID
+    );
+    expect(rows.every((r) => r.transfer_group_id === null)).toBe(true);
+  });
+
+  it("returns 404 when unpairing a groupId that does not exist", async () => {
+    const token = await login();
+    const fakeGroupId = crypto.randomUUID();
+
+    const res = await request(app)
+      .delete(`/transactions/pair/${fakeGroupId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("transferPaired filter returns only paired transactions", async () => {
+    const token = await login();
+    const acctB = await createCheckingAccount();
+    const debitId = await createPostedTx(token, CHECKING_A, -300);
+    const creditId = await createPostedTx(token, acctB, 300);
+
+    await request(app)
+      .post("/transactions/pair")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [debitId, creditId] });
+
+    const res = await request(app)
+      .get("/transactions?transferPaired=true")
+      .set("authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    const ids = (res.body.transactions as Array<{ id: string; transferGroupId: string | null }>).map((t) => t.id);
+    expect(ids).toContain(debitId);
+    expect(ids).toContain(creditId);
+    for (const t of res.body.transactions as Array<{ transferGroupId: string | null }>) {
+      expect(t.transferGroupId).not.toBeNull();
+    }
+  });
+});
+
+describe("delete property (F-4)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  async function createProperty(token: string, opts: { accountId?: string } = {}) {
+    const body: Record<string, unknown> = { addressLine1: "123 Main St", city: "Austin", state: "TX", zip: "78701" };
+    if (opts.accountId) body.accountId = opts.accountId;
+    const res = await request(app).post("/household/properties").set("authorization", `Bearer ${token}`).send(body);
+    expect(res.status).toBe(201);
+    return res.body.id as string;
+  }
+
+  async function createLoanAccount() {
+    const id = crypto.randomUUID();
+    await sqlStmt(
+      `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, currency, created_at)
+       VALUES (?, ?, ?, 'loan', 'Test Mortgage', 'USD', CURRENT_TIMESTAMP)`
+    ).run(id, HOUSEHOLD_ID, OWNER_USER_ID);
+    return id;
+  }
+
+  it("deletes a property and returns 200 with unlinkedAccounts: 0", async () => {
+    const token = await login();
+    const propertyId = await createProperty(token);
+
+    const del = await request(app)
+      .delete(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(del.status).toBe(200);
+    expect(del.body.unlinkedAccounts).toBe(0);
+
+    const get = await request(app)
+      .get(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(get.status).toBe(404);
+  });
+
+  it("cascades deletion of value snapshots", async () => {
+    const token = await login();
+    const propertyId = await createProperty(token);
+
+    await request(app)
+      .post(`/household/properties/${propertyId}/values`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ marketValueUsd: 500000, asOfDate: "2026-01-01" });
+
+    const del = await request(app)
+      .delete(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(del.status).toBe(200);
+
+    const snap = await sqlStmt(`SELECT id FROM property_value_snapshot WHERE property_id = ?`).all(propertyId);
+    expect(snap).toHaveLength(0);
+  });
+
+  it("nulls financial_account.property_id (unlinks mortgage) and reports unlinkedAccounts: 1", async () => {
+    const token = await login();
+    const loanAccountId = await createLoanAccount();
+    const propertyId = await createProperty(token, { accountId: loanAccountId });
+
+    const del = await request(app)
+      .delete(`/household/properties/${propertyId}`)
+      .set("authorization", `Bearer ${token}`);
+
+    expect(del.status).toBe(200);
+    expect(del.body.unlinkedAccounts).toBe(1);
+
+    const row = await sqlStmt(`SELECT property_id FROM financial_account WHERE id = ?`).get(loanAccountId) as { property_id: string | null } | undefined;
+    expect(row?.property_id).toBeNull();
+  });
+
+  it("returns 404 for a non-existent property", async () => {
+    const token = await login();
+    const fakeId = crypto.randomUUID();
+    const res = await request(app)
+      .delete(`/household/properties/${fakeId}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("account status (F-5)", () => {
+  const TEST_ACCOUNT_ID = SEED_BOA_CHECKING;
+
+  async function login() {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    expect(res.status).toBe(200);
+    return res.body.token as string;
+  }
+
+  function patchBody(status: "active" | "closed") {
+    return {
+      type: "checking",
+      institution: "Bank of America",
+      accountMask: "1001",
+      status
+    };
+  }
+
+  async function ensureAccountActive(token: string) {
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("active"));
+  }
+
+  afterEach(async () => {
+    const token = await login();
+    await ensureAccountActive(token);
+  });
+
+  it("PATCH with status closed sets status and closedAt", async () => {
+    const token = await login();
+    const patch = await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+    expect(patch.status).toBe(200);
+
+    const row = await sqlStmt(
+      `SELECT status, closed_at FROM financial_account WHERE id = ?`
+    ).get(TEST_ACCOUNT_ID) as { status: string; closed_at: string | null };
+    expect(row.status).toBe("closed");
+    expect(row.closed_at).not.toBeNull();
+
+    const listed = await request(app)
+      .get("/imports/accounts?includeClosedAccounts=true")
+      .set("authorization", `Bearer ${token}`);
+    const acct = listed.body.accounts.find((a: { id: string }) => a.id === TEST_ACCOUNT_ID);
+    expect(acct?.status).toBe("closed");
+    expect(acct?.closed_at).not.toBeNull();
+  });
+
+  it("GET /imports/accounts excludes closed accounts by default", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const res = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.accounts.some((a: { id: string }) => a.id === TEST_ACCOUNT_ID)).toBe(false);
+  });
+
+  it("GET /imports/accounts?includeClosedAccounts=true includes closed account with status", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const res = await request(app)
+      .get("/imports/accounts?includeClosedAccounts=true")
+      .set("authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const acct = res.body.accounts.find((a: { id: string }) => a.id === TEST_ACCOUNT_ID);
+    expect(acct).toBeDefined();
+    expect(acct.status).toBe("closed");
+    expect(acct.closed_at).not.toBeNull();
+  });
+
+  it("PATCH with status active clears closedAt and account reappears in default list", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const reopen = await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("active"));
+    expect(reopen.status).toBe(200);
+
+    const row = await sqlStmt(
+      `SELECT status, closed_at FROM financial_account WHERE id = ?`
+    ).get(TEST_ACCOUNT_ID) as { status: string; closed_at: string | null };
+    expect(row.status).toBe("active");
+    expect(row.closed_at).toBeNull();
+
+    const list = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(list.body.accounts.some((a: { id: string }) => a.id === TEST_ACCOUNT_ID)).toBe(true);
+  });
+
+  it("closed account is excluded from import binding account list", async () => {
+    const token = await login();
+    await request(app)
+      .patch(`/imports/accounts/${TEST_ACCOUNT_ID}`)
+      .set("authorization", `Bearer ${token}`)
+      .send(patchBody("closed"));
+
+    const list = await request(app).get("/imports/accounts").set("authorization", `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    const ids = list.body.accounts.map((a: { id: string }) => a.id);
+    expect(ids).not.toContain(TEST_ACCOUNT_ID);
+  });
+});
+
+describe("PS-5 Phase 1 — tax rate stored at insert", () => {
+  async function loginOwner(): Promise<string> {
+    const res = await request(app).post("/auth/login").send({ email: "owner@example.com", password: "ChangeMe123!" });
+    return res.body.token as string;
+  }
+
+  beforeAll(async () => {
+    // Clear any employers added by prior tests so resolvePayslipUploadContext returns ok with 0 employers.
+    const token = await loginOwner();
+    await request(app).patch("/household/profile").set("authorization", `Bearer ${token}`).send({ employers: [] });
+  });
+
+  it("stores effectiveFederalRateYtd from Deloitte-style federal line item", async () => {
+    const token = await loginOwner();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        grossPayYtd: 100000,
+        employeeTaxesYtd: 30000,
+        netPayCurrent: 5000,
+        lineItems: [
+          { section: "tax_deductions", name: "Federal Income Tax", authority: "Federal", amountCurrent: 1800, amountYtd: 22000 },
+          { section: "tax_deductions", name: "State Income Tax", authority: "State", amountCurrent: 400, amountYtd: 4800 },
+          { section: "tax_deductions", name: "Social Security", authority: "Federal", amountCurrent: 300, amountYtd: 3600 }
+        ]
+      });
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    // Federal rate: only "Federal Income Tax" matches (Social Security does not contain "withholding" or "income" in name)
+    expect(snap.effectiveFederalRateYtd).toBeCloseTo(0.22, 5);
+    // Total tax rate: employeeTaxesYtd / grossPayYtd
+    expect(snap.effectiveTotalTaxRateYtd).toBeCloseTo(0.3, 5);
+  });
+
+  it("stores effectiveFederalRateYtd from IBM-style TX Withholding Tax line item", async () => {
+    const token = await loginOwner();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        grossPayYtd: 80000,
+        employeeTaxesYtd: 20000,
+        netPayCurrent: 4000,
+        lineItems: [
+          { section: "tax_deductions", name: "TX Withholding Tax", authority: "Federal", amountCurrent: 1600, amountYtd: 17600 }
+        ]
+      });
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    // IBM-style: authority="Federal" + name contains "withholding" → matches
+    expect(snap.effectiveFederalRateYtd).toBeCloseTo(0.22, 5);
+    expect(snap.effectiveTotalTaxRateYtd).toBeCloseTo(0.25, 5);
+  });
+
+  it("returns null effectiveFederalRateYtd when no federal tax line items are present", async () => {
+    const token = await loginOwner();
+    const res = await request(app)
+      .post("/payslips/manual")
+      .set("authorization", `Bearer ${token}`)
+      .send({
+        grossPayYtd: 50000,
+        employeeTaxesYtd: 10000,
+        netPayCurrent: 3000,
+        lineItems: [
+          { section: "earnings", name: "Base Pay", amountCurrent: 4000, amountYtd: 48000 }
+        ]
+      });
+    expect(res.status).toBe(201);
+    const snap = res.body.snapshot;
+    expect(snap.effectiveFederalRateYtd).toBeNull();
+    expect(snap.effectiveTotalTaxRateYtd).toBeCloseTo(0.2, 5);
   });
 });

@@ -10,8 +10,9 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { buildHfbFile } from "./export-job.service.js";
-import { buildOAuth2Client, getGDriveCredentials } from "../gdrive/gdrive.service.js";
+import { buildOAuth2Client, getGDriveCredentials, markGDriveNeedsReauth } from "../gdrive/gdrive.service.js";
 import { logGoogleDriveApiError } from "../gdrive/log-google-drive-api-error.js";
+import { createNotification } from "../notifications/notification.service.js";
 
 export const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
 
@@ -92,6 +93,7 @@ function mapDriveUploadError(err: unknown): string {
 export type ListDriveBackupsResult =
   | { ok: true; files: DriveBackupEntry[] }
   | { ok: false; reason: "not_configured" }
+  | { ok: false; reason: "needs_reauth" }
   | { ok: false; reason: "drive_error"; message: string };
 
 type ListHfbOptions = { maxTotal?: number };
@@ -192,6 +194,11 @@ export async function listDriveBackups(householdId: string): Promise<ListDriveBa
   } catch (err: unknown) {
     if (err instanceof GaxiosError) {
       logGoogleDriveApiError("listDriveBackups(files.list)", err);
+      const data = err.response?.data as Record<string, unknown> | undefined;
+      if (data?.error === "invalid_grant") {
+        await markGDriveNeedsReauth(householdId);
+        return { ok: false, reason: "needs_reauth" as const };
+      }
       const status = err.response?.status;
       if (status === 403) {
         return { ok: false, reason: "drive_error", message: "Permission denied accessing Drive folder." };
@@ -199,6 +206,8 @@ export async function listDriveBackups(householdId: string): Promise<ListDriveBa
       if (status === 404) {
         return { ok: false, reason: "drive_error", message: "Drive folder not found." };
       }
+    } else {
+      log.error("listDriveBackups failed", { householdId, err });
     }
     return { ok: false, reason: "drive_error", message: mapDriveListError(err) };
   }
@@ -344,6 +353,13 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
       jobId
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
+    void createNotification({
+      householdId,
+      type: "backup_complete",
+      title: "Google Drive backup complete",
+      body: `Backup uploaded successfully: ${driveFileName}`,
+      actionUrl: "/settings?tab=data"
+    });
     if (creds.backupRetentionCount > 0) {
       await pruneOldDriveBackups(creds.refreshToken, backupFolderId, creds.backupRetentionCount);
     }
@@ -351,14 +367,29 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
     if (err instanceof GaxiosError) {
       logGoogleDriveApiError(`Backup job ${jobId} upload(files.create) household=${householdId}`, err);
     }
+    const isInvalidGrant =
+      err instanceof GaxiosError && (err.response?.data as Record<string, unknown>)?.error === "invalid_grant";
+    if (isInvalidGrant) {
+      await markGDriveNeedsReauth(householdId);
+    }
     const msg =
       err instanceof GaxiosError ? mapDriveUploadError(err) : err instanceof Error ? err.message : String(err);
+    const failBody = isInvalidGrant
+      ? "Google Drive authorization has expired. Open the app and go to Settings → Backup & Restore to reconnect."
+      : `Backup failed: ${msg}`;
+    void createNotification({
+      householdId,
+      type: "backup_failed",
+      title: "Google Drive backup failed",
+      body: failBody,
+      actionUrl: "/settings?tab=data"
+    });
     await qExec(
       `UPDATE backup_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
       msg,
       jobId
     );
-    log.error(`Backup job ${jobId} failed: ${msg}`);
+    log.error("Backup job failed", { jobId, householdId, err });
   } finally {
     try {
       fs.unlinkSync(tempPath);

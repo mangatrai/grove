@@ -349,6 +349,33 @@ export async function refreshPropertyValuation(
   return { ok: true, estimate: result.estimate, fetchedAt: today };
 }
 
+export async function deleteProperty(
+  propertyId: string,
+  householdId: string
+): Promise<{ ok: true; unlinkedAccounts: number } | { ok: false; code: "NOT_FOUND" }> {
+  const exists = await qGet<{ id: string }>(
+    `SELECT id FROM property WHERE id = ? AND household_id = ?`,
+    propertyId,
+    householdId
+  );
+  if (!exists) return { ok: false, code: "NOT_FOUND" };
+
+  const linked = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt FROM financial_account WHERE property_id = ? AND household_id = ?`,
+    propertyId,
+    householdId
+  );
+  const unlinkedAccounts = Number(linked?.cnt ?? 0);
+
+  await qExec(
+    `DELETE FROM property WHERE id = ? AND household_id = ?`,
+    propertyId,
+    householdId
+  );
+
+  return { ok: true, unlinkedAccounts };
+}
+
 /**
  * Preview valuation by address string without creating a property record.
  * Used by the "Retrieve value" button on the Add Property modal (pre-save).

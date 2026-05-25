@@ -83,6 +83,19 @@ export type PayslipSnapshotRow = {
   extractionMetadataJson: Record<string, unknown> | null;
   updatedAt: string;
   createdAt: string;
+  /** Prior-period values for the same person — populated by list query only (PS-1). */
+  prior?: {
+    grossPayCurrent: number | null;
+    netPayCurrent: number | null;
+    employeeTaxesCurrent: number | null;
+    preTaxDeductionsCurrent: number | null;
+  } | null;
+  /** Count of payslips in the same calendar year for the same person — detail query only (PS-4). */
+  payPeriodCountYtd?: number;
+  /** Federal income tax YTD ÷ gross YTD (decimal ratio). Null for snapshots before migration 0048. */
+  effectiveFederalRateYtd: number | null;
+  /** All employee taxes YTD ÷ gross YTD (decimal ratio). Null for snapshots before migration 0048. */
+  effectiveTotalTaxRateYtd: number | null;
 };
 
 function parseJsonRecord(s: unknown, fallback: Record<string, unknown>): Record<string, unknown> {
@@ -161,8 +174,72 @@ function rowToSnapshot(r: Record<string, unknown>): PayslipSnapshotRow {
         ? null
         : parseJsonRecord(r.extraction_metadata_json, {}),
     updatedAt: String(r.updated_at ?? r.created_at),
-    createdAt: String(r.created_at)
+    createdAt: String(r.created_at),
+    prior: 'prior_gross' in r
+      ? {
+          grossPayCurrent: r.prior_gross == null ? null : Number(r.prior_gross),
+          netPayCurrent: r.prior_net == null ? null : Number(r.prior_net),
+          employeeTaxesCurrent: r.prior_taxes == null ? null : Number(r.prior_taxes),
+          preTaxDeductionsCurrent: r.prior_pre_tax == null ? null : Number(r.prior_pre_tax),
+        }
+      : undefined,
+    payPeriodCountYtd: 'pay_period_count_ytd' in r && r.pay_period_count_ytd != null
+      ? Number(r.pay_period_count_ytd)
+      : undefined,
+    effectiveFederalRateYtd: r.effective_federal_rate_ytd == null ? null : Number(r.effective_federal_rate_ytd),
+    effectiveTotalTaxRateYtd: r.effective_total_tax_rate_ytd == null ? null : Number(r.effective_total_tax_rate_ytd),
   };
+}
+
+function computeTaxRatesFromLineItems(
+  grossPayYtd: number | null,
+  employeeTaxesYtd: number | null,
+  items: LineItemForInsert[]
+): { effectiveFederalRateYtd: number | null; effectiveTotalTaxRateYtd: number | null } {
+  if (!grossPayYtd || grossPayYtd === 0) {
+    return { effectiveFederalRateYtd: null, effectiveTotalTaxRateYtd: null };
+  }
+  const federalItems = items.filter((item) => {
+    if (item.section !== "tax_deductions") return false;
+    const name = (item.name ?? "").toLowerCase();
+    const auth = (item.authority ?? "").toLowerCase();
+    return (
+      name.includes("federal") ||
+      (auth === "federal" && (name.includes("withholding") || name.includes("income")))
+    );
+  });
+  const federalYtdSum = federalItems.reduce((sum, item) => sum + (item.amountYtd ?? 0), 0);
+  return {
+    effectiveFederalRateYtd: federalItems.length > 0 ? federalYtdSum / grossPayYtd : null,
+    effectiveTotalTaxRateYtd: employeeTaxesYtd != null ? employeeTaxesYtd / grossPayYtd : null,
+  };
+}
+
+async function computeAndWriteTaxRatesInTx(
+  tx: { unsafe(sql: string, params?: unknown[]): Promise<unknown[]> },
+  householdId: string,
+  payslipId: string,
+  grouped: PayslipLineItemsGrouped
+): Promise<void> {
+  const snapRows = (await tx.unsafe(
+    `SELECT gross_pay_ytd, employee_taxes_ytd FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,
+    [payslipId, householdId]
+  )) as Array<Record<string, unknown>>;
+  const row = snapRows[0];
+  if (!row) return;
+  const grossPayYtd = row.gross_pay_ytd == null ? null : Number(row.gross_pay_ytd);
+  const employeeTaxesYtd = row.employee_taxes_ytd == null ? null : Number(row.employee_taxes_ytd);
+  const allItems = Object.values(grouped).flat();
+  const { effectiveFederalRateYtd, effectiveTotalTaxRateYtd } = computeTaxRatesFromLineItems(
+    grossPayYtd,
+    employeeTaxesYtd,
+    allItems
+  );
+  const { text, values } = sqlBind(
+    `UPDATE payslip_snapshot SET effective_federal_rate_ytd = ?, effective_total_tax_rate_ytd = ? WHERE id = ? AND household_id = ?`,
+    [effectiveFederalRateYtd, effectiveTotalTaxRateYtd, payslipId, householdId]
+  );
+  await tx.unsafe(text, values as never[]);
 }
 
 function rowToLineItem(r: Record<string, unknown>): PayslipLineItemRow {
@@ -296,6 +373,12 @@ export async function insertPayslipSnapshot(
   const h = hybrid ?? null;
   const items = lineItems ?? [];
 
+  const { effectiveFederalRateYtd, effectiveTotalTaxRateYtd } = computeTaxRatesFromLineItems(
+    parsed.grossPayYtd,
+    parsed.employeeTaxesYtd,
+    items
+  );
+
   return qBegin(async (tx) => {
     const { text: insertText, values: insertValues } = sqlBind(
       `INSERT INTO payslip_snapshot (
@@ -316,6 +399,7 @@ export async function insertPayslipSnapshot(
         employee_id, personnel_number, talent_id,
         tax_profile_json, payment_summary_json, extraction_metadata_json,
         employment_rate, employment_rate_type,
+        effective_federal_rate_ytd, effective_total_tax_rate_ytd,
         updated_at
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -330,6 +414,7 @@ export async function insertPayslipSnapshot(
         ?, ?,
         ?,
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?,
         ?, ?,
         NOW()
       )`,
@@ -375,7 +460,9 @@ export async function insertPayslipSnapshot(
         h?.paymentSummaryJson ?? null,
         h?.extractionMetadataJson ?? null,
         h?.employmentRate ?? null,
-        h?.employmentRateType ?? null
+        h?.employmentRateType ?? null,
+        effectiveFederalRateYtd ?? null,
+        effectiveTotalTaxRateYtd ?? null
       ]
     );
     await tx.unsafe(insertText, insertValues as never[]);
@@ -485,10 +572,22 @@ export async function listPayslipSnapshots(
   );
   const total = Number(totalRow?.c) || 0;
   const rows = await qAll<Record<string, unknown>>(
-    `SELECT * FROM payslip_snapshot
+    `WITH ranked AS (
+       SELECT *,
+         LAG(gross_pay_current)          OVER w AS prior_gross,
+         LAG(net_pay_current)            OVER w AS prior_net,
+         LAG(employee_taxes_current)     OVER w AS prior_taxes,
+         LAG(pre_tax_deductions_current) OVER w AS prior_pre_tax
+       FROM payslip_snapshot
        WHERE ${where.join(" AND ")}
-       ORDER BY pay_period_end DESC NULLS LAST, pay_period_start DESC NULLS LAST, created_at DESC, id DESC
-       LIMIT ? OFFSET ?`,
+       WINDOW w AS (
+         PARTITION BY owner_person_profile_id
+         ORDER BY COALESCE(pay_period_end, pay_date, created_at::text) ASC NULLS LAST, id ASC
+       )
+     )
+     SELECT * FROM ranked
+     ORDER BY pay_period_end DESC NULLS LAST, pay_period_start DESC NULLS LAST, created_at DESC, id DESC
+     LIMIT ? OFFSET ?`,
     ...params,
     opts.limit,
     opts.offset
@@ -501,7 +600,16 @@ export async function getPayslipSnapshotForHousehold(
   id: string
 ): Promise<PayslipSnapshotRow | null> {
   const row = await qGet<Record<string, unknown>>(
-    `SELECT * FROM payslip_snapshot WHERE id = ? AND household_id = ?`,
+    `SELECT s.*,
+       (SELECT COUNT(*)::int
+        FROM payslip_snapshot s2
+        WHERE s2.household_id = s.household_id
+          AND s2.owner_person_profile_id IS NOT DISTINCT FROM s.owner_person_profile_id
+          AND EXTRACT(year FROM COALESCE(s2.pay_period_end::date, s2.pay_date::date, s2.created_at::date))
+            = EXTRACT(year FROM COALESCE(s.pay_period_end::date, s.pay_date::date, s.created_at::date))
+       ) AS pay_period_count_ytd
+     FROM payslip_snapshot s
+     WHERE s.id = ? AND s.household_id = ?`,
     id,
     householdId
   );
@@ -644,6 +752,17 @@ export async function patchPayslipSnapshotForHousehold(
     manualEditedAt: new Date().toISOString()
   };
 
+  // Compute updated tax rates using merged values + current line items (line items unchanged by this patch).
+  const currentGrouped = await getPayslipLineItems(id, householdId);
+  const allItems = Object.values(currentGrouped).flat();
+  const mergedGrossYtd = patch.grossPayYtd !== undefined ? patch.grossPayYtd : existing.grossPayYtd;
+  const mergedTaxesYtd = patch.employeeTaxesYtd !== undefined ? patch.employeeTaxesYtd : existing.employeeTaxesYtd;
+  const { effectiveFederalRateYtd, effectiveTotalTaxRateYtd } = computeTaxRatesFromLineItems(
+    mergedGrossYtd,
+    mergedTaxesYtd,
+    allItems
+  );
+
   const sets: string[] = [];
   const params: unknown[] = [];
 
@@ -677,6 +796,10 @@ export async function patchPayslipSnapshotForHousehold(
   addCol("employment_rate", patch.employmentRate);
   addCol("employment_rate_type", patch.employmentRateType);
 
+  sets.push("effective_federal_rate_ytd = ?");
+  params.push(effectiveFederalRateYtd);
+  sets.push("effective_total_tax_rate_ytd = ?");
+  params.push(effectiveTotalTaxRateYtd);
   sets.push("raw_extract_json = ?");
   params.push(JSON.stringify(raw));
   sets.push("updated_at = NOW()");
@@ -856,6 +979,7 @@ export async function patchPayslipLineItem(
     const grouped = groupLineItemRows(allRows);
 
     await applyDerivedSummary(tx, householdId, payslipId, grouped);
+    await computeAndWriteTaxRatesInTx(tx, householdId, payslipId, grouped);
 
     const snapRows = (await tx.unsafe(
       `SELECT * FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,
@@ -899,6 +1023,7 @@ export async function deletePayslipLineItem(
     const grouped = groupLineItemRows(allRows);
 
     await applyDerivedSummary(tx, householdId, payslipId, grouped);
+    await computeAndWriteTaxRatesInTx(tx, householdId, payslipId, grouped);
 
     const snapRows = (await tx.unsafe(
       `SELECT * FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,
@@ -967,6 +1092,7 @@ export async function addPayslipLineItem(
     const grouped = groupLineItemRows(allRows);
 
     await applyDerivedSummary(tx, householdId, payslipId, grouped);
+    await computeAndWriteTaxRatesInTx(tx, householdId, payslipId, grouped);
 
     const snapRows = (await tx.unsafe(
       `SELECT * FROM payslip_snapshot WHERE id = $1 AND household_id = $2`,

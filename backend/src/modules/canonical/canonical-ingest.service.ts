@@ -6,9 +6,9 @@ import { deleteStagingFilesForSession } from "../imports/import-session.service.
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
 import { classifyWithRules, type ClassificationResult } from "../category/category-rules.js";
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
+import { checkBudgetThresholds, createNotification } from "../notifications/notification.service.js";
 import {
   computeTransactionFingerprint,
-  descriptionsCompatibleForNearDuplicate,
   normalizeAmountForFingerprint,
   normalizeDescriptionForFingerprint,
   normalizeTxnDateForFingerprint
@@ -271,7 +271,8 @@ function existingDescriptionFingerprint(merchant: string | null, memo: string | 
  */
 export async function canonicalizeImportSession(
   sessionId: string,
-  householdId: string
+  householdId: string,
+  triggeredByUserId?: string
 ): Promise<{ ok: true; data: CanonicalizeOutcome } | CanonicalizeFailure> {
   const session = await qGet<{ id: string }>(
     `SELECT id FROM import_session WHERE id = ? AND household_id = ?`,
@@ -343,6 +344,14 @@ export async function canonicalizeImportSession(
   let skipped = 0;
   let nearDuplicates = 0;
   const dbRules = await listEnabledDbRulesForClassification(householdId);
+
+  const householdSettings = await qGet<{ large_txn_threshold_usd: number | null }>(
+    `SELECT large_txn_threshold_usd FROM household WHERE id = ?`,
+    householdId
+  );
+  const largeTxnThreshold = householdSettings?.large_txn_threshold_usd
+    ? Number(householdSettings.large_txn_threshold_usd)
+    : null;
   const fileDiagnostics = new Map<string, CanonicalFileDiagnostics>();
   const ensureFileDiag = (fileId: string): CanonicalFileDiagnostics => {
     const existing = fileDiagnostics.get(fileId);
@@ -433,6 +442,16 @@ export async function canonicalizeImportSession(
       inserted += 1;
       diag.inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
+      if (largeTxnThreshold !== null && Math.abs(rounded) >= largeTxnThreshold) {
+        const displayAmt = `$${Math.abs(rounded).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        void createNotification({
+          householdId,
+          type: "large_transaction",
+          title: "Large transaction detected",
+          body: `${merchant || "Transaction"} of ${displayAmt} on ${normDate}`,
+          actionUrl: `/transactions/${canonicalId}`
+        });
+      }
       seenFingerprintsThisRun.add(fingerprint);
       if (referenceId) seenReferenceIdsThisRun.add(`${accountId}:${referenceId}`);
       {
@@ -703,25 +722,22 @@ export async function canonicalizeImportSession(
 
     let isNear = false;
     for (const c of nearCandidates) {
-      const existingNorm = existingDescriptionFingerprint(c.merchant, c.memo);
-      if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
-        isNear = true;
-        await qExec(
-          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
-          crypto.randomUUID(),
-          householdId,
-          row.raw_id,
-          JSON.stringify({
-            kind: "near_duplicate",
-            existingCanonicalId: c.id,
-            rawId: row.raw_id,
-            message:
-              "Same account, date, and amount as an existing ledger row with a similar but non-identical description fingerprint."
-          })
-        );
-        break;
-      }
+      isNear = true;
+      await qExec(
+        `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+   VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
+        crypto.randomUUID(),
+        householdId,
+        row.raw_id,
+        JSON.stringify({
+          kind: "near_duplicate",
+          existingCanonicalId: c.id,
+          rawId: row.raw_id,
+          message:
+            "Same account, date, and amount as an existing ledger row but different fingerprint. Resolve to keep or move to another account."
+        })
+      );
+      break;
     }
 
     if (!isNear) {
@@ -734,25 +750,22 @@ export async function canonicalizeImportSession(
         ) {
           continue;
         }
-        const existingNorm = existingDescriptionFingerprint(pr.merchant, pr.memo);
-        if (descriptionsCompatibleForNearDuplicate(normDesc, existingNorm)) {
-          isNear = true;
-          await qExec(
-            `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-     VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
-            crypto.randomUUID(),
-            householdId,
-            row.raw_id,
-            JSON.stringify({
-              kind: "near_duplicate",
-              existingCanonicalId: null,
-              rawId: row.raw_id,
-              message:
-                "Same account, date, and amount as another row in this import with a similar but non-identical description fingerprint (pending insert)."
-            })
-          );
-          break;
-        }
+        isNear = true;
+        await qExec(
+          `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+   VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
+          crypto.randomUUID(),
+          householdId,
+          row.raw_id,
+          JSON.stringify({
+            kind: "near_duplicate",
+            existingCanonicalId: null,
+            rawId: row.raw_id,
+            message:
+              "Same account, date, and amount as another row in this import but different fingerprint (pending insert). Resolve to keep or move to another account."
+          })
+        );
+        break;
       }
     }
 
@@ -919,7 +932,7 @@ export async function canonicalizeImportSession(
           if (matched.has(c.id)) return false;
           if (c.accountId === debit.accountId) return false;
           if (c.centsAbs !== debit.centsAbs) return false;
-          return dateDiffDays(debit.txnDate, c.txnDate) <= 2;
+          return dateDiffDays(debit.txnDate, c.txnDate) <= 4;
         });
 
         if (matchingCredits.length > 1) {
@@ -961,7 +974,7 @@ export async function canonicalizeImportSession(
             debitId: debit.id,
             creditCandidateIds: matchingCredits.map((c) => c.id),
             dateWindow: { start: windowStart, end: windowEnd },
-            closeDateToleranceDays: 2,
+            closeDateToleranceDays: 4,
             matcherTelemetry: {
               phase: "debit_to_credits",
               debitLabel: debit.label,
@@ -1001,7 +1014,7 @@ export async function canonicalizeImportSession(
           if (matched.has(d.id)) return false;
           if (d.accountId === credit.accountId) return false;
           if (d.centsAbs !== credit.centsAbs) return false;
-          return dateDiffDays(d.txnDate, credit.txnDate) <= 2;
+          return dateDiffDays(d.txnDate, credit.txnDate) <= 4;
         });
 
         if (matchingDebitsForCredit.length > 1) {
@@ -1047,7 +1060,7 @@ export async function canonicalizeImportSession(
               debitLabel: debit.label,
               creditLabel: credit.label,
               dateWindow: { start: windowStart, end: windowEnd },
-              closeDateToleranceDays: 2,
+              closeDateToleranceDays: 4,
               matcherTelemetry: {
                 message:
                   "One-to-one amount/date match across accounts, but description pairing score is below the auto-match threshold."
@@ -1110,7 +1123,7 @@ export async function canonicalizeImportSession(
             debitId: debitCandidate.id,
             creditCandidateIds: [credit.id],
             dateWindow: { start: windowStart, end: windowEnd },
-            closeDateToleranceDays: 2,
+            closeDateToleranceDays: 4,
             matcherTelemetry: {
               phase: "credit_to_debits",
               creditLabel: credit.label,
@@ -1145,6 +1158,18 @@ export async function canonicalizeImportSession(
   }
 
   await deleteStagingFilesForSession(sessionId);
+
+  if (inserted > 0) {
+    void checkBudgetThresholds(householdId);
+    void createNotification({
+      householdId,
+      userId: triggeredByUserId,
+      type: "import_complete",
+      title: "Import complete",
+      body: `${inserted} new transaction${inserted === 1 ? "" : "s"} added${duplicates > 0 ? `, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped` : ""}.`,
+      actionUrl: "/transactions"
+    });
+  }
 
   return { ok: true, data: { inserted, duplicates, skipped, nearDuplicates } };
 }

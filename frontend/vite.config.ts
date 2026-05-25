@@ -31,7 +31,8 @@ export default defineConfig({
       "/gdrive": api,
       "/budget": api,
       "/recurring-overrides": api,
-      "/insights": api
+      "/insights": api,
+      "/notifications": api
     }
   }
 });

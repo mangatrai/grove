@@ -7,6 +7,7 @@ import multer from "multer";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
+import { log } from "../../logger.js";
 import { resolveDataPath } from "../../paths.js";
 import {
   getExportJob,
@@ -78,8 +79,13 @@ exportsRouter.post(
         const msg = err instanceof Error ? err.message : String(err);
         const code = (err as { code?: string }).code;
         if (code === "ENCRYPTED_NO_KEY") {
+          log.warn("export HFB preview: encrypted backup, no key", { householdId: req.authUser!.householdId });
           res.status(422).json({ message: msg });
         } else {
+          log.error("export HFB preview manifest read failed", {
+            householdId: req.authUser!.householdId,
+            err
+          });
           res.status(400).json({ message: msg });
         }
       }

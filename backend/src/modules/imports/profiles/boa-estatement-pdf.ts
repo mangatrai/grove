@@ -3,22 +3,46 @@ import type { NormalizedRawPayload } from "./types.js";
 import { extractPdfText } from "./pdf-text.js";
 import { parseAmount } from "./tabular-helpers.js";
 
-function mmddyyyyToIsoFlexible(s: string): string | null {
+const MONTH_MAP: Record<string, string> = {
+  january: "01", february: "02", march: "03", april: "04",
+  may: "05", june: "06", july: "07", august: "08",
+  september: "09", october: "10", november: "11", december: "12",
+  jan: "01", feb: "02", mar: "03", apr: "04",
+  jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+function parseDateToIso(s: string): string | null {
   const t = s.trim();
-  const m = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) {
-    return `${m[3]}-${m[1]!.padStart(2, "0")}-${m[2]!.padStart(2, "0")}`;
+  // MM/DD/YYYY or MM/DD/YY
+  const slash = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slash) {
+    const y = slash[3]!.length === 2
+      ? (Number(slash[3]) > 50 ? `19${slash[3]}` : `20${slash[3]}`)
+      : slash[3]!;
+    return `${y}-${slash[1]!.padStart(2, "0")}-${slash[2]!.padStart(2, "0")}`;
   }
-  const m2 = t.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
-  if (m2) {
-    const y = Number(m2[3]) > 50 ? `19${m2[3]}` : `20${m2[3]}`;
-    return `${y}-${m2[1]!.padStart(2, "0")}-${m2[2]!.padStart(2, "0")}`;
+  // "April 21, 2026" or "April 21 2026"
+  const text = t.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (text) {
+    const mm = MONTH_MAP[text[1]!.toLowerCase()];
+    if (mm) return `${text[3]}-${mm}-${text[2]!.padStart(2, "0")}`;
   }
   return null;
 }
 
+// Matches a date in either MM/DD/YYYY or "Month DD, YYYY" format
+const DATE_PAT = String.raw`(\d{1,2}\/\d{1,2}\/\d{2,4}|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4})`;
+const AMT_PAT = String.raw`(\d{1,3}(?:,\d{3})*\.\d{2})`;
+const BEG_RE = new RegExp(
+  String.raw`Beginning\s+balance(?:\s+as\s+of|\s+on)?\s+${DATE_PAT}[^\d]*${AMT_PAT}`, "i"
+);
+const END_RE = new RegExp(
+  String.raw`Ending\s+balance(?:\s+as\s+of|\s+on)?\s+${DATE_PAT}[^\d]*${AMT_PAT}`, "i"
+);
+
 /**
  * Best-effort beginning/ending balance from BoA deposit eStatement PDF text (summary area).
+ * Handles both MM/DD/YYYY and "Month DD, YYYY" date formats.
  */
 export function extractBoaEStatementBalancesFromText(text: string): BoaStatementBalances | null {
   const norm = text.replace(/\u00a0/g, " ").replace(/\s+/g, " ");
@@ -27,18 +51,14 @@ export function extractBoaEStatementBalancesFromText(text: string): BoaStatement
   let asOfStart: string | null = null;
   let asOfEnd: string | null = null;
 
-  const beg = norm.match(
-    /Beginning\s+balance(?:\s+as\s+of|\s+on)?\s+(\d{1,2}\/\d{1,2}\/\d{2,4})[^\d]*(\d{1,3}(?:,\d{3})*\.\d{2})/i
-  );
+  const beg = norm.match(BEG_RE);
   if (beg) {
-    asOfStart = mmddyyyyToIsoFlexible(beg[1]!);
+    asOfStart = parseDateToIso(beg[1]!);
     beginning = parseAmount(beg[2]!);
   }
-  const end = norm.match(
-    /Ending\s+balance(?:\s+as\s+of|\s+on)?\s+(\d{1,2}\/\d{1,2}\/\d{2,4})[^\d]*(\d{1,3}(?:,\d{3})*\.\d{2})/i
-  );
+  const end = norm.match(END_RE);
   if (end) {
-    asOfEnd = mmddyyyyToIsoFlexible(end[1]!);
+    asOfEnd = parseDateToIso(end[1]!);
     ending = parseAmount(end[2]!);
   }
 

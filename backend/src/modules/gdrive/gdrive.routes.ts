@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 
 import { env } from "../../config/env.js";
+import { log } from "../../logger.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
@@ -190,6 +191,10 @@ gdriveRouter.post("/connect", requireRole(["owner"]), connectRateLimit, async (r
     parsed.data.folderId
   );
   if (!result.ok) {
+    log.warn("gdrive connect failed", {
+      householdId: req.authUser!.householdId,
+      message: result.message
+    });
     res.status(422).json({ code: "DRIVE_CONNECTION_FAILED", message: result.message });
     return;
   }
@@ -218,6 +223,17 @@ gdriveRouter.get("/backups", requireRole(["owner", "admin"]), async (req: Authen
       });
       return;
     }
+    if (result.reason === "needs_reauth") {
+      res.status(401).json({
+        code: "GDRIVE_NEEDS_REAUTH",
+        message: "Google Drive authorization has expired. Reconnect in Settings."
+      });
+      return;
+    }
+    log.error("gdrive list backups failed", {
+      householdId: req.authUser!.householdId,
+      message: result.message
+    });
     res.status(502).json({ code: "DRIVE_LIST_FAILED", message: result.message });
     return;
   }
@@ -244,6 +260,7 @@ gdriveRouter.post("/backups/:fileId/preview", requireRole(["owner"]), async (req
   try {
     await downloadDriveFile(creds.refreshToken, fileId, tempPath);
   } catch (err: unknown) {
+    log.error("gdrive preview download failed", { householdId, fileId, err });
     const msg = err instanceof Error ? err.message : "Could not download backup from Drive.";
     if (msg.includes("not found") || msg.includes("404")) {
       res.status(404).json({ code: "DRIVE_FILE_NOT_FOUND", message: msg });
@@ -262,8 +279,10 @@ gdriveRouter.post("/backups/:fileId/preview", requireRole(["owner"]), async (req
     const msg = err instanceof Error ? err.message : String(err);
     const code = (err as { code?: string }).code;
     if (code === "ENCRYPTED_NO_KEY") {
+      log.warn("gdrive preview manifest: encrypted backup, no key", { householdId, fileId });
       res.status(422).json({ message: msg });
     } else {
+      log.error("gdrive preview manifest read failed", { householdId, fileId, err });
       res.status(400).json({ message: msg });
     }
   } finally {
@@ -336,6 +355,7 @@ gdriveRouter.post("/restore", requireRole(["owner"]), async (req: AuthenticatedR
   try {
     await downloadDriveFile(creds.refreshToken, fileId, tempPath);
   } catch (err: unknown) {
+    log.error("gdrive restore download failed", { householdId, fileId, err });
     res.status(502).json({
       code: "DRIVE_DOWNLOAD_FAILED",
       message: err instanceof Error ? err.message : "Could not download backup from Drive."

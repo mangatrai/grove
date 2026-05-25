@@ -10,6 +10,7 @@ import {
   upsertManualBalanceSnapshot
 } from "./balance-sheet.service.js";
 import { getCashSummary } from "./cash-summary.service.js";
+import { getOrGenerateYearSummary, sendYearSummaryEmail } from "./year-summary.service.js";
 
 export const reportsRouter = Router();
 reportsRouter.use(requireAuth);
@@ -167,7 +168,8 @@ reportsRouter.get("/balance-sheet", async (req: AuthenticatedRequest, res) => {
     assets: result.assets,
     liabilities: result.liabilities,
     properties: result.properties,
-    totals: result.totals
+    totals: result.totals,
+    memberSummary: result.memberSummary
   });
 });
 
@@ -319,4 +321,37 @@ reportsRouter.get("/cash-summary", async (req: AuthenticatedRequest, res) => {
     }
     throw e;
   }
+});
+
+// ── Year summary ─────────────────────────────────────────────────────────────
+
+reportsRouter.get("/year-summary", async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const year = parseInt(req.query.year as string, 10);
+  if (!year || year < 2000 || year > new Date().getFullYear()) {
+    res.status(400).json({ message: "Invalid year parameter" });
+    return;
+  }
+  const result = await getOrGenerateYearSummary(householdId, year);
+  res.json(result);
+});
+
+reportsRouter.post("/year-summary/:year/email", async (req: AuthenticatedRequest, res) => {
+  const householdId = req.authUser!.householdId;
+  const year = parseInt(req.params.year, 10);
+  if (!year || year < 2000 || year > new Date().getFullYear()) {
+    res.status(400).json({ message: "Invalid year" });
+    return;
+  }
+  const parsed = z.object({ email: z.string().email() }).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const result = await sendYearSummaryEmail(householdId, year, parsed.data.email);
+  if (!result.ok) {
+    res.status(500).json({ message: result.reason ?? "Failed to send email" });
+    return;
+  }
+  res.json({ ok: true });
 });

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { clearAllCaches, invalidateCacheByUrl } from "./cache";
 
 const TOKEN_KEY = "hf_jwt";
 
@@ -27,6 +28,8 @@ export function setToken(token: string | null): void {
     localStorage.setItem(TOKEN_KEY, token);
   } else {
     localStorage.removeItem(TOKEN_KEY);
+    // Clear all cached data on logout so a subsequent login starts fresh.
+    clearAllCaches();
   }
   notifyTokenListeners();
 }
@@ -62,6 +65,13 @@ export async function apiJson<T>(path: string, init: RequestInit = {}): Promise<
     } catch { /* use status text */ }
     throw new Error(message);
   }
+
+  // Invalidate cached data for any scope affected by this mutation.
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET") {
+    invalidateCacheByUrl(path);
+  }
+
   return (await res.json()) as T;
 }
 

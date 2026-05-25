@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { transferPairScore } from "../src/modules/canonical/canonical-ingest.service.js";
 import {
   computeTransactionFingerprint,
-  descriptionsCompatibleForNearDuplicate,
   normalizeAmountForFingerprint,
   normalizeDescriptionForFingerprint,
   normalizeTxnDateForFingerprint
@@ -69,11 +68,6 @@ describe("transaction fingerprint (Epic 4.2)", () => {
     expect(a).toBe(b);
   });
 
-  it("detects compatible descriptions for near-duplicate review", () => {
-    expect(descriptionsCompatibleForNearDuplicate("starbucks coffee", "starbucks coffee shop")).toBe(true);
-    expect(descriptionsCompatibleForNearDuplicate("x", "y")).toBe(false);
-    expect(descriptionsCompatibleForNearDuplicate("whole foods market", "whole foods")).toBe(true);
-  });
 });
 
 describe("transfer pair score (Epic 5.2)", () => {

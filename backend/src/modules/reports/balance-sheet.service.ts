@@ -11,6 +11,7 @@ export type BalanceSheetAccountRow = {
   type: string;
   currency: string;
   liquidity: "liquid" | "semi_liquid" | "restricted" | null;
+  status: string;
   side: BalanceSheetSide;
   balance: number | null;
   balanceAsOf: string | null;
@@ -31,6 +32,14 @@ export type PropertySheetRow = {
   linkedMortgageAsOf: string | null;
 };
 
+export type BalanceSheetMemberSummaryRow = {
+  personProfileId: string;
+  name: string;
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+};
+
 export type BalanceSheetResult = {
   asOf: string;
   assets: BalanceSheetAccountRow[];
@@ -41,6 +50,7 @@ export type BalanceSheetResult = {
     liabilities: number | null;
     netWorth: number | null;
   };
+  memberSummary: BalanceSheetMemberSummaryRow[];
 };
 
 export type BalanceSheetHistoryInterval = "month" | "quarter" | "week" | "day";
@@ -222,6 +232,102 @@ async function latestImportBalanceHint(
   return null;
 }
 
+async function resolveAccountBalance(
+  householdId: string,
+  financialAccountId: string,
+  asOf: string
+): Promise<number | null> {
+  const [manual, fromTable] = await Promise.all([
+    latestManualSnapshot(householdId, financialAccountId, asOf),
+    latestImportSnapshotFromTable(householdId, financialAccountId, asOf)
+  ]);
+
+  if (manual && fromTable) {
+    const pickManual = manual.asOfDate >= (fromTable.asOfDate ?? "");
+    return pickManual ? manual.amount : fromTable.amount;
+  }
+  if (manual) {
+    return manual.amount;
+  }
+  if (fromTable) {
+    return fromTable.amount;
+  }
+  const imp = await latestImportBalanceHint(financialAccountId, asOf);
+  return imp ? imp.amount : null;
+}
+
+async function buildMemberSummary(
+  householdId: string,
+  asOf: string
+): Promise<BalanceSheetMemberSummaryRow[]> {
+  const countRow = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt FROM person_profile WHERE household_id = ?`,
+    householdId
+  );
+  if (Number(countRow?.cnt ?? 0) < 2) {
+    return [];
+  }
+
+  const members = await qAll<{ id: string; full_name: string }>(
+    `SELECT pp.id, pp.full_name
+       FROM person_profile pp
+      WHERE pp.household_id = ?
+      ORDER BY pp.full_name, pp.id`,
+    householdId
+  );
+
+  const totalsByPerson = new Map<string, { assets: number; liabilities: number }>();
+  for (const m of members) {
+    totalsByPerson.set(m.id, { assets: 0, liabilities: 0 });
+  }
+
+  const accounts = await qAll<Record<string, unknown>>(
+    `SELECT fa.id, fa.type, fa.owner_person_profile_id
+       FROM financial_account fa
+       INNER JOIN person_profile pp ON pp.id = fa.owner_person_profile_id AND pp.household_id = ?
+      WHERE fa.household_id = ?
+        AND fa.type <> 'payslip'
+        AND fa.owner_person_profile_id IS NOT NULL`,
+    householdId,
+    householdId
+  );
+
+  for (const a of accounts) {
+    const ownerId = String(a.owner_person_profile_id);
+    const bucket = totalsByPerson.get(ownerId);
+    if (!bucket) {
+      continue;
+    }
+
+    const side = accountSide(String(a.type));
+    if (!side) {
+      continue;
+    }
+
+    const balance = await resolveAccountBalance(householdId, String(a.id), asOf);
+    if (balance == null) {
+      continue;
+    }
+
+    if (side === "asset") {
+      bucket.assets += balance;
+    } else {
+      bucket.liabilities += balance;
+    }
+  }
+
+  return members.map((m) => {
+    const t = totalsByPerson.get(m.id)!;
+    return {
+      personProfileId: m.id,
+      name: String(m.full_name),
+      totalAssets: t.assets,
+      totalLiabilities: t.liabilities,
+      netWorth: t.assets - t.liabilities
+    };
+  });
+}
+
 export async function getBalanceSheet(
   householdId: string,
   asOf: string,
@@ -229,7 +335,7 @@ export async function getBalanceSheet(
 ): Promise<BalanceSheetResult> {
   const own = financialAccountOwnerFragment(options);
   const accounts = await qAll<Record<string, unknown>>(
-    `SELECT id, institution, account_mask, type, currency, liquidity
+    `SELECT id, institution, account_mask, type, currency, liquidity, status
        FROM financial_account
       WHERE household_id = ?
         AND type <> 'payslip'${own.fragment}
@@ -305,6 +411,7 @@ export async function getBalanceSheet(
       type,
       currency: String(a.currency ?? "USD"),
       liquidity: a.liquidity == null ? null : (String(a.liquidity) as "liquid" | "semi_liquid" | "restricted"),
+      status: String(a.status ?? "active"),
       side,
       balance,
       balanceAsOf,
@@ -398,6 +505,8 @@ export async function getBalanceSheet(
     });
   }
 
+  const memberSummary = await buildMemberSummary(householdId, asOf);
+
   return {
     asOf,
     assets,
@@ -407,7 +516,8 @@ export async function getBalanceSheet(
       assets: assetHasAny ? assetSum : null,
       liabilities: liabilityHasAny ? liabilitySum : null,
       netWorth: assetHasAny || liabilityHasAny ? assetSum - liabilitySum : null
-    }
+    },
+    memberSummary
   };
 }
 
@@ -464,6 +574,39 @@ export async function upsertManualBalanceSnapshot(
     input.currency
   );
   return { id };
+}
+
+export async function computeAndUpsertCashBalanceIfApplicable(
+  householdId: string,
+  accountId: string,
+  txnDate: string,
+  delta: number
+): Promise<void> {
+  const acc = await qGet<{ type: string; currency: string }>(
+    `SELECT type, currency FROM financial_account WHERE id = ? AND household_id = ?`,
+    accountId,
+    householdId
+  );
+  if (!acc || acc.type !== "cash") return;
+
+  const latest = await qGet<{ amount: string }>(
+    `SELECT amount FROM account_balance_snapshot
+     WHERE financial_account_id = ? AND household_id = ?
+     ORDER BY as_of_date DESC, updated_at DESC
+     LIMIT 1`,
+    accountId,
+    householdId
+  );
+
+  const current = latest ? Number(latest.amount) : 0;
+  const newBalance = current + delta;
+
+  await upsertManualBalanceSnapshot(householdId, {
+    financialAccountId: accountId,
+    asOfDate: txnDate,
+    amount: newBalance,
+    currency: acc.currency
+  });
 }
 
 export type UpsertImportBalanceResult =

@@ -33,6 +33,7 @@ Household-scoped access to `transaction_canonical`: **GET** lists rows with opti
 - `ownerPersonProfileId` — optional UUID when `ownerScope=person` (legacy single-value).
 - `ownerPersonProfileIds` — optional UUID, repeatable; multi-select person profile filter when `ownerScope=person`. Singular and array params may be combined.
 - `belongsTo` — optional, repeatable; multi-select belongs-to filter. Values are `household` and/or person profile UUIDs. When present, takes precedence over `ownerScope` / `ownerPersonProfileId` / `ownerPersonProfileIds`. Mixed household + person IDs match household-scoped rows **or** rows owned by any listed profile.
+- `transferPaired` — `true` / `false`; when `true`, only rows with a non-null `transfer_group_id` (confirmed transfer pairs).
 - `returnTo` — optional relative app URL for context return affordance (frontend-only hint; ignored by backend filtering).
 - `fromDashboard` — optional `true`/`false` frontend context hint used for drill-down UX.
 
@@ -65,6 +66,7 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
       "accountMask": "1001",
       "categoryId": "uuid-or-null",
       "categoryName": "Groceries",
+      "transferGroupId": "uuid-or-null",
       "classificationMeta": {
         "source": "household",
         "ruleId": "uuid-or-null",
@@ -81,6 +83,7 @@ When `sessionId` is used, the response includes **`sessionId`** so clients can s
 }
 ```
 
+- **`transferGroupId`** — UUID shared by both legs of a confirmed transfer pair; `null` when the row is not part of a pair. Present on every row regardless of filter.
 - **`categoryId` / `categoryName`** — from `LEFT JOIN category` on `transaction_canonical.category_id`. Both `null` when uncategorized.
 - **`classificationMeta`** — parsed from `transaction_canonical.classification_meta` JSON set at **canonicalize** (import) or **manual** entry: **`source`** (`household` \| `builtin` \| `none` \| `manual`), **`ruleId`** (when a rule matched), **`confidence`** [0,1], **`reason`** (human-readable). **`null`** when absent or unparseable.
 - **`reviewReasons`** — present only when **`needsReview=true`**; human-readable strings explaining why the row matches the needs-review predicate. Possible values: **`Uncategorized`** (category_id IS NULL), **`Exact duplicate`** (status = 'duplicate', from CR-080), **`Status: <value>`** (other non-posted statuses), **`Open review: near-duplicate`** (open duplicate_ambiguity item on a posted row), **`Open review: reconciliation`** (open reconciliation_mismatch item).
@@ -147,15 +150,29 @@ Insert one **posted** canonical row (manual entry). **`user_id`** is taken from 
 
 ## `PATCH /transactions/:id`
 
-Update the **category** for one posted ledger row (household-scoped).
+Update one or more fields on a posted ledger row. Send a single-purpose body — the handler dispatches based on which field is present.
 
-**Body:**
+### Amount update (manual transactions only)
+
+```json
+{ "amount": 150.00 }
+```
+
+- Only allowed on manual transactions (`source_ref` starts with `manual:`). Returns **400 `NOT_MANUAL`** for imported rows.
+- For `type=’cash’` accounts the `account_balance_snapshot` is automatically updated (delta = `newAmount − oldAmount`).
+
+**200:**
+```json
+{ "amount": 150.00 }
+```
+
+### Category update
 
 ```json
 { "categoryId": "uuid" }
 ```
 
-or clear the category:
+or clear it:
 
 ```json
 { "categoryId": null }
@@ -173,11 +190,15 @@ or clear the category:
 }
 ```
 
-**400:** invalid body, or category not available for this household.  
+When **`categoryId`** is set to a non-null value, any **`resolution_item`** with **`type = unknown_category`** and **`target_id`** equal to this transaction’s id is marked **`resolved`** (attention path).
+
+### Status / memo / owner
+
+See existing fields: `status` (`"trashed"` / `"posted"`), `memo`, `ownerScope`, `ownerPersonProfileId`.
+
+**400:** invalid body, category not available, amount is zero/non-finite, or attempting to edit amount of an imported transaction.  
 **404:** transaction not found for this household.  
 **401:** missing or invalid token.
-
-When **`categoryId`** is set to a non-null value, any **`resolution_item`** with **`type = unknown_category`** and **`target_id`** equal to this transaction’s id is marked **`resolved`** (attention path).
 
 ## `GET /transactions/:id/open-review`
 
@@ -218,6 +239,36 @@ Returns **open** and **in_review** **`resolution_item`** rows linked to this can
 **400:** `:id` is not a valid UUID.  
 **404:** transaction not found for this household.  
 **401:** missing or invalid token.
+
+## `POST /transactions/pair`
+
+Manually confirm two transactions as a transfer pair. Assigns a shared `transfer_group_id` to both rows. Does not require a `transfer_ambiguity` resolution item — works on any posted transactions.
+
+**Body:** `{ "ids": ["uuid-A", "uuid-B"] }` — exactly two IDs.
+
+**Validations:**
+- Both must exist and be `posted` in the caller's household.
+- Both must be on **different** accounts.
+- Must have **opposite directions** — one `debit`, one `credit`.
+- Absolute amounts must match within 0.01.
+- Neither may already have a `transfer_group_id`.
+
+**200:** `{ "transferGroupId": "uuid" }`
+
+**400:** `SAME_ID` | `SAME_ACCOUNT` | `ALREADY_PAIRED` | `AMOUNT_MISMATCH` | `DIRECTION_MISMATCH` — with `{ code, message }`.  
+**404:** one or both IDs not found / not posted.
+
+---
+
+## `DELETE /transactions/pair/:groupId`
+
+Dissolves a transfer pair by nulling `transfer_group_id` on all rows that share `groupId` in the caller's household.
+
+**200:** `{ "unlinked": N }` — number of rows whose `transfer_group_id` was cleared.  
+**400:** `groupId` is not a valid UUID.  
+**404:** no rows found with this `groupId` in the household.
+
+---
 
 ## `POST /transactions/bulk-category`
 

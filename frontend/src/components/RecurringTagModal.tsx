@@ -21,7 +21,12 @@ interface RecurringTagModalProps {
   txnAmount: number;
   allTxns: Array<{ merchant: string | null; amount: number; direction: string }>;
   existingOverride: RecurringOverride | null;
-  onConfirm: (payload: { merchantKey: string; amountAnchor: number | null; amountTolerancePct: number }) => Promise<void>;
+  onConfirm: (payload: {
+    merchantKey: string;
+    displayName?: string;
+    amountAnchor: number | null;
+    amountTolerancePct: number;
+  }) => Promise<void>;
   onRemove: () => Promise<void>;
 }
 
@@ -36,6 +41,7 @@ export function RecurringTagModal({
   onRemove
 }: RecurringTagModalProps) {
   const [merchantKeyDraft, setMerchantKeyDraft] = useState("");
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [amountAnchorDraft, setAmountAnchorDraft] = useState("");
   const [toleranceDraft, setToleranceDraft] = useState("15");
   const [saving, setSaving] = useState(false);
@@ -46,6 +52,7 @@ export function RecurringTagModal({
       return;
     }
     setMerchantKeyDraft(existingOverride?.merchantKey ?? txnMerchant.toLowerCase().trim());
+    setDisplayNameDraft(existingOverride?.displayName ?? "");
     setAmountAnchorDraft(
       existingOverride?.amountAnchor != null ? existingOverride.amountAnchor.toFixed(2) : txnAmount.toFixed(2)
     );
@@ -84,7 +91,12 @@ export function RecurringTagModal({
     setSaving(true);
     setError(null);
     try {
-      await onConfirm({ merchantKey, amountAnchor, amountTolerancePct });
+      await onConfirm({
+        merchantKey,
+        displayName: displayNameDraft.trim() || undefined,
+        amountAnchor,
+        amountTolerancePct
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save recurring override.");
       setSaving(false);
@@ -119,6 +131,13 @@ export function RecurringTagModal({
           value={merchantKeyDraft}
           onChange={(e) => setMerchantKeyDraft(e.currentTarget.value)}
           description="Match is a substring of merchant, case-insensitive"
+        />
+        <TextInput
+          label="Display name"
+          description="Name shown on dashboard and settings. Defaults to merchant key if blank."
+          placeholder={merchantKeyDraft || "e.g. Frisco Utilities"}
+          value={displayNameDraft}
+          onChange={(e) => setDisplayNameDraft(e.currentTarget.value)}
         />
         <Text size="sm" mt="xs">
           {matchCount} transaction{matchCount === 1 ? "" : "s"} in current view match this pattern

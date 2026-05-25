@@ -538,4 +538,415 @@ This feature is distinct from D-3 (rental income tracking — permanently droppe
 
 ---
 
-*Last updated: 2026-05-15.*
+## Dashboard + Net Worth Caching (F-6)
+
+### Pattern: `useSessionCache` hook
+
+```typescript
+// frontend/src/hooks/useSessionCache.ts
+export function useSessionCache<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  ttlMs = 10 * 60 * 1000   // 10 min default; effectively infinite for offline use
+): { data: T | null; loading: boolean; lastUpdatedAt: Date | null; refresh: () => void }
+```
+
+- On mount: check `sessionStorage.getItem(key)`. If present and within TTL, parse and return immediately (no fetch).
+- If stale or absent: call `fetcher()`, store result + timestamp in `sessionStorage`.
+- `refresh()`: force fetch regardless of TTL, update storage and state.
+- Storage key format: `hfa:cache:{key}` to avoid namespace collision.
+
+### Cache invalidation on import finalize
+
+In `ImportWorkspacePage.tsx` (or wherever finalize is triggered), after a successful finalize response:
+
+```typescript
+// Clear dashboard and networth caches
+sessionStorage.removeItem('hfa:cache:cash-summary');
+sessionStorage.removeItem('hfa:cache:balance-sheet');
+```
+
+Or dispatch a `CustomEvent('hfa:import-finalized')` and listen for it in each cached page — cleaner if cache keys change.
+
+### Refresh icon placement
+
+- **Home page:** Top-right corner of the INFLOW / OUTFLOW KPI card row. `<ActionIcon variant="subtle">` with `<IconRefresh size={14}>`. Tooltip: "Last updated {timeAgo}".
+- **Net Worth page:** Same placement, top-right of the accounts table card.
+- During fetch: icon spins (`@keyframes spin`). On error: toast "Failed to refresh, using cached data."
+
+### What NOT to cache
+
+Do not cache the Transactions page or ledger — that list has user-driven filters and pagination; stale data there is confusing. Cache only the aggregate/summary endpoints that are expensive and rarely change.
+
+---
+
+## Net Worth Caching Follow-on (F-6b)
+
+F-6 shipped caching for the trend chart history (`bs-history:*` keys, `"networth"` scope, 7-day TTL) and the Dashboard cash-summary. Two expensive queries on the Net Worth page remain uncached after F-6.
+
+### What's still uncached
+
+| Query | When it fires | Cost |
+|---|---|---|
+| `GET /reports/balance-sheet` (snapshot) | Every page load; every member/scope filter change | High — joins accounts, properties, snapshots |
+| Per-account balance history (row expand) | Each time a user expands an account row | Medium × N (10–20 calls if all rows expanded) |
+
+### Cache keys and TTLs
+
+**Snapshot**
+```
+Key:   bs-snapshot:{ownerScope}:{ownerPersonProfileId|'household'}
+Scope: "networth"
+TTL:   1 hour
+```
+Rationale: snapshot reflects current account balances — it changes whenever a new import is finalized. 1 hour is short enough to feel fresh; the refresh icon handles the "I just imported" case explicitly.
+
+**Per-account row-expansion history**
+```
+Key:   bs-acct-history:{accountId}:{fromDate}:{toDate}
+Scope: "networth"
+TTL:   7 days
+```
+Rationale: historical balance data for a given account and date window is immutable once written. Same TTL as the trend chart history (already 7 days in F-6).
+
+### Invalidation
+
+Both keys use the existing `"networth"` scope. The refresh icon shipped in F-6 calls `refreshHistoryCache()` which invalidates the full scope — it already busts `bs-history:*` and will bust these new keys without any UI change.
+
+### Implementation notes
+
+- Wrap `loadSheet()` callback with `useLocalStorageCache`, same pattern as the history fetch already in the file.
+- For per-account expansion, locate the account-level history fetch in `NetWorthPage.tsx` and wrap it; the cache key must include accountId + the active from/to date window.
+- No new hook, no new scope, no new UI. Pure extension of the existing F-6 pattern.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+## Transfer Matching Improvements (TM-1 / TM-2 / TM-3)
+
+### TM-2: API spec for manual pair/unpair
+
+```
+POST /transactions/pair
+Body: { debitId: string; creditId: string }
+Validates:
+  - Both belong to same household
+  - Different account_id
+  - Opposite signs (one negative, one positive)
+  - Neither already has a transfer_group_id (or require explicit override)
+Response: 200 { transferGroupId: string }
+
+DELETE /transactions/pair/:groupId
+Validates:
+  - At least one transaction with this transfer_group_id belongs to caller's household
+Response: 204 (nulls transfer_group_id on all rows with that groupId)
+```
+
+### TM-3: ❌ NOT DOING — dropped 2026-05-19
+
+Premise was wrong. OFX parser never produces a truly empty description (`"OFX Transaction"` fallback means identical-memo pairs score 100 and auto-pair). No evidence of this failure mode in 3,500 production transactions. Transfer resolution queue is healthy. Closed without implementation.
+
+---
+
+## AI Year-End Summary (F-7)
+
+### Prompt design
+
+Feed as a structured JSON block (same approach as `insight-prompt.service.ts`):
+
+```
+You are a friendly personal finance advisor reviewing a household's full-year financial data.
+Write a 2-3 paragraph summary that feels personal and encouraging — not clinical.
+Cover: what went well, what stands out or surprised you, one specific actionable suggestion for next year.
+Avoid generic advice. Reference the actual numbers.
+
+DATA:
+{
+  "year": 2025,
+  "income": 280000,
+  "spending": 195000,
+  "netSavings": 85000,
+  "savingsRate": "30.4%",
+  "priorYearComparison": { "income": 265000, "spending": 188000, "savingsRate": "29.1%" },
+  "topCategories": [
+    { "name": "Housing", "amount": 42000, "pct": "21.5%" },
+    ...
+  ],
+  "bestMonth": { "month": "2025-03", "netSavings": 12400 },
+  "worstMonth": { "month": "2025-11", "netSavings": -2100 },
+  "netWorthStart": 620000,
+  "netWorthEnd": 710000,
+  "netWorthChange": 90000,
+  "largestTransaction": { "date": "2025-06-15", "amount": 28000, "description": "ESPP Purchase" },
+  "topMerchant": { "name": "Amazon", "count": 87 }
+}
+```
+
+### Backend endpoint
+
+```
+GET /reports/year-summary?year=2025
+```
+
+- Computes all data fields from `transaction_canonical`, `account_balance_snapshot`, `payslip_snapshot`.
+- Calls LLM and caches narrative in `household` settings JSON or a new `year_summary_cache` table (avoid re-calling LLM on every page load; invalidate if user uploads more data for that year).
+- Returns: `{ year, data: {...}, narrative: string, generatedAt: string }`.
+
+---
+
+---
+
+## Recurring Payments Display Name (F-9)
+
+### Problem
+
+Confirmed recurring rules on the Dashboard Recurring Payments card show the raw `merchantKey` value (the substring match pattern used for detection) as the display label. For auto-detected or manually-entered rules, this is often an ugly truncated bank string: `"CITY OF FRISCO UTILITI FRIS"`, `"MUNICIPAL ONLINE PAYME LUBB"`, etc.
+
+### What already exists
+
+| Layer | Status |
+|---|---|
+| DB column `recurring_merchant_override.display_name` (TEXT, nullable) | ✅ Exists |
+| Backend: `displayName?: z.string().optional()` in Zod schema | ✅ Already accepted |
+| Backend: `upsertOverride()` writes `display_name` if provided | ✅ Already handled |
+| Dashboard confirmed item rendering: `override.displayName ?? override.merchantKey` | ✅ Falls back correctly |
+| Settings > Recurring table: `o.displayName ?? "—"` column | ✅ Shows it read-only |
+
+The gap is entirely in the frontend collection layer.
+
+### What's missing
+
+`RecurringTagModal` (the modal launched from the Transactions page "Mark as recurring" button and from the Settings > Recurring edit button) collects only:
+- Match string (`merchantKey`)
+- Amount anchor (optional number)
+- Tolerance %
+
+There is no `displayName` input. Neither `TransactionsPage` nor `SettingsPage` passes `displayName` in the POST body, so it is always `null`.
+
+### Suggested items
+
+Suggested recurring items use the raw heuristic `item.merchant` (normalized transaction description, e.g. `"CLAUDE.AI SUBSCRIPTION SAN"`). This is intentional — they are unconfirmed candidates. When the user clicks to confirm a suggestion, the modal opens pre-filled with the merchant key; at that point they can set a display name. No change needed for the suggested rendering.
+
+### Fix
+
+**`frontend/src/components/RecurringTagModal.tsx`**
+- Add an optional "Display name" `TextInput` below the merchant key field.
+- Placeholder: the `merchantKey` value (so user sees what will be shown if left blank).
+- Pass `displayName` (trimmed, or `undefined` if blank) in the `onConfirm` callback.
+- When opened in edit mode (from Settings), pre-fill with existing `displayName` if set.
+
+**`frontend/src/pages/TransactionsPage.tsx`**
+- Include `displayName` in the POST body to `POST /recurring/overrides`.
+
+**`frontend/src/pages/SettingsPage.tsx`**
+- Include `displayName` in the POST body for both the "confirm new rule" and "edit existing rule" paths.
+
+No backend or migration changes needed.
+
+### Expected result
+
+After the fix, a user confirming `"CITY OF FRISCO UTILITI FRIS"` can type `"Frisco Utilities"` in the display name field. The Dashboard card shows `"Frisco Utilities"`, the Settings table shows `"Frisco Utilities"`, and the match string (used for detection) stays as `"CITY OF FRISCO UTILITI FRIS"` under the hood.
+
+---
+
+---
+
+## Near-Duplicate Detection — Remove Description Gate (TM-4)
+
+### Problem in detail
+
+The BoA CSV export masks sensitive digits in ACH/wire reference fields with `X` characters. The BoA PDF parser extracts the real digits. When both files are imported for the same account period, the canonicalization pipeline sees two transactions with the same account, date, and amount but descriptions that differ enough that neither passes the `descriptionsCompatibleForNearDuplicate()` substring check. Both land as live `posted` rows — a silent duplicate.
+
+### Real-world example pairs (all same transaction, different source)
+
+| CSV (masked) | PDF (real) |
+|---|---|
+| `CKPTUTOR DES:IAT PAYPAL ID:XXXXX50542835 INDN:MANGAT RAI CO ID:XXXXX0487C IAT PMT INFO: WEB XXXXXXXXXX00001199` | `CKPTUTOR DES:IAT PAYPAL ID:1049950542835 INDN:MANGAT RAI CO ID:XXXXXXXXXC IAT PMT INFO: WEB 00000` |
+| `IBM 3141 DES:PAYROLL ID:XXXXX73099 INDN:Mangat Rai CO ID:XXXXX71985 PPD PMT INFO:TRN*1*XXXXX73099` | `IBM 3141 DES:PAYROLL ID:1000073099 INDN:Mangat Rai CO ID:2130871985 PPD PMT INFO:TRN*1*10000730` |
+| `GOLDMAN SACHS BA DES:TRANSFER ID:000300008446968 INDN:Rai,Mangat CO ID:0124085260 WEB` | `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Rai,Mangat CO ID:XXXXX85260 WEB` |
+| `CHECKCARD 0430 TMOBILE AUTO P BELLEVUE WA 00000000000000000914798 RECURRING` | `TMOBILE AUTO P 04/30 PURCHASE BELLEVUE WA` |
+
+### Why the current check fails
+
+`normalizeDescriptionForFingerprint()` strips non-alphanumeric but preserves literal `X` as a letter. After normalization, `"idxxxxx50542835"` ≠ `"id1049950542835"`. Neither is a substring of the other, so `descriptionsCompatibleForNearDuplicate()` returns false and the near-duplicate path is never triggered.
+
+### Why NOT to fix the normalization
+
+Stripping X-runs and long digit sequences would fix these specific cases, but it hardcodes knowledge of BoA's masking format. Different banks, different parsers, or a future format change would silently re-break it. It's the wrong layer.
+
+### Option 1 (selected): Remove the description gate
+
+For same-account + same-date + same-amount pairs, drop `descriptionsCompatibleForNearDuplicate()` entirely. Any fingerprint mismatch routes the second transaction to `status = 'duplicate'` with a `duplicate_ambiguity` resolution item.
+
+**Trade-off:** Two genuinely different same-price same-day transactions (two $5.25 coffees, two $20 ATM withdrawals) will occasionally land in the resolution queue as false positives. The false-positive rate is low in practice — ACH, payroll, and transfer amounts are typically unique per day within an account — and the resolution queue is the designed path for ambiguity. Acceptable for a single-household app where the user resolves ambiguity themselves.
+
+**Why not fuzzy string matching (Levenshtein, Jaro-Winkler, Dice)?** These measure character-level distance. A 13-digit ID run or a long zero-padded reference adds significant character distance even when the merchant name is identical. The TMOBILE pair is worse: one description is ~2× the length. Character-level fuzzy matching doesn't handle token-level insertions cleanly, and a library won't help without additional preprocessing.
+
+---
+
+### Option 3 (upgrade path): Structural token Jaccard
+
+If false-positive resolution noise ever becomes a problem, replace the removed gate with a smarter check: strip any token that consists entirely of digits, X-characters, or a mix (`/^[x\d]+$/i`), then compute Jaccard similarity on the remaining structural word tokens. Those are the merchant name and type keywords — the stable part of any bank description, regardless of bank or format.
+
+```typescript
+function structuralTokens(normalizedDescription: string): Set<string> {
+  return new Set(
+    normalizedDescription.split(/\s+/).filter(t => t.length > 1 && !/^[x\d]+$/i.test(t))
+  );
+}
+
+function structuralJaccard(a: string, b: string): number {
+  const ta = structuralTokens(a);
+  const tb = structuralTokens(b);
+  const intersection = [...ta].filter(t => tb.has(t)).length;
+  const union = new Set([...ta, ...tb]).size;
+  return union === 0 ? 0 : intersection / union;
+}
+```
+
+Replace `descriptionsCompatibleForNearDuplicate()` with `structuralJaccard(a, b) >= 0.4`. The 0.4 threshold is tunable; requires ~40% of structural tokens to overlap.
+
+**Why generic:** Stripping pure-digit/X tokens is valid for any bank — reference IDs and trace numbers are always digits or masked digits, never merchant names. No knowledge of BoA's masking format is hardcoded.
+
+**Validation against the four real-world pairs:**
+
+| Pair | Jaccard after stripping |
+|---|---|
+| CKPTUTOR (masked vs real IDs) | ~0.90 ✓ |
+| IBM PAYROLL (masked vs real IDs) | ~0.85 ✓ |
+| GOLDMAN SACHS (real vs masked IDs) | ~0.80 ✓ |
+| TMOBILE (CHECKCARD prefix + long zeros vs clean) | 5/8 = 0.625 ✓ |
+
+No new npm dependency. ~15 lines of code when ready to upgrade.
+
+### Scope
+
+Same-account near-duplicate path only. Transfer pairing (`transferPairScore()`) is a separate scoring path — not touched.
+
+---
+
+## Cash Account Auto-Balance (F-10)
+
+### The problem
+
+A cash account is tracked exclusively by manual transaction entry. Currently, recording a cash expense in the Transactions page only creates a `transaction_canonical` row — it does not touch `account_balance_snapshot`. The user must navigate to Net Worth, find the account, and manually update the balance after every cash transaction. This defeats the purpose of tracking cash spending.
+
+### Data model (existing)
+
+`account_balance_snapshot` has `source = 'manual' | 'import'`. Manual-source rows are exactly what auto-balance should write. `upsertManualBalanceSnapshot()` in `balance-sheet.service.ts` already does the upsert correctly. No schema change needed.
+
+### Design
+
+**Trigger:** `POST /ledger` (create), `DELETE /ledger/:id` (delete), `PATCH /ledger/:id` (edit amount) — only when `financial_account.type = 'cash'`.
+
+**Balance computation (delta model):**
+- On create: `new_balance = latest_snapshot_amount + txn.amount`
+- On delete: `new_balance = latest_snapshot_amount − txn.amount`
+- On edit: `new_balance = latest_snapshot_amount − old_amount + new_amount`
+- If no prior snapshot exists: treat `latest_snapshot_amount = 0` (assumes starting from zero; user can set opening balance via Net Worth manual entry UI)
+
+**Why not recompute from SUM(transactions):** A user may set an opening balance manually (e.g. "I have $200 cash right now") and then track future spending. Summing all transactions from an arbitrary start would ignore the opening balance. The delta model anchors each increment to whatever the user last confirmed the balance to be.
+
+**Only cash accounts.** Checking and savings have import-sourced snapshots from statement files; auto-updating those from manual transactions would introduce noise. The `type = 'cash'` guard is the fence.
+
+### Edge cases
+
+- **Out-of-order entries:** If user records transactions out of date order (e.g. enters last week's coffee today), the snapshot's `as_of_date` will be the transaction date but the snapshot amount will still be correctly incremented from today's latest value. The balance may not reflect chronological order. Acceptable for cash — the user can correct via manual Net Worth entry.
+- **Currency:** Cash accounts are typically single-currency. Use the account's currency or default `USD`. If the account has mixed currencies (unusual), skip auto-balance (do not create a snapshot).
+- **Transfer transactions:** Cash-to-cash transfers should not double-count. If the debit and credit sides are both cash accounts, each side independently updates its own snapshot. This is correct — moving $50 from one cash envelope to another reduces one account by $50 and increases the other by $50.
+
+---
+
+---
+
+## PS-5: Tax Filing Profile + Stored Effective Federal Rate
+
+**Status:** Deferred — needs user due diligence before design is locked. Captured 2026-05-21. Mostly backend + import pipeline; frontend impact is a small per-person Settings section.
+
+### Problem
+
+`PS-4 TaxSufficiencyAlert` computes federal rate at runtime by scanning `payslip_line_item` rows for a line whose name or authority indicates federal withholding. This works but is fragile:
+
+- IBM: line name is `"TX Withholding Tax"`, authority `"Federal"` — name-only check misses it
+- Deloitte: line name is `"Federal Income Tax"` — name check works
+- A third employer could use a different format entirely
+
+**Root cause:** The federal line detection heuristic is brittle across payslip formats. The fix is to store the computed rate at import time — when the parsed data is already normalised — rather than re-detecting it on every page load.
+
+### The deeper signal gap
+
+The current tiered commentary (`< 10%`, `10–16%`, `16–28%`, `> 28%`) uses generic IRS benchmarks. A more precise signal — "you appear under-withheld by ~$3,200 for your filing situation" — requires knowing:
+
+1. **What was actually withheld** → already in `gross_pay_ytd` + `employee_taxes_ytd` + the federal line
+2. **What should be withheld** → requires filing status, number of allowances/credits, and IRS Pub 15-T withholding tables (or an LLM estimate)
+
+The W-4 context exists on some payslips (IBM shows marital status, filing status, credits) but not others (Deloitte does not). So storage must be hybrid: LLM-extracted where available, user-entered where not.
+
+### Proposed design
+
+#### Schema additions
+
+```sql
+-- Migration: 0049_ps5_tax_profile.sql
+
+-- Stored effective rate on the snapshot (avoids runtime line-item detection)
+ALTER TABLE payslip_snapshot
+  ADD COLUMN effective_federal_rate_ytd  NUMERIC,  -- fedTaxYtd / grossPayYtd * 100
+  ADD COLUMN effective_total_tax_rate_ytd NUMERIC; -- employeeTaxesYtd / grossPayYtd * 100
+
+-- Per-person tax filing profile (user-entered or LLM-populated at import)
+CREATE TABLE person_tax_profile (
+  id                   TEXT PRIMARY KEY,
+  household_id         TEXT NOT NULL REFERENCES household(id) ON DELETE CASCADE,
+  person_profile_id    TEXT NOT NULL REFERENCES person_profile(id) ON DELETE CASCADE,
+  tax_year             INTEGER NOT NULL,
+  filing_status        TEXT,  -- 'single' | 'married_jointly' | 'married_separately' | 'head_of_household'
+  w4_allowances        INTEGER,
+  w4_additional_amount NUMERIC,   -- additional withholding per period
+  w4_credits           NUMERIC,   -- Step 3 credits total
+  w4_extra_deductions  NUMERIC,   -- Step 4b deductions
+  state_code           TEXT,      -- 'TX' | 'CA' | etc.
+  notes                TEXT,
+  source               TEXT NOT NULL DEFAULT 'user',  -- 'user' | 'llm_extracted'
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(person_profile_id, tax_year)
+);
+```
+
+#### Import pipeline changes
+
+In the payslip finalization step (wherever the snapshot row is written or updated), compute and store `effective_federal_rate_ytd` from the already-parsed line items. No LLM call needed — pure arithmetic from the normalised extract data.
+
+If the LLM extract includes W-4 fields (IBM does, Deloitte doesn't), also upsert a `person_tax_profile` row with `source = 'llm_extracted'`. Don't overwrite a `source = 'user'` row.
+
+**Files:** `backend/src/modules/payslip/payslip.service.ts`, `backend/src/modules/imports/payslip-async-import-reconcile.service.ts`
+
+#### Frontend changes (small)
+
+A "Tax Filing" sub-section on the **Payslips → person detail** or **Settings → People** page:
+- Per-person, per-year entry: filing status, credits, additional withholding
+- Pre-filled from LLM extraction if available; user can correct
+- If populated, `TaxSufficiencyAlert` can show a more precise "estimated annual liability vs withheld" comparison
+
+**No changes to `PayslipDetailPage` itself** — the alert reads from `payslip_snapshot.effective_federal_rate_ytd` directly once it exists, bypassing the line-item scan.
+
+### Open questions (user to resolve before building)
+
+- [ ] **Where should the filing profile live in the UI?** Settings → People → [person] → Tax profile? Or payslip list sidebar?
+- [ ] **Which years to scope?** Current tax year only, or rolling window (2 years: current + prior)?
+- [ ] **LLM extraction quality:** Do IBM and other formats reliably put W-4 data into `tax_profile_json` already? Check `canonical_extract_json` on a few real payslips to see what's populated.
+- [ ] **State tax handling:** CA, TX, NY, IL all have different withholding rules. For the first pass, should state-specific analysis be skipped (show federal only) and added later?
+- [ ] **Precision of "estimated liability":** Use IRS Pub 15-T tables (static lookup, no LLM) or ask the LLM? Pub 15-T tables are public and updatable annually; an LLM approach is softer but more flexible for state + AMT edge cases.
+
+### Build order dependency
+
+This is blocked on user due diligence above. The `effective_federal_rate_ytd` column (migration + backend write at import time) is an independent first step that can ship without the `person_tax_profile` table or any frontend UI — it just makes the existing `TaxSufficiencyAlert` more robust.
+
+Phase 1 (independent): migration + import pipeline write → `effective_federal_rate_ytd` on snapshot
+Phase 2 (after due diligence): `person_tax_profile` table + Settings UI + richer alert commentary
+
+---
+
+*Last updated: 2026-05-21. Added PS-5: Tax Filing Profile + Stored Effective Federal Rate — backend/import pipeline feature to eliminate runtime line-item detection fragility and enable a richer per-person tax sufficiency signal. Blocked on user due diligence (filing profile placement, state handling, LLM vs Pub 15-T for liability estimate). Original F-6/TM/F-7/F-9/TM-4/F-10 entries above unchanged.*

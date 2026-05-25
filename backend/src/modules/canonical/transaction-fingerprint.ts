@@ -60,18 +60,3 @@ export function computeTransactionFingerprint(input: {
   return crypto.createHash("sha256").update(payload).digest("hex");
 }
 
-const MIN_SUBSTRING_LEN = 8;
-
-/**
- * True when two normalized descriptions are identical, or one plausibly extends the other
- * (same merchant line with extra suffix/prefix noise). Used for near-duplicate → resolution queue.
- */
-export function descriptionsCompatibleForNearDuplicate(a: string, b: string): boolean {
-  if (a === b) {
-    return true;
-  }
-  if (a.length < MIN_SUBSTRING_LEN || b.length < MIN_SUBSTRING_LEN) {
-    return false;
-  }
-  return a.includes(b) || b.includes(a);
-}

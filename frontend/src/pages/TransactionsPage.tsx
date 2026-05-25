@@ -118,6 +118,8 @@ type TxRow = {
   ownerPersonProfileId: string | null;
   /** Rules / manual classification audit from import canonicalize. */
   classificationMeta: TxClassificationMeta;
+  /** UUID shared by both legs of a confirmed transfer pair; null when not paired. */
+  transferGroupId: string | null;
   reviewReasons?: string[];
   openReviewItems?: OpenReviewItem[];
   importSessionId?: string | null;
@@ -312,6 +314,7 @@ export function TransactionsPage() {
   const needsReviewTab = searchParams.get("needsReview") === "true";
   const trashTab = searchParams.get("trash") === "true";
   const recurringOnlyFilter = searchParams.get("recurringOnly") === "true";
+  const transferPairedFilter = searchParams.get("transferPaired") === "true";
   const resolutionTypes = useMemo((): LedgerResolutionType[] => {
     const seen = new Set<LedgerResolutionType>();
     for (const r of searchParams.getAll("resolutionType")) {
@@ -405,6 +408,7 @@ export function TransactionsPage() {
   const [selectedAllIds, setSelectedAllIds] = useState<Set<string>>(() => new Set());
   const [bulkAllCategoryId, setBulkAllCategoryId] = useState<string>("");
   const [savingBulkAll, setSavingBulkAll] = useState(false);
+  const [savingPair, setSavingPair] = useState(false);
   const [editingMemoId, setEditingMemoId] = useState<string | null>(null);
   const [memoDraft, setMemoDraft] = useState("");
   // Selected candidate per transfer_ambiguity resolution item (itemId → candidateId).
@@ -500,7 +504,8 @@ export function TransactionsPage() {
       ownerScopeFilter,
       effectivePersonIds,
       amountMinUrl,
-      amountMaxUrl
+      amountMaxUrl,
+      transferPaired: transferPairedFilter || undefined
     }),
     [
       sessionFilter,
@@ -518,7 +523,8 @@ export function TransactionsPage() {
       ownerScopeFilter,
       effectivePersonIds,
       amountMinUrl,
-      amountMaxUrl
+      amountMaxUrl,
+      transferPairedFilter
     ]
   );
 
@@ -527,6 +533,25 @@ export function TransactionsPage() {
     appendLedgerListFilters(qs, ledgerFilterState);
     return qs.toString();
   }, [ledgerFilterState]);
+
+  // Derived state for transfer pair Link/Unlink bulk actions.
+  const pairSelectionState = useMemo(() => {
+    const selRows = (data?.transactions ?? []).filter((t) => selectedAllIds.has(t.id));
+    if (selectedAllIds.size !== 2 || selRows.length !== 2) {
+      return { canLink: false, sharedGroupId: null } as const;
+    }
+    const [a, b] = selRows as [typeof selRows[0], typeof selRows[0]];
+    const amountsMatch = Math.abs(Math.abs(a.amount) - Math.abs(b.amount)) <= 0.01;
+    const canLink =
+      !a.transferGroupId &&
+      !b.transferGroupId &&
+      a.accountId !== b.accountId &&
+      a.direction !== b.direction &&
+      amountsMatch;
+    const sharedGroupId =
+      a.transferGroupId && a.transferGroupId === b.transferGroupId ? a.transferGroupId : null;
+    return { canLink, sharedGroupId } as const;
+  }, [data, selectedAllIds]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -625,6 +650,7 @@ export function TransactionsPage() {
     accountIdsKey,
     amountMinUrl,
     amountMaxUrl,
+    transferPairedFilter,
     pageOffset,
     pageLimit
   ]);
@@ -778,6 +804,32 @@ export function TransactionsPage() {
       setError(e instanceof Error ? e.message : "Bulk trash failed");
     } finally {
       setSavingBulkAll(false);
+    }
+  }
+
+  async function linkAsTransfer(ids: [string, string]) {
+    setSavingPair(true);
+    try {
+      await apiJson("/transactions/pair", { method: "POST", body: JSON.stringify({ ids }) });
+      setSelectedAllIds(new Set());
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to link transfer pair");
+    } finally {
+      setSavingPair(false);
+    }
+  }
+
+  async function unlinkTransfer(groupId: string) {
+    setSavingPair(true);
+    try {
+      await apiJson(`/transactions/pair/${groupId}`, { method: "DELETE" });
+      setSelectedAllIds(new Set());
+      await load();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to unlink transfer pair");
+    } finally {
+      setSavingPair(false);
     }
   }
 
@@ -1528,43 +1580,65 @@ export function TransactionsPage() {
           <HelpIcon label="Search matches a substring in merchant + memo (multi-word = AND). Results sorted by date, newest first. Use amount min/max for signed amount range filtering." />
         </Group>
         {moreFiltersOpen ? (
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm" mt="sm">
-            <TextInput
-              label="Amount min (signed)"
-              type="number"
-              step="any"
-              placeholder="e.g. -500"
-              value={amountMinDraft}
-              onChange={(e) => setAmountMinDraft(e.target.value)}
-            />
-            <TextInput
-              label="Amount max (signed)"
-              type="number"
-              step="any"
-              placeholder="e.g. 100"
-              value={amountMaxDraft}
-              onChange={(e) => setAmountMaxDraft(e.target.value)}
-            />
-            <Checkbox
-              label="Recurring only"
-              checked={recurringOnlyFilter}
-              onChange={(e) => {
-                setSearchParams((prev) => {
-                  const next = new URLSearchParams(prev);
-                  if (e.target.checked) {
-                    next.set("recurringOnly", "true");
-                  } else {
-                    next.delete("recurringOnly");
-                  }
-                  next.set("offset", "0");
-                  return next;
-                });
-              }}
-            />
-            <Button type="button" onClick={() => commitAmountFilters()}>
-              Apply amounts
-            </Button>
-          </SimpleGrid>
+          <>
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" mt="sm">
+              <TextInput
+                label="Amount min (signed)"
+                type="number"
+                step="any"
+                placeholder="e.g. -500"
+                value={amountMinDraft}
+                onChange={(e) => setAmountMinDraft(e.target.value)}
+              />
+              <TextInput
+                label="Amount max (signed)"
+                type="number"
+                step="any"
+                placeholder="e.g. 100"
+                value={amountMaxDraft}
+                onChange={(e) => setAmountMaxDraft(e.target.value)}
+              />
+            </SimpleGrid>
+            <Group mt="sm" justify="space-between" align="center">
+              <Group gap="lg">
+                <Checkbox
+                  label="Recurring only"
+                  checked={recurringOnlyFilter}
+                  onChange={(e) => {
+                    setSearchParams((prev) => {
+                      const next = new URLSearchParams(prev);
+                      if (e.target.checked) {
+                        next.set("recurringOnly", "true");
+                      } else {
+                        next.delete("recurringOnly");
+                      }
+                      next.set("offset", "0");
+                      return next;
+                    });
+                  }}
+                />
+                <Checkbox
+                  label="Has transfer pair"
+                  checked={transferPairedFilter}
+                  onChange={(e) => {
+                    setSearchParams((prev) => {
+                      const next = new URLSearchParams(prev);
+                      if (e.target.checked) {
+                        next.set("transferPaired", "true");
+                      } else {
+                        next.delete("transferPaired");
+                      }
+                      next.set("offset", "0");
+                      return next;
+                    });
+                  }}
+                />
+              </Group>
+              <Button type="button" onClick={() => commitAmountFilters()}>
+                Apply amounts
+              </Button>
+            </Group>
+          </>
         ) : null}
       </Paper>
 
@@ -1779,6 +1853,31 @@ export function TransactionsPage() {
             >
               Move to trash
             </Button>
+            {pairSelectionState.canLink ? (
+              <Button
+                type="button"
+                variant="light"
+                color="blue"
+                disabled={savingPair}
+                onClick={() => {
+                  const ids = [...selectedAllIds] as [string, string];
+                  void linkAsTransfer(ids);
+                }}
+              >
+                ↔ Link as transfer
+              </Button>
+            ) : null}
+            {pairSelectionState.sharedGroupId ? (
+              <Button
+                type="button"
+                variant="light"
+                color="orange"
+                disabled={savingPair}
+                onClick={() => void unlinkTransfer(pairSelectionState.sharedGroupId!)}
+              >
+                ✕ Unlink transfer
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="default"
@@ -2004,6 +2103,9 @@ export function TransactionsPage() {
                               <Group gap={5} wrap="nowrap">
                                 <Text>{formatMoney(t.amount, t.direction)}</Text>
                                 {t.status !== "posted" ? <StatusBadge status={t.status} /> : null}
+                                {t.transferGroupId ? (
+                                  <Badge size="xs" variant="light" color="blue" title={`Transfer pair: ${t.transferGroupId}`}>↔</Badge>
+                                ) : null}
                               </Group>
                             </Table.Td>
                             <Table.Td>
@@ -2486,11 +2588,12 @@ export function TransactionsPage() {
           txnAmount={Math.abs(recurringModalTxn.amount)}
           allTxns={data?.transactions ?? []}
           existingOverride={findConfirmedOverride(recurringModalTxn.merchant, recurringOverrides)}
-          onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+          onConfirm={async ({ merchantKey, displayName, amountAnchor, amountTolerancePct }) => {
             const postRes = await apiFetch("/recurring-overrides", {
               method: "POST",
               body: JSON.stringify({
                 merchantKey,
+                displayName,
                 verdict: "confirmed",
                 amountAnchor,
                 amountTolerancePct

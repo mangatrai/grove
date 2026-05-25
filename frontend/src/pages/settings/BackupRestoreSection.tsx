@@ -38,6 +38,7 @@ type GDriveStatus = {
   backupFrequencyHours?: number;
   backupRetentionCount?: number;
   lastScheduledBackupAt?: string | null;
+  needsReauth?: boolean;
 };
 
 type DriveBackupEntry = {
@@ -906,6 +907,27 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                     </Button>
                   ) : null}
                 </Group>
+
+                {gdriveStatus?.needsReauth ? (
+                  <Alert
+                    color="orange"
+                    variant="light"
+                    title="Google Drive authorization expired"
+                  >
+                    Backups have been paused. Reconnect to resume automatic backups.
+                    {authRole === "owner" ? (
+                      <Button
+                        variant="filled"
+                        color="orange"
+                        size="xs"
+                        mt="xs"
+                        onClick={() => void handleGDriveConnect()}
+                      >
+                        Reconnect Google Drive
+                      </Button>
+                    ) : null}
+                  </Alert>
+                ) : null}
 
                 {gdriveStatus?.lastError ? (
                   <Alert color="red" variant="light">

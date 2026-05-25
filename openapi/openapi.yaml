@@ -659,6 +659,35 @@ paths:
           description: Validation error
         "404":
           description: Not found
+    delete:
+      summary: Delete a property and all its value snapshots
+      description: Owner/admin only. Permanently removes the property and cascades deletion of value snapshots. Linked mortgage accounts have their property_id nulled automatically.
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unlinkedAccounts:
+                    type: integer
+                    description: Number of financial accounts whose property_id was cleared
+        "400":
+          description: Invalid UUID
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden — caller is not owner or admin
+        "404":
+          description: Property not found
 
   /household/properties/{propertyId}/values:
     get:
@@ -687,6 +716,7 @@ paths:
     post:
       summary: Add or upsert a market value snapshot (upserts on same date)
       tags: [household]
+      x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1320,6 +1350,150 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DriveDownloadFailedResponse'
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List notifications for the authenticated user
+      description: Returns up to 40 unread notifications (newest first) plus up to 10 recent read notifications.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        householdId: { type: string, format: uuid }
+                        userId: { type: string, format: uuid, nullable: true }
+                        type: { type: string }
+                        title: { type: string }
+                        body: { type: string }
+                        actionUrl: { type: string, nullable: true }
+                        readAt: { type: string, format: date-time, nullable: true }
+                        createdAt: { type: string, format: date-time }
+        "401":
+          description: Unauthorized
+
+  /notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: Get unread notification count
+      description: Lightweight endpoint polled every 60 seconds by the frontend bell icon.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        "401":
+          description: Unauthorized
+
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Mark all notifications as read
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: All notifications marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          description: Unauthorized
+
+  /notifications/preferences:
+    get:
+      tags: [notifications]
+      summary: Get notification preferences for the authenticated user
+      description: Returns one entry per notification type. Missing rows fall back to system defaults.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Preference matrix
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferences:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string, format: uuid }
+                        notificationType: { type: string }
+                        enabledEmail: { type: boolean }
+                        enabledInapp: { type: boolean }
+        "401":
+          description: Unauthorized
+    put:
+      tags: [notifications]
+      summary: Bulk upsert notification preferences
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [preferences]
+              properties:
+                preferences:
+                  type: array
+                  items:
+                    type: object
+                    required: [notificationType, enabledEmail, enabledInapp]
+                    properties:
+                      notificationType: { type: string }
+                      enabledEmail: { type: boolean }
+                      enabledInapp: { type: boolean }
+      responses:
+        "200":
+          description: Updated full preference matrix
+        "400":
+          description: Invalid payload
+        "401":
+          description: Unauthorized
+
+  /notifications/{id}/read:
+    patch:
+      tags: [notifications]
+      summary: Mark a single notification as read
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Notification marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          description: Unauthorized
+        "404":
+          description: Notification not found or belongs to a different user
+
   /categories:
     get:
       tags: [categories]
@@ -1428,6 +1602,14 @@ paths:
       tags: [imports]
       summary: List financial accounts
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: includeClosedAccounts
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, includes closed accounts. Default returns active accounts only.
       responses:
         "200":
           description: Household financial accounts with import freshness metadata
@@ -1502,6 +1684,7 @@ paths:
       tags: [imports]
       summary: One-shot import upload (bank or payslip)
       description: Upload a single file and run the end-to-end import flow for bank transactions or payslips.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -1612,6 +1795,7 @@ paths:
       tags: [imports]
       summary: Confirm OFX account suggestion — members restricted to own sessions and own accounts
       description: Members must own the session and the target financial account.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /imports/sessions/{sessionId}/reconcile-payslip-async:
     post:
@@ -1631,6 +1815,7 @@ paths:
     post:
       tags: [imports]
       summary: Canonicalize into ledger
+      x-cache-invalidates: [dashboard]
       description: >
         Maps transaction_raw rows for the session into transaction_canonical.
         Returns { inserted, duplicates, skipped, nearDuplicates }.
@@ -1791,6 +1976,7 @@ paths:
       tags: [transactions]
       summary: Manual transaction entry — members restricted to accounts they own
       description: Members may only create transactions on accounts where owner_person_profile_id matches their profile.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/{transactionId}:
     patch:
@@ -1799,10 +1985,12 @@ paths:
       description: >
         Members may only update transactions they own (owner_person_profile_id).
         ownerScope/ownerPersonProfileId fields are ignored for member requests (ownership reassignment is owner/admin only).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
     delete:
       tags: [transactions]
       summary: Hard-delete transaction (must be trashed first) — members restricted to own transactions
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/{transactionId}/open-review:
     get:
@@ -1813,26 +2001,31 @@ paths:
     post:
       tags: [transactions]
       summary: Bulk set category on up to 200 transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-trash:
     post:
       tags: [transactions]
       summary: Bulk soft-delete (trash) up to 500 transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-restore:
     post:
       tags: [transactions]
       summary: Bulk restore up to 500 trashed transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-delete:
     post:
       tags: [transactions]
       summary: Bulk hard-delete up to 500 trashed transactions. Members restricted to own transactions (skippedNotOwned).
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /transactions/bulk-reassign-owner:
     post:
       tags: [transactions]
       summary: Reassign all transactions from one person profile to another — owner/admin only.
+      x-cache-invalidates: [dashboard]
       security: [{ bearerAuth: [] }]
   /resolution:
     get:
@@ -1942,6 +2135,10 @@ paths:
     get:
       tags: [reports]
       summary: Cash summary / KPIs
+      description: >-
+        Response is cached client-side in localStorage under scope 'dashboard' (TTL 7 days,
+        invalidated on version-counter bump). See docs/CACHING.md for full design.
+      x-cache-scope: dashboard
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet:
     get:
@@ -1979,22 +2176,140 @@ paths:
     get:
       tags: [reports]
       summary: Balance sheet totals over time (interval=month|quarter|week|day; optional ownerScope; optional accountIds for per-point account slices; max 120 samples)
+      description: >-
+        Response is cached client-side in localStorage under scope 'networth' (TTL 7 days,
+        invalidated on version-counter bump). See docs/CACHING.md for full design.
+      x-cache-scope: networth
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual:
     post:
       tags: [reports]
       summary: Upsert manual account balance snapshot
+      x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
   /reports/balance-sheet/manual/{id}:
     patch:
       tags: [reports]
       summary: Update manual balance snapshot amount/currency
+      x-cache-invalidates: [networth]
       security: [{ bearerAuth: [] }]
+  /reports/year-summary:
+    get:
+      tags: [reports]
+      summary: Year-End Wrapped — compute or return cached annual financial summary
+      description: >-
+        Returns pre-computed YearSummaryData (income, spending, net worth, top categories,
+        best/worst month, investment growth, payslip tax aggregates) plus a 3-paragraph LLM
+        narrative. First call for a given year triggers data computation + OpenAI narrative
+        (~30s); subsequent calls return the Postgres-cached result instantly. Cache is
+        invalidated by SHA-256 hash of source data; regeneration happens on next open, not
+        on import.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, example: 2025 }
+      responses:
+        "200":
+          description: Year summary data + narrative
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  year: { type: integer }
+                  data: { type: object, description: YearSummaryData — see year-summary.types.ts }
+                  narrative: { type: array, items: { type: string }, minItems: 3, maxItems: 3 }
+                  generatedAt: { type: string, format: date-time }
+                  fromCache: { type: boolean }
+        "400":
+          description: Invalid year parameter
+  /reports/year-summary/{year}/email:
+    post:
+      tags: [reports]
+      summary: Email the year-end summary to the provided address
+      description: >-
+        Generates (or uses cached) summary and sends a static HTML email via the
+        household's configured SMTP transport. Body must include recipient email.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: path
+          required: true
+          schema: { type: integer, example: 2025 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Email sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "400":
+          description: Invalid year or email
+        "500":
+          description: Email send failed
+
   /payslips:
     get:
       tags: [payslips]
       summary: List payslips
+      description: |
+        Returns paginated payslip snapshots. Each item includes a `prior` object (PS-1, F-3)
+        with the immediately preceding payslip values for the same person (LAG window function).
+        `prior` is null for a person's first payslip.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: ownerScope
+          in: query
+          schema: { type: string, enum: [household, person] }
+        - name: ownerPersonProfileId
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Paginated payslip list with prior-period delta values (PS-1)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/PayslipSnapshotSummary'
+                        - type: object
+                          properties:
+                            prior:
+                              description: Prior-period values for the same person (PS-1). Null for first payslip.
+                              nullable: true
+                              type: object
+                              properties:
+                                grossPayCurrent: { type: number, nullable: true }
+                                netPayCurrent: { type: number, nullable: true }
+                                employeeTaxesCurrent: { type: number, nullable: true }
+                                preTaxDeductionsCurrent: { type: number, nullable: true }
   /payslips/upload:
     post:
       tags: [payslips]
@@ -2219,6 +2534,9 @@ paths:
                     type: array
                     description: Cross-validation results between line item sums and summary columns (CR-117)
                     items: { $ref: '#/components/schemas/ValidationWarning' }
+                  payPeriodCountYtd:
+                    type: integer
+                    description: Count of payslips in the same calendar year for the same person — used for PS-4 annualised tax rate (F-3)
         "404":
           description: Payslip not found or not owned by this household
     patch:
@@ -3380,6 +3698,15 @@ components:
           type: string
           nullable: true
           description: Latest detected statement period end date (YYYY-MM-DD) from parsed statement metadata.
+        status:
+          type: string
+          enum: [active, closed]
+          description: Account lifecycle status. Closed accounts are hidden from default list and import binding.
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the account was closed; null while active.
 
     ImportAccountUpsertRequest:
       type: object
@@ -3408,6 +3735,10 @@ components:
         defaultParserProfileId: { type: string, nullable: true }
         initialBalance: { type: number, nullable: true }
         initialBalanceDate: { type: string, format: date, nullable: true }
+        status:
+          type: string
+          enum: [active, closed]
+          description: Close or reopen the account. Ignored on POST (accounts are created active).
 
     BalanceSheetAccountRow:
       type: object
@@ -3421,6 +3752,10 @@ components:
           type: string
           nullable: true
           enum: [liquid, semi_liquid, restricted]
+        status:
+          type: string
+          enum: [active, closed]
+          description: Closed accounts remain on the balance sheet with last known snapshot.
         side: { type: string, enum: [asset, liability] }
         balance: { type: number, nullable: true }
         balanceAsOf: { type: string, nullable: true, format: date }
@@ -3440,6 +3775,15 @@ components:
         linkedMortgageAccountId: { type: string, nullable: true, format: uuid }
         linkedMortgageBalance: { type: number, nullable: true }
         linkedMortgageAsOf: { type: string, nullable: true, format: date }
+
+    BalanceSheetMemberSummaryRow:
+      type: object
+      properties:
+        personProfileId: { type: string, format: uuid }
+        name: { type: string }
+        totalAssets: { type: number }
+        totalLiabilities: { type: number }
+        netWorth: { type: number }
 
     BalanceSheetSnapshotResponse:
       type: object
@@ -3463,6 +3807,11 @@ components:
             assets: { type: number, nullable: true }
             liabilities: { type: number, nullable: true }
             netWorth: { type: number, nullable: true }
+        memberSummary:
+          type: array
+          description: Per-person asset/liability/net-worth subtotals; empty when household has fewer than 2 person profiles
+          items:
+            $ref: '#/components/schemas/BalanceSheetMemberSummaryRow'
 
     PropertyRecord:
       type: object

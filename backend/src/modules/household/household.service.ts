@@ -41,6 +41,7 @@ export type HouseholdSettings = {
   city: string | null;
   state: string | null;
   combinedGrossIncomeUsd: number | null;
+  largeTxnThresholdUsd: number | null;
 };
 
 export async function getHouseholdSettings(householdId: string, userId?: string): Promise<HouseholdSettings | null> {
@@ -49,11 +50,13 @@ export async function getHouseholdSettings(householdId: string, userId?: string)
     city: string | null;
     state: string | null;
     combinedGrossIncomeUsd: number | null;
+    largeTxnThresholdUsd: number | null;
   }>(
     `SELECT monthly_savings_target_usd AS "monthlySavingsTargetUsd",
             city,
             state,
-            combined_gross_income_usd AS "combinedGrossIncomeUsd"
+            combined_gross_income_usd AS "combinedGrossIncomeUsd",
+            large_txn_threshold_usd AS "largeTxnThresholdUsd"
          FROM household WHERE id = ?`,
     householdId
   );
@@ -111,13 +114,19 @@ export async function getHouseholdSettings(householdId: string, userId?: string)
     }
   }
 
+  const largeTxnThresholdUsd =
+    base.largeTxnThresholdUsd != null && Number.isFinite(Number(base.largeTxnThresholdUsd)) && Number(base.largeTxnThresholdUsd) > 0
+      ? Math.round(Number(base.largeTxnThresholdUsd) * 100) / 100
+      : null;
+
   return {
     monthlySavingsTargetUsd,
     salaryDepositFinancialAccountId,
     employers,
     city: base.city?.trim() ? String(base.city) : null,
     state: base.state?.trim() ? String(base.state) : null,
-    combinedGrossIncomeUsd
+    combinedGrossIncomeUsd,
+    largeTxnThresholdUsd
   };
 }
 
@@ -150,6 +159,7 @@ export type PatchHouseholdSettingsInput = {
   city?: string | null;
   state?: string | null;
   combinedGrossIncomeUsd?: number | null;
+  largeTxnThresholdUsd?: number | null;
 };
 
 export type PatchHouseholdSettingsFailure = { ok: false; code: "INVALID_AMOUNT" };
@@ -180,6 +190,17 @@ export async function patchHouseholdSettings(
     const v =
       input.combinedGrossIncomeUsd === null ? null : Math.round(input.combinedGrossIncomeUsd * 100) / 100;
     await qExec(`UPDATE household SET combined_gross_income_usd = ? WHERE id = ?`, v, householdId);
+  }
+
+  if (input.largeTxnThresholdUsd !== undefined) {
+    if (input.largeTxnThresholdUsd !== null) {
+      if (!Number.isFinite(input.largeTxnThresholdUsd) || input.largeTxnThresholdUsd <= 0) {
+        return { ok: false, code: "INVALID_AMOUNT" };
+      }
+    }
+    const v =
+      input.largeTxnThresholdUsd === null ? null : Math.round(input.largeTxnThresholdUsd * 100) / 100;
+    await qExec(`UPDATE household SET large_txn_threshold_usd = ? WHERE id = ?`, v, householdId);
   }
 
   return { ok: true };

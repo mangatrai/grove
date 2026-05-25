@@ -2,6 +2,8 @@
 
 > **Progress:** Shipped — KPI + category breakdown + spending power (safe-to-spend, savings rate) + monthly category outflows. Set **`household.monthly_savings_target_usd`** via **`GET/PATCH /household/settings`** (see **`docs/API_HOUSEHOLD.md`**).
 
+> **Client-side cache:** The frontend caches this endpoint's response in `localStorage` under cache scope `dashboard`. The cache is invalidated automatically when any ledger mutation or import canonicalize succeeds (see `docs/CACHING.md`). If you add a new write endpoint whose result is reflected in cash-summary output, add it to `CACHE_INVALIDATION_MAP` in `frontend/src/cache.ts`.
+
 Base path: `/reports/cash-summary`  
 Auth: `Authorization: Bearer <JWT>` (requires authentication).
 

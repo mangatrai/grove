@@ -9,5 +9,7 @@ coverage
 /data/
 .runtime/
 oci/oci-retry.sh
-docs/claude-design/
-docs/cursor-prompts/
+docs/payslip-redesign/
+docs/real-estate/
+docs/pt1-protest/
+docs/year-in-review

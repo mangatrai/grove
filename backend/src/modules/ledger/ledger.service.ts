@@ -62,6 +62,8 @@ export interface CanonicalTransactionRow {
   ownerPersonProfileId: string | null;
   /** Rules/builtin/manual classification audit from canonicalize (null if absent or unparseable). */
   classificationMeta: ClassificationExplainMeta | null;
+  /** UUID shared by both legs of a confirmed transfer pair; null when not paired. */
+  transferGroupId: string | null;
   /** Populated when listing with `needsReviewOnly` — why the row appears under Needs review. */
   reviewReasons?: string[];
   /** Open resolution items for this row (same link rules as the review queue); for bulk `/resolution/*` and per-row PATCH. */
@@ -117,6 +119,8 @@ export interface LedgerListFilters {
   belongsTo?: string[];
   /** When true, return only trashed rows (status = 'trashed'). Default behaviour excludes them. */
   trashOnly?: boolean;
+  /** When true, return only rows with a non-null transfer_group_id (confirmed transfer pairs). */
+  transferPaired?: boolean;
 }
 
 /** Rows that belong in the “Needs review” tab. */
@@ -348,6 +352,9 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
     ))`);
     params.push(...filters.resolutionTypes);
   }
+  if (filters.transferPaired) {
+    parts.push("tc.transfer_group_id IS NOT NULL");
+  }
   if (filters.search !== undefined && filters.search.trim() !== "") {
     const raw = filters.search.trim();
     const needle = raw.toLowerCase();
@@ -382,6 +389,7 @@ function mapRow(
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
     classification_meta?: unknown;
+    transfer_group_id?: string | null;
     open_review_items_blob?: string | null;
     import_session_id?: string | null;
   },
@@ -405,7 +413,8 @@ function mapRow(
     categoryName: r.category_name,
     ownerScope: r.owner_scope,
     ownerPersonProfileId: r.owner_person_profile_id,
-    classificationMeta: parseClassificationMetaJson(r.classification_meta)
+    classificationMeta: parseClassificationMetaJson(r.classification_meta),
+    transferGroupId: r.transfer_group_id ?? null
   };
   if (opts?.includeReviewReasons) {
     const openItems = parseOpenReviewItems(r.open_review_items_blob ?? null);
@@ -435,7 +444,8 @@ function txSelectSql(includeReviewMeta: boolean): string {
        c.name AS category_name,
        tc.owner_scope AS owner_scope,
        tc.owner_person_profile_id AS owner_person_profile_id,
-       tc.classification_meta AS classification_meta`;
+       tc.classification_meta AS classification_meta,
+       tc.transfer_group_id AS transfer_group_id`;
   if (!includeReviewMeta) {
     return base;
   }
@@ -797,7 +807,7 @@ export async function bulkUpdateCategory(
 }
 
 export type CreateManualTransactionResult =
-  | { ok: true; id: string }
+  | { ok: true; id: string; amount: number }
   | {
       ok: false;
       code: "INVALID_ACCOUNT" | "INVALID_CATEGORY" | "INVALID_AMOUNT" | "DUPLICATE_FINGERPRINT";
@@ -885,7 +895,7 @@ export async function createManualCanonicalTransaction(
     throw err;
   }
 
-  return { ok: true, id };
+  return { ok: true, id, amount: rounded };
 }
 
 // ---------------------------------------------------------------------------
@@ -1031,4 +1041,125 @@ export async function bulkReassignOwner(
     toPersonProfileId
   );
   return { updated: Number(row?.cnt ?? 0) };
+}
+
+export type UpdateManualAmountResult =
+  | { ok: true; oldAmount: number; newAmount: number; accountId: string; txnDate: string }
+  | { ok: false; code: "NOT_FOUND" | "NOT_MANUAL" | "INVALID_AMOUNT" };
+
+export async function updateManualTransactionAmount(
+  householdId: string,
+  id: string,
+  rawAmount: number
+): Promise<UpdateManualAmountResult> {
+  const rounded = normalizeAmountForFingerprint(rawAmount);
+  if (!Number.isFinite(rounded) || rounded === 0) {
+    return { ok: false, code: "INVALID_AMOUNT" };
+  }
+
+  const row = await qGet<{ amount: string; source_ref: string; account_id: string; txn_date: string }>(
+    `SELECT amount, source_ref, account_id, txn_date
+     FROM transaction_canonical
+     WHERE id = ? AND household_id = ?`,
+    id,
+    householdId
+  );
+  if (!row) return { ok: false, code: "NOT_FOUND" };
+  if (!row.source_ref.startsWith("manual:")) {
+    return { ok: false, code: "NOT_MANUAL" };
+  }
+
+  const direction = rounded >= 0 ? "credit" : "debit";
+  await qExec(
+    `UPDATE transaction_canonical SET amount = ?, direction = ? WHERE id = ? AND household_id = ?`,
+    rounded,
+    direction,
+    id,
+    householdId
+  );
+
+  return {
+    ok: true,
+    oldAmount: Number(row.amount),
+    newAmount: rounded,
+    accountId: row.account_id,
+    txnDate: String(row.txn_date).slice(0, 10)
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Transfer pair / unpair (TM-2)
+// ---------------------------------------------------------------------------
+
+export type PairTransactionsResult =
+  | { ok: true; transferGroupId: string }
+  | { ok: false; code: "NOT_FOUND" | "SAME_ID" | "SAME_ACCOUNT" | "ALREADY_PAIRED" | "AMOUNT_MISMATCH" | "DIRECTION_MISMATCH"; message: string };
+
+export async function pairTransactions(
+  householdId: string,
+  id1: string,
+  id2: string
+): Promise<PairTransactionsResult> {
+  if (id1 === id2) {
+    return { ok: false, code: "SAME_ID", message: "Cannot pair a transaction with itself" };
+  }
+
+  type TxSnap = { amount: string; direction: string; account_id: string; transfer_group_id: string | null; status: string };
+  const [t1, t2] = await Promise.all([
+    qGet<TxSnap>(
+      `SELECT amount, direction, account_id, transfer_group_id, status FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+      id1, householdId
+    ),
+    qGet<TxSnap>(
+      `SELECT amount, direction, account_id, transfer_group_id, status FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+      id2, householdId
+    )
+  ]);
+
+  if (!t1 || !t2) return { ok: false, code: "NOT_FOUND", message: "One or both transactions not found" };
+  if (t1.status !== "posted" || t2.status !== "posted") {
+    return { ok: false, code: "NOT_FOUND", message: "Both transactions must be posted" };
+  }
+  if (t1.account_id === t2.account_id) {
+    return { ok: false, code: "SAME_ACCOUNT", message: "Transactions must be on different accounts" };
+  }
+  if (t1.transfer_group_id || t2.transfer_group_id) {
+    return { ok: false, code: "ALREADY_PAIRED", message: "One or both transactions are already part of a transfer pair" };
+  }
+  if (Math.abs(Math.abs(Number(t1.amount)) - Math.abs(Number(t2.amount))) > 0.01) {
+    return { ok: false, code: "AMOUNT_MISMATCH", message: "Transaction amounts do not match" };
+  }
+  if (t1.direction === t2.direction) {
+    return { ok: false, code: "DIRECTION_MISMATCH", message: "Transactions must have opposite directions (one debit, one credit)" };
+  }
+
+  const transferGroupId = crypto.randomUUID();
+  await qExec(
+    `UPDATE transaction_canonical SET transfer_group_id = ? WHERE id = ANY(?) AND household_id = ?`,
+    transferGroupId, [id1, id2], householdId
+  );
+
+  return { ok: true, transferGroupId };
+}
+
+export type UnpairTransactionsResult =
+  | { ok: true; unlinked: number }
+  | { ok: false; code: "NOT_FOUND" };
+
+export async function unpairTransactions(
+  householdId: string,
+  groupId: string
+): Promise<UnpairTransactionsResult> {
+  const check = await qGet<{ cnt: string }>(
+    `SELECT COUNT(*)::text AS cnt FROM transaction_canonical WHERE transfer_group_id = ? AND household_id = ?`,
+    groupId, householdId
+  );
+  if (!check || Number(check.cnt) === 0) {
+    return { ok: false, code: "NOT_FOUND" };
+  }
+  await qExec(
+    `UPDATE transaction_canonical SET transfer_group_id = NULL WHERE transfer_group_id = ? AND household_id = ?`,
+    groupId, householdId
+  );
+  return { ok: true, unlinked: Number(check.cnt) };
 }

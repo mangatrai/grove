@@ -27,6 +27,7 @@ Returns **household-level** savings target plus **person-level** income fields f
 - **`monthlySavingsTargetUsd`** — `null` when unset (safe-to-spend on cash summary). Stored on **`household`**. Migration **`0010`**.
 - **`salaryDepositFinancialAccountId`** — optional FK to a household **`financial_account`**. Stored on the signed-in user’s **`person_profile`**. Migration **`0020`**.
 - **`employers`** — JSON array on the signed-in user’s **`person_profile`**. Empty array when none saved.
+- **`largeTxnThresholdUsd`** — `null` when not configured. When set, any imported transaction exceeding this amount triggers a `large_transaction` notification. Migration **`0051`**.
 
 ## `PATCH /household/settings`
 
@@ -45,6 +46,7 @@ Send **at least one** field.
 ```
 
 - **`monthlySavingsTargetUsd`** — set to `null` to clear.
+- **`largeTxnThresholdUsd`** — set to `null` to disable the large-transaction alert. Must be positive when provided.
 
 **200:** Same shape as `GET`.
 
@@ -254,3 +256,17 @@ Lists all **`property_value_snapshot`** rows for the property, **ascending** by 
 **400** — validation or business rule (`INVALID_VALUE`).
 
 **404** — property not found.
+
+### `DELETE /household/properties/:propertyId`
+
+**Owner/admin only.** Permanently removes a property record and all its value snapshots. If any `financial_account` has `property_id` pointing to this property, the FK (`ON DELETE SET NULL`) clears those references automatically; the number of unlinked accounts is reported in the response.
+
+**200:** `{ "unlinkedAccounts": N }` — N is the count of mortgage/loan accounts whose `property_id` was cleared (0 when no accounts were linked).
+
+**400** — `propertyId` is not a valid UUID.
+
+**401** — missing or invalid token.
+
+**403** — caller is not owner or admin.
+
+**404** — property not found in household (`NOT_FOUND`).

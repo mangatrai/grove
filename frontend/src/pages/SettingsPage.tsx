@@ -16,7 +16,9 @@ import {
   PasswordInput,
   SegmentedControl,
   Select,
+  Badge,
   Stack,
+  Switch,
   Table,
   Tabs,
   Text,
@@ -37,7 +39,7 @@ import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 import { GroveLoader } from "../components/GroveLoader";
 
-const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
+const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -47,6 +49,7 @@ function isTab(s: string | null): s is SettingsTab {
 type HouseholdSettingsResponse = {
   monthlySavingsTargetUsd: number | null;
   salaryDepositFinancialAccountId: string | null;
+  largeTxnThresholdUsd: number | null;
   city: string | null;
   state: string | null;
   combinedGrossIncomeUsd: number | null;
@@ -73,6 +76,8 @@ type AccountRow = {
   owner_scope?: "household" | "person";
   owner_person_profile_id?: string | null;
   default_parser_profile_id?: string | null;
+  status?: string;
+  closed_at?: string | null;
 };
 
 // ─── Account type / sub-type picker data ─────────────────────────────────────
@@ -364,7 +369,14 @@ export function SettingsPage() {
   const [householdCityDraft, setHouseholdCityDraft] = useState("");
   const [householdStateDraft, setHouseholdStateDraft] = useState("");
   const [householdIncomeDraft, setHouseholdIncomeDraft] = useState("");
+  const [largeTxnThresholdDraft, setLargeTxnThresholdDraft] = useState("");
+  const [notifPrefs, setNotifPrefs] = useState<Array<{ notificationType: string; enabledEmail: boolean; enabledInapp: boolean }>>([]);
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
+  const [notifPrefsSaving, setNotifPrefsSaving] = useState(false);
+  const [notifPrefsError, setNotifPrefsError] = useState<string | null>(null);
+  const [notifPrefsSuccess, setNotifPrefsSuccess] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [showClosedAccounts, setShowClosedAccounts] = useState(false);
   const [loadingHousehold, setLoadingHousehold] = useState(true);
   const [savingHousehold, setSavingHousehold] = useState(false);
   const [householdError, setHouseholdError] = useState<string | null>(null);
@@ -431,6 +443,7 @@ export function SettingsPage() {
     memo: "",
     liquidity: "" as "" | "liquid" | "semi_liquid" | "restricted",
     belongsTo: "household" as BelongsToChoice,
+    status: "active" as "active" | "closed",
     initialBalance: "",
     initialBalanceDate: new Date().toISOString().slice(0, 10)
   });
@@ -495,6 +508,12 @@ export function SettingsPage() {
     ];
   }, [institutionCatalogList, institutionCustom]);
 
+  const fetchAccountsList = useCallback(async (includeClosed = showClosedAccounts) => {
+    const qs = includeClosed ? "?includeClosedAccounts=true" : "";
+    const r = await apiJson<{ accounts: AccountRow[] }>(`/imports/accounts${qs}`);
+    setAccounts(r.accounts);
+  }, [showClosedAccounts]);
+
   const loadProfile = useCallback(async () => {
     setLoadingProfile(true);
     setProfileError(null);
@@ -503,7 +522,9 @@ export function SettingsPage() {
       const [response, settings, acct] = await Promise.all([
         apiJson<HouseholdProfileResponse>("/household/profile"),
         apiJson<HouseholdSettingsResponse>("/household/settings"),
-        apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+        apiJson<{ accounts: AccountRow[] }>(
+          showClosedAccounts ? "/imports/accounts?includeClosedAccounts=true" : "/imports/accounts"
+        )
       ]);
       setAccounts(acct.accounts);
       const base = normalizeProfileDraft(response);
@@ -524,7 +545,7 @@ export function SettingsPage() {
     } finally {
       setLoadingProfile(false);
     }
-  }, []);
+  }, [showClosedAccounts]);
 
   const loadMembers = useCallback(async () => {
     setLoadingMembers(true);
@@ -552,23 +573,27 @@ export function SettingsPage() {
     try {
       const [r, acct] = await Promise.all([
         apiJson<HouseholdSettingsResponse>("/household/settings"),
-        apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
+        apiJson<{ accounts: AccountRow[] }>(
+          showClosedAccounts ? "/imports/accounts?includeClosedAccounts=true" : "/imports/accounts"
+        )
       ]);
       setAccounts(acct.accounts);
       setTargetDraft(r.monthlySavingsTargetUsd != null ? String(r.monthlySavingsTargetUsd) : "");
       setHouseholdCityDraft(r.city ?? "");
       setHouseholdStateDraft(r.state ?? "");
       setHouseholdIncomeDraft(r.combinedGrossIncomeUsd == null ? "" : String(r.combinedGrossIncomeUsd));
+      setLargeTxnThresholdDraft(r.largeTxnThresholdUsd == null ? "" : String(r.largeTxnThresholdUsd));
     } catch (e: unknown) {
       setHouseholdError(e instanceof Error ? e.message : "Could not load settings");
       setTargetDraft("");
       setHouseholdCityDraft("");
       setHouseholdStateDraft("");
       setHouseholdIncomeDraft("");
+      setLargeTxnThresholdDraft("");
     } finally {
       setLoadingHousehold(false);
     }
-  }, []);
+  }, [showClosedAccounts]);
 
   useEffect(() => {
     void (async () => {
@@ -616,6 +641,16 @@ export function SettingsPage() {
   }, [token, tab, loadProfile]);
 
   useEffect(() => {
+    if (!token || tab !== "notifications") return;
+    setNotifPrefsLoading(true);
+    setNotifPrefsError(null);
+    void apiJson<{ preferences: Array<{ notificationType: string; enabledEmail: boolean; enabledInapp: boolean }> }>("/notifications/preferences")
+      .then((r) => setNotifPrefs(r.preferences))
+      .catch((e: unknown) => setNotifPrefsError(e instanceof Error ? e.message : "Could not load preferences"))
+      .finally(() => setNotifPrefsLoading(false));
+  }, [token, tab]);
+
+  useEffect(() => {
     if (!token || tab !== "household") {
       return;
     }
@@ -631,9 +666,9 @@ export function SettingsPage() {
     }
     setAccountError(null);
     setAccountSuccess(null);
-    void apiJson<{ accounts: AccountRow[] }>("/imports/accounts")
-      .then((r) => setAccounts(r.accounts))
-      .catch((e: unknown) => setAccountError(e instanceof Error ? e.message : "Could not load accounts"));
+    void fetchAccountsList().catch((e: unknown) =>
+      setAccountError(e instanceof Error ? e.message : "Could not load accounts")
+    );
     if (canManageHousehold) {
       void apiJson<HouseholdMembersPayload>("/household/members")
         .then((r) => {
@@ -652,7 +687,7 @@ export function SettingsPage() {
         .catch(() => setAccountOwners([]));
     }
     void loadInstitutions();
-  }, [token, tab, canManageHousehold, loadInstitutions]);
+  }, [token, tab, canManageHousehold, loadInstitutions, fetchAccountsList, showClosedAccounts]);
 
   useEffect(() => {
     if (!token || tab !== "recurring") return;
@@ -735,6 +770,7 @@ export function SettingsPage() {
       }
       let newAccountId: string | null = null;
       if (accountDraft.id) {
+        body.status = accountDraft.status;
         await apiJson(`/imports/accounts/${encodeURIComponent(accountDraft.id)}`, {
           method: "PATCH",
           body: JSON.stringify(body)
@@ -743,8 +779,7 @@ export function SettingsPage() {
         const created = await apiJson<{ id: string }>("/imports/accounts", { method: "POST", body: JSON.stringify(body) });
         newAccountId = created.id;
       }
-      const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
-      setAccounts(r.accounts);
+      await fetchAccountsList();
       setAccountSuccess(accountDraft.id ? "Account updated." : "Account created.");
 
       // Auto-open property modal when a mortgage account is newly created
@@ -760,6 +795,7 @@ export function SettingsPage() {
         memo: "",
         liquidity: "",
         belongsTo: "household",
+        status: "active",
         initialBalance: "",
         initialBalanceDate: new Date().toISOString().slice(0, 10)
       });
@@ -924,13 +960,16 @@ export function SettingsPage() {
         setHouseholdError("Combined gross household income must be a non-negative number.");
         return;
       }
+      const largeTxnTrim = largeTxnThresholdDraft.trim();
+      const parsedLargeTxn = largeTxnTrim === "" ? null : Number(largeTxnTrim);
       await apiJson<HouseholdSettingsResponse>("/household/settings", {
         method: "PATCH",
         body: JSON.stringify({
           monthlySavingsTargetUsd: value,
           city: householdCityDraft.trim() || null,
           state: householdStateDraft.trim() || null,
-          combinedGrossIncomeUsd: parsedIncome
+          combinedGrossIncomeUsd: parsedIncome,
+          largeTxnThresholdUsd: parsedLargeTxn
         })
       });
       await loadHousehold();
@@ -938,6 +977,23 @@ export function SettingsPage() {
       setHouseholdError(e instanceof Error ? e.message : "Could not save");
     } finally {
       setSavingHousehold(false);
+    }
+  }
+
+  async function saveNotifPrefs() {
+    setNotifPrefsSaving(true);
+    setNotifPrefsError(null);
+    setNotifPrefsSuccess(null);
+    try {
+      await apiJson("/notifications/preferences", {
+        method: "PUT",
+        body: JSON.stringify({ preferences: notifPrefs })
+      });
+      setNotifPrefsSuccess("Preferences saved.");
+    } catch (e: unknown) {
+      setNotifPrefsError(e instanceof Error ? e.message : "Could not save preferences");
+    } finally {
+      setNotifPrefsSaving(false);
     }
   }
 
@@ -1232,7 +1288,9 @@ export function SettingsPage() {
                       ? "Accounts"
                       : id === "recurring"
                         ? "Recurring"
-                        : "Data & Backup"}
+                        : id === "data"
+                          ? "Data & Backup"
+                          : "Notifications"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -1574,8 +1632,6 @@ export function SettingsPage() {
                   </Stack>
                 </Box>
 
-                <Divider mt="xl" mb="md" label="Notifications" labelPosition="left" />
-                <Text c="dimmed">No notification service is configured. This section is reserved for future email and push notifications.</Text>
               </Stack>
             ) : null}
           </Stack>
@@ -1779,6 +1835,15 @@ export function SettingsPage() {
                   disabled={savingHousehold}
                   style={{ maxWidth: 320 }}
                 />
+                <CurrencyInput
+                  label="Large transaction alert threshold (USD)"
+                  description="Get notified when any transaction exceeds this amount. Leave blank to disable."
+                  placeholder="e.g. 500"
+                  value={largeTxnThresholdDraft === "" ? undefined : Number(largeTxnThresholdDraft)}
+                  onChange={(value) => setLargeTxnThresholdDraft(value == null ? "" : String(value))}
+                  disabled={savingHousehold}
+                  style={{ maxWidth: 320 }}
+                />
                 <Fieldset legend="Household Demographics" mt="sm">
                   <Stack gap="sm">
                     <TextInput
@@ -1844,6 +1909,11 @@ export function SettingsPage() {
           <Stack mt="md">
             <Title order={3}>Connected accounts</Title>
             <Text c="dimmed">Link accounts for import. Parser is chosen from institution, account type, and file when you import.</Text>
+            <Switch
+              label="Show closed accounts"
+              checked={showClosedAccounts}
+              onChange={(e) => setShowClosedAccounts(e.currentTarget.checked)}
+            />
             {accountError ? <Alert color="red">{accountError}</Alert> : null}
             {accountSuccess ? <Alert color="green">{accountSuccess}</Alert> : null}
             <Stack>
@@ -1922,6 +1992,20 @@ export function SettingsPage() {
                   disabled={savingAccount}
                 />
               </Fieldset>
+              {accountDraft.id ? (
+                <Checkbox
+                  label="Active"
+                  checked={accountDraft.status !== "closed"}
+                  onChange={(e) =>
+                    setAccountDraft((d) => ({
+                      ...d,
+                      status: e.currentTarget.checked ? "active" : "closed"
+                    }))
+                  }
+                  disabled={savingAccount}
+                  mt="xs"
+                />
+              ) : null}
               {!accountDraft.id ? (
                 <Group align="end" grow>
                   <CurrencyInput
@@ -1969,6 +2053,7 @@ export function SettingsPage() {
                         memo: "",
                         liquidity: "",
                         belongsTo: "household",
+                        status: "active",
                         initialBalance: "",
                         initialBalanceDate: new Date().toISOString().slice(0, 10)
                       })
@@ -1995,7 +2080,14 @@ export function SettingsPage() {
                     const isMortgage = a.type === "loan" && MORTGAGE_SUBTYPES.has(a.sub_type ?? "");
                     return (
                     <Table.Tr key={a.id}>
-                      <Table.Td>{a.institution}</Table.Td>
+                      <Table.Td>
+                        <Group gap={6} wrap="nowrap">
+                          <Text size="sm">{a.institution}</Text>
+                          {a.status === "closed" ? (
+                            <Badge color="gray" variant="light" size="xs">Closed</Badge>
+                          ) : null}
+                        </Group>
+                      </Table.Td>
                       <Table.Td>
                         <Text size="sm">{formatAccountTypeLabel(a.type, a.sub_type)}</Text>
                         {a.memo ? <Text size="xs" c="dimmed" truncate maw={200}>{a.memo}</Text> : null}
@@ -2034,6 +2126,7 @@ export function SettingsPage() {
                                   a.owner_scope === "person" && a.owner_person_profile_id
                                     ? (`person:${a.owner_person_profile_id}` as BelongsToChoice)
                                     : "household",
+                                status: a.status === "closed" ? "closed" : "active",
                                 initialBalance: "",
                                 initialBalanceDate: new Date().toISOString().slice(0, 10)
                               })
@@ -2299,10 +2392,16 @@ export function SettingsPage() {
                 txnAmount={editingOverride.amountAnchor ?? 0}
                 allTxns={[]}
                 existingOverride={editingOverride}
-                onConfirm={async ({ merchantKey, amountAnchor, amountTolerancePct }) => {
+                onConfirm={async ({ merchantKey, displayName, amountAnchor, amountTolerancePct }) => {
                   const res = await apiFetch("/recurring-overrides", {
                     method: "POST",
-                    body: JSON.stringify({ merchantKey, verdict: "confirmed", amountAnchor, amountTolerancePct })
+                    body: JSON.stringify({
+                      merchantKey,
+                      displayName,
+                      verdict: "confirmed",
+                      amountAnchor,
+                      amountTolerancePct
+                    })
                   });
                   if (!res.ok) throw new Error(`Failed to save (HTTP ${res.status})`);
                   const updated = await apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides");
@@ -2321,6 +2420,110 @@ export function SettingsPage() {
         ) : null}
 
         <BackupRestoreSection authRole={authRole} active={tab === "data"} />
+
+        {tab === "notifications" ? (
+          <Stack mt="md">
+            <Title order={3}>Notifications</Title>
+            <Text c="dimmed" size="sm">
+              Choose how you want to be notified for each event. Email uses your account address.
+            </Text>
+            {notifPrefsError ? <Alert color="red">{notifPrefsError}</Alert> : null}
+            {notifPrefsSuccess ? <Alert color="green">{notifPrefsSuccess}</Alert> : null}
+            {notifPrefsLoading ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading…</Text></Group>
+            ) : (() => {
+              type NotifMeta = { label: string; description: string; note?: string };
+              const NOTIF_META: Record<string, NotifMeta> = {
+                import_complete:            { label: "Import complete",          description: "When a bank statement import finishes processing" },
+                export_ready:               { label: "Export ready",             description: "When a data export file is ready to download" },
+                restore_complete:           { label: "Restore complete",         description: "When a household backup restore finishes" },
+                backup_complete:            { label: "Drive backup success",     description: "When an automatic Google Drive backup succeeds" },
+                backup_failed:              { label: "Drive backup failed",      description: "When a backup fails or Drive authorization expires" },
+                budget_threshold_80:        { label: "Budget warning (80%)",     description: "Early alert when monthly spending reaches 80% of the category limit" },
+                budget_threshold_100:       { label: "Budget exceeded (100%)",   description: "Alert when monthly spending crosses the full category budget" },
+                large_transaction:          { label: "Large transaction",        description: "When any transaction exceeds your alert threshold", note: "Set threshold in Settings → Household" },
+                property_valuation_updated: { label: "Property valuation updated", description: "When the monthly property estimate is refreshed" },
+              };
+
+              const GROUPS: Array<{ heading: string; types: string[] }> = [
+                { heading: "Data & Backup", types: ["import_complete", "export_ready", "restore_complete", "backup_complete", "backup_failed"] },
+                { heading: "Budget & Spending", types: ["budget_threshold_80", "budget_threshold_100", "large_transaction"] },
+                { heading: "Properties", types: ["property_valuation_updated"] },
+              ];
+
+              const prefMap = new Map(notifPrefs.map((p) => [p.notificationType, p]));
+
+              function togglePref(type: string, field: "enabledInapp" | "enabledEmail", val: boolean) {
+                setNotifPrefs((prev) =>
+                  prev.map((p) => (p.notificationType === type ? { ...p, [field]: val } : p))
+                );
+              }
+
+              return (
+                <Stack gap={0}>
+                  {/* Column header */}
+                  <Group px="sm" py="xs">
+                    <Text size="xs" fw={600} c="dimmed" style={{ flex: 1 }} tt="uppercase">Event</Text>
+                    <Text size="xs" fw={600} c="dimmed" w={60} ta="center" tt="uppercase">In-app</Text>
+                    <Text size="xs" fw={600} c="dimmed" w={60} ta="center" tt="uppercase">Email</Text>
+                  </Group>
+                  <Divider />
+
+                  {GROUPS.map((group) => {
+                    const rows = group.types.filter((t) => prefMap.has(t));
+                    if (rows.length === 0) return null;
+                    return (
+                      <Stack key={group.heading} gap={0}>
+                        <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="sm" pt="md" pb={4}>{group.heading}</Text>
+                        {rows.map((type) => {
+                          const pref = prefMap.get(type);
+                          if (!pref) return null;
+                          const meta = NOTIF_META[type];
+                          return (
+                            <Group
+                              key={type}
+                              px="sm"
+                              py="sm"
+                              align="flex-start"
+                              style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+                            >
+                              <Stack gap={2} style={{ flex: 1 }}>
+                                <Text size="sm" fw={500}>{meta?.label ?? type}</Text>
+                                {meta?.description ? <Text size="xs" c="dimmed">{meta.description}</Text> : null}
+                                {meta?.note ? <Text size="xs" c="blue.6">{meta.note}</Text> : null}
+                              </Stack>
+                              <Group w={60} justify="center" pt={2}>
+                                <Checkbox
+                                  checked={pref.enabledInapp}
+                                  onChange={(e) => { const v = e.currentTarget.checked; togglePref(type, "enabledInapp", v); }}
+                                  aria-label={`${meta?.label ?? type} in-app`}
+                                />
+                              </Group>
+                              <Group w={60} justify="center" pt={2}>
+                                <Checkbox
+                                  checked={pref.enabledEmail}
+                                  onChange={(e) => { const v = e.currentTarget.checked; togglePref(type, "enabledEmail", v); }}
+                                  aria-label={`${meta?.label ?? type} email`}
+                                />
+                              </Group>
+                            </Group>
+                          );
+                        })}
+                      </Stack>
+                    );
+                  })}
+
+                  <Group mt="md">
+                    <Button loading={notifPrefsSaving} onClick={() => void saveNotifPrefs()}>
+                      Save preferences
+                    </Button>
+                  </Group>
+                </Stack>
+              );
+            })()}
+          </Stack>
+        ) : null}
+
         </Tabs>
       </Paper>
       <ConfirmDialog

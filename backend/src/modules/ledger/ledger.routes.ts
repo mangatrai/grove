@@ -5,6 +5,7 @@ import { qAll, qGet } from "../../db/query.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
+import { computeAndUpsertCashBalanceIfApplicable } from "../reports/balance-sheet.service.js";
 import { listOpenResolutionItemsForCanonicalTransaction } from "../resolution/resolution.service.js";
 import {
   aggregateCanonicalTransactions,
@@ -19,8 +20,11 @@ import {
   listCanonicalTransactionsForImportSession,
   restoreTransaction,
   trashTransaction,
+  updateManualTransactionAmount,
   updateCanonicalTransactionCategory,
   updateCanonicalTransactionMemo,
+  pairTransactions,
+  unpairTransactions,
   type LedgerListFilters
 } from "./ledger.service.js";
 
@@ -108,6 +112,10 @@ const querySchema = z.object({
   trashOnly: z
     .enum(["true", "false"])
     .optional()
+    .transform((v) => v === "true"),
+  transferPaired: z
+    .enum(["true", "false"])
+    .optional()
     .transform((v) => v === "true")
 });
 
@@ -173,7 +181,8 @@ ledgerRouter.get("/aggregate", async (req: AuthenticatedRequest, res) => {
     ownerPersonProfileId,
     ownerPersonProfileIds,
     belongsTo,
-    trashOnly
+    trashOnly,
+    transferPaired
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
@@ -214,6 +223,7 @@ ledgerRouter.get("/aggregate", async (req: AuthenticatedRequest, res) => {
     accountId: accountId ?? undefined,
     accountIds: accountIds ?? undefined,
     trashOnly: trashOnly || undefined,
+    transferPaired: transferPaired || undefined,
     ...(belongsTo?.length
       ? { belongsTo }
       : {
@@ -266,7 +276,8 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     ownerPersonProfileId,
     ownerPersonProfileIds,
     belongsTo,
-    trashOnly
+    trashOnly,
+    transferPaired
   } = parsed.data;
   const householdId = req.authUser!.householdId;
 
@@ -307,6 +318,7 @@ ledgerRouter.get("/", async (req: AuthenticatedRequest, res) => {
     accountId: accountId ?? undefined,
     accountIds: accountIds ?? undefined,
     trashOnly: trashOnly || undefined,
+    transferPaired: transferPaired || undefined,
     ...(belongsTo?.length
       ? { belongsTo }
       : {
@@ -366,6 +378,7 @@ ledgerRouter.post("/", async (req: AuthenticatedRequest, res) => {
   });
 
   if (out.ok) {
+    await computeAndUpsertCashBalanceIfApplicable(householdId, body.accountId, body.txnDate, out.amount);
     res.status(201).json({ id: out.id });
     return;
   }
@@ -425,7 +438,8 @@ const patchCategorySchema = z.object({
   ownerScope: z.enum(["household", "person"]).optional(),
   ownerPersonProfileId: z.union([z.string().uuid(), z.null()]).optional(),
   status: z.enum(["trashed", "posted"]).optional(),
-  memo: z.union([z.string().max(500).trim(), z.null()]).optional()
+  memo: z.union([z.string().max(500).trim(), z.null()]).optional(),
+  amount: z.number().finite().refine((n) => n !== 0, "Amount must not be zero").optional()
 });
 
 const txnIdParamSchema = z.object({
@@ -471,6 +485,33 @@ ledgerRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
       res.status(403).json({ message: "You can only modify your own transactions." });
       return;
     }
+  }
+
+  // Amount-only update (manual transactions only).
+  if (
+    parsed.data.amount !== undefined &&
+    parsed.data.memo === undefined &&
+    parsed.data.status === undefined &&
+    parsed.data.categoryId === undefined &&
+    !parsed.data.ownerScope
+  ) {
+    const out = await updateManualTransactionAmount(householdId, req.params.id, parsed.data.amount);
+    if (!out.ok) {
+      if (out.code === "INVALID_AMOUNT") {
+        res.status(400).json({ message: "Amount must be a non-zero finite number", code: out.code });
+        return;
+      }
+      if (out.code === "NOT_MANUAL") {
+        res.status(400).json({ message: "Cannot edit amount of an imported transaction", code: out.code });
+        return;
+      }
+      res.status(404).json({ message: "Transaction not found" });
+      return;
+    }
+    const delta = out.newAmount - out.oldAmount;
+    await computeAndUpsertCashBalanceIfApplicable(householdId, out.accountId, out.txnDate, delta);
+    res.status(200).json({ amount: out.newAmount });
+    return;
   }
 
   // Memo-only update.
@@ -573,12 +614,67 @@ ledgerRouter.delete("/:id", async (req: AuthenticatedRequest, res) => {
     }
   }
 
+  const txnSnap = await qGet<{ account_id: string; amount: string; txn_date: string }>(
+    `SELECT account_id, amount, txn_date FROM transaction_canonical WHERE id = ? AND household_id = ?`,
+    parsed.data.id,
+    householdId
+  );
+
   const out = await hardDeleteTransaction(householdId, parsed.data.id);
   if (!out.ok) {
     res.status(out.code === "NOT_FOUND" ? 404 : 409).json({ message: out.code });
     return;
   }
+
+  if (txnSnap) {
+    await computeAndUpsertCashBalanceIfApplicable(
+      householdId,
+      txnSnap.account_id,
+      String(txnSnap.txn_date).slice(0, 10),
+      -Number(txnSnap.amount)
+    );
+  }
   res.status(204).send();
+});
+
+const pairSchema = z.object({
+  ids: z.array(z.string().uuid()).length(2)
+});
+
+const groupIdParamSchema = z.object({
+  groupId: z.string().uuid()
+});
+
+ledgerRouter.post("/pair", async (req: AuthenticatedRequest, res) => {
+  const parsed = pairSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payload — provide ids: [uuid, uuid]", issues: parsed.error.flatten() });
+    return;
+  }
+  const [id1, id2] = parsed.data.ids as [string, string];
+  const householdId = req.authUser!.householdId;
+  const out = await pairTransactions(householdId, id1, id2);
+  if (!out.ok) {
+    const status = out.code === "NOT_FOUND" ? 404 : 400;
+    res.status(status).json({ message: out.message, code: out.code });
+    return;
+  }
+  res.status(200).json({ transferGroupId: out.transferGroupId });
+});
+
+ledgerRouter.delete("/pair/:groupId", async (req: AuthenticatedRequest, res) => {
+  const parsed = groupIdParamSchema.safeParse(req.params);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid groupId — must be a UUID" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const out = await unpairTransactions(householdId, parsed.data.groupId);
+  if (!out.ok) {
+    res.status(404).json({ message: "Transfer pair not found", code: out.code });
+    return;
+  }
+  res.status(200).json({ unlinked: out.unlinked });
 });
 
 const bulkIdsSchema = z.object({

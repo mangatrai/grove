@@ -10,6 +10,7 @@ import { qAll } from "../../db/query.js";
 import { log } from "../../logger.js";
 import { isRealtyApiConfigured } from "./realty-api.service.js";
 import { refreshPropertyValuation } from "./property.service.js";
+import { createNotification } from "../notifications/notification.service.js";
 
 const HEARTBEAT_MS = 6 * 60 * 60 * 1000;   // every 6 h
 const STARTUP_DELAY_MS = 60_000;             // 1 min after boot
@@ -44,6 +45,13 @@ async function checkAndRefreshProperties(): Promise<void> {
       const result = await refreshPropertyValuation(row.id, row.household_id);
       if (result.ok) {
         log.info(`Realty scheduler: refreshed ${row.id} → $${result.estimate}`);
+        void createNotification({
+          householdId: row.household_id,
+          type: "property_valuation_updated",
+          title: "Property valuation updated",
+          body: `Your property estimate has been refreshed to $${result.estimate.toLocaleString("en-US")}.`,
+          actionUrl: "/real-estate"
+        });
       } else {
         log.warn(`Realty scheduler: skipped ${row.id} — ${result.message}`);
       }

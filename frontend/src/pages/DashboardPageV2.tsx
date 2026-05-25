@@ -2,17 +2,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { GroveCardLoader } from "../components/GroveLoader";
 import {
+  ActionIcon,
   Anchor,
   Badge,
   Box,
   Button,
   Group,
+  Modal,
   Paper,
   Progress,
   SimpleGrid,
   Stack,
   Text,
-  Title
+  Title,
+  Tooltip,
 } from "@mantine/core";
 import {
   Bar,
@@ -22,7 +25,7 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis
 } from "recharts";
@@ -31,12 +34,16 @@ import {
   IconAlertCircle,
   IconArrowsExchange,
   IconCopy,
+  IconRefresh,
+  IconSparkles,
 } from "@tabler/icons-react";
 
 import { FinancialHealthCard } from "../components/FinancialHealthCard";
+import { YearInReviewOverlay } from "../components/year-review/YearInReviewOverlay";
 import { apiFetch, apiJson, useAuthToken } from "../api";
+import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
 import { FS_CAT_PALETTE, FS_FOREST, FS_TERRACOTTA } from "../theme/chartPalette";
-import { formatUsd } from "../utils/format";
+import { formatTimeAgo, formatUsd } from "../utils/format";
 
 type CashSummaryResponse = {
   range: { start: string; end: string; label: string };
@@ -52,8 +59,8 @@ type ResolutionSummary = {
 };
 
 type NetWorthSnapshot = {
-  totals: { netWorth: number | null; assets: number | null; liabilities: number | null };
   asOf: string;
+  totals: { netWorth: number | null; assets: number | null; liabilities: number | null };
 };
 
 type NetWorthHistoryPoint = { date: string; netWorth: number | null };
@@ -172,7 +179,8 @@ const ALLOW_CATEGORIES = new Set([
   "tuition"
 ]);
 
-const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan", "checking"]);
+const LIABILITY_ACCOUNT_TYPES = new Set(["credit_card", "loan"]);
+const ACCOUNT_CARD_TYPES = new Set(["credit_card", "checking", "savings"]);
 
 function currentYearMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -181,6 +189,10 @@ function currentYearMonth(): string {
 function prevMonth(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
   return m === 1 ? `${y! - 1}-12` : `${y}-${String(m! - 1).padStart(2, "0")}`;
+}
+
+function sameMonthPriorYear(ym: string): string {
+  return `${Number(ym.slice(0, 4)) - 1}-${ym.slice(5, 7)}`;
 }
 
 function nextMonth(ym: string): string {
@@ -313,6 +325,7 @@ function computeAccountBuckets(txns: LedgerRow[], activeMonth: string): AccountB
   const buckets = new Map<string, AccountBucket>();
   for (const t of txns) {
     if (t.status !== "posted" || t.amount >= 0) continue;
+    if (!ACCOUNT_CARD_TYPES.has(t.accountType)) continue;
     const isThis = t.txnDate.startsWith(activeMonth);
     const isPrior = t.txnDate.startsWith(priorYm);
     if (!isThis && !isPrior) continue;
@@ -335,30 +348,55 @@ function computeAccountBuckets(txns: LedgerRow[], activeMonth: string): AccountB
       b.priorMonthTxnCount += 1;
     }
   }
-  return [...buckets.values()]
-    .filter((b) => b.thisMonthOutflow > 0)
+  const all = [...buckets.values()].filter((b) => b.thisMonthOutflow > 0);
+  const creditCards = all
+    .filter((b) => b.accountType === "credit_card")
     .sort((a, b) => b.thisMonthOutflow - a.thisMonthOutflow)
-    .slice(0, 5);
+    .slice(0, 3);
+  const checkingSavings = all
+    .filter((b) => b.accountType === "checking" || b.accountType === "savings")
+    .sort((a, b) => b.thisMonthOutflow - a.thisMonthOutflow)
+    .slice(0, 3);
+  return [...creditCards, ...checkingSavings];
 }
 
 function accountArrow(b: AccountBucket): { char: string; color: string } | null {
   if (b.priorMonthTxnCount < 3) return null;
-  const liability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
+  const isLiability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
   if (b.priorMonthOutflow === 0) return { char: "→", color: "dimmed" };
   const delta = (b.thisMonthOutflow - b.priorMonthOutflow) / b.priorMonthOutflow;
-  if (delta > 0.05) return { char: "↑", color: liability ? "fsTerracotta" : "fsGold" };
+  if (delta > 0.05) return { char: "↑", color: isLiability ? "fsTerracotta" : "fsGold" };
   if (delta < -0.05) return { char: "↓", color: "fsForest" };
   return { char: "→", color: "dimmed" };
 }
 
-function outflowSlices(cashData: CashSummaryResponse | null): Array<{ categoryId: string | null; categoryName: string; outflows: number }> {
+function yoyArrow(
+  b: AccountBucket,
+  pyData: { outflow: number; count: number } | undefined
+): { char: string; color: string } | null {
+  if (!pyData || pyData.count < 3) return null;
+  const isLiability = LIABILITY_ACCOUNT_TYPES.has(b.accountType);
+  if (pyData.outflow === 0) return { char: "→", color: "dimmed" };
+  const delta = (b.thisMonthOutflow - pyData.outflow) / pyData.outflow;
+  if (delta > 0.05) return { char: "↑", color: isLiability ? "fsTerracotta" : "fsGold" };
+  if (delta < -0.05) return { char: "↓", color: "fsForest" };
+  return { char: "→", color: "dimmed" };
+}
+
+function outflowSlices(
+  cashData: CashSummaryResponse | null
+): Array<{ categoryId: string | null; categoryIds?: string[]; categoryName: string; outflows: number }> {
   const rows = (cashData?.byCategory ?? []).filter((r) => r.outflows > 0).sort((a, b) => b.outflows - a.outflows);
   if (rows.length <= 5) {
     return rows.map((r) => ({ categoryId: r.categoryId, categoryName: r.categoryName, outflows: r.outflows }));
   }
   const top = rows.slice(0, 5).map((r) => ({ categoryId: r.categoryId, categoryName: r.categoryName, outflows: r.outflows }));
-  const other = rows.slice(5).reduce((acc, row) => acc + row.outflows, 0);
-  return [...top, { categoryId: null, categoryName: "Other", outflows: other }];
+  const otherRows = rows.slice(5);
+  const other = otherRows.reduce((acc, row) => acc + row.outflows, 0);
+  const categoryIds = otherRows
+    .map((r) => r.categoryId)
+    .filter((id): id is string => id != null);
+  return [...top, { categoryId: null, categoryIds, categoryName: "Other", outflows: other }];
 }
 
 export function DashboardPageV2() {
@@ -370,27 +408,50 @@ export function DashboardPageV2() {
   const [netWorthHistory, setNetWorthHistory] = useState<NetWorthHistoryPoint[] | null>(null);
   const [budgetData, setBudgetData] = useState<BudgetMonthResponse | null>(null);
   const [recentTxns, setRecentTxns] = useState<LedgerRow[] | null>(null);
+  const [priorYearTxns, setPriorYearTxns] = useState<LedgerRow[] | null>(null);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [loading, setLoading] = useState(true);
-  const [cashRetrying, setCashRetrying] = useState(false);
   const [showAllRecurring, setShowAllRecurring] = useState(false);
+  const [showYearReview, setShowYearReview] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  function isYearReviewVisible(): boolean {
+    if (import.meta.env.VITE_MODE === "TEST") return true;
+    const m = new Date().getMonth() + 1;
+    return m === 2 || m === 3;
+  }
+  const reviewYear = new Date().getFullYear() - 1;
 
   const isCurrentMonth = activeMonth === currentYearMonth();
 
-  const loadCashSummary = useCallback(async () => {
-    setCashRetrying(true);
-    try {
-      const value = await apiJson<CashSummaryResponse>(
+  const cashCacheKey = `cash-summary:${activeMonth}`;
+  const {
+    data: cachedCashData,
+    loading: cashCacheLoading,
+    error: cashCacheError,
+    lastUpdatedAt: cashLastUpdated,
+    refresh: refreshCashCache,
+  } = useLocalStorageCache<CashSummaryResponse>(
+    cashCacheKey,
+    "dashboard",
+    () =>
+      apiJson<CashSummaryResponse>(
         `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
         { cache: "no-store" }
-      );
-      setCashData(value);
-    } catch {
+      )
+  );
+
+  useEffect(() => {
+    if (cashCacheError) {
       setCashData("error");
-    } finally {
-      setCashRetrying(false);
+    } else if (cachedCashData !== null) {
+      setCashData(cachedCashData);
     }
-  }, [activeMonth]);
+  }, [cachedCashData, cashCacheError]);
+
+  const loadCashSummary = useCallback(() => {
+    refreshCashCache();
+  }, [refreshCashCache]);
 
   const loadAll = useCallback(async () => {
     if (!token) {
@@ -399,11 +460,8 @@ export function DashboardPageV2() {
     setLoading(true);
     const historyFrom = firstDayNMonthsBefore(activeMonth, 6);
     const monthEnd = lastDayOf(activeMonth);
+    const pyMonth = sameMonthPriorYear(activeMonth);
     const results = await Promise.allSettled([
-      apiJson<CashSummaryResponse>(
-        `/reports/cash-summary?preset=month&month=${encodeURIComponent(activeMonth)}&categoryBreakdown=true&categoryRollup=parent`,
-        { cache: "no-store" }
-      ),
       apiJson<ResolutionSummary>("/resolution/summary", { cache: "no-store" }),
       apiJson<NetWorthSnapshot>("/reports/balance-sheet", { cache: "no-store" }),
       apiJson<{ points: Array<{ asOf: string; totals: { netWorth: number | null } }> }>(
@@ -415,19 +473,23 @@ export function DashboardPageV2() {
         `/transactions?limit=200&dateFrom=${historyFrom}&dateTo=${monthEnd}`,
         { cache: "no-store" }
       ),
-      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" })
+      apiJson<{ ok: boolean; data: RecurringOverride[] }>("/recurring-overrides", { cache: "no-store" }),
+      apiJson<{ transactions: LedgerRow[] }>(
+        `/transactions?limit=200&dateFrom=${firstDayOf(pyMonth)}&dateTo=${lastDayOf(pyMonth)}`,
+        { cache: "no-store" }
+      ),
     ]);
-    setCashData(results[0].status === "fulfilled" ? results[0].value : "error");
-    setResolutionData(results[1].status === "fulfilled" ? results[1].value : null);
-    setNetWorthData(results[2].status === "fulfilled" ? results[2].value : null);
+    setResolutionData(results[0].status === "fulfilled" ? results[0].value : null);
+    setNetWorthData(results[1].status === "fulfilled" ? results[1].value : null);
     setNetWorthHistory(
-      results[3].status === "fulfilled"
-        ? results[3].value.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
+      results[2].status === "fulfilled"
+        ? results[2].value.points.map((p) => ({ date: p.asOf, netWorth: p.totals.netWorth }))
         : null
     );
-    setBudgetData(results[4].status === "fulfilled" ? results[4].value : null);
-    setRecentTxns(results[5].status === "fulfilled" ? results[5].value.transactions : null);
-    setRecurringOverrides(results[6].status === "fulfilled" && results[6].value.ok ? results[6].value.data : []);
+    setBudgetData(results[3].status === "fulfilled" ? results[3].value : null);
+    setRecentTxns(results[4].status === "fulfilled" ? results[4].value.transactions : null);
+    setRecurringOverrides(results[5].status === "fulfilled" && results[5].value.ok ? results[5].value.data : []);
+    setPriorYearTxns(results[6].status === "fulfilled" ? results[6].value.transactions : null);
     setLoading(false);
   }, [activeMonth, token]);
 
@@ -512,10 +574,25 @@ export function DashboardPageV2() {
   );
 
   const accountBuckets = useMemo(
-    () => (recentTxns && recentTxns.length >= 5 ? computeAccountBuckets(recentTxns, activeMonth) : []),
+    () => (recentTxns ? computeAccountBuckets(recentTxns, activeMonth) : []),
     [recentTxns, activeMonth]
   );
-  const showAccountModule = recentTxns !== null && recentTxns.length >= 5 && accountBuckets.length > 0;
+  const priorYearMap = useMemo(() => {
+    const map = new Map<string, { outflow: number; count: number }>();
+    if (!priorYearTxns) return map;
+    const pyMonth = sameMonthPriorYear(activeMonth);
+    for (const t of priorYearTxns) {
+      if (t.status !== "posted" || t.amount >= 0) continue;
+      if (!ACCOUNT_CARD_TYPES.has(t.accountType)) continue;
+      if (!t.txnDate.startsWith(pyMonth)) continue;
+      const entry = map.get(t.accountId) ?? { outflow: 0, count: 0 };
+      entry.outflow += Math.abs(t.amount);
+      entry.count += 1;
+      map.set(t.accountId, entry);
+    }
+    return map;
+  }, [priorYearTxns, activeMonth]);
+  const showAccountModule = !loading && recentTxns !== null;
 
   const trendData = cashData && cashData !== "error" ? cashData.monthlyTrend : [];
   const trendMax = useMemo(
@@ -553,40 +630,69 @@ export function DashboardPageV2() {
   return (
     <Box component="main" w="100%">
       <Paper withBorder p="lg" radius="md" mb="md">
-        <Group gap="sm" mb="lg">
-          <Button
-            type="button"
-            variant="default"
-            size="xs"
-            onClick={() => setActiveMonth((m) => prevMonth(m))}
-            disabled={loading}
-          >
-            ‹
-          </Button>
-          <Text fw={600} size="lg">
-            {formatMonthLabel(activeMonth)}
-          </Text>
-          <Button
-            type="button"
-            variant="default"
-            size="xs"
-            onClick={() => setActiveMonth((m) => nextMonth(m))}
-            disabled={isCurrentMonth || loading}
-          >
-            ›
-          </Button>
+        <Group justify="space-between" align="center" mb="lg">
+          <Group gap="sm">
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              onClick={() => setActiveMonth((m) => prevMonth(m))}
+              disabled={loading}
+            >
+              ‹
+            </Button>
+            <Text fw={600} size="lg">
+              {formatMonthLabel(activeMonth)}
+            </Text>
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              onClick={() => setActiveMonth((m) => nextMonth(m))}
+              disabled={isCurrentMonth || loading}
+            >
+              ›
+            </Button>
+          </Group>
+          <Group gap="sm">
+            {isYearReviewVisible() ? (
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<IconSparkles size={14} />}
+                onClick={() => setConfirmOpen(true)}
+              >
+                {reviewYear} Year in Review
+              </Button>
+            ) : null}
+            <Tooltip
+              label={cashLastUpdated ? `Last updated ${formatTimeAgo(cashLastUpdated)}` : "Loading..."}
+              position="bottom"
+              withArrow
+            >
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              onClick={refreshCashCache}
+              aria-label="Refresh dashboard data"
+              loading={cashCacheLoading}
+            >
+              <IconRefresh size={14} />
+            </ActionIcon>
+            </Tooltip>
+          </Group>
         </Group>
 
-        {loading ? (
+        {(loading || cashCacheLoading) && cashData === null ? (
           <GroveCardLoader label="Loading cash flow…" size="sm" />
         ) : cashUnavailable ? (
           <Text ta="center" mb="md" c="dimmed">
-            {cashRetrying ? (
+            {cashCacheLoading ? (
               "Retrying…"
             ) : (
               <>
                 Cash flow unavailable ·{" "}
-                <Button type="button" variant="default" size="xs" onClick={() => void loadCashSummary()}>
+                <Button type="button" variant="default" size="xs" onClick={loadCashSummary}>
                   Retry
                 </Button>
               </>
@@ -741,12 +847,20 @@ export function DashboardPageV2() {
                   return sortedSlices.map((slice, idx) => {
                     const pct = (slice.outflows / maxOut) * 100;
                     const color = FS_CAT_PALETTE[idx % FS_CAT_PALETTE.length]!;
-                    const href =
-                      slice.categoryName === "Other"
-                        ? null
-                        : slice.categoryId
-                          ? `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`
-                          : `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    let href: string | null = null;
+                    if (slice.categoryIds != null && slice.categoryIds.length > 0) {
+                      const params = new URLSearchParams();
+                      for (const id of slice.categoryIds) {
+                        params.append("categoryIds", id);
+                      }
+                      params.set("dateFrom", monthStart);
+                      params.set("dateTo", monthEnd);
+                      href = `/transactions?${params.toString()}`;
+                    } else if (slice.categoryId) {
+                      href = `/transactions?categoryId=${slice.categoryId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    } else if (slice.categoryName !== "Other") {
+                      href = `/transactions?uncategorizedOnly=true&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                    }
                     return (
                       <Box
                         key={`${slice.categoryName}-${idx}`}
@@ -956,30 +1070,61 @@ export function DashboardPageV2() {
 
         {showAccountModule ? (
           <Paper component="section" withBorder p="md" radius="md">
-            <Text size="xs" tt="uppercase" fw={500} c="dimmed" mb="xs" style={{ letterSpacing: "0.06em" }}>
-              By Account — This Month
-            </Text>
-            <Stack gap={4}>
-              {accountBuckets.map((b) => {
-                const arrow = accountArrow(b);
-                const href = `/transactions?accountId=${b.accountId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
-                return (
-                  <Group key={b.accountId} justify="space-between" gap={4} wrap="nowrap">
-                    <Anchor component={Link} to={href} size="sm" underline="hover">
-                      {b.name}
-                    </Anchor>
-                    <Group gap={6} wrap="nowrap">
-                      <Text size="sm">${formatNoCents(b.thisMonthOutflow)}</Text>
-                      {arrow ? (
-                        <Text size="sm" c={arrow.color} fw={600}>
-                          {arrow.char}
-                        </Text>
-                      ) : null}
+            <Tooltip
+              label="First arrow = vs last month · second arrow = vs same month last year"
+              position="top"
+              withArrow
+              multiline
+              w={290}
+            >
+              <Text
+                size="xs"
+                tt="uppercase"
+                fw={500}
+                c="dimmed"
+                mb="xs"
+                style={{ letterSpacing: "0.06em", cursor: "help", display: "inline-block" }}
+              >
+                By Account — This Month
+              </Text>
+            </Tooltip>
+            {accountBuckets.length === 0 ? (
+              <Text size="sm" c="dimmed">
+                No spending recorded this month for linked accounts.
+              </Text>
+            ) : (
+              <Stack gap={4}>
+                {accountBuckets.map((b) => {
+                  const momArr = accountArrow(b);
+                  const yoyArr = yoyArrow(b, priorYearMap.get(b.accountId));
+                  const href = `/transactions?accountId=${b.accountId}&dateFrom=${monthStart}&dateTo=${monthEnd}`;
+                  return (
+                    <Group key={b.accountId} justify="space-between" gap={4} wrap="nowrap">
+                      <Anchor component={Link} to={href} size="sm" underline="hover">
+                        {b.name}
+                      </Anchor>
+                      <Group gap={6} wrap="nowrap">
+                        <Text size="sm">${formatNoCents(b.thisMonthOutflow)}</Text>
+                        {momArr ? (
+                          <Tooltip label={`vs ${formatMonthLabel(prevMonth(activeMonth))}`} position="top" withArrow>
+                            <Text size="sm" c={momArr.color} fw={600} style={{ cursor: "default" }}>
+                              {momArr.char}
+                            </Text>
+                          </Tooltip>
+                        ) : null}
+                        {yoyArr ? (
+                          <Tooltip label={`vs ${formatMonthLabel(sameMonthPriorYear(activeMonth))}`} position="top" withArrow>
+                            <Text size="sm" c={yoyArr.color} fw={600} style={{ cursor: "default" }}>
+                              {yoyArr.char}
+                            </Text>
+                          </Tooltip>
+                        ) : null}
+                      </Group>
                     </Group>
-                  </Group>
-                );
-              })}
-            </Stack>
+                  );
+                })}
+              </Stack>
+            )}
           </Paper>
         ) : null}
       </SimpleGrid>
@@ -1002,13 +1147,42 @@ export function DashboardPageV2() {
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="month" tickFormatter={(v) => formatMonthShort(String(v))} />
               <YAxis tickFormatter={(v) => (trendUseK ? `$${(Number(v) / 1000).toFixed(0)}k` : `$${Number(v).toFixed(0)}`)} />
-              <Tooltip formatter={(v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+              <RechartsTooltip formatter={(v: number) => `$${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
               <Legend />
               <Bar dataKey="inflows" fill={FS_FOREST} name="Income" />
               <Bar dataKey="outflows" fill={FS_TERRACOTTA} name="Spending" />
             </BarChart>
           </ResponsiveContainer>
         </Box>
+      ) : null}
+
+      <Modal
+        opened={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        title={`Ready for your ${reviewYear} Year in Review?`}
+        centered
+      >
+        <Text size="sm" mb="lg">
+          We&apos;ll pull all your data from {reviewYear} and generate a personalised summary. Takes about 30
+          seconds the first time — instant on return visits.
+        </Text>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setConfirmOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmOpen(false);
+              setShowYearReview(true);
+            }}
+          >
+            Let&apos;s go!
+          </Button>
+        </Group>
+      </Modal>
+
+      {showYearReview ? (
+        <YearInReviewOverlay year={reviewYear} onClose={() => setShowYearReview(false)} />
       ) : null}
     </Box>
   );

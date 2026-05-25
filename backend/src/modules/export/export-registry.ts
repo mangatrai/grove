@@ -194,6 +194,13 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 19,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "year_summary_cache",
+    tableName: "year_summary_cache",
+    restoreOrder: 20,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
   }
 ];
 
@@ -211,5 +218,8 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   // Seeded global data — restored from seeds, not from backups
   "category_rule_global",
   // GCP service account private key — never include in .hfb backups
-  "household_gdrive_config"
+  "household_gdrive_config",
+  // Notification rows are transient UI state — not restored from backups
+  "notification",
+  "notification_preference"
 ];

@@ -177,7 +177,10 @@ export async function updateImportFileBinding(
   return { ok: true };
 }
 
-export async function listHouseholdFinancialAccounts(householdId: string): Promise<
+export async function listHouseholdFinancialAccounts(
+  householdId: string,
+  options?: { includeClosedAccounts?: boolean }
+): Promise<
   Array<{
     id: string;
     type: string;
@@ -192,10 +195,14 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
     default_parser_profile_id: string | null;
+    status: string;
+    closed_at: string | null;
     last_uploaded_at: string | null;
     last_statement_end_date: string | null;
   }>
 > {
+  const includeClosedAccounts = options?.includeClosedAccounts ?? false;
+  const statusFilter = includeClosedAccounts ? "" : " AND fa.status = 'active'";
   const accounts = await qAll<{
     id: string;
     type: string;
@@ -210,6 +217,8 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
     owner_scope: "household" | "person";
     owner_person_profile_id: string | null;
     default_parser_profile_id: string | null;
+    status: string;
+    closed_at: string | null;
     last_uploaded_at: string | null;
   }>(
     `SELECT fa.id,
@@ -225,15 +234,17 @@ export async function listHouseholdFinancialAccounts(householdId: string): Promi
             fa.owner_scope,
             fa.owner_person_profile_id,
             fa.default_parser_profile_id,
+            fa.status,
+            fa.closed_at::text AS closed_at,
             MAX(f.uploaded_at)::text AS last_uploaded_at
        FROM financial_account fa
        LEFT JOIN import_file f
          ON f.financial_account_id = fa.id
         AND f.status = 'parsed'
-      WHERE fa.household_id = ?
+      WHERE fa.household_id = ?${statusFilter}
       GROUP BY fa.id, fa.type, fa.sub_type, fa.memo, fa.liquidity, fa.linked_account_id, fa.property_id,
                fa.institution, fa.account_mask, fa.currency, fa.owner_scope,
-               fa.owner_person_profile_id, fa.default_parser_profile_id
+               fa.owner_person_profile_id, fa.default_parser_profile_id, fa.status, fa.closed_at
       ORDER BY CASE WHEN fa.type = 'payslip' THEN 0 ELSE 1 END, fa.institution, fa.type`,
     householdId
   );
@@ -322,19 +333,26 @@ export async function updateHouseholdFinancialAccount(input: {
   ownerScope?: "household" | "person";
   ownerPersonProfileId?: string | null;
   defaultParserProfileId?: string | null;
+  status?: "active" | "closed";
 }): Promise<boolean> {
   const ownerScope = input.ownerScope ?? "household";
   const ownerPersonProfileId = ownerScope === "person" ? (input.ownerPersonProfileId ?? null) : null;
   // Explicit null means "clear override, revert to auto". Undefined means "keep existing".
   // Here we always re-derive when null is passed so edits stay consistent.
   const liquidity = input.liquidity ?? defaultLiquidity(input.type, input.subType ?? null);
-  const updated = await qGet<{ id: string }>(
-    `UPDATE financial_account
-        SET type = ?, sub_type = ?, memo = ?, liquidity = ?,
-            institution = ?, account_mask = ?,
-            owner_scope = ?, owner_person_profile_id = ?, default_parser_profile_id = ?
-      WHERE id = ? AND household_id = ?
-      RETURNING id`,
+
+  const setClauses = [
+    "type = ?",
+    "sub_type = ?",
+    "memo = ?",
+    "liquidity = ?",
+    "institution = ?",
+    "account_mask = ?",
+    "owner_scope = ?",
+    "owner_person_profile_id = ?",
+    "default_parser_profile_id = ?"
+  ];
+  const params: unknown[] = [
     input.type,
     input.subType ?? null,
     input.memo?.trim() || null,
@@ -343,9 +361,27 @@ export async function updateHouseholdFinancialAccount(input: {
     input.accountMask ?? null,
     ownerScope,
     ownerPersonProfileId,
-    input.defaultParserProfileId ?? null,
-    input.accountId,
-    input.householdId
+    input.defaultParserProfileId ?? null
+  ];
+
+  if (input.status !== undefined) {
+    setClauses.push("status = ?");
+    params.push(input.status);
+    if (input.status === "closed") {
+      setClauses.push("closed_at = COALESCE(closed_at, NOW())");
+    } else {
+      setClauses.push("closed_at = NULL");
+    }
+  }
+
+  params.push(input.accountId, input.householdId);
+
+  const updated = await qGet<{ id: string }>(
+    `UPDATE financial_account
+        SET ${setClauses.join(", ")}
+      WHERE id = ? AND household_id = ?
+      RETURNING id`,
+    ...params
   );
   return Boolean(updated);
 }

@@ -1,4 +1,5 @@
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { log } from "../../logger.js";
 import { canonicalizeImportSession } from "../canonical/canonical-ingest.service.js";
 import { findEmployerById, resolvePayslipUploadContext } from "../payslip/payslip-employer-resolve.service.js";
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
@@ -135,7 +136,7 @@ async function uploadBankAndImport(params: UploadBankParams): Promise<UploadAndI
       return { ok: false, code: "PARSE_FAILED", message: parsed.message };
     }
 
-    const canonicalized = await canonicalizeImportSession(created.id, params.householdId);
+    const canonicalized = await canonicalizeImportSession(created.id, params.householdId, params.userId);
     if (!canonicalized.ok) {
       return { ok: false, code: "CANONICALIZE_FAILED", message: canonicalized.message };
     }
@@ -164,7 +165,8 @@ async function uploadBankAndImport(params: UploadBankParams): Promise<UploadAndI
         parserProfileId: inferred
       }
     };
-  } catch {
+  } catch (err) {
+    log.error("bank quick-upload failed", { householdId: params.householdId, err });
     return { ok: false, code: "SESSION_CREATE_FAILED", message: "Could not complete bank import upload flow." };
   }
 }

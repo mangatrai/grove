@@ -18,6 +18,423 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-216 (2026-05-25): F-1 — In-app notification system
+
+- **Type:** New feature — unified notification center with bell icon, per-type preferences, and 8 trigger types
+- **What:**
+  - Migration `0051`: `notification` table (id, household_id, user_id, type, title, body, action_url, read_at), `notification_preference` table (per-user per-type email+inapp toggles), `large_txn_threshold_usd NUMERIC(12,2)` on `household` table
+  - **`notification.service.ts`** (new): `createNotification()` (broadcast or targeted, checks prefs, dispatches email), `listNotifications()`, `getUnreadCount()`, `markNotificationRead()`, `markAllNotificationsRead()`, `getNotificationPreferences()`, `upsertNotificationPreferences()`, `checkBudgetThresholds()`, `purgeOldNotifications()`
+  - **`notifications.routes.ts`** (new): `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/:id/read`, `POST /notifications/read-all`, `GET /notifications/preferences`, `PUT /notifications/preferences`
+  - **`app.ts`**: registered `/notifications` router
+  - **`server.ts`**: calls `purgeOldNotifications()` on startup (90-day retention)
+  - **`export-registry.ts`**: `notification` and `notification_preference` added to `EXPORT_EPHEMERAL_TABLES`
+  - **`gdrive-backup.service.ts`**: fires `backup_complete` / `backup_failed` notifications; FIX-215 manual `sendMail` replaced with `createNotification` (email now respects preference)
+  - **`export-job.service.ts`**: fires `export_ready` notification
+  - **`import-household-bundle.service.ts`**: fires `restore_complete` notification
+  - **`realty-scheduler.service.ts`**: fires `property_valuation_updated` notification on each successful refresh
+  - **`canonical-ingest.service.ts`**: fires `large_transaction` per row exceeding `large_txn_threshold_usd`; calls `checkBudgetThresholds()` after import (fires `budget_threshold_80` / `budget_threshold_100` at most once per category per month)
+  - **`household.service.ts`** / **`household.routes.ts`**: `largeTxnThresholdUsd` added to GET/PATCH `/household/settings`
+  - **`NotificationPanel.tsx`** (new): bell icon with red badge, Popover panel, 60s unread polling, mark-read / mark-all-read, settings link
+  - **`AppTopBar.tsx`**: `NotificationPanel` inserted between Import button and user menu
+  - **`SettingsPage.tsx`**: "notifications" tab added; preference matrix (In-app / Email toggles per type); `largeTxnThresholdUsd` field in Household tab; placeholder Divider removed from Profile tab
+- **Notification types (9):** `import_complete`, `export_ready`, `restore_complete`, `backup_complete`, `backup_failed`, `property_valuation_updated`, `budget_threshold_80`, `budget_threshold_100`, `large_transaction`
+- **UX fixes (post-launch):** Added `import_complete` type; fixed `e.currentTarget.checked` crash (switched to Mantine `Checkbox` + capture value before state update); redesigned notification grid with section groups (Data & Backup / Budget & Spending / Properties); clearer descriptions; large_transaction row notes threshold location in Household settings; Vite proxy added `/notifications`
+- **Design decisions:** Per-user rows for broadcast (each member gets own `read_at`); budget check at import finalize time; auto-delete >90 days on startup; `large_txn_threshold_usd` in Household settings
+
+## FIX-215 (2026-05-25): Google Drive — handle expired refresh token (invalid_grant)
+
+- **Type:** Bug fix — production backup failure with no recovery path
+- **What:** Google OAuth refresh tokens issued by apps in "Testing" status expire after 7 days. Previously the backup job and list-backups endpoint logged `invalid_grant` and failed silently with no user-visible signal.
+  - Migration `0050`: added `needs_reauth BOOLEAN DEFAULT FALSE` to `household_gdrive_config`
+  - `gdrive-backup.service.ts` `runBackupJob`: catches `invalid_grant` GaxiosError, sets `needs_reauth = TRUE` on the config, and sends an email to the household owner
+  - `gdrive-backup.service.ts` `listDriveBackups`: catches `invalid_grant`, sets `needs_reauth = TRUE`, returns new `needs_reauth` reason (→ 401 from route)
+  - `gdrive.service.ts`: `markGDriveNeedsReauth()` helper; `connectGDrive()` clears `needs_reauth = FALSE` on successful reconnect; `needsReauth` field added to `GDriveStatus` type and SELECT
+  - `gdrive.routes.ts` `/backups`: handles `needs_reauth` reason → 401 `GDRIVE_NEEDS_REAUTH`
+  - `BackupRestoreSection.tsx`: orange alert banner + "Reconnect Google Drive" button shown when `needsReauth = true`
+- **Why:** App is in Google OAuth "Testing" status (personal use, no Google verification); tokens expire every 7 days. Backup had been silently failing for ~3 days before user noticed. Fix surfaces the expiry via email + in-app banner with a one-click reconnect.
+- **Files:** `backend/db/migrations/0050_gdrive_needs_reauth.sql`, `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`
+
+---
+
+## UX-214 (2026-05-24): Year in Review — revised LLM narrative prompt
+
+- **Type:** Prompt quality — narrative tone and structure
+- **What:** Rewrote `buildPrompt()` in `year-summary.service.ts`. Moved advisor role to a dedicated OpenAI system message (`NARRATIVE_SYSTEM_PROMPT`). Restructured three paragraphs: wins first → notable observation → forward-looking opportunity. Removed `topMerchant` from the data payload (was leading the LLM to call out specific merchants). Spending categories can be named as factual observations but the LLM is explicitly instructed not to suggest lifestyle changes, cheaper alternatives, or category reductions.
+- **Why:** Previous output lectured the household on dining out habits; `topMerchant` + "actionable suggestion" framing caused the LLM to reach for the cheapest move (cut the top spend category). Good → notable → opportunity is the correct advisor arc.
+- **Files:** `backend/src/modules/reports/year-summary.service.ts`
+
+---
+
+## FIX-213 (2026-05-24): Error logging — GDrive and export preview routes (I-10)
+
+- **Type:** Observability — log Drive/OAuth/HFB failures before 4xx/5xx responses
+- **What:** `gdrive.service.ts` OAuth exchange; `gdrive-backup.service.ts` non-Gaxios list errors; `gdrive.routes.ts` connect/list/download/preview/restore; `exports.routes.ts` HFB manifest preview.
+- **Why:** I-10 audit cluster 2 — GDrive module failures were invisible in server logs.
+- **Files:** `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive.routes.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `backend/src/modules/export/exports.routes.ts`
+
+---
+
+## FIX-212 (2026-05-24): Error logging — imports, payslips, startup, background jobs (I-10)
+
+- **Type:** Observability — log swallowed import/payslip/startup/job errors
+- **What:** Startup IIFE try/catch + `process.exit(1)`; `import-parser` / `import-upload` parse failures; payslip LLM/PDF sniff failures; export/import/backup job handlers pass full `err` to `log.error`. `CLAUDE.md` documents `log.*` API (not `logger.*`).
+- **Why:** I-10 audit cluster 1 — core user flows failed with no stack trace in logs.
+- **Files:** `backend/src/server.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/src/modules/imports/import-upload.service.ts`, `backend/src/modules/payslip/payslip-parse.service.ts`, `backend/src/modules/payslip/payslip-sniff.service.ts`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/export/import-household-bundle.service.ts`, `backend/src/modules/export/gdrive-backup.service.ts`, `CLAUDE.md`
+
+---
+
+## CR-211 (2026-05-24): Year in Review — backend service, migration, and routes (F-7)
+
+- **Type:** New feature — backend half of F-7 Year-End Wrapped
+- **Migration:** `0049_year_summary_cache.sql` — `year_summary_cache` table (Postgres); stores `data_json`, `narrative_json`, SHA-256 `data_hash` for lazy invalidation; `UNIQUE(household_id, year)`.
+- **Service:** `year-summary.service.ts` — aggregates income/spending from `transaction_canonical`, net worth + investment + bank balance growth from `account_balance_snapshot`, top categories, best/worst month, largest transaction, top merchant, payslip YTD aggregates from last payslip per household member. Generates 3-paragraph LLM narrative (OpenAI gpt-4o, cached). Hash-based cache invalidation — never auto-regenerates on import; waits for user to open overlay.
+- **Routes:** `GET /reports/year-summary?year=YYYY` (returns `YearSummaryResponse`), `POST /reports/year-summary/:year/email` (sends static summary email via existing mailer).
+- **Env:** Added `VITE_MODE=TEST` to `.env` — frontend reads `import.meta.env.VITE_MODE === 'TEST'` to show Year in Review button outside the Feb–Mar production window.
+- **Why:** F-7 Year-End Wrapped feature. F-1 (notification system) dependency removed — existing SMTP/nodemailer is sufficient for the email endpoint.
+- **Files:** `backend/db/migrations/0049_year_summary_cache.sql`, `backend/src/modules/reports/year-summary.types.ts`, `backend/src/modules/reports/year-summary.service.ts`, `backend/src/modules/reports/reports.routes.ts`, `.env`
+
+---
+
+## UX-211 (2026-05-24): Year in Review — frontend wrapped summary overlay
+
+- **Type:** New feature (frontend only; backend `GET /reports/year-summary` built in parallel)
+- **What:** Dashboard button (Feb–Mar, or always in `VITE_MODE=TEST`) opens a confirmation modal, then a full-screen 12-slide “Year in Review” overlay with animated stats, charts, and AI narrative. New files: `year-review/types.ts`, `useYearSummary.ts`, `YearInReviewOverlay.tsx`, `YearInReviewSlides.tsx`; CSS in `index.css`. Slide 12 email CTA (when `emailEnabled` from `/auth/capabilities`) posts `POST /reports/year-summary/:year/email` with JSON body `{ email }`, not a query param.
+- **Why:** Spotify-style year-end household finance recap for prior calendar year.
+- **Files:** `frontend/src/components/year-review/*`, `frontend/src/hooks/useYearSummary.ts`, `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/index.css`
+
+---
+
+## UX-210 (2026-05-23): PS-2b follow-on — filter insurance from contributions card; add post-tax savings rate badge
+
+- **Type:** Correctness fix + UX enhancement
+- **What:**
+  - Added `isContributionItem(item)` classifier to `contributions.ts` using a regex that matches investment/savings items (401k, 403b, 457, Roth, ESPP, RSU, HSA, FSA, deferred comp, pension, after-tax, stock salary/other/purchase, profit sharing, savings plan). Items like Group Life Insurance, AD&D, LTD, Health Care Premium, Legal Insurance, and dental/vision premiums do NOT match and are excluded.
+  - Contributions YTD sidebar card now filters both pre-tax and post-tax sections through `isContributionItem` — only true investment contributions appear.
+  - Added `computeFilteredPostTaxSavingsRate(ps)` to `savingsUtils.ts` — sums `amountCurrent` for filtered post-tax line items divided by gross.
+  - `SavingsRateBanner` extended with `postTaxRate` prop; shows a second `📈 X% of gross to post-tax investments this period` row when non-null. Banner now renders if either pre-tax or post-tax rate is present.
+- **Why:** Post-tax deductions include both insurance (non-savings) and investment contributions. Displaying all post-tax items as "contributions" was misleading.
+- **Files:** `frontend/src/payslip/contributions.ts`, `frontend/src/payslip/savingsUtils.ts`, `frontend/src/payslip/SavingsRateBanner.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
+## UX-209 (2026-05-23): PS-2b — post-tax contribution grouping in payslip sidebar
+
+- **Type:** UI enhancement (V4 backlog item PS-2b)
+- **What:** The "Contributions YTD" sidebar card on `PayslipDetailPage` now shows both pre-tax and post-tax deduction line items. When both sections are present, "Pre-Tax" / "Post-Tax" section labels appear; if only one type exists the label is omitted. Post-tax items are sourced from `detail.lineItems.post_tax_deductions` (raw, not merged with `other_deductions`). Null `amountYtd` renders as `—` via `formatMoney`, same as pre-tax.
+- **Also:** Added `computePostTaxSavingsRate`, `computePostTaxSavingsRateYtd`, and `computeWealthBuildingRateYtd` to `savingsUtils.ts` for future use.
+- **Cleanup:** Removed unused `contribGroups` useMemo + `groupContributions` import (the IIFE in the card handles the show/hide logic directly). Fixed pre-existing test fixture gap: `payslipChartsModel.test.ts` `base()` fixture missing `effectiveFederalRateYtd`/`effectiveTotalTaxRateYtd`.
+- **Files:** `frontend/src/payslip/savingsUtils.ts`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/payslip/payslipChartsModel.test.ts`
+
+---
+
+## CR-208 (2026-05-23): PS-5 — recalculate stored tax rates on payslip edit
+
+- **Type:** Correctness fix (follow-on to CR-207)
+- **What:** When a payslip is edited — either its summary fields (`grossPayYtd`, `employeeTaxesYtd`, etc.) or any line item (add, edit, delete) — the stored `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` are now recomputed and written in the same operation.
+  - **`PATCH /payslips/:id`** (summary edit): fetches current line items before the UPDATE, merges patched values with existing values to compute new rates, includes rate columns in the single UPDATE.
+  - **`PATCH /payslips/:id/line-items/:itemId`**, **`POST /payslips/:id/line-items`**, **`DELETE /payslips/:id/line-items/:itemId`**: all three run inside a transaction; `computeAndWriteTaxRatesInTx()` executes after `applyDerivedSummary` (so `employee_taxes_ytd` is already re-summed) but before the final snapshot SELECT, so the returned snapshot carries fresh rates.
+- **Why:** Without recalculation on edit, stored rates became stale after any correction to LLM-extracted numbers. The stored value preference in `savingsUtils.ts` means stale stored rates would shadow the correct runtime fallback.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`
+
+---
+
+## CR-207 (2026-05-23): PS-5 Phase 1 — store effective tax rates at payslip import
+
+- **Type:** Reliability fix / data quality (V4 backlog item PS-5 Phase 1)
+- **What:** At payslip import time, `effective_federal_rate_ytd` and `effective_total_tax_rate_ytd` are now computed from extracted line items and stored on `payslip_snapshot`. `TaxSufficiencyAlert` and `computeFederalRateYtd` prefer the stored values; fall back to runtime line-item scan for older snapshots.
+  - Migration **0048**: adds `effective_federal_rate_ytd NUMERIC` and `effective_total_tax_rate_ytd NUMERIC` to `payslip_snapshot`.
+  - Federal rate: sums `tax_deductions` line items matching the federal heuristic (name contains "federal", or `authority="Federal"` + name contains "withholding"/"income"), divides by `gross_pay_ytd`. Handles both Deloitte-style ("Federal Income Tax") and IBM-style ("TX Withholding Tax" with `authority="Federal"`).
+  - Total tax rate: `employee_taxes_ytd / gross_pay_ytd` (aggregate column, not line-item sum).
+  - No LLM prompt or JSON schema changes — pure service-layer arithmetic on already-extracted data.
+- **Why:** Runtime heuristic in `TaxSufficiencyAlert` was brittle — IBM uses "TX Withholding Tax" with authority="Federal", not "federal" in the name. Moving computation to import time eliminates rendering-layer string matching and is format-agnostic via the `authority` field.
+- **Files:** `backend/db/migrations/0048_ps5_tax_rate_columns.sql`, `backend/src/modules/payslip/payslip.service.ts` (type + `computeTaxRatesFromLineItems` helper + INSERT), `frontend/src/payslip/types.ts`, `frontend/src/payslip/savingsUtils.ts`, `backend/tests/app.test.ts` (3 new PS-5 tests)
+
+---
+
+## CR-206 (2026-05-22): Account closed/inactive status (F-5)
+
+- **Type:** Feature (V4 backlog item F-5)
+- **What:** Financial accounts can be marked **closed** without deleting history.
+  - Migration **0047**: `financial_account.status` (`active` | `closed`) and `closed_at`.
+  - **`GET /imports/accounts`**: active-only by default; `?includeClosedAccounts=true` returns closed rows with `status` and `closed_at`.
+  - **`PATCH /imports/accounts/:id`**: optional `status` — closing sets `closed_at` (preserved on re-close); reopen clears `closed_at`.
+  - Closed accounts excluded from import binding list and AI insight net-worth context; still on balance sheet API for historical snapshots.
+  - **Settings → Accounts:** Close/Reopen actions, “Show closed accounts” toggle, Closed badge.
+  - **Net Worth:** “Show closed” toggle, Closed badge on closed rows (UI filter only; API returns all).
+- **Files:** `backend/db/migrations/0047_account_status.sql`, `import-file-binding.service.ts`, `imports.routes.ts`, `insight-prompt.service.ts`, `balance-sheet.service.ts`, `backend/tests/app.test.ts`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/NetWorthPage.tsx`, `docs/API_IMPORT_SESSIONS.md`, `openapi/openapi.yaml`, `docs/V4_PLAN.md`
+
+---
+
+## CR-205 (2026-05-22): Delete property (F-4)
+
+- **Type:** Feature (V4 backlog item F-4)
+- **What:** Owner/admin can now delete a property from the Net Worth page.
+  - **`DELETE /household/properties/:propertyId`** — permanently removes the property and all its value snapshots (cascade). Any `financial_account` with `property_id` pointing to the deleted property is auto-unlinked via `ON DELETE SET NULL`; count returned in `unlinkedAccounts`.
+  - **Frontend:** Trash icon added to each property row in the Real Estate section (Net Worth page). Confirmation dialog warns when a linked mortgage account will be unlinked.
+- **Why:** No way existed to remove a property created by mistake or sold. Every other entity has a delete path; properties were stuck forever.
+- **Files:**
+  - `backend/src/modules/household/property.service.ts` — added `deleteProperty()`
+  - `backend/src/modules/household/household.routes.ts` — added `DELETE /household/properties/:propertyId`; imported `deleteProperty`
+  - `frontend/src/pages/NetWorthPage.tsx` — `IconTrash` import; `deletePropertyTarget` / `deletePropertyError` state; `doDeleteProperty` callback; trash icon in property row; ConfirmDialog with linked-mortgage warning
+  - `backend/tests/app.test.ts` — 4 integration tests (delete success, snapshot cascade, mortgage unlink, 404)
+  - `docs/API_HOUSEHOLD.md` — documented new endpoint
+
+---
+
+## CR-204 (2026-05-22): Transfer pair visibility + manual pair/unpair UI (TM-2)
+
+- **Type:** Feature (V4 backlog item TM-2)
+- **What:** Users can now see, manually create, and dissolve confirmed transfer pairs directly from the Transactions → All tab.
+  - **`GET /transactions`** now returns `transferGroupId` (UUID or null) on every row.
+  - **`GET /transactions?transferPaired=true`** filters to only paired rows.
+  - **`POST /transactions/pair`** — body `{ ids: [uuid, uuid] }` — pairs two transactions: must be posted, different accounts, opposite directions (one debit / one credit), abs amounts within 0.01. Returns `{ transferGroupId }`.
+  - **`DELETE /transactions/pair/:groupId`** — nulls `transfer_group_id` on all rows sharing that group; returns 204.
+  - **Frontend:** "Has transfer pair" checkbox in the More Filters section (server-side filter). `↔` badge on paired rows in the Amount cell. Bulk bar: when exactly 2 rows are selected, "↔ Link as transfer" appears when amounts match and directions are opposite; "✕ Unlink transfer" appears when both share the same `transferGroupId`.
+- **Why:** No way existed to see which transactions were paired as transfers, or to pair/unpair manually (e.g., check float > 4 days, missed by auto-detection). The Needs Review queue handles detection-based ambiguity; TM-2 adds general-purpose visibility and control. Resolution queue is untouched.
+- **Files:**
+  - `backend/src/modules/ledger/ledger.service.ts` — `transferGroupId` on `CanonicalTransactionRow`; `transferPaired` on `LedgerListFilters`; updated `txSelectSql`, `mapRow`, `ledgerFilterClause`; added `pairTransactions()`, `unpairTransactions()`
+  - `backend/src/modules/ledger/ledger.routes.ts` — `transferPaired` in query schema; new `POST /pair`, `DELETE /pair/:groupId`
+  - `frontend/src/ledger/ledgerListQuery.ts` — `transferPaired` in `appendLedgerListFilters`
+  - `frontend/src/pages/TransactionsPage.tsx` — `transferGroupId` on `TxRow`; filter toggle; `↔` badge; bulk bar Link/Unlink buttons
+  - `backend/tests/app.test.ts` — 6 integration tests
+
+---
+
+## CR-203 (2026-05-22): Cash account — auto-update balance snapshot on manual transaction (F-10)
+
+- **Type:** Feature (V4 backlog item F-10)
+- **What:** When a manual transaction is created, edited, or hard-deleted against a `type='cash'` financial account, the `account_balance_snapshot` table is now automatically updated. Delta model: create → `+amount`; hard delete → `−amount`; amount edit → `+newAmount − oldAmount`. If no prior snapshot exists, the starting balance is treated as 0. Non-cash accounts (checking, savings, etc.) are unaffected.
+- **Why:** Cash accounts are tracked exclusively through manual entry. Without auto-update, users had to visit the Net Worth page after every transaction to keep the balance current.
+- **Known limitation (deferred):** Backdated transactions read the *latest* snapshot as the base, then write the result to the *transaction's* date. This can produce a logically inverted snapshot (a past-dated row with a value derived from a future balance). User can correct via the Net Worth manual balance entry. Fixing this properly requires summing all manual transactions from scratch — deferred to a future pass.
+- **Files:**
+  - `backend/src/modules/reports/balance-sheet.service.ts` — added `computeAndUpsertCashBalanceIfApplicable()`
+  - `backend/src/modules/ledger/ledger.service.ts` — added `updateManualTransactionAmount()`, updated `CreateManualTransactionResult` to carry `amount`
+  - `backend/src/modules/ledger/ledger.routes.ts` — POST/PATCH/DELETE wired to cash balance helper; `amount` field added to PATCH schema
+  - `backend/tests/app.test.ts` — 4 integration tests covering create, delete, amount-edit, and non-cash guard
+
+---
+
+## FIX-202 (2026-05-22): BoA eStatement — store both beginning and ending balance snapshots
+
+- **Type:** Bug fix
+- **What:** Import pipeline only stored the ending balance in `account_balance_snapshot` after parsing a BoA eStatement PDF. Beginning balance was extracted but silently discarded. Now both the beginning (`asOfStart`) and ending (`asOfEnd`) balance points are written as separate `source='import'` snapshots, giving the Net Worth page two data points per statement period.
+- **Why:** BoA PDFs have both "Beginning balance on {date}" and "Ending balance on {date}" in their account summary. Only storing the ending balance meant no historical beginning balance was ever recorded.
+- **Files:** `backend/src/modules/imports/import-parser.service.ts`, `backend/tests/boa-parser.test.ts`
+
+---
+
+## UX-201 (2026-05-22): PayslipsPage TrendCard — total tax rate YTD next to Net YTD
+
+- **Type:** UX enhancement
+- **What:** Added `totalTaxRateYtd` (all employee taxes ÷ gross, from the most recent payslip for the person) to the `TrendCard` component on the payslip list page. Displays inline next to the Net YTD dollar value in a smaller muted monospace label: `"26.2% tax"`. Shows `⚠` prefix in amber only when the rate is below 24% (≈ below-average federal threshold adjusted for FICA — roughly < 16% federal + 7.65% SS+Medicare). No green tick for healthy cases — the list stays quiet when things are fine. Tooltip on hover explains the metric.
+- **Why:** Surfaces a key health signal (are you withholding enough?) at the list level without requiring the user to open each detail page.
+- **Files:** `frontend/src/pages/PayslipsPage.tsx`
+
+---
+
+## FIX-200 (2026-05-22): BoA PDF parser — balance date regex misses spelled-out month format
+
+- **Type:** Bug fix
+- **What:** `extractBoaEStatementBalancesFromText` in `boa-estatement-pdf.ts` used a regex that only matched dates in `MM/DD/YYYY` format. Real BoA eStatements use `"April 21, 2026"` (spelled-out month). Result: `statementBalances` was always `null` for BoA PDFs → ending balance never written to `account_balance_snapshot` → users had to manually update balances after every import.
+- **Fix:** Replaced the single date-format regex with a combined pattern matching both `MM/DD/YYYY` and `"Month DD, YYYY"` (full and abbreviated month names). Added `parseDateToIso()` helper that handles both formats, replacing `mmddyyyyToIsoFlexible()`. The rest of the pipeline (writing the ending balance to `account_balance_snapshot` via `upsertImportBalanceSnapshotFromStatement`) was already correct — only the regex was broken.
+- **Why:** The balance snapshot write path in `import-parser.service.ts` was wired and working; `statementBalances` was just never populated due to the date mismatch.
+- **Files:** `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`
+
+## UX-200 (2026-05-22): TaxSufficiencyAlert — revert to compact banner (spec-correct)
+
+- **Type:** UX correction
+- **What:** The redesigned `TaxSufficiencyAlert` (UX-199) used a large card with stat blocks that made it the visual centrepiece of the payslip detail page. The spec prototype shows a compact single-line amber banner (same visual weight as `SavingsRateBanner`). Reverted to a compact inline banner: icon + bold `"Federal X.X% YTD · current period"` + `"all taxes Y.Y%"` secondary + tier hint sentence. Coloured background per tier (amber for under-withheld/below-average, forest-subtle for on-track, info-subtle for over-withheld).
+- **Why:** Visual hierarchy was wrong — the tax signal should be a quiet informational note, not the dominant element on the page.
+- **Files:** `frontend/src/payslip/TaxSufficiencyAlert.tsx`
+
+---
+
+## UX-199 (2026-05-21): PayslipDetailPage — PS-4 redesign, bold total rows, column alignment, breadcrumb link + seed payslips
+
+- **Type:** UX redesign + feature + dev tooling
+- **What:**
+  - **PS-4 TaxSufficiencyAlert complete redesign:** Dropped annualisation entirely. Now uses direct YTD percentages: `fedTaxYtd / grossPayYtd` and `employeeTaxesYtd / grossPayYtd`. Always renders when data is available (was: conditional on < 20%). New tiered badge: < 10% = Under-withheld (amber), 10–16% = Below average (amber), 16–28% = On track (green), > 28% = Over-withheld (blue). Shows both Federal and All-employee tax rates (current + YTD) in monospace. Commentary explains what to do.
+  - **`savingsUtils.ts` refactored:** Removed `TAX_BENCHMARK_PCT`, `computeFederalRateAnnualised`, `isTaxRateLow`. Added `computeFederalRateYtd`, `computeFederalRateCurrent`, `computeTotalTaxRateYtd`, `computeTotalTaxRateCurrent`.
+  - **Bold section total rows:** Added `LITotalRow` component (bold, `borderTop: 1px solid border`). Renders "Gross Pay" after earnings, "Total pre-tax" after pre-tax deductions, "Total taxes" after tax deductions, "Total post-tax" after post-tax deductions. Net Pay at bottom unchanged (heavier `2px` border).
+  - **Column alignment fix:** `SectionHdr` "Current"/"YTD" headers now include a 52 px placeholder div at the end to align with data rows (which have pencil/trash icon gutter). `minWidth` on all amount columns bumped 72 → 80 for clearer number boundaries.
+  - **Breadcrumb person link:** Person name in `Payslips › Owner › period` breadcrumb is now a clickable `<Anchor>` linking to `/payslips?ownerPersonProfileId=<id>` when the payslip is person-scoped.
+  - **`PayslipsPage.tsx`:** Added `useSearchParams` lazy init — reads `ownerPersonProfileId` from URL on mount and pre-selects the person filter pill.
+  - **YTD sidebar:** Net row value uses `var(--fs-forest)` (green). Each row has a bottom border. Header shows `{year} YTD · {firstName}`.
+  - **Dev seed `dev_0007_seed_payslips.sql`:** 6 bi-weekly IBM payslips for Alex Owner (Texas, 18.5% federal = on track) + 3 monthly Deloitte payslips for Sam Spouse (California, 16% federal = below average, CA state tax rows). All payslips `owner_scope = 'person'` + `owner_person_profile_id`. Detailed line items on the two most recent payslips per person.
+- **Why:** Annualisation was wrong for real-world data (users have 24 or 26 pay periods, not always 26). Drop it in favour of direct YTD ratios which need no pay-period count. Column header misalignment and missing bold totals were spec regressions. Seed data needed to exercise person filters.
+- **Files:** `frontend/src/payslip/savingsUtils.ts`, `frontend/src/payslip/TaxSufficiencyAlert.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/pages/PayslipsPage.tsx`, `backend/db/seeds/dev/dev_0007_seed_payslips.sql`
+
+---
+
+## UX-198 (2026-05-21): PayslipDetailPage — spec-correct line item layout + PS-4 fix + remove invented section
+
+- **Type:** UX fix + bug fix
+- **What:**
+  - **Line item layout regression fixed:** Replaced all `<Table withTableBorder striped highlightOnHover>` wrappers in the line items panel with spec-correct compact div-based rows (flex layout: name left, Current/YTD right-aligned, pencil/trash icons). Matches `LIRow` in `docs/payslip-redesign/shared.jsx`. Edit mode expands to an inline `<Paper>` form with labelled inputs; delete mode shows inline confirmation — no table context required.
+  - **"Correct pay amounts" section removed:** The section was invented and not in the redesign spec. Removed the Paper block and all supporting code (`SummaryAmountRow`, `AmountRowDef`, `PatchableAmountField`, `AMOUNT_ROWS`, `SummaryEditState`, `patchSummary`, `handleSaveSummaryRow`, related state variables). Line item pencil/trash icons provide the spec-correct correction path.
+  - **PS-4 TaxSufficiencyAlert fix:** `federalRate` was computed as `computeFederalRateAnnualised(detail, detail.payPeriodCountYtd ?? 1)`. The `?? 1` fallback inflated the annualised rate 26× when `payPeriodCountYtd` was absent, keeping the alert permanently suppressed. Changed to only call `computeFederalRateAnnualised` when `payPeriodCountYtd != null`; otherwise `federalRate` stays `null` (no alert, correct).
+- **Why:** UI regression from prior session where LineItemRow was Table.Tr-based; spec uses compact flex rows. "Correct pay amounts" Paper was not in spec and confused users. PS-4 alert was silently broken by an aggressive numeric fallback.
+- **Files:** `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
+## CR-197 (2026-05-21): F-3 frontend — payslip pages full redesign (PS-1 through PS-4)
+
+- **Type:** Feature (F-3 V4 plan — full payslip UI overhaul)
+- **What:**
+  - **New utility/component files** (all in `frontend/src/payslip/`):
+    - `deltaUtils.ts` — `computeDelta()` + `DeltaBadge` colored pill (↑↓ + abs + pct)
+    - `contributions.ts` — `groupContributions()` with regex name-pattern matching for 401k/HSA/ESPP/pension buckets
+    - `savingsUtils.ts` — savings rate, YTD rate, annualised federal rate, tax sufficiency threshold
+    - `SparklineMini.tsx` — SVG polyline + area + animated draw; skips animation under `prefers-reduced-motion`
+    - `PayslipListCard.tsx` — per-payslip row with avatar, period dates, Gross/Net/Taxes + DeltaBadge
+    - `ContribBucket.tsx` — collapsible accordion for grouped contribution line items
+    - `KpiStrip.tsx` — 4-column KPI grid with forest-green accent on Net Pay
+    - `SavingsRateBanner.tsx` — green banner showing savings rate this period + YTD (PS-3)
+    - `TaxSufficiencyAlert.tsx` — amber alert when annualised federal rate < 20% (PS-4)
+  - **`PayslipsPage.tsx`** — complete rewrite: person filter pills, TrendCard per person with SparklineMini, month-grouped list using PayslipListCard, collapsible "Income analytics" section, client-side person filtering (loads all 200)
+  - **`PayslipDetailPage.tsx`** — complete rewrite of layout, all CRUD logic preserved: KpiStrip + SavingsRateBanner + TaxSufficiencyAlert above 2-column body (line items left, YTD sidebar right); edit mode via `<Collapse>` panel; contributions grouped with ContribBucket; sparkline from person's payslip list secondary fetch
+  - **`AddPayslipPage.tsx`** — new add form replacing `PayslipManualPage`: 1fr 270px grid, 5 editable line tables (Earnings/Tax/Pre-Tax/Post-Tax/Other), live sidebar with balance check badge; routes `/payslips/new`
+  - `App.tsx` updated to route `/payslips/new` → `AddPayslipPage`; `PayslipManualPage.tsx` deleted
+- **Why:** F-3 V4 — full payslip UX overhaul per `docs/payslip-redesign/` spec. Features: PS-1 delta badges, PS-2 contribution grouping, PS-3 savings rate banner, PS-4 tax sufficiency signal. Edit capability preserved (Deloitte extraction is unreliable).
+- **Files:** `frontend/src/payslip/` (9 new files), `frontend/src/pages/PayslipsPage.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`, `frontend/src/pages/AddPayslipPage.tsx`, `frontend/src/App.tsx`, deleted `frontend/src/pages/PayslipManualPage.tsx`
+
+---
+
+## CR-196 (2026-05-21): F-3 AddPayslipPage — post-tax deductions section added
+
+- **Type:** Feature (gap vs. spec)
+- **What:** `AddPayslipPage` includes a fifth editable line-item table for **Post-Tax Deductions** (section `post_tax_deductions`), and `PayslipDetailPage` renders post-tax deductions in both view mode and edit mode. The original redesign spec omitted this section.
+- **Why:** User identified the omission — post-tax deductions (e.g. Roth after-tax, garnishments) exist in the data model and must be editable since LLM extraction can hallucinate or miss them.
+- **Files:** `frontend/src/pages/AddPayslipPage.tsx`, `frontend/src/pages/PayslipDetailPage.tsx`
+
+---
+
+## CR-195 (2026-05-21): F-3 backend — prior-period window function + payPeriodCountYtd
+
+- **Type:** Feature (PS-1 / PS-4 backend prerequisite)
+- **What:**
+  - `listPayslipSnapshots()` now uses a CTE with `LAG()` window function (partitioned by `owner_person_profile_id`, ordered by `COALESCE(pay_period_end, pay_date, created_at::text) ASC`) to attach `prior: { grossPayCurrent, netPayCurrent, employeeTaxesCurrent, preTaxDeductionsCurrent }` to each list item. `prior` is `null` for a person's first payslip.
+  - `getPayslipSnapshotForHousehold()` adds a COUNT subquery returning `payPeriodCountYtd` — number of payslips in the same calendar year for the same person. Used by the frontend to annualise the federal withholding rate (PS-4).
+  - `PayslipSnapshotRow` backend type and `PayslipSnapshotDetail` frontend type both extended. New `PriorPayslipValues` type exported from `types.ts`.
+- **Why:** F-3 payslip redesign requires delta badges (PS-1) on the list page and tax sufficiency signal (PS-4) on the detail page. Both need prior-period data not previously returned by the API.
+- **Files:** `backend/src/modules/payslip/payslip.service.ts`, `frontend/src/payslip/types.ts`, `openapi/openapi.yaml`
+
+---
+
+## FIX-193 (2026-05-20): TM-4 near-duplicate detection: drop description gate (TM-4)
+
+- **Type:** Bug fix
+- **What:** Near-duplicate detection now flags **any** rows with same `account_id` + `txn_date` + amount (±0.0001 tolerance) but different fingerprint as a `duplicate_ambiguity` resolution item, **regardless of description similarity**. Removed the `descriptionsCompatibleForNearDuplicate()` gate that was allowing masked ACH descriptions (from CSV: "XXXXX1234") to slip past when they differed from PDFs with real digits ("ACH123451234").
+- **Why:** TM-4 — Bank descriptions from different sources (CSV vs PDF) can differ while representing the same transaction. The gate was too conservative; same account/date/amount is sufficient to flag duplicates. False positives (two unrelated same-day same-amount charges) land in the resolution queue, not silently duplicated or deleted. Transfer matching is unaffected (cross-account only).
+- **Files:** `backend/src/modules/canonical/transaction-fingerprint.ts` (removed function), `backend/src/modules/canonical/canonical-ingest.service.ts` (removed description gates at lines ~705 and ~728)
+
+---
+
+## UX-118 (2026-05-20): Display name field on recurring payments tag modal
+
+- **Type:** UX
+- **What:** **RecurringTagModal** now includes a **Display name** field; saved value is sent as `displayName` on confirm (blank clears to merchant-key default on the server).
+- **Why:** Backend and dashboard/settings already support `display_name`; the modal was the only missing edit surface.
+- **Files:** `frontend/src/components/RecurringTagModal.tsx`, `frontend/src/pages/TransactionsPage.tsx`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+## CR-194 (2026-05-20): Net Worth snapshot + per-account row-expansion caching (F-6b)
+
+- **Type:** Performance (F-6b, V4 plan)
+- **What:** Extended the `localStorage` caching layer to the two remaining expensive Net Worth queries that F-6 left uncached. (1) **Balance-sheet snapshot** (`GET /reports/balance-sheet`) — now served from cache on all subsequent loads with a 1-hour TTL; re-fetches when `tableAsOf` or `belongsTo` filter changes. (2) **Per-account row-expansion history** (`GET /reports/balance-sheet/history?accountIds=…`) — first expand triggers a fetch and writes to cache under key `bs-acct-history:{accountId}:{from}:{to}`; subsequent expands (and re-mounts) read from cache with a 7-day TTL. Both use the existing `networth` scope so the refresh icon already on the page busts all keys together.
+- **Why:** F-6b — these were the two hot paths not covered by F-6: the snapshot fires on every page load + every filter change; the per-account history fires once per expanded row (10–20 calls if all rows open).
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+---
+
+## UX-117 (2026-05-19): "Other" slice link on WHERE MONEY WENT card (I-12)
+
+- **Type:** UX (I-12, V4 plan)
+- **What:** The **Other** spending slice on the dashboard WHERE MONEY WENT card is now a link to Transactions, filtered to all constituent categories (beyond the top 5) and the active month date window.
+- **Why:** I-12 — Other was the only unclickable slice; spending in Other was a dead end.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+## CR-193 (2026-05-19): Balance sheet member subtotals + Household Breakdown card (F-2)
+
+- **Type:** Feature (F-2, V4 plan)
+- **What:** `GET /reports/balance-sheet` now includes **`memberSummary[]`** — per-person asset, liability, and net-worth totals when the household has ≥ 2 person profiles (empty array otherwise). Net Worth page shows a **Household Breakdown** table beside the liquidity card (side-by-side on tablet/desktop).
+- **Why:** F-2 — compare all household members at once without switching the belongs-to filter.
+- **Files:** `backend/src/modules/reports/balance-sheet.service.ts`, `frontend/src/pages/NetWorthPage.tsx`, `docs/API_BALANCE_SHEET.md`, `openapi/openapi.yaml`, `docs/V4_PLAN.md`, `backend/tests/app.test.ts`
+
+---
+
+## CR-192 (2026-05-19): Client-side localStorage caching for Dashboard + Net Worth (F-6)
+
+- **Type:** Performance / UX (F-6, V4 plan)
+- **What:** Introduced `localStorage`-based caching for the two most expensive report endpoints (`GET /reports/cash-summary` — ~30–40 table scans; `GET /reports/balance-sheet/history` — up to 180 sequential queries). Subsequent page loads and tab opens serve cached data immediately with no network request. Cache is invalidated automatically by a URL-pattern interceptor in `apiJson()` that bumps a per-scope version counter whenever any relevant write endpoint succeeds. Two scopes: `dashboard` (staled by imports + ledger mutations) and `networth` (staled by balance-sheet/manual + property value writes). TTL safety net: 7 days. Logout clears all `hfa:*` localStorage keys.
+- **New files:**
+  - `frontend/src/cache.ts` — version counters, `CACHE_INVALIDATION_MAP`, read/write helpers, `invalidateCacheByUrl()`, `clearAllCaches()`
+  - `frontend/src/hooks/useLocalStorageCache.ts` — `useLocalStorageCache<T>()` hook; serves cache on mount, listens for `hfa:cache-invalidate` custom events for same-page invalidation, exposes `refresh()` that bumps scope version and force-refetches
+  - `docs/CACHING.md` — full architecture doc: scope map, invalidation table, hook API, storage impact, what is and isn't cached
+- **Modified files:**
+  - `frontend/src/api.ts` — added `invalidateCacheByUrl()` call after every successful non-GET in `apiJson()`; added `clearAllCaches()` call in `setToken(null)` (logout)
+  - `frontend/src/pages/DashboardPageV2.tsx` — `GET /reports/cash-summary` now goes through `useLocalStorageCache`; refresh icon added (top-right of inflow/outflow KPI card)
+  - `frontend/src/pages/NetWorthPage.tsx` — `GET /reports/balance-sheet/history` now goes through `useLocalStorageCache`; refresh icon added; `refresh()` called after balance/property write completes
+  - `docs/API_CASH_SUMMARY.md`, `docs/API_BALANCE_SHEET.md` — caching notes added
+  - `openapi/openapi.yaml` — `x-cache-scope` on cached GET endpoints; `x-cache-invalidates` on all write endpoints that affect a scope
+
+---
+
+## FIX-192 (2026-05-19): Transfer date tolerance bumped from 2 → 4 days (TM-1)
+
+- **Type:** Bug fix (TM-1, V4 plan)
+- **What:** Bank-to-bank ACH transfers routinely settle in 3 business days, causing confirmed transfer pairs to miss the ±2-day auto-pairing window and land in the unmatched resolution queue. Widened the tolerance to ±4 calendar days (3 business days). The pair score threshold (45) and same-account exclusion both still apply, so false-positive risk is unchanged — the scorer does not consider date proximity; only amount and account differ.
+- **Fix:** Changed `<= 2` to `<= 4` in the debit→credit and credit→debit filter passes; updated `closeDateToleranceDays` telemetry in all three ambiguity reason JSON blobs.
+- **Test:** New integration test `"pairs transfer across a 3-day ACH settlement gap (TM-1)"` in `app.test.ts` — debit on 2000-01-10, credit on 2000-01-13, verifies `transfer_group_id` is set on both rows.
+- **Files:** `backend/src/modules/canonical/canonical-ingest.service.ts` (lines 922, 1004, 964/1050/1113), `backend/tests/app.test.ts`
+
+---
+
+## UX-116 (2026-05-18): BY ACCOUNT card — add YoY delta arrow alongside MoM arrow (R-2)
+
+- **Type:** UX enhancement (R-2, V4 plan)
+- **What:** Each account row in the "By Account — This Month" card now shows **two arrows side by side**: the existing MoM arrow (vs prior month) and a new YoY arrow (vs same month last year). Both are bare arrow symbols (↑↓→) — no year label. Meaning is conveyed via Mantine `Tooltip`: hover shows "vs April 2026" and "vs May 2025" respectively. Card heading also has a tooltip: "First arrow = vs last month · second arrow = vs same month last year". The count < 3 guard and ±5% threshold apply to both; same colour semantics apply (liabilities: ↑ terracotta, ↓ forest; assets: ↑ gold, ↓ forest).
+- **Implementation:** Added a separate `GET /transactions` fetch (8th in `Promise.allSettled`) for the prior-year month. `priorYearMap` useMemo builds a `Map<accountId, {outflow, count}>` from those transactions. `yoyArrow()` function mirrors `accountArrow()`. Recharts `Tooltip` aliased to `RechartsTooltip` to avoid naming conflict with Mantine `Tooltip`. No backend changes.
+- **Dev seed:** `dev_0006_seed_rolling_ledger.sql` — 72 transactions across 3 accounts (BoA Checking, BoA CC, Citi CC) using `CURRENT_DATE`-relative dates (M0–M5 + M-12) so the seed stays fresh in any month after `db:reset:dev`. Designed to show all three arrow-color paths: BoA Checking ↑gold/↑gold, BoA CC ↑terra/↓forest, Citi CC ↓forest/↑terra.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`, `backend/db/seeds/dev/dev_0006_seed_rolling_ledger.sql`
+
+---
+
+## UX-115 (2026-05-18): BY ACCOUNT card — account filter, top-3 cap, empty state (F-8)
+
+- **Type:** UX redesign (F-8, V4 plan)
+- **What:** Redesigned the "By Account — This Month" dashboard card:
+  - **Account types filtered** to `credit_card`, `checking`, `savings` only. Loans (steady decrease, no monthly signal), investment, retirement, and property excluded. Filter applied inside `computeAccountBuckets` via `ACCOUNT_CARD_TYPES`.
+  - **Row cap:** top 3 credit cards + top 3 checking/savings = max 6 rows, sorted by `thisMonthOutflow` descending within each group.
+  - **Metric stays as transaction outflow** — genuinely "this month" data that fits the month-navigation UX. Outflow is accurate when OFX statements are imported (the primary data entry path).
+  - **Empty state:** card always renders once transactions load; shows "No spending recorded this month for linked accounts." when no matching outflow exists, instead of hiding the card entirely.
+  - **Arrow colors corrected:** checking/savings ↑ = gold (cautionary), ↓ = forest. Previously checking was incorrectly in `LIABILITY_ACCOUNT_TYPES` causing terracotta ↑ (fixed by R-3/UX-114); this pass corrects the broader asset vs liability colour logic.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+## UX-114 (2026-05-18): Fix checking account arrow color in BY ACCOUNT card (R-3)
+
+- **Type:** Bug fix / UX (R-3, V4 plan)
+- **What:** `LIABILITY_ACCOUNT_TYPES` incorrectly included `"checking"`, causing the BY ACCOUNT dashboard card to show a red ↑ arrow when checking outflow increased month-over-month — the same signal used for a rising credit card balance. Checking is a liquid asset, not a liability; its ↑ should be gold (cautionary/neutral), not terracotta (bad).
+- **Fix:** Removed `"checking"` from the set. Correct list: `new Set(["credit_card", "loan"])`.
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx` (line 175)
+
+---
+
+## SEC-003 (2026-05-17): Force password change for all users after household restore
+
+- **Type:** Security hardening (R-1, V4 plan)
+- **What:** After a household bundle restore completes, all `app_user` rows for the household are flagged `force_password_change = true` inside the same transaction. Previously, restored users could log in immediately with whatever password was in the backup — potentially stale or compromised credentials.
+- **Fix:** Added a `txExec` UPDATE at the end of the restore transaction in `import-household-bundle.service.ts`. Runs atomically with the data restore; if the transaction rolls back, the flag is not set. The existing `auth.service.ts` login flow already enforces the flag (redirects to password-change flow), so no UI or middleware changes needed.
+- **Files:** `backend/src/modules/export/import-household-bundle.service.ts`
+
+---
+
 ## FIX-193 (2026-05-16): Export registry missing `property`, `property_value_snapshot`, `payslip_deposit_match`
 
 - **Type:** Bug fix (backup coverage — three V3 tables omitted from .hfb exports)

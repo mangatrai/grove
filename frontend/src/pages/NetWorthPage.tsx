@@ -1,8 +1,9 @@
-import { IconChevronDown, IconChevronRight, IconPencil, IconRefresh } from "@tabler/icons-react";
+import { IconChevronDown, IconChevronRight, IconPencil, IconRefresh, IconTrash } from "@tabler/icons-react";
 import {
   ActionIcon,
   Alert,
   Anchor,
+  Badge,
   Box,
   Button,
   Collapse,
@@ -12,10 +13,12 @@ import {
   Select,
   SimpleGrid,
   Stack,
+  Switch,
   Table,
   Text,
   TextInput,
-  Title
+  Title,
+  Tooltip as MantineTooltip
 } from "@mantine/core";
 import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
@@ -29,12 +32,15 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis
 } from "recharts";
 
 import { apiJson, useAuthToken } from "../api";
+import { readCache, writeCache } from "../cache";
+import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
+import { formatTimeAgo } from "../utils/format";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { GroveCardLoader } from "../components/GroveLoader";
@@ -50,6 +56,7 @@ type BalanceSheetAccountRow = {
   currency: string;
   /** Present when API returns F-1 enrichment; missing balances bucket as uncategorized in liquidity breakdown. */
   liquidity?: "liquid" | "semi_liquid" | "restricted" | null;
+  status?: string;
   side: "asset" | "liability";
   balance: number | null;
   balanceAsOf: string | null;
@@ -70,6 +77,14 @@ type PropertySheetRow = {
   linkedMortgageAsOf: string | null;
 };
 
+type BalanceSheetMemberSummaryRow = {
+  personProfileId: string;
+  name: string;
+  totalAssets: number;
+  totalLiabilities: number;
+  netWorth: number;
+};
+
 type BalanceSheetResponse = {
   asOf: string;
   assets: BalanceSheetAccountRow[];
@@ -80,6 +95,7 @@ type BalanceSheetResponse = {
     liabilities: number | null;
     netWorth: number | null;
   };
+  memberSummary?: BalanceSheetMemberSummaryRow[];
 };
 
 type AccountOption = {
@@ -115,8 +131,6 @@ type BalanceSheetHistoryResponse = {
 type PeriodPreset = "3m" | "6m" | "12m" | "2y" | "3y" | "ytd" | "custom";
 
 type BelongsToFilter = "" | "household" | `person:${string}`;
-
-const HISTORY_DEBOUNCE_MS = 280;
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -218,12 +232,10 @@ function appendOwnerQuery(qs: URLSearchParams, belongsTo: BelongsToFilter): void
 export function NetWorthPage() {
   const token = useAuthToken();
   const [tableAsOf, setTableAsOf] = useState(() => todayIso());
-  const [data, setData] = useState<BalanceSheetResponse | null>(null);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [ownerProfiles, setOwnerProfiles] = useState<Array<{ id: string; label: string }>>([]);
   const [belongsTo, setBelongsTo] = useState<BelongsToFilter>("");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [showClosedAccounts, setShowClosedAccounts] = useState(false);
 
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("3m");
   const [customFrom, setCustomFrom] = useState(() => {
@@ -241,9 +253,6 @@ export function NetWorthPage() {
   }, [periodPreset, customFrom, customTo]);
 
   const [histInterval, setHistInterval] = useState<"month" | "quarter" | "week" | "day">("month");
-  const [historyData, setHistoryData] = useState<BalanceSheetHistoryResponse | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(false);
   const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set());
   const [accountHistoryById, setAccountHistoryById] = useState<Map<string, Array<{ month: string; balance: number }>>>(
     new Map()
@@ -263,6 +272,8 @@ export function NetWorthPage() {
   const [propertyRowSaving, setPropertyRowSaving] = useState(false);
   const [propertyRowSaveError, setPropertyRowSaveError] = useState<string | null>(null);
   const [propertyRowRetrieving, setPropertyRowRetrieving] = useState(false);
+  const [deletePropertyTarget, setDeletePropertyTarget] = useState<PropertySheetRow | null>(null);
+  const [deletePropertyError, setDeletePropertyError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editAmount, setEditAmount] = useState("");
@@ -302,23 +313,53 @@ export function NetWorthPage() {
     [ownerProfiles]
   );
 
-  const loadSheet = useCallback(async () => {
-    const qs = new URLSearchParams({ asOf: tableAsOf });
-    appendOwnerQuery(qs, belongsTo);
-    const res = await apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
-    setData(res);
-  }, [tableAsOf, belongsTo]);
-
-  const loadHistoryImmediate = useCallback(async () => {
+  const historyQs = (() => {
     const qs = new URLSearchParams({
       from: histRange.from,
       to: histRange.to,
       interval: histInterval
     });
     appendOwnerQuery(qs, belongsTo);
-    const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
-    setHistoryData(res);
-  }, [histRange.from, histRange.to, histInterval, belongsTo]);
+    return qs.toString();
+  })();
+  const historyCacheKey = `bs-history:${historyQs}`;
+
+  const {
+    data: historyData,
+    loading: historyLoading,
+    error: historyError,
+    lastUpdatedAt: historyLastUpdated,
+    refresh: refreshHistoryCache,
+  } = useLocalStorageCache<BalanceSheetHistoryResponse>(
+    historyCacheKey,
+    "networth",
+    () => {
+      const qs = new URLSearchParams({
+        from: histRange.from,
+        to: histRange.to,
+        interval: histInterval
+      });
+      appendOwnerQuery(qs, belongsTo);
+      return apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+    }
+  );
+
+  const snapshotCacheKey = `bs-snapshot:${belongsTo || "household"}:${tableAsOf}`;
+  const {
+    data,
+    loading,
+    error: loadError,
+    refresh: refreshSheetCache,
+  } = useLocalStorageCache<BalanceSheetResponse>(
+    snapshotCacheKey,
+    "networth",
+    () => {
+      const qs = new URLSearchParams({ asOf: tableAsOf });
+      appendOwnerQuery(qs, belongsTo);
+      return apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
+    },
+    60 * 60 * 1000
+  );
 
   useEffect(() => {
     if (!token) {
@@ -357,37 +398,6 @@ export function NetWorthPage() {
     });
   }, [token]);
 
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-    setLoading(true);
-    setLoadError(null);
-    void loadSheet()
-      .catch((e: unknown) => {
-        setLoadError(e instanceof Error ? e.message : "Failed to load balance sheet");
-        setData(null);
-      })
-      .finally(() => setLoading(false));
-  }, [token, loadSheet]);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-    const t = window.setTimeout(() => {
-      setHistoryLoading(true);
-      setHistoryError(null);
-      void loadHistoryImmediate()
-        .catch((e: unknown) => {
-          setHistoryError(e instanceof Error ? e.message : "Failed to load history");
-          setHistoryData(null);
-        })
-        .finally(() => setHistoryLoading(false));
-    }, HISTORY_DEBOUNCE_MS);
-    return () => window.clearTimeout(t);
-  }, [token, loadHistoryImmediate]);
-
   const chartRows = useMemo(
     () =>
       (historyData?.points ?? []).map((p) => ({
@@ -417,6 +427,22 @@ export function NetWorthPage() {
           balance: r.balance ?? 0
         })),
     [data?.assets]
+  );
+
+  const balanceSheetAssets = useMemo(
+    () =>
+      showClosedAccounts
+        ? (data?.assets ?? [])
+        : (data?.assets ?? []).filter((r) => r.status !== "closed"),
+    [data?.assets, showClosedAccounts]
+  );
+
+  const balanceSheetLiabilities = useMemo(
+    () =>
+      showClosedAccounts
+        ? (data?.liabilities ?? [])
+        : (data?.liabilities ?? []).filter((r) => r.status !== "closed"),
+    [data?.liabilities, showClosedAccounts]
   );
 
   const topLiabilities = useMemo(
@@ -477,21 +503,24 @@ export function NetWorthPage() {
     setBulkAsOfDraft(tableAsOf);
   }, [tableAsOf]);
 
-  const reloadAll = useCallback(async () => {
-    setLoadError(null);
-    setHistoryError(null);
-    setLoading(true);
-    setHistoryLoading(true);
-    try {
-      await loadSheet();
-      await loadHistoryImmediate();
-    } catch (e: unknown) {
-      setLoadError(e instanceof Error ? e.message : "Reload failed");
-    } finally {
-      setLoading(false);
-      setHistoryLoading(false);
+  // When the networth scope is invalidated (refresh icon or any write), clear the in-memory
+  // account history Maps so expanded rows re-fetch on next open rather than serving stale data.
+  useEffect(() => {
+    function onInvalidate(e: Event) {
+      const evt = e as CustomEvent<{ scope: string }>;
+      if (evt.detail.scope === "networth") {
+        setAccountHistoryById(new Map());
+        setAccountHistoryFailedIds(new Set());
+      }
     }
-  }, [loadSheet, loadHistoryImmediate]);
+    window.addEventListener("hfa:cache-invalidate", onInvalidate);
+    return () => window.removeEventListener("hfa:cache-invalidate", onInvalidate);
+  }, []);
+
+  const reloadAll = useCallback(() => {
+    refreshSheetCache();
+    refreshHistoryCache();
+  }, [refreshSheetCache, refreshHistoryCache]);
 
   const startEdit = useCallback((row: BalanceSheetAccountRow) => {
     setEditingId(row.financialAccountId);
@@ -542,15 +571,15 @@ export function NetWorthPage() {
           })
         });
         cancelEdit();
-        await loadSheet();
-        await loadHistoryImmediate();
+        refreshSheetCache();
+        refreshHistoryCache();
       } catch (err: unknown) {
         setRowSaveError(err instanceof Error ? err.message : "Could not save balance");
       } finally {
         setRowSaving(false);
       }
     },
-    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, loadHistoryImmediate, loadSheet]
+    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, refreshSheetCache, refreshHistoryCache]
   );
 
   const runBulkAsOf = useCallback(async () => {
@@ -584,9 +613,9 @@ export function NetWorthPage() {
     }
     setBulkWorking(false);
     setBulkSummary(`Updated ${okCount} account(s). Failed: ${fail}. Skipped (no balance): ${skipped}.`);
-    await loadSheet();
-    await loadHistoryImmediate();
-  }, [allTableRows, bulkAsOfDraft, data, loadHistoryImmediate, loadSheet]);
+    refreshSheetCache();
+    refreshHistoryCache();
+  }, [allTableRows, bulkAsOfDraft, data, refreshSheetCache, refreshHistoryCache]);
 
   const loadAccountHistory = useCallback(async (accountId: string) => {
     if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId)) {
@@ -598,10 +627,27 @@ export function NetWorthPage() {
     fromDate.setUTCMonth(fromDate.getUTCMonth() - 12);
     const from = fromDate.toISOString().slice(0, 10);
 
+    const acctCacheKey = `bs-acct-history:${accountId}:${from}:${to}`;
+    const cached = readCache<BalanceSheetHistoryResponse>(acctCacheKey, "networth", 7 * 24 * 60 * 60 * 1000);
+    if (cached) {
+      const chartPoints = (cached.data.points ?? [])
+        .map((p) => {
+          const acct = p.accounts?.find((a) => a.financialAccountId === accountId);
+          const bal = acct?.balance ?? null;
+          return { month: p.asOf, balance: bal };
+        })
+        .filter((p): p is { month: string; balance: number } =>
+          p.balance !== null && Number.isFinite(p.balance)
+        );
+      setAccountHistoryById((prev) => new Map(prev).set(accountId, chartPoints));
+      return;
+    }
+
     setAccountHistoryLoadingIds((prev) => new Set(prev).add(accountId));
     try {
       const qs = new URLSearchParams({ from, to, accountIds: accountId, interval: "month" });
       const res = await apiJson<BalanceSheetHistoryResponse>(`/reports/balance-sheet/history?${qs.toString()}`);
+      writeCache(acctCacheKey, "networth", res);
       const chartPoints = (res.points ?? [])
         .map((p) => {
           const acct = p.accounts?.find((a) => a.financialAccountId === accountId);
@@ -725,8 +771,8 @@ export function NetWorthPage() {
           })
         });
         cancelPropertyEdit();
-        await loadSheet();
-        await loadHistoryImmediate();
+        refreshSheetCache();
+        refreshHistoryCache();
         if (propertyHistoryById.has(propertyId)) {
           setPropertyHistoryById((prev) => {
             const n = new Map(prev);
@@ -745,10 +791,10 @@ export function NetWorthPage() {
       cancelPropertyEdit,
       editPropertyAmount,
       editPropertyAsOf,
-      loadHistoryImmediate,
       loadPropertyHistory,
-      loadSheet,
-      propertyHistoryById
+      refreshSheetCache,
+      propertyHistoryById,
+      refreshHistoryCache
     ]
   );
 
@@ -771,6 +817,26 @@ export function NetWorthPage() {
     },
     []
   );
+
+  const doDeleteProperty = useCallback(async () => {
+    if (!deletePropertyTarget) return;
+    try {
+      await apiJson<{ unlinkedAccounts: number }>(
+        `/household/properties/${deletePropertyTarget.propertyId}`,
+        { method: "DELETE" }
+      );
+      const pid = deletePropertyTarget.propertyId;
+      setDeletePropertyTarget(null);
+      setDeletePropertyError(null);
+      setPropertyHistoryById((prev) => { const n = new Map(prev); n.delete(pid); return n; });
+      setExpandedPropertyIds((prev) => { const n = new Set(prev); n.delete(pid); return n; });
+      refreshSheetCache();
+      refreshHistoryCache();
+    } catch (err) {
+      setDeletePropertyError(err instanceof Error ? err.message : "Could not delete property");
+      throw err;
+    }
+  }, [deletePropertyTarget, refreshSheetCache, refreshHistoryCache]);
 
   const onPresetChange = (next: PeriodPreset) => {
     setPeriodPreset(next);
@@ -844,42 +910,109 @@ export function NetWorthPage() {
         <Text size="xs" c="dimmed" ta="right" mt={4}>Balances as of {tableAsOf}</Text>
       </Stack>
 
-      {liquidityTiers ? (
-        <Paper withBorder shadow="sm" radius="md" p="md">
-          <Group gap={8} align="center" mb="sm">
-            <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Liquidity breakdown</Title>
-            <HelpIcon label="Liquid: accessible same day. Semi-liquid: marketable assets, days to settle. Restricted: retirement, HSA, property — penalty or time to access. Tag accounts in Settings → Accounts to see this breakdown." />
-          </Group>
-          <Stack gap={4} style={{ maxWidth: "28rem" }}>
-            <Group justify="space-between">
-              <Text size="sm" c="dimmed">Liquid</Text>
-              <Text size="sm" fw={600} style={{ color: "var(--color-success)" }}>{formatMoney(liquidityTiers.liquid)}</Text>
+      {(() => {
+        const showLiquidity = liquidityTiers != null;
+        const showMemberBreakdown = (data?.memberSummary?.length ?? 0) > 1;
+        if (!showLiquidity && !showMemberBreakdown) {
+          return null;
+        }
+
+        const liquidityCard = showLiquidity ? (
+          <Paper withBorder shadow="sm" radius="md" p="md">
+            <Group gap={8} align="center" mb="sm">
+              <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Liquidity breakdown</Title>
+              <HelpIcon label="Liquid: accessible same day. Semi-liquid: marketable assets, days to settle. Restricted: retirement, HSA, property — penalty or time to access. Tag accounts in Settings → Accounts to see this breakdown." />
             </Group>
-            <Group justify="space-between">
-              <Text size="sm" c="dimmed">Semi-liquid</Text>
-              <Text size="sm" fw={600}>{formatMoney(liquidityTiers.semiLiquid)}</Text>
-            </Group>
-            <Group justify="space-between">
-              <Text size="sm" c="dimmed">Restricted</Text>
-              <Text size="sm" fw={600}>{formatMoney(liquidityTiers.restricted)}</Text>
-            </Group>
-            {liquidityTiers.hasUncategorized ? (
+            <Stack gap={4} style={{ maxWidth: "28rem" }}>
               <Group justify="space-between">
-                <Group gap={4}>
-                  <Text size="sm" c="dimmed">Uncategorized</Text>
-                  <Anchor component={Link} to="/settings?tab=accounts" size="xs">Tag accounts</Anchor>
-                </Group>
-                <Text size="sm" c="dimmed">{formatMoney(liquidityTiers.uncategorized)}</Text>
+                <Text size="sm" c="dimmed">Liquid</Text>
+                <Text size="sm" fw={600} style={{ color: "var(--color-success)" }}>{formatMoney(liquidityTiers.liquid)}</Text>
               </Group>
-            ) : null}
-          </Stack>
-        </Paper>
-      ) : null}
+              <Group justify="space-between">
+                <Text size="sm" c="dimmed">Semi-liquid</Text>
+                <Text size="sm" fw={600}>{formatMoney(liquidityTiers.semiLiquid)}</Text>
+              </Group>
+              <Group justify="space-between">
+                <Text size="sm" c="dimmed">Restricted</Text>
+                <Text size="sm" fw={600}>{formatMoney(liquidityTiers.restricted)}</Text>
+              </Group>
+              {liquidityTiers.hasUncategorized ? (
+                <Group justify="space-between">
+                  <Group gap={4}>
+                    <Text size="sm" c="dimmed">Uncategorized</Text>
+                    <Anchor component={Link} to="/settings?tab=accounts" size="xs">Tag accounts</Anchor>
+                  </Group>
+                  <Text size="sm" c="dimmed">{formatMoney(liquidityTiers.uncategorized)}</Text>
+                </Group>
+              ) : null}
+            </Stack>
+          </Paper>
+        ) : null;
+
+        const memberBreakdownCard = showMemberBreakdown ? (
+          <Paper withBorder shadow="sm" radius="md" p="md">
+            <Text fw={600} mb="xs">Household Breakdown</Text>
+            <Table striped={false} withTableBorder withRowBorders verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }}>Member</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }} ta="right">Assets</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }} ta="right">Liabilities</Table.Th>
+                  <Table.Th fz={11} tt="uppercase" c="dimmed" fw={600} style={{ letterSpacing: "0.06em" }} ta="right">Net Worth</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                <Table.Tr>
+                  <Table.Td fw={700}>Household Total</Table.Td>
+                  <Table.Td ta="right" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(data?.totals.assets)}</Table.Td>
+                  <Table.Td ta="right" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(data?.totals.liabilities)}</Table.Td>
+                  <Table.Td ta="right" fw={700} style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(data?.totals.netWorth)}</Table.Td>
+                </Table.Tr>
+                {data!.memberSummary!.map((row) => (
+                  <Table.Tr key={row.personProfileId}>
+                    <Table.Td>{row.name}</Table.Td>
+                    <Table.Td ta="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(row.totalAssets)}</Table.Td>
+                    <Table.Td ta="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(row.totalLiabilities)}</Table.Td>
+                    <Table.Td ta="right" style={{ fontVariantNumeric: "tabular-nums" }}>{formatMoney(row.netWorth)}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Paper>
+        ) : null;
+
+        if (showLiquidity && showMemberBreakdown) {
+          return (
+            <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+              {liquidityCard}
+              {memberBreakdownCard}
+            </SimpleGrid>
+          );
+        }
+        return liquidityCard ?? memberBreakdownCard;
+      })()}
 
       <Paper withBorder shadow="sm" radius="md" p="md">
-        <Group gap={8} align="center" mb="sm">
-          <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Trend</Title>
-          <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
+        <Group justify="space-between" align="center" mb="sm">
+          <Group gap={8} align="center">
+            <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Trend</Title>
+            <HelpIcon label="Chart updates automatically when you change period, interval, or belongs-to filter." />
+          </Group>
+          <MantineTooltip
+            label={historyLastUpdated ? `Last updated ${formatTimeAgo(historyLastUpdated)}` : "Loading..."}
+            position="bottom"
+            withArrow
+          >
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              onClick={refreshHistoryCache}
+              aria-label="Refresh net worth history"
+              loading={historyLoading}
+            >
+              <IconRefresh size={14} />
+            </ActionIcon>
+          </MantineTooltip>
         </Group>
         <Group gap={6} wrap="wrap" role="group" aria-label="Trend period preset">
           {(["3m", "6m", "12m", "2y", "3y", "ytd", "custom"] as const).map((p) => (
@@ -990,7 +1123,7 @@ export function NetWorthPage() {
                       `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                     }
                   />
-                  <Tooltip
+                  <RechartsTooltip
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) {
                         return null;
@@ -1028,11 +1161,18 @@ export function NetWorthPage() {
           <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Balance sheet</Title>
           <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
         </Group>
-        <Box mb="sm" style={{ maxWidth: "12rem" }}>
-          <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
-        </Box>
+        <Group align="flex-end" gap="md" mb="sm" wrap="wrap">
+          <Box style={{ maxWidth: "12rem" }}>
+            <TextInput type="date" size="sm" label="Snapshot date" value={tableAsOf} onChange={(ev) => setTableAsOf(ev.target.value)} />
+          </Box>
+          <Switch
+            label="Show closed"
+            checked={showClosedAccounts}
+            onChange={(e) => setShowClosedAccounts(e.currentTarget.checked)}
+          />
+        </Group>
         {loading ? <GroveCardLoader label="Loading balance sheet…" size="sm" /> : null}
-        {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
+        {!loading && data && (balanceSheetAssets.length > 0 || (data.properties ?? []).length > 0) ? (
           <Box style={{ overflowX: "auto" }}>
             {editDirty ? (
               <Text size="sm" c="dimmed" mb="xs" style={{ maxWidth: "40rem" }}>
@@ -1052,7 +1192,7 @@ export function NetWorthPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {data.assets.map((r) => {
+                {balanceSheetAssets.map((r) => {
                   const signed = signedDisplayBalance(r);
                   const isEditing = editingId === r.financialAccountId;
                   const isExpanded = expandedAccountIds.has(r.financialAccountId);
@@ -1069,6 +1209,9 @@ export function NetWorthPage() {
                               {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                             </ActionIcon>
                             <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                            {r.status === "closed" ? (
+                              <Badge color="gray" variant="light" size="xs">Closed</Badge>
+                            ) : null}
                           </Group>
                         </Table.Td>
                         <Table.Td>
@@ -1114,7 +1257,7 @@ export function NetWorthPage() {
                                     <LineChart data={historyPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
                                       <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                       <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-                                      <Tooltip
+                                      <RechartsTooltip
                                         formatter={(v: number | string) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                                         labelFormatter={(label) => `Month: ${String(label)}`}
                                       />
@@ -1226,19 +1369,35 @@ export function NetWorthPage() {
                             <Table.Td><Text size="sm">{p.marketValueAsOf ?? "—"}</Text></Table.Td>
                             <Table.Td>
                               {!isEditing ? (
-                                <ActionIcon
-                                  variant="subtle"
-                                  color="gray"
-                                  size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    startPropertyEdit(p);
-                                  }}
-                                  aria-label="Edit market value"
-                                  title="Edit market value"
-                                >
-                                  <IconPencil size={15} />
-                                </ActionIcon>
+                                <Group gap={4} wrap="nowrap">
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="gray"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startPropertyEdit(p);
+                                    }}
+                                    aria-label="Edit market value"
+                                    title="Edit market value"
+                                  >
+                                    <IconPencil size={15} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    variant="subtle"
+                                    color="red"
+                                    size="sm"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeletePropertyError(null);
+                                      setDeletePropertyTarget(p);
+                                    }}
+                                    aria-label="Delete property"
+                                    title="Delete property"
+                                  >
+                                    <IconTrash size={15} />
+                                  </ActionIcon>
+                                </Group>
                               ) : null}
                             </Table.Td>
                           </Table.Tr>
@@ -1258,7 +1417,7 @@ export function NetWorthPage() {
                                               `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
                                             }
                                           />
-                                          <Tooltip
+                                          <RechartsTooltip
                                             formatter={(v: number | string) => [
                                               `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
                                               "Market value"
@@ -1299,9 +1458,9 @@ export function NetWorthPage() {
             </Table>
           </Box>
         ) : null}
-        {!loading && data && data.liabilities.length > 0 ? (
+        {!loading && data && balanceSheetLiabilities.length > 0 ? (
           <>
-            {!loading && data && (data.assets.length > 0 || (data.properties ?? []).length > 0) ? (
+            {!loading && data && (balanceSheetAssets.length > 0 || (data.properties ?? []).length > 0) ? (
               <Divider my="md" />
             ) : null}
             <Box style={{ overflowX: "auto", marginTop: "1rem" }}>
@@ -1317,7 +1476,7 @@ export function NetWorthPage() {
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {data.liabilities.map((r) => {
+                {balanceSheetLiabilities.map((r) => {
                   const signed = signedDisplayBalance(r);
                   const isEditing = editingId === r.financialAccountId;
                   const isExpanded = expandedAccountIds.has(r.financialAccountId);
@@ -1334,6 +1493,9 @@ export function NetWorthPage() {
                               {isExpanded ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
                             </ActionIcon>
                             <Text size="sm">{r.institution}{r.accountMask ? ` · ${r.accountMask}` : ""}</Text>
+                            {r.status === "closed" ? (
+                              <Badge color="gray" variant="light" size="xs">Closed</Badge>
+                            ) : null}
                           </Group>
                         </Table.Td>
                         <Table.Td>
@@ -1379,7 +1541,7 @@ export function NetWorthPage() {
                                     <LineChart data={historyPoints} margin={{ top: 8, right: 12, left: 8, bottom: 8 }}>
                                       <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                                       <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
-                                      <Tooltip
+                                      <RechartsTooltip
                                         formatter={(v: number | string) => `$${Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                                         labelFormatter={(label) => `Month: ${String(label)}`}
                                       />
@@ -1477,6 +1639,30 @@ export function NetWorthPage() {
         closeOnClickOutside={false}
         onClose={() => setBulkConfirmOpen(false)}
         onConfirm={runBulkAsOf}
+      />
+
+      <ConfirmDialog
+        opened={deletePropertyTarget !== null}
+        title="Delete property?"
+        danger
+        confirmLabel="Delete"
+        closeOnClickOutside={false}
+        onClose={() => { setDeletePropertyTarget(null); setDeletePropertyError(null); }}
+        onConfirm={doDeleteProperty}
+        message={
+          <Stack gap="xs">
+            <Text size="sm">
+              This will permanently remove the property record and all value history.
+              {deletePropertyTarget?.linkedMortgageAccountId
+                ? " The linked mortgage account will be unlinked."
+                : null}
+              {" "}This cannot be undone.
+            </Text>
+            {deletePropertyError ? (
+              <Alert color="red" variant="light" radius="sm">{deletePropertyError}</Alert>
+            ) : null}
+          </Stack>
+        }
       />
     </Stack>
   );
