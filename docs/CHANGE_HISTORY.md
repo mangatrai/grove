@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-214 (2026-05-24): Year in Review — revised LLM narrative prompt
+
+- **Type:** Prompt quality — narrative tone and structure
+- **What:** Rewrote `buildPrompt()` in `year-summary.service.ts`. Moved advisor role to a dedicated OpenAI system message (`NARRATIVE_SYSTEM_PROMPT`). Restructured three paragraphs: wins first → notable observation → forward-looking opportunity. Removed `topMerchant` from the data payload (was leading the LLM to call out specific merchants). Spending categories can be named as factual observations but the LLM is explicitly instructed not to suggest lifestyle changes, cheaper alternatives, or category reductions.
+- **Why:** Previous output lectured the household on dining out habits; `topMerchant` + "actionable suggestion" framing caused the LLM to reach for the cheapest move (cut the top spend category). Good → notable → opportunity is the correct advisor arc.
+- **Files:** `backend/src/modules/reports/year-summary.service.ts`
+
+---
+
 ## FIX-213 (2026-05-24): Error logging — GDrive and export preview routes (I-10)
 
 - **Type:** Observability — log Drive/OAuth/HFB failures before 4xx/5xx responses

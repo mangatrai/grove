@@ -279,18 +279,20 @@ async function computeDataHash(householdId: string, year: number): Promise<strin
 
 // ── LLM narrative ────────────────────────────────────────────────────────────
 
+const NARRATIVE_SYSTEM_PROMPT = `You are a personal financial advisor delivering a year-end review to a household client. You have studied their complete annual financial data. Write like a trusted advisor who knows this client well — direct, warm, and specific to their actual numbers. No generic advice, no bullet points, no headers.`;
+
 function buildPrompt(data: YearSummaryData): string {
   const payslipExtra = data.payslip
     ? `\nPayslip aggregates (household YTD): gross ${data.payslip.totalGrossYtd.toFixed(0)}, federal tax ${data.payslip.federalTaxYtd.toFixed(0)}, total tax ${data.payslip.totalTaxYtd.toFixed(0)}, effective federal rate ${data.payslip.effectiveFederalRatePct.toFixed(1)}%, pre-tax contributions ${data.payslip.preTaxContributionsYtd.toFixed(0)}`
     : "";
 
-  return `You are a friendly personal finance advisor reviewing a household's full-year financial data.
-Write exactly 3 paragraphs. Separate each with a blank line.
-Paragraph 1: What went well — lead with a specific win using real numbers.
-Paragraph 2: One notable pattern or surprise from the data.
-Paragraph 3: One specific, actionable suggestion for next year based on their actual trajectory.
-If payslip data is present, mention the effective tax withholding rate where most relevant.
-Tone: personal, warm, encouraging. No bullet points, no headers, no generic advice.
+  return `Write exactly 3 paragraphs reviewing this household's ${data.year} finances. Separate each paragraph with a blank line.
+
+Paragraph 1 — The wins: Lead with what went well. Reference a specific achievement with real numbers — savings, net worth growth, income, or a strong month. Make it clear you studied the data, not a form letter.
+
+Paragraph 2 — Something worth naming: One pattern, shift, or surprise a sharp advisor would notice. If top spending categories are relevant, name the category as a factual observation — do not suggest the household reduce, cut, or rethink it. Spending on family, food, and travel reflects life priorities; acknowledge it without judgment.
+
+Paragraph 3 — One real opportunity: Focus on what they can DO with their momentum — put savings to work, optimise tax efficiency, build a specific reserve, or accelerate a payoff. If payslip data is present and the effective withholding rate reveals an opportunity (over- or under-withholding), mention it here. Do not suggest lifestyle changes or cheaper alternatives for any spending category.
 
 DATA:
 ${JSON.stringify(
@@ -309,7 +311,6 @@ ${JSON.stringify(
       netWorthChange: data.netWorthChange,
       investmentGrowth: data.investments,
       largestTransaction: data.largestTransaction,
-      topMerchant: data.topMerchant,
     },
     null,
     2,
@@ -333,7 +334,10 @@ async function generateNarrative(data: YearSummaryData): Promise<string[]> {
       model: "gpt-4o",
       max_tokens: 800,
       temperature: 0.7,
-      messages: [{ role: "user", content: buildPrompt(data) }],
+      messages: [
+        { role: "system", content: NARRATIVE_SYSTEM_PROMPT },
+        { role: "user", content: buildPrompt(data) },
+      ],
     });
     return parseNarrative(completion.choices[0]?.message?.content ?? "");
   } catch (err) {
