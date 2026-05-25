@@ -762,7 +762,7 @@ importsRouter.post("/sessions/:sessionId/canonicalize", async (req: Authenticate
     }
   }
 
-  const result = await canonicalizeImportSession(req.params.sessionId, householdId);
+  const result = await canonicalizeImportSession(req.params.sessionId, householdId, userId);
   if (!result.ok) {
     if (result.code === "NOT_FOUND") {
       res.status(404).json({ message: result.message, code: result.code });
@@ -938,7 +938,7 @@ importsRouter.post("/sessions/:sessionId/ofx-confirm", async (req: Authenticated
   }
 
   // Canonicalize.
-  const canonResult = await canonicalizeImportSession(sessionId, householdId);
+  const canonResult = await canonicalizeImportSession(sessionId, householdId, userId);
   if (!canonResult.ok) {
     if (canonResult.code === "NOT_FOUND") {
       res.status(404).json({ message: canonResult.message, code: canonResult.code });

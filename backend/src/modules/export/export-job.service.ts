@@ -13,6 +13,7 @@ import { queryAllExportTables } from "./export-household-bundle.service.js";
 import { renderExportReadyTemplate } from "../mailer/templates/export-ready.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { purgeStalePasswordResetTokens } from "../auth/auth.service.js";
+import { createNotification } from "../notifications/notification.service.js";
 
 const EXPORTS_DIR = resolveDataPath("data/exports");
 const EXPORT_TTL_HOURS = 48;
@@ -169,6 +170,14 @@ async function runExportJob(jobId: string, householdId: string): Promise<void> {
           const tpl = renderExportReadyTemplate({ expiresAt, settingsUrl });
           await sendMail({ to: user.email, subject: tpl.subject, html: tpl.html, text: tpl.text });
         }
+        void createNotification({
+          householdId,
+          userId: row.requested_by_user_id,
+          type: "export_ready",
+          title: "Your export is ready",
+          body: "Your household data export has finished. Download it from Settings → Data.",
+          actionUrl: "/settings?tab=data"
+        });
       } catch (mailErr: unknown) {
         log.warn(
           `Export-ready email failed for job ${jobId}: ${mailErr instanceof Error ? mailErr.message : String(mailErr)}`

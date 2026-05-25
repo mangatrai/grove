@@ -6,6 +6,7 @@ import { deleteStagingFilesForSession } from "../imports/import-session.service.
 import type { NormalizedRawPayload } from "../imports/profiles/types.js";
 import { classifyWithRules, type ClassificationResult } from "../category/category-rules.js";
 import { listEnabledDbRulesForClassification } from "../category/category-rules.service.js";
+import { checkBudgetThresholds, createNotification } from "../notifications/notification.service.js";
 import {
   computeTransactionFingerprint,
   normalizeAmountForFingerprint,
@@ -270,7 +271,8 @@ function existingDescriptionFingerprint(merchant: string | null, memo: string | 
  */
 export async function canonicalizeImportSession(
   sessionId: string,
-  householdId: string
+  householdId: string,
+  triggeredByUserId?: string
 ): Promise<{ ok: true; data: CanonicalizeOutcome } | CanonicalizeFailure> {
   const session = await qGet<{ id: string }>(
     `SELECT id FROM import_session WHERE id = ? AND household_id = ?`,
@@ -342,6 +344,14 @@ export async function canonicalizeImportSession(
   let skipped = 0;
   let nearDuplicates = 0;
   const dbRules = await listEnabledDbRulesForClassification(householdId);
+
+  const householdSettings = await qGet<{ large_txn_threshold_usd: number | null }>(
+    `SELECT large_txn_threshold_usd FROM household WHERE id = ?`,
+    householdId
+  );
+  const largeTxnThreshold = householdSettings?.large_txn_threshold_usd
+    ? Number(householdSettings.large_txn_threshold_usd)
+    : null;
   const fileDiagnostics = new Map<string, CanonicalFileDiagnostics>();
   const ensureFileDiag = (fileId: string): CanonicalFileDiagnostics => {
     const existing = fileDiagnostics.get(fileId);
@@ -432,6 +442,16 @@ export async function canonicalizeImportSession(
       inserted += 1;
       diag.inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
+      if (largeTxnThreshold !== null && Math.abs(rounded) >= largeTxnThreshold) {
+        const displayAmt = `$${Math.abs(rounded).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        void createNotification({
+          householdId,
+          type: "large_transaction",
+          title: "Large transaction detected",
+          body: `${merchant || "Transaction"} of ${displayAmt} on ${normDate}`,
+          actionUrl: `/transactions/${canonicalId}`
+        });
+      }
       seenFingerprintsThisRun.add(fingerprint);
       if (referenceId) seenReferenceIdsThisRun.add(`${accountId}:${referenceId}`);
       {
@@ -1138,6 +1158,18 @@ export async function canonicalizeImportSession(
   }
 
   await deleteStagingFilesForSession(sessionId);
+
+  if (inserted > 0) {
+    void checkBudgetThresholds(householdId);
+    void createNotification({
+      householdId,
+      userId: triggeredByUserId,
+      type: "import_complete",
+      title: "Import complete",
+      body: `${inserted} new transaction${inserted === 1 ? "" : "s"} added${duplicates > 0 ? `, ${duplicates} duplicate${duplicates === 1 ? "" : "s"} skipped` : ""}.`,
+      actionUrl: "/transactions"
+    });
+  }
 
   return { ok: true, data: { inserted, duplicates, skipped, nearDuplicates } };
 }

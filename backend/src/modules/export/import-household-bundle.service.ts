@@ -12,6 +12,7 @@ import { env } from "../../config/env.js";
 import { decryptBackup, isEncryptedBackup } from "./backup-crypto.js";
 import { EXPORT_REGISTRY, type ExportRow } from "./export-registry.js";
 import { assertRestoreInsertColumnNames } from "./restore-insert-validation.js";
+import { createNotification } from "../notifications/notification.service.js";
 
 export type HfbManifestPreview = {
   exportVersion: number;
@@ -441,6 +442,13 @@ async function runImportJob(jobId: string, householdId: string): Promise<void> {
       jobId
     );
     log.info(`Import job ${jobId} complete for household ${householdId}: ${JSON.stringify(stats)}`);
+    void createNotification({
+      householdId,
+      type: "restore_complete",
+      title: "Household restore complete",
+      body: "Your household data has been restored from backup. Please log in again to continue.",
+      actionUrl: "/dashboard"
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     await qExec(`UPDATE import_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`, msg, jobId);

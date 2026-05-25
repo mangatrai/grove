@@ -11,8 +11,8 @@ import { resolveDataPath } from "../../paths.js";
 import { log } from "../../logger.js";
 import { buildHfbFile } from "./export-job.service.js";
 import { buildOAuth2Client, getGDriveCredentials, markGDriveNeedsReauth } from "../gdrive/gdrive.service.js";
-import { sendMail } from "../mailer/mailer.service.js";
 import { logGoogleDriveApiError } from "../gdrive/log-google-drive-api-error.js";
+import { createNotification } from "../notifications/notification.service.js";
 
 export const STAGING_DIR = resolveDataPath("data/gdrive-backup-staging");
 
@@ -353,6 +353,13 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
       jobId
     );
     log.info(`Backup job ${jobId} complete for household ${householdId}: uploaded ${driveFileName}`);
+    void createNotification({
+      householdId,
+      type: "backup_complete",
+      title: "Google Drive backup complete",
+      body: `Backup uploaded successfully: ${driveFileName}`,
+      actionUrl: "/settings?tab=data"
+    });
     if (creds.backupRetentionCount > 0) {
       await pruneOldDriveBackups(creds.refreshToken, backupFolderId, creds.backupRetentionCount);
     }
@@ -364,21 +371,19 @@ async function runBackupJob(jobId: string, householdId: string): Promise<void> {
       err instanceof GaxiosError && (err.response?.data as Record<string, unknown>)?.error === "invalid_grant";
     if (isInvalidGrant) {
       await markGDriveNeedsReauth(householdId);
-      const ownerRow = await qGet<{ email: string }>(
-        `SELECT email FROM app_user WHERE household_id = ? AND role = 'owner' LIMIT 1`,
-        householdId
-      );
-      if (ownerRow?.email) {
-        void sendMail({
-          to: ownerRow.email,
-          subject: "Household Finance — Google Drive backup failed",
-          html: "<p>Your Google Drive backup failed because the Drive authorization has expired (this happens every 7 days in testing mode). Open the app, go to <strong>Settings → Backup & Restore</strong>, and click <strong>Reconnect Google Drive</strong> to restore automatic backups.</p>",
-          text: "Your Google Drive backup failed because the Drive authorization has expired. Open the app, go to Settings → Backup & Restore, and click Reconnect Google Drive to restore automatic backups.",
-        });
-      }
     }
     const msg =
       err instanceof GaxiosError ? mapDriveUploadError(err) : err instanceof Error ? err.message : String(err);
+    const failBody = isInvalidGrant
+      ? "Google Drive authorization has expired. Open the app and go to Settings → Backup & Restore to reconnect."
+      : `Backup failed: ${msg}`;
+    void createNotification({
+      householdId,
+      type: "backup_failed",
+      title: "Google Drive backup failed",
+      body: failBody,
+      actionUrl: "/settings?tab=data"
+    });
     await qExec(
       `UPDATE backup_job SET status = 'failed', completed_at = NOW(), error_text = ? WHERE id = ?`,
       msg,

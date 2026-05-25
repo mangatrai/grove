@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-216 (2026-05-25): F-1 — In-app notification system
+
+- **Type:** New feature — unified notification center with bell icon, per-type preferences, and 8 trigger types
+- **What:**
+  - Migration `0051`: `notification` table (id, household_id, user_id, type, title, body, action_url, read_at), `notification_preference` table (per-user per-type email+inapp toggles), `large_txn_threshold_usd NUMERIC(12,2)` on `household` table
+  - **`notification.service.ts`** (new): `createNotification()` (broadcast or targeted, checks prefs, dispatches email), `listNotifications()`, `getUnreadCount()`, `markNotificationRead()`, `markAllNotificationsRead()`, `getNotificationPreferences()`, `upsertNotificationPreferences()`, `checkBudgetThresholds()`, `purgeOldNotifications()`
+  - **`notifications.routes.ts`** (new): `GET /notifications`, `GET /notifications/unread-count`, `PATCH /notifications/:id/read`, `POST /notifications/read-all`, `GET /notifications/preferences`, `PUT /notifications/preferences`
+  - **`app.ts`**: registered `/notifications` router
+  - **`server.ts`**: calls `purgeOldNotifications()` on startup (90-day retention)
+  - **`export-registry.ts`**: `notification` and `notification_preference` added to `EXPORT_EPHEMERAL_TABLES`
+  - **`gdrive-backup.service.ts`**: fires `backup_complete` / `backup_failed` notifications; FIX-215 manual `sendMail` replaced with `createNotification` (email now respects preference)
+  - **`export-job.service.ts`**: fires `export_ready` notification
+  - **`import-household-bundle.service.ts`**: fires `restore_complete` notification
+  - **`realty-scheduler.service.ts`**: fires `property_valuation_updated` notification on each successful refresh
+  - **`canonical-ingest.service.ts`**: fires `large_transaction` per row exceeding `large_txn_threshold_usd`; calls `checkBudgetThresholds()` after import (fires `budget_threshold_80` / `budget_threshold_100` at most once per category per month)
+  - **`household.service.ts`** / **`household.routes.ts`**: `largeTxnThresholdUsd` added to GET/PATCH `/household/settings`
+  - **`NotificationPanel.tsx`** (new): bell icon with red badge, Popover panel, 60s unread polling, mark-read / mark-all-read, settings link
+  - **`AppTopBar.tsx`**: `NotificationPanel` inserted between Import button and user menu
+  - **`SettingsPage.tsx`**: "notifications" tab added; preference matrix (In-app / Email toggles per type); `largeTxnThresholdUsd` field in Household tab; placeholder Divider removed from Profile tab
+- **Notification types (9):** `import_complete`, `export_ready`, `restore_complete`, `backup_complete`, `backup_failed`, `property_valuation_updated`, `budget_threshold_80`, `budget_threshold_100`, `large_transaction`
+- **UX fixes (post-launch):** Added `import_complete` type; fixed `e.currentTarget.checked` crash (switched to Mantine `Checkbox` + capture value before state update); redesigned notification grid with section groups (Data & Backup / Budget & Spending / Properties); clearer descriptions; large_transaction row notes threshold location in Household settings; Vite proxy added `/notifications`
+- **Design decisions:** Per-user rows for broadcast (each member gets own `read_at`); budget check at import finalize time; auto-delete >90 days on startup; `large_txn_threshold_usd` in Household settings
+
 ## FIX-215 (2026-05-25): Google Drive — handle expired refresh token (invalid_grant)
 
 - **Type:** Bug fix — production backup failure with no recovery path

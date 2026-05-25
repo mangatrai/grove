@@ -10,6 +10,7 @@ import {
 } from "@tabler/icons-react";
 
 import { apiJson, setToken, useAuthToken } from "../api";
+import { NotificationPanel } from "../components/NotificationPanel";
 
 type AppTopBarProps = {
   onOpenMobileNav: () => void;
@@ -160,6 +161,9 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
             <IconUpload size={15} />
             <span>Import</span>
           </button>
+
+          {/* Notifications */}
+          <NotificationPanel />
 
           {/* User menu */}
           <div className="user-menu" ref={menuRef}>

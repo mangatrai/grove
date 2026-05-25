@@ -27,6 +27,7 @@ Returns **household-level** savings target plus **person-level** income fields f
 - **`monthlySavingsTargetUsd`** — `null` when unset (safe-to-spend on cash summary). Stored on **`household`**. Migration **`0010`**.
 - **`salaryDepositFinancialAccountId`** — optional FK to a household **`financial_account`**. Stored on the signed-in user’s **`person_profile`**. Migration **`0020`**.
 - **`employers`** — JSON array on the signed-in user’s **`person_profile`**. Empty array when none saved.
+- **`largeTxnThresholdUsd`** — `null` when not configured. When set, any imported transaction exceeding this amount triggers a `large_transaction` notification. Migration **`0051`**.
 
 ## `PATCH /household/settings`
 
@@ -45,6 +46,7 @@ Send **at least one** field.
 ```
 
 - **`monthlySavingsTargetUsd`** — set to `null` to clear.
+- **`largeTxnThresholdUsd`** — set to `null` to disable the large-transaction alert. Must be positive when provided.
 
 **200:** Same shape as `GET`.
 

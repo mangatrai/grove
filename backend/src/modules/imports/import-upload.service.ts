@@ -136,7 +136,7 @@ async function uploadBankAndImport(params: UploadBankParams): Promise<UploadAndI
       return { ok: false, code: "PARSE_FAILED", message: parsed.message };
     }
 
-    const canonicalized = await canonicalizeImportSession(created.id, params.householdId);
+    const canonicalized = await canonicalizeImportSession(created.id, params.householdId, params.userId);
     if (!canonicalized.ok) {
       return { ok: false, code: "CANONICALIZE_FAILED", message: canonicalized.message };
     }

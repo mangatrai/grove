@@ -9,6 +9,7 @@ import { closeSql, getSql } from "./db/query.js";
 import { log } from "./logger.js";
 import { startBackupScheduler } from "./modules/gdrive/gdrive-scheduler.service.js";
 import { startRealtyScheduler } from "./modules/household/realty-scheduler.service.js";
+import { purgeOldNotifications } from "./modules/notifications/notification.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
 
@@ -43,6 +44,7 @@ void (async () => {
     if (env.MODE !== "TEST") {
       startBackupScheduler();
       startRealtyScheduler();
+      void purgeOldNotifications();
     }
     const server = app.listen(port, () => {
       log.info(`Backend listening on http://localhost:${port}`);

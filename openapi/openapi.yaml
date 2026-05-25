@@ -1350,6 +1350,150 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DriveDownloadFailedResponse'
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List notifications for the authenticated user
+      description: Returns up to 40 unread notifications (newest first) plus up to 10 recent read notifications.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        householdId: { type: string, format: uuid }
+                        userId: { type: string, format: uuid, nullable: true }
+                        type: { type: string }
+                        title: { type: string }
+                        body: { type: string }
+                        actionUrl: { type: string, nullable: true }
+                        readAt: { type: string, format: date-time, nullable: true }
+                        createdAt: { type: string, format: date-time }
+        "401":
+          description: Unauthorized
+
+  /notifications/unread-count:
+    get:
+      tags: [notifications]
+      summary: Get unread notification count
+      description: Lightweight endpoint polled every 60 seconds by the frontend bell icon.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+        "401":
+          description: Unauthorized
+
+  /notifications/read-all:
+    post:
+      tags: [notifications]
+      summary: Mark all notifications as read
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: All notifications marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          description: Unauthorized
+
+  /notifications/preferences:
+    get:
+      tags: [notifications]
+      summary: Get notification preferences for the authenticated user
+      description: Returns one entry per notification type. Missing rows fall back to system defaults.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Preference matrix
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferences:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        userId: { type: string, format: uuid }
+                        notificationType: { type: string }
+                        enabledEmail: { type: boolean }
+                        enabledInapp: { type: boolean }
+        "401":
+          description: Unauthorized
+    put:
+      tags: [notifications]
+      summary: Bulk upsert notification preferences
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [preferences]
+              properties:
+                preferences:
+                  type: array
+                  items:
+                    type: object
+                    required: [notificationType, enabledEmail, enabledInapp]
+                    properties:
+                      notificationType: { type: string }
+                      enabledEmail: { type: boolean }
+                      enabledInapp: { type: boolean }
+      responses:
+        "200":
+          description: Updated full preference matrix
+        "400":
+          description: Invalid payload
+        "401":
+          description: Unauthorized
+
+  /notifications/{id}/read:
+    patch:
+      tags: [notifications]
+      summary: Mark a single notification as read
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Notification marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "401":
+          description: Unauthorized
+        "404":
+          description: Notification not found or belongs to a different user
+
   /categories:
     get:
       tags: [categories]

@@ -39,7 +39,7 @@ import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 import { GroveLoader } from "../components/GroveLoader";
 
-const TABS = ["profile", "household", "accounts", "recurring", "data"] as const;
+const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -49,6 +49,7 @@ function isTab(s: string | null): s is SettingsTab {
 type HouseholdSettingsResponse = {
   monthlySavingsTargetUsd: number | null;
   salaryDepositFinancialAccountId: string | null;
+  largeTxnThresholdUsd: number | null;
   city: string | null;
   state: string | null;
   combinedGrossIncomeUsd: number | null;
@@ -368,6 +369,12 @@ export function SettingsPage() {
   const [householdCityDraft, setHouseholdCityDraft] = useState("");
   const [householdStateDraft, setHouseholdStateDraft] = useState("");
   const [householdIncomeDraft, setHouseholdIncomeDraft] = useState("");
+  const [largeTxnThresholdDraft, setLargeTxnThresholdDraft] = useState("");
+  const [notifPrefs, setNotifPrefs] = useState<Array<{ notificationType: string; enabledEmail: boolean; enabledInapp: boolean }>>([]);
+  const [notifPrefsLoading, setNotifPrefsLoading] = useState(false);
+  const [notifPrefsSaving, setNotifPrefsSaving] = useState(false);
+  const [notifPrefsError, setNotifPrefsError] = useState<string | null>(null);
+  const [notifPrefsSuccess, setNotifPrefsSuccess] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [showClosedAccounts, setShowClosedAccounts] = useState(false);
   const [loadingHousehold, setLoadingHousehold] = useState(true);
@@ -575,12 +582,14 @@ export function SettingsPage() {
       setHouseholdCityDraft(r.city ?? "");
       setHouseholdStateDraft(r.state ?? "");
       setHouseholdIncomeDraft(r.combinedGrossIncomeUsd == null ? "" : String(r.combinedGrossIncomeUsd));
+      setLargeTxnThresholdDraft(r.largeTxnThresholdUsd == null ? "" : String(r.largeTxnThresholdUsd));
     } catch (e: unknown) {
       setHouseholdError(e instanceof Error ? e.message : "Could not load settings");
       setTargetDraft("");
       setHouseholdCityDraft("");
       setHouseholdStateDraft("");
       setHouseholdIncomeDraft("");
+      setLargeTxnThresholdDraft("");
     } finally {
       setLoadingHousehold(false);
     }
@@ -630,6 +639,16 @@ export function SettingsPage() {
     }
     void loadProfile();
   }, [token, tab, loadProfile]);
+
+  useEffect(() => {
+    if (!token || tab !== "notifications") return;
+    setNotifPrefsLoading(true);
+    setNotifPrefsError(null);
+    void apiJson<{ preferences: Array<{ notificationType: string; enabledEmail: boolean; enabledInapp: boolean }> }>("/notifications/preferences")
+      .then((r) => setNotifPrefs(r.preferences))
+      .catch((e: unknown) => setNotifPrefsError(e instanceof Error ? e.message : "Could not load preferences"))
+      .finally(() => setNotifPrefsLoading(false));
+  }, [token, tab]);
 
   useEffect(() => {
     if (!token || tab !== "household") {
@@ -941,13 +960,16 @@ export function SettingsPage() {
         setHouseholdError("Combined gross household income must be a non-negative number.");
         return;
       }
+      const largeTxnTrim = largeTxnThresholdDraft.trim();
+      const parsedLargeTxn = largeTxnTrim === "" ? null : Number(largeTxnTrim);
       await apiJson<HouseholdSettingsResponse>("/household/settings", {
         method: "PATCH",
         body: JSON.stringify({
           monthlySavingsTargetUsd: value,
           city: householdCityDraft.trim() || null,
           state: householdStateDraft.trim() || null,
-          combinedGrossIncomeUsd: parsedIncome
+          combinedGrossIncomeUsd: parsedIncome,
+          largeTxnThresholdUsd: parsedLargeTxn
         })
       });
       await loadHousehold();
@@ -955,6 +977,23 @@ export function SettingsPage() {
       setHouseholdError(e instanceof Error ? e.message : "Could not save");
     } finally {
       setSavingHousehold(false);
+    }
+  }
+
+  async function saveNotifPrefs() {
+    setNotifPrefsSaving(true);
+    setNotifPrefsError(null);
+    setNotifPrefsSuccess(null);
+    try {
+      await apiJson("/notifications/preferences", {
+        method: "PUT",
+        body: JSON.stringify({ preferences: notifPrefs })
+      });
+      setNotifPrefsSuccess("Preferences saved.");
+    } catch (e: unknown) {
+      setNotifPrefsError(e instanceof Error ? e.message : "Could not save preferences");
+    } finally {
+      setNotifPrefsSaving(false);
     }
   }
 
@@ -1249,7 +1288,9 @@ export function SettingsPage() {
                       ? "Accounts"
                       : id === "recurring"
                         ? "Recurring"
-                        : "Data & Backup"}
+                        : id === "data"
+                          ? "Data & Backup"
+                          : "Notifications"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -1591,8 +1632,6 @@ export function SettingsPage() {
                   </Stack>
                 </Box>
 
-                <Divider mt="xl" mb="md" label="Notifications" labelPosition="left" />
-                <Text c="dimmed">No notification service is configured. This section is reserved for future email and push notifications.</Text>
               </Stack>
             ) : null}
           </Stack>
@@ -1793,6 +1832,15 @@ export function SettingsPage() {
                   placeholder="e.g. 500"
                   value={targetDraft === "" ? undefined : Number(targetDraft)}
                   onChange={(value) => setTargetDraft(value == null ? "" : String(value))}
+                  disabled={savingHousehold}
+                  style={{ maxWidth: 320 }}
+                />
+                <CurrencyInput
+                  label="Large transaction alert threshold (USD)"
+                  description="Get notified when any transaction exceeds this amount. Leave blank to disable."
+                  placeholder="e.g. 500"
+                  value={largeTxnThresholdDraft === "" ? undefined : Number(largeTxnThresholdDraft)}
+                  onChange={(value) => setLargeTxnThresholdDraft(value == null ? "" : String(value))}
                   disabled={savingHousehold}
                   style={{ maxWidth: 320 }}
                 />
@@ -2372,6 +2420,110 @@ export function SettingsPage() {
         ) : null}
 
         <BackupRestoreSection authRole={authRole} active={tab === "data"} />
+
+        {tab === "notifications" ? (
+          <Stack mt="md">
+            <Title order={3}>Notifications</Title>
+            <Text c="dimmed" size="sm">
+              Choose how you want to be notified for each event. Email uses your account address.
+            </Text>
+            {notifPrefsError ? <Alert color="red">{notifPrefsError}</Alert> : null}
+            {notifPrefsSuccess ? <Alert color="green">{notifPrefsSuccess}</Alert> : null}
+            {notifPrefsLoading ? (
+              <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading…</Text></Group>
+            ) : (() => {
+              type NotifMeta = { label: string; description: string; note?: string };
+              const NOTIF_META: Record<string, NotifMeta> = {
+                import_complete:            { label: "Import complete",          description: "When a bank statement import finishes processing" },
+                export_ready:               { label: "Export ready",             description: "When a data export file is ready to download" },
+                restore_complete:           { label: "Restore complete",         description: "When a household backup restore finishes" },
+                backup_complete:            { label: "Drive backup success",     description: "When an automatic Google Drive backup succeeds" },
+                backup_failed:              { label: "Drive backup failed",      description: "When a backup fails or Drive authorization expires" },
+                budget_threshold_80:        { label: "Budget warning (80%)",     description: "Early alert when monthly spending reaches 80% of the category limit" },
+                budget_threshold_100:       { label: "Budget exceeded (100%)",   description: "Alert when monthly spending crosses the full category budget" },
+                large_transaction:          { label: "Large transaction",        description: "When any transaction exceeds your alert threshold", note: "Set threshold in Settings → Household" },
+                property_valuation_updated: { label: "Property valuation updated", description: "When the monthly property estimate is refreshed" },
+              };
+
+              const GROUPS: Array<{ heading: string; types: string[] }> = [
+                { heading: "Data & Backup", types: ["import_complete", "export_ready", "restore_complete", "backup_complete", "backup_failed"] },
+                { heading: "Budget & Spending", types: ["budget_threshold_80", "budget_threshold_100", "large_transaction"] },
+                { heading: "Properties", types: ["property_valuation_updated"] },
+              ];
+
+              const prefMap = new Map(notifPrefs.map((p) => [p.notificationType, p]));
+
+              function togglePref(type: string, field: "enabledInapp" | "enabledEmail", val: boolean) {
+                setNotifPrefs((prev) =>
+                  prev.map((p) => (p.notificationType === type ? { ...p, [field]: val } : p))
+                );
+              }
+
+              return (
+                <Stack gap={0}>
+                  {/* Column header */}
+                  <Group px="sm" py="xs">
+                    <Text size="xs" fw={600} c="dimmed" style={{ flex: 1 }} tt="uppercase">Event</Text>
+                    <Text size="xs" fw={600} c="dimmed" w={60} ta="center" tt="uppercase">In-app</Text>
+                    <Text size="xs" fw={600} c="dimmed" w={60} ta="center" tt="uppercase">Email</Text>
+                  </Group>
+                  <Divider />
+
+                  {GROUPS.map((group) => {
+                    const rows = group.types.filter((t) => prefMap.has(t));
+                    if (rows.length === 0) return null;
+                    return (
+                      <Stack key={group.heading} gap={0}>
+                        <Text size="xs" fw={700} c="dimmed" tt="uppercase" px="sm" pt="md" pb={4}>{group.heading}</Text>
+                        {rows.map((type) => {
+                          const pref = prefMap.get(type);
+                          if (!pref) return null;
+                          const meta = NOTIF_META[type];
+                          return (
+                            <Group
+                              key={type}
+                              px="sm"
+                              py="sm"
+                              align="flex-start"
+                              style={{ borderBottom: "1px solid var(--mantine-color-default-border)" }}
+                            >
+                              <Stack gap={2} style={{ flex: 1 }}>
+                                <Text size="sm" fw={500}>{meta?.label ?? type}</Text>
+                                {meta?.description ? <Text size="xs" c="dimmed">{meta.description}</Text> : null}
+                                {meta?.note ? <Text size="xs" c="blue.6">{meta.note}</Text> : null}
+                              </Stack>
+                              <Group w={60} justify="center" pt={2}>
+                                <Checkbox
+                                  checked={pref.enabledInapp}
+                                  onChange={(e) => { const v = e.currentTarget.checked; togglePref(type, "enabledInapp", v); }}
+                                  aria-label={`${meta?.label ?? type} in-app`}
+                                />
+                              </Group>
+                              <Group w={60} justify="center" pt={2}>
+                                <Checkbox
+                                  checked={pref.enabledEmail}
+                                  onChange={(e) => { const v = e.currentTarget.checked; togglePref(type, "enabledEmail", v); }}
+                                  aria-label={`${meta?.label ?? type} email`}
+                                />
+                              </Group>
+                            </Group>
+                          );
+                        })}
+                      </Stack>
+                    );
+                  })}
+
+                  <Group mt="md">
+                    <Button loading={notifPrefsSaving} onClick={() => void saveNotifPrefs()}>
+                      Save preferences
+                    </Button>
+                  </Group>
+                </Stack>
+              );
+            })()}
+          </Stack>
+        ) : null}
+
         </Tabs>
       </Paper>
       <ConfirmDialog

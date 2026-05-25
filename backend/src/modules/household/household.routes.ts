@@ -51,7 +51,8 @@ householdRouter.get("/settings", async (req: AuthenticatedRequest, res) => {
     employers: full.employers,
     city: full.city,
     state: full.state,
-    combinedGrossIncomeUsd: full.combinedGrossIncomeUsd
+    combinedGrossIncomeUsd: full.combinedGrossIncomeUsd,
+    largeTxnThresholdUsd: full.largeTxnThresholdUsd
   });
 });
 
@@ -60,7 +61,8 @@ const patchSchema = z
     monthlySavingsTargetUsd: z.union([z.number().min(0).max(1_000_000_000), z.null()]).optional(),
     city: z.string().max(100).nullable().optional(),
     state: z.string().max(100).nullable().optional(),
-    combinedGrossIncomeUsd: z.union([z.number().min(0).max(100_000_000), z.null()]).optional()
+    combinedGrossIncomeUsd: z.union([z.number().min(0).max(100_000_000), z.null()]).optional(),
+    largeTxnThresholdUsd: z.union([z.number().positive().max(1_000_000_000), z.null()]).optional()
   })
   .refine((b) => Object.keys(b).length > 0, { message: "At least one field required" });
 
@@ -87,7 +89,8 @@ householdRouter.patch("/settings", requireRole(["owner", "admin"]), async (req: 
     employers: full.employers,
     city: full.city,
     state: full.state,
-    combinedGrossIncomeUsd: full.combinedGrossIncomeUsd
+    combinedGrossIncomeUsd: full.combinedGrossIncomeUsd,
+    largeTxnThresholdUsd: full.largeTxnThresholdUsd
   });
 });
 

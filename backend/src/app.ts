@@ -21,6 +21,7 @@ import { ledgerRouter } from "./modules/ledger/ledger.routes.js";
 import { payslipRouter } from "./modules/payslip/payslip.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
+import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { recurringRouter } from "./modules/recurring/recurring.routes.js";
 
 /**
@@ -121,6 +122,7 @@ export function buildApp() {
   app.use("/budget", budgetRouter);
   app.use("/recurring-overrides", recurringRouter);
   app.use("/insights", insightsRouter);
+  app.use("/notifications", notificationsRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));
