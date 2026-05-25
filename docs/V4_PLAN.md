@@ -176,7 +176,7 @@ No way exists today to see which transactions are paired as transfers, or to man
 
 ---
 
-### F-7: AI Year-End "Wrapped" financial summary
+### F-7: AI Year-End "Wrapped" financial summary ✅ SHIPPED (CR-211 + UX-211, 2026-05-24)
 A "Spotify Wrapped for your finances" — triggered manually in January after the full year is imported and reconciled. Surfaces the year's highlights, trends, and surprises in a card-based UI with optional email delivery.
 
 **Trigger:** Manual "Generate Year Summary" button, visible January 1 – March 31. User selects the year (defaults to prior year).
