@@ -297,7 +297,7 @@ F-6 shipped caching for the trend chart history (`bs-history:*` keys) and the Da
 
 ---
 
-### I-10: App-wide error logging audit
+### I-10: App-wide error logging audit ✅ SHIPPED (FIX-212 + FIX-213, 2026-05-24)
 
 Production issues are currently discovered by tracing code paths by hand because many async route handlers lack try-catch (errors cause process crashes with no log entry) and several service functions return early/silently on unexpected states.
 
