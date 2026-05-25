@@ -9,7 +9,7 @@
  * See docs/CACHING.md for the full design, scope map, and invalidation rules.
  */
 
-export type CacheScope = "dashboard" | "networth";
+export type CacheScope = "dashboard" | "networth" | "recurring";
 
 const NS = "hfa";
 

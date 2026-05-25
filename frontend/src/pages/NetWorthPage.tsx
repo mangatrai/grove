@@ -313,16 +313,13 @@ export function NetWorthPage() {
     [ownerProfiles]
   );
 
-  const historyQs = (() => {
-    const qs = new URLSearchParams({
-      from: histRange.from,
-      to: histRange.to,
-      interval: histInterval
-    });
-    appendOwnerQuery(qs, belongsTo);
-    return qs.toString();
-  })();
-  const historyCacheKey = `bs-history:${historyQs}`;
+  // Use a stable monthly key so cache persists across days within the same month.
+  // For custom date ranges the full range is part of the key (user-specified, so always exact).
+  const cacheMonth = new Date().toISOString().slice(0, 7);
+  const historyCacheKey =
+    periodPreset === "custom"
+      ? `bs-history:custom:${histRange.from}:${histRange.to}:${histInterval}:${belongsTo || "household"}`
+      : `bs-history:${periodPreset}:${histInterval}:${belongsTo || "household"}:${cacheMonth}`;
 
   const {
     data: historyData,
@@ -344,6 +341,7 @@ export function NetWorthPage() {
     }
   );
 
+  // Snapshot key is date-specific; mutations invalidate via scope version bump.
   const snapshotCacheKey = `bs-snapshot:${belongsTo || "household"}:${tableAsOf}`;
   const {
     data,
@@ -358,7 +356,7 @@ export function NetWorthPage() {
       appendOwnerQuery(qs, belongsTo);
       return apiJson<BalanceSheetResponse>(`/reports/balance-sheet?${qs.toString()}`);
     },
-    60 * 60 * 1000
+    24 * 60 * 60 * 1000
   );
 
   useEffect(() => {
@@ -627,7 +625,9 @@ export function NetWorthPage() {
     fromDate.setUTCMonth(fromDate.getUTCMonth() - 12);
     const from = fromDate.toISOString().slice(0, 10);
 
-    const acctCacheKey = `bs-acct-history:${accountId}:${from}:${to}`;
+    // Key on YYYY-MM so cache survives across days within the same month.
+    const acctCacheMonth = new Date().toISOString().slice(0, 7);
+    const acctCacheKey = `bs-acct-history:${accountId}:${acctCacheMonth}`;
     const cached = readCache<BalanceSheetHistoryResponse>(acctCacheKey, "networth", 7 * 24 * 60 * 60 * 1000);
     if (cached) {
       const chartPoints = (cached.data.points ?? [])

@@ -18,6 +18,40 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-221 (2026-05-25): Net Worth page cache keys change daily — trend and account charts reload on every visit
+
+- **Type:** Bug fix — cache miss on every new calendar day because cache keys embedded today's full `YYYY-MM-DD` date
+- **Root cause:**
+  - `historyCacheKey` was `"bs-history:" + historyQs` where `historyQs` included `to=<todayIso()>`. Every new calendar day the `to` date changed → different key → cache miss → re-fetch
+  - `acctCacheKey` (individual account mini-charts) was `"bs-acct-history:<id>:<from>:<to>"` — same daily-drift problem
+  - Snapshot `maxAgeMs` was 1 hour; with scope-version invalidation already in place on mutations, 1 hour was unnecessarily short
+- **Fix:**
+  - `historyCacheKey` for non-custom presets now uses `"bs-history:<preset>:<interval>:<belongsTo>:<YYYY-MM>"` — stable for the entire month. Custom date ranges keep exact `from:to` in the key.
+  - `acctCacheKey` now uses `"bs-acct-history:<id>:<YYYY-MM>"` — stable for the month.
+  - Snapshot `maxAgeMs` raised from 1 hour to 24 hours; invalidation via networth scope version bump (on balance save / property update) handles freshness correctly.
+- **Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+## FIX-220 (2026-05-25): Dashboard caching for 5 slow home-page cards
+
+- **Type:** Performance fix — reduce page-open latency for 5 cards that were refetching on every navigation
+- **What:**
+  - Converted Net Worth snapshot, Net Worth 6-month history, 6-month transactions (By Account), and Recurring Payments from `loadAll` uncached fetches to individual `useLocalStorageCache` hooks
+  - Added "recurring" cache scope to `cache.ts` so recurring-override dismisses can invalidate independently without touching the dashboard/networth scopes
+  - `dismissRecurring` now calls `bumpCacheVersion("recurring")` after a successful POST so the stale cached override list is evicted immediately
+  - `loadAll` now only fetches 3 items (resolution summary, budget, prior-year transactions) — 4 fewer network calls on cache-hit page loads
+  - Each card uses its own loading flag instead of the global `loading` from `loadAll`: "Where money went" → `cashCacheLoading`, Net Worth → `netWorthCacheLoading`, Recurring → `recurringCacheLoading`, By Account → `recentTxnsCacheLoading`
+  - Fixed "Other" bucket sort in "Where money went": always pinned last regardless of its total, even if it exceeds a named category
+- **Files:** `frontend/src/pages/DashboardPageV2.tsx`, `frontend/src/cache.ts`
+
+## FIX-219 (2026-05-25): Settings > Data & Backup causes logout on expired Google Drive token
+
+- **Type:** Hot production break — clicking Settings > Data & Backup signed the user out when Google Drive auth was expired
+- **Root cause:** `GET /gdrive/backups` returned HTTP 401 with `code: GDRIVE_NEEDS_REAUTH` when the Google OAuth token had expired. The frontend's `apiJson`/`apiFetch` treat any 401 as a JWT session expiry and call `setToken(null)` (clearing the JWT and signing the user out). The two 401 meanings (JWT invalid vs Google token expired) were conflated.
+- **Fix:**
+  - `gdrive.routes.ts`: Changed `needs_reauth` response from `res.status(401)` to `res.status(409)` — 401 is now reserved exclusively for JWT auth failures
+  - `BackupRestoreSection.tsx`: `loadDriveBackups` catch block now propagates the server error message (e.g. "Google Drive authorization has expired. Reconnect in Settings.") instead of a hardcoded generic string
+- **Files:** `backend/src/modules/gdrive/gdrive.routes.ts`, `frontend/src/pages/settings/BackupRestoreSection.tsx`
+
 ## CR-216 (2026-05-25): F-1 — In-app notification system
 
 - **Type:** New feature — unified notification center with bell icon, per-type preferences, and 8 trigger types

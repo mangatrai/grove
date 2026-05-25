@@ -322,8 +322,8 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
     try {
       const res = await apiJson<{ files: DriveBackupEntry[] }>("/gdrive/backups");
       setDriveBackups(res.files);
-    } catch {
-      setDriveBackupsError("Could not load Drive backup list.");
+    } catch (e: unknown) {
+      setDriveBackupsError(e instanceof Error ? e.message : "Could not load Drive backup list.");
     } finally {
       setDriveBackupsLoading(false);
     }
