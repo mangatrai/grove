@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-223 (2026-05-25): NetWorth page — overly aggressive cache invalidation on mutations + GDrive reconnect broken
+
+- **Type:** Bug fixes — two issues
+- **GDrive reconnect:** "Reconnect Google Drive" button in the `needsReauth` alert called `handleGDriveConnect()` with no argument. The handler reads `gdriveFolderIdInput` (always empty at this point) and returns early with "Enter the Drive folder ID first." Fix: `handleGDriveConnect` now accepts an optional `overrideFolderId`; reconnect button passes `gdriveStatus.folderId` (already stored from the original connect).
+- **Cache over-invalidation on NetWorthPage:**
+  - `refreshPropertyValuation` used `apiJson` POST → `invalidateCacheByUrl` fired → `hfa:cache-invalidate` event → trend chart and balance sheet refetched immediately, before the user even confirmed the Redfin estimate. Changed to `apiFetch` to prevent premature invalidation.
+  - `saveEdit` / `runBulkAsOf` / `savePropertyMarketValue` each called explicit `refreshSheetCache()` + `refreshHistoryCache()` AFTER `apiJson` POST — redundant because those URLs are already in `CACHE_INVALIDATION_MAP` and `apiJson` auto-fires the invalidation event. Removed the duplicate explicit calls (one reload per save, not three).
+- **Files:** `frontend/src/pages/settings/BackupRestoreSection.tsx`, `frontend/src/pages/NetWorthPage.tsx`
+
 ## FIX-221 (2026-05-25): Net Worth page cache keys change daily — trend and account charts reload on every visit
 
 - **Type:** Bug fix — cache miss on every new calendar day because cache keys embedded today's full `YYYY-MM-DD` date

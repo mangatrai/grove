@@ -37,7 +37,7 @@ import {
   YAxis
 } from "recharts";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiFetch, apiJson, useAuthToken } from "../api";
 import { readCache, writeCache } from "../cache";
 import { useLocalStorageCache } from "../hooks/useLocalStorageCache";
 import { formatTimeAgo } from "../utils/format";
@@ -569,15 +569,13 @@ export function NetWorthPage() {
           })
         });
         cancelEdit();
-        refreshSheetCache();
-        refreshHistoryCache();
       } catch (err: unknown) {
         setRowSaveError(err instanceof Error ? err.message : "Could not save balance");
       } finally {
         setRowSaving(false);
       }
     },
-    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId, refreshSheetCache, refreshHistoryCache]
+    [accounts, allTableRows, cancelEdit, editAmount, editAsOf, editingId]
   );
 
   const runBulkAsOf = useCallback(async () => {
@@ -611,9 +609,7 @@ export function NetWorthPage() {
     }
     setBulkWorking(false);
     setBulkSummary(`Updated ${okCount} account(s). Failed: ${fail}. Skipped (no balance): ${skipped}.`);
-    refreshSheetCache();
-    refreshHistoryCache();
-  }, [allTableRows, bulkAsOfDraft, data, refreshSheetCache, refreshHistoryCache]);
+  }, [allTableRows, bulkAsOfDraft, data]);
 
   const loadAccountHistory = useCallback(async (accountId: string) => {
     if (accountHistoryById.has(accountId) || accountHistoryLoadingIds.has(accountId)) {
@@ -771,8 +767,6 @@ export function NetWorthPage() {
           })
         });
         cancelPropertyEdit();
-        refreshSheetCache();
-        refreshHistoryCache();
         if (propertyHistoryById.has(propertyId)) {
           setPropertyHistoryById((prev) => {
             const n = new Map(prev);
@@ -792,9 +786,7 @@ export function NetWorthPage() {
       editPropertyAmount,
       editPropertyAsOf,
       loadPropertyHistory,
-      refreshSheetCache,
       propertyHistoryById,
-      refreshHistoryCache
     ]
   );
 
@@ -803,10 +795,13 @@ export function NetWorthPage() {
       setPropertyRowRetrieving(true);
       setPropertyRowSaveError(null);
       try {
-        const r = await apiJson<{ estimate: number; fetchedAt: string }>(
-          `/household/properties/${propertyId}/refresh-valuation`,
-          { method: "POST" }
-        );
+        // Use apiFetch to prevent auto-invalidating the networth cache before the user confirms the value.
+        const res = await apiFetch(`/household/properties/${propertyId}/refresh-valuation`, { method: "POST" });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({})) as { message?: string };
+          throw new Error(body.message ?? "Could not retrieve valuation");
+        }
+        const r = await res.json() as { estimate: number; fetchedAt: string };
         setEditPropertyAmount(String(Math.round(r.estimate)));
         setEditPropertyAsOf(r.fetchedAt);
       } catch (err: unknown) {
