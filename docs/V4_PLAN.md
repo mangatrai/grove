@@ -461,7 +461,7 @@ Annual workflow to assess whether to protest a county appraisal and build eviden
 
 **Architecture decision:** Built feature for data collection, storage, and protest tracking + LLM layer ("Generate protest strategy" button) for case analysis and multi-state strategy adaptation. Not a standalone Claude Code skill — requires persistent property and protest history data.
 
-**Quick win available now (standalone):** Extract subject property physical facts (sqft/beds/baths/yearBuilt/lotSqft) from the existing Redfin `/detailsbyaddress` response. Currently parsed for comps only. Small isolated addition to `realty-api.service.ts`; should ship before the full ARB feature so data accumulates with each monthly refresh.
+**Subject property extraction:** ✅ Shipped as part of D-2 (CR-187/CR-188). `ValuationDetail.subject` in `realty-api.service.ts` already captures sqft/beds/baths/yearBuilt/lotSqft from the Redfin `/detailsbyaddress` response.
 
 **Design details:** See `docs/V4_BACKLOG.md` §Property Tax Protest Assistant for full feature vision, CAD data landscape (DCAD portal URLs, Shelby County assessor URLs), reference services (ownwell.com, bezit.co), LLM layer design, and remaining open questions.
 
