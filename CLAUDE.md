@@ -12,7 +12,8 @@ npm run dev:frontend     # Frontend (Vite HMR, port 3000)
 npm run start:dev        # Both services background (logs in .runtime/logs/)
 npm test                 # All tests
 npm run test -w backend  # Backend only (single-worker, real Postgres)
-npm run test -w frontend # Frontend only
+npm run test -w frontend # Frontend only (Vitest — pure logic, no DOM)
+npm run test:e2e         # Playwright E2E (requires npm run start:dev + db:reset:dev first)
 npm run build            # Both workspaces → dist/
 npm run lint             # Both workspaces
 npm run db:reset         # Drop/recreate schema + migrations + bootstrap
@@ -97,4 +98,6 @@ Every code change, no exceptions:
 2. **`docs/API_REFERENCE.md`** — update the relevant section if request/response shape, behaviour, or error codes changed.
 3. **`openapi/openapi.yaml`** — add/update for every new or modified HTTP endpoint. No route ships without an OpenAPI entry.
 4. **Tests** — run `npm run test -w backend` after every backend change. Do not commit if tests fail. Add tests for new parser profiles, service logic, and API behaviour changes.
+   - **Frontend unit tests** (`npm run test -w frontend`) — Vitest, tests pure logic functions (cache, ledger query builders, payslip chart models, parser profile detection). Add tests here for new pure functions.
+   - **E2E tests** (`npm run test:e2e`) — Playwright, tests real browser flows (auth, navigation, DOM). Add new E2E specs in `e2e/` for new pages or critical user flows. Requires `npm run start:dev` + `npm run db:reset:dev`. Uses `e2e@example.com` / `ChangeMe123!` as the test user (seeded in bootstrap, `force_password_change=false`). Navigate via sidebar clicks — never `page.goto()` for routes proxied by Vite (see `vite.config.ts` proxy list).
 5. **Commits** — one commit per logical concern. Use `feat(scope/ID):` / `fix(scope/ID):` convention. Doc changes (CHANGE_HISTORY + API_REFERENCE + openapi) go in the **same commit** as the code, never separate.
