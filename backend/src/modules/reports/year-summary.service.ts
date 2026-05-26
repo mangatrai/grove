@@ -4,6 +4,7 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
+import { DEFAULT_CATEGORY_IDS } from "../category/category-ids.js";
 import type {
   YearSummaryCategory,
   YearSummaryData,
@@ -25,6 +26,18 @@ const MONTH_NAMES = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+// Bump when query logic changes to bust stale cache entries automatically.
+const CACHE_VERSION = "2";
+
+// Inter-account transfers are excluded from all income/spending aggregates so
+// they don't inflate reported income (transfers-in) or spending (transfers-out).
+const TRANSFER_CATEGORY_IDS: string[] = [
+  DEFAULT_CATEGORY_IDS.transfers,
+  DEFAULT_CATEGORY_IDS.transfersIn,
+  DEFAULT_CATEGORY_IDS.transfersOut,
+  DEFAULT_CATEGORY_IDS.transfersCashWithdrawal,
+];
+
 // ── Income / spending ────────────────────────────────────────────────────────
 
 async function computeIncomeSpending(householdId: string, year: number) {
@@ -37,8 +50,9 @@ async function computeIncomeSpending(householdId: string, year: number) {
      WHERE household_id = ?
        AND txn_date >= ? AND txn_date < ?
        AND status = 'posted'
+       AND NOT (category_id = ANY(?))
      GROUP BY EXTRACT(MONTH FROM txn_date::date)`,
-    householdId, `${year}-01-01`, `${year + 1}-01-01`,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, TRANSFER_CATEGORY_IDS,
   );
   const monthlyIncome = Array<number>(12).fill(0);
   const monthlySpending = Array<number>(12).fill(0);
@@ -66,10 +80,11 @@ async function computeTopCategories(
        AND tc.txn_date >= ? AND tc.txn_date < ?
        AND tc.amount < 0
        AND tc.status = 'posted'
+       AND NOT (tc.category_id = ANY(?))
      GROUP BY c.name
      ORDER BY SUM(-tc.amount) DESC
      LIMIT 5`,
-    householdId, `${year}-01-01`, `${year + 1}-01-01`,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, TRANSFER_CATEGORY_IDS,
   );
   return rows.map((r) => ({
     name: r.name ?? "Uncategorized",
@@ -133,9 +148,10 @@ async function computeLargestTransaction(householdId: string, year: number) {
        AND tc.txn_date >= ? AND tc.txn_date < ?
        AND tc.amount < 0
        AND tc.status = 'posted'
+       AND NOT (tc.category_id = ANY(?))
      ORDER BY tc.amount ASC
      LIMIT 1`,
-    householdId, `${year}-01-01`, `${year + 1}-01-01`,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, TRANSFER_CATEGORY_IDS,
   );
   if (!row) return null;
   return {
@@ -199,8 +215,9 @@ async function computePayslipData(householdId: string, year: number): Promise<Ye
   const totalGrossYtd = snapshots.reduce((a, s) => a + Number(s.gross_pay_ytd ?? 0), 0);
   const preTaxContributionsYtd = snapshots.reduce((a, s) => a + Number(s.pre_tax_deductions_ytd ?? 0), 0);
   const postTaxContributionsYtd = snapshots.reduce((a, s) => a + Number(s.post_tax_deductions_ytd ?? 0), 0);
-  const effectiveFederalRatePct = Number(snapshots[0].effective_federal_rate_ytd ?? 0);
-  const effectiveTotalRatePct = Number(snapshots[0].effective_total_tax_rate_ytd ?? 0);
+  // stored as decimal ratio (e.g. 0.283); multiply to get percentage points
+  const effectiveFederalRatePct = Number(snapshots[0].effective_federal_rate_ytd ?? 0) * 100;
+  const effectiveTotalRatePct = Number(snapshots[0].effective_total_tax_rate_ytd ?? 0) * 100;
 
   const snapshotIds = snapshots.map((s) => s.id);
 
@@ -273,7 +290,7 @@ async function computeDataHash(householdId: string, year: number): Promise<strin
       householdId, `${year}-01-01`, `${year + 1}-01-01`,
     ),
   ]);
-  const input = `${tc?.cnt}:${tc?.max_ts}:${abs?.cnt}:${abs?.max_ts}:${ps?.cnt}:${ps?.max_ts}`;
+  const input = `v${CACHE_VERSION}:${tc?.cnt}:${tc?.max_ts}:${abs?.cnt}:${abs?.max_ts}:${ps?.cnt}:${ps?.max_ts}`;
   return crypto.createHash("sha256").update(input).digest("hex");
 }
 

@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-224 (2026-05-25): Year-in-review — transfer contamination, effective-rate = 0, stale cache not busted
+
+- **Type:** Data quality / calculation bug
+- **Income/spending inflated by transfers:** `computeIncomeSpending`, `computeTopCategories`, `computeLargestTransaction` all included inter-account transfer transactions (category IDs: `transfersIn`, `transfersOut`, `transfersCashWithdrawal`, `transfers` parent). This inflated reported income from ~$136K actual to $1.1M and made "Transfers out" 70% of spending. Fixed by adding `AND NOT (category_id = ANY(?))` using `TRANSFER_CATEGORY_IDS` constant from `DEFAULT_CATEGORY_IDS`.
+- **effectiveFederalRatePct / effectiveTotalRatePct = 0:** `payslip_snapshot.effective_federal_rate_ytd` stores a decimal ratio (e.g. 0.283), but the service returned it as-is. Multiplied by 100 to convert to percentage points.
+- **Stale cache not busted on logic change:** Cache hash only covered data row counts and timestamps — logic fixes silently returned stale results. Added `CACHE_VERSION` constant; bumped to `"2"` and included in hash so any query-logic change busts existing cached reports.
+- **Files:** `backend/src/modules/reports/year-summary.service.ts`
+
 ## FIX-223 (2026-05-25): NetWorth page — overly aggressive cache invalidation on mutations + GDrive reconnect broken
 
 - **Type:** Bug fixes — two issues
