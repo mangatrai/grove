@@ -28,6 +28,7 @@ All items shipped in V4 release cycle with their reference IDs.
 | **F-8** | BY ACCOUNT card — full redesign pass | UX | **Account types:** credit_card, checking, savings only (loan/investment/retirement excluded). **Row cap:** top 3 credit cards + top 3 checking/savings = 6 max. **Metric:** transaction outflow (thisMonthOutflow) not balance. **Arrows:** MoM + YoY after R-2. R-3 color fix prerequisite. Shipped 2026-05-18. |
 | **I-10** | App-wide error logging audit | Reliability | Audit all Express async route handlers for missing try-catch (unhandled rejections crash process). Audit service functions for silent early returns. Audit external API calls (RealtyAPI, OpenAI, Google Drive, SMTP) for consistent logging: on start (info), on success (info), on failure (error). Audit scheduler functions. Add log line at every background operation start. Shipped 2026-05-24. |
 | **I-12** | "Other" category hyperlink on WHERE MONEY WENT card | UX | Top-5 spending categories are Anchor links to Transactions filtered by category. "Other" catch-all bucket was plain Text (non-clickable). Fix: carry constituent category IDs on Other slice, build URL with `categoryIds[]=...` params. Transactions page already supports multi-value filter. Shipped 2026-05-19. |
+| **I-8** | Playwright E2E test suite | Reliability/Test | 13 tests across 3 suites: auth flow (login/logout/guard), navigation/layout (sidebar links, page titles), transactions ledger (filter, date range, aggregate strip). Runs against live dev stack with `e2e@example.com` test user. `npm run test:e2e` command. Shipped 2026-05-25 (CR-226). |
 | **F-7** | AI Year-End "Wrapped" financial summary | Feature | Manual "Generate Year Summary" button (Jan–Mar visible). Surfaces: full-year income/spending/net savings/savings rate + YoY, top 5 categories, best/worst month, net worth change, investment growth, largest transaction, top merchant. LLM narrative (2–3 paragraphs). Email delivery via F-1 notification. Shipped 2026-05-24. |
 | **F-9** | Recurring payments — display name field in tag modal | UX | `RecurringTagModal` has no `displayName` input, so confirmed rules always show raw merchantKey. Add optional "Display name" TextInput. Frontend-only, no backend change. Both TransactionsPage and SettingsPage pass `displayName` in POST body. Shipped 2026-05-22. |
 | **F-10** | Cash account — auto-update balance snapshot on manual transaction | Feature | When manual transaction recorded against cash account, auto-compute and upsert balance snapshot. `POST /ledger` (create): `snapshot + amount`. `DELETE` (delete): `snapshot - amount`. `PATCH` (edit): `snapshot - old + new`. No schema migration (manual-source snapshots already exist). Cash-only scope. Shipped 2026-05-22. |
@@ -96,7 +97,6 @@ Features and improvements in active design/planning phase for V4+.
 
 | ID | Title | Status | Description | Priority |
 |---|---|---|---|---|
-| **I-8** | Playwright end-to-end test suite | Deferred (post-V4) | Time-boxed spike to evaluate Playwright (3–5 days). Auth flow, import session, ledger, net worth. Spike decision: Docker reuse, local-only vs CI, test data isolation. V3 found UI bugs (subcategory picker, charts, delta cards) missed by backend tests. | P3 |
 | **I-2** | Async payslip upload + import parse/canonicalize | Deferred | Apply 202/poll pattern to long-running ops: `POST /payslips/upload` (OpenAI risk), `POST /imports/sessions/:id/parse`, `POST /imports/sessions/:id/canonicalize`. Export/restore already async + proven. | P3 |
 | **I-7** | Recurring payments — phases 4+ | Deferred | Annual subscription detection (CV + 2-month gate misses annuals). Upcoming bill prediction. Per-transaction exclusion from recurring pattern. Enhancement to shipped phases 1–3. | P3 |
 | **T-1** | Documentation consolidation | ✅ SHIPPED (DOC-217, 2026-05-25) | Reduced 40+ markdown files to 5 canonical docs: `USER_GUIDE.md` (enhanced), `ADMIN_GUIDE.md` (new — consolidates RUNBOOK, PRODUCTION_SETUP, HOSTING_OPTIONS, DATABASE_ARCHITECTURE, ENVIRONMENT_VARIABLES, ARCHITECTURE, CACHING, IMPORT_CLASSIFICATION, EMAIL_INFRASTRUCTURE, OCI_DEPLOYMENT), `BACKLOG.md` (new Jira-style board — consolidates all backlog files, V3/V4 history), `PRD_AND_CRS.md` (new — consolidates all archive docs), `CHANGE_HISTORY.md` (unchanged). API docs and openapi.yaml untouched. README and CLAUDE.md updated. | P3 |
@@ -117,6 +117,7 @@ Items explicitly deferred with decision reasoning.
 | **FR-15** | Household staff module (timesheets, expenses, payments) | V5/V6 candidate | Full timesheet + expense + payment for household employees (nanny, cleaner, au pair). `staff` RBAC role. Admin review, approval, payment recording with ledger posting. No code yet. Target delivery ~Q3/Q4 2026. See PRD_AND_CRS.md §3.10. | Schema (designed): `staff_profile`, `timesheet_entry`, `timesheet_period`, `staff_expense`, `staff_payment`. |
 | **PS-5 Phase 2** | Tax filing profile — full computation | ❌ NOT DOING (decision 2026-05-24) | Computing "are you under-withheld?" requires household total income, deductions, credits — tax software territory. Not every payslip has W-4 data (Deloitte doesn't); auto-population partial. Phase 1 (stored effective_federal_rate_ytd) is the right stopping point. Year-end Wrapped (F-7) can surface rough "your federal withholding was X% of gross" flag. | — |
 | **I-11** | PWA file-input hang — File System Access API fallback | Deferred (post-V4) | Chrome installed-app (PWA) mode blocks `<input type="file">.click()`. Safari PWA works correctly. File System Access API (`window.showOpenFilePicker`) works in PWA mode as fallback. Affected flows: import file upload, backup/restore upload, category rules CSV import. Revisit if Safari PWA adoption increases or Chrome PWA adoption forces the issue. | — |
+| **ESPP-1** | ESPP equity tracker | V5 | IBM ESPP purchase, transfer, and sale tracking for tax and P&L visibility. One PDF + one CSV uploaded together per transfer event. Two DB tables: `espp_batch` (purchase date, shares granted, FMV/share, cost basis/share, discount/share, shares_transferred) + `espp_sale` (time-series: batch_id, sale_date, shares_sold, sale_price). Batches upserted by allocation date so CSV rows from multiple periods update the right record. Multi-batch sale form (one date, N rows). Year summary strip: shares purchased/transferred/outstanding/sold, total invested, discount YTD, proceeds YTD, realized gain/loss, ordinary income YTD, cap gain/loss YTD. Tax: disqualifying disposition — ordinary income = discount × shares sold; cap gain = (sale price − FMV) × shares sold. Full design spec in Feature Backlog Detail below. | — |
 
 ---
 
@@ -327,6 +328,65 @@ Full design notes for major systems from source files.
 - Parser auto-detection (CSV headers, PDF text, account history)
 - Remember last-used parser per account
 
+### ESPP Equity Tracker (ESPP-1, V5)
+
+**Status:** Deferred V5. Design + spec complete (2026-05-26); prototype in `concept/espp/`. No code yet.
+
+**Context:** IBM ESPP — each payslip deduction = one purchase event (1:1 payslip → batch). Stocks land in EquatePlus (Computershare). User transfers to broker immediately. Selling before 2 years = disqualifying disposition.
+
+**Tax concept definitions (these three are distinct):**
+
+| Metric | Formula | When it triggers |
+|--------|---------|-----------------|
+| Discount Received | `discount/share x shares_purchased` | At purchase. IBM reports this on payslip "ESPP Discount" field. |
+| Ordinary Income | `discount/share x shares_sold` | Only on sale. Zero if holding. Less than Discount Received if any shares still held. |
+| Capital Gain/Loss | `(sale_price - FMV) x shares_sold` | Only on sale. Positive when sale price exceeds FMV at purchase. |
+
+Ordinary income does not equal discount received unless 100% of shares are sold. Discount Received YTD tile uses `SUM(espp_discount_payslip)` across batches in the year — IBM's authoritative number, not a formula.
+
+**Data sources per batch:**
+- **PDF (EquatePlus plan detail):** purchase date, shares allocated, Purchase FMV/share, cost basis/share. Parse via text/regex — no OpenAI needed. Fields consistently labelled: "Cost basis $X", "Purchase FMV $X", "Allocated N".
+- **CSV (Allocations export):** one row per allocation date, shares transferred to broker. One CSV can span multiple purchase dates; system matches rows to batches by allocation date.
+- Both files are **optional individually** — at least one required to submit. PDF-only creates the batch record with outstanding = all shares. CSV-only updates `shares_transferred` on existing batches by date. Both together = full upsert.
+
+**Payslip linkage:** At import time, query payslip by `pay_date = purchase_date OR pay_period_end = purchase_date`, filter `pli.name ILIKE '%ESPP%'`. Store three values on `espp_batch` directly — no cross-table join at read time:
+- `espp_discount_payslip` from `name = 'ESPP Discount'`, `amount_current` (section: `other_information`)
+- `espp_salary_deduction` from `name = 'ESPP (Stock Salary)'`, `amount_current` (section: `post_tax_deductions`)
+- `espp_other_deduction` from `name = 'ESPP (Stock Other)'`, `amount_current` (section: `post_tax_deductions`)
+
+**DB schema:**
+
+`espp_batch` — one row per purchase date, upserted on import:
+```
+id, purchase_date (unique), shares_granted, fmv_per_share, cost_basis_per_share,
+discount_per_share (stored: fmv - cost_basis), shares_transferred,
+payslip_id (FK nullable), espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
+created_at, updated_at
+```
+
+`espp_sale` — time-series, one row per batch-line in a sale:
+```
+id, batch_id (FK espp_batch), sale_date, shares_sold, sale_price_per_share,
+proceeds (shares_sold x sale_price),
+ordinary_income (discount_per_share x shares_sold),
+cap_gain_loss ((sale_price - fmv_per_share) x shares_sold),
+created_at
+```
+
+Derived (never stored): `outstanding = shares_granted - shares_transferred`, `held_at_broker = shares_transferred - SUM(shares_sold)`
+
+**UI — ESPP Tracker page** (Forest Studio design system; prototype in `concept/espp/`):
+
+*Year selector* — drives both the summary strip and the batch table. Changing year filters everything on the page.
+
+*Section 1 — Year summary strip:* 5-col x 2-row stat tile grid. Row 1: Shares Purchased YTD | Transferred to Broker | Outstanding (EquatePlus) | Shares Sold YTD | Total Invested. Row 2: Discount Received YTD (gold, source: payslip SUM) | Sale Proceeds YTD | Realized Gain/Loss (green/red) | Ordinary Income YTD | Capital Gain/Loss YTD (green/red).
+
+*Section 2 — Batch table:* filtered by selected year. Columns: Purchase Date | Shares | FMV/sh | Cost/sh | Disc/sh (gold) | Transferred | Outstanding | Sold | Held (forest-green when > 0) | Status badge (All Held / Partially Sold / Fully Sold). Expandable row shows sale history: Sale Date | Shares Sold | Sale Price | Proceeds | Ordinary Income (gold) | Cap Gain/Loss (green/red).
+
+*Actions (top-right):*
+- **Import** — two drop zones side by side (PDF left, CSV right), both optional individually, at least one required. On submit: PDF creates/upserts batch; CSV updates `shares_transferred` on matched batches; payslip lookup runs immediately to store ESPP line items.
+- **Record Sale** — date picker + multi-row grid. Each row: `[Batch dropdown (date + shares available)] [Qty] [Price/share] [Proceeds] [OI] [Cap Gain/Loss] [x]`. Last three columns are **live-calculated** as user types — Proceeds = qty x price, OI = discount_per_share x qty, Cap Gain = (price - fmv_per_share) x qty. Modal grows horizontally to show all 7 columns. "+ Add Row" adds another batch-line on the same sale date. One submit creates N `espp_sale` rows.
+
 ### Security Hardening
 
 **Status:** SEC-153/154 shipped (2026-05-06). I-4/I-6 shipped (2026-05-12). B-7 shipped (2026-05-09).
@@ -351,7 +411,7 @@ Full design notes for major systems from source files.
 
 | Version | Release | Items Shipped | Type |
 |---|---|---|---|
-| **V4** | 2026-05-15–2026-05-25 | R-1/R-2/R-3 + F-1/F-2/F-3/F-4/F-5/F-6/F-6b/F-7/F-8/F-9/F-10 + TM-1/TM-2/TM-4 + PS-2b/PS-5-Phase-1 + I-10/I-12 | Quick fixes, high-value features, performance, payslip pass, error logging |
+| **V4** | 2026-05-15–2026-05-25 | R-1/R-2/R-3 + F-1/F-2/F-3/F-4/F-5/F-6/F-6b/F-7/F-8/F-9/F-10 + TM-1/TM-2/TM-4 + PS-2b/PS-5-Phase-1 + I-8/I-10/I-12 | Quick fixes, high-value features, performance, payslip pass, error logging, Playwright E2E |
 | **V3** | 2026-04-15–2026-05-14 | B-1–8 + F-1–11 + I-1–6 + D-2 + UX-166/167/174/175/176 | Major feature release: infrastructure, account enrichment, real estate, reporting, mobile UX baseline |
 | **V2** | Pre-2026-04-15 | RBAC (CR-109), recurring phases 1–3 (CR-121/122/123), security (SEC-153/154) | Foundation: roles, recurring detection, pre-release hardening |
 | **V1** | Pre-2026-04 | Basic ledger, import, dashboard, payslips, net worth | Core app |
@@ -364,7 +424,7 @@ Full design notes for major systems from source files.
 All P1 and P2 items shipped. V4 feature set locked 2026-05-15; final item (F-1 notification system) shipped 2026-05-25. Next planning cycle: V5 priorities and groom deferred items.
 
 ### V5 Candidate Items
-- **High value:** I-8 Playwright E2E, PT-1 property tax protest assistant (needs grooming), data archival (D-1)
+- **High value:** PT-1 property tax protest assistant (needs grooming), data archival (D-1), ESPP-1 equity tracker
 - **Foundation:** Multi-household (D-4) for future multi-user deployments
 - **Enhancement:** Recurring phase 4+, async import pipeline
 
@@ -377,4 +437,4 @@ All P1 and P2 items shipped. V4 feature set locked 2026-05-15; final item (F-1 n
 
 ---
 
-*Last updated: 2026-05-25. V4 complete. F-1 shipped (CR-216) — notification system fully live. All P1/P2 items shipped; V4 feature set locked. Next: V5 planning and backlog grooming.*
+*Last updated: 2026-05-26. V4 complete. I-8 Playwright E2E marked Shipped V4 (CR-226, 13 tests, 3 suites). All P1/P2/P3 V4 items shipped; V4 feature set fully locked. ESPP-1 added as V5 candidate (IBM ESPP purchase/transfer/sale tracker, full design spec captured). Next: V5 planning and backlog grooming.*
