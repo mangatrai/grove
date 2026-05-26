@@ -38,11 +38,10 @@ Self-hosted household finance app — import bank statements, categorize spendin
 | Audience | Start here |
 |----------|------------|
 | **Using the app** | [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) |
-| **Developer setup (from zero)** | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) |
-| **Production / hosting / DB policy** | [`docs/PRODUCTION_SETUP.md`](docs/PRODUCTION_SETUP.md) |
-| **Environment variables** | [`docs/ENVIRONMENT_VARIABLES.md`](docs/ENVIRONMENT_VARIABLES.md) |
-| **HTTP API** | [`openapi/openapi.yaml`](openapi/openapi.yaml) · [`docs/API_INDEX.md`](docs/API_INDEX.md) |
-| **System design** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| **Setup, deployment & operations** | [`docs/ADMIN_GUIDE.md`](docs/ADMIN_GUIDE.md) |
+| **HTTP API** | [`openapi/openapi.yaml`](openapi/openapi.yaml) · [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) |
+| **Product requirements & decisions** | [`docs/PRD_AND_CRS.md`](docs/PRD_AND_CRS.md) |
+| **Backlog & roadmap** | [`docs/BACKLOG.md`](docs/BACKLOG.md) |
 | **Change log** | [`docs/CHANGE_HISTORY.md`](docs/CHANGE_HISTORY.md) |
 
 ---
@@ -85,7 +84,7 @@ npm run lint    # ESLint across both workspaces
 npm run build   # production build (backend + frontend)
 ```
 
-Backend tests run against a real Postgres instance (not mocked). See [`docs/RUNBOOK.md`](docs/RUNBOOK.md) for test database setup.
+Backend tests run against a real Postgres instance (not mocked). See [`docs/ADMIN_GUIDE.md`](docs/ADMIN_GUIDE.md) §2 for test database setup.
 
 ---
 

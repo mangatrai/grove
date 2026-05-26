@@ -72,12 +72,29 @@ Apply this whenever the investigation would require reading more than 2–3 file
 
 ---
 
+## IMPORTANT: Documentation Structure (6 canonical docs — do not create new files)
+
+All documentation lives in exactly these 6 files. When adding or updating docs, route content to the right file:
+
+| File | What goes here |
+|------|----------------|
+| `docs/USER_GUIDE.md` | How to use the app — screens, workflows, UI flows for household members |
+| `docs/ADMIN_GUIDE.md` | How to deploy, configure, and operate — env vars, hosting, DB, caching, email, troubleshooting |
+| `docs/BACKLOG.md` | Feature requests, planned work, bugs, deferred/dropped items (Jira-style board with status) |
+| `docs/PRD_AND_CRS.md` | Product requirements, architectural decisions, design rationale, competitive notes |
+| `docs/API_REFERENCE.md` | HTTP endpoint documentation — request/response schemas, errors, query params |
+| `docs/CHANGE_HISTORY.md` | Append-only log of every shipped change (CR-/FIX-/UX-/DB-/DOC- entries) |
+
+**Rule:** Never create a new standalone `.md` file in `docs/`. Route content to the right file above.
+
+---
+
 ## IMPORTANT: Mandatory Per-Change Checklist
 
 Every code change, no exceptions:
 
 1. **`docs/CHANGE_HISTORY.md`** — add an entry (CR-/FIX-/UX-/DB- prefix). What changed, why, which files.
-2. **`docs/API_*.md`** — update if request/response shape, behaviour, or error codes changed.
+2. **`docs/API_REFERENCE.md`** — update the relevant section if request/response shape, behaviour, or error codes changed.
 3. **`openapi/openapi.yaml`** — add/update for every new or modified HTTP endpoint. No route ships without an OpenAPI entry.
 4. **Tests** — run `npm run test -w backend` after every backend change. Do not commit if tests fail. Add tests for new parser profiles, service logic, and API behaviour changes.
-5. **Commits** — one commit per logical concern. Use `feat(scope/ID):` / `fix(scope/ID):` convention. Doc changes (CHANGE_HISTORY + API docs + openapi) go in the **same commit** as the code, never separate.
+5. **Commits** — one commit per logical concern. Use `feat(scope/ID):` / `fix(scope/ID):` convention. Doc changes (CHANGE_HISTORY + API_REFERENCE + openapi) go in the **same commit** as the code, never separate.

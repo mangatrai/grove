@@ -10,11 +10,29 @@
 | **UX-** | Design / UX polish — layout, visuals, affordances (not always a bug). |
 | **FIX-** | Bug or correctness fix (backend, migrations, tests). |
 | **DB-** | Schema / migration / seed semantics worth remembering. |
-| **PRD-** | Documented deviation from historical PRD / backlog intent — *by design* after decision (archived: `docs/archive/FINANCE_APP_PRD.md`). |
+| **PRD-** | Documented deviation from historical PRD / backlog intent — *by design* after decision (see `docs/PRD_AND_CRS.md`). |
 
-**GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/household-finance-app`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
+**GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
 Entries are **newest-first** within each calendar period. IDs are stable; do not renumber.
+
+---
+
+## DOC-217 (2026-05-25): Documentation consolidation — 40+ files → 5 canonical docs (T-1)
+
+- **Type:** Maintenance / documentation restructure
+- **What:** Reduced the `docs/` directory from 40+ markdown files to 5 canonical documents. 25 source files were retired; their content was synthesized into the new structure.
+- **New documents:**
+  - `docs/USER_GUIDE.md` — enhanced end-user guide; covers every major screen, workflow, and key UI element; reads frontend React pages for accuracy
+  - `docs/ADMIN_GUIDE.md` — new operator guide; consolidates RUNBOOK.md, PRODUCTION_SETUP.md, HOSTING_OPTIONS_AND_HOME_LAB.md, OCI_DEPLOYMENT.md, ENVIRONMENT_VARIABLES.md, DATABASE_ARCHITECTURE.md, ARCHITECTURE.md, CACHING.md, IMPORT_CLASSIFICATION.md, EMAIL_INFRASTRUCTURE.md
+  - `docs/BACKLOG.md` — Jira/Trello-style board; consolidates V4_PLAN.md, V4_BACKLOG.md, V3_PLAN.md, V3_BACKLOG.md, EXPORT_IMPORT_BACKLOG.md, IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md, MOBILE_UX_BACKLOG.md, MULTI_HOUSEHOLD_BACKLOG.md, RECURRING_PAYMENTS_BACKLOG.md, SECURITY_HARDENING_BACKLOG.md; includes shipped V3/V4, active items, deferred, dropped
+  - `docs/PRD_AND_CRS.md` — product requirements + architecture decisions; consolidates archive/FINANCE_APP_PRD.md, archive/CATEGORIZATION_ROADMAP.md, archive/DECISIONS_LOG.md, archive/PFM_COMPETITIVE_UX_REFERENCE.md, archive/PROJECT_CONTEXT.md, PAYSLIP_V1.md
+  - `docs/CHANGE_HISTORY.md` — kept as-is; untouched
+- **Untouched:** All `docs/API_*.md` files and `openapi/openapi.yaml`
+- **README.md:** Documentation table updated to point to the 5 new canonical docs
+- **CHANGE_HISTORY.md:** PRD-prefix note updated (archive/FINANCE_APP_PRD.md retired; PRD_AND_CRS.md is the new canonical PRD)
+- **Files created:** `docs/ADMIN_GUIDE.md`, `docs/BACKLOG.md`, `docs/PRD_AND_CRS.md` (new); `docs/USER_GUIDE.md` (rewritten)
+- **Files deleted:** 21 files in `docs/`, 5 files in `docs/archive/` (archive/ is now empty)
 
 ---
 

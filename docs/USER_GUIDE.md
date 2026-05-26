@@ -1,139 +1,741 @@
-# User guide
+# Grove — User Guide
 
-How to use the Household Finance app day to day. For installing the software on a machine or server, see [`RUNBOOK.md`](RUNBOOK.md). For deployment and database policy, see [`PRODUCTION_SETUP.md`](PRODUCTION_SETUP.md).
+Welcome to Grove, a self-hosted household finance app designed for families and small groups. This guide covers every major screen and workflow in the application. For installation and server management, see [ADMIN_GUIDE.md](ADMIN_GUIDE.md). For API documentation, see [API_REFERENCE.md](API_REFERENCE.md).
 
-## Sign in
+---
 
-Use the email and password for your account. On a fresh install from the default seed, the first user is created by the database seed (see [`RUNBOOK.md`](RUNBOOK.md) “First sign-in” for the default email and password). **Change the default password** as soon as you are set up.
+## Getting Started
 
-After sign-in you land on **Home**, with cash summaries and shortcuts into the ledger.
+### First Login
 
-## Net worth
+Grove runs on a single household. On a fresh installation, a default account is created during setup — check [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §2 for the initial email and temporary password.
 
-Open **Net worth** from the sidebar for **assets vs liabilities** (non–payslip accounts).
+After your first successful login, you will land on the **Dashboard** (home page). Change your default password immediately.
 
-- **Trend:** choose a **period** (last 3 / 6 / 12 months, year-to-date, or custom dates) and an **interval** (month-end, weekly, or daily samples). Each chart point uses the same balance rules as the table below: **manual balance** first, then a balance saved from an **import**, then a **statement** hint when nothing else exists. The chart shows total assets, liabilities, and net; you can **overlay** a few accounts on the same chart. The **period summary** table lists the **first** and **last** sample dates on the chart (same endpoints as the line); **Ledger** opens **Transactions** for that calendar day only. **Belongs to** optionally limits the sheet to household-owned accounts or one member’s accounts.
-- **Balance sheet:** one table for all accounts. Account type classification: **assets** = checking, savings, investment, **retirement** (401K/IRA/pension); **liabilities** = credit card, loan, mortgage. Accounts of other types (e.g. payslip) are excluded. **Liability balances** are stored as **positive magnitudes** (what you owe); net worth = total assets − total liabilities. When you import a statement (OFX, BoA CSV/PDF, Marcus PDF, Wealthfront PDF) the **statement ending balance** is automatically saved as an import snapshot — it appears on the balance sheet immediately without manual entry. **Table as of** picks the snapshot date; use **Edit** on a row to post a manual balance (or **Bulk set as-of** to re-date manual snapshots). Account names link to **Transactions** for the balance as-of day; when a balance came from an import, an extra link opens transactions for that **import file**.
-- **Retry load** appears only if the trend or balance sheet failed to load; it refetches both.
+#### Password Reset
 
-Details and API behavior: [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md).
+If you forget your password, click **Forgot password?** on the login page. An administrator can send you a password reset link, or they can use **Settings > Household > Reset password** to generate a temporary password that you must change on your next login.
 
-## Home (dashboard)
+### Navigation Overview
 
-The dashboard gives you a full household snapshot in one view.
+The app has a sidebar on the left (collapsible on mobile) with links to major sections:
 
-- **Net worth widget** — shows current total assets, liabilities, and net worth pulled from the balance sheet, with a link to the full Net Worth page. Only appears once you have at least one account with a balance.
-- **Budget progress bar** — shows this calendar month's spend vs budget (color-coded: green → amber at 85% → red when over). Only appears when a budget exists for the current month. Links to the Budget page.
-- **Cash KPIs** — inflows, outflows, net, safe-to-spend, and savings rate for the selected period, with previous-period and year-over-year comparison chips. Use the period preset to switch between last 30 days, calendar month, YTD, etc.
-- **Safe to spend / savings target** — set a monthly savings target with the slider; safe-to-spend updates live (prorated by days in the selected period). Click **Save target** to persist it.
-- **Uncategorized / review alerts** — if there are open resolution items (unknown categories, transfers needing pairing, or possible duplicates), the dashboard shows a line for each type with a direct "Review" link.
-- **Outflows by category (pie)** — donut chart for the selected period. Click a slice to open Transactions filtered to that category.
-- **Top inflow sources (table)** — ranked inflow totals by category for the period, with View links.
-- **By category (table)** — full parent-level rollup with inflows / outflows / net / transaction count and comparison deltas.
-- **Stacked monthly outflows bar** and **monthly net bar** — always show the trailing 6 calendar months regardless of the period preset above (labeled accordingly).
-- **By account (table)** — per-account breakdown with View links.
-- **AI financial health card** — on-demand analysis of your household (or personal scope for members). Use **Generate analysis** / **Refresh analysis**, then wait for the async job to complete. The card shows a short rationale and expandable detail sections (what is working, concerns, spending patterns, investment gaps, and next steps).
-- **Scope filters** — Account and Belongs-to filters at the top apply to all KPIs and charts on the page.
+- **Home** — Cash flow dashboard and net worth snapshot
+- **Transactions** — Ledger, search, bulk edit, and resolution queue
+- **Imports** — Upload bank statements and payslips
+- **Net Worth** — Balance sheet, asset/liability tracking, historical trends
+- **Budget** — Set monthly spending goals and track progress
+- **Payslips** — View, upload, and manage payslip records
+- **Categories** — Define custom categories and rules for auto-classification
+- **Settings** — Household profile, member roster, accounts, notifications, backups
 
-## Settings
+Click the account menu in the top-right corner to access **Settings**, change password, or sign out.
 
-Open **Account → Settings** from the top bar.
+### Household vs Individual Views
 
-- **Profile:** name, avatar, visibility, and related preferences.
-- **Password:** change your own password (existing sessions are invalidated after a successful change). Owners and admins can also **reset a member's password** from the Household tab — useful when a member forgets theirs.
-- **Household / finances:** monthly savings target, household member roster, income and employer setup (used for payslips), and other household-level options.
-- **Connected accounts:** add or edit **financial accounts** (bank, card, etc.). Pick an institution label, parser profile where applicable, account mask (e.g. last four digits), and **belongs-to** (household vs a specific member) so imports and reports attribute activity correctly.
-- **Custom institutions:** you can add household-specific institution names that complement the built-in list.
-- **AI Insights history:** historical generated analyses live in the **Insights** tab. Use this for trend checks and to compare newer advice vs prior recommendations.
-- **Household backup (.hfb):** request an **export** of the household database slice (async job, then download the **`.hfb`** bundle). **Restore from backup** uploads that file and replaces household data (**destructive**); after a successful restore you are signed out because existing login tokens are invalidated. Prefer export → restore on a **fresh** instance or when you intentionally want to replace everything in the household. Operator details: [`RUNBOOK.md`](RUNBOOK.md) §11; API: [`API_EXPORTS.md`](API_EXPORTS.md).
+Grove is built for a household of multiple members (a spouse, children, roommates, etc.). Each person can have:
 
-### AI analysis privacy notes
+- A **household member profile** (used for attribution on accounts, transactions, and payslips).
+- Optionally, a **login account** (so they can sign in and see personal data).
 
-- Insight prompts use anonymized aggregates and profile fields only.
-- The model input excludes names, emails, account numbers, and raw transaction descriptions.
-- Scope is role-based: owner/admin = household analysis, member = personal analysis.
+When you add a bank account or assign a transaction, you can tag it as belonging to the household as a whole, or to a specific person. Reports (Transactions, Net Worth, Payslips) can then be filtered by person.
 
-### Household members
+For a single-user household, everything stays tagged as "household" and filters remain invisible.
 
-The **Household** tab lets you maintain a roster of the people who live in and share the household. Each member has a **name**, optional **email**, a **role** (`head` or `member`), and a **relationship** (`self`, `spouse`, `child`, `dependent`, `other`).
+---
 
-**Why this matters:** member profiles drive the **belongs-to** attribution throughout the app. When you add a bank account, a transaction, or a payslip, you can assign it to a specific person rather than the household as a whole. Reports (Transactions, Net Worth, Payslips) can then be filtered by person to show each member's slice.
+## Dashboard (Home)
 
-**Adding a member:** fill in at least a first name, choose a role and relationship, and click **Save household**. Click **Add another row** to stage multiple new members before saving. Each saved member row shows a trash icon — click it to remove that member (a confirmation dialog appears; removal is permanent).
+The Dashboard is your household snapshot in one view. It updates in real time and caches data to reduce refresh latency.
 
-**Removing a member:** uses the trash icon at the right of each saved row. A confirmation dialog appears; removal is permanent. If the member has a login account, check **Also delete their login account** to remove it at the same time.
+### Overview Cards
 
-**Login accounts:** Each saved member row shows whether they have a login account ("✓ Has login account"). From this row, owners and admins can:
-- **Create login** — creates a login account with a default temporary password; the member must change it on first login.
-- **Reset password** — generates a new temporary password, immediately invalidates the member's current session, and sets `force_password_change`. Use this when a member forgets their password. Share the temporary password with them out-of-band; they will be prompted to change it on next login. This is also what the **Forgot password?** link on the login page directs users to request.
+**Cash flow (top):** Shows the current month's net cash movement (inflows minus outflows). The display includes:
 
-**Roles:**
-- `head` — household head; has ownership semantics over accounts and income attributed to them.
-- `member` — any other household member.
+- Large net figure (green if positive, red if negative).
+- Inflow and outflow totals.
+- Savings rate or spending alert (e.g., "Saved 23% of income this month" or "Spending exceeded income").
+- Number of posted transactions for the month.
 
-> **Note on login accounts vs household members:** These are separate concepts. A household _member_ is a person profile used for attribution. A _login user_ is an account that can authenticate to the app. Login accounts are managed from **Settings → Household** — no database access required.
+**Refresh:** Click the refresh icon (top-right of the cash flow card) to reload dashboard data. Hover over the icon to see when data was last updated.
 
-## Importing statements
+**Month selector:** Use the left/right arrows to browse previous months. You cannot navigate to future months; the current calendar month is always the rightmost option.
 
-1. Click **New import** in the header.
-2. Create or continue an **import session**, then **upload** your files (CSV, PDF, etc., depending on supported profiles).
-3. For each file, **bind** it to the correct **financial account** and owner if prompted.
-4. Run **parse**, review any parser warnings, then **canonicalize** to write rows into the ledger—or use **Run import** in the workspace to run **parse** and then **canonicalize** in one go.
+**Budget progress:** If a budget exists for the current month, a progress bar shows total spent vs budgeted. The bar is green below 80%, amber at 80-99%, and red when over budget. Click **Manage** to edit the budget.
 
-### What each step does
+### Alert Badges
 
-- **Parse** reads the staged files and inserts **parsed rows** into the database (`transaction_raw`). It does not compare against your existing ledger yet.
-- **Canonicalize** maps those parsed rows into **ledger transactions** (`transaction_canonical`): it applies **fingerprint dedupe**, classifies categories, and creates **Needs review** items as needed. Exact fingerprint duplicates from a previous import appear in Needs Review with the label **"Exact duplicate"** so you can decide to keep or trash them — nothing is silently dropped. Near-duplicates (same amount, different description) are flagged similarly. Unknown categories surface as uncategorized items to resolve.
+When open resolution items exist, badges appear below the cash flow card:
 
-**Important:** Ledger rows are created **as soon as canonicalize succeeds**. Finalizing the import session is about **closing that session** (no more uploads, workflow complete)—it is **not** a separate “commit to ledger” step. While the session is still in **review**, **Undo import** can remove the ledger rows that came from this session’s parsed lines and clear related review items, while keeping the parsed rows so you can canonicalize again.
+- **Uncategorized** — transactions with unknown categories.
+- **Transfers to pair** — transactions flagged as transfer-like (matching amount, date, opposite sign) but not yet confirmed as a pair.
+- **Possible duplicates** — exact duplicate rows from separate import sessions.
 
-**Sessions:** While a session is in **review**, you fix issues and apply categories; after you are done, start a **new import session** for the next batch rather than reusing a finalized workflow in ways the UI discourages.
+Click any badge to jump directly to the Transactions page with that filter applied.
 
-**Staging files:** Uploaded bytes live under `data/imports/<sessionId>/` during processing. After a successful canonicalize, the app normally **removes** those staged files. Keep your own copies of originals if you need long-term archives outside the app.
+### Spending Breakdown
+
+**Where money went (card):** A donut chart and table showing spending by category for the month. Click a category name or slice to open Transactions filtered to that category.
+
+**By Account (card):** Lists the top 6 accounts (3 credit cards, 3 checking/savings) by outflow this month, with comparison arrows:
+
+- First arrow = vs. last month (↑ spending up, ↓ spending down, → similar).
+- Second arrow = vs. same month last year.
+
+Hovering over an arrow shows the comparison period. Click the account name to jump to Transactions for that account.
+
+### Net Worth Card
+
+Displays current total assets, liabilities, and net worth (pulled from the Balance Sheet page). Shows a mini 6-month trend line. Click **View details →** to open the full Net Worth page.
+
+### Recurring Payments Card
+
+Grove detects recurring charges by analyzing transaction patterns over 6+ months:
+
+- **Confirmed** recurring items appear first (marked with ●).
+- **Suggested** items appear second (marked with ○); you can dismiss individual suggestions.
+
+The card shows the total estimated monthly recurring spend and a count of distinct recurring charges. Click **+ N more** to expand the full list.
+
+### Financial Health Card
+
+Shows an AI-generated analysis of your household's financial situation (generated on-demand):
+
+- Click **Generate analysis** to trigger an async job.
+- On first run, generation takes ~30 seconds; subsequent visits are instant (cached).
+- The card displays a short summary and expandable detail sections: what's working, concerns, spending patterns, investment gaps, and next steps.
+- Analysis is scoped to the household by default; members see personal-only analysis.
+
+### Period and Scope Filters
+
+At the top of the dashboard:
+
+- **Month selector** — browse months (forward/back arrows).
+- **Refresh button** — reload all dashboard data.
+- **Year-in-Review (seasonal)** — In February and March, a button appears to generate a personalized annual summary (see [Year-in-Review](#year-in-review) section below).
+
+### 6-Month Trend Chart
+
+Scrolling to the bottom of the dashboard, a 6-month stacked bar chart shows income (inflows) and spending (outflows) for the trailing 6 calendar months. This chart is independent of the month selector above.
+
+---
 
 ## Transactions
 
-- **All:** browse and search posted (and other) ledger rows. Assign or change **categories**, adjust **belongs-to**, and use row actions as needed.
-- **Needs review:** rows that need attention — **unknown category**, **exact duplicate** (same transaction from a previous import), **near-duplicate** (same amount, similar description), **transfer ambiguity**, **reconciliation hints**, etc. Expand a row to see why it's flagged; use **Resolve** (keep / acknowledge), **Trash** (discard), or **bulk** actions on a selection. Resolving an exact duplicate promotes it to **posted**; trashing removes it from reports.
+The **Transactions** page is where you browse, search, filter, categorize, and edit the ledger.
 
-**Review queue statuses (bulk bar):** **In review** marks selected resolution items as *in progress*; **Resolve** marks them *resolved* (cleared from the open queue); **Reopen** sends them back to *open*. Applying a **category** updates the underlying transaction where the item type allows it (for example unknown-category items). The ledger row already exists; the queue tracks what still needs a human decision.
+### Tabs and Filters
 
-**Resolve all by merchant name** — when you have many unknown-category items for the same merchant (e.g. 40 rows for "WHOLEFDS"), click **"Resolve all by merchant name…"** in the Needs Review tab to expand an inline form. Type the merchant name or fragment; the app shows a live count of how many items match. Pick a category and click **Apply to all** — all matching open unknown-category items are categorized and resolved in one step. No row selection required.
+**All:** The complete ledger of posted transactions.
 
-**Rule learning** — after you change a transaction's category in the ledger table, the app offers to **create a classification rule** from that transaction's description pattern (owner/admin only). Accepting creates a `contains` rule so future imports with similar descriptions are classified automatically, without visiting Category Rules. Tap "Not now" to skip — the category change is saved either way.
+**Needs Review:** Transactions and review items awaiting human decisions:
+- Unknown categories
+- Exact duplicates (marked "Exact duplicate" — same row imported twice)
+- Near-duplicates (same amount, similar description; transaction may not exist yet)
+- Transfer ambiguity (two transactions that look paired but not confirmed)
+- Reconciliation hints (balance mismatches)
 
-**Search:** Use the search field where provided; merchant and memo text may be indexed for full-text search depending on setup.
+Expand any row to see why it's flagged.
 
-### Ledger edits
+### Search and Filter Controls
 
-For **posted** transactions you can:
+**Search field** — Free-text search on merchant/description.
 
-- **Edit memo** — hover over any row to reveal a pencil icon next to the description. Click to enter inline edit mode; Enter saves, Escape cancels. The memo is an annotation field and does not affect the dedup fingerprint. (CR-107)
-- **Delete (single)** — move a row to Trash with the trash icon, then permanently delete it from the Trash tab.
-- **Bulk delete** — select rows on the Trash tab and use “Delete permanently”.
-- **Bulk recategorize (All tab)** — check one or more rows on the All (Ledger) tab to reveal a bulk action bar. Choose a category and click “Apply category” to reassign all selected rows at once. Useful after rule changes or when correcting a batch of miscategorised imports. (CR-113)
-- **Bulk recategorize (Needs Review tab)** — same bulk bar is available on the Needs Review tab, targeted at unknown-category resolution items.
+**Category filter** — Hierarchical picker. Choose parent categories or drill into subcategories.
 
-## Categories and rules
+**Account filter** — Select accounts by institution and type.
 
-- **Categories:** browse the taxonomy, add household-specific subcategories under top-level groups where the product allows it.
-- **Category rules (household):** define patterns (contains, prefix, etc.) that map bank text to a **leaf** category. Rules have priority and optional **money in / out** scope. You can **import** and **export** CSV for bulk edit; sample templates live under [`fixtures/category-import/`](../fixtures/category-import/) in the repo (see that folder’s README for column formats).
-- **Quick rule from transaction:** when you categorize a transaction in the ledger, the app offers to create a rule from that transaction’s description automatically. This is the fastest way to build up household rules — no need to visit Category Rules at all for the common case. The rule uses a `contains` match on the normalized description.
-- **Built-in rules:** global keyword rules ship with the app; household rules are evaluated in an order documented for operators in [`IMPORT_CLASSIFICATION.md`](IMPORT_CLASSIFICATION.md) and related API docs.
+**Date range** — Start and end dates (defaults to current month).
+
+**Belongs to** — Filter by household or a specific member.
+
+**Status** — "Posted" (canonical, live) or "Trash" (soft-deleted).
+
+**Uncategorized only** — Show transactions with no category assigned.
+
+Filters can be combined; results update instantly.
+
+### Transaction Rows
+
+Each row in the ledger shows:
+
+- **Date** — posted date.
+- **Merchant** — business name or description.
+- **Amount** — signed number (negative = outflow, positive = inflow).
+- **Category** — assigned category name.
+- **Account** — linked bank/card account.
+- **Status** — posted, duplicate, trashed, or in review.
+
+Hovering over a row reveals:
+
+- **Pencil icon** — inline edit memo (separate annotation field, not part of dedup fingerprint).
+- **More actions menu** (•••) — delete, recategorize, or other options.
+
+### Categorizing Transactions
+
+**Single transaction:** Click the category field in a row and select from the hierarchical picker. Saves instantly. If you change a posted row's category, the app offers to **create a classification rule** (owner/admin only) that auto-categorizes similar future imports by description pattern. Click **Create rule** or **Not now** — either way, the category change is saved.
+
+**Bulk recategorize:** Check one or more rows in the ledger to reveal a bulk action bar at the bottom. Select a category and click **Apply category**. All selected rows are recategorized at once. Useful after rule changes or when correcting a batch of mis-classified imports.
+
+### Resolve All by Merchant Name
+
+When you have many unknown-category items for the same merchant (e.g., 40 uncategorized "WHOLEFDS" rows), use the **Needs Review** tab:
+
+1. Click **Resolve all by merchant name…** to expand an inline form.
+2. Type the merchant name or fragment. The app shows a live count of matching open items.
+3. Pick a category.
+4. Click **Apply to all** — all matching open unknown-category items are categorized and resolved in one step.
+
+No row selection required.
+
+### Ledger Edits
+
+**Edit memo:** Hover over any transaction's merchant/description to reveal a pencil icon. Click to inline-edit the memo (annotation text). Press Enter to save, Escape to cancel. The memo is separate from the dedup fingerprint and does not affect duplicate detection.
+
+**Delete single:** Click the trash icon on any row to move it to the Trash tab. Rows in Trash can be permanently deleted via **Trash tab > Delete permanently** after selecting them.
+
+**Bulk delete:** Switch to the **Trash tab**, check rows, and click **Delete permanently** in the bulk action bar.
+
+### Review Item Resolution
+
+In the **Needs Review** tab, each item has an **Expand** button that shows:
+
+- Type (exact duplicate, near-duplicate, unknown category, transfer ambiguity, etc.)
+- Reason and context
+- Suggested actions
+
+**Status bar (below selection):**
+
+- **In review** — mark selected items as "in progress" (optional workflow state).
+- **Resolve** — mark selected items as "resolved" and remove them from the open queue.
+- **Reopen** — send resolved items back to "open" status.
+
+**Apply category** — when available for unknown-category items, updates the underlying transaction.
+
+---
+
+## Importing Bank Statements
+
+The **Imports** page (accessible via **New import** button in the top bar or the sidebar) manages file uploads and statement parsing.
+
+### Import Workflow
+
+**Step 1: Create or continue a session**
+
+Click **New import** to start fresh, or continue an existing import session if one is in progress.
+
+**Step 2: Upload files**
+
+- Drag and drop or click to upload CSV, PDF, OFX, QFX, or Excel files depending on your banks and configured parser profiles.
+- Multiple files can be uploaded in one session.
+- Uploads are staged to disk (in `data/imports/<sessionId>/`).
+
+**Step 3: Bind each file to an account**
+
+For each file, a form appears:
+
+- **Financial Account** — pick the correct bank account (hierarchically grouped by institution).
+- **Parser Profile** — the app auto-detects the format (e.g., "Bank of America CSV", "OFX") but you can override manually if needed.
+- **Belongs to** — household or a specific member (for correct attribution).
+
+**Step 4: Parse**
+
+Click **Parse** (or use **Run import** to parse and canonicalize in one step).
+
+- Reads raw bytes from each file and normalizes to `transaction_raw` in the database.
+- May show warnings (e.g., balance mismatch, unreadable PDF).
+- No ledger rows are created yet.
+
+**Step 5: Review parsed rows**
+
+The import workspace shows:
+
+- **Raw rows** — normalized transactions extracted from files (not yet in the ledger).
+- **Parse summary** — file-level success/failure, row counts.
+
+**Step 6: Canonicalize**
+
+Click **Canonicalize** to create ledger rows:
+
+- Applies dedup fingerprint; exact duplicates are inserted as `duplicate` status and flagged in **Needs Review**.
+- Classifies categories using built-in rules, household rules, and optional AI.
+- Creates resolution items for unknown categories, transfer ambiguities, and near-duplicates.
+- **Ledger rows are now live** and appear in the Transactions page.
+
+**Step 7: Resolve**
+
+While the import session is **in review**, go to **Transactions > Needs Review** to resolve open items. You can:
+
+- Assign categories to unknown-category items.
+- Confirm or reject duplicates.
+- Pair transfer candidates.
+
+**Step 8: Finalize**
+
+Once all issues are resolved (or you're ready to move on), the import session moves to a terminal state. No further edits to this session are possible via the UI.
+
+**Step 9: Undo (optional)**
+
+While a session is still **in review**, you can use **Undo import** to delete all canonical rows created from that session's parsed rows and clear related resolution items. Parsed rows are preserved, so you can re-canonicalize if needed.
+
+### Key Concepts
+
+**Duplicate detection:** The app compares each new row against existing posted transactions using:
+
+1. **FITID** (bank-supplied reference ID) if available (strongest check).
+2. **Fingerprint** (SHA256 hash of account + date + amount + normalized description).
+
+Exact matches are inserted as `duplicate` status and surfaced in **Needs Review** for user decision. Users can promote duplicates to `posted` (keep) or move to `trashed` (discard). Nothing is silently dropped.
+
+**Near-duplicates:** Same account/date/amount but different description (e.g., description edited by user at the bank). These create a review item but no canonical row; user decides if a new row should be added.
+
+**File cleanup:** After a successful canonicalize, Grove normally removes staged files from disk. Keep your own copies of originals if you need long-term archives.
+
+### Supported Formats
+
+- **OFX/QFX** — standard banking format (Chase, Discover, most banks).
+- **Bank of America CSV/PDF** — checking and credit card.
+- **Marcus PDF** — savings accounts.
+- **Wealthfront PDF** — investment accounts.
+- **IBM, Deloitte, ADP payslip PDFs** — if configured (see [Payslips](#payslips)).
+- **Custom CSV** — if parser profiles have been set up by the operator.
+
+Not all formats are enabled on every deployment. Disabled formats will not appear in the file picker.
+
+---
+
+## Net Worth
+
+The **Net Worth** page tracks your total assets and liabilities over time.
+
+### Balance Sheet View
+
+**Assets table:** Rows for every account tagged as an asset (checking, savings, investment, retirement, etc.). Each row shows:
+
+- **Account name** and account mask (e.g., last four digits).
+- **Type** (e.g., checking, 401k, brokerage).
+- **Balance** (most recent snapshot; may be manual or imported).
+- **As of date** — when the balance was recorded.
+- **Source** — "manual" (you entered it), "import" (from a bank statement), or null (no balance yet).
+
+Click an account name to view transactions on that account for the balance-as-of date. If the balance came from an import, a second link opens transactions filtered to that specific import file.
+
+**Liabilities table:** Same structure but for credit cards, loans, and mortgages. Balances are stored as positive numbers (what you owe).
+
+**Totals summary:** Total assets, total liabilities, and net worth (assets − liabilities). Shows as of the current snapshot date.
+
+### Adding / Updating Balances
+
+**Manual balance entry:** Click **Edit** on any account row (or use the edit icon) to enter a balance and date.
+
+**Bulk set as-of:** Use the **Bulk set as-of** button to re-date multiple manual balance snapshots at once (useful when you want all balances as of month-end).
+
+**Import automatic balances:** When you import a statement (OFX, CSV, PDF), the statement ending balance is automatically captured and stored as an import snapshot on the account. Balances appear immediately without manual entry.
+
+### Historical Trend Chart
+
+**Trend tab:** Select a time period (last 3/6/12 months, year-to-date, or custom dates) and an interval (day, week, month-end, or custom).
+
+- Chart shows total assets, liabilities, and net worth as three lines.
+- You can overlay individual accounts on the same chart for detailed tracking.
+- Hover over a point to see exact values and the date range sampled.
+
+**Period summary table:** Lists the first and last sample dates on the chart (the endpoints). For each, shows balances and transaction count. Click **Ledger** to view transactions on that calendar day.
+
+### Account Types and Liquidity
+
+Accounts are classified as:
+
+- **Assets:** checking, savings, investment, retirement, health (HSA/FSA), education (529/Coverdell), cash.
+- **Liabilities:** credit card, loan, mortgage.
+- **Other:** payslip accounts (income records, excluded from net worth).
+
+An optional **Liquidity** enrichment (F-1 feature) labels accounts as:
+
+- **Liquid** — readily accessible (checking, savings, HYSA).
+- **Semi-liquid** — slower to convert (brokerage, investment).
+- **Restricted** — locked up (retirement, education).
+
+### Retry Load
+
+If the trend or balance sheet fails to load, a **Retry load** button appears to refetch both.
+
+---
 
 ## Payslips
 
-If your deployment uses payslip import: configure **employer** and deposit account linkage in Settings / profile flows as guided by the UI, then upload payslip PDFs through the payslip workflow. Parsed summaries are separate from normal bank **canonical** transactions; see [`PAYSLIP_V1.md`](PAYSLIP_V1.md) for product scope and limitations.
+Payslips are income records separate from bank transactions. They capture earnings, taxes, and deductions from pay stubs.
 
-On the **Payslips** list, use **Belongs-to** (same idea as Transactions) to narrow rows to household-attributed payslips, a single member, or clear the filter to see all.
+### Uploading a Payslip PDF
 
-## Where to read more
+1. Click **+ Add payslip** or **New payslip** in the Payslips list.
+2. Upload a PDF from your payroll system.
+3. Select the **Employee** (person the payslip belongs to) and **Employer**.
+4. The app extracts line items:
+   - Gross pay (current + year-to-date).
+   - Pre-tax deductions (401k, health insurance, etc.).
+   - Taxes (federal, state, FICA, etc.).
+   - Post-tax deductions.
+   - Net pay.
+5. You can edit extracted values if the PDF parser misread anything.
+6. Click **Save** to store the payslip.
+
+### Payslips List
+
+The **Payslips** page shows all uploaded payslips, grouped by month:
+
+- **Belongs to** filter — show all, household, or a specific member.
+- **TrendCard per person** — for each person with payslips:
+  - Latest net pay.
+  - Year-to-date net pay.
+  - 10-period net pay sparkline (trend).
+  - Total YTD tax rate (%) with warning if suspiciously low (< 24% total ≈ < 16% federal after FICA).
+
+Click any payslip row to open the detail page.
+
+### Payslip Detail View
+
+**KPI Strip (top):** Shows key figures from this payslip:
+
+- Gross pay (current, YTD).
+- Net pay (current, YTD).
+- Total tax rate (current, YTD, %).
+- Savings rate (if linked to a deposit account).
+
+**Line Items Table:** Organized by section:
+
+- **Earnings** — wages, bonuses, overtime.
+- **Pre-tax deductions** — 401k, health insurance, dependent care FSA.
+- **Tax deductions** — federal withholding, state, local, FICA (Social Security + Medicare).
+- **Post-tax deductions** — 529, adoption assistance.
+- **Other deductions and information** — company-specific fields.
+
+Each row shows current and YTD amounts, plus hours or rate if applicable. You can:
+
+- **Edit** individual line items (click pencil icon).
+- **Delete** unnecessary rows (trash icon).
+- **Add** rows via the **Add line item** button (select section and fill in name, authority, amount).
+
+**Matched Deposits:** If the payslip deposit account is linked in Settings, the page shows matched transactions in the ±3-day window around the pay date. Click a matched deposit to view that transaction in the Transactions page.
+
+**Validation Alerts:** Warnings appear for:
+
+- Missing gross or net pay.
+- Suspiciously low tax withholding.
+- Unmatched salary deposit.
+
+These do not prevent saving; they are informational.
+
+---
+
+## Categories and Rules
+
+The **Categories** page lets you manage the expense and income taxonomy and set up auto-classification rules.
+
+### Categories Tab
+
+Browse the hierarchical category tree:
+
+- Parent categories (e.g., "Housing", "Dining", "Utilities").
+- Subcategories within each parent (e.g., "Dining > Restaurants", "Dining > Coffee").
+
+You can:
+
+- **Add custom subcategories** under any parent group (click **+ Add** in the parent row).
+- **View transaction counts** — each category shows the number of transactions assigned.
+
+Built-in categories are provided; custom categories are household-specific.
+
+### Category Rules Tab
+
+Define patterns that auto-classify transactions:
+
+**Built-in rules:** Global keyword rules ship with Grove. You see them listed but cannot edit them.
+
+**Household rules (custom):** Create rules to classify transactions by merchant description:
+
+- **Pattern type:** "contains" (merchant name includes this text), or other operators.
+- **Pattern value:** the text to match (case-insensitive, normalized).
+- **Target category:** the leaf category this rule assigns.
+- **Scope (optional):** money in, money out, or both.
+- **Priority:** lower priority numbers are checked first; useful for override rules.
+
+Once saved, rules auto-classify future imports. Example: a rule "contains WHOLEFDS → Groceries" will classify any merchant with "WHOLEFDS" in the name as "Groceries".
+
+**Quick rule from transaction:** When you categorize a transaction in the ledger, the app offers to **create a classification rule** from that transaction's description. This is the fastest way to build household rules — no need to visit this page for the common case. The rule uses `contains` pattern matching on the normalized description.
+
+**Import/Export:** Use the import/export CSV buttons to bulk-edit rules. Sample templates are provided in the repo under `fixtures/category-import/`.
+
+---
+
+## Budget
+
+The **Budget** page allows you to set spending limits and track progress by category.
+
+### Setting a Budget
+
+1. Choose a month.
+2. Click **Edit** or use the form to assign budget amounts to categories.
+3. Save. The budget is stored per household per month.
+
+### Tracking Progress
+
+- **Progress bar** — shows total spent vs. total budgeted for the month.
+- **Per-category breakdown** — table lists each budgeted category with budgeted, spent, remaining, and % used.
+- **Alert colors:** Green (0-80%), amber (80-99%), red (100%+).
+
+The **Dashboard > Budget progress** card also shows a live bar for the current month.
+
+---
+
+## Settings
+
+Access via the account menu (top-right) → **Settings**.
+
+### Profile Tab
+
+- **Name** — your display name.
+- **Avatar / initials** — optional profile picture.
+- **Email** — email address (for password reset notifications).
+- **Visibility** — role-based (owner, admin, member).
+
+### Password Tab
+
+- **Change password** — enter your current password and new password.
+- **Reset a member's password** (owners/admins only) — use **Household tab** instead; see below.
+
+### Household Tab
+
+Manage household members and settings:
+
+**Household settings:**
+
+- **Monthly savings target** — slider to set a target savings goal; updates "Safe to spend" on the Dashboard.
+- **Salary deposit account** — link the account where payslip deposits land (for deposit matching).
+- **Large transaction threshold** — optional; flag transactions above this amount for review.
+- **City / State** — household location (optional).
+- **Combined gross income** — household total annual income (used for AI insights).
+
+**Employer setup** (for payslips):
+
+- Add employers with display name and parser profile.
+- Link each employer to a salary deposit account.
+
+**Member roster:**
+
+- Table of household members with name, role (head/member), relationship (self/spouse/child/dependent/other).
+- **Add another row** button to stage new members.
+- **Save household** to persist changes.
+- **Trash icon** on saved rows to delete a member. Confirm the deletion in the dialog. Optionally also delete the member's login account if they have one.
+
+**Member login accounts:**
+
+- Shows "✓ Has login account" or "—" for each member.
+- **Create login** (owners/admins) — generates a login account with a temporary password; the member must change it on first login.
+- **Reset password** (owners/admins) — generates a new temporary password and invalidates the member's current session. Share the temporary password with them out-of-band; they will be prompted to change it on next login.
+
+### Accounts Tab
+
+Add and manage financial accounts (banks, credit cards, investment accounts, etc.):
+
+- **Institution** — pick from a built-in list (Chase, BOA, Discover, etc.) or add a custom institution.
+- **Account type** — checking, savings, credit card, loan, mortgage, investment, retirement, health, education, cash, payslip. Also supports hierarchical subtypes (e.g., "retirement/401k_roth").
+- **Account mask** — last four digits or other identifier (for display only).
+- **Currency** — USD or other (defaults to USD).
+- **Sub-type** — optional breakdown (e.g., "savings/high_yield" for a HYSA).
+- **Memo** — optional note (e.g., "joint account").
+- **Liquidity** (F-1 feature, optional) — liquid, semi-liquid, or restricted (for balance sheet enrichment).
+- **Belongs to** — household or a specific member.
+- **Default parser profile** — (optional) auto-detect is usually sufficient, but you can override.
+- **Property ID** — (optional) if the account is a mortgage, link to a property (real estate tracking).
+
+**Last uploaded** — timestamp of the most recent import.
+
+**Status** — active or closed (closed accounts do not appear in import dropdowns).
+
+### Recurring Tab
+
+View and manage recurring payment overrides:
+
+- **Confirmed recurring** — payments you have explicitly marked as recurring (marked with ●).
+- **Dismiss** — hide a suggested recurring payment.
+
+The Dashboard detects recurring patterns automatically; use this tab to confirm or dismiss suggestions.
+
+### Notifications Tab
+
+Configure how and when the app alerts you:
+
+- **Email notifications** (optional) — alerts for large transactions, missing categories, etc.
+- **In-app alerts** — badges and notifications in the app UI.
+- **Frequency** — daily, weekly, or monthly.
+
+### Data Tab
+
+**AI Insights history:** View historical analyses generated on the Dashboard. Useful for trend checks and comparing old advice vs. new recommendations.
+
+### Backup Tab
+
+**Export household (`.hfb` bundle):**
+
+1. Click **Request export**.
+2. The app generates a compressed backup of all household data (async job; you'll see a notification when done).
+3. Click **Download** to save the `.hfb` file to your computer.
+
+Keep backups in a secure, separate location (e.g., cloud storage, external drive).
+
+**Restore from backup:**
+
+1. Click **Choose file** and select a previously exported `.hfb` file.
+2. Click **Restore**. This is **destructive** — all current household data is replaced with the backup contents.
+3. After restore succeeds, you are signed out (because login tokens are invalidated).
+
+Use restore when:
+
+- Setting up a fresh instance and migrating data.
+- You intentionally want to roll back to a prior state.
+
+Operator details: see [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §5.3; API: [API_REFERENCE.md](API_REFERENCE.md) §Export.
+
+---
+
+## Year-in-Review
+
+In **February and March**, a **Year in Review** button appears on the Dashboard. Clicking it generates a personalized summary of the prior year:
+
+- **Cash flow summary** — total income, spending, savings.
+- **Spending patterns** — largest categories, month-to-month trends.
+- **Recurring charges** — detected automatic payments.
+- **Net worth change** — year-over-year net worth progression.
+- **Insights** — narrative analysis (on first run, ~30 seconds; cached on return visits).
+
+The review includes an AI-generated narrative summarizing financial highlights and patterns. This is the household-level view; members see personal-only summaries.
+
+---
+
+## Tips and Common Tasks
+
+### Finding a Specific Transaction
+
+1. Go to **Transactions**.
+2. Use the search field to find merchant/description text.
+3. Use date filters to narrow the range.
+4. Use category, account, or "belongs to" filters to slice by person or type.
+5. Click the transaction row to view details or edit.
+
+### Categorizing a Batch of Old Transactions
+
+1. Go to **Transactions > All**.
+2. Check multiple rows for the same merchant or category.
+3. Select a category from the bulk action bar.
+4. Click **Apply category**. All selected rows are recategorized at once.
+
+### Setting Up Auto-Classification Rules
+
+**Option A (quick):** In the ledger, categorize a transaction manually. The app offers to **create a rule** from that description — accept to auto-classify future similar imports.
+
+**Option B (detailed):** Go to **Categories > Rules** and manually define a rule with pattern and target category.
+
+### Reviewing Imports
+
+1. Upload statements via **Imports > New import**.
+2. Bind each file to the correct account.
+3. Click **Run import** to parse and canonicalize.
+4. Go to **Transactions > Needs Review** to resolve open items.
+5. Assign unknown categories, confirm/reject duplicates, pair transfers.
+6. Once resolved, the import session is automatically finalized.
+
+### Tracking Net Worth Over Time
+
+1. Go to **Net Worth**.
+2. Ensure at least one account has a balance (manual or imported).
+3. Switch to the **Trend** tab.
+4. Select a period (3/6/12 months, YTD, or custom).
+5. (Optional) Overlay individual accounts for detailed tracking.
+6. View the historical chart and summary table.
+
+### Uploading and Reviewing Payslips
+
+1. Go to **Payslips > + Add payslip** (or **New payslip**).
+2. Upload a PDF.
+3. Select employee and employer.
+4. Review extracted line items. Edit if the parser misread.
+5. Click **Save**.
+6. On the Payslips list, view YTD summaries and compare across pay periods.
+
+### Resetting a Member's Password
+
+1. Go to **Settings > Household**.
+2. Find the member's row.
+3. Click **Reset password** (owners/admins only).
+4. A temporary password is generated. Share it with the member via a secure channel.
+5. On next login, they are forced to change it.
+
+### Exporting and Restoring Backup
+
+**Export:**
+
+1. Go to **Settings > Data > Backup**.
+2. Click **Request export**. Wait for the async job to complete.
+3. Click **Download** to save the `.hfb` file.
+
+**Restore:**
+
+1. Go to **Settings > Data > Backup** on a fresh or target instance.
+2. Click **Choose file** and select the `.hfb` file.
+3. Click **Restore**. You will be signed out after the destructive restore completes.
+
+---
+
+## Troubleshooting
+
+### Transactions Not Appearing After Import
+
+Check the **Transactions > Needs Review** tab. Open items may be flagged as duplicates, with unknown categories, or for transfer pairing. Resolve or dismiss them to move them to the ledger.
+
+### Balance Not Matching Statement
+
+Go to **Net Worth** and check:
+
+1. Is the account balance up-to-date? Update manually if needed.
+2. Are all transactions imported? Search the ledger for the statement date range.
+3. Is there a reconciliation mismatch? Check import warnings during canonicalize.
+
+For detailed diagnosis, see [API_REFERENCE.md](API_REFERENCE.md) §Balance Sheet.
+
+### Parser Failed or Misread Data
+
+1. Go to **Imports > [session]**.
+2. Check the parse summary for errors or warnings.
+3. If the parser misread, you can manually fix individual line items in the canonicalize review step.
+4. If a file is unsupported, contact your operator to add a new parser profile.
+
+### Forgot Password
+
+Click **Forgot password?** on the login page. An administrator can reset your password via **Settings > Household > Reset password** (members) or use the password reset flow.
+
+### Session Expired
+
+If you are signed out unexpectedly, go back to the login page. This can happen if:
+
+- Your password was changed (old tokens invalidated immediately).
+- The server restarted.
+- Your session timed out.
+
+Simply log in again.
+
+---
+
+## Additional Resources
 
 | Topic | Document |
-|--------|-----------|
-| Net worth / balance sheet API | [`API_BALANCE_SHEET.md`](API_BALANCE_SHEET.md) |
-| Environment variables | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) |
-| Logging | [`ENVIRONMENT_VARIABLES.md`](ENVIRONMENT_VARIABLES.md) |
-| API routes (machine-readable) | [`openapi/openapi.yaml`](../openapi/openapi.yaml) |
-| API topic index | [`API_INDEX.md`](API_INDEX.md) |
-| Change and release notes | [`CHANGE_HISTORY.md`](CHANGE_HISTORY.md) |
+|-------|----------|
+| Balance Sheet API & behavior | [API_REFERENCE.md](API_REFERENCE.md) §Balance Sheet |
+| All API routes | [API_REFERENCE.md](API_REFERENCE.md) |
+| Payslip design & limitations | [PRD_AND_CRS.md](PRD_AND_CRS.md) §3.5 |
+| Category classification logic | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §6 |
+| All API endpoints (machine-readable) | [openapi/openapi.yaml](../openapi/openapi.yaml) |
+| Change history & release notes | [CHANGE_HISTORY.md](CHANGE_HISTORY.md) |
+| Environment variables & logging | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §4 |
+| Installation & server setup | [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §2–3 |
+| Backup & restore API | [API_REFERENCE.md](API_REFERENCE.md) §Export |
