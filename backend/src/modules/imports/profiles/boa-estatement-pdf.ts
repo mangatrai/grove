@@ -248,7 +248,9 @@ function tryConsumeBoaTransaction(
       j++;
       continue;
     }
-    if (/^MANGAT RAI\s+!/.test(next)) {
+    // BoA PDFs print the account holder's name (all-caps) followed by "!" as a
+    // section marker — this line is a header artifact, not part of the description.
+    if (/^[A-Z][A-Z\s]{2,30}[A-Z]\s+!/.test(next)) {
       break;
     }
     if (/^\s*(-?\$?\d{1,3}(?:,\d{3})*\.\d{2})\s*$/.test(next)) {

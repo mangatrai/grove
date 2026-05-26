@@ -70,8 +70,13 @@ export const DEFAULT_CATEGORY_IDS = {
   loansHome: "30000000-0000-0000-0000-000000000139",
   loansPersonal: "30000000-0000-0000-0000-000000000140",
 
+  /** Investments parent (roll-up) */
+  investmentsParent: "30000000-0000-0000-0000-000000000105",
   /** Investments > IRA */
   investmentsIra: "30000000-0000-0000-0000-000000000147",
+  investmentsStocks: "30000000-0000-0000-0000-000000000009",
+  investmentsFiveTwentyNinePlan: "30000000-0000-0000-0000-000000000126",
+  investmentsCrypto: "30000000-0000-0000-0000-000000000128",
 
   travelAirfare: "30000000-0000-0000-0000-000000000143",
   travelCarRental: "30000000-0000-0000-0000-000000000144",

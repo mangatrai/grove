@@ -38,7 +38,7 @@ The heuristic becomes a **suggestion engine**, not an authority. User overrides 
 2. Each transaction row has a subtle recurring indicator icon (empty = untagged, filled = confirmed recurring).
 3. User clicks the icon or a context menu "Mark as recurring".
 4. A confirmation popup appears:
-   - **Merchant match string** — pre-filled with the normalized merchant name, **editable**. For clean merchants: `Netflix.com`. For messy ACH strings: user can trim `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Rai,Mangat` down to `GOLDMAN SACHS BA`.
+   - **Merchant match string** — pre-filled with the normalized merchant name, **editable**. For clean merchants: `Netflix.com`. For messy ACH strings: user can trim `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Account Holder` down to `GOLDMAN SACHS BA`.
    - **Match preview** — "This will apply to **N transactions** matching this string" — live count updates as user edits the match string.
    - **Amount anchor** — pre-filled with median of matched transactions. User can adjust or clear.
    - **Amount tolerance** — default ±15%. Handles price increases (Netflix $16.99 → $18.99 = 12% delta, within tolerance).

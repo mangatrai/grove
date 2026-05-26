@@ -81,7 +81,7 @@ describe("category rules (Epic 5.1)", () => {
 
   it("contains matches when stored pattern has punctuation bank text does not (fingerprint normalization)", () => {
     const bankDesc =
-      '"FID BKG SVC LLC DES:MONEYLINE ID:XXXXX9040 XY7YX INDN:MANGAT RAI CO ID:XXXXX04600 PPD"';
+      '"FID BKG SVC LLC DES:MONEYLINE ID:XXXXX9040 XY7YX INDN:ACCOUNT HOLDER CO ID:XXXXX04600 PPD"';
     const norm = normalizeDescriptionForFingerprint(bankDesc);
     const rule: DbCategoryRule = {
       id: "test-rule-punct",

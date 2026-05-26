@@ -100,7 +100,7 @@ The net worth page currently has a filter (show household OR one member). Member
 | Member | Assets | Liabilities | Net Worth |
 |--------|--------|-------------|-----------|
 | Household Total | $X | $Y | $Z |
-| Mangat | $a | $b | $c |
+| Owner | $a | $b | $c |
 | Spouse | $d | $e | $f |
 
 This gives the household overview without requiring the user to switch filters. Accounts already have `owner_person_profile_id`; the balance sheet service can group by it using the same snapshot data already loaded.

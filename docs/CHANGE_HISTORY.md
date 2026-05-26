@@ -18,6 +18,32 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-225 (2026-05-26): Year-in-review — investment contributions excluded from spending + NetWorth manual-refresh-only
+
+- **Type:** Data quality + UX
+- **Investments excluded from spending:** Transactions under `Investments` parent (Stocks, IRA, 529, Crypto, Bonds, and any user-created subcategories) were counted as spending in the year-in-review. Fixed by fetching all investment category IDs at runtime (parent + leaves by `parent_id` JOIN) and excluding them from income/spending aggregates, `topCategories`, and `largestTransaction`. A separate `investmentContributions` total is computed and passed to the LLM so it can narrate "invested $X" rather than treating contributions as spending. `CACHE_VERSION` bumped to `"3"` to bust stale reports.
+- **NetWorth balance save no longer triggers page reload:** `saveRow` and `runBulkAsOf` switched from `apiJson` to `apiFetch` — no auto `invalidateCacheByUrl` fires on save. `/reports/balance-sheet/manual` removed from `CACHE_INVALIDATION_MAP`. A `IconRefresh` button added to the "Balance sheet" section header so users can reload once after editing all accounts.
+- **Missing investment IDs added:** `investmentsParent`, `investmentsStocks`, `investmentsFiveTwentyNinePlan`, `investmentsCrypto` added to `DEFAULT_CATEGORY_IDS` in `category-ids.ts`.
+- **Tests updated:** `cache.test.ts` updated to assert that `/balance-sheet/manual` correctly produces no scope invalidation.
+- **Files:** `backend/src/modules/category/category-ids.ts`, `backend/src/modules/reports/year-summary.service.ts`, `backend/src/modules/reports/year-summary.types.ts`, `frontend/src/cache.ts`, `frontend/src/cache.test.ts`, `frontend/src/pages/NetWorthPage.tsx`
+
+## FIX-224 (2026-05-25): Year-in-review — transfer contamination, effective-rate = 0, stale cache not busted
+
+- **Type:** Data quality / calculation bug
+- **Income/spending inflated by transfers:** `computeIncomeSpending`, `computeTopCategories`, `computeLargestTransaction` all included inter-account transfer transactions (category IDs: `transfersIn`, `transfersOut`, `transfersCashWithdrawal`, `transfers` parent). This inflated reported income from ~$136K actual to $1.1M and made "Transfers out" 70% of spending. Fixed by adding `AND NOT (category_id = ANY(?))` using `TRANSFER_CATEGORY_IDS` constant from `DEFAULT_CATEGORY_IDS`.
+- **effectiveFederalRatePct / effectiveTotalRatePct = 0:** `payslip_snapshot.effective_federal_rate_ytd` stores a decimal ratio (e.g. 0.283), but the service returned it as-is. Multiplied by 100 to convert to percentage points.
+- **Stale cache not busted on logic change:** Cache hash only covered data row counts and timestamps — logic fixes silently returned stale results. Added `CACHE_VERSION` constant; bumped to `"2"` and included in hash so any query-logic change busts existing cached reports.
+- **Files:** `backend/src/modules/reports/year-summary.service.ts`
+
+## FIX-223 (2026-05-25): NetWorth page — overly aggressive cache invalidation on mutations + GDrive reconnect broken
+
+- **Type:** Bug fixes — two issues
+- **GDrive reconnect:** "Reconnect Google Drive" button in the `needsReauth` alert called `handleGDriveConnect()` with no argument. The handler reads `gdriveFolderIdInput` (always empty at this point) and returns early with "Enter the Drive folder ID first." Fix: `handleGDriveConnect` now accepts an optional `overrideFolderId`; reconnect button passes `gdriveStatus.folderId` (already stored from the original connect).
+- **Cache over-invalidation on NetWorthPage:**
+  - `refreshPropertyValuation` used `apiJson` POST → `invalidateCacheByUrl` fired → `hfa:cache-invalidate` event → trend chart and balance sheet refetched immediately, before the user even confirmed the Redfin estimate. Changed to `apiFetch` to prevent premature invalidation.
+  - `saveEdit` / `runBulkAsOf` / `savePropertyMarketValue` each called explicit `refreshSheetCache()` + `refreshHistoryCache()` AFTER `apiJson` POST — redundant because those URLs are already in `CACHE_INVALIDATION_MAP` and `apiJson` auto-fires the invalidation event. Removed the duplicate explicit calls (one reload per save, not three).
+- **Files:** `frontend/src/pages/settings/BackupRestoreSection.tsx`, `frontend/src/pages/NetWorthPage.tsx`
+
 ## FIX-221 (2026-05-25): Net Worth page cache keys change daily — trend and account charts reload on every visit
 
 - **Type:** Bug fix — cache miss on every new calendar day because cache keys embedded today's full `YYYY-MM-DD` date

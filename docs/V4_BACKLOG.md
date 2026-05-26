@@ -211,7 +211,7 @@ Add a collapsible "Household Breakdown" section at the bottom of `NetWorthPage.t
 │ Member              │ Assets   │ Liabilities │ Net Worth  │
 ├─────────────────────┼──────────┼─────────────┼────────────┤
 │ Household Total     │ $820,000 │ $312,000    │ $508,000   │
-│ Mangat              │ $600,000 │ $280,000    │ $320,000   │
+│ Owner               │ $600,000 │ $280,000    │ $320,000   │
 │ Spouse              │ $220,000 │ $32,000     │ $188,000   │
 │ Shared              │ $0       │ $0          │ $0         │
 └─────────────────────┴──────────┴─────────────┴────────────┘
@@ -409,7 +409,7 @@ For **multi-state properties (Memphis, TN):** Tennessee has a completely differe
 - **Property detail:** `assessormelvinburgess.com/propertyDetails?parcelid={parcelId}&IR=true`
   - Example: `assessormelvinburgess.com/propertyDetails?parcelid=073053%20%2000028&IR=true`
 - **Appeals process:** `assessormelvinburgess.com/content?key=Appeals_Process` (different from Texas ARB — Shelby County Board of Equalization)
-- Owner search works: `assessormelvinburgess.com/realPropertyDetails?FirstName=Mangat&LastName=Rai&active=owner&Page=property` — this is how to find your own parcel IDs
+- Owner search works: `assessormelvinburgess.com/realPropertyDetails?FirstName=YourFirst&LastName=YourLast&active=owner&Page=property` — this is how to find your own parcel IDs
 
 ### Feature vision
 
@@ -496,8 +496,8 @@ Content-Type: application/json
   "improvementValue": 817120,
   "marketValue": 1101813,
   "appraisedValue": 1101813,
-  "name": "GUPTA, NEHA & RAI, MANGAT TRS GOYAL FAMILY TRUST",
-  "fullSitus": "7070 COULTER LAKE RD, FRISCO, TX, 75036",
+  "name": "OWNER, FIRST & OWNER, SECOND TRS FAMILY TRUST",
+  "fullSitus": "123 EXAMPLE RD, ANYTOWN, TX, 00000",
   "arbHearing": "No"
 }
 ```
@@ -762,9 +762,9 @@ The BoA CSV export masks sensitive digits in ACH/wire reference fields with `X` 
 
 | CSV (masked) | PDF (real) |
 |---|---|
-| `CKPTUTOR DES:IAT PAYPAL ID:XXXXX50542835 INDN:MANGAT RAI CO ID:XXXXX0487C IAT PMT INFO: WEB XXXXXXXXXX00001199` | `CKPTUTOR DES:IAT PAYPAL ID:1049950542835 INDN:MANGAT RAI CO ID:XXXXXXXXXC IAT PMT INFO: WEB 00000` |
-| `IBM 3141 DES:PAYROLL ID:XXXXX73099 INDN:Mangat Rai CO ID:XXXXX71985 PPD PMT INFO:TRN*1*XXXXX73099` | `IBM 3141 DES:PAYROLL ID:1000073099 INDN:Mangat Rai CO ID:2130871985 PPD PMT INFO:TRN*1*10000730` |
-| `GOLDMAN SACHS BA DES:TRANSFER ID:000300008446968 INDN:Rai,Mangat CO ID:0124085260 WEB` | `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Rai,Mangat CO ID:XXXXX85260 WEB` |
+| `CKPTUTOR DES:IAT PAYPAL ID:XXXXX50542835 INDN:ACCOUNT HOLDER CO ID:XXXXX0487C IAT PMT INFO: WEB XXXXXXXXXX00001199` | `CKPTUTOR DES:IAT PAYPAL ID:1049950542835 INDN:ACCOUNT HOLDER CO ID:XXXXXXXXXC IAT PMT INFO: WEB 00000` |
+| `IBM 3141 DES:PAYROLL ID:XXXXX73099 INDN:Account Holder CO ID:XXXXX71985 PPD PMT INFO:TRN*1*XXXXX73099` | `IBM 3141 DES:PAYROLL ID:1000073099 INDN:Account Holder CO ID:XXXXXXXXXX PPD PMT INFO:TRN*1*XXXXXXXXX` |
+| `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Holder,Account CO ID:XXXXX85260 WEB` | `GOLDMAN SACHS BA DES:TRANSFER ID:XXXXXXXXXX46968 INDN:Holder,Account CO ID:XXXXX85260 WEB` |
 | `CHECKCARD 0430 TMOBILE AUTO P BELLEVUE WA 00000000000000000914798 RECURRING` | `TMOBILE AUTO P 04/30 PURCHASE BELLEVUE WA` |
 
 ### Why the current check fails
