@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-226 (2026-05-25): Playwright E2E test suite — initial setup (I-8)
+
+- **Type:** Test infrastructure
+- **What:** Added Playwright end-to-end tests (I-8 from V4 backlog). Three test suites, 13 tests total covering the critical user paths.
+- **Files created:** `e2e/auth.spec.ts`, `e2e/dashboard.spec.ts`, `e2e/transactions.spec.ts`, `e2e/helpers/auth.ts`, `playwright.config.ts`
+- **Files modified:** `package.json` (added `test:e2e` script + `@playwright/test` dev dep), `backend/db/seeds/0001_bootstrap.sql` (added `e2e@example.com` test user with `force_password_change=false`)
+- **Test suites:**
+  - `auth.spec.ts` — login form render, invalid credentials error, successful login, force-password-change redirect for bootstrap owner
+  - `dashboard.spec.ts` — dashboard load, cash/net-worth/budget sections visible, no console errors
+  - `transactions.spec.ts` — table render, filter input, row data, needs-review URL param
+- **Why:** Bootstrap user has `force_password_change=true`; added `e2e@example.com` (same password hash, `force_password_change=false`) to bootstrap seed so tests bypass the mandatory-reset redirect without modifying production user flow.
+- **Run:** Requires `npm run start:dev` (ports 3000/4000) + `npm run db:reset:dev`, then `npm run test:e2e`
+
+---
+
 ## DOC-217 (2026-05-25): Documentation consolidation — 40+ files → 5 canonical docs (T-1)
 
 - **Type:** Maintenance / documentation restructure

@@ -28,6 +28,7 @@
     "db:generate:dev-ledger": "node scripts/generate-dev-ledger-seed.mjs",
     "build": "npm run build -w backend && npm run build -w frontend",
     "test": "npm run test -w backend && npm run test -w frontend",
+    "test:e2e": "playwright test",
     "lint": "npm run lint -w backend && npm run lint -w frontend",
     "import:purge": "node scripts/purge-import-staging.mjs",
     "icons:gen": "node scripts/gen-icons.mjs",
@@ -37,6 +38,7 @@
     "postgres": "^3.4.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@resvg/resvg-js": "^2.6.2",
     "knip": "^6.13.1"
   }

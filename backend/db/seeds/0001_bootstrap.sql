@@ -25,6 +25,21 @@ UPDATE household
 SET owner_user_id = '20000000-0000-0000-0000-000000000001'
 WHERE id = '10000000-0000-0000-0000-000000000001';
 
+-- E2E test user: same password (ChangeMe123!) but force_password_change=false so tests skip the reset redirect.
+-- Never use this account outside of automated testing.
+INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope, force_password_change, created_at)
+VALUES
+  (
+    '20000000-0000-0000-0000-000000000002',
+    '10000000-0000-0000-0000-000000000001',
+    'e2e@example.com',
+    'owner',
+    '$2a$10$Tg2KSaLf8qB4az.7LdyCvuQclHikol6qgE2ZWMJt5/chBWCfMO6eO',
+    'all',
+    false,
+    CURRENT_TIMESTAMP
+  ) ON CONFLICT DO NOTHING;
+
 -- Top-level parents (roll-up groups only; no parent_id)
 INSERT INTO category (id, household_id, parent_id, name, is_default) VALUES
   ('30000000-0000-0000-0000-000000000001', NULL, NULL, 'Income', 1),
