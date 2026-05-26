@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-225 (2026-05-26): Year-in-review — investment contributions excluded from spending + NetWorth manual-refresh-only
+
+- **Type:** Data quality + UX
+- **Investments excluded from spending:** Transactions under `Investments` parent (Stocks, IRA, 529, Crypto, Bonds, and any user-created subcategories) were counted as spending in the year-in-review. Fixed by fetching all investment category IDs at runtime (parent + leaves by `parent_id` JOIN) and excluding them from income/spending aggregates, `topCategories`, and `largestTransaction`. A separate `investmentContributions` total is computed and passed to the LLM so it can narrate "invested $X" rather than treating contributions as spending. `CACHE_VERSION` bumped to `"3"` to bust stale reports.
+- **NetWorth balance save no longer triggers page reload:** `saveRow` and `runBulkAsOf` switched from `apiJson` to `apiFetch` — no auto `invalidateCacheByUrl` fires on save. `/reports/balance-sheet/manual` removed from `CACHE_INVALIDATION_MAP`. A `IconRefresh` button added to the "Balance sheet" section header so users can reload once after editing all accounts.
+- **Missing investment IDs added:** `investmentsParent`, `investmentsStocks`, `investmentsFiveTwentyNinePlan`, `investmentsCrypto` added to `DEFAULT_CATEGORY_IDS` in `category-ids.ts`.
+- **Tests updated:** `cache.test.ts` updated to assert that `/balance-sheet/manual` correctly produces no scope invalidation.
+- **Files:** `backend/src/modules/category/category-ids.ts`, `backend/src/modules/reports/year-summary.service.ts`, `backend/src/modules/reports/year-summary.types.ts`, `frontend/src/cache.ts`, `frontend/src/cache.test.ts`, `frontend/src/pages/NetWorthPage.tsx`
+
 ## FIX-224 (2026-05-25): Year-in-review — transfer contamination, effective-rate = 0, stale cache not busted
 
 - **Type:** Data quality / calculation bug

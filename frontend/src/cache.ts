@@ -33,8 +33,10 @@ export const CACHE_INVALIDATION_MAP: Array<{ pattern: RegExp; scopes: CacheScope
   { pattern: /^\/ledger(\/|$)/, scopes: ["dashboard"] },
 
   // ── Net Worth scope ────────────────────────────────────────────────────────
-  // Manual account balance snapshot (create or update)
-  { pattern: /^\/reports\/balance-sheet\/manual(\/|$)/, scopes: ["networth"] },
+  // NOTE: /reports/balance-sheet/manual is intentionally NOT here — balance row
+  // saves use apiFetch (no auto-invalidation) so the user can edit multiple
+  // accounts without triggering a page reload after each save. The Refresh
+  // button on the Net Worth page triggers the reload when the user is done.
   // Property value snapshot (manual entry)
   { pattern: /^\/household\/properties\/[^/]+\/values$/, scopes: ["networth"] },
   // Property valuation refresh (calls Redfin API, inserts new snapshot)

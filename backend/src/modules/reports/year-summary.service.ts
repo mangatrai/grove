@@ -27,7 +27,7 @@ const MONTH_NAMES = [
 ];
 
 // Bump when query logic changes to bust stale cache entries automatically.
-const CACHE_VERSION = "2";
+const CACHE_VERSION = "3";
 
 // Inter-account transfers are excluded from all income/spending aggregates so
 // they don't inflate reported income (transfers-in) or spending (transfers-out).
@@ -38,9 +38,22 @@ const TRANSFER_CATEGORY_IDS: string[] = [
   DEFAULT_CATEGORY_IDS.transfersCashWithdrawal,
 ];
 
+// Investment contributions are excluded from spending and reported separately.
+// Fetched at runtime to include any user-created subcategories under the parent.
+async function getInvestmentCategoryIds(householdId: string): Promise<string[]> {
+  const parentId = DEFAULT_CATEGORY_IDS.investmentsParent;
+  const rows = await qAll<{ id: string }>(
+    `SELECT id FROM category
+     WHERE (household_id IS NULL OR household_id = ?)
+       AND (id = ? OR parent_id = ?)`,
+    householdId, parentId, parentId,
+  );
+  return rows.map((r) => r.id);
+}
+
 // ── Income / spending ────────────────────────────────────────────────────────
 
-async function computeIncomeSpending(householdId: string, year: number) {
+async function computeIncomeSpending(householdId: string, year: number, excludeIds: string[]) {
   const rows = await qAll<{ month: number; income: string; spending: string }>(
     `SELECT
        EXTRACT(MONTH FROM txn_date::date)::int AS month,
@@ -52,7 +65,7 @@ async function computeIncomeSpending(householdId: string, year: number) {
        AND status = 'posted'
        AND NOT (category_id = ANY(?))
      GROUP BY EXTRACT(MONTH FROM txn_date::date)`,
-    householdId, `${year}-01-01`, `${year + 1}-01-01`, TRANSFER_CATEGORY_IDS,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, excludeIds,
   );
   const monthlyIncome = Array<number>(12).fill(0);
   const monthlySpending = Array<number>(12).fill(0);
@@ -65,12 +78,32 @@ async function computeIncomeSpending(householdId: string, year: number) {
   return { monthlyIncome, monthlySpending, income, spending };
 }
 
+async function computeInvestmentContributions(
+  householdId: string,
+  year: number,
+  investmentCategoryIds: string[],
+): Promise<number> {
+  if (investmentCategoryIds.length === 0) return 0;
+  const row = await qGet<{ total: string | null }>(
+    `SELECT SUM(-amount) AS total
+     FROM transaction_canonical
+     WHERE household_id = ?
+       AND txn_date >= ? AND txn_date < ?
+       AND amount < 0
+       AND status = 'posted'
+       AND (category_id = ANY(?))`,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, investmentCategoryIds,
+  );
+  return Number(row?.total ?? 0);
+}
+
 // ── Top categories ───────────────────────────────────────────────────────────
 
 async function computeTopCategories(
   householdId: string,
   year: number,
   totalSpend: number,
+  excludeIds: string[],
 ): Promise<YearSummaryCategory[]> {
   const rows = await qAll<{ name: string | null; amount: string }>(
     `SELECT COALESCE(c.name, 'Uncategorized') AS name, SUM(-tc.amount) AS amount
@@ -84,7 +117,7 @@ async function computeTopCategories(
      GROUP BY c.name
      ORDER BY SUM(-tc.amount) DESC
      LIMIT 5`,
-    householdId, `${year}-01-01`, `${year + 1}-01-01`, TRANSFER_CATEGORY_IDS,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, excludeIds,
   );
   return rows.map((r) => ({
     name: r.name ?? "Uncategorized",
@@ -133,7 +166,7 @@ async function computeBalanceSnapshotByType(
 
 // ── Notable transactions ─────────────────────────────────────────────────────
 
-async function computeLargestTransaction(householdId: string, year: number) {
+async function computeLargestTransaction(householdId: string, year: number, excludeIds: string[]) {
   const row = await qGet<{
     amount: string;
     merchant: string | null;
@@ -151,7 +184,7 @@ async function computeLargestTransaction(householdId: string, year: number) {
        AND NOT (tc.category_id = ANY(?))
      ORDER BY tc.amount ASC
      LIMIT 1`,
-    householdId, `${year}-01-01`, `${year + 1}-01-01`, TRANSFER_CATEGORY_IDS,
+    householdId, `${year}-01-01`, `${year + 1}-01-01`, excludeIds,
   );
   if (!row) return null;
   return {
@@ -260,8 +293,8 @@ async function computePayslipData(householdId: string, year: number): Promise<Ye
 
 // ── Prior year ───────────────────────────────────────────────────────────────
 
-async function computePriorYear(householdId: string, year: number): Promise<YearSummaryData["priorYear"]> {
-  const { income, spending } = await computeIncomeSpending(householdId, year);
+async function computePriorYear(householdId: string, year: number, excludeIds: string[]): Promise<YearSummaryData["priorYear"]> {
+  const { income, spending } = await computeIncomeSpending(householdId, year, excludeIds);
   if (income === 0 && spending === 0) return null;
   const netSavings = income - spending;
   const savingsRate = income > 0 ? Math.round((netSavings / income) * 1000) / 10 : 0;
@@ -327,6 +360,7 @@ ${JSON.stringify(
       netWorthEnd: data.netWorthEnd,
       netWorthChange: data.netWorthChange,
       investmentGrowth: data.investments,
+      investmentContributions: data.investmentContributions > 0 ? data.investmentContributions : undefined,
       largestTransaction: data.largestTransaction,
     },
     null,
@@ -366,8 +400,12 @@ async function generateNarrative(data: YearSummaryData): Promise<string[]> {
 // ── Core data computation ────────────────────────────────────────────────────
 
 async function computeYearSummaryData(householdId: string, year: number): Promise<YearSummaryData> {
+  // Resolve investment category IDs at runtime so user-created subcategories are included.
+  const investmentCategoryIds = await getInvestmentCategoryIds(householdId);
+  const excludeIds = [...TRANSFER_CATEGORY_IDS, ...investmentCategoryIds];
+
   const [{ monthlyIncome, monthlySpending, income, spending }, householdRow] = await Promise.all([
-    computeIncomeSpending(householdId, year),
+    computeIncomeSpending(householdId, year, excludeIds),
     qGet<{ name: string }>(`SELECT name FROM household WHERE id = ?`, householdId),
   ]);
 
@@ -392,18 +430,20 @@ async function computeYearSummaryData(householdId: string, year: number): Promis
     topMerchant,
     payslip,
     priorYear,
+    investmentContributions,
   ] = await Promise.all([
-    computeTopCategories(householdId, year, spending),
+    computeTopCategories(householdId, year, spending, excludeIds),
     computeBalanceSnapshot(householdId, `${year}-01-01`),
     computeBalanceSnapshot(householdId, `${year}-12-31`),
     computeBalanceSnapshotByType(householdId, `${year}-01-01`, INVESTMENT_TYPES),
     computeBalanceSnapshotByType(householdId, `${year}-12-31`, INVESTMENT_TYPES),
     computeBalanceSnapshotByType(householdId, `${year}-01-01`, BANK_TYPES),
     computeBalanceSnapshotByType(householdId, `${year}-12-31`, BANK_TYPES),
-    computeLargestTransaction(householdId, year),
+    computeLargestTransaction(householdId, year, excludeIds),
     computeTopMerchant(householdId, year),
     computePayslipData(householdId, year),
-    computePriorYear(householdId, year - 1),
+    computePriorYear(householdId, year - 1, excludeIds),
+    computeInvestmentContributions(householdId, year, investmentCategoryIds),
   ]);
 
   const netWorthChange = netWorthEnd - netWorthStart;
@@ -435,6 +475,7 @@ async function computeYearSummaryData(householdId: string, year: number): Promis
     netWorthChange,
     netWorthChangePct,
     investments,
+    investmentContributions,
     otherSavings: bankEnd - bankStart,
     largestTransaction,
     topMerchant,
