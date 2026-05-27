@@ -201,6 +201,20 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 20,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "espp_batch",
+    tableName: "espp_batch",
+    restoreOrder: 21,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
+  },
+  {
+    tableKey: "espp_sale",
+    tableName: "espp_sale",
+    restoreOrder: 22,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true,
   }
 ];
 

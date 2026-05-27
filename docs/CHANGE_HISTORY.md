@@ -18,6 +18,27 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-ESPP-1 (2026-05-27): IBM ESPP Equity Tracker — backend (ESPP-1)
+
+- **Type:** Feature — backend + DB
+- **GitHub:** https://github.com/mangatrai/grove/issues/31
+- **What:** Full backend for IBM ESPP purchase batch tracking and sale history. Migration `0052_espp_tracker.sql` creates `espp_batch` (one row per purchase date, upserted on re-import) and `espp_sale` (time-series disposals). Five REST endpoints under `/espp`: list batches with sales, year summary, import from EquatePlus PDF/CSV, record sales, delete sale. OI and cap gain/loss computed server-side on sale insert. Import auto-links batch to matching payslip and stores IBM-authoritative discount/deduction amounts. Both `espp_batch` and `espp_sale` registered in export registry (restoreOrder 21–22).
+- **Files created:** `backend/db/migrations/0052_espp_tracker.sql`, `backend/src/modules/espp/espp.types.ts`, `backend/src/modules/espp/espp-parse.service.ts`, `backend/src/modules/espp/espp.service.ts`, `backend/src/modules/espp/espp.routes.ts`, `backend/tests/espp.test.ts`
+- **Files modified:** `backend/src/app.ts` (register esppRouter), `backend/src/modules/export/export-registry.ts` (2 new entries), `docs/API_REFERENCE.md` (ESPP section)
+- **Why:** V5 feature — user needs tax visibility (OI vs cap gain) and P&L tracking for IBM ESPP grants across purchase batches and sale disposals.
+
+---
+
+## CR-ESPP-1 (2026-05-26): IBM ESPP tracking page — frontend (ESPP-1)
+
+- **Type:** Feature — frontend
+- **What:** Added `/espp` page for IBM Employee Stock Purchase Plan tracking: year summary strip, purchase batch table with expandable sale history, import modal (PDF + CSV drop zones), and record-sale modal.
+- **Files created:** `frontend/src/pages/EsppPage.tsx`
+- **Files modified:** `frontend/src/App.tsx` (route), `frontend/src/layout/AppSidebar.tsx` (Daily nav item), `frontend/vite.config.ts` (`/espp` API proxy)
+- **Why:** ESPP-1 frontend slice; backend endpoints wired via bare `/espp/*` paths (Vite proxy). Custom file drop zones (no `@mantine/dropzone` dep); native date input (no `@mantine/dates`).
+
+---
+
 ## CR-226 (2026-05-25): Playwright E2E test suite — initial setup (I-8)
 
 - **Type:** Test infrastructure

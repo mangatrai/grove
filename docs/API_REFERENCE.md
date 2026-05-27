@@ -2908,6 +2908,163 @@ LLM prompt includes only anonymized aggregates and profile/demographic fields. N
 
 ---
 
+## ESPP Equity Tracker
+
+IBM ESPP purchase batch and sale history management. All endpoints require authentication.
+
+---
+
+### GET /espp/batches
+
+Returns all purchase batches with their sale history for the specified year.
+
+**Query params:** `year` (integer, required)
+
+**Response `200`:**
+```json
+{
+  "batches": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "purchaseDate": "2026-03-31",
+      "sharesGranted": 4.0,
+      "fmvPerShare": 239.62,
+      "costBasisPerShare": 203.68,
+      "discountPerShare": 35.94,
+      "sharesTransferred": 3.0955,
+      "payslipId": "uuid | null",
+      "esppDiscountPayslip": 84.94,
+      "esppSalaryDeduction": 479.44,
+      "esppOtherDeduction": 1.90,
+      "sharesSold": 1.5,
+      "held": 1.5955,
+      "status": "Partially Sold",
+      "sales": [
+        {
+          "id": "uuid",
+          "batchId": "uuid",
+          "saleDate": "2026-05-01",
+          "sharesSold": 1.5,
+          "salePricePerShare": 250.00,
+          "proceeds": 375.00,
+          "ordinaryIncome": 53.91,
+          "capGainLoss": 15.57,
+          "createdAt": "2026-05-01T12:00:00Z"
+        }
+      ],
+      "createdAt": "2026-03-31T00:00:00Z",
+      "updatedAt": "2026-03-31T00:00:00Z"
+    }
+  ]
+}
+```
+
+**Errors:** `400` — missing or invalid `year`
+
+---
+
+### GET /espp/summary
+
+Returns aggregated year-level statistics for the specified year.
+
+**Query params:** `year` (integer, required)
+
+**Response `200`:**
+```json
+{
+  "year": 2026,
+  "sharesPurchased": 4.0,
+  "sharesTransferred": 3.0955,
+  "sharesSold": 1.5,
+  "totalInvested": 814.72,
+  "discountReceivedYtd": 84.94,
+  "saleProceeds": 375.00,
+  "realizedGainLoss": 69.48,
+  "ordinaryIncomeYtd": 53.91,
+  "capGainLossYtd": 15.57
+}
+```
+
+Returns zero values for all numeric fields if no data exists for the year. **Errors:** `400` — missing or invalid `year`
+
+---
+
+### POST /espp/import
+
+Parses and upserts an ESPP purchase batch from EquatePlus files. At least one file is required.
+
+**Content-Type:** `multipart/form-data`
+
+**Fields:**
+- `pdf` (file, optional) — EquatePlus purchase confirmation PDF. Provides FMV, cost basis, allocated shares, purchase date.
+- `csv` (file, optional) — EquatePlus allocation export CSV. Provides transferred shares and cost basis.
+
+At least one of `pdf` or `csv` must be present.
+
+On success, automatically links the batch to a matching payslip (by `pay_date` or `pay_period_end` = `purchaseDate`) and stores IBM-authoritative ESPP deduction amounts from the payslip line items.
+
+Re-importing the same purchase date upserts (updates) the existing row rather than creating a duplicate.
+
+**Response `201`:**
+```json
+{ "batch": { /* EsppBatchRow — same shape as in /espp/batches */ } }
+```
+
+**Errors:**
+- `400` — no file provided
+- `422 NO_DATE` — purchase date could not be determined from the uploaded files
+- `422 NO_COST_BASIS` — cost basis not found (CSV-only upload with no PDF)
+- `422 PDF_PARSE_ERROR` — PDF could not be parsed
+
+---
+
+### POST /espp/sales
+
+Records one or more lot disposals in a single transaction.
+
+**Request body:**
+```json
+{
+  "saleDate": "2026-05-01",
+  "rows": [
+    {
+      "batchId": "uuid",
+      "sharesSold": 1.5,
+      "salePricePerShare": 250.00
+    }
+  ]
+}
+```
+
+Computed and stored server-side:
+- `proceeds` = `sharesSold × salePricePerShare`
+- `ordinaryIncome` = `discountPerShare × sharesSold`
+- `capGainLoss` = `(salePricePerShare − fmvPerShare) × sharesSold`
+
+**Response `201`:**
+```json
+{ "sales": [ /* EsppSaleRow[] */ ] }
+```
+
+**Errors:**
+- `400` — invalid payload (missing fields, wrong types)
+- `404 BATCH_NOT_FOUND` — batchId not found or not owned by this household
+- `422 OVERSOLD` — sharesSold exceeds available held shares
+- `422 INCOMPLETE_BATCH` — batch is missing FMV data (no PDF imported yet)
+
+---
+
+### DELETE /espp/sales/:saleId
+
+Removes a sale record. The parent batch's held/status will reflect the change on the next `GET /espp/batches` call.
+
+**Response:** `204 No Content`
+
+**Errors:** `404` — sale not found or not owned by this household
+
+---
+
 ## Error Response Format
 
 Validation errors use `400` with shape:
