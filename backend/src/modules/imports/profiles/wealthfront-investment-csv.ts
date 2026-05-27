@@ -6,7 +6,7 @@
  * Amount sign: positive = deposit/credit, negative = withdrawal — already canonical convention.
  */
 
-import { parseCsvWithHeader, parseAmount } from "./tabular-helpers.js";
+import { parseCsvWithHeader, parseAmount, pickCol } from "./tabular-helpers.js";
 import type { NormalizedRawPayload } from "./types.js";
 
 /** Convert M/D/YYYY → YYYY-MM-DD. Returns null if not parseable. */
@@ -23,9 +23,9 @@ export function parseWealthfrontInvestmentCsv(buffer: Buffer): NormalizedRawPayl
   const out: NormalizedRawPayload[] = [];
 
   for (const row of rows) {
-    const rawDate = row["Transaction date"]?.trim() ?? "";
-    const description = row["Description"]?.trim() ?? "";
-    const rawAmount = row["Amount"]?.trim() ?? "";
+    const rawDate = pickCol(row, "Transaction date", "Transaction Date", "Date");
+    const description = pickCol(row, "Description");
+    const rawAmount = pickCol(row, "Amount");
 
     if (!rawDate || !description || !rawAmount) {
       continue;

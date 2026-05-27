@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-PARSER-1 (2026-05-27): Parser robustness — case-insensitive section headers and flexible CSV column matching
+
+- **Type:** Bug fix / hardening — bank import parsers
+- **What:** Seven parsers had brittle exact-string or exact-case matches that would silently drop all data if the bank made a minor format change.
+  - `marcus-online-savings-pdf.ts`: `"ACCOUNT ACTIVITY"` and activity column header were case-sensitive exact-string matches. Now uses `/ACCOUNT ACTIVITY/i` and a flexible `startsWith("datedescription") && includes("balance")` check.
+  - `wealthfront-investment-pdf.ts`: `"II. Account Activity"` was an exact match. Now uses `/(?:II\.\s*)?Account Activity\b/i` — tolerates section numbering changes and casing.
+  - `boa-credit-card-csv.ts`, `discover-card-csv.ts`, `wealthfront-investment-csv.ts`: Column lookups used exact-case string keys (`row["Posted Date"]`, `row["Trans. Date"]`, `row["Transaction date"]`, etc.). A bank export with different casing (e.g., `"Transaction Date"` vs `"Transaction date"`) would silently produce empty output. Now use a new `pickCol()` helper that tries exact match first, then case-insensitive, then tries common aliases.
+  - `boa-estatement-pdf.ts`: Added `"Deposits and other additions - continued"` and `"ATM and debit card subtractions - continued"` handlers (matching the existing pattern for `"Other subtractions - continued"` and `"Withdrawals - continued"`). Also extended the transaction date regex from `/\d{2}\/\d{2}\/\d{2}/` to `/\d{2}\/\d{2}\/\d{2,4}/` to handle 4-digit-year statements.
+- **New helper:** `pickCol(row, ...candidates)` in `tabular-helpers.ts` — exact then case-insensitive column lookup with alias fallback.
+- **Files:** `backend/src/modules/imports/profiles/tabular-helpers.ts`, `marcus-online-savings-pdf.ts`, `wealthfront-investment-pdf.ts`, `boa-credit-card-csv.ts`, `discover-card-csv.ts`, `wealthfront-investment-csv.ts`, `boa-estatement-pdf.ts`
+
+---
+
 ## FIX-BOA-1 (2026-05-27): BoA eStatement PDF — flat Withdrawals section silently dropped all transactions
 
 - **Type:** Bug fix — backend parser

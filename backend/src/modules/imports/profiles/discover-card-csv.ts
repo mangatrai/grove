@@ -7,7 +7,7 @@
  * We negate amounts so charges become negative (canonical convention: debit = negative).
  */
 
-import { parseCsvWithHeader, parseAmount } from "./tabular-helpers.js";
+import { parseCsvWithHeader, parseAmount, pickCol } from "./tabular-helpers.js";
 import type { NormalizedRawPayload } from "./types.js";
 
 /** Convert MM/DD/YYYY → YYYY-MM-DD. Returns null if not parseable. */
@@ -24,11 +24,11 @@ export function parseDiscoverCardCsv(buffer: Buffer): NormalizedRawPayload[] {
   const out: NormalizedRawPayload[] = [];
 
   for (const row of rows) {
-    const rawTxnDate = row["Trans. Date"]?.trim() ?? "";
-    const rawPostDate = row["Post Date"]?.trim() ?? "";
-    const description = row["Description"]?.trim() ?? "";
-    const rawAmount = row["Amount"]?.trim() ?? "";
-    const category = row["Category"]?.trim() ?? "";
+    const rawTxnDate = pickCol(row, "Trans. Date", "Transaction Date", "Date");
+    const rawPostDate = pickCol(row, "Post Date", "Posted Date", "Posting Date");
+    const description = pickCol(row, "Description");
+    const rawAmount = pickCol(row, "Amount");
+    const category = pickCol(row, "Category");
 
     if (!rawTxnDate || !description || !rawAmount) {
       continue;

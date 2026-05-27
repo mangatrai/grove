@@ -24,7 +24,8 @@ function mmddyyyyToIso(raw: string): string {
 
 /** pdf-parse often emits `DateDescriptionCreditsDebitsBalance` without spaces. */
 function isMarcusActivityHeaderLine(line: string): boolean {
-  return line.replace(/\s/g, "") === "DateDescriptionCreditsDebitsBalance";
+  const compact = line.replace(/\s/g, "").toLowerCase();
+  return compact.startsWith("datedescription") && compact.includes("balance");
 }
 
 export function parseMarcusOnlineSavingsFromText(
@@ -65,7 +66,8 @@ export function parseMarcusOnlineSavingsFromText(
   }
 
   // --- Activity table parsing ---
-  const idx = text.indexOf("ACCOUNT ACTIVITY");
+  const activityM = /\bACCOUNT ACTIVITY\b/i.exec(text);
+  const idx = activityM ? activityM.index : -1;
   if (idx < 0) {
     return { rows: [], statementBalances: buildStatementBalances(summaryBeginning, summaryEnding, summaryPeriodStart, summaryPeriodEnd) };
   }

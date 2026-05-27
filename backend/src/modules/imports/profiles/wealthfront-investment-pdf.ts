@@ -123,7 +123,8 @@ export function parseWealthfrontFromText(
   }
 
   // --- Activity section extraction ---
-  const activityIdx = text.indexOf("II. Account Activity");
+  const activityM = /(?:II\.\s*)?Account Activity\b/i.exec(text);
+  const activityIdx = activityM ? activityM.index : -1;
   if (activityIdx < 0) {
     return {
       rows: [],

@@ -107,6 +107,11 @@ export function parseBoaEStatementFromTextDetailed(text: string): {
       i++;
       continue;
     }
+    if (zone === "deposits" && /^Deposits and other additions - continued/i.test(lineTrim)) {
+      pendingHeader = true;
+      i++;
+      continue;
+    }
     if (zone === "deposits" && pendingHeader && isBoaColumnHeaderLine(lineTrim)) {
       pendingHeader = false;
       i++;
@@ -121,6 +126,11 @@ export function parseBoaEStatementFromTextDetailed(text: string): {
 
     if (lineTrim === "ATM and debit card subtractions") {
       zone = "atm";
+      pendingHeader = true;
+      i++;
+      continue;
+    }
+    if (zone === "atm" && /^ATM and debit card subtractions - continued/i.test(lineTrim)) {
       pendingHeader = true;
       i++;
       continue;
@@ -227,7 +237,7 @@ function tryConsumeBoaTransaction(
   startIdx: number
 ): { payload: NormalizedRawPayload; nextIdx: number } | null {
   const line = lines[startIdx].trimEnd();
-  const m = line.match(/^(\d{2}\/\d{2}\/\d{2})(.*)$/);
+  const m = line.match(/^(\d{2}\/\d{2}\/\d{2,4})(.*)$/);
   if (!m) {
     return null;
   }

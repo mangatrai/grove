@@ -40,6 +40,23 @@ export function countCsvDataLines(csvText: string): number {
 }
 
 /**
+ * Look up a column value from a CSV row, trying candidates in order.
+ * Tries exact match first, then case-insensitive. Returns "" if none found.
+ */
+export function pickCol(row: Record<string, string>, ...candidates: string[]): string {
+  for (const name of candidates) {
+    if (name in row) return row[name]!;
+  }
+  const entries = Object.entries(row);
+  for (const name of candidates) {
+    const lower = name.toLowerCase();
+    const found = entries.find(([k]) => k.toLowerCase() === lower);
+    if (found) return found[1];
+  }
+  return "";
+}
+
+/**
  * BoA checking/savings web export: summary lines first; transaction header is
  * `Date,Description,Amount,Running Bal.` (or similar).
  */
