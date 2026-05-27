@@ -64,7 +64,7 @@ describe("parseEsppCsv", () => {
 });
 
 describe("parseEsppPdf", () => {
-  it("extracts fields from EquatePlus-style text", async () => {
+  it("extracts fields from EquatePlus-style text (spaced format)", async () => {
     const text = `
       IBM Employees Stock Purchase Plan
       Purchase date: March 31, 2026
@@ -79,6 +79,26 @@ describe("parseEsppPdf", () => {
     expect(result.sharesTransferred).toBe(3.0955);
     expect(result.costBasisPerShare).toBe(203.68);
     expect(result.fmvPerShare).toBe(239.62);
+  });
+
+  it("extracts fields from real EquatePlus PDF format (label+value concatenated)", async () => {
+    // EquatePlus web-app PDF concatenates labels and values with no whitespace
+    const text = [
+      'PURCHASE SHARES',
+      'IBM Employees Stock Purchase Plan',
+      'Allocated4.06578',
+      'Distributed3.0955',
+      'Outstanding0.97028',
+      'Allocation dateMar 31, 2026',
+      'Cost basis$ 203.68',
+      'Purchase FMV$ 239.62',
+    ].join('\n');
+    const result = await parseEsppPdf(Buffer.from(text));
+    expect(result.purchaseDate).toBe('2026-03-31');
+    expect(result.sharesGranted).toBeCloseTo(4.06578, 4);
+    expect(result.sharesTransferred).toBeCloseTo(3.0955, 4);
+    expect(result.costBasisPerShare).toBeCloseTo(203.68, 2);
+    expect(result.fmvPerShare).toBeCloseTo(239.62, 2);
   });
 
   it("returns nulls when fields are absent", async () => {

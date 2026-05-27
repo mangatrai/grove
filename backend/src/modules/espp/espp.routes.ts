@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
+import { log } from "../../logger.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import {
   deleteSale,
@@ -69,7 +70,15 @@ esppRouter.post(
     const pdfBuffer = files?.['pdf']?.[0]?.buffer ?? null;
     const csvBuffer = files?.['csv']?.[0]?.buffer ?? null;
 
+    log.debug({
+      hasPdf: pdfBuffer != null,
+      pdfBytes: pdfBuffer?.length ?? 0,
+      hasCsv: csvBuffer != null,
+      csvBytes: csvBuffer?.length ?? 0,
+    }, 'espp:import received files');
+
     if (!pdfBuffer && !csvBuffer) {
+      log.warn('espp:import rejected — no files in request (multer found nothing)');
       res.status(400).json({ message: 'At least one file (pdf or csv) is required.' });
       return;
     }
@@ -78,11 +87,13 @@ esppRouter.post(
     const result = await importBatch(householdId, pdfBuffer, csvBuffer);
 
     if (!result.ok) {
+      log.warn({ code: result.code, message: result.message, householdId }, 'espp:import failed');
       const status = result.code === 'NO_FILE' ? 400 : 422;
       res.status(status).json({ message: result.message, code: result.code });
       return;
     }
 
+    log.info({ purchaseDate: result.data.purchaseDate, householdId }, 'espp:import batch upserted');
     res.status(201).json({ batch: result.data });
   }
 );

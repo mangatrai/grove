@@ -27,21 +27,21 @@ import { GrovePageLoader } from "../components/GroveLoader";
 import { formatUsd } from "../utils/format";
 
 const T = {
-  pageBg: "#efebe3",
-  surface: "#fdfcfb",
-  surfaceAlt: "#f5f0e8",
-  border: "#ddd6ce",
-  text: "#1c1917",
-  textMuted: "#78716c",
-  forest: "#2d6a4f",
-  forest2: "#4a8a6e",
-  gold: "#c8860a",
-  terracotta: "#8b3a26",
-  sage: "#7a8a6e",
-  accentSub: "#ebf5ef",
-  goldSub: "#fef6e4",
-  terrSub: "#f9ece8",
-  shadow: "0 2px 12px rgba(28,25,23,0.07),0 1px 3px rgba(28,25,23,0.05)",
+  pageBg:     "var(--color-page-bg)",
+  surface:    "var(--color-surface)",
+  surfaceAlt: "var(--color-surface-alt)",
+  border:     "var(--color-border)",
+  text:       "var(--color-text)",
+  textMuted:  "var(--color-text-muted)",
+  forest:     "var(--color-accent)",
+  forest2:    "var(--fs-forest-2)",
+  gold:       "var(--color-warm)",
+  terracotta: "var(--color-expense)",
+  sage:       "var(--fs-sage)",
+  accentSub:  "var(--color-accent-subtle)",
+  goldSub:    "var(--color-warm-subtle)",
+  terrSub:    "var(--color-danger-subtle)",
+  shadow:     "var(--shadow-card)",
 };
 
 type EsppSale = {
@@ -449,8 +449,18 @@ function ImportModal({
   }
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Import ESPP Data" size="md">
+    <Modal
+      opened={opened}
+      onClose={!submitting ? onClose : () => {}}
+      closeOnClickOutside={!submitting}
+      closeOnEscape={!submitting}
+      title="Import ESPP Data"
+      size="md"
+    >
       <Stack gap="md">
+        <Text size="sm" c="dimmed">
+          Upload both files to sync your latest activity from EquatePlus.
+        </Text>
         <Group align="stretch" gap="md" wrap="nowrap">
           <FileDropZone
             label="Purchase PDF"
@@ -468,7 +478,7 @@ function ImportModal({
           />
         </Group>
         {error ? (
-          <Alert variant="light" color="red">
+          <Alert variant="light" color="red" title="Import failed">
             {error}
           </Alert>
         ) : null}
@@ -477,7 +487,7 @@ function ImportModal({
             Cancel
           </Button>
           <Button onClick={() => void handleImport()} loading={submitting} disabled={!canSubmit}>
-            Import
+            Import Files
           </Button>
         </Group>
       </Stack>
@@ -496,7 +506,11 @@ function RecordSaleModal({
   batches: EsppBatch[];
   onSuccess: () => void;
 }) {
-  const availableBatches = useMemo(() => batches.filter((b) => b.held > 0), [batches]);
+  // Only show batches that have FMV data — CSV-only batches are rejected by the backend on sale.
+  const availableBatches = useMemo(
+    () => batches.filter((b) => b.held > 0 && b.fmvPerShare != null),
+    [batches]
+  );
   const defaultBatchId = availableBatches[0]?.id ?? "";
 
   const [saleDate, setSaleDate] = useState(todayIso());
@@ -578,13 +592,13 @@ function RecordSaleModal({
     }
   }
 
-  const gridTemplate = "7fr 90px 120px 120px 110px 120px 34px";
+  const gridTemplate = "1fr 80px 108px 112px 30px";
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Record Sale" size="lg">
+    <Modal opened={opened} onClose={!submitting ? onClose : () => {}} title="Record Sale" size="lg">
       <Stack gap="md">
         <div>
-          <Text size="sm" fw={500} mb={4}>
+          <Text size="xs" fw={700} tt="uppercase" style={{ letterSpacing: "0.07em", color: T.textMuted }} mb={6}>
             Sale Date
           </Text>
           <input
@@ -592,34 +606,37 @@ function RecordSaleModal({
             value={saleDate}
             onChange={(e) => setSaleDate(e.target.value)}
             style={{
-              padding: "8px 12px",
+              padding: "6px 10px",
               borderRadius: 6,
               border: `1px solid ${T.border}`,
               background: T.surface,
+              color: T.text,
               fontFamily: "inherit",
+              fontSize: 13,
+              maxWidth: 180,
             }}
           />
         </div>
 
+        {/* Column headers */}
         <div
           style={{
             display: "grid",
             gridTemplateColumns: gridTemplate,
-            gap: 8,
-            alignItems: "center",
-            fontSize: 11,
+            gap: 6,
+            paddingBottom: 8,
+            borderBottom: `1px solid ${T.border}`,
+            fontSize: 10,
             textTransform: "uppercase",
-            letterSpacing: "0.06em",
+            letterSpacing: "0.07em",
             color: T.textMuted,
-            fontWeight: 600,
+            fontWeight: 700,
           }}
         >
           <span>Batch</span>
           <span>Shares</span>
           <span>Price / share</span>
           <span>Proceeds</span>
-          <span>OI</span>
-          <span>Cap Gain/Loss</span>
           <span />
         </div>
 
@@ -628,8 +645,8 @@ function RecordSaleModal({
           const shares = Number(row.qty) || 0;
           const price = Number(row.price) || 0;
           const proceeds = shares * price;
-          const oi = batch ? batch.discountPerShare * shares : 0;
-          const capGain = batch ? (price - batch.fmvPerShare) * shares : 0;
+          const oi = batch?.discountPerShare != null ? batch.discountPerShare * shares : null;
+          const capGain = batch?.fmvPerShare != null ? (price - batch.fmvPerShare) * shares : null;
 
           return (
             <div
@@ -637,8 +654,8 @@ function RecordSaleModal({
               style={{
                 display: "grid",
                 gridTemplateColumns: gridTemplate,
-                gap: 8,
-                alignItems: "center",
+                gap: 6,
+                alignItems: "start",
               }}
             >
               <Select
@@ -646,48 +663,70 @@ function RecordSaleModal({
                 value={row.batchId || null}
                 onChange={(v) => updateRow(row.id, { batchId: v ?? "" })}
                 placeholder="Select batch"
-                searchable={false}
+                size="sm"
               />
               <NumberInput
-                min={1}
+                size="sm"
+                min={0.000001}
                 step={1}
-                allowDecimal={false}
+                decimalScale={6}
                 value={row.qty === "" ? "" : Number(row.qty)}
                 onChange={(v) => updateRow(row.id, { qty: v === "" || v == null ? "" : String(v) })}
               />
               <NumberInput
-                min={0}
+                size="sm"
+                min={0.01}
                 step={0.01}
                 decimalScale={2}
                 value={row.price === "" ? "" : Number(row.price)}
                 onChange={(v) => updateRow(row.id, { price: v === "" || v == null ? "" : String(v) })}
               />
-              <Text size="sm" style={mono}>
-                ${formatUsd(proceeds)}
-              </Text>
-              <Text size="sm" style={{ ...mono, color: T.gold }}>
-                ${formatUsd(oi)}
-              </Text>
-              <Text
-                size="sm"
-                style={{ ...mono, color: capGain >= 0 ? T.forest : T.terracotta }}
-              >
-                {formatSignedUsd(capGain)}
-              </Text>
+              {/* Proceeds + OI/CG stacked in one cell */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <div
+                  style={{
+                    padding: "6px 9px",
+                    borderRadius: 6,
+                    border: `1px solid ${T.border}`,
+                    background: T.pageBg,
+                    textAlign: "right",
+                    ...mono,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: proceeds > 0 ? T.forest : T.textMuted,
+                  }}
+                >
+                  {proceeds > 0 ? `$${formatUsd(proceeds)}` : "—"}
+                </div>
+                {(oi != null || capGain != null) && shares > 0 && price > 0 && (
+                  <div style={{ fontSize: 10, textAlign: "right", ...mono, lineHeight: 1.4 }}>
+                    {oi != null && (
+                      <span style={{ color: T.gold }}>OI {oi >= 0 ? "+" : ""}{formatSignedUsd(oi)}</span>
+                    )}
+                    {oi != null && capGain != null && <span style={{ color: T.textMuted }}> · </span>}
+                    {capGain != null && (
+                      <span style={{ color: capGain >= 0 ? T.forest : T.terracotta }}>
+                        CG {formatSignedUsd(capGain)}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
               <ActionIcon
                 variant="subtle"
                 color="gray"
+                size="sm"
                 disabled={rows.length <= 1}
                 onClick={() => removeRow(row.id)}
                 aria-label="Remove row"
               >
-                <IconX size={16} />
+                <IconX size={14} />
               </ActionIcon>
             </div>
           );
         })}
 
-        <Button variant="light" onClick={addRow} style={{ alignSelf: "flex-start" }}>
+        <Button variant="light" size="xs" onClick={addRow} style={{ alignSelf: "flex-start" }}>
           + Add Row
         </Button>
 
@@ -697,7 +736,7 @@ function RecordSaleModal({
           </Alert>
         ) : null}
 
-        <Group justify="space-between" align="center" mt="xs">
+        <Group justify="space-between" align="center" pt="xs" style={{ borderTop: `1px solid ${T.border}` }}>
           <Text size="xs" c="dimmed">
             Ordinary income &amp; capital gain/loss calculated on submit.
           </Text>
@@ -899,10 +938,10 @@ export function EsppPage() {
                       >
                         <Table.Td>{batch.purchaseDate}</Table.Td>
                         <Table.Td style={mono}>{formatShares(batch.sharesGranted)}</Table.Td>
-                        <Table.Td style={mono}>${formatUsd(batch.fmvPerShare)}</Table.Td>
+                        <Table.Td style={mono}>{batch.fmvPerShare != null ? `$${formatUsd(batch.fmvPerShare)}` : "—"}</Table.Td>
                         <Table.Td style={mono}>${formatUsd(batch.costBasisPerShare)}</Table.Td>
                         <Table.Td style={{ ...mono, color: T.gold }}>
-                          ${formatUsd(batch.discountPerShare)}
+                          {batch.discountPerShare != null ? `$${formatUsd(batch.discountPerShare)}` : "—"}
                         </Table.Td>
                         <Table.Td style={mono}>{formatShares(batch.sharesTransferred)}</Table.Td>
                         <Table.Td style={mono}>{formatShares(outstanding)}</Table.Td>

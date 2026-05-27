@@ -37,6 +37,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - **Files modified:** `frontend/src/App.tsx` (route), `frontend/src/layout/AppSidebar.tsx` (Daily nav item), `frontend/vite.config.ts` (`/espp` API proxy)
 - **Why:** ESPP-1 frontend slice; backend endpoints wired via bare `/espp/*` paths (Vite proxy). Custom file drop zones (no `@mantine/dropzone` dep); native date input (no `@mantine/dates`). E2E: sidebar nav, summary strip, empty/table state, import modal, year selector, no console errors.
 
+## FIX-ESPP-4 (2026-05-27): ESPP PDF parser regex + structured logging
+
+- **Type:** Bug fix — backend + tests
+- **What:** Real EquatePlus web-app PDFs concatenate field labels and values with no whitespace (e.g., `Allocated4.06578`, `Cost basis$ 203.68`, `Allocation dateMar 31, 2026`). All five extraction regexes failed on this format → all fields null → 422 NO_DATE. Fixed: regexes now use `\s*` for zero-or-more-space separators; "Allocation date" added as primary date label (EquatePlus uses this, not "Purchase date:"). Added structured `log.debug/warn` calls to `espp-parse.service.ts` and `log.debug/warn/info` to the import route so parse failures are visible in logs. Added test case for the real concatenated format (now 501 passing backend tests).
+- **Files modified:** `backend/src/modules/espp/espp-parse.service.ts`, `backend/src/modules/espp/espp.routes.ts`, `backend/tests/espp.test.ts`
+
+## FIX-ESPP-3 (2026-05-27): RecordSaleModal layout + import UX
+
+- **Type:** Bug fix — frontend
+- **What:** RecordSaleModal 7-column grid (`"7fr 90px 120px 120px 110px 120px 34px"`) overflowed its container → horizontal scroll; batch dropdown rendered too small. Redesigned to 5 columns (`"1fr 80px 108px 112px 30px"`): Batch | Shares | Price | Proceeds | ✕. OI and cap gain are shown as small live-calc text below the Proceeds box (gold OI · forest/terracotta CG) — informational, not a separate column. ImportModal: disable backdrop/escape dismiss during submit so accidental close no longer swallows error feedback.
+- **Files modified:** `frontend/src/pages/EsppPage.tsx`
+
+## FIX-ESPP-2 (2026-05-26): ESPP page crash + dark-mode color mismatch
+
+- **Type:** Bug fix — frontend
+- **What:** Two bugs. (1) `formatUsd(batch.fmvPerShare)` crashed with `Cannot read properties of null (reading 'toLocaleString')` — CSV-only batches have null FMV and discount; now renders "—" for null fields. (2) `EsppPage` T object hardcoded light-mode hex values (#efebe3, #fdfcfb, etc.) instead of CSS variables, so the page rendered with light linen backgrounds in dark mode while the rest of the shell was dark. Replaced all T values with `var(--color-*)` and `var(--fs-*)` tokens that adapt to both color schemes.
+- **Files modified:** `frontend/src/pages/EsppPage.tsx`
+
 ## FIX-ESPP-1 (2026-05-26): ESPP page blank — API envelope + Vite proxy scope
 
 - **Type:** Bug fix — frontend
