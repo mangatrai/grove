@@ -84,6 +84,9 @@ type EsppSummary = {
 
 type SaleRow = { id: number; batchId: string; qty: string; price: string };
 
+type EsppBatchesResponse = { batches: EsppBatch[] };
+type EsppSalesResponse = { sales: EsppSale[] };
+
 const mono: CSSProperties = { fontFamily: "'JetBrains Mono', 'Fira Code', monospace" };
 
 function formatSignedUsd(n: number): string {
@@ -555,7 +558,7 @@ function RecordSaleModal({
     setSubmitting(true);
     setError(null);
     try {
-      await apiJson<EsppSale[]>("/espp/sales", {
+      await apiJson<EsppSalesResponse>("/espp/sales", {
         method: "POST",
         body: JSON.stringify({
           saleDate,
@@ -731,11 +734,11 @@ export function EsppPage() {
     setLoading(true);
     setError(null);
     Promise.all([
-      apiJson<EsppBatch[]>(`/espp/batches?year=${year}`),
+      apiJson<EsppBatchesResponse>(`/espp/batches?year=${year}`),
       apiJson<EsppSummary>(`/espp/summary?year=${year}`),
     ])
-      .then(([b, s]) => {
-        setBatches(b);
+      .then(([batchesRes, s]) => {
+        setBatches(batchesRes.batches ?? []);
         setSummary(s);
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load ESPP data"))

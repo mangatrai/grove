@@ -33,9 +33,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 - **Type:** Feature — frontend
 - **What:** Added `/espp` page for IBM Employee Stock Purchase Plan tracking: year summary strip, purchase batch table with expandable sale history, import modal (PDF + CSV drop zones), and record-sale modal.
-- **Files created:** `frontend/src/pages/EsppPage.tsx`
+- **Files created:** `frontend/src/pages/EsppPage.tsx`, `e2e/espp.spec.ts`
 - **Files modified:** `frontend/src/App.tsx` (route), `frontend/src/layout/AppSidebar.tsx` (Daily nav item), `frontend/vite.config.ts` (`/espp` API proxy)
-- **Why:** ESPP-1 frontend slice; backend endpoints wired via bare `/espp/*` paths (Vite proxy). Custom file drop zones (no `@mantine/dropzone` dep); native date input (no `@mantine/dates`).
+- **Why:** ESPP-1 frontend slice; backend endpoints wired via bare `/espp/*` paths (Vite proxy). Custom file drop zones (no `@mantine/dropzone` dep); native date input (no `@mantine/dates`). E2E: sidebar nav, summary strip, empty/table state, import modal, year selector, no console errors.
+
+## FIX-ESPP-1 (2026-05-26): ESPP page blank — API envelope + Vite proxy scope
+
+- **Type:** Bug fix — frontend
+- **What:** `GET /espp/batches` returns `{ batches: [...] }` but `EsppPage` treated the body as a bare array → `batches.map is not a function` and a white screen. Unwrap `batchesRes.batches`. Vite proxy: replaced catch-all `/espp` with `/espp/batches`, `/espp/summary`, `/espp/import`, `/espp/sales` so the React route `/espp` is not forwarded to Express on hard refresh.
+- **Files modified:** `frontend/src/pages/EsppPage.tsx`, `frontend/vite.config.ts`
 
 ---
 
