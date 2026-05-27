@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-8 (2026-05-27): ESPP — DD-MMM-YY date parsing + transferred accumulation
+
+- **Type:** Bug fix — backend
+- **What:** Two fixes triggered by EquatePlus's second CSV export format.
+  1. **DD-MMM-YY date parsing:** `parseMonthDate` now handles `15-Jan-26` / `30-Jan-26` format (EquatePlus allocation CSV uses this for multi-event exports). Previously all rows were silently skipped → import fell back to PDF-only path → used PDF "Distributed" (running total) as `sharesTransferred`.
+  2. **CSV `sharesTransferred` accumulation:** Each EquatePlus CSV represents one transfer event delta, not a cumulative total. On UPSERT conflict (same household+date), `shares_transferred` is now accumulated (`existing + delta`), capped at `shares_granted` to prevent double-import inflation. PDF-only imports preserve the existing `shares_transferred` — PDF's "Distributed" is a running total that includes cross-batch events and must not be accumulated.
+- **Why:** Batch A showed stale `sharesTransferred` after second CSV (partial remainder not accumulated). Batch B showed the PDF Distributed running total instead of the CSV per-event delta. Root cause was the date parsing failure silently dropping all second-CSV rows.
+- **Files modified:** `backend/src/modules/espp/espp-parse.service.ts` (`parseMonthDate`), `backend/src/modules/espp/espp.service.ts` (split UPSERT logic, remove PDF sharesTransferred override), `backend/tests/espp.test.ts` (DD-MMM-YY parse test, accumulation integration test)
+
+---
+
 ## FIX-ESPP-7 (2026-05-27): ESPP info icons, multi-batch import, discount fallback
 
 - **Type:** Bug fix + UX — backend + frontend

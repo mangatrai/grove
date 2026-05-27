@@ -2927,34 +2927,34 @@ Returns all purchase batches with their sale history for the specified year.
     {
       "id": "uuid",
       "householdId": "uuid",
-      "purchaseDate": "2026-03-31",
-      "sharesGranted": 4.0,
-      "fmvPerShare": 239.62,
-      "costBasisPerShare": 203.68,
-      "discountPerShare": 35.94,
-      "sharesTransferred": 3.0955,
+      "purchaseDate": "2026-04-25",
+      "sharesGranted": 6.0,
+      "fmvPerShare": 190.00,
+      "costBasisPerShare": 160.00,
+      "discountPerShare": 30.00,
+      "sharesTransferred": 4.0,
       "payslipId": "uuid | null",
-      "esppDiscountPayslip": 84.94,
-      "esppSalaryDeduction": 479.44,
-      "esppOtherDeduction": 1.90,
-      "sharesSold": 1.5,
-      "held": 1.5955,
+      "esppDiscountPayslip": 60.00,
+      "esppSalaryDeduction": 340.00,
+      "esppOtherDeduction": 2.50,
+      "sharesSold": 2.0,
+      "held": 2.0,
       "status": "Partially Sold",
       "sales": [
         {
           "id": "uuid",
           "batchId": "uuid",
-          "saleDate": "2026-05-01",
-          "sharesSold": 1.5,
-          "salePricePerShare": 250.00,
-          "proceeds": 375.00,
-          "ordinaryIncome": 53.91,
-          "capGainLoss": 15.57,
-          "createdAt": "2026-05-01T12:00:00Z"
+          "saleDate": "2026-06-01",
+          "sharesSold": 2.0,
+          "salePricePerShare": 200.00,
+          "proceeds": 400.00,
+          "ordinaryIncome": 60.00,
+          "capGainLoss": 20.00,
+          "createdAt": "2026-06-01T12:00:00Z"
         }
       ],
-      "createdAt": "2026-03-31T00:00:00Z",
-      "updatedAt": "2026-03-31T00:00:00Z"
+      "createdAt": "2026-04-25T00:00:00Z",
+      "updatedAt": "2026-04-25T00:00:00Z"
     }
   ]
 }
@@ -2974,15 +2974,15 @@ Returns aggregated year-level statistics for the specified year.
 ```json
 {
   "year": 2026,
-  "sharesPurchased": 4.0,
-  "sharesTransferred": 3.0955,
-  "sharesSold": 1.5,
-  "totalInvested": 814.72,
-  "discountReceivedYtd": 84.94,
-  "saleProceeds": 375.00,
-  "realizedGainLoss": 69.48,
-  "ordinaryIncomeYtd": 53.91,
-  "capGainLossYtd": 15.57
+  "sharesPurchased": 6.0,
+  "sharesTransferred": 4.0,
+  "sharesSold": 2.0,
+  "totalInvested": 960.00,
+  "discountReceivedYtd": 60.00,
+  "saleProceeds": 400.00,
+  "realizedGainLoss": 80.00,
+  "ordinaryIncomeYtd": 60.00,
+  "capGainLossYtd": 20.00
 }
 ```
 

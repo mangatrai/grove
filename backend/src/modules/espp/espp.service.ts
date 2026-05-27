@@ -216,6 +216,8 @@ export async function importBatch(
     costBasisPerShare: number;
     fmvPerShare: number | null;
     discountPerShare: number | null;
+    // true = CSV delta (accumulate on conflict); false = PDF-only (preserve existing on conflict)
+    accumulateTransferred: boolean;
   };
 
   const specs: BatchSpec[] = [];
@@ -230,9 +232,8 @@ export async function importBatch(
       const granted = isPdfDate && pdfData?.sharesGranted != null
         ? pdfData.sharesGranted
         : csvRow.sharesTransferred;
-      const transferred = isPdfDate && pdfData?.sharesTransferred != null
-        ? pdfData.sharesTransferred
-        : csvRow.sharesTransferred;
+      // CSV Quantity is the incremental delta for this transfer event — never use PDF Distributed
+      const transferred = csvRow.sharesTransferred;
       specs.push({
         purchaseDate:     csvRow.purchaseDate,
         sharesGranted:    granted,
@@ -240,6 +241,7 @@ export async function importBatch(
         costBasisPerShare: cost,
         fmvPerShare:       fmv,
         discountPerShare:  fmv != null ? fmv - cost : null,
+        accumulateTransferred: true,
       });
     }
 
@@ -256,6 +258,7 @@ export async function importBatch(
           costBasisPerShare: cost,
           fmvPerShare:       fmv,
           discountPerShare:  fmv != null ? fmv - cost : null,
+          accumulateTransferred: false,
         });
       }
     }
@@ -277,6 +280,7 @@ export async function importBatch(
       costBasisPerShare: cost,
       fmvPerShare:       fmv,
       discountPerShare:  fmv != null ? fmv - cost : null,
+      accumulateTransferred: false,
     });
   }
 
@@ -289,33 +293,71 @@ export async function importBatch(
   for (const spec of specs) {
     const link = await findPayslipLink(householdId, spec.purchaseDate);
     const id   = randomUUID();
-    await qExec(
-      `INSERT INTO espp_batch (
-         id, household_id, purchase_date,
-         shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
-         shares_transferred, payslip_id,
-         espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
-         created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (household_id, purchase_date) DO UPDATE SET
-         shares_granted         = EXCLUDED.shares_granted,
-         fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
-         cost_basis_per_share   = EXCLUDED.cost_basis_per_share,
-         discount_per_share     = COALESCE(EXCLUDED.discount_per_share, espp_batch.discount_per_share),
-         shares_transferred     = EXCLUDED.shares_transferred,
-         payslip_id             = COALESCE(EXCLUDED.payslip_id, espp_batch.payslip_id),
-         espp_discount_payslip  = COALESCE(EXCLUDED.espp_discount_payslip, espp_batch.espp_discount_payslip),
-         espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
-         espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
-         updated_at             = ?`,
-      id, householdId, spec.purchaseDate,
-      spec.sharesGranted, spec.fmvPerShare, spec.costBasisPerShare, spec.discountPerShare,
-      spec.sharesTransferred, link?.id ?? null,
-      link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
-      now, now,
-      now
-    );
-    log.info({ purchaseDate: spec.purchaseDate, fmv: spec.fmvPerShare, householdId }, 'espp:import batch upserted');
+
+    if (spec.accumulateTransferred) {
+      // CSV import: accumulate shares_transferred (each CSV is a transfer event delta).
+      // Cap at shares_granted to prevent double-import inflation on already-complete batches.
+      // shares_granted keeps the larger of PDF-sourced vs CSV fallback values.
+      await qExec(
+        `INSERT INTO espp_batch (
+           id, household_id, purchase_date,
+           shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
+           shares_transferred, payslip_id,
+           espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (household_id, purchase_date) DO UPDATE SET
+           shares_granted         = GREATEST(EXCLUDED.shares_granted, espp_batch.shares_granted),
+           fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
+           cost_basis_per_share   = EXCLUDED.cost_basis_per_share,
+           discount_per_share     = COALESCE(EXCLUDED.discount_per_share, espp_batch.discount_per_share),
+           shares_transferred     = LEAST(
+             GREATEST(EXCLUDED.shares_granted, espp_batch.shares_granted),
+             espp_batch.shares_transferred + EXCLUDED.shares_transferred
+           ),
+           payslip_id             = COALESCE(EXCLUDED.payslip_id, espp_batch.payslip_id),
+           espp_discount_payslip  = COALESCE(EXCLUDED.espp_discount_payslip, espp_batch.espp_discount_payslip),
+           espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
+           espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
+           updated_at             = ?`,
+        id, householdId, spec.purchaseDate,
+        spec.sharesGranted, spec.fmvPerShare, spec.costBasisPerShare, spec.discountPerShare,
+        spec.sharesTransferred, link?.id ?? null,
+        link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
+        now, now,
+        now
+      );
+    } else {
+      // PDF-only import: preserve existing shares_transferred (PDF "Distributed" is a running
+      // total that includes historical events from other batches — don't accumulate it).
+      await qExec(
+        `INSERT INTO espp_batch (
+           id, household_id, purchase_date,
+           shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
+           shares_transferred, payslip_id,
+           espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (household_id, purchase_date) DO UPDATE SET
+           shares_granted         = GREATEST(EXCLUDED.shares_granted, espp_batch.shares_granted),
+           fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
+           cost_basis_per_share   = EXCLUDED.cost_basis_per_share,
+           discount_per_share     = COALESCE(EXCLUDED.discount_per_share, espp_batch.discount_per_share),
+           shares_transferred     = COALESCE(espp_batch.shares_transferred, EXCLUDED.shares_transferred),
+           payslip_id             = COALESCE(EXCLUDED.payslip_id, espp_batch.payslip_id),
+           espp_discount_payslip  = COALESCE(EXCLUDED.espp_discount_payslip, espp_batch.espp_discount_payslip),
+           espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
+           espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
+           updated_at             = ?`,
+        id, householdId, spec.purchaseDate,
+        spec.sharesGranted, spec.fmvPerShare, spec.costBasisPerShare, spec.discountPerShare,
+        spec.sharesTransferred, link?.id ?? null,
+        link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
+        now, now,
+        now
+      );
+    }
+    log.info({ purchaseDate: spec.purchaseDate, fmv: spec.fmvPerShare, accumulateTransferred: spec.accumulateTransferred, householdId }, 'espp:import batch upserted');
   }
 
   const dates = specs.map(s => s.purchaseDate);
