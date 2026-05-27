@@ -23,6 +23,7 @@ import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
 import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { recurringRouter } from "./modules/recurring/recurring.routes.js";
+import { esppRouter } from "./modules/espp/espp.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -123,6 +124,7 @@ export function buildApp() {
   app.use("/recurring-overrides", recurringRouter);
   app.use("/insights", insightsRouter);
   app.use("/notifications", notificationsRouter);
+  app.use("/espp", esppRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

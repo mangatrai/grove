@@ -12,6 +12,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { PayslipDetailPage } from "./pages/PayslipDetailPage";
 import { AddPayslipPage } from "./pages/AddPayslipPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
+import { EsppPage } from "./pages/EsppPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
@@ -32,6 +33,7 @@ export function App() {
           <Route path="/payslips/new" element={<AddPayslipPage />} />
           <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
+          <Route path="/espp" element={<EsppPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
           <Route path="/import" element={<Navigate to="/imports/workspace" replace />} />

@@ -32,7 +32,12 @@ export default defineConfig({
       "/budget": api,
       "/recurring-overrides": api,
       "/insights": api,
-      "/notifications": api
+      "/notifications": api,
+      // ESPP API only — do not proxy bare `/espp` (same path as the React route).
+      "/espp/batches": api,
+      "/espp/summary": api,
+      "/espp/import": api,
+      "/espp/sales": api
     }
   }
 });

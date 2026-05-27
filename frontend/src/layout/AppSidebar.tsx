@@ -6,6 +6,7 @@ import {
   IconScale,
   IconReceipt,
   IconFileText,
+  IconTrendingUp,
   IconTag,
   IconSettings,
   IconChevronLeft,
@@ -27,6 +28,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
       { to: "/", end: true, label: "Home", Icon: IconHome },
       { to: "/transactions", end: false, label: "Transactions", Icon: IconReceipt },
       { to: "/payslips", end: false, label: "Payslips", Icon: IconFileText },
+      { to: "/espp", end: false, label: "ESPP", Icon: IconTrendingUp },
     ],
   },
   {
