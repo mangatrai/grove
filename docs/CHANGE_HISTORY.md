@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-237 (2026-05-27): Dashboard "Other" link — categoryIds multi-filter now expands parent categories to children
+
+- **Type:** Bug fix — multi-category filter missing parent expansion
+- **What:** Clicking "Other" on the "Where Money Went" dashboard strip navigated to the Transactions page with multiple `categoryIds` in the URL. The filter showed "5 categories" selected but returned 0 transactions. Root cause: the `ledgerFilterClause` single-ID path expands parent category IDs to include child transactions (`WHERE parent_id = ?`), but the multi-ID path (`= ANY(?)`) did a flat match only — no parent expansion. Dashboard category IDs can be parent IDs; transactions are stored with leaf/child IDs.
+- **Fix:** Multi-ID path in `ledgerFilterClause` now also matches children: `tc.category_id = ANY(?) OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ANY(?) ...)`.
+- **Files:** `backend/src/modules/ledger/ledger.service.ts`
+
+---
+
 ## FIX-ESPP-10 (2026-05-27): ESPP batch status — "Fully Sold" threshold raised to match display precision
 
 - **Type:** Bug fix — floating-point epsilon mismatch

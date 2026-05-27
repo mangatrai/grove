@@ -259,8 +259,10 @@ async function ledgerFilterClause(householdId: string, filters: LedgerListFilter
         params.push(cid);
       }
     } else if (uniqueCategoryIds.length > 1) {
-      parts.push("tc.category_id = ANY(?)");
-      params.push(uniqueCategoryIds);
+      parts.push(
+        "(tc.category_id = ANY(?) OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ANY(?) AND (household_id IS NULL OR household_id = ?)))"
+      );
+      params.push(uniqueCategoryIds, uniqueCategoryIds, householdId);
     }
   }
   if (filters.dateFrom) {
