@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-9 (2026-05-27): ESPP Record Sale — allow 4-decimal sale price input
+
+- **Type:** Bug fix — frontend precision truncation
+- **What:** The "Price / share" `NumberInput` in the Record Sale modal had `decimalScale={2}`, silently truncating any price with more than 2 decimal places before it reached the backend. Example: entering 307.3951 was stored as 307.39, so 3 shares produced proceeds of $922.17 instead of the correct $922.19. DB schema (`sale_price_per_share NUMERIC(12,4)`) and backend computation (multiply-then-round) were already correct — only the frontend input was the bottleneck.
+- **Fix:** `decimalScale={2}` → `decimalScale={4}`, `min={0.01}` → `min={0.0001}` on the price `NumberInput`.
+- **Files:** `frontend/src/pages/EsppPage.tsx`
+
+---
+
 ## FIX-PARSER-1 (2026-05-27): Parser robustness — case-insensitive section headers and flexible CSV column matching
 
 - **Type:** Bug fix / hardening — bank import parsers

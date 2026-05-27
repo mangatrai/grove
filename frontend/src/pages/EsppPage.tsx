@@ -687,9 +687,9 @@ function RecordSaleModal({
               />
               <NumberInput
                 size="sm"
-                min={0.01}
+                min={0.0001}
                 step={0.01}
-                decimalScale={2}
+                decimalScale={4}
                 value={row.price === "" ? "" : Number(row.price)}
                 onChange={(v) => updateRow(row.id, { price: v === "" || v == null ? "" : String(v) })}
               />
