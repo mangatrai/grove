@@ -32,7 +32,8 @@ export default defineConfig({
       "/budget": api,
       "/recurring-overrides": api,
       "/insights": api,
-      "/notifications": api
+      "/notifications": api,
+      "/espp": api
     }
   }
 });
