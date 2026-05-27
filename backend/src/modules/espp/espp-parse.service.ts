@@ -9,11 +9,22 @@ const MONTH_MAP: Record<string, string> = {
 };
 
 function parseMonthDate(s: string): string | null {
-  const m = s.match(/([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})/);
-  if (!m) return null;
-  const mo = MONTH_MAP[m[1]!.toLowerCase()];
-  if (!mo) return null;
-  return `${m[3]}-${mo}-${m[2]!.padStart(2, '0')}`;
+  // "Jan 15, 2026" / "January 15 2026"
+  let m = s.match(/([A-Za-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})/);
+  if (m) {
+    const mo = MONTH_MAP[m[1]!.toLowerCase()];
+    if (!mo) return null;
+    return `${m[3]}-${mo}-${m[2]!.padStart(2, '0')}`;
+  }
+  // "15-Jan-26" / "15-Jan-2026" (EquatePlus allocation CSV format)
+  m = s.match(/(\d{1,2})-([A-Za-z]+)-(\d{2,4})/);
+  if (m) {
+    const mo = MONTH_MAP[m[2]!.toLowerCase()];
+    if (!mo) return null;
+    const yr = m[3]!.length === 2 ? `20${m[3]}` : m[3]!;
+    return `${yr}-${mo}-${m[1]!.padStart(2, '0')}`;
+  }
+  return null;
 }
 
 export type PdfParseResult = {

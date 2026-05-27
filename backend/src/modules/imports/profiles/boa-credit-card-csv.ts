@@ -1,4 +1,4 @@
-import { parseCsvWithHeader, parseAmount } from "./tabular-helpers.js";
+import { parseCsvWithHeader, parseAmount, pickCol } from "./tabular-helpers.js";
 import type { NormalizedRawPayload } from "./types.js";
 
 /** Convert MM/DD/YYYY → YYYY-MM-DD. Returns original string if not parseable. */
@@ -20,10 +20,10 @@ export function parseBoaCreditCardCsv(buffer: Buffer): NormalizedRawPayload[] {
   const out: NormalizedRawPayload[] = [];
 
   for (const row of rows) {
-    const rawPosted = row["Posted Date"]?.trim() ?? "";
-    const payee = row["Payee"]?.trim() ?? "";
-    const ref = row["Reference Number"]?.trim() ?? "";
-    const rawAmt = row["Amount"]?.trim() ?? "";
+    const rawPosted = pickCol(row, "Posted Date", "Transaction Date", "Date");
+    const payee = pickCol(row, "Payee", "Description", "Merchant");
+    const ref = pickCol(row, "Reference Number", "Reference #");
+    const rawAmt = pickCol(row, "Amount");
     const amount = parseAmount(rawAmt);
     if (!rawPosted || !payee || amount === null) {
       continue;

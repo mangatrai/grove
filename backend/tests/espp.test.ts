@@ -39,14 +39,14 @@ describe("parseEsppCsv", () => {
   it("parses a two-row allocation CSV", () => {
     const csv = [
       '"Plan","Instrument","Allocation date","Quantity","Cost basis","Cost basis (unit)"',
-      '"IBM Employees Stock Purchase Plan","Purchase Shares","Mar 13, 2026","0.9045",210.14,"$"',
-      '"IBM Employees Stock Purchase Plan","Purchase Shares","Mar 31, 2026","3.0955",203.68,"$"',
+      '"Acme Corp Stock Purchase Plan","Purchase Shares","Apr 10, 2026","2.5",160.00,"$"',
+      '"Acme Corp Stock Purchase Plan","Purchase Shares","Apr 25, 2026","4.0",158.00,"$"',
     ].join('\n');
 
     const rows = parseEsppCsv(Buffer.from(csv));
     expect(rows).toHaveLength(2);
-    expect(rows[0]).toMatchObject({ purchaseDate: '2026-03-13', sharesTransferred: 0.9045, costBasisPerShare: 210.14 });
-    expect(rows[1]).toMatchObject({ purchaseDate: '2026-03-31', sharesTransferred: 3.0955, costBasisPerShare: 203.68 });
+    expect(rows[0]).toMatchObject({ purchaseDate: '2026-04-10', sharesTransferred: 2.5, costBasisPerShare: 160 });
+    expect(rows[1]).toMatchObject({ purchaseDate: '2026-04-25', sharesTransferred: 4.0, costBasisPerShare: 158 });
   });
 
   it("returns empty array for header-only CSV", () => {
@@ -54,10 +54,23 @@ describe("parseEsppCsv", () => {
     expect(parseEsppCsv(Buffer.from(csv))).toHaveLength(0);
   });
 
+  it("parses DD-MMM-YY date format (EquatePlus allocation export)", () => {
+    const csv = [
+      'Plan,Instrument,Allocation date,Quantity,Cost basis,Cost basis (unit),Total Cost Basis',
+      'Acme Corp Stock Purchase Plan,Purchase Shares,10-Apr-26,3.0,160.00,$,$480.00',
+      'Acme Corp Stock Purchase Plan,Purchase Shares,25-Apr-26,5.0,158.00,$,$790.00',
+    ].join('\n');
+
+    const rows = parseEsppCsv(Buffer.from(csv));
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ purchaseDate: '2026-04-10', sharesTransferred: 3.0, costBasisPerShare: 160 });
+    expect(rows[1]).toMatchObject({ purchaseDate: '2026-04-25', sharesTransferred: 5.0, costBasisPerShare: 158 });
+  });
+
   it("skips rows with unparseable dates", () => {
     const csv = [
       '"Plan","Instrument","Allocation date","Quantity","Cost basis","Cost basis (unit)"',
-      '"IBM","Shares","BADDATE","1.0",200.00,"$"',
+      '"Acme","Shares","BADDATE","1.0",200.00,"$"',
     ].join('\n');
     expect(parseEsppCsv(Buffer.from(csv))).toHaveLength(0);
   });
@@ -66,39 +79,39 @@ describe("parseEsppCsv", () => {
 describe("parseEsppPdf", () => {
   it("extracts fields from EquatePlus-style text (spaced format)", async () => {
     const text = `
-      IBM Employees Stock Purchase Plan
-      Purchase date: March 31, 2026
-      Allocated 4.0000
-      Distributed 3.0955
-      Cost basis $203.68
-      Purchase FMV $239.62
+      Acme Corp Stock Purchase Plan
+      Purchase date: April 25, 2026
+      Allocated 6.0
+      Distributed 4.0
+      Cost basis $160.00
+      Purchase FMV $190.00
     `;
     const result = await parseEsppPdf(Buffer.from(text));
-    expect(result.purchaseDate).toBe('2026-03-31');
-    expect(result.sharesGranted).toBe(4.0);
-    expect(result.sharesTransferred).toBe(3.0955);
-    expect(result.costBasisPerShare).toBe(203.68);
-    expect(result.fmvPerShare).toBe(239.62);
+    expect(result.purchaseDate).toBe('2026-04-25');
+    expect(result.sharesGranted).toBe(6.0);
+    expect(result.sharesTransferred).toBe(4.0);
+    expect(result.costBasisPerShare).toBe(160);
+    expect(result.fmvPerShare).toBe(190);
   });
 
   it("extracts fields from real EquatePlus PDF format (label+value concatenated)", async () => {
     // EquatePlus web-app PDF concatenates labels and values with no whitespace
     const text = [
       'PURCHASE SHARES',
-      'IBM Employees Stock Purchase Plan',
-      'Allocated4.06578',
-      'Distributed3.0955',
-      'Outstanding0.97028',
-      'Allocation dateMar 31, 2026',
-      'Cost basis$ 203.68',
-      'Purchase FMV$ 239.62',
+      'Acme Corp Stock Purchase Plan',
+      'Allocated6.5',
+      'Distributed4.5',
+      'Outstanding2.0',
+      'Allocation dateApr 25, 2026',
+      'Cost basis$ 160.00',
+      'Purchase FMV$ 190.00',
     ].join('\n');
     const result = await parseEsppPdf(Buffer.from(text));
-    expect(result.purchaseDate).toBe('2026-03-31');
-    expect(result.sharesGranted).toBeCloseTo(4.06578, 4);
-    expect(result.sharesTransferred).toBeCloseTo(3.0955, 4);
-    expect(result.costBasisPerShare).toBeCloseTo(203.68, 2);
-    expect(result.fmvPerShare).toBeCloseTo(239.62, 2);
+    expect(result.purchaseDate).toBe('2026-04-25');
+    expect(result.sharesGranted).toBeCloseTo(6.5, 1);
+    expect(result.sharesTransferred).toBeCloseTo(4.5, 1);
+    expect(result.costBasisPerShare).toBeCloseTo(160, 2);
+    expect(result.fmvPerShare).toBeCloseTo(190, 2);
   });
 
   it("returns nulls when fields are absent", async () => {
@@ -114,14 +127,16 @@ describe("importBatch", () => {
   afterEach(async () => {
     await cleanupBatch('2026-06-15');
     await cleanupBatch('2026-07-15');
-    await cleanupBatch('2026-09-13');
-    await cleanupBatch('2026-09-30');
+    await cleanupBatch('2026-10-10');
+    await cleanupBatch('2026-10-25');
+    await cleanupBatch('2026-11-10');
+    await cleanupBatch('2026-11-25');
   });
 
   it("creates a batch from PDF+CSV", async () => {
     const csv = [
       '"Plan","Instrument","Allocation date","Quantity","Cost basis","Cost basis (unit)"',
-      '"IBM","Purchase Shares","Jun 15, 2026","10.0",180.00,"$"',
+      '"Acme Corp","Purchase Shares","Jun 15, 2026","10.0",180.00,"$"',
     ].join('\n');
     const pdfText = `
       Purchase date: June 15, 2026
@@ -167,8 +182,8 @@ describe("importBatch", () => {
   it("imports multi-date CSV — creates one batch per row", async () => {
     const csv = [
       '"Plan","Instrument","Allocation date","Quantity","Cost basis","Cost basis (unit)"',
-      '"IBM","Purchase Shares","Sep 13, 2026","0.9045",210.14,"$"',
-      '"IBM","Purchase Shares","Sep 30, 2026","3.0955",203.68,"$"',
+      '"Acme Corp","Purchase Shares","Oct 10, 2026","2.5",160.00,"$"',
+      '"Acme Corp","Purchase Shares","Oct 25, 2026","4.0",158.00,"$"',
     ].join('\n');
 
     const result = await importBatch(HOUSEHOLD_ID, null, Buffer.from(csv));
@@ -177,14 +192,56 @@ describe("importBatch", () => {
     expect(result.data).toHaveLength(2);
 
     const dates = result.data.map(b => b.purchaseDate).sort();
-    expect(dates[0]).toBe('2026-09-13');
-    expect(dates[1]).toBe('2026-09-30');
+    expect(dates[0]).toBe('2026-10-10');
+    expect(dates[1]).toBe('2026-10-25');
 
     // CSV-only batches have null FMV until a PDF is uploaded
     for (const b of result.data) {
       expect(b.fmvPerShare).toBeNull();
       expect(b.discountPerShare).toBeNull();
     }
+  });
+
+  it("accumulates shares_transferred across two CSV transfer events (DD-MMM-YY format)", async () => {
+    // First event: Nov 10 allocation, 7 of 10 allocated shares transferred to broker
+    const csv1 = [
+      '"Plan","Instrument","Allocation date","Quantity","Cost basis","Cost basis (unit)"',
+      '"Acme Corp","Purchase Shares","Nov 10, 2026","7",150.00,"$"',
+    ].join('\n');
+    const pdfText = `
+      Allocation dateNov 10, 2026
+      Allocated 10.0
+      Distributed 7
+      Cost basis $150.00
+      Purchase FMV $180.00
+    `;
+    const r1 = await importBatch(HOUSEHOLD_ID, Buffer.from(pdfText), Buffer.from(csv1));
+    expect(r1.ok).toBe(true);
+    if (!r1.ok) return;
+    expect(r1.data[0]!.sharesTransferred).toBe(7);
+
+    // Second event: remaining 3 from Nov 10 + Nov 25 batch transferred (DD-MMM-YY format)
+    const csv2 = [
+      'Plan,Instrument,Allocation date,Quantity,Cost basis,Cost basis (unit)',
+      'Acme Corp,Purchase Shares,10-Nov-26,3.0,150.00,$',
+      'Acme Corp,Purchase Shares,25-Nov-26,5.0,148.00,$',
+    ].join('\n');
+    const r2 = await importBatch(HOUSEHOLD_ID, null, Buffer.from(csv2));
+    expect(r2.ok).toBe(true);
+    if (!r2.ok) return;
+    expect(r2.data).toHaveLength(2);
+
+    const nov10 = r2.data.find(b => b.purchaseDate === '2026-11-10');
+    const nov25 = r2.data.find(b => b.purchaseDate === '2026-11-25');
+
+    // Nov 10: 7 + 3 = 10 (accumulated), capped at shares_granted = 10
+    expect(nov10!.sharesTransferred).toBeCloseTo(10, 4);
+    // Nov 10: FMV preserved from first PDF import
+    expect(nov10!.fmvPerShare).toBeCloseTo(180, 2);
+
+    // Nov 25: new CSV-only batch, FMV null until PDF is imported
+    expect(nov25!.sharesTransferred).toBeCloseTo(5.0, 4);
+    expect(nov25!.fmvPerShare).toBeNull();
   });
 
   it("returns error when no files provided", async () => {

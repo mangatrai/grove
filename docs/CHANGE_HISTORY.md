@@ -18,6 +18,40 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-PARSER-1 (2026-05-27): Parser robustness — case-insensitive section headers and flexible CSV column matching
+
+- **Type:** Bug fix / hardening — bank import parsers
+- **What:** Seven parsers had brittle exact-string or exact-case matches that would silently drop all data if the bank made a minor format change.
+  - `marcus-online-savings-pdf.ts`: `"ACCOUNT ACTIVITY"` and activity column header were case-sensitive exact-string matches. Now uses `/ACCOUNT ACTIVITY/i` and a flexible `startsWith("datedescription") && includes("balance")` check.
+  - `wealthfront-investment-pdf.ts`: `"II. Account Activity"` was an exact match. Now uses `/(?:II\.\s*)?Account Activity\b/i` — tolerates section numbering changes and casing.
+  - `boa-credit-card-csv.ts`, `discover-card-csv.ts`, `wealthfront-investment-csv.ts`: Column lookups used exact-case string keys (`row["Posted Date"]`, `row["Trans. Date"]`, `row["Transaction date"]`, etc.). A bank export with different casing (e.g., `"Transaction Date"` vs `"Transaction date"`) would silently produce empty output. Now use a new `pickCol()` helper that tries exact match first, then case-insensitive, then tries common aliases.
+  - `boa-estatement-pdf.ts`: Added `"Deposits and other additions - continued"` and `"ATM and debit card subtractions - continued"` handlers (matching the existing pattern for `"Other subtractions - continued"` and `"Withdrawals - continued"`). Also extended the transaction date regex from `/\d{2}\/\d{2}\/\d{2}/` to `/\d{2}\/\d{2}\/\d{2,4}/` to handle 4-digit-year statements.
+- **New helper:** `pickCol(row, ...candidates)` in `tabular-helpers.ts` — exact then case-insensitive column lookup with alias fallback.
+- **Files:** `backend/src/modules/imports/profiles/tabular-helpers.ts`, `marcus-online-savings-pdf.ts`, `wealthfront-investment-pdf.ts`, `boa-credit-card-csv.ts`, `discover-card-csv.ts`, `wealthfront-investment-csv.ts`, `boa-estatement-pdf.ts`
+
+---
+
+## FIX-BOA-1 (2026-05-27): BoA eStatement PDF — flat Withdrawals section silently dropped all transactions
+
+- **Type:** Bug fix — backend parser
+- **What:** The `"Withdrawals and other subtractions"` section header was encountered and simply skipped (`i++; continue`) without entering any parse zone. Any transactions directly under this header (rather than inside an `"ATM and debit card subtractions"` or `"Other subtractions"` subsection) were silently discarded.
+- **Why it matters:** BoA "Adv Relationship Banking" and similar account types use a flat layout — all withdrawals sit directly under the top-level header with no subsections. Months where there are no ATM or debit card transactions also hit this case even on standard checking accounts.
+- **Fix:** Added `"withdrawals"` as a first-class parse zone. When the header is encountered, `zone = "withdrawals"` and `pendingHeader = true`. The `"ATM and debit card subtractions"` and `"Other subtractions"` checks still fire first (before zone dispatching), so nested-section statements continue to work unchanged. `"Total withdrawals and other subtractions"` resets the zone.
+- **Files:** `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`, `backend/tests/boa-parser.test.ts` (3 new unit tests + 1 PDF integration test)
+
+---
+
+## FIX-ESPP-8 (2026-05-27): ESPP — DD-MMM-YY date parsing + transferred accumulation
+
+- **Type:** Bug fix — backend
+- **What:** Two fixes triggered by EquatePlus's second CSV export format.
+  1. **DD-MMM-YY date parsing:** `parseMonthDate` now handles `15-Jan-26` / `30-Jan-26` format (EquatePlus allocation CSV uses this for multi-event exports). Previously all rows were silently skipped → import fell back to PDF-only path → used PDF "Distributed" (running total) as `sharesTransferred`.
+  2. **CSV `sharesTransferred` accumulation:** Each EquatePlus CSV represents one transfer event delta, not a cumulative total. On UPSERT conflict (same household+date), `shares_transferred` is now accumulated (`existing + delta`), capped at `shares_granted` to prevent double-import inflation. PDF-only imports preserve the existing `shares_transferred` — PDF's "Distributed" is a running total that includes cross-batch events and must not be accumulated.
+- **Why:** Batch A showed stale `sharesTransferred` after second CSV (partial remainder not accumulated). Batch B showed the PDF Distributed running total instead of the CSV per-event delta. Root cause was the date parsing failure silently dropping all second-CSV rows.
+- **Files modified:** `backend/src/modules/espp/espp-parse.service.ts` (`parseMonthDate`), `backend/src/modules/espp/espp.service.ts` (split UPSERT logic, remove PDF sharesTransferred override), `backend/tests/espp.test.ts` (DD-MMM-YY parse test, accumulation integration test)
+
+---
+
 ## FIX-ESPP-7 (2026-05-27): ESPP info icons, multi-batch import, discount fallback
 
 - **Type:** Bug fix + UX — backend + frontend

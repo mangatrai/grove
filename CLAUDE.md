@@ -23,6 +23,27 @@ docker compose up -d     # Local Postgres 18 on port 5433 (DATABASE_SSL=0 locall
 
 ---
 
+## IMPORTANT: No PII / Real Financial Data in Code or Docs
+
+Test files, planning documents, code comments, and documentation examples must **never** contain real personal or financial data. This is a standing rule for all features — not just ESPP.
+
+**What counts as PII/real data:**
+- Real account numbers, transaction amounts, or balances from actual bank/brokerage statements
+- Real share quantities, stock prices, cost bases, or FMV values from actual holdings
+- Real payslip amounts, salary figures, or tax deduction values
+- Real dates that correspond to specific transaction events (e.g., purchase dates matching an actual ESPP lot)
+- Real names, emails, or other identifiers beyond the seeded test fixtures (`owner@example.com`, `e2e@example.com`)
+
+**How to write test data:**
+- Use obviously fictional values: round or near-round numbers (e.g., 10 shares, $150.00/share)
+- Use generic company/institution names ("Acme Corp", "Example Bank") — never real employer or bank names in examples
+- Use dates that are clearly chosen for testing (e.g., `2026-06-15`), not dates copied from real statements
+- When building a feature from a real-world scenario, generalize all numbers before writing code or tests
+
+This applies everywhere that ends up in git history: `backend/tests/`, `docs/`, `concept/`, inline code examples, and API_REFERENCE response examples.
+
+---
+
 ## Code Conventions
 
 - **No default exports** — named exports only

@@ -8,7 +8,10 @@ import {
   parseBoaCheckingOrSavingsCsvDetailed,
   parseBoaCsvStatementBalances
 } from "../src/modules/imports/profiles/boa-checking-savings-csv.js";
-import { extractBoaEStatementBalancesFromText } from "../src/modules/imports/profiles/boa-estatement-pdf.js";
+import {
+  extractBoaEStatementBalancesFromText,
+  parseBoaEStatementFromTextDetailed,
+} from "../src/modules/imports/profiles/boa-estatement-pdf.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -84,6 +87,98 @@ describe("BOA checking/savings CSV parser", () => {
     expect(b?.ending).toBeCloseTo(5678.9, 2);
     expect(b?.asOfStart).toBe("2025-01-01");
     expect(b?.asOfEnd).toBe("2025-01-31");
+  });
+
+  // ── BoA eStatement PDF transaction parser ──────────────────────────────────
+
+  it("parses flat 'Withdrawals and other subtractions' section (no ATM/Other subsections)", () => {
+    // Adv Relationship Banking and some BoA account types use a flat layout
+    // where all withdrawals sit directly under the section header.
+    const text = [
+      "Deposits and other additions",
+      "Date Description Amount",
+      "04/15/26 PAYROLL DIRECT DEPOSIT 2,000.00",
+      "Total deposits and other additions 2,000.00",
+      "Withdrawals and other subtractions",
+      "Date Description Amount",
+      "04/18/26 GROCERY STORE -75.00",
+      "04/22/26 UTILITY BILL -120.00",
+      "04/29/26 ONLINE PAYMENT -45.00",
+      "Total withdrawals and other subtractions -240.00",
+    ].join("\n");
+
+    const { rows } = parseBoaEStatementFromTextDetailed(text);
+    expect(rows).toHaveLength(4);
+
+    const deposits = rows.filter(r => r.amount > 0);
+    const withdrawals = rows.filter(r => r.amount < 0);
+    expect(deposits).toHaveLength(1);
+    expect(deposits[0]!.amount).toBeCloseTo(2000, 2);
+
+    expect(withdrawals).toHaveLength(3);
+    expect(withdrawals.map(r => r.amount).sort((a, b) => a - b))
+      .toEqual([-120, -75, -45]);
+  });
+
+  it("parses nested withdrawals with ATM and Other subsections (regression)", () => {
+    // Standard BoA checking layout: subsections appear inside Withdrawals
+    const text = [
+      "Deposits and other additions",
+      "Date Description Amount",
+      "05/01/26 PAYROLL DIRECT DEPOSIT 3,000.00",
+      "Total deposits and other additions 3,000.00",
+      "Withdrawals and other subtractions",
+      "ATM and debit card subtractions",
+      "Date Description Amount",
+      "05/05/26 ATM CASH WITHDRAWAL -200.00",
+      "05/10/26 DEBIT CARD PURCHASE -35.00",
+      "Total ATM and debit card subtractions -235.00",
+      "Other subtractions",
+      "Date Description Amount",
+      "05/15/26 ONLINE TRANSFER -500.00",
+      "Total other subtractions -500.00",
+      "Total withdrawals and other subtractions -735.00",
+    ].join("\n");
+
+    const { rows } = parseBoaEStatementFromTextDetailed(text);
+    expect(rows).toHaveLength(4);
+
+    const withdrawals = rows.filter(r => r.amount < 0);
+    expect(withdrawals).toHaveLength(3);
+    expect(withdrawals.map(r => r.amount).sort((a, b) => a - b))
+      .toEqual([-500, -200, -35]);
+  });
+
+  it("parses month with only ATM subsection (no Other subtractions block)", () => {
+    const text = [
+      "Withdrawals and other subtractions",
+      "ATM and debit card subtractions",
+      "Date Description Amount",
+      "06/03/26 ATM CASH WITHDRAWAL -100.00",
+      "06/12/26 DEBIT CARD PURCHASE -22.50",
+      "Total ATM and debit card subtractions -122.50",
+      "Total withdrawals and other subtractions -122.50",
+    ].join("\n");
+
+    const { rows } = parseBoaEStatementFromTextDetailed(text);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.amount).toBeCloseTo(-100, 2);
+    expect(rows[1]!.amount).toBeCloseTo(-22.5, 2);
+  });
+
+  it("parses eStatement from spouse BoA PDF if present", async () => {
+    const pdfPath = path.join(repoRoot, "data/imports/banks/neha/eStmt_2025-05-12.pdf");
+    if (!fs.existsSync(pdfPath)) return;
+    const { extractPdfText } = await import("../src/modules/imports/profiles/pdf-text.js");
+    const buf = fs.readFileSync(pdfPath);
+    const text = await extractPdfText(buf);
+    const { rows, statementBalances } = parseBoaEStatementFromTextDetailed(text);
+    // 4 deposits + 7 withdrawals
+    expect(rows.length).toBeGreaterThanOrEqual(11);
+    const withdrawals = rows.filter(r => r.amount < 0);
+    expect(withdrawals.length).toBeGreaterThanOrEqual(7);
+    expect(statementBalances?.beginning).toBeCloseTo(41321.32, 2);
+    expect(statementBalances?.ending).toBeCloseTo(45343.95, 2);
   });
 
   it("recovers malformed quoted-description rows via loose fallback parsing", () => {
