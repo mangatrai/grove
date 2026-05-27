@@ -507,10 +507,10 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
     }
   }, []);
 
-  const handleGDriveConnect = useCallback(async () => {
+  const handleGDriveConnect = useCallback(async (overrideFolderId?: string) => {
     setGdriveError(null);
     setGdriveSuccess(null);
-    const folderId = gdriveFolderIdInput.trim();
+    const folderId = (overrideFolderId ?? gdriveFolderIdInput).trim();
     if (!folderId) { setGdriveError("Enter the Drive folder ID first."); return; }
     setGdriveConnecting(true);
     try {
@@ -921,7 +921,7 @@ export function BackupRestoreSection({ authRole, active }: BackupRestoreSectionP
                         color="orange"
                         size="xs"
                         mt="xs"
-                        onClick={() => void handleGDriveConnect()}
+                        onClick={() => void handleGDriveConnect(gdriveStatus?.folderId)}
                       >
                         Reconnect Google Drive
                       </Button>

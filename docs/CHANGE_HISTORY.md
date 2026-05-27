@@ -10,13 +10,72 @@
 | **UX-** | Design / UX polish — layout, visuals, affordances (not always a bug). |
 | **FIX-** | Bug or correctness fix (backend, migrations, tests). |
 | **DB-** | Schema / migration / seed semantics worth remembering. |
-| **PRD-** | Documented deviation from historical PRD / backlog intent — *by design* after decision (archived: `docs/archive/FINANCE_APP_PRD.md`). |
+| **PRD-** | Documented deviation from historical PRD / backlog intent — *by design* after decision (see `docs/PRD_AND_CRS.md`). |
 
-**GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/household-finance-app`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
+**GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
 Entries are **newest-first** within each calendar period. IDs are stable; do not renumber.
 
 ---
+
+## CR-226 (2026-05-25): Playwright E2E test suite — initial setup (I-8)
+
+- **Type:** Test infrastructure
+- **What:** Added Playwright end-to-end tests (I-8 from V4 backlog). Three test suites, 13 tests total covering the critical user paths.
+- **Files created:** `e2e/auth.spec.ts`, `e2e/dashboard.spec.ts`, `e2e/transactions.spec.ts`, `e2e/helpers/auth.ts`, `playwright.config.ts`
+- **Files modified:** `package.json` (added `test:e2e` script + `@playwright/test` dev dep), `backend/db/seeds/0001_bootstrap.sql` (added `e2e@example.com` test user with `force_password_change=false`)
+- **Test suites:**
+  - `auth.spec.ts` — login form render, invalid credentials error, successful login, force-password-change redirect for bootstrap owner
+  - `dashboard.spec.ts` — dashboard load, cash/net-worth/budget sections visible, no console errors
+  - `transactions.spec.ts` — table render, filter input, row data, needs-review URL param
+- **Why:** Bootstrap user has `force_password_change=true`; added `e2e@example.com` (same password hash, `force_password_change=false`) to bootstrap seed so tests bypass the mandatory-reset redirect without modifying production user flow.
+- **Run:** Requires `npm run start:dev` (ports 3000/4000) + `npm run db:reset:dev`, then `npm run test:e2e`
+
+---
+
+## DOC-217 (2026-05-25): Documentation consolidation — 40+ files → 5 canonical docs (T-1)
+
+- **Type:** Maintenance / documentation restructure
+- **What:** Reduced the `docs/` directory from 40+ markdown files to 5 canonical documents. 25 source files were retired; their content was synthesized into the new structure.
+- **New documents:**
+  - `docs/USER_GUIDE.md` — enhanced end-user guide; covers every major screen, workflow, and key UI element; reads frontend React pages for accuracy
+  - `docs/ADMIN_GUIDE.md` — new operator guide; consolidates RUNBOOK.md, PRODUCTION_SETUP.md, HOSTING_OPTIONS_AND_HOME_LAB.md, OCI_DEPLOYMENT.md, ENVIRONMENT_VARIABLES.md, DATABASE_ARCHITECTURE.md, ARCHITECTURE.md, CACHING.md, IMPORT_CLASSIFICATION.md, EMAIL_INFRASTRUCTURE.md
+  - `docs/BACKLOG.md` — Jira/Trello-style board; consolidates V4_PLAN.md, V4_BACKLOG.md, V3_PLAN.md, V3_BACKLOG.md, EXPORT_IMPORT_BACKLOG.md, IMPORT_PIPELINE_SIMPLIFICATION_BACKLOG.md, MOBILE_UX_BACKLOG.md, MULTI_HOUSEHOLD_BACKLOG.md, RECURRING_PAYMENTS_BACKLOG.md, SECURITY_HARDENING_BACKLOG.md; includes shipped V3/V4, active items, deferred, dropped
+  - `docs/PRD_AND_CRS.md` — product requirements + architecture decisions; consolidates archive/FINANCE_APP_PRD.md, archive/CATEGORIZATION_ROADMAP.md, archive/DECISIONS_LOG.md, archive/PFM_COMPETITIVE_UX_REFERENCE.md, archive/PROJECT_CONTEXT.md, PAYSLIP_V1.md
+  - `docs/CHANGE_HISTORY.md` — kept as-is; untouched
+- **Untouched:** All `docs/API_*.md` files and `openapi/openapi.yaml`
+- **README.md:** Documentation table updated to point to the 5 new canonical docs
+- **CHANGE_HISTORY.md:** PRD-prefix note updated (archive/FINANCE_APP_PRD.md retired; PRD_AND_CRS.md is the new canonical PRD)
+- **Files created:** `docs/ADMIN_GUIDE.md`, `docs/BACKLOG.md`, `docs/PRD_AND_CRS.md` (new); `docs/USER_GUIDE.md` (rewritten)
+- **Files deleted:** 21 files in `docs/`, 5 files in `docs/archive/` (archive/ is now empty)
+
+---
+
+## FIX-225 (2026-05-26): Year-in-review — investment contributions excluded from spending + NetWorth manual-refresh-only
+
+- **Type:** Data quality + UX
+- **Investments excluded from spending:** Transactions under `Investments` parent (Stocks, IRA, 529, Crypto, Bonds, and any user-created subcategories) were counted as spending in the year-in-review. Fixed by fetching all investment category IDs at runtime (parent + leaves by `parent_id` JOIN) and excluding them from income/spending aggregates, `topCategories`, and `largestTransaction`. A separate `investmentContributions` total is computed and passed to the LLM so it can narrate "invested $X" rather than treating contributions as spending. `CACHE_VERSION` bumped to `"3"` to bust stale reports.
+- **NetWorth balance save no longer triggers page reload:** `saveRow` and `runBulkAsOf` switched from `apiJson` to `apiFetch` — no auto `invalidateCacheByUrl` fires on save. `/reports/balance-sheet/manual` removed from `CACHE_INVALIDATION_MAP`. A `IconRefresh` button added to the "Balance sheet" section header so users can reload once after editing all accounts.
+- **Missing investment IDs added:** `investmentsParent`, `investmentsStocks`, `investmentsFiveTwentyNinePlan`, `investmentsCrypto` added to `DEFAULT_CATEGORY_IDS` in `category-ids.ts`.
+- **Tests updated:** `cache.test.ts` updated to assert that `/balance-sheet/manual` correctly produces no scope invalidation.
+- **Files:** `backend/src/modules/category/category-ids.ts`, `backend/src/modules/reports/year-summary.service.ts`, `backend/src/modules/reports/year-summary.types.ts`, `frontend/src/cache.ts`, `frontend/src/cache.test.ts`, `frontend/src/pages/NetWorthPage.tsx`
+
+## FIX-224 (2026-05-25): Year-in-review — transfer contamination, effective-rate = 0, stale cache not busted
+
+- **Type:** Data quality / calculation bug
+- **Income/spending inflated by transfers:** `computeIncomeSpending`, `computeTopCategories`, `computeLargestTransaction` all included inter-account transfer transactions (category IDs: `transfersIn`, `transfersOut`, `transfersCashWithdrawal`, `transfers` parent). This inflated reported income from ~$136K actual to $1.1M and made "Transfers out" 70% of spending. Fixed by adding `AND NOT (category_id = ANY(?))` using `TRANSFER_CATEGORY_IDS` constant from `DEFAULT_CATEGORY_IDS`.
+- **effectiveFederalRatePct / effectiveTotalRatePct = 0:** `payslip_snapshot.effective_federal_rate_ytd` stores a decimal ratio (e.g. 0.283), but the service returned it as-is. Multiplied by 100 to convert to percentage points.
+- **Stale cache not busted on logic change:** Cache hash only covered data row counts and timestamps — logic fixes silently returned stale results. Added `CACHE_VERSION` constant; bumped to `"2"` and included in hash so any query-logic change busts existing cached reports.
+- **Files:** `backend/src/modules/reports/year-summary.service.ts`
+
+## FIX-223 (2026-05-25): NetWorth page — overly aggressive cache invalidation on mutations + GDrive reconnect broken
+
+- **Type:** Bug fixes — two issues
+- **GDrive reconnect:** "Reconnect Google Drive" button in the `needsReauth` alert called `handleGDriveConnect()` with no argument. The handler reads `gdriveFolderIdInput` (always empty at this point) and returns early with "Enter the Drive folder ID first." Fix: `handleGDriveConnect` now accepts an optional `overrideFolderId`; reconnect button passes `gdriveStatus.folderId` (already stored from the original connect).
+- **Cache over-invalidation on NetWorthPage:**
+  - `refreshPropertyValuation` used `apiJson` POST → `invalidateCacheByUrl` fired → `hfa:cache-invalidate` event → trend chart and balance sheet refetched immediately, before the user even confirmed the Redfin estimate. Changed to `apiFetch` to prevent premature invalidation.
+  - `saveEdit` / `runBulkAsOf` / `savePropertyMarketValue` each called explicit `refreshSheetCache()` + `refreshHistoryCache()` AFTER `apiJson` POST — redundant because those URLs are already in `CACHE_INVALIDATION_MAP` and `apiJson` auto-fires the invalidation event. Removed the duplicate explicit calls (one reload per save, not three).
+- **Files:** `frontend/src/pages/settings/BackupRestoreSection.tsx`, `frontend/src/pages/NetWorthPage.tsx`
 
 ## FIX-221 (2026-05-25): Net Worth page cache keys change daily — trend and account charts reload on every visit
 

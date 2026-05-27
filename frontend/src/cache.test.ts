@@ -222,12 +222,15 @@ describe("CACHE_INVALIDATION_MAP patterns", () => {
   });
 
   // ── Net Worth scope
-  it("POST /reports/balance-sheet/manual → networth", () => {
-    expect(scopesFor("/reports/balance-sheet/manual")).toEqual(["networth"]);
+  // NOTE: /reports/balance-sheet/manual is intentionally NOT in the map.
+  // Balance row saves use apiFetch (no auto-invalidation) so updating multiple
+  // accounts doesn't reload the page after each save. Refresh is manual.
+  it("POST /reports/balance-sheet/manual → no scope (manual refresh only)", () => {
+    expect(scopesFor("/reports/balance-sheet/manual")).toHaveLength(0);
   });
 
-  it("PATCH /reports/balance-sheet/manual/:id → networth", () => {
-    expect(scopesFor("/reports/balance-sheet/manual/snap-id-123")).toEqual(["networth"]);
+  it("PATCH /reports/balance-sheet/manual/:id → no scope (manual refresh only)", () => {
+    expect(scopesFor("/reports/balance-sheet/manual/snap-id-123")).toHaveLength(0);
   });
 
   it("POST /household/properties/:id/values → networth", () => {
@@ -265,9 +268,9 @@ describe("invalidateCacheByUrl", () => {
     expect(getCacheVersion("networth")).toBe(0);
   });
 
-  it("bumps networth version for /reports/balance-sheet/manual", () => {
+  it("does NOT bump networth for /reports/balance-sheet/manual (manual refresh only)", () => {
     invalidateCacheByUrl("/reports/balance-sheet/manual");
-    expect(getCacheVersion("networth")).toBe(1);
+    expect(getCacheVersion("networth")).toBe(0);
     expect(getCacheVersion("dashboard")).toBe(0);
   });
 

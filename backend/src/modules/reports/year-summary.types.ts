@@ -41,6 +41,8 @@ export interface YearSummaryData {
   netWorthChange: number;
   netWorthChangePct: number;
   investments: YearSummaryInvestments | null;
+  /** Total cash put into investment accounts (Stocks, IRA, 529, Crypto, etc.) during the year. */
+  investmentContributions: number;
   otherSavings: number;
   largestTransaction: { amount: number; description: string; date: string; category: string | null } | null;
   topMerchant: { name: string; visits: number; totalSpent: number; avgPerVisit: number } | null;
