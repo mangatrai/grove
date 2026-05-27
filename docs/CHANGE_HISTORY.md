@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-10 (2026-05-27): ESPP batch status — "Fully Sold" threshold raised to match display precision
+
+- **Type:** Bug fix — floating-point epsilon mismatch
+- **What:** Batches where `shares_transferred == shares_sold` (visually 0 held shares) could show "Partially Sold" instead of "Fully Sold". Root cause: `held` was compared against a `0.000001` epsilon, but Postgres NUMERIC → `parseFloat` floating-point residuals can produce `held ≈ 0.00003` — above the old threshold but below display precision (4dp). The batch would display held=0 yet show "Partially Sold".
+- **Fix:** Raised the epsilon in `listBatchesWithSales` from `0.000001` to `0.00005` (half a unit at 4dp, matching `formatShares` display precision). Any held value that rounds to 0 at 4dp is now treated as "Fully Sold".
+- **Files:** `backend/src/modules/espp/espp.service.ts`
+
+---
+
 ## FIX-ESPP-9 (2026-05-27): ESPP Record Sale — allow 4-decimal sale price input
 
 - **Type:** Bug fix — frontend precision truncation

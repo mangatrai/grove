@@ -116,7 +116,7 @@ export async function listBatchesWithSales(
     const held        = Math.max(0, transferred - totalSold);
     const status: EsppBatchWithSales['status'] =
       totalSold === 0 ? 'Unsold' :
-      held <= 0.000001 ? 'Fully Sold' :
+      held < 0.00005 ? 'Fully Sold' :
       'Partially Sold';
 
     return {
