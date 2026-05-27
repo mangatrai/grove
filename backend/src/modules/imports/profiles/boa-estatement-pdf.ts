@@ -75,7 +75,7 @@ export function extractBoaEStatementBalancesFromText(text: string): BoaStatement
   };
 }
 
-type Zone = "none" | "deposits" | "atm" | "other";
+type Zone = "none" | "deposits" | "atm" | "other" | "withdrawals";
 
 
 /** pdf-parse output often concatenates headers and dates (no spaces). */
@@ -160,7 +160,29 @@ export function parseBoaEStatementFromTextDetailed(text: string): {
       continue;
     }
 
-    if (lineTrim === "Withdrawals and other subtractions" || /^Withdrawals and other subtractions - continued/i.test(lineTrim)) {
+    // "Withdrawals and other subtractions" is a zone on its own for accounts that
+    // don't break it into ATM / Other subsections (e.g. Adv Relationship Banking).
+    // On accounts that DO have subsections, "ATM and debit card subtractions" and
+    // "Other subtractions" checks above fire first and override this zone.
+    if (lineTrim === "Withdrawals and other subtractions") {
+      zone = "withdrawals";
+      pendingHeader = true;
+      i++;
+      continue;
+    }
+    if (zone === "withdrawals" && /^Withdrawals and other subtractions - continued/i.test(lineTrim)) {
+      pendingHeader = true;
+      i++;
+      continue;
+    }
+    if (zone === "withdrawals" && pendingHeader && isBoaColumnHeaderLine(lineTrim)) {
+      pendingHeader = false;
+      i++;
+      continue;
+    }
+    if (zone === "withdrawals" && /^Total\s+withdrawals\s+and\s+other\s+subtractions/i.test(lineTrim)) {
+      zone = "none";
+      pendingHeader = false;
       i++;
       continue;
     }

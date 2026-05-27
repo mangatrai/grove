@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-BOA-1 (2026-05-27): BoA eStatement PDF — flat Withdrawals section silently dropped all transactions
+
+- **Type:** Bug fix — backend parser
+- **What:** The `"Withdrawals and other subtractions"` section header was encountered and simply skipped (`i++; continue`) without entering any parse zone. Any transactions directly under this header (rather than inside an `"ATM and debit card subtractions"` or `"Other subtractions"` subsection) were silently discarded.
+- **Why it matters:** BoA "Adv Relationship Banking" and similar account types use a flat layout — all withdrawals sit directly under the top-level header with no subsections. Months where there are no ATM or debit card transactions also hit this case even on standard checking accounts.
+- **Fix:** Added `"withdrawals"` as a first-class parse zone. When the header is encountered, `zone = "withdrawals"` and `pendingHeader = true`. The `"ATM and debit card subtractions"` and `"Other subtractions"` checks still fire first (before zone dispatching), so nested-section statements continue to work unchanged. `"Total withdrawals and other subtractions"` resets the zone.
+- **Files:** `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`, `backend/tests/boa-parser.test.ts` (3 new unit tests + 1 PDF integration test)
+
+---
+
 ## FIX-ESPP-8 (2026-05-27): ESPP — DD-MMM-YY date parsing + transferred accumulation
 
 - **Type:** Bug fix — backend
