@@ -428,6 +428,77 @@ These do not prevent saving; they are informational.
 
 ---
 
+## ESPP (Employee Stock Purchase Plan)
+
+The **ESPP** page tracks IBM ESPP purchase batches, stock disposals, and year-to-date tax exposure (ordinary income vs. capital gain/loss). Access it via **ESPP** in the sidebar.
+
+### Year Summary Strip
+
+Ten KPI cards across two rows display the current year's activity:
+
+- **Shares Purchased YTD** — total shares allocated in purchase batches
+- **Transferred to Broker** — shares released to your brokerage account
+- **Outstanding (EquatePlus)** — shares still held in the EquatePlus platform
+- **Shares Sold YTD** — total shares you have recorded as sold
+- **Total Invested** — cost basis × shares purchased
+- **Discount Received YTD** *(ⓘ)* — (FMV − cost basis) × shares transferred; falls back to computed value when no payslip is linked
+- **Sale Proceeds YTD** — total proceeds from recorded sales
+- **Realized Gain / Loss** — OI + cap gain/loss combined
+- **Ordinary Income YTD** *(ⓘ)* — discount × shares sold; this amount appears on your W-2
+- **Capital Gain / Loss** *(ⓘ)* — (sale price − FMV at purchase) × shares sold; taxed at capital gains rates
+
+Hover the ⓘ icon on a card to see the formula.
+
+Use the **‹ ›** year selector to navigate between years.
+
+### Purchase Batch Table
+
+Each row is one purchase batch (one EquatePlus purchase date). Columns:
+
+| Column | Description |
+|--------|-------------|
+| Purchase Date | YYYY-MM-DD of the purchase |
+| Shares | Shares allocated (from PDF) |
+| FMV / sh | Fair market value per share at purchase |
+| Cost / sh | Your cost basis per share (after IBM discount) |
+| Disc / sh | Discount per share (FMV − cost) |
+| Transferred | Shares released to broker (from CSV) |
+| Outstanding | Shares still in EquatePlus (Shares − Transferred) |
+| Sold | Shares you have sold |
+| Held | Shares in broker not yet sold (Transferred − Sold) |
+| Status | Unsold / Partially Sold / Fully Sold badge |
+
+Click any batch row to expand its **Sale History** — a sub-table of every recorded disposal with date, shares, price, proceeds, OI, and cap gain/loss.
+
+CSV-only batches (no PDF uploaded yet) show **—** for FMV and Discount.
+
+### Importing from EquatePlus
+
+Click **Import** to open the import modal. Drag or browse to upload:
+
+- **Purchase PDF** — the EquatePlus purchase confirmation PDF (provides FMV, discount rate, allocated/distributed counts)
+- **Allocation CSV** — the EquatePlus allocation export CSV (provides the full list of purchase dates and shares for the year)
+
+You can upload both together or separately. The CSV defines all purchase dates for the year; the PDF enriches the matching date with FMV and discount data. If you upload only the CSV, FMV will be blank until you import the PDF for that date.
+
+Re-importing the same files is safe — the backend upserts (no duplicates). If a matching payslip exists (pay date = purchase date), the IBM-authoritative ESPP discount amount is pulled in automatically.
+
+### Recording a Sale
+
+Click **Record Sale** to log a stock disposal. The button is disabled until at least one batch with a positive held quantity and FMV data exists.
+
+For each row in the modal:
+
+1. **Batch** — select the purchase date you are selling from
+2. **Shares** — number of shares sold
+3. **Price / share** — sale price
+
+Below the Proceeds box, **OI** (ordinary income) and **CG** (capital gain/loss) are shown live as you type — OI in gold, CG in forest/terracotta. These are informational; the server recomputes them on submit.
+
+Click **+ Add Row** to record multiple lots in one session (same sale date). The backend rejects the submission if any row exceeds the available held quantity for that batch.
+
+---
+
 ## Categories and Rules
 
 The **Categories** page lets you manage the expense and income taxonomy and set up auto-classification rules.

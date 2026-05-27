@@ -114,6 +114,8 @@ describe("importBatch", () => {
   afterEach(async () => {
     await cleanupBatch('2026-06-15');
     await cleanupBatch('2026-07-15');
+    await cleanupBatch('2026-09-13');
+    await cleanupBatch('2026-09-30');
   });
 
   it("creates a batch from PDF+CSV", async () => {
@@ -132,11 +134,12 @@ describe("importBatch", () => {
     const result = await importBatch(HOUSEHOLD_ID, Buffer.from(pdfText), Buffer.from(csv));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.data.purchaseDate).toBe('2026-06-15');
-    expect(result.data.costBasisPerShare).toBe(180);
-    expect(result.data.fmvPerShare).toBe(212);
-    expect(result.data.discountPerShare).toBeCloseTo(32, 1);
-    expect(result.data.sharesTransferred).toBe(10);
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]!.purchaseDate).toBe('2026-06-15');
+    expect(result.data[0]!.costBasisPerShare).toBe(180);
+    expect(result.data[0]!.fmvPerShare).toBe(212);
+    expect(result.data[0]!.discountPerShare).toBeCloseTo(32, 1);
+    expect(result.data[0]!.sharesTransferred).toBe(10);
   });
 
   it("upserts on re-import — no duplicate row", async () => {
@@ -159,6 +162,29 @@ describe("importBatch", () => {
       `SELECT COUNT(*) AS cnt FROM espp_batch WHERE household_id = ? AND purchase_date = '2026-07-15'`
     ).get<{ cnt: string }>(HOUSEHOLD_ID);
     expect(Number(row!.cnt)).toBe(1);
+  });
+
+  it("imports multi-date CSV — creates one batch per row", async () => {
+    const csv = [
+      '"Plan","Instrument","Allocation date","Quantity","Cost basis","Cost basis (unit)"',
+      '"IBM","Purchase Shares","Sep 13, 2026","0.9045",210.14,"$"',
+      '"IBM","Purchase Shares","Sep 30, 2026","3.0955",203.68,"$"',
+    ].join('\n');
+
+    const result = await importBatch(HOUSEHOLD_ID, null, Buffer.from(csv));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toHaveLength(2);
+
+    const dates = result.data.map(b => b.purchaseDate).sort();
+    expect(dates[0]).toBe('2026-09-13');
+    expect(dates[1]).toBe('2026-09-30');
+
+    // CSV-only batches have null FMV until a PDF is uploaded
+    for (const b of result.data) {
+      expect(b.fmvPerShare).toBeNull();
+      expect(b.discountPerShare).toBeNull();
+    }
   });
 
   it("returns error when no files provided", async () => {

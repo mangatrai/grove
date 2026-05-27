@@ -93,8 +93,8 @@ esppRouter.post(
       return;
     }
 
-    log.info({ purchaseDate: result.data.purchaseDate, householdId }, 'espp:import batch upserted');
-    res.status(201).json({ batch: result.data });
+    log.info({ count: result.data.length, dates: result.data.map(b => b.purchaseDate), householdId }, 'espp:import batches upserted');
+    res.status(201).json({ batches: result.data });
   }
 );
 

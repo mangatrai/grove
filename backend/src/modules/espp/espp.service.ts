@@ -138,7 +138,10 @@ export async function getYearSummary(
        COALESCE(SUM(shares_granted),                              0) AS shares_purchased,
        COALESCE(SUM(shares_transferred),                          0) AS shares_transferred,
        COALESCE(SUM(cost_basis_per_share * shares_granted),       0) AS total_invested,
-       COALESCE(SUM(COALESCE(espp_discount_payslip, 0)),          0) AS discount_received
+       COALESCE(SUM(CASE
+         WHEN espp_discount_payslip IS NOT NULL THEN espp_discount_payslip
+         ELSE COALESCE(discount_per_share * shares_transferred, 0)
+       END), 0) AS discount_received
      FROM espp_batch
      WHERE household_id = ?
        AND EXTRACT(YEAR FROM purchase_date::date) = ?`,
@@ -185,7 +188,7 @@ export async function importBatch(
   householdId: string,
   pdfBuffer: Buffer | null,
   csvBuffer: Buffer | null
-): Promise<{ ok: true; data: EsppBatchRow } | { ok: false; code: string; message: string }> {
+): Promise<{ ok: true; data: EsppBatchRow[] } | { ok: false; code: string; message: string }> {
   if (!pdfBuffer && !csvBuffer) {
     return { ok: false, code: 'NO_FILE', message: 'At least one file (PDF or CSV) is required.' };
   }
@@ -202,65 +205,127 @@ export async function importBatch(
 
   const csvRows = csvBuffer ? parseEsppCsv(csvBuffer) : [];
 
-  // Determine purchase date — PDF is authoritative; fall back to first CSV row
-  const purchaseDate = pdfData?.purchaseDate ?? csvRows[0]?.purchaseDate ?? null;
-  if (!purchaseDate) {
+  // Build the set of batches to upsert:
+  // • CSV rows define all purchase dates (the full year roster).
+  // • PDF enriches the one batch whose date matches the PDF.
+  // • If PDF-only (no CSV), create a single batch from PDF data.
+  type BatchSpec = {
+    purchaseDate: string;
+    sharesGranted: number;
+    sharesTransferred: number;
+    costBasisPerShare: number;
+    fmvPerShare: number | null;
+    discountPerShare: number | null;
+  };
+
+  const specs: BatchSpec[] = [];
+
+  if (csvRows.length > 0) {
+    for (const csvRow of csvRows) {
+      const isPdfDate = pdfData?.purchaseDate === csvRow.purchaseDate;
+      const fmv = isPdfDate ? (pdfData?.fmvPerShare ?? null) : null;
+      const cost = isPdfDate && pdfData?.costBasisPerShare != null
+        ? pdfData.costBasisPerShare
+        : csvRow.costBasisPerShare;
+      const granted = isPdfDate && pdfData?.sharesGranted != null
+        ? pdfData.sharesGranted
+        : csvRow.sharesTransferred;
+      const transferred = isPdfDate && pdfData?.sharesTransferred != null
+        ? pdfData.sharesTransferred
+        : csvRow.sharesTransferred;
+      specs.push({
+        purchaseDate:     csvRow.purchaseDate,
+        sharesGranted:    granted,
+        sharesTransferred: transferred,
+        costBasisPerShare: cost,
+        fmvPerShare:       fmv,
+        discountPerShare:  fmv != null ? fmv - cost : null,
+      });
+    }
+
+    // If PDF has a date that doesn't appear in the CSV, add a PDF-only batch
+    if (pdfData?.purchaseDate && !csvRows.some(r => r.purchaseDate === pdfData!.purchaseDate)) {
+      const cost = pdfData.costBasisPerShare;
+      if (cost != null) {
+        const fmv = pdfData.fmvPerShare ?? null;
+        const granted = pdfData.sharesGranted ?? pdfData.sharesTransferred ?? 0;
+        specs.push({
+          purchaseDate:     pdfData.purchaseDate,
+          sharesGranted:    granted,
+          sharesTransferred: pdfData.sharesTransferred ?? granted,
+          costBasisPerShare: cost,
+          fmvPerShare:       fmv,
+          discountPerShare:  fmv != null ? fmv - cost : null,
+        });
+      }
+    }
+  } else if (pdfData) {
+    // PDF-only import
+    if (!pdfData.purchaseDate) {
+      return { ok: false, code: 'NO_DATE', message: 'Could not determine purchase date from uploaded files.' };
+    }
+    if (!pdfData.costBasisPerShare) {
+      return { ok: false, code: 'NO_COST_BASIS', message: 'Could not determine cost basis. Please include the PDF.' };
+    }
+    const fmv = pdfData.fmvPerShare ?? null;
+    const cost = pdfData.costBasisPerShare;
+    const granted = pdfData.sharesGranted ?? pdfData.sharesTransferred ?? 0;
+    specs.push({
+      purchaseDate:      pdfData.purchaseDate,
+      sharesGranted:     granted,
+      sharesTransferred: pdfData.sharesTransferred ?? granted,
+      costBasisPerShare: cost,
+      fmvPerShare:       fmv,
+      discountPerShare:  fmv != null ? fmv - cost : null,
+    });
+  }
+
+  if (specs.length === 0) {
     return { ok: false, code: 'NO_DATE', message: 'Could not determine purchase date from uploaded files.' };
   }
 
-  // Match CSV row by date to get sharesTransferred (if CSV provided)
-  const csvRow = csvRows.find(r => r.purchaseDate === purchaseDate);
+  const now = new Date().toISOString();
 
-  // Resolve field values, preferring PDF
-  const costBasisPerShare = pdfData?.costBasisPerShare ?? csvRow?.costBasisPerShare;
-  if (!costBasisPerShare) {
-    return { ok: false, code: 'NO_COST_BASIS', message: 'Could not determine cost basis. Please include the PDF.' };
+  for (const spec of specs) {
+    const link = await findPayslipLink(householdId, spec.purchaseDate);
+    const id   = randomUUID();
+    await qExec(
+      `INSERT INTO espp_batch (
+         id, household_id, purchase_date,
+         shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
+         shares_transferred, payslip_id,
+         espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (household_id, purchase_date) DO UPDATE SET
+         shares_granted         = EXCLUDED.shares_granted,
+         fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
+         cost_basis_per_share   = EXCLUDED.cost_basis_per_share,
+         discount_per_share     = COALESCE(EXCLUDED.discount_per_share, espp_batch.discount_per_share),
+         shares_transferred     = EXCLUDED.shares_transferred,
+         payslip_id             = COALESCE(EXCLUDED.payslip_id, espp_batch.payslip_id),
+         espp_discount_payslip  = COALESCE(EXCLUDED.espp_discount_payslip, espp_batch.espp_discount_payslip),
+         espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
+         espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
+         updated_at             = ?`,
+      id, householdId, spec.purchaseDate,
+      spec.sharesGranted, spec.fmvPerShare, spec.costBasisPerShare, spec.discountPerShare,
+      spec.sharesTransferred, link?.id ?? null,
+      link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
+      now, now,
+      now
+    );
+    log.info({ purchaseDate: spec.purchaseDate, fmv: spec.fmvPerShare, householdId }, 'espp:import batch upserted');
   }
 
-  const sharesGranted    = pdfData?.sharesGranted    ?? (csvRow ? csvRow.sharesTransferred : 0);
-  const sharesTransferred = csvRow?.sharesTransferred ?? pdfData?.sharesTransferred ?? sharesGranted;
-  const fmvPerShare      = pdfData?.fmvPerShare ?? null;
-  const discountPerShare = fmvPerShare != null ? fmvPerShare - costBasisPerShare : null;
-
-  // Try to link to a payslip for IBM-authoritative discount numbers
-  const link = await findPayslipLink(householdId, purchaseDate);
-
-  const now = new Date().toISOString();
-  const id  = randomUUID();
-
-  await qExec(
-    `INSERT INTO espp_batch (
-       id, household_id, purchase_date,
-       shares_granted, fmv_per_share, cost_basis_per_share, discount_per_share,
-       shares_transferred, payslip_id,
-       espp_discount_payslip, espp_salary_deduction, espp_other_deduction,
-       created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (household_id, purchase_date) DO UPDATE SET
-       shares_granted         = EXCLUDED.shares_granted,
-       fmv_per_share          = COALESCE(EXCLUDED.fmv_per_share, espp_batch.fmv_per_share),
-       cost_basis_per_share   = EXCLUDED.cost_basis_per_share,
-       discount_per_share     = COALESCE(EXCLUDED.discount_per_share, espp_batch.discount_per_share),
-       shares_transferred     = EXCLUDED.shares_transferred,
-       payslip_id             = COALESCE(EXCLUDED.payslip_id, espp_batch.payslip_id),
-       espp_discount_payslip  = COALESCE(EXCLUDED.espp_discount_payslip, espp_batch.espp_discount_payslip),
-       espp_salary_deduction  = COALESCE(EXCLUDED.espp_salary_deduction, espp_batch.espp_salary_deduction),
-       espp_other_deduction   = COALESCE(EXCLUDED.espp_other_deduction,  espp_batch.espp_other_deduction),
-       updated_at             = ?`,
-    id, householdId, purchaseDate,
-    sharesGranted, fmvPerShare, costBasisPerShare, discountPerShare,
-    sharesTransferred, link?.id ?? null,
-    link?.discount ?? null, link?.salary ?? null, link?.other ?? null,
-    now, now,
-    now  // updated_at for the DO UPDATE SET clause
+  const dates = specs.map(s => s.purchaseDate);
+  const placeholders = dates.map(() => '?').join(', ');
+  const rows = await qAll<Record<string, unknown>>(
+    `SELECT * FROM espp_batch WHERE household_id = ? AND purchase_date IN (${placeholders}) ORDER BY purchase_date DESC`,
+    householdId, ...dates
   );
 
-  const row = await qGet<Record<string, unknown>>(
-    `SELECT * FROM espp_batch WHERE household_id = ? AND purchase_date = ?`,
-    householdId, purchaseDate
-  );
-
-  return { ok: true, data: mapBatch(row!) };
+  return { ok: true, data: rows.map(mapBatch) };
 }
 
 export async function recordSales(

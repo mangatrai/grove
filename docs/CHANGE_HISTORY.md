@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-7 (2026-05-27): ESPP info icons, multi-batch import, discount fallback
+
+- **Type:** Bug fix + UX — backend + frontend
+- **What:** Three fixes.
+  1. **Multi-batch CSV import:** `importBatch` now creates one `espp_batch` row per CSV row (previous version dropped all but the first date). PDF enriches the matching date; other dates get CSV-only batches with null FMV. `POST /espp/import` response changed from `{ batch }` to `{ batches: [] }`.
+  2. **Discount Received YTD fallback:** `getYearSummary` now uses `CASE WHEN espp_discount_payslip IS NOT NULL THEN espp_discount_payslip ELSE discount_per_share * shares_transferred END` so Discount Received is non-zero for batches without a linked payslip.
+  3. **StatCard info icons:** Replaced plain `sub` text on Discount Received, Ordinary Income, and Capital Gain/Loss cards with Mantine `Tooltip` + `IconInfoCircle` icon — formulas visible on hover.
+- **Files modified:** `backend/src/modules/espp/espp.service.ts`, `backend/src/modules/espp/espp.routes.ts`, `backend/tests/espp.test.ts` (array assertions + multi-batch test), `frontend/src/pages/EsppPage.tsx`, `docs/USER_GUIDE.md` (ESPP section), `docs/ADMIN_GUIDE.md` (ESPP tables §5.2), `docs/BACKLOG.md` (ESPP-1 shipped)
+
+---
+
 ## CR-ESPP-1 (2026-05-27): IBM ESPP Equity Tracker — backend (ESPP-1)
 
 - **Type:** Feature — backend + DB

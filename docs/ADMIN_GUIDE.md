@@ -428,6 +428,43 @@ For Drive backup/restore (CR-106):
 
 **Schema source:** [`backend/db/migrations/0001_baseline.sql`](../backend/db/migrations/0001_baseline.sql) (squashed baseline) and incremental migrations in [`backend/db/migrations/`](../backend/db/migrations/) (numbered `0002`, etc.).
 
+### 5.2 ESPP Tables (migration `0052_espp_tracker.sql`)
+
+Two tables support the ESPP equity tracker:
+
+**`espp_batch`** — one row per purchase date (unique per `household_id + purchase_date`):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT PK | UUID |
+| `household_id` | TEXT FK | References `household(id)` |
+| `purchase_date` | TEXT | ISO YYYY-MM-DD |
+| `shares_granted` | NUMERIC(12,6) | Shares allocated (from PDF) |
+| `fmv_per_share` | NUMERIC(12,4) | Fair market value at purchase; NULL for CSV-only batches |
+| `cost_basis_per_share` | NUMERIC(12,4) | Employee purchase price per share |
+| `discount_per_share` | NUMERIC(12,4) | FMV − cost basis; NULL for CSV-only batches |
+| `shares_transferred` | NUMERIC(12,6) | Shares released to broker (from CSV) |
+| `payslip_id` | TEXT FK | Linked payslip (if pay date matches purchase date) |
+| `espp_discount_payslip` | NUMERIC(12,2) | IBM-authoritative ESPP discount from payslip |
+| `espp_salary_deduction` | NUMERIC(12,2) | ESPP salary deduction from payslip |
+| `espp_other_deduction` | NUMERIC(12,2) | Other ESPP deductions from payslip |
+
+**`espp_sale`** — one row per disposal event:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT PK | UUID |
+| `batch_id` | TEXT FK | References `espp_batch(id)` |
+| `household_id` | TEXT FK | References `household(id)` |
+| `sale_date` | TEXT | ISO YYYY-MM-DD |
+| `shares_sold` | NUMERIC(12,6) | Shares disposed |
+| `sale_price_per_share` | NUMERIC(12,4) | Sale price per share |
+| `proceeds` | NUMERIC(12,2) | shares_sold × sale_price |
+| `ordinary_income` | NUMERIC(12,2) | discount_per_share × shares_sold (W-2 income) |
+| `cap_gain_loss` | NUMERIC(12,2) | (sale_price − fmv_per_share) × shares_sold |
+
+Both tables are registered in the export registry (restoreOrder 21–22) and included in `.hfb` backup bundles.
+
 **Key indexes** (see migration files for full inventory). Highlights:
 
 - **`transaction_canonical`:** Compound index `(household_id, txn_date DESC, status)` for ledger list, cash summary, budget queries

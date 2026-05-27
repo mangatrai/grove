@@ -13,10 +13,12 @@ import {
   Table,
   Text,
   Title,
+  Tooltip,
 } from "@mantine/core";
 import {
   IconChevronDown,
   IconChevronRight,
+  IconInfoCircle,
   IconUpload,
   IconX,
 } from "@tabler/icons-react";
@@ -133,11 +135,13 @@ function StatCard({
   value,
   sub,
   tone,
+  tooltip,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   tone?: "pos" | "neg" | "gold" | "neu";
+  tooltip?: string;
 }) {
   const toneColor =
     tone === "pos" ? T.forest : tone === "neg" ? T.terracotta : tone === "gold" ? T.gold : T.text;
@@ -168,9 +172,17 @@ function StatCard({
           color: T.textMuted,
           fontWeight: 600,
           marginBottom: 6,
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
         }}
       >
         {label}
+        {tooltip ? (
+          <Tooltip label={tooltip} multiline w={260} withArrow position="top">
+            <IconInfoCircle size={12} style={{ cursor: "help", flexShrink: 0 }} />
+          </Tooltip>
+        ) : null}
       </div>
       <div
         style={{
@@ -738,7 +750,7 @@ function RecordSaleModal({
 
         <Group justify="space-between" align="center" pt="xs" style={{ borderTop: `1px solid ${T.border}` }}>
           <Text size="xs" c="dimmed">
-            Ordinary income &amp; capital gain/loss calculated on submit.
+            Only batches with FMV data (PDF imported) are shown. Import the PDF for a batch to enable sales from it.
           </Text>
           <Group gap="sm">
             <Button variant="default" onClick={onClose} disabled={submitting}>
@@ -863,7 +875,7 @@ export function EsppPage() {
             label="Discount Received YTD"
             value={`$${formatUsd(summaryData.discountReceivedYtd)}`}
             tone="gold"
-            sub="FMV − cost basis × shares"
+            tooltip="(FMV − cost basis) × shares_transferred; uses payslip value when available, otherwise computed from batch data"
           />
           <StatCard label="Sale Proceeds YTD" value={`$${formatUsd(summaryData.saleProceeds)}`} />
           <StatCard
@@ -874,13 +886,13 @@ export function EsppPage() {
           <StatCard
             label="Ordinary Income YTD"
             value={`$${formatUsd(summaryData.ordinaryIncomeYtd)}`}
-            sub="discount × shares sold"
+            tooltip="discount_per_share × shares_sold — reported as W-2 wages at sale time"
           />
           <StatCard
             label="Capital Gain / Loss"
             value={formatSignedUsd(summaryData.capGainLossYtd)}
             tone={summaryData.capGainLossYtd >= 0 ? "pos" : "neg"}
-            sub="sale price vs FMV at purchase"
+            tooltip="(sale_price − FMV_at_purchase) × shares_sold — taxed at capital gains rates"
           />
         </SimpleGrid>
       </Paper>
