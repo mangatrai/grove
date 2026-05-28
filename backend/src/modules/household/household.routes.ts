@@ -26,12 +26,14 @@ import {
   getProperty,
   listPropertiesForHousehold,
   listPropertyValueSnapshots,
+  getEquityHistory,
   previewValuationByAddress,
   refreshPropertyValuation,
   updateProperty,
   type PropertyUse
 } from "./property.service.js";
-import { isRealtyApiConfigured } from "./realty-api.service.js";
+import { isRealtyApiConfigured, type ValuationDetail } from "./realty-api.service.js";
+import { triggerDCADBackfill } from "../protest/protest-worksheet.service.js";
 import { qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 
@@ -379,21 +381,21 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
     // Use NOW() directly — no CASE WHEN to avoid PostgreSQL type-resolution failure
     // on an untyped parameter in a predicate-only position.
     if (parsed.data.apiPropertyId) {
-      const detailJson = parsed.data.valuationDetailJson != null
-        ? JSON.stringify(parsed.data.valuationDetailJson)
-        : null;
+      const detail = parsed.data.valuationDetailJson as ValuationDetail | null;
       await qExec(
         `UPDATE property
             SET api_provider          = 'redfin',
                 api_property_id       = ?,
                 api_listing_id        = ?,
-                valuation_detail_json = ?::jsonb,
+                valuation_detail_json = ?,
+                photo_url             = ?,
                 valuation_fetched_at  = NOW(),
                 updated_at            = NOW()
           WHERE id = ?`,
         parsed.data.apiPropertyId,
         parsed.data.apiListingId ?? null,
-        detailJson,
+        parsed.data.valuationDetailJson ?? null,
+        detail?.photoUrl ?? null,
         id
       );
     }
@@ -408,6 +410,17 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
     }
 
     res.status(201).json({ id });
+
+    // Fire-and-forget DCAD data backfill for TX properties (non-blocking)
+    const addressParts = [parsed.data.addressLine1, parsed.data.city, parsed.data.state, parsed.data.zip].filter(Boolean);
+    if (parsed.data.state === "TX" && addressParts.length >= 3) {
+      void triggerDCADBackfill(id, householdId, addressParts.join(", ")).catch((err) => {
+        log.warn("DCAD backfill failed at property creation", {
+          propertyId: id,
+          err: err instanceof Error ? err.message : String(err)
+        });
+      });
+    }
   } catch (err) {
     log.error("POST /household/properties: create failed", { err: err instanceof Error ? err.message : String(err) });
     res.status(500).json({ message: "Failed to create property", code: "CREATE_FAILED" });
@@ -434,7 +447,11 @@ const propertyPatchSchema = z.object({
   city: z.string().max(100).nullable().optional(),
   state: z.string().max(100).nullable().optional(),
   zip: z.string().max(20).nullable().optional(),
-  propertyUse: z.enum(["primary", "rental", "vacation"]).nullable().optional()
+  propertyUse: z.enum(["primary", "rental", "vacation"]).nullable().optional(),
+  purchasePrice: z.number().int().positive().nullable().optional(),
+  purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  monthlyRent: z.number().int().min(0).nullable().optional(),
+  propertyNotes: z.string().max(2000).nullable().optional()
 }).refine((b) => Object.keys(b).length > 0, { message: "At least one field required" });
 
 householdRouter.patch("/properties/:propertyId", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
@@ -454,7 +471,11 @@ householdRouter.patch("/properties/:propertyId", requireRole(["owner", "admin"])
     city: parsed.data.city,
     state: parsed.data.state,
     zip: parsed.data.zip,
-    propertyUse: parsed.data.propertyUse as PropertyUse | null | undefined
+    propertyUse: parsed.data.propertyUse as PropertyUse | null | undefined,
+    purchasePrice: parsed.data.purchasePrice,
+    purchaseDate: parsed.data.purchaseDate,
+    monthlyRent: parsed.data.monthlyRent,
+    propertyNotes: parsed.data.propertyNotes
   });
   if (!out.ok) {
     res.status(404).json({ message: "Property not found", code: out.code });
@@ -493,6 +514,17 @@ householdRouter.get("/properties/:propertyId/values", async (req: AuthenticatedR
   const householdId = req.authUser!.householdId;
   const snapshots = await listPropertyValueSnapshots(params.data.propertyId, householdId);
   res.status(200).json({ snapshots });
+});
+
+householdRouter.get("/properties/:propertyId/equity-history", async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const history = await getEquityHistory(params.data.propertyId, householdId);
+  res.status(200).json({ history });
 });
 
 householdRouter.post("/properties/:propertyId/values", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {

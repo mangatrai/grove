@@ -18,6 +18,157 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-RE3 (2026-05-28): PropertyDetailPage — equity/mortgage/AVM chart + layout redesign
+
+- **Type:** Feature + UX redesign
+- **What:**
+  - New backend endpoint `GET /household/properties/:propertyId/equity-history` — lateral join across `property_value_snapshot` and `account_balance_snapshot` (linked mortgage); returns `{ date, avm, mortgageBalance, equity }[]` per snapshot date. Equity is `avm - mortgageBalance` (simple subtraction; no new complexity).
+  - New full-width **Value · Mortgage · Equity** line chart (3 lines: AVM green, Mortgage red, Equity blue). Mortgage line only shown when a linked loan account has balance snapshots. Legend included.
+  - Assessment History chart moved to full-width below the equity chart (was in left span-8 column).
+  - Layout restructured: left col (span 8) now holds image + Property Details + Protest Readiness. Right col (span 4) holds Valuation numbers + compact Data Sources row. Charts are full-width below the grid.
+  - AVM-only sparkline removed from Valuation card — equity chart fully replaces it.
+  - Data Sources card shrunk to a single compact row (text + Refresh button inline, no padding waste).
+  - `snapshots` state + `loadSnapshots` callback removed (now redundant).
+- **Files:** `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/PropertyDetailPage.tsx`
+
+## UX-RE2 (2026-05-28): Property detail page polish — edit button wired, purchase fields, theme colors fixed
+
+- **Type:** UX polish + feature gap fill
+- **What:**
+  - `PropertyDetailPage.tsx`: Edit button (Property Details card) was greyed/disabled placeholder — now wired to `<AddPropertyModal existingPropertyId={property.id} />`. Clicking Edit opens the full edit modal inline.
+  - `AddPropertyModal.tsx`: Added purchase price (USD) and purchase date fields. Both are loaded from the API in edit mode and sent in the PATCH body on save. Create mode includes them in the POST body. Fields sit between "Property use" and "Market value".
+  - `PropertyDetailPage.tsx`: Replaced hardcoded hex colors (`#4dabf7` on tax line chart, `#2d6a4f` on AVM sparkline) with Mantine CSS variables (`var(--mantine-color-blue-5)`, `var(--mantine-color-green-7)`) so both charts respect light/dark theme.
+- **Files:** `frontend/src/pages/PropertyDetailPage.tsx`, `frontend/src/components/AddPropertyModal.tsx`
+
+## CR-RE1-ADD-MODAL (2026-05-28): AddPropertyModal extracted + dev seeds for real estate
+
+- **Type:** Change request — modal extraction + test data
+- **What:**
+  - Extracted `frontend/src/components/AddPropertyModal.tsx` from the inline modal in `SettingsPage.tsx`. Props: `opened`, `onClose`, `onSaved`, optional `accountId` (hides mortgage picker when set), optional `existingPropertyId` (edit mode).
+  - When `accountId` is not provided (opened from RE list), the modal fetches and shows a "Link to mortgage account (optional)" Select.
+  - `SettingsPage.tsx`: replaced 27-field `propertyModal` state + `openPropertyModal` / `retrieveValuation` / `savePropertyDetails` functions with a 3-field state + `<AddPropertyModal>` component. SettingsPage auto-open after mortgage creation still works via `accountId` prop.
+  - `RealEstatePage.tsx`: "Add Property" button now opens `AddPropertyModal` directly; no longer redirects to `/settings?tab=accounts`.
+  - Added `backend/db/seeds/dev/dev_0008_seed_properties.sql` — 2 fictional properties (TX primary + TN rental), 8-month value snapshots each, mortgage account, protest worksheet + 3 DCAD comps.
+- **Files:** `frontend/src/components/AddPropertyModal.tsx` (new), `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/RealEstatePage.tsx`, `backend/db/seeds/dev/dev_0008_seed_properties.sql` (new)
+- **GitHub:** https://github.com/mangatrai/grove/issues/37
+
+## CR-RE1-DETAIL (2026-05-28): PropertyDetailPage full redesign per prototype + hybrid assessment chart + AVM sparkline
+
+- **Type:** Change request — real estate detail page UX
+- **What:** Full rewrite of `PropertyDetailPage.tsx` to match prototype spec:
+  - **Property Details card** — Property Type, Address, Beds/Baths, Above-Grade Sqft, Lot Size, Year Built, Stories, APN, County/CAD, Appeal Process, Monthly Rent (rental only), Notes (if set). Label/value grid layout, no editable fields.
+  - **Assessment History chart** — Hybrid `ComposedChart`: Bar (assessed value, left Y-axis) + Line (taxes due, right Y-axis). Dual Y-axis both labelled in `$XXXk`. Year-over-year label on bars.
+  - **Valuation card** — AVM sparkline using `property_value_snapshot` timeseries from `GET /household/properties/:id/values`. Shows trajectory month-over-month.
+  - **`cadInfo()` helper** — derives CAD name and appeal process from `state` + `county`: TX (Denton→DCAD/ARB, Harris→HCAD, Travis→TCAD, Collin→CCAD, generic TX), TN (Shelby→Shelby Assessor/Board of Equalization, generic TN).
+  - Removed purchase price / purchase date editable inputs (one-time at add time; not on detail page).
+- **Files:** `frontend/src/pages/PropertyDetailPage.tsx`
+
+---
+
+## CR-RE1-REDFIN-PARSE (2026-05-28): Parse photo URL, county, stories, property type from Redfin response
+
+- **Type:** Change request — Redfin data enrichment
+- **What:**
+  - `ValuationDetail` extended with `county`, `photoUrl`, `thumbnailUrl`, `subject.stories`, `subject.propertyType`.
+  - `parseRedfinResponse()` in `realty-api.service.ts` extracts:
+    - **County** — `details.aboveTheFold.mainHouseInfo.selectedAmenities` entry where `header === "County"`
+    - **Exterior photo** — `details.aboveTheFold.photoTags.tagsByPhotoId` — first entry tagged "Exterior" (falls back to first entry); `photoUrl` (bigphoto) + `thumbnailphotoUrl` (midphoto)
+    - **Stories** — `details.aboveTheFold.basicInfo.numStories`
+    - **Property type** — `details.aboveTheFold.basicInfo.propertyTypeName`
+  - `refreshPropertyValuation()` in `property.service.ts` persists `photo_url` from `result.detail.photoUrl ?? null`.
+  - Property cards on `RealEstatePage.tsx` show the photo as a 120px thumbnail; diagonal-stripe placeholder when no photo.
+- **Files:** `backend/src/modules/household/realty-api.service.ts`, `backend/src/modules/household/property.service.ts`, `frontend/src/pages/RealEstatePage.tsx`
+
+---
+
+## DB-RE1-PHOTO (2026-05-28): Add photo_url column to property table (migration 0055)
+
+- **Type:** DB migration
+- **What:** `ALTER TABLE property ADD COLUMN IF NOT EXISTS photo_url TEXT;`
+- **Files:** `backend/db/migrations/0055_re1_photo_url.sql`
+
+---
+
+## CR-RE1-DCAD-BACKFILL (2026-05-28): Async DCAD backfill at property add time (TX only)
+
+- **Type:** Change request — DCAD data enrichment
+- **What:** When a TX property is created with a sufficiently complete address (street + city + state), a fire-and-forget `triggerDCADBackfill()` call runs after the 201 response. It calls `searchDCADByAddress()`, creates the protest worksheet if needed, and saves CAD comps. Errors are caught and logged; they do not affect the creation response.
+- **Why:** DCAD assessment data is more reliable than Redfin for tax values and is needed before the protest flow begins. Pre-populating at add time means the protest worksheet starts with comps already loaded.
+- **Files:** `backend/src/modules/protest/protest-worksheet.service.ts` (`triggerDCADBackfill` function), `backend/src/modules/household/household.routes.ts` (property creation POST handler)
+
+---
+
+## FIX-RE1-JSONB (2026-05-28): Fix valuation_detail_json always storing NULL
+
+- **Type:** Bug fix — critical data persistence
+- **Root cause:** All JSONB writes used `qExec` with `?::jsonb` SQL cast and `JSON.stringify(obj)` as the string param. The `postgres` npm library's `sql.unsafe()` sends JavaScript strings as the `text` OID; PostgreSQL's `::jsonb` cast on a typed-text parameter silently produces NULL rather than coercing it. The fix is to pass the plain JavaScript object/array — the driver then sends it with the JSONB OID, no cast needed.
+- **Files fixed:**
+  - `backend/src/modules/household/property.service.ts` — `refreshPropertyValuation`: `valuation_detail_json = ?::jsonb` + `JSON.stringify(result.detail)` → `valuation_detail_json = ?` + `result.detail`
+  - `backend/src/modules/protest/protest-worksheet.service.ts` — `appendConversationTurn`: `conversation_json || ?::jsonb` + `JSON.stringify([turn])` → `conversation_json || ?` + `[turn]`; `updateStrategy`: `strategy_json = ?::jsonb` + `JSON.stringify(strategy)` → `strategy_json = ?` + `strategy`; `saveCADComps`: `?::jsonb` + `JSON.stringify(comp.raw)` → `?` + `comp.raw`
+  - `backend/src/modules/household/household.routes.ts` — property creation path: same pattern fixed
+- **Impact:** Subject facts (beds/baths/sqFt/yearBuilt), CAD assessment value, tax history, and comps were all invisible on Real Estate and Tax Protest pages because the JSONB column was always NULL.
+
+---
+
+## FIX-RE1-FIELDS (2026-05-28): Fix field-name mismatches across RE-1/PT-1 pages and API
+
+- **Type:** Bug fix — data display
+- **Fixes:**
+  - `subject.sqFt` (capital F) was referenced as `sqft` (lowercase) in RealEstatePage, PropertyDetailPage, TaxProtestPage, and protest.routes.ts system prompt — caused sqft/beds/baths/yearBuilt to always show "—"
+  - `.assessment.assessedValue` → `.taxCurrent.assessedValue` in RealEstatePage, PropertyDetailPage, TaxProtestPage, protest.routes.ts — CAD assessed value was always null
+  - `.taxesPaid` → `.taxesDue` in RealEstatePage; added fallback chain `taxCurrent.taxesDue` first, then `taxHistory[0].taxesDue` — Annual Property Tax KPI always showed "—"
+  - `detail.estimate.value` (wrong — `estimate` is a plain number) → `typeof detail.estimate === "number" ? detail.estimate : null` in protest.routes.ts system prompt
+  - Image placeholder in PropertyDetailPage hardcoded "123 Example St" → `property.addressLine1 ?? "Property image"`
+  - Vite dev proxy: added `"/api": api` so `/api/protest/...` calls reach Express instead of 404-ing
+  - TaxProtestPage property switcher: `navigate()` + `setSearchParams` were both called on selection → double history entry; removed redundant `navigate()` call
+- **Files:** `frontend/src/pages/RealEstatePage.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`, `frontend/src/pages/TaxProtestPage.tsx`, `backend/src/modules/protest/protest.routes.ts`, `frontend/vite.config.ts`
+
+---
+
+## PT-1d (2026-05-27): TaxProtestPage frontend — chat + strategy + status tracker
+
+- **Type:** Change request — protest assistant UI
+- **What:** Added `TaxProtestPage` at `/tax-protest` with two-column layout: left-side worksheet chat (year selector, attachment helpers, optimistic send, assistant thread) and right-side context panel (property switcher, valuation/overassessment context, strategy panel, protest status stepper with hearing-date/status updates).
+- **Files:** `frontend/src/pages/TaxProtestPage.tsx`, `frontend/src/App.tsx`
+- **GitHub:** closes #23
+
+---
+
+## PT-1b (2026-05-27): DCAD service, worksheet service, and protest chat API
+
+- **Type:** Change request — protest assistant backend
+- **What:** Added `dcad.service.ts` with TrueProdigy public token auto-refresh + search helpers; added worksheet/comps persistence service; added `/api/protest/:propertyId/worksheet` (GET/PATCH) and `/api/protest/:propertyId/chat` with GPT-4.1 tool-use loop (`fetch_dcad_comps`, `update_strategy`) and conversation persistence.
+- **Files:** `backend/src/modules/protest/dcad.service.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/app.ts`, `docs/API_REFERENCE.md`
+- **GitHub:** closes #23
+
+---
+
+## PT-1a (2026-05-27): protest_worksheet and protest_comp_cad tables
+
+- **Type:** DB migration — property tax protest worksheet + CAD comps cache
+- **What:** Added migration `0054_pt1_protest_worksheets.sql` creating `protest_worksheet` and `protest_comp_cad` with household/property scoping, uniqueness indexes, and supporting indexes. Registered both tables in export coverage to prevent backup omissions.
+- **Files:** `backend/db/migrations/0054_pt1_protest_worksheets.sql`, `backend/src/modules/export/export-registry.ts`
+- **GitHub:** closes #23
+
+---
+
+## RE-1c/RE-1d/RE-1e (2026-05-27): Real Estate list/detail pages + sidebar nav
+
+- **Type:** Change request — real estate UX delivery
+- **What:** Added `RealEstatePage` (`/real-estate`) with KPI strip, property card grid, hearing/protest signals, and actions (`Add Property`, `Refresh All`). Added `PropertyDetailPage` (`/real-estate/:propertyId`) with two-column facts/valuation/protest/source layout, editable property metadata form, and assessment-history chart. Added sidebar group **Property & Tax** with links to Real Estate and Tax Protest. Wired protected routes in `App.tsx`.
+- **Files:** `frontend/src/pages/RealEstatePage.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`, `frontend/src/layout/AppSidebar.tsx`, `frontend/src/App.tsx`
+
+---
+
+## RE-1a/RE-1b (2026-05-27): Property metadata columns + PATCH fields
+
+- **Type:** Change request — real estate property user metadata
+- **What:** Added `purchase_price`, `purchase_date`, `monthly_rent`, and `property_notes` to the `property` table (migration `0053_re1_property_metadata.sql`). Extended `PropertyRecord` and `PATCH /household/properties/:propertyId` to read/write `purchasePrice`, `purchaseDate`, `monthlyRent`, and `propertyNotes`. `updateProperty` now sets only columns present in the patch body (undefined keys are not overwritten).
+- **Files:** `backend/db/migrations/0053_re1_property_metadata.sql`, `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+- **GitHub:** closes #37
+
+---
+
 ## FIX-237 (2026-05-27): Dashboard "Other" link — categoryIds multi-filter now expands parent categories to children
 
 - **Type:** Bug fix — multi-category filter missing parent expansion

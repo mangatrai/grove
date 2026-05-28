@@ -23,6 +23,7 @@ All routes require `Authorization: Bearer <token>` (JWT) unless noted otherwise.
 - [Google Drive Integration](#google-drive-integration)
 - [Notifications](#notifications)
 - [AI Insights](#ai-insights)
+- [Property Tax Protest](#property-tax-protest)
 
 ---
 
@@ -85,6 +86,81 @@ Returns household-level savings target plus the signed-in user's person-level in
 - **`salaryDepositFinancialAccountId`** — optional FK to a household `financial_account` on the signed-in user's `person_profile`.
 - **`employers`** — JSON array on the signed-in user's `person_profile`. Empty when none.
 - **`largeTxnThresholdUsd`** — `null` when unset. Any imported transaction exceeding this amount triggers a `large_transaction` notification.
+
+---
+
+## Property Tax Protest
+
+All protest routes are mounted under `/api/protest` and require owner/admin role.
+
+### `GET /api/protest/:propertyId/worksheet?year=YYYY`
+
+Gets or creates a worksheet for the property and tax year.
+
+- **`year`** optional; defaults to current year.
+
+**Response 200:**
+```json
+{
+  "worksheet": {
+    "id": "uuid",
+    "householdId": "uuid",
+    "propertyId": "uuid",
+    "taxYear": 2026,
+    "status": "not_filed",
+    "hearingDate": null,
+    "conversationJson": [],
+    "strategyJson": null,
+    "createdAt": "2026-05-28T01:00:00.000Z",
+    "updatedAt": "2026-05-28T01:00:00.000Z"
+  }
+}
+```
+
+---
+
+### `POST /api/protest/:propertyId/chat`
+
+Assistant chat endpoint for protest planning and comp analysis.
+
+**Request body:**
+```json
+{
+  "message": "Draft my informal hearing argument.",
+  "attachmentText": "Optional extracted notes",
+  "attachmentType": "text",
+  "year": 2026
+}
+```
+
+- **`attachmentType`**: `pdf | url | text` (optional).
+- Uses GPT-4.1 with tool calls for DCAD comp fetch + strategy persistence.
+
+**Response 200:**
+```json
+{
+  "assistantMessage": "Start with unequal-appraisal comp framing...",
+  "strategyUpdated": true,
+  "compsAdded": 4
+}
+```
+
+---
+
+### `PATCH /api/protest/:propertyId/worksheet`
+
+Updates worksheet status and optional hearing date.
+
+**Request body:**
+```json
+{
+  "year": 2026,
+  "status": "informal",
+  "hearingDate": "2026-07-15"
+}
+```
+
+**Response 200:** `{ "worksheet": { ...updated worksheet... } }`
 
 ---
 
@@ -392,7 +468,21 @@ Creates a property and optionally links it to a mortgage account.
 
 **Auth:** Owner/admin only.
 
-Updates address/use fields. Send at least one of: `addressLine1`, `city`, `state`, `zip`, `propertyUse`.
+Updates address, use, and user-editable metadata fields. Send at least one field. Omitted keys are left unchanged; `null` clears a nullable field.
+
+**Request body (all fields optional; at least one required):**
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `addressLine1` | string \| null | max 200 |
+| `city` | string \| null | max 100 |
+| `state` | string \| null | max 100 |
+| `zip` | string \| null | max 20 |
+| `propertyUse` | `"primary"` \| `"rental"` \| `"vacation"` \| null | |
+| `purchasePrice` | integer \| null | positive, nullable to clear |
+| `purchaseDate` | string \| null | ISO `YYYY-MM-DD`, nullable to clear |
+| `monthlyRent` | integer \| null | ≥ 0, nullable to clear |
+| `propertyNotes` | string \| null | max 2000 chars, nullable to clear |
 
 **Response 200:** `{ "updated": true }`
 
@@ -427,6 +517,26 @@ Lists all `property_value_snapshot` rows for the property (ascending by `asOfDat
       "source": "manual",
       "apiProvider": null,
       "createdAt": "2026-05-10T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+#### `GET /household/properties/:propertyId/equity-history`
+
+Returns AVM, linked mortgage balance, and computed equity per snapshot date. The mortgage balance at each point is resolved from `account_balance_snapshot` for the linked loan account (using the closest balance on or before that date). If no mortgage is linked, `mortgageBalance` is `0` and `equity` equals `avm`.
+
+**Response 200:**
+```json
+{
+  "history": [
+    {
+      "date": "2025-10-01",
+      "avm": 480000,
+      "mortgageBalance": 320000,
+      "equity": 160000
     }
   ]
 }

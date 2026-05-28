@@ -40,6 +40,9 @@ export interface ValuationDetail {
   source: "redfin";
   estimate: number;              // Redfin AVM predictedValue
   estimateRange: { low: number; high: number } | null;
+  county: string | null;         // County name (e.g. "Denton", "Shelby") from Redfin amenities
+  photoUrl: string | null;       // Exterior photo URL (bigphoto CDN)
+  thumbnailUrl: string | null;   // Exterior thumbnail URL (midphoto CDN)
   lastSold: {
     date: string | null;         // "YYYY-MM-DD"
     price: number | null;        // null in non-disclosure states
@@ -64,6 +67,8 @@ export interface ValuationDetail {
     sqFt: number | null;
     lotSqFt: number | null;
     yearBuilt: number | null;
+    stories: number | null;
+    propertyType: string | null;  // e.g. "Single Family Residential"
     apn: string | null;           // Assessor Parcel Number — encodes county property ID for tax protest lookups
   } | null;
 }
@@ -309,14 +314,44 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
       : typeof basicInfo.totalSqFt === "number" ? basicInfo.totalSqFt : null,
     lotSqFt: typeof basicInfo.lotSqFt === "number" ? basicInfo.lotSqFt : null,
     yearBuilt: typeof basicInfo.yearBuilt === "number" ? basicInfo.yearBuilt : null,
+    stories: typeof basicInfo.numStories === "number" ? basicInfo.numStories : null,
+    propertyType: typeof basicInfo.propertyTypeName === "string" ? basicInfo.propertyTypeName : null,
     apn: typeof basicInfo.apn === "string" ? basicInfo.apn : null
   } : null;
+
+  // County name from main house amenities list
+  const aboveTheFold = details.aboveTheFold as Record<string, unknown> | undefined;
+  const mainHouseInfo = aboveTheFold?.mainHouseInfo as Record<string, unknown> | undefined;
+  const amenities = Array.isArray(mainHouseInfo?.selectedAmenities)
+    ? (mainHouseInfo!.selectedAmenities as Array<Record<string, unknown>>)
+    : [];
+  const countyEntry = amenities.find((a) => a.header === "County");
+  const county = typeof countyEntry?.content === "string" ? countyEntry.content : null;
+
+  // Exterior photo URL from tagsByPhotoId (find entry tagged "Exterior")
+  const photoTags = aboveTheFold?.photoTags as Record<string, unknown> | undefined;
+  const tagsByPhotoId = photoTags?.tagsByPhotoId as Record<string, Record<string, unknown>> | undefined;
+  let photoUrl: string | null = null;
+  let thumbnailUrl: string | null = null;
+  if (tagsByPhotoId) {
+    const entries = Object.values(tagsByPhotoId);
+    const exteriorEntry = entries.find(
+      (e) => Array.isArray(e.tags) && (e.tags as string[]).includes("Exterior")
+    ) ?? entries[0];
+    if (exteriorEntry) {
+      photoUrl = typeof exteriorEntry.photoUrl === "string" ? exteriorEntry.photoUrl : null;
+      thumbnailUrl = typeof exteriorEntry.thumbnailphotoUrl === "string" ? exteriorEntry.thumbnailphotoUrl : null;
+    }
+  }
 
   const detail: ValuationDetail = {
     fetchedAt: new Date().toISOString().slice(0, 10),
     source: "redfin",
     estimate: predictedValue,
     estimateRange,
+    county,
+    photoUrl,
+    thumbnailUrl,
     lastSold,
     taxCurrent,
     taxHistory,

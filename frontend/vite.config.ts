@@ -37,7 +37,8 @@ export default defineConfig({
       "/espp/batches": api,
       "/espp/summary": api,
       "/espp/import": api,
-      "/espp/sales": api
+      "/espp/sales": api,
+      "/api": api
     }
   }
 });

@@ -23,6 +23,7 @@ tags:
   - name: recurring
   - name: insights
   - name: gdrive
+  - name: protest
 paths:
   /health:
     get:
@@ -646,6 +647,10 @@ paths:
                 state: { type: string, nullable: true }
                 zip: { type: string, nullable: true }
                 propertyUse: { type: string, nullable: true, enum: [primary, rental, vacation] }
+                purchasePrice: { type: integer, nullable: true, minimum: 1 }
+                purchaseDate: { type: string, nullable: true, format: date }
+                monthlyRent: { type: integer, nullable: true, minimum: 0 }
+                propertyNotes: { type: string, nullable: true, maxLength: 2000 }
       responses:
         "200":
           description: Updated
@@ -688,6 +693,36 @@ paths:
           description: Forbidden — caller is not owner or admin
         "404":
           description: Property not found
+
+  /household/properties/{propertyId}/equity-history:
+    get:
+      summary: AVM, mortgage balance, and equity per value snapshot date
+      tags: [household]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Equity history points
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date: { type: string, example: "2025-10-01" }
+                        avm: { type: number, example: 480000 }
+                        mortgageBalance: { type: number, example: 320000 }
+                        equity: { type: number, example: 160000 }
+        "400":
+          description: Invalid propertyId
 
   /household/properties/{propertyId}/values:
     get:
@@ -880,6 +915,105 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
+  /api/protest/{propertyId}/worksheet:
+    get:
+      tags: [protest]
+      summary: Get or create protest worksheet for property/year
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: year
+          in: query
+          required: false
+          schema: { type: integer, minimum: 2000, maximum: 2100 }
+      responses:
+        "200":
+          description: Worksheet record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worksheet:
+                    $ref: '#/components/schemas/ProtestWorksheet'
+        "400":
+          description: Validation error
+        "404":
+          description: Property not found
+    patch:
+      tags: [protest]
+      summary: Update protest worksheet status and hearing date
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year]
+              properties:
+                year: { type: integer, minimum: 2000, maximum: 2100 }
+                status: { type: string, enum: [not_filed, filed, informal, arb, resolved] }
+                hearingDate: { type: string, format: date, nullable: true }
+      responses:
+        "200":
+          description: Worksheet updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  worksheet:
+                    $ref: '#/components/schemas/ProtestWorksheet'
+        "400":
+          description: Validation error
+        "404":
+          description: Property not found
+  /api/protest/{propertyId}/chat:
+    post:
+      tags: [protest]
+      summary: Chat with protest assistant for a property
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string }
+                attachmentText: { type: string }
+                attachmentType: { type: string, enum: [pdf, url, text] }
+                year: { type: integer, minimum: 2000, maximum: 2100 }
+      responses:
+        "200":
+          description: Assistant response + side effects summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assistantMessage: { type: string }
+                  strategyUpdated: { type: boolean }
+                  compsAdded: { type: integer }
+        "400":
+          description: Validation error
+        "404":
+          description: Property not found
   /gdrive/oauth/callback:
     get:
       tags: [gdrive]
@@ -3828,6 +3962,10 @@ components:
         apiPropertyId: { type: string, nullable: true }
         latestValueUsd: { type: number, nullable: true }
         latestValueAsOf: { type: string, format: date, nullable: true }
+        purchasePrice: { type: integer, nullable: true }
+        purchaseDate: { type: string, format: date, nullable: true }
+        monthlyRent: { type: integer, nullable: true }
+        propertyNotes: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -3841,6 +3979,40 @@ components:
         source: { type: string, enum: [manual, api] }
         apiProvider: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
+
+    ProtestWorksheet:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        householdId: { type: string, format: uuid }
+        propertyId: { type: string, format: uuid }
+        taxYear: { type: integer }
+        status: { type: string, enum: [not_filed, filed, informal, arb, resolved] }
+        hearingDate: { type: string, format: date, nullable: true }
+        conversationJson:
+          type: array
+          items:
+            type: object
+            properties:
+              role: { type: string, enum: [user, assistant, tool] }
+              content: { type: string }
+              ts: { type: string, format: date-time }
+              attachmentType: { type: string, enum: [pdf, url, text], nullable: true }
+        strategyJson:
+          type: object
+          nullable: true
+          properties:
+            caseStrength: { type: number }
+            targetValueUsd: { type: number }
+            primaryStrategy: { type: string }
+            draftArguments:
+              type: array
+              items: { type: string }
+            redFlags:
+              type: array
+              items: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     ServiceErrorResponse:
       type: object

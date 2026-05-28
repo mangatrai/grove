@@ -38,6 +38,7 @@ import { CurrencyInput } from "../components/CurrencyInput";
 import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 import { GroveLoader } from "../components/GroveLoader";
+import { AddPropertyModal } from "../components/AddPropertyModal";
 
 const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
@@ -447,33 +448,11 @@ export function SettingsPage() {
     initialBalance: "",
     initialBalanceDate: new Date().toISOString().slice(0, 10)
   });
-  const [propertyModal, setPropertyModal] = useState<{
+  const [addPropertyModal, setAddPropertyModal] = useState<{
     open: boolean;
-    accountId: string;
-    propertyId: string | null;
-    addressLine1: string;
-    city: string;
-    state: string;
-    zip: string;
-    propertyUse: "" | "primary" | "rental" | "vacation";
-    marketValueUsd: string;
-    asOfDate: string;
-    saving: boolean;
-    error: string | null;
-    apiPropertyId: string | null;
-    apiListingId: string | null;
-    valuationDetail: unknown | null;
-    retrieving: boolean;
-    retrieveError: string | null;
-  }>({
-    open: false, accountId: "", propertyId: null,
-    addressLine1: "", city: "", state: "", zip: "",
-    propertyUse: "", marketValueUsd: "",
-    asOfDate: new Date().toISOString().slice(0, 10),
-    saving: false, error: null,
-    apiPropertyId: null, apiListingId: null, valuationDetail: null,
-    retrieving: false, retrieveError: null
-  });
+    accountId: string | null;
+    existingPropertyId: string | null;
+  }>({ open: false, accountId: null, existingPropertyId: null });
 
   const canManageHousehold = authRole === "owner" || authRole === "admin";
 
@@ -801,14 +780,7 @@ export function SettingsPage() {
       });
 
       if (justCreatedMortgage) {
-        setPropertyModal({
-          open: true, accountId: newAccountId!, propertyId: null,
-          addressLine1: "", city: "", state: "", zip: "", propertyUse: "",
-          marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
-          saving: false, error: null,
-          apiPropertyId: null, apiListingId: null, valuationDetail: null,
-          retrieving: false, retrieveError: null
-        });
+        setAddPropertyModal({ open: true, accountId: newAccountId!, existingPropertyId: null });
       }
     } catch (e: unknown) {
       setAccountError(e instanceof Error ? e.message : "Could not save account");
@@ -817,134 +789,8 @@ export function SettingsPage() {
     }
   }
 
-  async function openPropertyModal(a: AccountRow) {
-    const base = {
-      open: true, accountId: a.id, propertyId: a.property_id,
-      addressLine1: "", city: "", state: "", zip: "",
-      propertyUse: "" as "" | "primary" | "rental" | "vacation",
-      marketValueUsd: "", asOfDate: new Date().toISOString().slice(0, 10),
-      saving: false, error: null,
-      apiPropertyId: null, apiListingId: null, valuationDetail: null,
-      retrieving: false, retrieveError: null
-    };
-    if (a.property_id) {
-      try {
-        const r = await apiJson<{
-          property: {
-            addressLine1: string | null; city: string | null;
-            state: string | null; zip: string | null;
-            propertyUse: string | null; latestValueUsd: number | null;
-            latestValueAsOf: string | null;
-          }
-        }>(`/household/properties/${encodeURIComponent(a.property_id)}`);
-        const p = r.property;
-        setPropertyModal({
-          ...base,
-          addressLine1: p.addressLine1 ?? "",
-          city: p.city ?? "",
-          state: p.state ?? "",
-          zip: p.zip ?? "",
-          propertyUse: (p.propertyUse ?? "") as typeof base.propertyUse,
-          marketValueUsd: p.latestValueUsd != null ? String(p.latestValueUsd) : "",
-          asOfDate: p.latestValueAsOf ?? base.asOfDate
-        });
-      } catch {
-        setPropertyModal(base);
-      }
-    } else {
-      setPropertyModal(base);
-    }
-  }
-
-  async function retrieveValuation() {
-    if (!token) return;
-    const addr = [
-      propertyModal.addressLine1.trim(),
-      propertyModal.city.trim(),
-      propertyModal.state.trim(),
-      propertyModal.zip.trim()
-    ].filter(Boolean).join(", ");
-    if (!addr) return;
-    setPropertyModal((m) => ({ ...m, retrieving: true, retrieveError: null }));
-    try {
-      const r = await apiJson<{ estimate: number; apiPropertyId: string; apiListingId: string | null; detail: unknown }>(
-        "/household/properties/preview-valuation",
-        { method: "POST", body: JSON.stringify({ address: addr }) }
-      );
-      setPropertyModal((m) => ({
-        ...m,
-        retrieving: false,
-        marketValueUsd: String(Math.round(r.estimate)),
-        asOfDate: new Date().toISOString().slice(0, 10),
-        apiPropertyId: r.apiPropertyId,
-        apiListingId: r.apiListingId,
-        valuationDetail: r.detail
-      }));
-    } catch (e: unknown) {
-      setPropertyModal((m) => ({
-        ...m,
-        retrieving: false,
-        retrieveError: e instanceof Error ? e.message : "Could not retrieve valuation"
-      }));
-    }
-  }
-
-  async function savePropertyDetails() {
-    if (!token) return;
-    setPropertyModal((m) => ({ ...m, saving: true, error: null }));
-    try {
-      const body: Record<string, unknown> = {
-        addressLine1: propertyModal.addressLine1.trim() || null,
-        city: propertyModal.city.trim() || null,
-        state: propertyModal.state.trim() || null,
-        zip: propertyModal.zip.trim() || null,
-        propertyUse: propertyModal.propertyUse || null,
-        accountId: propertyModal.accountId
-      };
-      if (propertyModal.apiPropertyId) {
-        body.apiPropertyId = propertyModal.apiPropertyId;
-        body.apiListingId = propertyModal.apiListingId;
-        body.valuationDetailJson = propertyModal.valuationDetail;
-      }
-      const valueUsd = parseFloat(propertyModal.marketValueUsd);
-      if (!isNaN(valueUsd) && valueUsd >= 0) {
-        body.initialValueUsd = valueUsd;
-        body.initialValueAsOf = propertyModal.asOfDate;
-      }
-
-      if (propertyModal.propertyId) {
-        // Update existing property
-        await apiJson(`/household/properties/${encodeURIComponent(propertyModal.propertyId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({
-            addressLine1: body.addressLine1,
-            city: body.city,
-            state: body.state,
-            zip: body.zip,
-            propertyUse: body.propertyUse
-          })
-        });
-        if (!isNaN(valueUsd) && valueUsd >= 0) {
-          await apiJson(`/household/properties/${encodeURIComponent(propertyModal.propertyId)}/values`, {
-            method: "POST",
-            body: JSON.stringify({ marketValueUsd: valueUsd, asOfDate: propertyModal.asOfDate })
-          });
-        }
-      } else {
-        // Create new property + link to account
-        await apiJson("/household/properties", { method: "POST", body: JSON.stringify(body) });
-      }
-
-      const r = await apiJson<{ accounts: AccountRow[] }>("/imports/accounts");
-      setAccounts(r.accounts);
-      setPropertyModal((m) => ({ ...m, open: false, saving: false }));
-    } catch (e: unknown) {
-      setPropertyModal((m) => ({
-        ...m,
-        saving: false,
-        error: e instanceof Error ? e.message : "Could not save property details"
-      }));
-    }
+  function openPropertyModal(a: AccountRow) {
+    setAddPropertyModal({ open: true, accountId: a.id, existingPropertyId: a.property_id });
   }
 
   async function saveHouseholdTarget(value: number | null) {
@@ -2140,7 +1986,7 @@ export function SettingsPage() {
                               variant="light"
                               color={a.property_id ? "teal" : "blue"}
                               size="xs"
-                              onClick={() => void openPropertyModal(a)}
+                              onClick={() => openPropertyModal(a)}
                             >
                               {a.property_id ? "Property ✓" : "+ Property"}
                             </Button>
@@ -2191,105 +2037,13 @@ export function SettingsPage() {
         ) : null}
 
         {/* ── Property details modal ── */}
-        <Modal
-          opened={propertyModal.open}
-          onClose={() => setPropertyModal((m) => ({ ...m, open: false }))}
-          title="Property details"
-          size="md"
-        >
-          <Stack>
-            {propertyModal.error ? <Alert color="red">{propertyModal.error}</Alert> : null}
-            <TextInput
-              label="Street address"
-              value={propertyModal.addressLine1}
-              onChange={(e) => setPropertyModal((m) => ({ ...m, addressLine1: e.currentTarget.value }))}
-              placeholder="123 Main St"
-              disabled={propertyModal.saving}
-            />
-            <Group grow>
-              <TextInput
-                label="City"
-                value={propertyModal.city}
-                onChange={(e) => setPropertyModal((m) => ({ ...m, city: e.currentTarget.value }))}
-                disabled={propertyModal.saving}
-              />
-              <TextInput
-                label="State"
-                value={propertyModal.state}
-                onChange={(e) => setPropertyModal((m) => ({ ...m, state: e.currentTarget.value }))}
-                placeholder="CA"
-                maw={80}
-                disabled={propertyModal.saving}
-              />
-              <TextInput
-                label="ZIP"
-                value={propertyModal.zip}
-                onChange={(e) => setPropertyModal((m) => ({ ...m, zip: e.currentTarget.value }))}
-                placeholder="94105"
-                maw={100}
-                disabled={propertyModal.saving}
-              />
-            </Group>
-            <Select
-              label="Property use"
-              value={propertyModal.propertyUse || null}
-              onChange={(v) => setPropertyModal((m) => ({ ...m, propertyUse: (v ?? "") as typeof m.propertyUse }))}
-              disabled={propertyModal.saving}
-              clearable
-              placeholder="Select use"
-              data={[
-                { value: "primary", label: "Primary residence" },
-                { value: "rental",  label: "Rental / investment property" },
-                { value: "vacation", label: "Vacation home" }
-              ]}
-            />
-            <Group grow align="end">
-              <CurrencyInput
-                label="Market value (USD)"
-                value={propertyModal.marketValueUsd === "" ? undefined : Number(propertyModal.marketValueUsd)}
-                onChange={(v) => setPropertyModal((m) => ({ ...m, marketValueUsd: v == null ? "" : String(v) }))}
-                placeholder="0.00"
-                disabled={propertyModal.saving}
-              />
-              <TextInput
-                label="As of date"
-                type="date"
-                value={propertyModal.asOfDate}
-                onChange={(e) => setPropertyModal((m) => ({ ...m, asOfDate: e.currentTarget.value }))}
-                disabled={propertyModal.saving}
-              />
-            </Group>
-            {propertyModal.retrieveError ? (
-              <Alert color="orange" py={6}>{propertyModal.retrieveError}</Alert>
-            ) : null}
-            <Button
-              variant="light"
-              size="xs"
-              loading={propertyModal.retrieving}
-              disabled={
-                propertyModal.saving ||
-                !propertyModal.addressLine1.trim() ||
-                !propertyModal.city.trim() ||
-                !propertyModal.state.trim() ||
-                !propertyModal.zip.trim()
-              }
-              onClick={() => void retrieveValuation()}
-            >
-              {propertyModal.marketValueUsd !== "" ? "Update Redfin estimate" : "Retrieve Redfin estimate"}
-            </Button>
-            <Text size="xs" c="dimmed">
-              Market value creates a snapshot in property history. Add new snapshots any time to track appreciation.
-            </Text>
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setPropertyModal((m) => ({ ...m, open: false }))} disabled={propertyModal.saving}>
-                Cancel
-              </Button>
-              <Button loading={propertyModal.saving} onClick={() => void savePropertyDetails()}>
-                Save property
-              </Button>
-            </Group>
-          </Stack>
-        </Modal>
+        <AddPropertyModal
+          opened={addPropertyModal.open}
+          onClose={() => setAddPropertyModal((m) => ({ ...m, open: false }))}
+          onSaved={() => void fetchAccountsList()}
+          accountId={addPropertyModal.accountId}
+          existingPropertyId={addPropertyModal.existingPropertyId}
+        />
 
         {tab === "recurring" ? (
           <Stack mt="md">

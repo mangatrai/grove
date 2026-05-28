@@ -371,7 +371,38 @@ Time-and-expense reporting for household employees (nanny, cleaner, au pair). St
 - `staff_expense`: Expense or mileage entry; pending/approved/rejected status with review notes.
 - `staff_payment`: Payment record with optional FK to `transaction_canonical` if posted to ledger.
 
-### 3.13 Export, Backup, and Restore (FR-11, PRD §19)
+### 3.13 Real Estate and Property Tax Protest (RE-1, PT-1)
+
+#### Real Estate Portfolio
+- **Data model:** `property` table (address, use, purchase price/date, monthly rent, notes, `photo_url`). `property_value_snapshot` for AVM timeseries.
+- **Valuation provider:** Redfin via RealtyAPI.io. Parsed fields: AVM, tax history, comps, county, exterior photo URL, stories, property type.
+- **DCAD async backfill (TX only):** At property add time, a fire-and-forget call to TrueProdigy public DCAD API populates protest worksheet comps. Errors logged, never block the create response.
+
+#### Multi-County CAD Reference Data
+
+| State | County | CAD / Assessor Portal | Appeal Process |
+|-------|--------|-----------------------|----------------|
+| TX | Denton | DCAD (`uentral.com` / TrueProdigy) | ARB (Appraisal Review Board) |
+| TX | Harris | HCAD | ARB |
+| TX | Travis | TCAD | ARB |
+| TX | Collin | CCAD | ARB |
+| TX | Any other | `[County] CAD` | ARB |
+| TN | Shelby | Shelby County Assessor — `assessormelvinburgess.com` | Board of Equalization |
+| TN | Any other | `[County] Assessor` | County Assessment Appeal |
+
+**Shelby County (Memphis, TN) data sources:**
+- Property detail: `assessormelvinburgess.com/propertyDetails?parcelid={parcelId}&IR=true`
+- Owner name search: `assessormelvinburgess.com/realPropertyDetails?FirstName=...&LastName=...&active=owner&Page=property`
+- Appeal: Board of Equalization (different process from TX ARB)
+
+#### Property Tax Protest Assistant (PT-1)
+- Chat-based agentic pipeline: GPT-4.1 + OpenAI tool use.
+- Tools: `fetch_dcad_comps`, `update_strategy`.
+- System prompt injects property facts, AVM, assessed value, comps.
+- Conversation + structured strategy (`caseStrength`, `targetValueUsd`, `primaryStrategy`, `draftArguments`, `redFlags`) stored in `protest_worksheet`.
+- Protest status stepper: `not_filed → filed → informal → arb → resolved`.
+
+### 3.14 Export, Backup, and Restore (FR-11, PRD §19)
 
 #### Manual export/restore
 - **Export:** `POST /exports/household` downloads ZIP bundle (`.hfb`, export version 4).

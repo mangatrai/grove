@@ -24,6 +24,7 @@ import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
 import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { recurringRouter } from "./modules/recurring/recurring.routes.js";
 import { esppRouter } from "./modules/espp/espp.routes.js";
+import { protestRouter } from "./modules/protest/protest.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -66,7 +67,8 @@ const API_PATH_PREFIXES = [
   "/gdrive",
   "/budget",
   "/recurring-overrides",
-  "/insights"
+  "/insights",
+  "/api/protest"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -125,6 +127,7 @@ export function buildApp() {
   app.use("/insights", insightsRouter);
   app.use("/notifications", notificationsRouter);
   app.use("/espp", esppRouter);
+  app.use("/api/protest", protestRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     app.use(express.static(frontendDist, { index: false }));

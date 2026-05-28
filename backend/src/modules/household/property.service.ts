@@ -22,6 +22,11 @@ export type PropertyRecord = {
   valuationFetchedAt: string | null;
   latestValueUsd: number | null;
   latestValueAsOf: string | null;
+  photoUrl: string | null;
+  purchasePrice: number | null;
+  purchaseDate: string | null;
+  monthlyRent: number | null;
+  propertyNotes: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -52,9 +57,21 @@ type PropertyRow = {
   valuation_fetched_at: string | null;
   latest_value_usd: string | null;
   latest_value_as_of: string | null;
+  photo_url: string | null;
+  purchase_price: number | null;
+  purchase_date: string | Date | null;
+  monthly_rent: number | null;
+  property_notes: string | null;
   created_at: string;
   updated_at: string;
 };
+
+function formatPropertyDate(val: string | Date | null | undefined): string | null {
+  if (val == null) return null;
+  if (typeof val === "string") return val.slice(0, 10);
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  return String(val).slice(0, 10);
+}
 
 function toPropertyRecord(row: PropertyRow): PropertyRecord {
   const lv = row.latest_value_usd != null ? Number(row.latest_value_usd) : null;
@@ -74,6 +91,11 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     valuationFetchedAt: row.valuation_fetched_at ?? null,
     latestValueUsd: lv != null && Number.isFinite(lv) ? lv : null,
     latestValueAsOf: row.latest_value_as_of ?? null,
+    photoUrl: row.photo_url ?? null,
+    purchasePrice: row.purchase_price ?? null,
+    purchaseDate: formatPropertyDate(row.purchase_date),
+    monthlyRent: row.monthly_rent ?? null,
+    propertyNotes: row.property_notes ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -170,6 +192,10 @@ export async function updateProperty(
     state?: string | null;
     zip?: string | null;
     propertyUse?: PropertyUse | null;
+    purchasePrice?: number | null;
+    purchaseDate?: string | null;
+    monthlyRent?: number | null;
+    propertyNotes?: string | null;
   }
 ): Promise<{ ok: true } | { ok: false; code: "NOT_FOUND" }> {
   const existing = await qGet<{ id: string }>(
@@ -179,17 +205,33 @@ export async function updateProperty(
   );
   if (!existing) return { ok: false, code: "NOT_FOUND" };
 
+  const sets: string[] = [];
+  const params: unknown[] = [];
+
+  function addCol(column: string, val: unknown | undefined) {
+    if (val === undefined) return;
+    sets.push(`${column} = ?`);
+    params.push(val);
+  }
+
+  addCol("address_line1", input.addressLine1);
+  addCol("city", input.city);
+  addCol("state", input.state);
+  addCol("zip", input.zip);
+  addCol("property_use", input.propertyUse);
+  addCol("purchase_price", input.purchasePrice);
+  addCol("purchase_date", input.purchaseDate);
+  addCol("monthly_rent", input.monthlyRent);
+  addCol("property_notes", input.propertyNotes);
+
+  if (sets.length === 0) return { ok: true };
+
+  sets.push("updated_at = NOW()");
+  params.push(propertyId, householdId);
+
   await qExec(
-    `UPDATE property
-        SET address_line1 = ?, city = ?, state = ?, zip = ?, property_use = ?, updated_at = NOW()
-      WHERE id = ? AND household_id = ?`,
-    input.addressLine1 ?? null,
-    input.city ?? null,
-    input.state ?? null,
-    input.zip ?? null,
-    input.propertyUse ?? null,
-    propertyId,
-    householdId
+    `UPDATE property SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
+    ...params
   );
   return { ok: true };
 }
@@ -326,13 +368,15 @@ export async function refreshPropertyValuation(
         SET api_provider           = 'redfin',
             api_property_id        = ?,
             api_listing_id         = ?,
-            valuation_detail_json  = ?::jsonb,
+            valuation_detail_json  = ?,
+            photo_url              = ?,
             valuation_fetched_at   = NOW(),
             updated_at             = NOW()
       WHERE id = ? AND household_id = ?`,
     result.apiPropertyId,
     result.apiListingId,
-    JSON.stringify(result.detail),
+    result.detail,
+    result.detail.photoUrl ?? null,
     propertyId,
     householdId
   );
@@ -347,6 +391,55 @@ export async function refreshPropertyValuation(
 
   log.info("refreshPropertyValuation: done", { propertyId, estimate: result.estimate });
   return { ok: true, estimate: result.estimate, fetchedAt: today };
+}
+
+export type EquityHistoryPoint = {
+  date: string;
+  avm: number;
+  mortgageBalance: number;
+  equity: number;
+};
+
+export async function getEquityHistory(
+  propertyId: string,
+  householdId: string
+): Promise<EquityHistoryPoint[]> {
+  const rows = await qAll<{
+    date: string;
+    avm: string;
+    mortgage_balance: string;
+    equity: string;
+  }>(
+    `SELECT pvs.as_of_date::text AS date,
+            pvs.market_value_usd::text AS avm,
+            COALESCE(bal.amount, 0)::text AS mortgage_balance,
+            (pvs.market_value_usd - COALESCE(bal.amount, 0))::text AS equity
+       FROM property_value_snapshot pvs
+       JOIN property p ON p.id = pvs.property_id AND p.household_id = ?
+       LEFT JOIN financial_account fa
+         ON fa.property_id = pvs.property_id
+        AND fa.household_id = ?
+        AND fa.type = 'loan'
+        AND fa.sub_type IN ('mortgage_primary', 'mortgage_investment', 'mortgage_vacation')
+       LEFT JOIN LATERAL (
+         SELECT amount FROM account_balance_snapshot abs
+          WHERE abs.financial_account_id = fa.id
+            AND abs.as_of_date <= pvs.as_of_date
+          ORDER BY abs.as_of_date DESC
+          LIMIT 1
+       ) bal ON true
+      WHERE pvs.property_id = ?
+      ORDER BY pvs.as_of_date ASC`,
+    householdId,
+    householdId,
+    propertyId
+  );
+  return rows.map((r) => ({
+    date: r.date,
+    avm: Number(r.avm),
+    mortgageBalance: Number(r.mortgage_balance),
+    equity: Number(r.equity)
+  }));
 }
 
 export async function deleteProperty(

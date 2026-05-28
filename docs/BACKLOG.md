@@ -86,13 +86,18 @@ Ongoing features and infrastructure shipped before V3/V4 planning cycles.
 
 ---
 
-## Active Items — Planned
+## Active Items — V5 (In Progress)
 
-Features and improvements in active design/planning phase for V4+.
+V5 sprint: Real Estate first-class pages (RE-1) → Property Tax Protest assistant (PT-1). RE-1 is prerequisite for PT-1 Protest CTA. Build order: RE-1a→b→c→d→e, then PT-1a→b→c→d→e.
 
 ### High Priority (P1/P2)
 
-(All V4 P1/P2 items are shipped. Next active planning in V5.)
+| ID | Title | Type | Status | Notes |
+|---|---|---|---|---|
+| **RE-1** | Real Estate portfolio + property detail pages | Feature | **Shipped** | First-class `/real-estate` section. Portfolio list with KPI strip + property cards (photo thumbnails, AVM gain %, overassessment badge). Detail page: Property Details card (type, address, beds/baths, sqft, lot, year built, stories, APN, county/CAD, appeal process, monthly rent, notes), hybrid Assessment History chart (Bar=assessed + Line=taxes due, dual Y-axis), AVM sparkline from value snapshots. Redfin photo URL + county + stories + property type parsed from API response. DCAD backfill fired async at property add time (TX only). Migrations 0053 (purchase_price/date/rent/notes), 0055 (photo_url). Add Property modal extracted to standalone `AddPropertyModal` component; wired from RE list "Add Property" CTA; optional mortgage-account picker when opened outside Settings. Dev seeds: 2 fictional properties + value snapshots + protest comps. GH #37. |
+| **PT-1** | Property tax protest assistant (ARB) | Feature | **Active** | Chat-based agentic pipeline: GPT-4.1 + OpenAI tool use. DCAD data via TrueProdigy public JSON API (`prod-container.trueprodigyapi.com/public/property/search`). Tools: fetch_dcad_property, search_comps, update_worksheet. System prompt injects property facts + CAD assessed + AVM + protest history. User inputs: free-form chat, PDF upload, URLs. Conversation stored in `protest_worksheets.conversation_json`. Side panel: structured strategy summary (target value, case strength, arguments). "Generate Document" → ARB hearing packet PDF on demand. Migration 0054: `protest_worksheets` + `protest_comp_cad` tables. GH #23. |
+| **ESPP-2** | IBM last close price strip on ESPP screen | UX | **Active** | Daily close price from Yahoo Finance API in ESPP header strip. GH #36. |
+| **LLM-1** | LLM adapter abstraction layer | Architecture | **Backlog** | Current LLM integration is provider-coupled: OpenAI calls scattered in `protest.routes.ts`, payslip extraction, year-end summary. Design: two adapter interfaces (`ChatCompletionAdapter` for insights/year-end/payslip extraction, `ToolUseAdapter` for protest agentic loop), each with OpenAI and Anthropic implementations. Per-use-case model config (cheaper model for simple completion, stronger model for protest). Callers prepare prompt + tools only; adapter handles SDK, retry, error shape. Benefit: swap provider in one place, add per-case model control. Scope: new `backend/src/llm/` module with `chat-completion.ts`, `tool-use.ts`, `openai.ts`, `anthropic.ts`. |
 
 ### Medium Priority (P3)
 
@@ -115,7 +120,7 @@ Items explicitly deferred with decision reasoning.
 | **D-4** | Multi-household support | V5+ | Email canonical identity; `user_household_membership` join table. RBAC already works for single-household (target use case). Migration touches auth, JWT, every service query — risk outweighs benefit for v1. Full design captured in Feature Backlog §Multi-Household Support below. | Invite codes, create-your-own household, household switcher in top bar. |
 | **D-3** | Rental income tracking | ~~Deferred~~ **DROPPED** | Scope creep — app is not a rental property management tool. `linked_account_id` schema hook already in place for future HELOC if ever needed. Removed from backlog permanently 2026-05-15. | — |
 | **D-5** | HELOC modeling | ~~Deferred~~ **DROPPED** | User does not have a HELOC. `financial_account.linked_account_id` (added F-1) supports future pairing. No code needed beyond existing column. Removed permanently 2026-05-15. | — |
-| **PT-1** | Property tax protest assistant (ARB) | V5+ (needs grooming) | User's Denton County ARB hearing June 8, 2026 (may do manually this year). **Subject property extraction shipped** as CR-187/CR-188 (part of D-2). CAD data integration (unequal appraisal evidence) remains deferred. Full design in Feature Backlog §Property Tax Protest below. | Data collection, storage, protest tracking, LLM strategy layer. DCAD has JSON API. |
+| **PT-1** | Property tax protest assistant (ARB) | ~~V5+ (deferred)~~ **→ Active V5** | Moved to Active V5. Full design in concept/pt1-protest/. Chat-based agentic pipeline with GPT-4.1 tool use. TrueProdigy public DCAD API confirmed. See Active Items table above. | — |
 | **FR-15** | Household staff module (timesheets, expenses, payments) | V5/V6 candidate | Full timesheet + expense + payment for household employees (nanny, cleaner, au pair). `staff` RBAC role. Admin review, approval, payment recording with ledger posting. No code yet. Target delivery ~Q3/Q4 2026. See PRD_AND_CRS.md §3.10. | Schema (designed): `staff_profile`, `timesheet_entry`, `timesheet_period`, `staff_expense`, `staff_payment`. |
 | **PS-5 Phase 2** | Tax filing profile — full computation | ❌ NOT DOING (decision 2026-05-24) | Computing "are you under-withheld?" requires household total income, deductions, credits — tax software territory. Not every payslip has W-4 data (Deloitte doesn't); auto-population partial. Phase 1 (stored effective_federal_rate_ytd) is the right stopping point. Year-end Wrapped (F-7) can surface rough "your federal withholding was X% of gross" flag. | — |
 | **I-11** | PWA file-input hang — File System Access API fallback | Deferred (post-V4) | Chrome installed-app (PWA) mode blocks `<input type="file">.click()`. Safari PWA works correctly. File System Access API (`window.showOpenFilePicker`) works in PWA mode as fallback. Affected flows: import file upload, backup/restore upload, category rules CSV import. Revisit if Safari PWA adoption increases or Chrome PWA adoption forces the issue. | — |
@@ -425,18 +430,17 @@ Derived (never stored): `outstanding = shares_granted - shares_transferred`, `he
 ### V4 Complete
 All P1 and P2 items shipped. V4 feature set locked 2026-05-15; final item (F-1 notification system) shipped 2026-05-25. Next planning cycle: V5 priorities and groom deferred items.
 
-### V5 Candidate Items
-- **High value:** PT-1 property tax protest assistant (needs grooming), data archival (D-1), ESPP-1 equity tracker
-- **Foundation:** Multi-household (D-4) for future multi-user deployments
-- **Enhancement:** Recurring phase 4+, async import pipeline
+### V5 Active Sprint
+RE-1 (Real Estate pages) → PT-1 (Property Tax Protest chat). Both are Active; RE-1 builds first because it provides the container and the "Prepare Tax Protest" CTA. PT-1 depends on RE-1 detail page CTA. ESPP-2 (last close price) is independent and can run in parallel.
 
 ### Design Decision Notes
 - **Payslip:** PS-5 Phase 2 (full tax computation) dropped — tax software territory; Phase 1 (stored rates) sufficient for data-derived signal
 - **Real estate:** No dedicated `real_estate` account type; property data on join table (simpler than institution identity problem)
+- **Property Tax Protest:** Chat-based HitL design (not rigid phase pipeline). GPT-4.1 + tool use over in-house Node.js backend (no external orchestration platform needed). TrueProdigy public DCAD API confirmed — short-lived public JWT auto-issued by portal.
 - **Transfer detection:** Greedy pre-assignment considered but deferred — user resolution queue acceptable for household app
 - **Recurring:** Heuristic + user override proven approach; fuzzy matching dropped (high false-positive risk on short bank strings)
 - **Multi-household:** Deferred until self-hosted → multi-user use case becomes real; RBAC already works for single household
 
 ---
 
-*Last updated: 2026-05-27. V4 complete. ESPP-1 (IBM ESPP equity tracker) shipped 2026-05-27 — moved from Deferred to Shipped. ESPP-2 (IBM last close price strip) added as P2 Active for V5. Next: V5 planning and backlog grooming.*
+*Last updated: 2026-05-28. RE-1 fully shipped: photo URL, county/CAD, stories parsed from Redfin; DCAD async backfill at add time; PropertyDetailPage full redesign; hybrid assessment chart; AVM sparkline; AddPropertyModal extracted + wired from RE list; dev seeds. LLM-1 (adapter abstraction) in backlog.*
