@@ -71,6 +71,7 @@ export function AddPropertyModal({
               propertyUse: string | null; latestValueUsd: number | null;
               latestValueAsOf: string | null;
               purchasePrice: number | null; purchaseDate: string | null;
+              linkedMortgageId: string | null;
             }
           }>(`/household/properties/${encodeURIComponent(existingPropertyId)}`);
           const p = r.property;
@@ -84,7 +85,8 @@ export function AddPropertyModal({
             purchasePrice: p.purchasePrice != null ? String(p.purchasePrice) : "",
             purchaseDate: p.purchaseDate ?? "",
             marketValueUsd: p.latestValueUsd != null ? String(p.latestValueUsd) : "",
-            asOfDate: p.latestValueAsOf ?? fresh.asOfDate
+            asOfDate: p.latestValueAsOf ?? fresh.asOfDate,
+            linkedAccountId: p.linkedMortgageId ?? null
           }));
         } catch { /* leave blank */ }
       })();
@@ -94,10 +96,13 @@ export function AddPropertyModal({
       void (async () => {
         try {
           const r = await apiJson<{
-            accounts: Array<{ id: string; institution: string; account_mask: string | null; type: string; sub_type: string | null }>
+            accounts: Array<{ id: string; institution: string; account_mask: string | null; type: string; sub_type: string | null; property_id: string | null }>
           }>("/imports/accounts");
           const mortgages = r.accounts.filter(
-            (a) => a.type === "loan" && MORTGAGE_SUBTYPES.has(a.sub_type ?? "")
+            (a) =>
+              a.type === "loan" &&
+              MORTGAGE_SUBTYPES.has(a.sub_type ?? "") &&
+              (!a.property_id || a.property_id === existingPropertyId)
           );
           setS((prev) => ({
             ...prev,

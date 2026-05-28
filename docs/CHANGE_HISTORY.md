@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-RE5 (2026-05-28): Property page — mortgage display, edit modal pre-fill, dropdown filter, Add form persistence
+
+- **Type:** Bug fix (5 issues)
+- **What:**
+  - **Mortgage in detail table (issue 1):** `getProperty()` now LEFT JOINs `financial_account` on `property_id` + `type='loan'` to fetch the linked mortgage. `PropertyRecord` gains `linkedMortgageId`, `linkedMortgageInstitution`, `linkedMortgageMask`. PropertyDetailPage shows "Linked Mortgage" and "Mortgage Balance" rows in the details table (balance sourced from the latest equity history point, no extra API call).
+  - **Edit modal pre-fill (issue 2):** AddPropertyModal now reads `linkedMortgageId` from the property response and sets `linkedAccountId` in state, so the dropdown shows the already-linked mortgage selected on open.
+  - **Dropdown filter (issue 3):** Mortgage dropdown filters out accounts where `property_id` is non-null and not this property. Prevents already-linked mortgages from appearing selectable in Add/Edit modal.
+  - **Purchase price/date persist on Add (issue 4):** POST `/properties` Zod schema was missing `purchasePrice` and `purchaseDate`. Added both fields; `createProperty()` now INSERTs them into the `property` table.
+  - **Market value persists on Add (issue 5):** `initialValueUsd`/`initialValueAsOf` were already in the schema and service — this was the same root cause as issue 4 (the field names matched but purchasePrice/purchaseDate were stripped). With issue 4 fixed, all fields now reach the DB correctly.
+- **Files:** `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/components/AddPropertyModal.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`
+
 ## UX-RE4 (2026-05-28): PropertyDetailPage — layout refinements, AVM fallback, charts side-by-side, seed fix
 
 - **Type:** UX polish + bug fix

@@ -49,6 +49,9 @@ type PropertyRecord = {
   photoUrl: string | null;
   valuationFetchedAt?: string | null;
   valuationDetail?: unknown | null;
+  linkedMortgageId: string | null;
+  linkedMortgageInstitution: string | null;
+  linkedMortgageMask: string | null;
 };
 
 type EquityPoint = { date: string; avm: number; mortgageBalance: number; equity: number };
@@ -233,6 +236,15 @@ export function PropertyDetailPage() {
   const fullAddress = [property.addressLine1, property.city, property.state, property.zip].filter(Boolean).join(", ");
   const hasMortgage = equityHistory.some((p) => p.mortgageBalance > 0);
 
+  const linkedMortgageLabel = property.linkedMortgageId != null
+    ? property.linkedMortgageMask
+      ? `${property.linkedMortgageInstitution} ····${property.linkedMortgageMask}`
+      : (property.linkedMortgageInstitution ?? "Mortgage")
+    : null;
+  const latestMortgageBalance = equityHistory.length > 0 && equityHistory[equityHistory.length - 1].mortgageBalance > 0
+    ? equityHistory[equityHistory.length - 1].mortgageBalance
+    : null;
+
   const detailRows: [string, string][] = [
     ["Property Type", propertyType ?? t.label],
     ["Address", fullAddress || "—"],
@@ -244,6 +256,8 @@ export function PropertyDetailPage() {
     ["APN", apn ?? "—"],
     ["County / CAD", cadName],
     ["Appeal Process", appealProcess],
+    ...(linkedMortgageLabel ? [["Linked Mortgage", linkedMortgageLabel] as [string, string]] : []),
+    ...(latestMortgageBalance != null ? [["Mortgage Balance", money(latestMortgageBalance)] as [string, string]] : []),
     ...(property.propertyUse === "rental" && property.monthlyRent != null
       ? [["Monthly Rent", `${money(property.monthlyRent)}/mo · ${money(property.monthlyRent * 12)}/yr`] as [string, string]]
       : []),

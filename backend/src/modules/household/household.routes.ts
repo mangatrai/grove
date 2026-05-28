@@ -322,6 +322,8 @@ const propertyBodySchema = z.object({
   propertyUse: z.enum(["primary", "rental", "vacation"]).nullable().optional(),
   /** accountId to link to this property on creation */
   accountId: z.string().uuid().optional(),
+  purchasePrice: z.number().finite().positive().nullable().optional(),
+  purchaseDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   /** Initial market value snapshot (optional) */
   initialValueUsd: z.number().finite().min(0).nullable().optional(),
   initialValueAsOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
@@ -373,6 +375,8 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
       state: parsed.data.state ?? null,
       zip: parsed.data.zip ?? null,
       propertyUse: (parsed.data.propertyUse as PropertyUse | null | undefined) ?? null,
+      purchasePrice: parsed.data.purchasePrice ?? null,
+      purchaseDate: parsed.data.purchaseDate ?? null,
       initialValueUsd: parsed.data.initialValueUsd ?? null,
       initialValueAsOf: parsed.data.initialValueAsOf ?? null
     });

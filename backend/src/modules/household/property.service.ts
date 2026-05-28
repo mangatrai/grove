@@ -27,6 +27,9 @@ export type PropertyRecord = {
   purchaseDate: string | null;
   monthlyRent: number | null;
   propertyNotes: string | null;
+  linkedMortgageId: string | null;
+  linkedMortgageInstitution: string | null;
+  linkedMortgageMask: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -62,6 +65,9 @@ type PropertyRow = {
   purchase_date: string | Date | null;
   monthly_rent: number | null;
   property_notes: string | null;
+  linked_mortgage_id: string | null;
+  linked_mortgage_institution: string | null;
+  linked_mortgage_mask: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -96,6 +102,9 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     purchaseDate: formatPropertyDate(row.purchase_date),
     monthlyRent: row.monthly_rent ?? null,
     propertyNotes: row.property_notes ?? null,
+    linkedMortgageId: row.linked_mortgage_id ?? null,
+    linkedMortgageInstitution: row.linked_mortgage_institution ?? null,
+    linkedMortgageMask: row.linked_mortgage_mask ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -108,7 +117,10 @@ export async function getProperty(
   const row = await qGet<PropertyRow>(
     `SELECT p.*,
             pvs.market_value_usd::text AS latest_value_usd,
-            pvs.as_of_date::text       AS latest_value_as_of
+            pvs.as_of_date::text       AS latest_value_as_of,
+            fa.id                      AS linked_mortgage_id,
+            fa.institution             AS linked_mortgage_institution,
+            fa.account_mask            AS linked_mortgage_mask
        FROM property p
        LEFT JOIN LATERAL (
          SELECT market_value_usd, as_of_date
@@ -117,6 +129,10 @@ export async function getProperty(
           ORDER BY as_of_date DESC
           LIMIT 1
        ) pvs ON true
+       LEFT JOIN financial_account fa
+         ON fa.property_id = p.id
+        AND fa.type = 'loan'
+        AND fa.sub_type IN ('mortgage_primary', 'mortgage_investment', 'mortgage_vacation')
       WHERE p.id = ? AND p.household_id = ?`,
     propertyId,
     householdId
@@ -151,20 +167,24 @@ export async function createProperty(input: {
   state?: string | null;
   zip?: string | null;
   propertyUse?: PropertyUse | null;
+  purchasePrice?: number | null;
+  purchaseDate?: string | null;
   initialValueUsd?: number | null;
   initialValueAsOf?: string | null;
 }): Promise<{ id: string }> {
   const id = randomUUID();
   await qExec(
-    `INSERT INTO property (id, household_id, address_line1, city, state, zip, property_use, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+    `INSERT INTO property (id, household_id, address_line1, city, state, zip, property_use, purchase_price, purchase_date, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
     id,
     input.householdId,
     input.addressLine1 ?? null,
     input.city ?? null,
     input.state ?? null,
     input.zip ?? null,
-    input.propertyUse ?? null
+    input.propertyUse ?? null,
+    input.purchasePrice ?? null,
+    input.purchaseDate ?? null
   );
 
   if (input.initialValueUsd != null && Number.isFinite(input.initialValueUsd) && input.initialValueUsd >= 0) {
