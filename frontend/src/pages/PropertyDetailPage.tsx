@@ -320,7 +320,52 @@ export function PropertyDetailPage() {
               </Stack>
             </Card>
 
-            {/* Protest Readiness — contextually placed below property details */}
+          </Stack>
+        </Grid.Col>
+
+        {/* RIGHT COLUMN */}
+        <Grid.Col span={{ base: 12, md: 4 }}>
+          <Stack gap="md">
+            {/* Valuation */}
+            <Card withBorder radius="md" p="md">
+              <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Valuation</Text>
+              <Stack gap={0}>
+                <Box py={10}>
+                  <Text size="xs" c="dimmed">Purchased</Text>
+                  <Text fw={700}>{money(property.purchasePrice)}</Text>
+                  {property.purchaseDate ? <Text size="xs" c="dimmed">{property.purchaseDate}</Text> : null}
+                </Box>
+                <Divider />
+                <Box py={10}>
+                  <Text size="xs" c="dimmed">
+                    {avm != null
+                      ? `Current AVM${property.latestValueAsOf ? ` (${property.latestValueAsOf})` : ""}`
+                      : "Purchase Price (no AVM yet)"}
+                  </Text>
+                  <Text fw={700}>{money(avm ?? property.purchasePrice)}</Text>
+                  {avm != null && estimateRange ? (
+                    <Text size="xs" c="dimmed">Range {money(estimateRange.low)}–{money(estimateRange.high)}</Text>
+                  ) : null}
+                </Box>
+                <Divider />
+                <Box py={10}>
+                  <Text size="xs" c="dimmed">CAD Assessed{taxYear ? ` ${taxYear}` : ""}</Text>
+                  <Text fw={700} c={isOverAssessed ? "orange" : undefined}>{money(cadAssessed)}</Text>
+                  {taxesDue != null ? <Text size="xs" c="dimmed">Taxes: {money(taxesDue)}</Text> : null}
+                </Box>
+                <Divider />
+                <Box py={10}>
+                  <Text size="xs" c="dimmed">Gain since purchase</Text>
+                  <Text fw={700} c={gainAmt != null && gainAmt >= 0 ? "green" : "red"}>
+                    {gainAmt != null && gainPctVal != null
+                      ? `${money(gainAmt)} (${gainPctVal >= 0 ? "+" : ""}${gainPctVal.toFixed(1)}%)`
+                      : "—"}
+                  </Text>
+                </Box>
+              </Stack>
+            </Card>
+
+            {/* Protest Readiness */}
             <Card withBorder radius="md" p="md">
               <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Protest Readiness</Text>
               {isOverAssessed && overPct != null ? (
@@ -346,46 +391,6 @@ export function PropertyDetailPage() {
                 Prepare Tax Protest
               </Button>
             </Card>
-          </Stack>
-        </Grid.Col>
-
-        {/* RIGHT COLUMN */}
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <Stack gap="md">
-            {/* Valuation */}
-            <Card withBorder radius="md" p="md">
-              <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Valuation</Text>
-              <Stack gap={0}>
-                <Box py={10}>
-                  <Text size="xs" c="dimmed">Purchased</Text>
-                  <Text fw={700}>{money(property.purchasePrice)}</Text>
-                  {property.purchaseDate ? <Text size="xs" c="dimmed">{property.purchaseDate}</Text> : null}
-                </Box>
-                <Divider />
-                <Box py={10}>
-                  <Text size="xs" c="dimmed">Current AVM{property.latestValueAsOf ? ` (${property.latestValueAsOf})` : ""}</Text>
-                  <Text fw={700}>{money(avm)}</Text>
-                  {estimateRange ? (
-                    <Text size="xs" c="dimmed">Range {money(estimateRange.low)}–{money(estimateRange.high)}</Text>
-                  ) : null}
-                </Box>
-                <Divider />
-                <Box py={10}>
-                  <Text size="xs" c="dimmed">CAD Assessed{taxYear ? ` ${taxYear}` : ""}</Text>
-                  <Text fw={700} c={isOverAssessed ? "orange" : undefined}>{money(cadAssessed)}</Text>
-                  {taxesDue != null ? <Text size="xs" c="dimmed">Taxes: {money(taxesDue)}</Text> : null}
-                </Box>
-                <Divider />
-                <Box py={10}>
-                  <Text size="xs" c="dimmed">Gain since purchase</Text>
-                  <Text fw={700} c={gainAmt != null && gainAmt >= 0 ? "green" : "red"}>
-                    {gainAmt != null && gainPctVal != null
-                      ? `${money(gainAmt)} (${gainPctVal >= 0 ? "+" : ""}${gainPctVal.toFixed(1)}%)`
-                      : "—"}
-                  </Text>
-                </Box>
-              </Stack>
-            </Card>
 
             {/* Data Sources — compact */}
             <Card withBorder radius="md" p="sm">
@@ -410,67 +415,71 @@ export function PropertyDetailPage() {
         </Grid.Col>
       </Grid>
 
-      {/* Full-width: AVM / Mortgage / Equity chart */}
-      <Card withBorder radius="md" p="md">
-        <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Value · Mortgage · Equity</Text>
-        {equityHistory.length >= 2 ? (
-          <Box h={240}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={equityHistory} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
-                <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(0, 7)} tick={{ fontSize: 11 }} />
-                <YAxis tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v: number | string, name: string) => [money(Number(v)), name]} />
-                <Legend />
-                <Line type="monotone" dataKey="avm" stroke="var(--mantine-color-green-7)" strokeWidth={2} dot={false} name="AVM" />
-                {hasMortgage ? (
-                  <Line type="monotone" dataKey="mortgageBalance" stroke="var(--mantine-color-red-5)" strokeWidth={2} dot={false} name="Mortgage" />
-                ) : null}
-                <Line type="monotone" dataKey="equity" stroke="var(--mantine-color-blue-5)" strokeWidth={2} dot={false} name="Equity" />
-              </LineChart>
-            </ResponsiveContainer>
-          </Box>
-        ) : (
-          <Text c="dimmed" size="sm">Add value snapshots to track equity over time.</Text>
-        )}
-      </Card>
+      <Grid>
+        <Grid.Col span={{ base: 12, md: 6 }}>
+          <Card withBorder radius="md" p="md" h="100%">
+            <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Value · Mortgage · Equity</Text>
+            {equityHistory.length >= 2 ? (
+              <Box h={240}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={equityHistory} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
+                    <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(0, 7)} tick={{ fontSize: 10 }} />
+                    <YAxis tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} tick={{ fontSize: 10 }} width={48} />
+                    <Tooltip formatter={(v: number | string, name: string) => [money(Number(v)), name]} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="avm" stroke="var(--mantine-color-green-7)" strokeWidth={2} dot={false} name="AVM" />
+                    {hasMortgage ? (
+                      <Line type="monotone" dataKey="mortgageBalance" stroke="var(--mantine-color-red-5)" strokeWidth={2} dot={false} name="Mortgage" />
+                    ) : null}
+                    <Line type="monotone" dataKey="equity" stroke="var(--mantine-color-blue-5)" strokeWidth={2} dot={false} name="Equity" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Box>
+            ) : (
+              <Text c="dimmed" size="sm">Add value snapshots to track equity over time.</Text>
+            )}
+          </Card>
+        </Grid.Col>
 
-      {/* Full-width: Assessment history */}
-      <Card withBorder radius="md" p="md">
-        <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Assessment History</Text>
-        {chartData.length === 0 ? (
-          <Text c="dimmed" size="sm">No assessment history available.</Text>
-        ) : (
-          <Box h={260}>
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={chartData} margin={{ top: 20, right: 52, left: 8, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
-                <XAxis dataKey="year" />
-                <YAxis yAxisId="left" tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} />
-                <YAxis yAxisId="right" orientation="right" tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} />
-                <Tooltip
-                  formatter={(v: number | string, name: string) => [
-                    money(Number(v)),
-                    name === "assessedValue" ? "CAD Assessed" : "Taxes Due"
-                  ]}
-                />
-                <Bar dataKey="assessedValue" yAxisId="left" fill="var(--color-warm)" name="assessedValue">
-                  <LabelList dataKey="yoyLabel" position="top" style={{ fill: "var(--color-text-muted)", fontSize: 10 }} />
-                </Bar>
-                <Line
-                  dataKey="taxesDue"
-                  yAxisId="right"
-                  stroke="var(--mantine-color-blue-5)"
-                  strokeWidth={2}
-                  dot={{ r: 4, fill: "var(--mantine-color-blue-5)" }}
-                  name="taxesDue"
-                  connectNulls
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </Box>
-        )}
-      </Card>
+        <Grid.Col span={{ base: 12, md: 6 }}>
+          <Card withBorder radius="md" p="md" h="100%">
+            <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Assessment History</Text>
+            {chartData.length === 0 ? (
+              <Text c="dimmed" size="sm">No assessment history available.</Text>
+            ) : (
+              <Box h={240}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={chartData} margin={{ top: 20, right: 44, left: 0, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.35} />
+                    <XAxis dataKey="year" tick={{ fontSize: 10 }} />
+                    <YAxis yAxisId="left" tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} tick={{ fontSize: 10 }} width={48} />
+                    <YAxis yAxisId="right" orientation="right" tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} tick={{ fontSize: 10 }} width={44} />
+                    <Tooltip
+                      formatter={(v: number | string, name: string) => [
+                        money(Number(v)),
+                        name === "assessedValue" ? "CAD Assessed" : "Taxes Due"
+                      ]}
+                    />
+                    <Bar dataKey="assessedValue" yAxisId="left" fill="var(--color-warm)" name="assessedValue">
+                      <LabelList dataKey="yoyLabel" position="top" style={{ fill: "var(--color-text-muted)", fontSize: 10 }} />
+                    </Bar>
+                    <Line
+                      dataKey="taxesDue"
+                      yAxisId="right"
+                      stroke="var(--mantine-color-blue-5)"
+                      strokeWidth={2}
+                      dot={{ r: 4, fill: "var(--mantine-color-blue-5)" }}
+                      name="taxesDue"
+                      connectNulls
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </Box>
+            )}
+          </Card>
+        </Grid.Col>
+      </Grid>
 
       <AddPropertyModal
         opened={editModalOpen}

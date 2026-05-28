@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-RE4 (2026-05-28): PropertyDetailPage — layout refinements, AVM fallback, charts side-by-side, seed fix
+
+- **Type:** UX polish + bug fix
+- **What:**
+  - **Dev seed fix:** Mortgage account ID `40000000-0000-0000-0000-000000000006` collided with Marcus savings account in `dev_0003`; `ON CONFLICT DO NOTHING` silently swallowed the insert. Changed to `40000000-0000-0000-0000-000000000011`. Added 8 months of `account_balance_snapshot` rows for the mortgage so the equity chart renders with real data after `npm run db:reset:dev`.
+  - **AVM fallback:** Valuation card now shows purchase price with label "Purchase Price (no AVM yet)" when `latestValueUsd` is null. Estimate range hidden in that case.
+  - **Protest Readiness moved to right column:** Card is now stacked below Valuation in the span-4 right column. Left column is now image + Property Details only (less crowded).
+  - **Charts side-by-side:** Value · Mortgage · Equity chart and Assessment History chart now sit in a 2-column `Grid` (each `span={{ base: 12, md: 6 }}`) instead of two stacked full-width cards. Both chart heights normalized to 240px; Y-axis width tightened to 48px to reclaim horizontal space at half-width.
+- **Files:** `backend/db/seeds/dev/dev_0008_seed_properties.sql`, `frontend/src/pages/PropertyDetailPage.tsx`
+
 ## UX-RE3 (2026-05-28): PropertyDetailPage — equity/mortgage/AVM chart + layout redesign
 
 - **Type:** Feature + UX redesign
