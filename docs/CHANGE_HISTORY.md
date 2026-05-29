@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-PT1-1 (2026-05-29): TaxProtestPage — prototype-faithful redesign with floating chat FAB
+
+- **Type:** UX redesign + backend endpoint addition
+- **What:**
+  - **Page layout:** Complete rewrite from chat-centric skeleton to prototype-faithful single-column layout (View A — Evidence File). Page now shows: signal card (CAD / AVM / over% / est. savings / sqft / beds / year built), Market Value Evidence table, Unequal Appraisal Evidence table, AI Strategy panel (conditionally rendered), Protest Tracker with horizontal stepper.
+  - **Floating chat FAB:** Chat demoted from a 58vh pane to a fixed bottom-right ActionIcon that opens a 400px right-side Mantine Drawer. Removed the separate "Attach URL" button (URLs can be pasted directly in the chat input). Fixed the flex-layout height bug that was clipping the textarea below the visible region.
+  - **Evidence tables:** Both Market Value and Unequal Appraisal tables show DCAD comparable properties fetched via new GET `/api/protest/:propertyId/comps` endpoint. Each table shows subject row at bottom (highlighted), $/sqft, and color-coded "vs Subject" column (green if comp is lower, helps the case).
+  - **DB migration `0056_pt1_market_value.sql`:** Adds `market_value_usd NUMERIC` column to `protest_comp_cad`. `saveCADComps()` now stores `comp.marketValue` in this column; `listWorksheetComps()` returns full comp data (dcadPropertyId, city, sqft, beds, baths, yearBuilt, marketValueUsd).
+  - **New endpoint `GET /api/protest/:propertyId/comps?year=N`:** Returns saved DCAD comps for a property/year. Added to `protest.routes.ts`; backed by the updated `listWorksheetComps()` service function.
+  - **Strategy panel:** Rendered only when AI has generated a `strategyJson`. Shows case strength Progress bar, target value, primary strategy, draft arguments, and red flags Alert.
+  - **Deadline banner:** Amber/red Alert appears when hearing date is ≤ 30 days away.
+  - **Chat refresh:** After AI fetches comps (`compsAdded > 0`), the comps endpoint is re-fetched and evidence tables update automatically.
+- **Files:** `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/db/migrations/0056_pt1_market_value.sql`, `frontend/src/pages/TaxProtestPage.tsx`
+- **Not in scope (Phase 2):** Redfin comparable sales search (actual sold prices), MLS data, PDF export.
+
+---
+
 ## FIX-RE5 (2026-05-28): Property page — mortgage display, edit modal pre-fill, dropdown filter, Add form persistence
 
 - **Type:** Bug fix (5 issues)

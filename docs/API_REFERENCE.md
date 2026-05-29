@@ -147,6 +147,36 @@ Assistant chat endpoint for protest planning and comp analysis.
 
 ---
 
+### `GET /api/protest/:propertyId/comps?year=YYYY`
+
+Returns saved DCAD comparable properties for a property and tax year.
+
+- **`year`** optional; defaults to current year.
+
+**Response 200:**
+```json
+{
+  "comps": [
+    {
+      "dcadPropertyId": "12345-000000",
+      "addressLine1": "456 Elm St",
+      "city": "Flower Mound",
+      "assessedValueUsd": 320000,
+      "marketValueUsd": 380000,
+      "sqft": 1950,
+      "beds": 3,
+      "baths": 2,
+      "yearBuilt": 2005,
+      "perSqftUsd": 164.1
+    }
+  ]
+}
+```
+
+Returns an empty array if no DCAD comps have been fetched for this property/year. Comps are populated automatically for TX properties at creation (fire-and-forget backfill) or on demand via the chat endpoint.
+
+---
+
 ### `PATCH /api/protest/:propertyId/worksheet`
 
 Updates worksheet status and optional hearing date.

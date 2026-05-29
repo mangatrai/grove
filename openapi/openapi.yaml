@@ -915,6 +915,44 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
+  /api/protest/{propertyId}/comps:
+    get:
+      tags: [protest]
+      summary: List saved DCAD comparable properties for a protest worksheet
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: year
+          in: query
+          required: false
+          schema: { type: integer, minimum: 2000, maximum: 2100 }
+      responses:
+        "200":
+          description: Array of DCAD comp records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comps:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        dcadPropertyId: { type: string }
+                        addressLine1: { type: string, nullable: true }
+                        city: { type: string, nullable: true }
+                        assessedValueUsd: { type: number, nullable: true }
+                        marketValueUsd: { type: number, nullable: true }
+                        sqft: { type: number, nullable: true }
+                        beds: { type: number, nullable: true }
+                        baths: { type: number, nullable: true }
+                        yearBuilt: { type: integer, nullable: true }
+                        perSqftUsd: { type: number, nullable: true }
+        "404": { description: Property not found }
   /api/protest/{propertyId}/worksheet:
     get:
       tags: [protest]

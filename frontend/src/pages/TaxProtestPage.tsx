@@ -6,15 +6,16 @@ import {
   Button,
   Card,
   Chip,
+  Drawer,
   Grid,
   Group,
   List,
   Paper,
-  Popover,
   Progress,
   Select,
   Stack,
   Stepper,
+  Table,
   Text,
   TextInput,
   Textarea,
@@ -22,8 +23,9 @@ import {
   Tooltip,
 } from "@mantine/core";
 import {
+  IconCalendarEvent,
   IconFileText,
-  IconLink,
+  IconMessage,
   IconPaperclip,
   IconSend,
   IconX,
@@ -78,6 +80,19 @@ type Worksheet = {
   strategyJson: StrategyJson | null;
 };
 
+type CADComp = {
+  dcadPropertyId: string;
+  addressLine1: string | null;
+  city: string | null;
+  assessedValueUsd: number | null;
+  marketValueUsd: number | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  yearBuilt: number | null;
+  perSqftUsd: number | null;
+};
+
 type Toast = { id: number; color: "green" | "red" | "yellow"; message: string };
 type ChatTurnUI = {
   id: string;
@@ -97,6 +112,7 @@ type PendingAttachment = {
 type PropertiesResponse = { properties: PropertyRecord[] };
 type PropertyResponse = { property: PropertyRecord };
 type WorksheetResponse = { worksheet: Worksheet };
+type CompsResponse = { comps: CADComp[] };
 type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -118,10 +134,9 @@ function money(value: number | null | undefined): string {
   return `$${value.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 }
 
-function propertyTypeLabel(value: PropertyRecord["propertyUse"]): string {
-  if (value === "rental") return "Rental";
-  if (value === "vacation") return "Vacation";
-  return "Primary";
+function ppsf(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  return `$${value.toFixed(0)}/sf`;
 }
 
 function formatDate(iso: string | null | undefined): string {
@@ -145,14 +160,22 @@ function statusIndex(status: ProtestStatus): number {
   return 0;
 }
 
-function attachmentChipLabel(type: AttachmentType): string {
-  if (type === "pdf") return "📄 PDF text";
-  if (type === "url") return "🔗 URL";
-  return "📎 Text file attached";
+function markdownLines(text: string): string[] {
+  return text
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line, idx, arr) => !(line === "" && arr[idx - 1] === ""));
 }
 
-function markdownLines(text: string): string[] {
-  return text.split("\n").map((line) => line.trimEnd()).filter((line, idx, arr) => !(line === "" && arr[idx - 1] === ""));
+function vsSubjectColor(compPpsf: number | null, subjectPpsf: number | null): string | undefined {
+  if (compPpsf == null || subjectPpsf == null || subjectPpsf === 0) return undefined;
+  return compPpsf < subjectPpsf ? "green" : "red";
+}
+
+function vsSubjectLabel(compPpsf: number | null, subjectPpsf: number | null): string {
+  if (compPpsf == null || subjectPpsf == null || subjectPpsf === 0) return "—";
+  const diff = ((compPpsf / subjectPpsf) - 1) * 100;
+  return `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`;
 }
 
 export function TaxProtestPage() {
@@ -167,12 +190,12 @@ export function TaxProtestPage() {
   const [propertyId, setPropertyId] = useState<string | null>(null);
   const [property, setProperty] = useState<PropertyRecord | null>(null);
   const [worksheet, setWorksheet] = useState<Worksheet | null>(null);
+  const [comps, setComps] = useState<CADComp[]>([]);
   const [year, setYear] = useState<string>("2026");
   const [chat, setChat] = useState<ChatTurnUI[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
-  const [urlPopoverOpen, setUrlPopoverOpen] = useState(false);
-  const [urlDraft, setUrlDraft] = useState("");
   const [hearingDraft, setHearingDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState<ProtestStatus>("not_filed");
   const [thinking, setThinking] = useState(false);
@@ -181,14 +204,17 @@ export function TaxProtestPage() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const addToast = useCallback((color: Toast["color"], messageText: string) => {
-    const next: Toast = { id: toastSeq, color, message: messageText };
-    setToastSeq((n) => n + 1);
-    setToasts((prev) => [...prev, next]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== next.id));
-    }, 3000);
-  }, [toastSeq]);
+  const addToast = useCallback(
+    (color: Toast["color"], messageText: string) => {
+      const next: Toast = { id: toastSeq, color, message: messageText };
+      setToastSeq((n) => n + 1);
+      setToasts((prev) => [...prev, next]);
+      window.setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== next.id));
+      }, 3000);
+    },
+    [toastSeq]
+  );
 
   const loadBase = useCallback(async () => {
     setLoading(true);
@@ -201,11 +227,14 @@ export function TaxProtestPage() {
         setPropertyId(null);
         setProperty(null);
         setWorksheet(null);
+        setComps([]);
         setChat([]);
+        setLoading(false);
         return;
       }
       const qpProperty = searchParams.get("property");
-      const chosen = qpProperty && props.some((p) => p.id === qpProperty) ? qpProperty : props[0].id;
+      const chosen =
+        qpProperty && props.some((p) => p.id === qpProperty) ? qpProperty : props[0].id;
       setPropertyId(chosen);
       if (!qpProperty || qpProperty !== chosen) {
         setSearchParams({ property: chosen });
@@ -220,12 +249,18 @@ export function TaxProtestPage() {
   const loadPropertyAndWorksheet = useCallback(async (pid: string, selectedYear: number) => {
     setError(null);
     try {
-      const [propRes, wsRes] = await Promise.all([
+      const [propRes, wsRes, compsRes] = await Promise.all([
         apiJson<PropertyResponse>(`/household/properties/${encodeURIComponent(pid)}`),
-        apiJson<WorksheetResponse>(`/api/protest/${encodeURIComponent(pid)}/worksheet?year=${selectedYear}`)
+        apiJson<WorksheetResponse>(
+          `/api/protest/${encodeURIComponent(pid)}/worksheet?year=${selectedYear}`
+        ),
+        apiJson<CompsResponse>(
+          `/api/protest/${encodeURIComponent(pid)}/comps?year=${selectedYear}`
+        ).catch(() => ({ comps: [] as CADComp[] }))
       ]);
       setProperty(propRes.property);
       setWorksheet(wsRes.worksheet);
+      setComps(compsRes.comps);
       setHearingDraft(wsRes.worksheet.hearingDate ?? "");
       setStatusDraft(wsRes.worksheet.status);
       const turns: ChatTurnUI[] = (wsRes.worksheet.conversationJson ?? [])
@@ -254,20 +289,48 @@ export function TaxProtestPage() {
   }, [token, propertyId, year, loadPropertyAndWorksheet]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [chat, thinking]);
+    if (chatOpen) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [chat, thinking, chatOpen]);
 
-  const subject = useMemo(() => asRecord(asRecord(property?.valuationDetail)?.subject), [property?.valuationDetail]);
-  const estimate = useMemo(() => asRecord(asRecord(property?.valuationDetail)?.estimate), [property?.valuationDetail]);
-  const assessment = useMemo(() => asRecord(asRecord(property?.valuationDetail)?.taxCurrent), [property?.valuationDetail]);
+  const subject = useMemo(
+    () => asRecord(asRecord(property?.valuationDetail)?.subject),
+    [property?.valuationDetail]
+  );
+  const estimate = useMemo(
+    () => asRecord(asRecord(property?.valuationDetail)?.estimate),
+    [property?.valuationDetail]
+  );
+  const assessment = useMemo(
+    () => asRecord(asRecord(property?.valuationDetail)?.taxCurrent),
+    [property?.valuationDetail]
+  );
 
   const cadAssessed = asNumber(assessment?.assessedValue);
   const avm = asNumber(estimate?.value) ?? property?.latestValueUsd ?? null;
-  const overPct = cadAssessed != null && avm != null && avm > 0 ? ((cadAssessed / avm) - 1) * 100 : null;
+  const subjectSqft = asNumber(subject?.sqFt);
+  const overPct =
+    cadAssessed != null && avm != null && avm > 0
+      ? ((cadAssessed / avm) - 1) * 100
+      : null;
   const overAmt = cadAssessed != null && avm != null ? cadAssessed - avm : null;
-  const annualSavings = overAmt != null && overAmt > 0 && (property?.state ?? "").toUpperCase() === "TX"
-    ? overAmt * 0.02
-    : null;
+  const annualSavings =
+    overAmt != null &&
+    overAmt > 0 &&
+    (property?.state ?? "").toUpperCase() === "TX"
+      ? overAmt * 0.02
+      : null;
+
+  const subjectAssessedPpsf =
+    cadAssessed != null && subjectSqft != null && subjectSqft > 0
+      ? cadAssessed / subjectSqft
+      : null;
+  const subjectMarketPpsf =
+    avm != null && subjectSqft != null && subjectSqft > 0 ? avm / subjectSqft : null;
+
+  const hearingDays =
+    worksheet?.hearingDate != null ? daysUntil(worksheet.hearingDate) : null;
 
   const send = useCallback(async () => {
     if (!propertyId || !worksheet) return;
@@ -288,15 +351,18 @@ export function TaxProtestPage() {
     setSending(true);
     setThinking(true);
     try {
-      const res = await apiJson<ChatResponse>(`/api/protest/${encodeURIComponent(propertyId)}/chat`, {
-        method: "POST",
-        body: JSON.stringify({
-          message: bodyText,
-          attachmentText: attachment?.text,
-          attachmentType: attachment?.type,
-          year: Number(year)
-        })
-      });
+      const res = await apiJson<ChatResponse>(
+        `/api/protest/${encodeURIComponent(propertyId)}/chat`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            message: bodyText,
+            attachmentText: attachment?.text,
+            attachmentType: attachment?.type,
+            year: Number(year)
+          })
+        }
+      );
       setChat((prev) => [
         ...prev.map((t) => (t.id === optimistic.id ? { ...t, optimistic: false } : t)),
         {
@@ -307,11 +373,17 @@ export function TaxProtestPage() {
         }
       ]);
       if (res.strategyUpdated) {
-        const wsRes = await apiJson<WorksheetResponse>(`/api/protest/${encodeURIComponent(propertyId)}/worksheet?year=${Number(year)}`);
+        const wsRes = await apiJson<WorksheetResponse>(
+          `/api/protest/${encodeURIComponent(propertyId)}/worksheet?year=${Number(year)}`
+        );
         setWorksheet(wsRes.worksheet);
       }
       if (res.compsAdded > 0) {
         addToast("green", `Fetched ${res.compsAdded} comparable properties from DCAD.`);
+        const compsRes = await apiJson<CompsResponse>(
+          `/api/protest/${encodeURIComponent(propertyId)}/comps?year=${Number(year)}`
+        ).catch(() => ({ comps: [] as CADComp[] }));
+        setComps(compsRes.comps);
       }
     } catch (err) {
       setChat((prev) => prev.filter((t) => t.id !== optimistic.id));
@@ -322,47 +394,70 @@ export function TaxProtestPage() {
     }
   }, [propertyId, worksheet, message, pendingAttachment, year, addToast]);
 
-  const updateWorksheet = useCallback(async (patch: { status?: ProtestStatus; hearingDate?: string | null }) => {
-    if (!propertyId || !worksheet) return;
-    try {
-      const res = await apiJson<WorksheetResponse>(`/api/protest/${encodeURIComponent(propertyId)}/worksheet`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          year: Number(year),
-          ...patch
-        })
-      });
-      setWorksheet(res.worksheet);
-      setStatusDraft(res.worksheet.status);
-      setHearingDraft(res.worksheet.hearingDate ?? "");
-    } catch (err) {
-      addToast("red", err instanceof Error ? err.message : "Failed to update worksheet");
-    }
-  }, [propertyId, worksheet, year, addToast]);
+  const updateWorksheet = useCallback(
+    async (patch: { status?: ProtestStatus; hearingDate?: string | null }) => {
+      if (!propertyId || !worksheet) return;
+      try {
+        const res = await apiJson<WorksheetResponse>(
+          `/api/protest/${encodeURIComponent(propertyId)}/worksheet`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ year: Number(year), ...patch })
+          }
+        );
+        setWorksheet(res.worksheet);
+        setStatusDraft(res.worksheet.status);
+        setHearingDraft(res.worksheet.hearingDate ?? "");
+      } catch (err) {
+        addToast("red", err instanceof Error ? err.message : "Failed to update worksheet");
+      }
+    },
+    [propertyId, worksheet, year, addToast]
+  );
 
-  const onPickTextFile = useCallback((file: File) => {
-    if (file.name.toLowerCase().endsWith(".pdf")) {
-      addToast("yellow", "PDF extraction coming soon — paste the text content from your PDF for now");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === "string" ? reader.result : "";
-      setPendingAttachment({ type: "text", text, label: file.name });
-    };
-    reader.onerror = () => addToast("red", "Could not read attachment");
-    reader.readAsText(file);
-  }, [addToast]);
+  const onPickTextFile = useCallback(
+    (file: File) => {
+      if (file.name.toLowerCase().endsWith(".pdf")) {
+        addToast(
+          "yellow",
+          "PDF extraction coming soon — paste the text content from your PDF for now"
+        );
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = typeof reader.result === "string" ? reader.result : "";
+        setPendingAttachment({ type: "text", text, label: file.name });
+      };
+      reader.onerror = () => addToast("red", "Could not read attachment");
+      reader.readAsText(file);
+    },
+    [addToast]
+  );
 
   if (!token) return <Navigate to="/" replace />;
   if (loading) return <GrovePageLoader label="Loading protest assistant…" />;
 
+  const propertyLabel =
+    property != null
+      ? [property.addressLine1, property.city, property.state].filter(Boolean).join(", ")
+      : "No property";
+
   return (
     <Stack gap="md">
+      {/* Toast stack */}
       {toasts.length > 0 ? (
-        <Stack gap={6} style={{ position: "fixed", right: 18, top: 72, zIndex: 2000, width: 340 }}>
+        <Stack
+          gap={6}
+          style={{ position: "fixed", right: 18, top: 72, zIndex: 2000, width: 340 }}
+        >
           {toasts.map((toast) => (
-            <Alert key={toast.id} color={toast.color} withCloseButton onClose={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}>
+            <Alert
+              key={toast.id}
+              color={toast.color}
+              withCloseButton
+              onClose={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+            >
               {toast.message}
             </Alert>
           ))}
@@ -371,300 +466,561 @@ export function TaxProtestPage() {
 
       {error ? <Alert color="red">{error}</Alert> : null}
 
-      <Grid>
-        <Grid.Col span={{ base: 12, md: 8 }}>
-          <Card withBorder radius="md" p="md">
-            <Stack gap="sm">
-              <Group justify="space-between">
-                <div>
-                  <Group gap={8}>
-                    <Title order={2} style={{ fontSize: 20 }}>
-                      {property?.addressLine1 ?? "Tax Protest Assistant"}
-                    </Title>
-                    <Badge variant="light">{propertyTypeLabel(property?.propertyUse ?? null)}</Badge>
-                  </Group>
-                  <Text c="dimmed" size="sm">{property?.city ?? "Example City"}, {property?.state ?? "TX"}</Text>
-                </div>
-                <Group>
-                  <Select
-                    label="Tax Year"
-                    value={year}
-                    onChange={(v) => setYear(v ?? "2026")}
-                    data={[
-                      { value: "2024", label: "2024" },
-                      { value: "2025", label: "2025" },
-                      { value: "2026", label: "2026" }
-                    ]}
-                    w={100}
-                  />
-                  <Tooltip label="ARB document export — coming soon." withArrow>
-                    <Button leftSection={<IconFileText size={16} />} variant="default" disabled>
-                      Generate Document
-                    </Button>
-                  </Tooltip>
-                </Group>
-              </Group>
+      {/* Property switcher + year + export */}
+      <Group justify="space-between" align="flex-end">
+        <Group align="flex-end" gap="sm">
+          <Select
+            label="Property"
+            value={propertyId}
+            data={properties.map((p) => ({
+              value: p.id,
+              label: `${p.addressLine1 ?? "Unnamed"}${p.city ? `, ${p.city}` : ""}`
+            }))}
+            onChange={(next) => {
+              if (!next) return;
+              setPropertyId(next);
+              setSearchParams({ property: next });
+            }}
+            w={280}
+          />
+          <Select
+            label="Tax Year"
+            value={year}
+            onChange={(v) => setYear(v ?? "2026")}
+            data={[
+              { value: "2024", label: "2024" },
+              { value: "2025", label: "2025" },
+              { value: "2026", label: "2026" }
+            ]}
+            w={100}
+          />
+        </Group>
+        <Tooltip label="ARB document export — coming soon." withArrow>
+          <Button
+            leftSection={<IconFileText size={16} />}
+            variant="default"
+            disabled
+          >
+            Generate Document
+          </Button>
+        </Tooltip>
+      </Group>
 
-              <Paper withBorder radius="md" p="sm" style={{ height: "58vh", display: "flex", flexDirection: "column" }}>
-                <Box style={{ flex: 1, overflowY: "auto", paddingRight: 4 }}>
-                  <Stack gap="sm">
-                    {chat.map((turn) => (
-                      <Group key={turn.id} justify={turn.role === "user" ? "flex-end" : "flex-start"}>
-                        <Paper
-                          radius="md"
-                          p="sm"
-                          bg={turn.role === "user" ? "dark.8" : "gray.1"}
-                          c={turn.role === "user" ? "white" : undefined}
-                          maw="85%"
-                        >
-                          <Stack gap={4}>
-                            {turn.role === "assistant"
-                              ? markdownLines(turn.content).map((line, idx) => <Text key={idx} size="sm">{line || " "}</Text>)
-                              : <Text size="sm">{turn.content}</Text>}
-                            {turn.attachmentType ? (
-                              <Chip checked readOnly size="xs" variant="light">
-                                {attachmentChipLabel(turn.attachmentType)}
-                              </Chip>
-                            ) : null}
-                          </Stack>
-                        </Paper>
-                      </Group>
-                    ))}
-                    {thinking ? (
-                      <Group justify="flex-start">
-                        <Paper radius="md" p="sm" bg="gray.1">
-                          <Text size="sm" c="dimmed">Assistant is thinking…</Text>
-                        </Paper>
-                      </Group>
-                    ) : null}
-                    <div ref={bottomRef} />
-                  </Stack>
-                </Box>
+      {/* Deadline banner */}
+      {worksheet?.hearingDate != null && hearingDays != null && hearingDays <= 30 ? (
+        <Alert
+          color={hearingDays <= 7 ? "red" : "yellow"}
+          icon={<IconCalendarEvent size={16} />}
+          title="Upcoming ARB Hearing"
+        >
+          {propertyLabel} · {formatDate(worksheet.hearingDate)} ·{" "}
+          <strong>{hearingDays} days away</strong>
+        </Alert>
+      ) : null}
 
-                <Stack gap={8} mt="sm">
-                  {pendingAttachment ? (
-                    <Group>
-                      <Chip checked readOnly>{pendingAttachment.label}</Chip>
-                      <ActionIcon variant="subtle" color="gray" onClick={() => setPendingAttachment(null)} aria-label="Remove attachment">
-                        <IconX size={14} />
-                      </ActionIcon>
-                    </Group>
-                  ) : null}
-                  <Textarea
-                    value={message}
-                    onChange={(e) => setMessage(e.currentTarget.value)}
-                    autosize
-                    minRows={2}
-                    maxRows={6}
-                    placeholder="Ask the protest assistant to draft arguments or analyze comps..."
-                    onKeyDown={(e) => {
-                      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                        e.preventDefault();
-                        if (!sending) {
-                          void send();
-                        }
-                      }
-                    }}
-                  />
-                  <Group justify="space-between">
-                    <Group>
-                      <input
-                        ref={fileInputRef}
-                        hidden
-                        type="file"
-                        accept=".txt,.json,.csv,.pdf"
-                        onChange={(e) => {
-                          const file = e.currentTarget.files?.[0];
-                          e.currentTarget.value = "";
-                          if (!file) return;
-                          onPickTextFile(file);
-                        }}
-                      />
-                      <Tooltip label="Attach text file" withArrow>
-                        <ActionIcon variant="default" onClick={() => fileInputRef.current?.click()} aria-label="Attach text file">
-                          <IconPaperclip size={16} />
-                        </ActionIcon>
-                      </Tooltip>
-                      <Popover opened={urlPopoverOpen} onChange={setUrlPopoverOpen} position="top-start" withArrow>
-                        <Popover.Target>
-                          <ActionIcon variant="default" onClick={() => setUrlPopoverOpen((o) => !o)} aria-label="Attach URL">
-                            <IconLink size={16} />
-                          </ActionIcon>
-                        </Popover.Target>
-                        <Popover.Dropdown>
-                          <Stack gap="xs">
-                            <TextInput
-                              placeholder="https://example.com/comp-listing"
-                              value={urlDraft}
-                              onChange={(e) => setUrlDraft(e.currentTarget.value)}
-                            />
-                            <Group justify="flex-end">
-                              <Button
-                                size="xs"
-                                onClick={() => {
-                                  const next = urlDraft.trim();
-                                  if (!next) return;
-                                  setPendingAttachment({ type: "url", text: next, label: next });
-                                  setUrlDraft("");
-                                  setUrlPopoverOpen(false);
-                                }}
-                              >
-                                Attach URL
-                              </Button>
-                            </Group>
-                          </Stack>
-                        </Popover.Dropdown>
-                      </Popover>
-                    </Group>
-                    <Button
-                      leftSection={<IconSend size={16} />}
-                      onClick={() => void send()}
-                      loading={sending}
-                      disabled={sending || message.trim().length === 0}
-                    >
-                      Send
-                    </Button>
-                  </Group>
-                </Stack>
-              </Paper>
-            </Stack>
-          </Card>
-        </Grid.Col>
-
-        <Grid.Col span={{ base: 12, md: 4 }}>
-          <Stack gap="md">
-            <Card withBorder radius="md" p="md">
-              <Stack gap="sm">
-                <Select
-                  label="Property"
-                  value={propertyId}
-                  data={properties.map((p) => ({
-                    value: p.id,
-                    label: `${p.addressLine1 ?? "Unnamed property"}${p.city ? `, ${p.city}` : ""}`
-                  }))}
-                  onChange={(next) => {
-                    if (!next) return;
-                    setPropertyId(next);
-                    setSearchParams({ property: next });
-                  }}
-                />
-              </Stack>
-            </Card>
-
-            <Card withBorder radius="md" p="md">
-              <Stack gap={8}>
-                <Group justify="space-between">
-                  <Text fw={700}>{property?.addressLine1 ?? "123 Example St"}</Text>
-                  <Badge variant="light">{propertyTypeLabel(property?.propertyUse ?? null)}</Badge>
-                </Group>
-                <Text c="dimmed" size="sm">{property?.city ?? "Example City"}, {property?.state ?? "TX"}</Text>
-                <Grid>
-                  <Grid.Col span={6}>
-                    <Text size="xs" c="dimmed">CAD Assessed</Text>
-                    <Text fw={700}>{money(cadAssessed)}</Text>
-                  </Grid.Col>
-                  <Grid.Col span={6}>
-                    <Text size="xs" c="dimmed">AVM</Text>
-                    <Text fw={700}>{money(avm)}</Text>
-                  </Grid.Col>
-                </Grid>
-                {overPct != null && overPct > 3 ? (
-                  <Badge color="yellow" variant="light">
-                    ~{overPct.toFixed(1)}% overassessed, est. {annualSavings != null ? money(annualSavings) : "--"} savings/yr
-                  </Badge>
-                ) : null}
-                <Grid>
-                  <Grid.Col span={6}><Text size="sm">Sqft: {asNumber(subject?.sqFt) ?? "—"}</Text></Grid.Col>
-                  <Grid.Col span={6}><Text size="sm">Beds: {asNumber(subject?.beds) ?? "—"}</Text></Grid.Col>
-                  <Grid.Col span={6}><Text size="sm">Baths: {asNumber(subject?.baths) ?? "—"}</Text></Grid.Col>
-                  <Grid.Col span={6}><Text size="sm">Built: {asNumber(subject?.yearBuilt) ?? "—"}</Text></Grid.Col>
-                </Grid>
-              </Stack>
-            </Card>
-
-            {worksheet?.strategyJson ? (
-              <Card withBorder radius="md" p="md">
-                <Stack gap="sm">
-                  <Title order={4}>Strategy</Title>
-                  <Text size="sm">Case strength</Text>
-                  <Progress
-                    value={Math.max(0, Math.min(100, (worksheet.strategyJson.caseStrength / 10) * 100))}
-                    color={worksheet.strategyJson.caseStrength >= 7 ? "green" : worksheet.strategyJson.caseStrength >= 4 ? "yellow" : "red"}
-                  />
-                  <Text size="sm">Target value: <strong>{money(worksheet.strategyJson.targetValueUsd)}</strong></Text>
-                  <Text size="sm">Primary strategy: {worksheet.strategyJson.primaryStrategy}</Text>
-                  <div>
-                    <Text size="sm" fw={600} mb={6}>Draft arguments</Text>
-                    <List size="sm">
-                      {worksheet.strategyJson.draftArguments.map((arg, idx) => (
-                        <List.Item key={`${idx}-${arg.slice(0, 16)}`}>{arg}</List.Item>
-                      ))}
-                    </List>
-                  </div>
-                  {worksheet.strategyJson.redFlags.length > 0 ? (
-                    <Alert color="orange">
-                      <List size="sm">
-                        {worksheet.strategyJson.redFlags.map((flag, idx) => (
-                          <List.Item key={`${idx}-${flag.slice(0, 20)}`}>{flag}</List.Item>
-                        ))}
-                      </List>
-                    </Alert>
-                  ) : null}
-                </Stack>
-              </Card>
+      {/* Signal card */}
+      <Card withBorder radius="md" p="md">
+        <Stack gap={8}>
+          <Group justify="space-between">
+            <div>
+              <Title order={3} style={{ fontSize: 17 }}>
+                {property?.addressLine1 ?? "Select a property"}
+              </Title>
+              <Text c="dimmed" size="sm">
+                {[property?.city, property?.state, property?.zip].filter(Boolean).join(", ")}
+              </Text>
+            </div>
+            {overPct != null ? (
+              <Badge
+                color={overPct > 3 ? "yellow" : "green"}
+                variant="light"
+                size="lg"
+              >
+                {overPct > 0 ? "+" : ""}
+                {overPct.toFixed(1)}% vs AVM
+              </Badge>
             ) : null}
+          </Group>
 
-            <Card withBorder radius="md" p="md">
-              <Stack gap="sm">
-                <Title order={4}>Protest Status</Title>
-                <Stepper active={worksheet ? statusIndex(worksheet.status) : 0} orientation="vertical" size="xs" iconSize={20}>
-                  <Stepper.Step label="Not Filed" />
-                  <Stepper.Step label="Filed" />
-                  <Stepper.Step label="Informal Offer" />
-                  <Stepper.Step label="ARB Hearing" />
-                  <Stepper.Step label="Resolved" />
-                </Stepper>
-                {worksheet?.hearingDate ? (
-                  <Text size="sm">
-                    Hearing: {formatDate(worksheet.hearingDate)}
-                    {daysUntil(worksheet.hearingDate) != null ? ` · ${daysUntil(worksheet.hearingDate)} days away` : ""}
-                  </Text>
-                ) : null}
-                <TextInput
-                  label="Hearing Date"
-                  type="date"
-                  value={hearingDraft}
-                  onChange={(e) => setHearingDraft(e.currentTarget.value)}
-                  onBlur={() => {
-                    if (!worksheet) return;
-                    const next = hearingDraft.trim() || null;
-                    if ((worksheet.hearingDate ?? null) !== next) {
-                      void updateWorksheet({ hearingDate: next });
-                    }
+          <Grid>
+            <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+              <Text size="xs" c="dimmed">CAD Assessed</Text>
+              <Text fw={700} size="sm">{money(cadAssessed)}</Text>
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+              <Text size="xs" c="dimmed">AVM (Redfin)</Text>
+              <Text fw={700} size="sm">{money(avm)}</Text>
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+              <Text size="xs" c="dimmed">Est. Annual Savings</Text>
+              <Text fw={700} size="sm" c={annualSavings != null && annualSavings > 0 ? "green" : undefined}>
+                {annualSavings != null ? money(annualSavings) + "/yr" : "—"}
+              </Text>
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+              <Text size="xs" c="dimmed">Sqft</Text>
+              <Text fw={700} size="sm">
+                {subjectSqft != null ? subjectSqft.toLocaleString() : "—"}
+              </Text>
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+              <Text size="xs" c="dimmed">Beds / Baths</Text>
+              <Text fw={700} size="sm">
+                {asNumber(subject?.beds) ?? "—"} / {asNumber(subject?.baths) ?? "—"}
+              </Text>
+            </Grid.Col>
+            <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+              <Text size="xs" c="dimmed">Year Built</Text>
+              <Text fw={700} size="sm">{asNumber(subject?.yearBuilt) ?? "—"}</Text>
+            </Grid.Col>
+          </Grid>
+        </Stack>
+      </Card>
+
+      {/* Market Value Evidence table */}
+      <Card withBorder radius="md" p="md">
+        <Stack gap="sm">
+          <Group justify="space-between">
+            <Title order={4}>Market Value Evidence</Title>
+            <Text size="xs" c="dimmed">
+              {comps.length > 0 ? `${comps.length} comparable properties` : "No comps loaded"}
+            </Text>
+          </Group>
+          {comps.length > 0 ? (
+            <>
+              <Box style={{ overflowX: "auto" }}>
+                <Table striped highlightOnHover withTableBorder withColumnBorders fz="xs">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Address</Table.Th>
+                      <Table.Th>City</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>Sqft</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>Beds</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>Baths</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>CAD Market Value</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {comps
+                      .filter((c) => c.marketValueUsd != null)
+                      .map((comp) => {
+                        const compPpsf =
+                          comp.marketValueUsd != null && comp.sqft != null && comp.sqft > 0
+                            ? comp.marketValueUsd / comp.sqft
+                            : null;
+                        const color = vsSubjectColor(compPpsf, subjectMarketPpsf);
+                        return (
+                          <Table.Tr key={comp.dcadPropertyId}>
+                            <Table.Td>{comp.addressLine1 ?? "—"}</Table.Td>
+                            <Table.Td>{comp.city ?? "—"}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>
+                              {comp.sqft != null ? comp.sqft.toLocaleString() : "—"}
+                            </Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>{comp.beds ?? "—"}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>{comp.baths ?? "—"}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>
+                              {money(comp.marketValueUsd)}
+                            </Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>{ppsf(compPpsf)}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>
+                              <Text size="xs" c={color} fw={color ? 600 : undefined}>
+                                {vsSubjectLabel(compPpsf, subjectMarketPpsf)}
+                              </Text>
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
+                    {/* Subject row */}
+                    <Table.Tr style={{ background: "var(--mantine-color-blue-light)" }}>
+                      <Table.Td fw={700}>
+                        {property?.addressLine1 ?? "Subject"}
+                      </Table.Td>
+                      <Table.Td fw={700}>{property?.city ?? "—"}</Table.Td>
+                      <Table.Td style={{ textAlign: "right" }} fw={700}>
+                        {subjectSqft != null ? subjectSqft.toLocaleString() : "—"}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }} fw={700}>
+                        {asNumber(subject?.beds) ?? "—"}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }} fw={700}>
+                        {asNumber(subject?.baths) ?? "—"}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }} fw={700}>
+                        {money(avm)}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }} fw={700}>
+                        {ppsf(subjectMarketPpsf)}
+                      </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>
+                        <Badge size="xs" variant="light">Subject</Badge>
+                      </Table.Td>
+                    </Table.Tr>
+                  </Table.Tbody>
+                </Table>
+              </Box>
+              <Text size="xs" c="dimmed">
+                CAD estimated market values shown. Ask the protest assistant to research recent comparable sales for stronger evidence.
+              </Text>
+            </>
+          ) : (
+            <Paper withBorder p="md" radius="md">
+              <Stack align="center" gap="xs">
+                <Text size="sm" c="dimmed">No comparable properties loaded yet.</Text>
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconMessage size={14} />}
+                  onClick={() => {
+                    setMessage("Please search for comparable properties near my address and analyze market value evidence.");
+                    setChatOpen(true);
                   }}
-                />
-                <Select
-                  label="Status"
-                  value={statusDraft}
-                  data={[
-                    { value: "not_filed", label: "Not Filed" },
-                    { value: "filed", label: "Filed" },
-                    { value: "informal", label: "Informal Offer" },
-                    { value: "arb", label: "ARB Hearing" },
-                    { value: "resolved", label: "Resolved" }
-                  ]}
-                  onChange={(v) => {
-                    if (!v) return;
-                    const next = v as ProtestStatus;
-                    setStatusDraft(next);
-                    void updateWorksheet({ status: next });
-                  }}
-                />
+                >
+                  Ask AI to fetch comps
+                </Button>
               </Stack>
-            </Card>
+            </Paper>
+          )}
+        </Stack>
+      </Card>
+
+      {/* Unequal Appraisal Evidence table */}
+      <Card withBorder radius="md" p="md">
+        <Stack gap="sm">
+          <Group justify="space-between">
+            <Title order={4}>Unequal Appraisal Evidence</Title>
+            <Text size="xs" c="dimmed">
+              {comps.length > 0 ? `${comps.length} DCAD comparable properties` : "No comps loaded"}
+            </Text>
+          </Group>
+          {comps.length > 0 ? (
+            <Box style={{ overflowX: "auto" }}>
+              <Table striped highlightOnHover withTableBorder withColumnBorders fz="xs">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Address</Table.Th>
+                    <Table.Th>City</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Sqft</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Beds</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Baths</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>CAD Assessed</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {comps.map((comp) => {
+                    const color = vsSubjectColor(comp.perSqftUsd, subjectAssessedPpsf);
+                    return (
+                      <Table.Tr key={comp.dcadPropertyId}>
+                        <Table.Td>{comp.addressLine1 ?? "—"}</Table.Td>
+                        <Table.Td>{comp.city ?? "—"}</Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>
+                          {comp.sqft != null ? comp.sqft.toLocaleString() : "—"}
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>{comp.beds ?? "—"}</Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>{comp.baths ?? "—"}</Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>
+                          {money(comp.assessedValueUsd)}
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>{ppsf(comp.perSqftUsd)}</Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>
+                          <Text size="xs" c={color} fw={color ? 600 : undefined}>
+                            {vsSubjectLabel(comp.perSqftUsd, subjectAssessedPpsf)}
+                          </Text>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                  {/* Subject row */}
+                  <Table.Tr style={{ background: "var(--mantine-color-blue-light)" }}>
+                    <Table.Td fw={700}>
+                      {property?.addressLine1 ?? "Subject"}
+                    </Table.Td>
+                    <Table.Td fw={700}>{property?.city ?? "—"}</Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {subjectSqft != null ? subjectSqft.toLocaleString() : "—"}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {asNumber(subject?.beds) ?? "—"}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {asNumber(subject?.baths) ?? "—"}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {money(cadAssessed)}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {ppsf(subjectAssessedPpsf)}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }}>
+                      <Badge size="xs" variant="light">Subject</Badge>
+                    </Table.Td>
+                  </Table.Tr>
+                </Table.Tbody>
+              </Table>
+            </Box>
+          ) : (
+            <Paper withBorder p="md" radius="md">
+              <Stack align="center" gap="xs">
+                <Text size="sm" c="dimmed">No DCAD comparable properties loaded.</Text>
+                <Text size="xs" c="dimmed">
+                  DCAD comps are fetched automatically for TX properties or can be requested via the protest assistant.
+                </Text>
+              </Stack>
+            </Paper>
+          )}
+        </Stack>
+      </Card>
+
+      {/* Strategy panel — only when AI has generated a strategy */}
+      {worksheet?.strategyJson ? (
+        <Card withBorder radius="md" p="md">
+          <Stack gap="sm">
+            <Title order={4}>AI Strategy Analysis</Title>
+            <Group gap="xl">
+              <div style={{ flex: 1 }}>
+                <Text size="xs" c="dimmed" mb={4}>
+                  Case strength ({worksheet.strategyJson.caseStrength.toFixed(1)}/10)
+                </Text>
+                <Progress
+                  value={Math.max(
+                    0,
+                    Math.min(100, (worksheet.strategyJson.caseStrength / 10) * 100)
+                  )}
+                  color={
+                    worksheet.strategyJson.caseStrength >= 7
+                      ? "green"
+                      : worksheet.strategyJson.caseStrength >= 4
+                      ? "yellow"
+                      : "red"
+                  }
+                  size="md"
+                />
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Target Value</Text>
+                <Text fw={700}>{money(worksheet.strategyJson.targetValueUsd)}</Text>
+              </div>
+            </Group>
+            <div>
+              <Text size="sm" c="dimmed" mb={2}>Primary approach</Text>
+              <Text size="sm">{worksheet.strategyJson.primaryStrategy}</Text>
+            </div>
+            <div>
+              <Text size="sm" fw={600} mb={6}>Draft arguments</Text>
+              <List size="sm" spacing={4}>
+                {worksheet.strategyJson.draftArguments.map((arg, idx) => (
+                  <List.Item key={`${idx}-${arg.slice(0, 16)}`}>{arg}</List.Item>
+                ))}
+              </List>
+            </div>
+            {worksheet.strategyJson.redFlags.length > 0 ? (
+              <Alert color="orange" title="Red flags">
+                <List size="sm">
+                  {worksheet.strategyJson.redFlags.map((flag, idx) => (
+                    <List.Item key={`${idx}-${flag.slice(0, 20)}`}>{flag}</List.Item>
+                  ))}
+                </List>
+              </Alert>
+            ) : null}
           </Stack>
-        </Grid.Col>
-      </Grid>
+        </Card>
+      ) : null}
+
+      {/* Protest tracker */}
+      <Card withBorder radius="md" p="md">
+        <Stack gap="md">
+          <Title order={4}>Protest Status</Title>
+          <Stepper
+            active={worksheet ? statusIndex(worksheet.status) : 0}
+            size="xs"
+            iconSize={20}
+          >
+            <Stepper.Step label="Not Filed" />
+            <Stepper.Step label="Filed" />
+            <Stepper.Step label="Informal Offer" />
+            <Stepper.Step label="ARB Hearing" />
+            <Stepper.Step label="Resolved" />
+          </Stepper>
+          <Grid>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <Select
+                label="Update status"
+                value={statusDraft}
+                data={[
+                  { value: "not_filed", label: "Not Filed" },
+                  { value: "filed", label: "Filed" },
+                  { value: "informal", label: "Informal Offer" },
+                  { value: "arb", label: "ARB Hearing" },
+                  { value: "resolved", label: "Resolved" }
+                ]}
+                onChange={(v) => {
+                  if (!v) return;
+                  const next = v as ProtestStatus;
+                  setStatusDraft(next);
+                  void updateWorksheet({ status: next });
+                }}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <TextInput
+                label="Hearing Date"
+                type="date"
+                value={hearingDraft}
+                onChange={(e) => setHearingDraft(e.currentTarget.value)}
+                onBlur={() => {
+                  if (!worksheet) return;
+                  const next = hearingDraft.trim() || null;
+                  if ((worksheet.hearingDate ?? null) !== next) {
+                    void updateWorksheet({ hearingDate: next });
+                  }
+                }}
+              />
+            </Grid.Col>
+          </Grid>
+          {worksheet?.hearingDate ? (
+            <Text size="sm" c="dimmed">
+              Hearing: {formatDate(worksheet.hearingDate)}
+              {hearingDays != null ? ` · ${hearingDays} days away` : ""}
+            </Text>
+          ) : null}
+        </Stack>
+      </Card>
+
+      {/* Floating chat FAB */}
+      <Tooltip label="Protest Assistant" withArrow position="left">
+        <ActionIcon
+          radius="xl"
+          size={56}
+          style={{ position: "fixed", bottom: 28, right: 28, zIndex: 300 }}
+          onClick={() => setChatOpen(true)}
+        >
+          <IconMessage size={26} />
+        </ActionIcon>
+      </Tooltip>
+
+      {/* Chat drawer */}
+      <Drawer
+        opened={chatOpen}
+        onClose={() => setChatOpen(false)}
+        position="right"
+        size={400}
+        title="Protest Assistant"
+        styles={{ body: { display: "flex", flexDirection: "column", height: "calc(100% - 60px)", padding: "12px 16px" } }}
+      >
+        <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
+          <Stack gap="sm">
+            {chat.length === 0 ? (
+              <Text size="sm" c="dimmed" ta="center" mt="xl">
+                Ask me to analyze your case, draft arguments, or fetch comparable properties.
+              </Text>
+            ) : null}
+            {chat.map((turn) => (
+              <Group key={turn.id} justify={turn.role === "user" ? "flex-end" : "flex-start"}>
+                <Paper
+                  radius="md"
+                  p="sm"
+                  bg={turn.role === "user" ? "dark.8" : "gray.1"}
+                  c={turn.role === "user" ? "white" : undefined}
+                  maw="88%"
+                >
+                  <Stack gap={4}>
+                    {turn.role === "assistant"
+                      ? markdownLines(turn.content).map((line, idx) => (
+                          <Text key={idx} size="sm">
+                            {line || " "}
+                          </Text>
+                        ))
+                      : <Text size="sm">{turn.content}</Text>}
+                    {turn.attachmentType ? (
+                      <Chip checked readOnly size="xs" variant="light">
+                        📎 Attachment
+                      </Chip>
+                    ) : null}
+                  </Stack>
+                </Paper>
+              </Group>
+            ))}
+            {thinking ? (
+              <Group justify="flex-start">
+                <Paper radius="md" p="sm" bg="gray.1">
+                  <Text size="sm" c="dimmed">Thinking…</Text>
+                </Paper>
+              </Group>
+            ) : null}
+            <div ref={bottomRef} />
+          </Stack>
+        </Box>
+
+        <Stack gap={8} mt="sm" style={{ flexShrink: 0 }}>
+          {pendingAttachment ? (
+            <Group>
+              <Chip checked readOnly size="xs">{pendingAttachment.label}</Chip>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                onClick={() => setPendingAttachment(null)}
+                aria-label="Remove attachment"
+                size="sm"
+              >
+                <IconX size={14} />
+              </ActionIcon>
+            </Group>
+          ) : null}
+          <Textarea
+            value={message}
+            onChange={(e) => setMessage(e.currentTarget.value)}
+            autosize
+            minRows={2}
+            maxRows={5}
+            placeholder="Ask about comps, arguments, strategy…"
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                if (!sending) void send();
+              }
+            }}
+          />
+          <Group justify="space-between">
+            <Group gap={4}>
+              <input
+                ref={fileInputRef}
+                hidden
+                type="file"
+                accept=".txt,.json,.csv"
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0];
+                  e.currentTarget.value = "";
+                  if (!file) return;
+                  onPickTextFile(file);
+                }}
+              />
+              <Tooltip label="Attach text file" withArrow>
+                <ActionIcon
+                  variant="default"
+                  onClick={() => fileInputRef.current?.click()}
+                  aria-label="Attach text file"
+                >
+                  <IconPaperclip size={16} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+            <Group gap="xs">
+              <Text size="xs" c="dimmed">⌘↵</Text>
+              <Button
+                leftSection={<IconSend size={16} />}
+                onClick={() => void send()}
+                loading={sending}
+                disabled={sending || message.trim().length === 0}
+              >
+                Send
+              </Button>
+            </Group>
+          </Group>
+        </Stack>
+      </Drawer>
     </Stack>
   );
 }

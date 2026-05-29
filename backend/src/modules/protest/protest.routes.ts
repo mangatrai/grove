@@ -12,6 +12,7 @@ import { searchDCADByAddress } from "./dcad.service.js";
 import {
   appendConversationTurn,
   getOrCreateWorksheet,
+  listWorksheetComps,
   updateStrategy,
   updateWorksheetStatus,
   type ConversationTurn,
@@ -132,6 +133,28 @@ protestRouter.get("/:propertyId/worksheet", async (req: AuthenticatedRequest, re
   }
   const worksheet = await getOrCreateWorksheet(property.id, householdId, year);
   res.status(200).json({ worksheet });
+});
+
+protestRouter.get("/:propertyId/comps", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
+    return;
+  }
+  const year = query.data.year ?? thisYear();
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  const comps = await listWorksheetComps(property.id, householdId, year);
+  res.status(200).json({ comps });
 });
 
 protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) => {

@@ -172,13 +172,14 @@ export async function saveCADComps(
     await qExec(
       `INSERT INTO protest_comp_cad
         (id, household_id, property_id, tax_year, dcad_property_id, address_line1, city, assessed_value_usd,
-         sqft, beds, baths, year_built, per_sqft_usd, raw_json, fetched_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+         market_value_usd, sqft, beds, baths, year_built, per_sqft_usd, raw_json, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
        ON CONFLICT (property_id, tax_year, dcad_property_id)
        DO UPDATE SET
          address_line1 = EXCLUDED.address_line1,
          city = EXCLUDED.city,
          assessed_value_usd = EXCLUDED.assessed_value_usd,
+         market_value_usd = EXCLUDED.market_value_usd,
          sqft = EXCLUDED.sqft,
          beds = EXCLUDED.beds,
          baths = EXCLUDED.baths,
@@ -194,6 +195,7 @@ export async function saveCADComps(
       comp.address,
       comp.city,
       comp.assessedValue,
+      comp.marketValue,
       comp.sqft,
       comp.beds,
       comp.baths,
@@ -226,13 +228,40 @@ export async function triggerDCADBackfill(
   }
 }
 
+export type ProtestComp = {
+  dcadPropertyId: string;
+  addressLine1: string | null;
+  city: string | null;
+  assessedValueUsd: number | null;
+  marketValueUsd: number | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  yearBuilt: number | null;
+  perSqftUsd: number | null;
+};
+
+type CompRow = {
+  dcad_property_id: string;
+  address_line1: string | null;
+  city: string | null;
+  assessed_value_usd: number | null;
+  market_value_usd: number | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  year_built: number | null;
+  per_sqft_usd: number | null;
+};
+
 export async function listWorksheetComps(
   propertyId: string,
   householdId: string,
   taxYear: number
-): Promise<Array<{ addressLine1: string | null; assessedValueUsd: number | null; perSqftUsd: number | null }>> {
-  const rows = await qAll<{ address_line1: string | null; assessed_value_usd: number | null; per_sqft_usd: number | null }>(
-    `SELECT address_line1, assessed_value_usd, per_sqft_usd
+): Promise<ProtestComp[]> {
+  const rows = await qAll<CompRow>(
+    `SELECT dcad_property_id, address_line1, city, assessed_value_usd, market_value_usd,
+            sqft, beds, baths, year_built, per_sqft_usd
        FROM protest_comp_cad
       WHERE household_id = ? AND property_id = ? AND tax_year = ?
       ORDER BY fetched_at DESC`,
@@ -241,8 +270,15 @@ export async function listWorksheetComps(
     taxYear
   );
   return rows.map((r) => ({
+    dcadPropertyId: r.dcad_property_id,
     addressLine1: r.address_line1,
-    assessedValueUsd: r.assessed_value_usd,
-    perSqftUsd: r.per_sqft_usd
+    city: r.city,
+    assessedValueUsd: r.assessed_value_usd != null ? Number(r.assessed_value_usd) : null,
+    marketValueUsd: r.market_value_usd != null ? Number(r.market_value_usd) : null,
+    sqft: r.sqft != null ? Number(r.sqft) : null,
+    beds: r.beds != null ? Number(r.beds) : null,
+    baths: r.baths != null ? Number(r.baths) : null,
+    yearBuilt: r.year_built,
+    perSqftUsd: r.per_sqft_usd != null ? Number(r.per_sqft_usd) : null
   }));
 }
