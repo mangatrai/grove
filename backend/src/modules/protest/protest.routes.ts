@@ -292,6 +292,20 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
         {
           type: "function",
           function: {
+            name: "search_web",
+            description: "Search the web for comparable property sales, market trends, or appraisal data. Use targeted queries like '123 Main St Dallas TX sold price 2024' or 'Dallas TX property tax protest ARB results 2025'.",
+            parameters: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Search query" }
+              },
+              required: ["query"]
+            }
+          }
+        },
+        {
+          type: "function",
+          function: {
             name: "update_strategy",
             description: "Save the current protest strategy summary",
             parameters: {
@@ -340,6 +354,43 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
           toolResult = `Redfin data refreshed. Updated AVM: ${money(result.estimate)}. The sold comps list has been updated.`;
         } else {
           toolResult = `Redfin refresh failed: ${result.message}`;
+        }
+      } else if (call.function.name === "search_web") {
+        if (!env.TAVILY_API_KEY) {
+          toolResult = "Web search is not configured (TAVILY_API_KEY missing).";
+        } else {
+          const args = (() => {
+            try { return JSON.parse(call.function.arguments) as { query?: unknown }; } catch { return {}; }
+          })();
+          const query = typeof args.query === "string" ? args.query.trim() : "";
+          if (!query) {
+            toolResult = "No query provided.";
+          } else {
+            try {
+              const tavilyRes = await fetch("https://api.tavily.com/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  api_key: env.TAVILY_API_KEY,
+                  query,
+                  search_depth: "basic",
+                  max_results: 5
+                }),
+                signal: AbortSignal.timeout(10_000)
+              });
+              if (!tavilyRes.ok) {
+                toolResult = `Tavily returned HTTP ${tavilyRes.status}.`;
+              } else {
+                const data = await tavilyRes.json() as { results?: Array<{ title: string; url: string; content: string }> };
+                const results = data.results ?? [];
+                toolResult = results.length === 0
+                  ? "No results found."
+                  : results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content}`).join("\n\n");
+              }
+            } catch (err) {
+              toolResult = `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.`;
+            }
+          }
         }
       } else if (call.function.name === "fetch_dcad_comps") {
         const args = (() => {

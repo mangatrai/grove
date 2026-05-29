@@ -106,7 +106,9 @@ const envSchema = z.object({
    */
   FRONTEND_APP_URL: z.string().default(""),
   /** RealtyAPI key for Redfin property valuation (D-2). Optional — feature degrades to manual if absent. */
-  REALTY_API_KEY: z.string().optional()
+  REALTY_API_KEY: z.string().optional(),
+  /** Tavily search API key for AI protest assistant web search (PT-3). Optional — search_web tool disabled if absent. */
+  TAVILY_API_KEY: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

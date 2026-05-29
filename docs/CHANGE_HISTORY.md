@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-PT3-1 (2026-05-29): Protest AI — Tavily web search tool (`search_web`)
+
+- **Type:** Feature — AI autonomous web search for comparable sales and market data
+- **What:**
+  - Added `search_web` AI tool to the protest chat handler. The AI can now call Tavily's search API to find recent comparable sales, market trends, ARB outcomes, and county assessor data for any query.
+  - Added `TAVILY_API_KEY` optional env var to `backend/src/config/env.ts`. Tool gracefully disabled when key is absent.
+  - No new DB table, no migration, no frontend change.
+- **Files:** `backend/src/config/env.ts`, `backend/src/modules/protest/protest.routes.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_REFERENCE.md`
+- **GitHub:** https://github.com/mangatrai/grove/issues/39
+
+---
+
 ## UX-PT2-1 (2026-05-29): TaxProtestPage — Redfin comparable sold prices in Market Value Evidence table
 
 - **Type:** Feature — market value evidence from real sold comps

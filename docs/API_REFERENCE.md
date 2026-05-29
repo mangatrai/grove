@@ -134,14 +134,15 @@ Assistant chat endpoint for protest planning and comp analysis.
 ```
 
 - **`attachmentType`**: `pdf | url | text` (optional).
-- Uses GPT-4.1 with tool calls for DCAD comp fetch + strategy persistence.
+- Uses `OPENAI_MODEL` (default `gpt-4o-mini`) with tool calls. Available AI tools: `fetch_dcad_comps`, `refresh_redfin_comps`, `search_web` (Tavily — requires `TAVILY_API_KEY`), `update_strategy`.
 
 **Response 200:**
 ```json
 {
   "assistantMessage": "Start with unequal-appraisal comp framing...",
   "strategyUpdated": true,
-  "compsAdded": 4
+  "compsAdded": 4,
+  "soldCompsRefreshed": false
 }
 ```
 
