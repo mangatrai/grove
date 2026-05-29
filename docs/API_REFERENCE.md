@@ -207,6 +207,27 @@ Returns Redfin comparable sold properties from the property's stored `valuation_
 
 ---
 
+### `GET /api/protest/:propertyId/evidence-packet?year=YYYY`
+
+Generates and streams a multi-page PDF ARB evidence packet for the given property and tax year.
+
+**Auth:** Owner/admin. `year` defaults to current year if omitted.
+
+**Response 200:**
+- `Content-Type: application/pdf`
+- `Content-Disposition: attachment; filename="<address>_ARB_<year>.pdf"`
+- PDF body (binary stream)
+
+**PDF sections:**
+1. **Cover** — valuation summary boxes (CAD assessed, AVM, overassessment %, target value), property facts, strategy panel (case strength bar, primary approach, key arguments, red flags)
+2. **DCAD Comparable Properties** — table with market value, $/sqft, vs-subject %; subject row highlighted; green/red colour coding
+3. **Recent Comparable Sales** — Redfin sold comps table (if available)
+4. **Market Value Comparison** — horizontal bar chart of AVM vs DCAD comp market values; green bars = comp below subject (supports protest)
+
+**Errors:** `400` invalid params · `404` property not found · `401/403` auth
+
+---
+
 ### `PATCH /api/protest/:propertyId/worksheet`
 
 Updates worksheet status and optional hearing date.

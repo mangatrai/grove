@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-PT4-1 (2026-05-29): ARB Evidence Packet PDF export
+
+- **Type:** Feature — Generate Document button, pdfkit PDF
+- **What:**
+  - New `GET /api/protest/:propertyId/evidence-packet?year=N` endpoint streams a multi-page PDF ARB hearing packet.
+  - PDF pages: (1) cover with valuation summary boxes + property facts + strategy panel, (2) DCAD comps table with vs-subject colour coding + subject row highlighted yellow, (3) Redfin sold comps table, (4) horizontal bar chart comparing AVM vs DCAD comp market values.
+  - New `protest-evidence.service.ts` encapsulates all pdfkit drawing logic; no new DB table or migration.
+  - Added `pdfkit` + `@types/pdfkit` to backend dependencies.
+  - Frontend: enabled "Generate Document" button on `TaxProtestPage` — triggers fetch → blob → anchor download; shows `loading` spinner while generating.
+- **Files:** `backend/src/modules/protest/protest-evidence.service.ts` (new), `backend/src/modules/protest/protest.routes.ts`, `backend/package.json`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/CHANGE_HISTORY.md`, `docs/API_REFERENCE.md`
+- **GitHub:** closes #40
+
 ## CR-PT3-1 (2026-05-29): Protest AI — Tavily web search tool (`search_web`)
 
 - **Type:** Feature — AI autonomous web search for comparable sales and market data

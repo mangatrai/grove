@@ -20,6 +20,7 @@ import {
   type StrategyJson,
   saveCADComps
 } from "./protest-worksheet.service.js";
+import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
@@ -456,6 +457,80 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     compsAdded,
     soldCompsRefreshed
   });
+});
+
+protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
+    return;
+  }
+  const year = query.data.year ?? thisYear();
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+
+  const worksheet = await getOrCreateWorksheet(property.id, householdId, year);
+  const dcadComps = await listWorksheetComps(property.id, householdId, year);
+
+  const detail = asRecord(property.valuationDetail);
+  const subject = asRecord(detail?.subject);
+  const taxCurrent = asRecord(detail?.taxCurrent);
+  const cadAssessed = asNumber(taxCurrent?.assessedValue);
+  const avm = (typeof detail?.estimate === "number" ? detail.estimate : null) ?? property.latestValueUsd;
+
+  const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
+  const soldComps: SoldComp[] = rawSoldComps.map((c) => {
+    const r = asRecord(c) ?? {};
+    const soldPrice = asNumber(r.soldPrice);
+    const sqft = asNumber(r.sqft);
+    return {
+      address: typeof r.address === "string" ? r.address : null,
+      sqft,
+      beds: asNumber(r.beds),
+      baths: asNumber(r.baths),
+      soldPrice,
+      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
+      pricePerSqft:
+        soldPrice != null && sqft != null && sqft > 0
+          ? Math.round(soldPrice / sqft)
+          : asNumber(r.pricePerSqft),
+      listPrice: asNumber(r.listPrice)
+    };
+  });
+
+  const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown Property";
+  const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);
+  const filename = `${safeAddr}_ARB_${year}.pdf`;
+
+  const doc = generateEvidencePDF({
+    address,
+    taxYear: year,
+    cadAssessed,
+    avm,
+    sqft: asNumber(subject?.sqFt),
+    beds: asNumber(subject?.beds),
+    baths: asNumber(subject?.baths),
+    yearBuilt: asNumber(subject?.yearBuilt),
+    hearingDate: worksheet.hearingDate,
+    worksheetStatus: worksheet.status,
+    strategy: worksheet.strategyJson,
+    dcadComps,
+    soldComps
+  });
+
+  log.info("evidence packet generated", { propertyId: property.id, year, comps: dcadComps.length });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  doc.pipe(res);
 });
 
 protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, res) => {

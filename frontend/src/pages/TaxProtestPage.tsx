@@ -33,7 +33,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 
-import { apiJson, useAuthToken } from "../api";
+import { apiJson, getToken, useAuthToken } from "../api";
 import { GrovePageLoader } from "../components/GroveLoader";
 
 type ProtestStatus = "not_filed" | "filed" | "informal" | "arb" | "resolved";
@@ -216,6 +216,7 @@ export function TaxProtestPage() {
   const [statusDraft, setStatusDraft] = useState<ProtestStatus>("not_filed");
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -463,6 +464,29 @@ export function TaxProtestPage() {
     [addToast]
   );
 
+  const handleDownload = useCallback(async () => {
+    if (!propertyId) return;
+    setDownloading(true);
+    try {
+      const tok = getToken();
+      const res = await fetch(`/api/protest/${propertyId}/evidence-packet?year=${year}`, {
+        headers: tok ? { Authorization: `Bearer ${tok}` } : {}
+      });
+      if (!res.ok) throw new Error(`PDF generation failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `ARB_Evidence_${year}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to generate PDF");
+    } finally {
+      setDownloading(false);
+    }
+  }, [propertyId, year, addToast]);
+
   if (!token) return <Navigate to="/" replace />;
   if (loading) return <GrovePageLoader label="Loading protest assistant…" />;
 
@@ -523,15 +547,15 @@ export function TaxProtestPage() {
             w={100}
           />
         </Group>
-        <Tooltip label="ARB document export — coming soon." withArrow>
-          <Button
-            leftSection={<IconFileText size={16} />}
-            variant="default"
-            disabled
-          >
-            Generate Document
-          </Button>
-        </Tooltip>
+        <Button
+          leftSection={<IconFileText size={16} />}
+          variant="default"
+          loading={downloading}
+          disabled={!propertyId}
+          onClick={handleDownload}
+        >
+          Generate Document
+        </Button>
       </Group>
 
       {/* Deadline banner */}
