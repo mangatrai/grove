@@ -227,7 +227,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
 
   for (let iteration = 0; iteration < 5; iteration += 1) {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: env.OPENAI_MODEL,
       messages,
       tools: [
         {

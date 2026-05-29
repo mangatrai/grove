@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-PT1-1 (2026-05-29): TaxProtestPage — FAB overlap + OPENAI_MODEL env wire-up
+
+- **Type:** UI bug fix + config fix
+- **What:**
+  - **FAB overlap:** Chat FAB (floating ActionIcon) was visible behind/over the open Drawer. Fixed by conditionally rendering FAB only when `!chatOpen`. (`frontend/src/pages/TaxProtestPage.tsx`)
+  - **OPENAI_MODEL env:** Protest chat route hardcoded `model: "gpt-4.1"`. Switched to `model: env.OPENAI_MODEL` so the `OPENAI_MODEL` env var (already defined in `env.ts` with default `"gpt-4o-mini"`) controls the model. (`backend/src/modules/protest/protest.routes.ts`)
+
+---
+
 ## UX-PT1-1 (2026-05-29): TaxProtestPage — prototype-faithful redesign with floating chat FAB
 
 - **Type:** UX redesign + backend endpoint addition

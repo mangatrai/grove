@@ -889,17 +889,19 @@ export function TaxProtestPage() {
         </Stack>
       </Card>
 
-      {/* Floating chat FAB */}
-      <Tooltip label="Protest Assistant" withArrow position="left">
-        <ActionIcon
-          radius="xl"
-          size={56}
-          style={{ position: "fixed", bottom: 28, right: 28, zIndex: 300 }}
-          onClick={() => setChatOpen(true)}
-        >
-          <IconMessage size={26} />
-        </ActionIcon>
-      </Tooltip>
+      {/* Floating chat FAB — hidden when drawer is open */}
+      {!chatOpen && (
+        <Tooltip label="Protest Assistant" withArrow position="left">
+          <ActionIcon
+            radius="xl"
+            size={56}
+            style={{ position: "fixed", bottom: 28, right: 28, zIndex: 300 }}
+            onClick={() => setChatOpen(true)}
+          >
+            <IconMessage size={26} />
+          </ActionIcon>
+        </Tooltip>
+      )}
 
       {/* Chat drawer */}
       <Drawer
