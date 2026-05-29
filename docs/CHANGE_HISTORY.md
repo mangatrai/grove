@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-PT2-1 (2026-05-29): TaxProtestPage — Redfin comparable sold prices in Market Value Evidence table
+
+- **Type:** Feature — market value evidence from real sold comps
+- **What:**
+  - **Market Value Evidence table** now shows actual Redfin comparable sold prices (`soldPrice`, `pricePerSqft`, `soldDate`) instead of DCAD estimated market values. Data is read from `property.valuation_detail.comps` (already stored as part of the Redfin property fetch — no new DB table or migration).
+  - **TX non-disclosure note:** When `soldPrice` is null (common in TX), shows `listPrice` in dimmed text as a fallback and displays a note explaining the limitation.
+  - **New endpoint `GET /api/protest/:propertyId/sold-comps`:** Returns shaped Redfin comp data (address, sqft, beds, baths, soldPrice, soldDate, pricePerSqft, listPrice). No `year` param — comps are property-level not year-specific.
+  - **New AI tool `refresh_redfin_comps`** in protest chat handler: calls `refreshPropertyValuation()` to re-fetch Redfin data. Returns `soldCompsRefreshed: true` in chat response; frontend re-fetches and updates Market Value table.
+  - **Files:** `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`
+
+---
+
 ## FIX-PT1-1 (2026-05-29): TaxProtestPage — FAB overlap + OPENAI_MODEL env wire-up
 
 - **Type:** UI bug fix + config fix

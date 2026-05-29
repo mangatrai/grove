@@ -177,6 +177,35 @@ Returns an empty array if no DCAD comps have been fetched for this property/year
 
 ---
 
+### `GET /api/protest/:propertyId/sold-comps`
+
+Returns Redfin comparable sold properties from the property's stored `valuation_detail`. No `year` param — comps are property-level.
+
+**Response 200:**
+```json
+{
+  "comps": [
+    {
+      "address": "456 Elm St",
+      "city": "Flower Mound",
+      "state": "TX",
+      "sqft": 1950,
+      "beds": 3,
+      "baths": 2,
+      "yearBuilt": 2005,
+      "soldPrice": null,
+      "soldDate": "2025-10-01",
+      "pricePerSqft": null,
+      "listPrice": 420000
+    }
+  ]
+}
+```
+
+`soldPrice` and `pricePerSqft` are frequently null in Texas (non-disclosure state). `listPrice` is shown as a fallback. Array is empty if the property has no Redfin valuation data or no comps were returned by Redfin.
+
+---
+
 ### `PATCH /api/protest/:propertyId/worksheet`
 
 Updates worksheet status and optional hearing date.

@@ -93,6 +93,20 @@ type CADComp = {
   perSqftUsd: number | null;
 };
 
+type SoldComp = {
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  yearBuilt: number | null;
+  soldPrice: number | null;
+  soldDate: string | null;
+  pricePerSqft: number | null;
+  listPrice: number | null;
+};
+
 type Toast = { id: number; color: "green" | "red" | "yellow"; message: string };
 type ChatTurnUI = {
   id: string;
@@ -113,7 +127,8 @@ type PropertiesResponse = { properties: PropertyRecord[] };
 type PropertyResponse = { property: PropertyRecord };
 type WorksheetResponse = { worksheet: Worksheet };
 type CompsResponse = { comps: CADComp[] };
-type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number };
+type SoldCompsResponse = { comps: SoldComp[] };
+type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number; soldCompsRefreshed: boolean };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -191,6 +206,7 @@ export function TaxProtestPage() {
   const [property, setProperty] = useState<PropertyRecord | null>(null);
   const [worksheet, setWorksheet] = useState<Worksheet | null>(null);
   const [comps, setComps] = useState<CADComp[]>([]);
+  const [soldComps, setSoldComps] = useState<SoldComp[]>([]);
   const [year, setYear] = useState<string>("2026");
   const [chat, setChat] = useState<ChatTurnUI[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
@@ -228,6 +244,7 @@ export function TaxProtestPage() {
         setProperty(null);
         setWorksheet(null);
         setComps([]);
+        setSoldComps([]);
         setChat([]);
         setLoading(false);
         return;
@@ -249,18 +266,22 @@ export function TaxProtestPage() {
   const loadPropertyAndWorksheet = useCallback(async (pid: string, selectedYear: number) => {
     setError(null);
     try {
-      const [propRes, wsRes, compsRes] = await Promise.all([
+      const [propRes, wsRes, compsRes, soldCompsRes] = await Promise.all([
         apiJson<PropertyResponse>(`/household/properties/${encodeURIComponent(pid)}`),
         apiJson<WorksheetResponse>(
           `/api/protest/${encodeURIComponent(pid)}/worksheet?year=${selectedYear}`
         ),
         apiJson<CompsResponse>(
           `/api/protest/${encodeURIComponent(pid)}/comps?year=${selectedYear}`
-        ).catch(() => ({ comps: [] as CADComp[] }))
+        ).catch(() => ({ comps: [] as CADComp[] })),
+        apiJson<SoldCompsResponse>(
+          `/api/protest/${encodeURIComponent(pid)}/sold-comps`
+        ).catch(() => ({ comps: [] as SoldComp[] }))
       ]);
       setProperty(propRes.property);
       setWorksheet(wsRes.worksheet);
       setComps(compsRes.comps);
+      setSoldComps(soldCompsRes.comps);
       setHearingDraft(wsRes.worksheet.hearingDate ?? "");
       setStatusDraft(wsRes.worksheet.status);
       const turns: ChatTurnUI[] = (wsRes.worksheet.conversationJson ?? [])
@@ -384,6 +405,13 @@ export function TaxProtestPage() {
           `/api/protest/${encodeURIComponent(propertyId)}/comps?year=${Number(year)}`
         ).catch(() => ({ comps: [] as CADComp[] }));
         setComps(compsRes.comps);
+      }
+      if (res.soldCompsRefreshed) {
+        addToast("green", "Redfin data refreshed — comparable sold prices updated.");
+        const soldCompsRes = await apiJson<SoldCompsResponse>(
+          `/api/protest/${encodeURIComponent(propertyId)}/sold-comps`
+        ).catch(() => ({ comps: [] as SoldComp[] }));
+        setSoldComps(soldCompsRes.comps);
       }
     } catch (err) {
       setChat((prev) => prev.filter((t) => t.id !== optimistic.id));
@@ -577,16 +605,18 @@ export function TaxProtestPage() {
         </Stack>
       </Card>
 
-      {/* Market Value Evidence table */}
+      {/* Market Value Evidence table — Redfin comparable sold prices */}
       <Card withBorder radius="md" p="md">
         <Stack gap="sm">
           <Group justify="space-between">
             <Title order={4}>Market Value Evidence</Title>
             <Text size="xs" c="dimmed">
-              {comps.length > 0 ? `${comps.length} comparable properties` : "No comps loaded"}
+              {soldComps.length > 0
+                ? `${soldComps.length} Redfin comparable sales`
+                : "No Redfin comps loaded"}
             </Text>
           </Group>
-          {comps.length > 0 ? (
+          {soldComps.length > 0 ? (
             <>
               <Box style={{ overflowX: "auto" }}>
                 <Table striped highlightOnHover withTableBorder withColumnBorders fz="xs">
@@ -597,46 +627,50 @@ export function TaxProtestPage() {
                       <Table.Th style={{ textAlign: "right" }}>Sqft</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>Beds</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>Baths</Table.Th>
-                      <Table.Th style={{ textAlign: "right" }}>CAD Market Value</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>Sold Price</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
+                      <Table.Th style={{ textAlign: "right" }}>Sold Date</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
-                    {comps
-                      .filter((c) => c.marketValueUsd != null)
-                      .map((comp) => {
-                        const compPpsf =
-                          comp.marketValueUsd != null && comp.sqft != null && comp.sqft > 0
-                            ? comp.marketValueUsd / comp.sqft
-                            : null;
-                        const color = vsSubjectColor(compPpsf, subjectMarketPpsf);
-                        return (
-                          <Table.Tr key={comp.dcadPropertyId}>
-                            <Table.Td>{comp.addressLine1 ?? "—"}</Table.Td>
-                            <Table.Td>{comp.city ?? "—"}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>
-                              {comp.sqft != null ? comp.sqft.toLocaleString() : "—"}
-                            </Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>{comp.beds ?? "—"}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>{comp.baths ?? "—"}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>
-                              {money(comp.marketValueUsd)}
-                            </Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>{ppsf(compPpsf)}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>
-                              <Text size="xs" c={color} fw={color ? 600 : undefined}>
-                                {vsSubjectLabel(compPpsf, subjectMarketPpsf)}
-                              </Text>
-                            </Table.Td>
-                          </Table.Tr>
-                        );
-                      })}
+                    {soldComps.map((comp, idx) => {
+                      const color = vsSubjectColor(comp.pricePerSqft, subjectMarketPpsf);
+                      return (
+                        <Table.Tr key={`${comp.address ?? ""}-${idx}`}>
+                          <Table.Td>{comp.address ?? "—"}</Table.Td>
+                          <Table.Td>{comp.city ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            {comp.sqft != null ? comp.sqft.toLocaleString() : "—"}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{comp.beds ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{comp.baths ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            {comp.soldPrice != null ? (
+                              money(comp.soldPrice)
+                            ) : comp.listPrice != null ? (
+                              <Text size="xs" c="dimmed">Listed: {money(comp.listPrice)}</Text>
+                            ) : (
+                              "—"
+                            )}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            {ppsf(comp.pricePerSqft)}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            {comp.soldDate ?? "—"}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            <Text size="xs" c={color} fw={color ? 600 : undefined}>
+                              {vsSubjectLabel(comp.pricePerSqft, subjectMarketPpsf)}
+                            </Text>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
                     {/* Subject row */}
                     <Table.Tr style={{ background: "var(--mantine-color-blue-light)" }}>
-                      <Table.Td fw={700}>
-                        {property?.addressLine1 ?? "Subject"}
-                      </Table.Td>
+                      <Table.Td fw={700}>{property?.addressLine1 ?? "Subject"}</Table.Td>
                       <Table.Td fw={700}>{property?.city ?? "—"}</Table.Td>
                       <Table.Td style={{ textAlign: "right" }} fw={700}>
                         {subjectSqft != null ? subjectSqft.toLocaleString() : "—"}
@@ -648,11 +682,12 @@ export function TaxProtestPage() {
                         {asNumber(subject?.baths) ?? "—"}
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }} fw={700}>
-                        {money(avm)}
+                        {money(avm)} <Text size="xs" c="dimmed" span>(AVM)</Text>
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }} fw={700}>
                         {ppsf(subjectMarketPpsf)}
                       </Table.Td>
+                      <Table.Td style={{ textAlign: "right" }}>—</Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>
                         <Badge size="xs" variant="light">Subject</Badge>
                       </Table.Td>
@@ -661,23 +696,26 @@ export function TaxProtestPage() {
                 </Table>
               </Box>
               <Text size="xs" c="dimmed">
-                CAD estimated market values shown. Ask the protest assistant to research recent comparable sales for stronger evidence.
+                Comparable sold prices from Redfin. Texas is a non-disclosure state — sold prices may not be available for all properties. Ask the protest assistant to refresh Redfin data or search for additional evidence.
               </Text>
             </>
           ) : (
             <Paper withBorder p="md" radius="md">
               <Stack align="center" gap="xs">
-                <Text size="sm" c="dimmed">No comparable properties loaded yet.</Text>
+                <Text size="sm" c="dimmed">No Redfin comparable sales loaded.</Text>
+                <Text size="xs" c="dimmed" ta="center">
+                  Redfin comps load from your property valuation data. Ask the protest assistant to refresh Redfin data.
+                </Text>
                 <Button
                   size="xs"
                   variant="light"
                   leftSection={<IconMessage size={14} />}
                   onClick={() => {
-                    setMessage("Please search for comparable properties near my address and analyze market value evidence.");
+                    setMessage("Please refresh my Redfin property data and show me comparable sold prices for market value evidence.");
                     setChatOpen(true);
                   }}
                 >
-                  Ask AI to fetch comps
+                  Ask AI to refresh Redfin data
                 </Button>
               </Stack>
             </Paper>

@@ -915,6 +915,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
+  /api/protest/{propertyId}/sold-comps:
+    get:
+      tags: [protest]
+      summary: List Redfin comparable sold properties from property valuation data
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Array of Redfin comp records (soldPrice/pricePerSqft may be null in TX)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comps:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        address: { type: string, nullable: true }
+                        city: { type: string, nullable: true }
+                        state: { type: string, nullable: true }
+                        sqft: { type: number, nullable: true }
+                        beds: { type: number, nullable: true }
+                        baths: { type: number, nullable: true }
+                        yearBuilt: { type: number, nullable: true }
+                        soldPrice: { type: number, nullable: true }
+                        soldDate: { type: string, nullable: true }
+                        pricePerSqft: { type: number, nullable: true }
+                        listPrice: { type: number, nullable: true }
+        "404": { description: Property not found }
   /api/protest/{propertyId}/comps:
     get:
       tags: [protest]

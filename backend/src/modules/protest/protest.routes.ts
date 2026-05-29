@@ -7,7 +7,7 @@ import { log } from "../../logger.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
-import { getProperty } from "../household/property.service.js";
+import { getProperty, refreshPropertyValuation } from "../household/property.service.js";
 import { searchDCADByAddress } from "./dcad.service.js";
 import {
   appendConversationTurn,
@@ -157,6 +157,44 @@ protestRouter.get("/:propertyId/comps", async (req: AuthenticatedRequest, res) =
   res.status(200).json({ comps });
 });
 
+protestRouter.get("/:propertyId/sold-comps", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  const detail = asRecord(property.valuationDetail);
+  const rawComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
+  const comps = rawComps.map((c) => {
+    const r = asRecord(c) ?? {};
+    const soldPrice = asNumber(r.soldPrice);
+    const sqft = asNumber(r.sqft);
+    return {
+      address: typeof r.address === "string" ? r.address : null,
+      city: typeof r.city === "string" ? r.city : null,
+      state: typeof r.state === "string" ? r.state : null,
+      sqft,
+      beds: asNumber(r.beds),
+      baths: asNumber(r.baths),
+      yearBuilt: asNumber(r.yearBuilt),
+      soldPrice,
+      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
+      pricePerSqft:
+        soldPrice != null && sqft != null && sqft > 0
+          ? Math.round(soldPrice / sqft)
+          : asNumber(r.pricePerSqft),
+      listPrice: asNumber(r.listPrice)
+    };
+  });
+  res.status(200).json({ comps });
+});
+
 protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) => {
   const params = propertyIdSchema.safeParse(req.params);
   if (!params.success) {
@@ -223,6 +261,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
 
   let strategyUpdated = false;
   let compsAdded = 0;
+  let soldCompsRefreshed = false;
   let assistantMessage = "";
 
   for (let iteration = 0; iteration < 5; iteration += 1) {
@@ -240,6 +279,14 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
               properties: { address: { type: "string" } },
               required: ["address"]
             }
+          }
+        },
+        {
+          type: "function",
+          function: {
+            name: "refresh_redfin_comps",
+            description: "Re-fetch Redfin data for the subject property to get the latest AVM estimate and comparable sold prices.",
+            parameters: { type: "object", properties: {} }
           }
         },
         {
@@ -286,7 +333,15 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     for (const call of toolCalls) {
       if (call.type !== "function") continue;
       let toolResult = "Unsupported tool call";
-      if (call.function.name === "fetch_dcad_comps") {
+      if (call.function.name === "refresh_redfin_comps") {
+        const result = await refreshPropertyValuation(property.id, householdId);
+        if (result.ok) {
+          soldCompsRefreshed = true;
+          toolResult = `Redfin data refreshed. Updated AVM: ${money(result.estimate)}. The sold comps list has been updated.`;
+        } else {
+          toolResult = `Redfin refresh failed: ${result.message}`;
+        }
+      } else if (call.function.name === "fetch_dcad_comps") {
         const args = (() => {
           try {
             return JSON.parse(call.function.arguments) as { address?: unknown };
@@ -347,7 +402,8 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   res.status(200).json({
     assistantMessage,
     strategyUpdated,
-    compsAdded
+    compsAdded,
+    soldCompsRefreshed
   });
 });
 
