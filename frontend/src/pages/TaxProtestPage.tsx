@@ -12,6 +12,7 @@ import {
   List,
   Paper,
   Progress,
+  ScrollArea,
   SegmentedControl,
   Select,
   Stack,
@@ -22,6 +23,7 @@ import {
   Textarea,
   Title,
   Tooltip,
+  useComputedColorScheme,
 } from "@mantine/core";
 import {
   IconCalendarEvent,
@@ -227,6 +229,8 @@ export function TaxProtestPage() {
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const colorScheme = useComputedColorScheme("light");
 
   const addToast = useCallback(
     (color: Toast["color"], messageText: string) => {
@@ -714,7 +718,7 @@ export function TaxProtestPage() {
                       );
                     })}
                     {/* Subject row */}
-                    <Table.Tr style={{ background: "var(--mantine-color-blue-light)" }}>
+                    <Table.Tr bg={colorScheme === "dark" ? "blue.9" : "blue.0"}>
                       <Table.Td fw={700}>{property?.addressLine1 ?? "Subject"}</Table.Td>
                       <Table.Td fw={700}>{property?.city ?? "—"}</Table.Td>
                       <Table.Td style={{ textAlign: "right" }} fw={700}>
@@ -817,7 +821,7 @@ export function TaxProtestPage() {
                     );
                   })}
                   {/* Subject row */}
-                  <Table.Tr style={{ background: "var(--mantine-color-blue-light)" }}>
+                  <Table.Tr bg={colorScheme === "dark" ? "blue.9" : "blue.0"}>
                     <Table.Td fw={700}>
                       {property?.addressLine1 ?? "Subject"}
                     </Table.Td>
@@ -1047,9 +1051,9 @@ export function TaxProtestPage() {
         position="right"
         size={400}
         title="Protest Assistant"
-        styles={{ body: { display: "flex", flexDirection: "column", height: "calc(100% - 60px)", padding: "12px 16px" } }}
+        styles={{ body: { display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", padding: "12px 16px" } }}
       >
-        <Box style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingRight: 4 }}>
+        <ScrollArea style={{ flex: 1, minHeight: 0 }} pr={4} type="auto">
           <Stack gap="sm">
             {chat.length === 0 ? (
               <Text size="sm" c="dimmed" ta="center" mt="xl">
@@ -1061,7 +1065,7 @@ export function TaxProtestPage() {
                 <Paper
                   radius="md"
                   p="sm"
-                  bg={turn.role === "user" ? "dark.8" : "gray.1"}
+                  bg={turn.role === "user" ? "forest.6" : colorScheme === "dark" ? "dark.5" : "gray.1"}
                   c={turn.role === "user" ? "white" : undefined}
                   maw="88%"
                 >
@@ -1075,7 +1079,10 @@ export function TaxProtestPage() {
                       : <Text size="sm">{turn.content}</Text>}
                     {turn.attachmentType ? (
                       <Chip checked readOnly size="xs" variant="light">
-                        📎 Attachment
+                        <Group gap={4} align="center">
+                          <IconPaperclip size={12} />
+                          Attachment
+                        </Group>
                       </Chip>
                     ) : null}
                   </Stack>
@@ -1084,14 +1091,14 @@ export function TaxProtestPage() {
             ))}
             {thinking ? (
               <Group justify="flex-start">
-                <Paper radius="md" p="sm" bg="gray.1">
+                <Paper radius="md" p="sm" bg={colorScheme === "dark" ? "dark.5" : "gray.1"}>
                   <Text size="sm" c="dimmed">Thinking…</Text>
                 </Paper>
               </Group>
             ) : null}
             <div ref={bottomRef} />
           </Stack>
-        </Box>
+        </ScrollArea>
 
         <Stack gap={8} mt="sm" style={{ flexShrink: 0 }}>
           {pendingAttachment ? (
@@ -1115,6 +1122,7 @@ export function TaxProtestPage() {
             minRows={2}
             maxRows={5}
             placeholder="Ask about comps, arguments, strategy…"
+            disabled={sending}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                 e.preventDefault();
@@ -1141,13 +1149,14 @@ export function TaxProtestPage() {
                   variant="default"
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach text file"
+                  disabled={sending}
                 >
                   <IconPaperclip size={16} />
                 </ActionIcon>
               </Tooltip>
             </Group>
             <Group gap="xs">
-              <Text size="xs" c="dimmed">⌘↵</Text>
+              <Text size="xs" c="dimmed">{navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+↵</Text>
               <Button
                 leftSection={<IconSend size={16} />}
                 onClick={() => void send()}

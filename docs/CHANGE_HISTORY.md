@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-PT-7 (2026-05-29): TaxProtestPage — chat drawer Mantine theming + dark/light mode fix
+
+- **Type:** UX / bug fix — closes #48
+- **What:**
+  - User message bubbles were `bg="dark.8" c="white"` — invisible in dark mode. Changed to `bg="forest.6" c="white"` (app primary color, renders correctly in both modes).
+  - Assistant and "thinking" bubble `bg="gray.1"` → `gray.1` in light / `dark.5` in dark using `useComputedColorScheme`.
+  - Table subject-row highlight on both evidence tables: replaced `style={{ background: "var(--mantine-color-blue-light)" }}` (not dark-mode aware) with `bg={colorScheme === "dark" ? "blue.9" : "blue.0"}` prop.
+  - Replaced manual `<Box style={{ overflowY: "auto" }}>` scroll container with Mantine `<ScrollArea>`.
+  - Added `disabled={sending}` to `Textarea` and the attach `ActionIcon` so the input is visually locked while a request is in flight.
+  - Fixed keyboard shortcut hint from hardcoded `⌘↵` to platform-aware `Ctrl/⌘+↵` using `navigator.platform`.
+  - Cleaned up `Drawer` body styles: `flex: 1; overflow: hidden` instead of fragile `height: calc(100% - 60px)`.
+- **Files:** `frontend/src/pages/TaxProtestPage.tsx`
+- **GitHub:** closes #48
+
+---
+
 ## DOC-PT-5-1 (2026-05-29): User Guide and Admin Guide updates for PT-4b and PT-5
 
 - **Type:** Documentation
