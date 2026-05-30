@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DOC-PT4-1 (2026-05-29): PT-4 docs, tests, and PT-4b backlog
+
+- **Type:** Documentation + Test
+- **What:**
+  - Added **Tax Protest** section to `docs/USER_GUIDE.md` — covers property/year selection, chat assistant capabilities, strategy panel, DCAD/Redfin comps tabs, PDF export contents, and protest status reference table.
+  - Added §4.5 Tax Protest AI to `docs/ADMIN_GUIDE.md` — documents `OPENAI_API_KEY`, `OPENAI_MODEL`, `TAVILY_API_KEY` env vars and `pdfkit` PDF generation (no system font dependency).
+  - Added `backend/tests/protest.test.ts` — 4 integration tests for `GET /api/protest/:propertyId/evidence-packet`: 200+`application/pdf` for seeded property, 200 with year omitted (defaults to current year), 404 for unknown property, 401 without token. All 512 tests passing.
+  - Added **PT-4b** backlog entry (`docs/BACKLOG.md`) — Word (.docx) format for ARB evidence packet using `docx` npm library. Full spec captured (5-page ARB Board section + Protestor section with oral script + negotiation table). GH #41.
+- **Files:** `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md`, `docs/BACKLOG.md`, `backend/tests/protest.test.ts`
+- **GitHub:** #41 opened for PT-4b
+
 ## CR-PT4-1 (2026-05-29): ARB Evidence Packet PDF export
 
 - **Type:** Feature — Generate Document button, pdfkit PDF

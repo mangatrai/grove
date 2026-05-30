@@ -499,6 +499,68 @@ Click **+ Add Row** to record multiple lots in one session (same sale date). The
 
 ---
 
+## Tax Protest
+
+The **Tax Protest** feature helps you build and submit an Appraisal Review Board (ARB) protest for any owned property. Access it from a property's detail page via the **Prepare Tax Protest** button, or directly from the sidebar under **Real Estate**.
+
+### Selecting a Property and Year
+
+Use the **Property** and **Year** dropdowns at the top of the page to load (or create) a protest worksheet for that property and tax year. A new worksheet starts with status **Not Filed**.
+
+### Chat Assistant
+
+The chat panel on the right side drives the workflow. The AI assistant has access to:
+
+- **Your property facts** — address, beds/baths, sqft, CAD assessed value, and AVM from your linked Redfin data.
+- **DCAD comparable sales** — comparable properties from the county appraisal district, fetched via the **Fetch DCAD comps** tool.
+- **Redfin sold comps** — recent market sale prices near your property, refreshed on demand.
+- **Live web search** — the AI can search for recent sold prices and market trends via Tavily (requires `TAVILY_API_KEY` in the server environment).
+
+Type in plain language: "What is my case strength?", "Find recent comparable sales near my address", "How should I open the hearing?" The AI responds with analysis and updates the strategy panel.
+
+### Strategy Panel
+
+The left panel shows the AI's structured assessment:
+
+- **Target value** — the value the AI recommends requesting at the hearing.
+- **Case strength** — a 0–100 score with a colour-coded bar (green ≥ 70, amber 40–69, red < 40).
+- **Arguments** — bullet points for your strongest protest grounds.
+- **Red flags** — weaknesses in the case the AI has identified.
+
+The strategy panel is updated automatically when the AI calls `update_strategy` during a chat turn.
+
+### DCAD Comps and Redfin Comps
+
+You can view fetched comps in the **DCAD Comps** and **Redfin Comps** tabs below the chat. Click **Fetch DCAD comps** (or ask the AI to do it) to pull the county's own comparable pool. Redfin comps are refreshed by asking the AI or clicking the refresh button.
+
+### Generating the ARB Evidence Packet (PDF)
+
+Once you have comps and a strategy, click **Generate Document** to download a multi-page PDF evidence packet:
+
+- **Cover page** — property address, tax year, hearing date, valuation summary boxes (CAD assessed, AVM, target ask, savings), and the AI strategy panel.
+- **DCAD comps table** — the county's own comps with your property highlighted in yellow; comps below your assessed value highlighted green.
+- **Redfin sold comps table** — recent market sales near your property.
+- **Horizontal bar chart** — visual comparison of $/sqft across subject and all comps (subject in blue, comps green if below subject or red if above).
+
+Print the packet and bring it to your hearing. Hand the ARB Board section to the appraiser.
+
+### Protest Status
+
+Use the **Status** dropdown to track progress through the workflow:
+
+| Status | Meaning |
+|--------|---------|
+| Not Filed | Worksheet created, no protest submitted yet |
+| Filed | Protest formally submitted to the CAD |
+| Informal Pending | Informal hearing scheduled (pre-ARB settlement attempt) |
+| Informal Settled | Settled before formal ARB hearing |
+| ARB Scheduled | Formal ARB hearing date set |
+| ARB Won | Protest succeeded — assessed value reduced |
+| ARB Lost | Protest denied at the ARB level |
+| Withdrawn | Protest withdrawn by owner |
+
+---
+
 ## Categories and Rules
 
 The **Categories** page lets you manage the expense and income taxonomy and set up auto-classification rules.

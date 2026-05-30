@@ -345,7 +345,19 @@ Required for **IBM and Deloitte payslip PDF parsing**:
 | `OPENAI_API_KEY` | OpenAI API key (if payslip extraction is enabled) |
 | `OPENAI_MODEL` | Chat model ID; default `gpt-4o-mini` |
 
-### 4.5 Backup Encryption (Optional)
+### 4.5 Tax Protest AI (Optional)
+
+Required for the property tax protest chat assistant and live web search:
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENAI_API_KEY` | OpenAI API key; used for the protest chat tool-use loop (GPT-4.1) |
+| `OPENAI_MODEL` | Chat model ID; default `gpt-4.1` |
+| `TAVILY_API_KEY` | Tavily search API key for live web search during protest chat. Free tier: 1 000 credits/month. If unset, the `search_web` tool responds with a graceful "not configured" message — all other protest features remain functional. |
+
+**PDF generation** (`GET /api/protest/:id/evidence-packet`) uses `pdfkit` (bundled npm dependency). No system fonts or native binaries are required — pdfkit ships its own font data.
+
+### 4.6 Backup Encryption (Optional)
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
@@ -353,7 +365,7 @@ Required for **IBM and Deloitte payslip PDF parsing**:
 
 **Note:** Unencrypted exports can still be restored without this key. Encrypted exports require the matching key.
 
-### 4.6 Email / SMTP (Optional, For Password Reset and Invites)
+### 4.7 Email / SMTP (Optional, For Password Reset and Invites)
 
 | Variable | Default | Example |
 |----------|---------|---------|
@@ -367,7 +379,7 @@ Required for **IBM and Deloitte payslip PDF parsing**:
 
 **Email is optional** until password reset ships. If any `SMTP_*` are absent, email-dependent features degrade gracefully.
 
-### 4.7 Google Drive Backup (Optional)
+### 4.8 Google Drive Backup (Optional)
 
 For Drive backup/restore (CR-106):
 
@@ -380,7 +392,7 @@ For Drive backup/restore (CR-106):
 
 **If all three are missing,** Drive connect is disabled (button grayed out, `OAUTH_NOT_CONFIGURED` shown).
 
-### 4.8 Frontend (Vite, Dev Only)
+### 4.9 Frontend (Vite, Dev Only)
 
 | Variable | Purpose |
 |----------|---------|
@@ -388,7 +400,7 @@ For Drive backup/restore (CR-106):
 | `VITE_DEV_SIGNIN_EMAIL` | Email prefill on `/` (dev only) |
 | `VITE_DEV_SIGNIN_PASSWORD` | Password prefill on `/` (dev only) |
 
-### 4.9 Hardcoded Defaults (Non-Configurable)
+### 4.10 Hardcoded Defaults (Non-Configurable)
 
 | Item | Location | Details |
 |------|----------|---------|
