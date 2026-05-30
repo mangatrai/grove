@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-PWA-1 (2026-05-29): PWA stale after new release — cache-control fix
+
+- **Type:** Bug fix
+- **What:** Installed PWA (iOS / macOS) showed stale content or broke after every new deployment because `index.html` was served with no `Cache-Control` header — browsers and iOS cached it indefinitely. On a new deploy, Vite's hashed JS/CSS filenames change, but the cached shell still referenced the old names, causing load failures.
+- **Fix (Option A from GH #43):** Two changes in `backend/src/app.ts`:
+  1. `index.html` catch-all now sets `Cache-Control: no-cache` before `res.sendFile()` — forces the browser to revalidate the HTML shell on every load without blocking (ETag/304 still works).
+  2. `express.static()` now sets `Cache-Control: public, max-age=31536000, immutable` for files under `assets/` (Vite's content-hashed output directory) so JS/CSS chunks are cached aggressively and do not cause unnecessary network round-trips.
+- **Non-hashed assets** (manifest.json, icons, favicon) continue with browser-default caching.
+- **Not included:** service worker / offline support (Option B from issue). Can be added later with `vite-plugin-pwa` if needed.
+- **Files:** `backend/src/app.ts`
+- **GitHub:** closes #43
+
 ## FIX-ESPP-11 (2026-05-29): ESPP dual-payslip discount sum
 
 - **Type:** Bug fix
