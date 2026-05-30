@@ -533,16 +533,30 @@ The strategy panel is updated automatically when the AI calls `update_strategy` 
 
 You can view fetched comps in the **DCAD Comps** and **Redfin Comps** tabs below the chat. Click **Fetch DCAD comps** (or ask the AI to do it) to pull the county's own comparable pool. Redfin comps are refreshed by asking the AI or clicking the refresh button.
 
-### Generating the ARB Evidence Packet (PDF)
+### Generating the ARB Evidence Packet
 
-Once you have comps and a strategy, click **Generate Document** to download a multi-page PDF evidence packet:
+Once you have comps and a strategy, select a format using the **PDF / Word** toggle next to the **Generate Document** button, then click the button to download the packet.
+
+**PDF** — a print-ready multi-page document:
 
 - **Cover page** — property address, tax year, hearing date, valuation summary boxes (CAD assessed, AVM, target ask, savings), and the AI strategy panel.
 - **DCAD comps table** — the county's own comps with your property highlighted in yellow; comps below your assessed value highlighted green.
 - **Redfin sold comps table** — recent market sales near your property.
 - **Horizontal bar chart** — visual comparison of $/sqft across subject and all comps (subject in blue, comps green if below subject or red if above).
 
-Print the packet and bring it to your hearing. Hand the ARB Board section to the appraiser.
+**Word (.docx)** — an editable document with two sections you can hand-edit before submitting:
+
+- **Section 1 — ARB Board Packet** (hand to the panel): valuation summary table, property facts, DCAD unequal-appraisal comps table, Redfin market-sales comps table, and the AI's key arguments as bullet points.
+- **Section 2 — Protestor Reference Sheet** (keep for yourself): an oral script from the AI's strategy, a blank negotiation table (CAD Offer / Your Counter / Notes), and a quick-reference card of key facts.
+
+Print the PDF packet and bring it to your hearing. Use the Word version when you need to hand-edit arguments or paste content into your CAD's own submission template.
+
+### Filing Deadline and CAD Portal
+
+In the **Protest Status** section, two additional fields help you stay on top of your protest timeline:
+
+- **Filing Deadline** — enter the county's protest filing deadline (YYYY-MM-DD). The app will send in-app and email notifications at 30, 7, and 1 day(s) before this date and before the hearing date. A **red alert banner** appears on the protest page if the deadline is within 7 days and the protest has not yet been resolved.
+- **CAD Portal URL** — paste the URL of your county appraisal district's online portal. An external-link icon next to the field opens it in a new tab so you can file directly from the protest page.
 
 ### Protest Status
 

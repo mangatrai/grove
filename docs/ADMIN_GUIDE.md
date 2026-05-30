@@ -355,7 +355,9 @@ Required for the property tax protest chat assistant and live web search:
 | `OPENAI_MODEL` | Chat model ID; default `gpt-4.1` |
 | `TAVILY_API_KEY` | Tavily search API key for live web search during protest chat. Free tier: 1 000 credits/month. If unset, the `search_web` tool responds with a graceful "not configured" message — all other protest features remain functional. |
 
-**PDF generation** (`GET /api/protest/:id/evidence-packet`) uses `pdfkit` (bundled npm dependency). No system fonts or native binaries are required — pdfkit ships its own font data.
+**Document generation** (`GET /api/protest/:id/evidence-packet?format=pdf|docx`) uses `pdfkit` for PDF and the `docx` npm package for Word. Both are bundled dependencies — no system fonts or native binaries required.
+
+**Deadline notifications** fire in-app and by email at 30, 7, and 1 day(s) before the `filing_deadline` and `hearing_date` stored on each protest worksheet. Notifications are triggered when the worksheet page is loaded (fire-and-forget, deduped per 2-day window). Email delivery requires SMTP to be configured (see §4.7). Notification types: `protest_filing_deadline_approaching`, `protest_hearing_approaching`.
 
 ### 4.6 Backup Encryption (Optional)
 

@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DOC-PT-5-1 (2026-05-29): User Guide and Admin Guide updates for PT-4b and PT-5
+
+- **Type:** Documentation
+- **What:** Updated `docs/USER_GUIDE.md` and `docs/ADMIN_GUIDE.md` to cover PT-4b (DOCX format option) and PT-5 (filing deadline, CAD portal URL, deadline notifications) which shipped in earlier commits this session.
+- **USER_GUIDE changes:** Expanded "Generating the ARB Evidence Packet" section — now covers both PDF and Word formats with two-section DOCX structure described. Added new "Filing Deadline and CAD Portal" section documenting the DateInput, CAD portal URL field, external-link icon, red alert banner, and notification cadence (30/7/1 days before deadline and hearing).
+- **ADMIN_GUIDE changes:** Updated §4.5 to reference both `pdfkit` and `docx` npm packages; added note on deadline notification types, email SMTP requirement, fire-and-forget trigger pattern, and 2-day dedup window.
+- **Files:** `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
 ## CR-PT-5 (2026-05-29): Tax Protest — filing deadline tracking and notifications
 
 - **Type:** Feature
