@@ -57,8 +57,11 @@ type PayslipLink = {
 } | null;
 
 async function findPayslipLink(householdId: string, purchaseDate: string): Promise<PayslipLink> {
+  // Aggregate across ALL payslips on this date — some months have two payslips (salary +
+  // commissions), each carrying an ESPP deduction line. GROUP BY ps.id + LIMIT 1 would
+  // silently discard the second payslip's contribution.
   const row = await qGet<Record<string, unknown>>(
-    `SELECT ps.id,
+    `SELECT MIN(ps.id) AS id,
             COALESCE(SUM(CASE WHEN pli.name ILIKE '%Discount%' THEN pli.amount_current ELSE 0 END), 0) AS discount,
             COALESCE(SUM(CASE WHEN pli.name ILIKE '%Salary%'   THEN pli.amount_current ELSE 0 END), 0) AS salary,
             COALESCE(SUM(CASE WHEN pli.name ILIKE '%Other%'    THEN pli.amount_current ELSE 0 END), 0) AS other
@@ -66,12 +69,10 @@ async function findPayslipLink(householdId: string, purchaseDate: string): Promi
      JOIN payslip_line_item pli ON pli.payslip_snapshot_id = ps.id
      WHERE ps.household_id = ?
        AND pli.name ILIKE '%ESPP%'
-       AND (ps.pay_date = ? OR ps.pay_period_end = ?)
-     GROUP BY ps.id
-     LIMIT 1`,
+       AND (ps.pay_date = ? OR ps.pay_period_end = ?)`,
     householdId, purchaseDate, purchaseDate
   );
-  if (!row) return null;
+  if (!row || row.id == null) return null;
   return {
     id:       row.id as string,
     discount: parseFloat(String(row.discount)),

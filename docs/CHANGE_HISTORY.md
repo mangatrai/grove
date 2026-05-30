@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-11 (2026-05-29): ESPP dual-payslip discount sum
+
+- **Type:** Bug fix
+- **What:** `findPayslipLink()` in `espp.service.ts` used `GROUP BY ps.id LIMIT 1`, picking only the first payslip found on the purchase date. When month-end has two payslips (salary + commissions) each carrying an ESPP deduction line, the second payslip's deduction was silently discarded, causing an understated `espp_discount_payslip` on the batch.
+- **Fix:** Removed `GROUP BY ps.id LIMIT 1`; query now aggregates all ESPP line items across all payslips for the given date via a single `MIN(ps.id) AS id` + bare `SUM(...)`. The `id` column used as `payslip_id` FK now records the earliest matching payslip (acceptable — exact FK linkage is cosmetic when multiple payslips share the date).
+- **Test:** Added ESPP-11 case to `backend/tests/espp.test.ts` — seeds two payslips on the same pay_date with $80 and $40 ESPP Discount line items, imports a batch, asserts `espp_discount_payslip` = $120. 513 tests passing.
+- **Files:** `backend/src/modules/espp/espp.service.ts`, `backend/tests/espp.test.ts`
+- **GitHub:** closes #42
+
 ## DOC-PT4-1 (2026-05-29): PT-4 docs, tests, and PT-4b backlog
 
 - **Type:** Documentation + Test
