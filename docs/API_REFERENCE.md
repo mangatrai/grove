@@ -95,7 +95,7 @@ All protest routes are mounted under `/api/protest` and require owner/admin role
 
 ### `GET /api/protest/:propertyId/worksheet?year=YYYY`
 
-Gets or creates a worksheet for the property and tax year.
+Gets or creates a worksheet for the property and tax year. Also fires a background check for upcoming protest deadlines (filing deadline and hearing date); in-app and email notifications are emitted at 30/7/1 days before each deadline.
 
 - **`year`** optional; defaults to current year.
 
@@ -109,6 +109,8 @@ Gets or creates a worksheet for the property and tax year.
     "taxYear": 2026,
     "status": "not_filed",
     "hearingDate": null,
+    "filingDeadline": null,
+    "cadPortalUrl": null,
     "conversationJson": [],
     "strategyJson": null,
     "createdAt": "2026-05-28T01:00:00.000Z",
@@ -207,16 +209,19 @@ Returns Redfin comparable sold properties from the property's stored `valuation_
 
 ---
 
-### `GET /api/protest/:propertyId/evidence-packet?year=YYYY`
+### `GET /api/protest/:propertyId/evidence-packet?year=YYYY&format=pdf|docx`
 
-Generates and streams a multi-page PDF ARB evidence packet for the given property and tax year.
+Generates an ARB evidence packet for the given property and tax year. Returns PDF (default) or Word DOCX.
 
 **Auth:** Owner/admin. `year` defaults to current year if omitted.
 
-**Response 200:**
+**Query params:**
+- `year` — optional integer, defaults to current year
+- `format` — `pdf` (default) or `docx`
+
+**Response 200 — PDF (`format=pdf` or omitted):**
 - `Content-Type: application/pdf`
 - `Content-Disposition: attachment; filename="<address>_ARB_<year>.pdf"`
-- PDF body (binary stream)
 
 **PDF sections:**
 1. **Cover** — valuation summary boxes (CAD assessed, AVM, overassessment %, target value), property facts, strategy panel (case strength bar, primary approach, key arguments, red flags)
@@ -224,24 +229,36 @@ Generates and streams a multi-page PDF ARB evidence packet for the given propert
 3. **Recent Comparable Sales** — Redfin sold comps table (if available)
 4. **Market Value Comparison** — horizontal bar chart of AVM vs DCAD comp market values; green bars = comp below subject (supports protest)
 
+**Response 200 — DOCX (`format=docx`):**
+- `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+- `Content-Disposition: attachment; filename="<address>_ARB_<year>.docx"`
+
+**DOCX sections:**
+1. **ARB Board Packet** — valuation summary table, property facts, DCAD comps table, recent sales table, key arguments (submit to the panel)
+2. **Protestor Reference Sheet** — oral script (numbered talking points), negotiation table (blank), quick-reference card (keep for yourself)
+
 **Errors:** `400` invalid params · `404` property not found · `401/403` auth
 
 ---
 
 ### `PATCH /api/protest/:propertyId/worksheet`
 
-Updates worksheet status and optional hearing date.
+Updates worksheet status, hearing date, filing deadline, and CAD portal URL.
 
 **Request body:**
 ```json
 {
   "year": 2026,
   "status": "informal",
-  "hearingDate": "2026-07-15"
+  "hearingDate": "2026-07-15",
+  "filingDeadline": "2026-05-15",
+  "cadPortalUrl": "https://www.dallascad.org/protest"
 }
 ```
 
-**Response 200:** `{ "worksheet": { ...updated worksheet... } }`
+All fields except `year` are optional. `hearingDate` and `filingDeadline` accept `YYYY-MM-DD` or `null` to clear. `cadPortalUrl` accepts a valid URL or `null` to clear.
+
+**Response 200:** `{ "worksheet": { ...updated worksheet with all fields... } }`
 
 ---
 

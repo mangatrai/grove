@@ -18,6 +18,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-PT-5 (2026-05-29): Tax Protest — filing deadline tracking and notifications
+
+- **Type:** Feature
+- **What:** Adds `filing_deadline` (DATE) and `cad_portal_url` (TEXT) columns to `protest_worksheet`. Users can record the CAD filing deadline and a link to the CAD portal (e.g. DCAD online protest URL) directly on the protest page.
+- **Notifications:** Two new notification types — `protest_filing_deadline_approaching` and `protest_hearing_approaching`. Both default to in-app + email delivery. `checkProtestDeadlines()` fires on every worksheet load (fire-and-forget); it checks all non-resolved worksheets in the household and emits notifications at 30/7/1 days before `filing_deadline` or `hearing_date`. Deduped — skips if a matching notification was created within the last 2 days.
+- **Frontend:** Filing Deadline DateInput and CAD Portal URL TextInput added to the Protest Status card. CAD Portal URL shows an open-in-new-tab ActionIcon. Red Alert shown if filing deadline is within 7 days and status is not resolved.
+- **Migration:** `0057_pt5_protest_deadlines.sql` — `ALTER TABLE protest_worksheet ADD COLUMN IF NOT EXISTS filing_deadline DATE, ADD COLUMN IF NOT EXISTS cad_portal_url TEXT`
+- **Files:** `backend/db/migrations/0057_pt5_protest_deadlines.sql` · `backend/src/modules/notifications/notification.service.ts` · `backend/src/modules/protest/protest-worksheet.service.ts` · `backend/src/modules/protest/protest.routes.ts` · `frontend/src/pages/TaxProtestPage.tsx`
+
+---
+
+## CR-PT-4b (2026-05-29): Tax Protest — DOCX evidence packet format
+
+- **Type:** Feature
+- **What:** The existing `GET /api/protest/:propertyId/evidence-packet` endpoint now accepts `?format=pdf|docx` (default `pdf`). `format=docx` generates a Word document using the `docx` npm package (v9). No new route.
+- **DOCX structure:** Two sections in one file — (1) **ARB Board Packet**: valuation summary table, property facts table, DCAD comps table, recent sales table, key arguments; (2) **Protestor Reference Sheet** (after a page break): numbered oral script, blank negotiation table, quick-reference card.
+- **Frontend:** A `SegmentedControl` (PDF / Word) added next to the "Generate Document" button in `TaxProtestPage.tsx`. Download filename matches selected format.
+- **Test:** New assertion in `backend/tests/protest.test.ts` verifying `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document` and `.docx` filename for `format=docx`.
+- **Files:** `backend/src/modules/protest/protest-evidence-docx.service.ts` (new) · `backend/src/modules/protest/protest.routes.ts` · `frontend/src/pages/TaxProtestPage.tsx` · `backend/tests/protest.test.ts` · `backend/package.json`
+
+---
+
 ## FIX-PWA-1 (2026-05-29): PWA stale after new release — cache-control fix
 
 - **Type:** Bug fix

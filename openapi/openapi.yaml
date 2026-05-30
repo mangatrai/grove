@@ -988,6 +988,36 @@ paths:
                         yearBuilt: { type: integer, nullable: true }
                         perSqftUsd: { type: number, nullable: true }
         "404": { description: Property not found }
+  /api/protest/{propertyId}/evidence-packet:
+    get:
+      tags: [protest]
+      summary: Generate ARB evidence packet (PDF or DOCX)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: year
+          in: query
+          required: false
+          schema: { type: integer, minimum: 2000, maximum: 2100 }
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [pdf, docx], default: pdf }
+          description: "pdf returns a PDF stream; docx returns a Word document buffer"
+      responses:
+        "200":
+          description: Evidence packet file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "404": { description: Property not found }
   /api/protest/{propertyId}/worksheet:
     get:
       tags: [protest]
@@ -1036,6 +1066,8 @@ paths:
                 year: { type: integer, minimum: 2000, maximum: 2100 }
                 status: { type: string, enum: [not_filed, filed, informal, arb, resolved] }
                 hearingDate: { type: string, format: date, nullable: true }
+                filingDeadline: { type: string, format: date, nullable: true }
+                cadPortalUrl: { type: string, format: uri, nullable: true }
       responses:
         "200":
           description: Worksheet updated
@@ -4062,6 +4094,8 @@ components:
         taxYear: { type: integer }
         status: { type: string, enum: [not_filed, filed, informal, arb, resolved] }
         hearingDate: { type: string, format: date, nullable: true }
+        filingDeadline: { type: string, format: date, nullable: true }
+        cadPortalUrl: { type: string, format: uri, nullable: true }
         conversationJson:
           type: array
           items:

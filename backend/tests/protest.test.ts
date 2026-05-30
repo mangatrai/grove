@@ -68,4 +68,13 @@ describe("GET /api/protest/:propertyId/evidence-packet", () => {
       .get(`/api/protest/${PROPERTY_ID}/evidence-packet?year=${TAX_YEAR}`);
     expect(res.status).toBe(401);
   });
+
+  it("returns 200 with DOCX content-type for format=docx (PT-4b)", async () => {
+    const res = await request(app)
+      .get(`/api/protest/${PROPERTY_ID}/evidence-packet?year=${TAX_YEAR}&format=docx`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/wordprocessingml/);
+    expect(res.headers["content-disposition"]).toMatch(/\.docx/);
+  });
 });

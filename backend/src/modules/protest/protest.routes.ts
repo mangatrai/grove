@@ -15,18 +15,25 @@ import {
   listWorksheetComps,
   updateStrategy,
   updateWorksheetStatus,
+  updateWorksheetMeta,
   type ConversationTurn,
   type ProtestStatus,
   type StrategyJson,
   saveCADComps
 } from "./protest-worksheet.service.js";
+import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
+import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 
 const worksheetStatusSchema = z.enum(["not_filed", "filed", "informal", "arb", "resolved"]);
 const propertyIdSchema = z.object({ propertyId: z.string().uuid() });
 const worksheetQuerySchema = z.object({ year: z.coerce.number().int().min(2000).max(2100).optional() });
+const evidencePacketQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  format: z.enum(["pdf", "docx"]).default("pdf"),
+});
 const chatBodySchema = z.object({
   message: z.string().min(1).max(4000),
   attachmentText: z.string().max(50_000).optional(),
@@ -36,7 +43,9 @@ const chatBodySchema = z.object({
 const patchWorksheetBodySchema = z.object({
   year: z.number().int().min(2000).max(2100),
   status: worksheetStatusSchema.optional(),
-  hearingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional()
+  hearingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  filingDeadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  cadPortalUrl: z.string().url().nullable().optional()
 });
 
 function thisYear(): number {
@@ -132,7 +141,9 @@ protestRouter.get("/:propertyId/worksheet", async (req: AuthenticatedRequest, re
     res.status(404).json({ message: "Property not found" });
     return;
   }
+  const userId = req.authUser!.userId;
   const worksheet = await getOrCreateWorksheet(property.id, householdId, year);
+  void checkProtestDeadlines(householdId, userId);
   res.status(200).json({ worksheet });
 });
 
@@ -465,12 +476,13 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
     res.status(400).json({ errors: params.error.issues });
     return;
   }
-  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  const query = evidencePacketQuerySchema.safeParse(req.query ?? {});
   if (!query.success) {
     res.status(400).json({ errors: query.error.issues });
     return;
   }
   const year = query.data.year ?? thisYear();
+  const format = query.data.format;
   const householdId = req.authUser!.householdId;
   const property = await getProperty(params.data.propertyId, householdId);
   if (!property) {
@@ -509,9 +521,8 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
 
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown Property";
   const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);
-  const filename = `${safeAddr}_ARB_${year}.pdf`;
 
-  const doc = generateEvidencePDF({
+  const packetInput = {
     address,
     taxYear: year,
     cadAssessed,
@@ -525,12 +536,21 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
     strategy: worksheet.strategyJson,
     dcadComps,
     soldComps
-  });
+  };
 
-  log.info("evidence packet generated", { propertyId: property.id, year, comps: dcadComps.length });
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  doc.pipe(res);
+  log.info("evidence packet generated", { propertyId: property.id, year, format, comps: dcadComps.length });
+
+  if (format === "docx") {
+    const buf = await generateEvidenceDOCX(packetInput);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeAddr}_ARB_${year}.docx"`);
+    res.send(buf);
+  } else {
+    const doc = generateEvidencePDF(packetInput);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeAddr}_ARB_${year}.pdf"`);
+    doc.pipe(res);
+  }
 });
 
 protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, res) => {
@@ -557,6 +577,12 @@ protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, 
     parsed.data.status ?? worksheet.status,
     parsed.data.hearingDate
   );
+  if (parsed.data.filingDeadline !== undefined || parsed.data.cadPortalUrl !== undefined) {
+    await updateWorksheetMeta(worksheet.id, householdId, {
+      filingDeadline: parsed.data.filingDeadline,
+      cadPortalUrl: parsed.data.cadPortalUrl
+    });
+  }
   const updated = await getOrCreateWorksheet(property.id, householdId, parsed.data.year);
   log.info("protest worksheet updated", {
     worksheetId: worksheet.id,

@@ -12,6 +12,7 @@ import {
   List,
   Paper,
   Progress,
+  SegmentedControl,
   Select,
   Stack,
   Stepper,
@@ -24,6 +25,7 @@ import {
 } from "@mantine/core";
 import {
   IconCalendarEvent,
+  IconExternalLink,
   IconFileText,
   IconMessage,
   IconPaperclip,
@@ -76,6 +78,8 @@ type Worksheet = {
   taxYear: number;
   status: ProtestStatus;
   hearingDate: string | null;
+  filingDeadline: string | null;
+  cadPortalUrl: string | null;
   conversationJson: ConversationTurn[];
   strategyJson: StrategyJson | null;
 };
@@ -214,9 +218,12 @@ export function TaxProtestPage() {
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
   const [hearingDraft, setHearingDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState<ProtestStatus>("not_filed");
+  const [filingDeadlineDraft, setFilingDeadlineDraft] = useState("");
+  const [cadPortalUrlDraft, setCadPortalUrlDraft] = useState("");
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [docFormat, setDocFormat] = useState<"pdf" | "docx">("pdf");
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -285,6 +292,8 @@ export function TaxProtestPage() {
       setSoldComps(soldCompsRes.comps);
       setHearingDraft(wsRes.worksheet.hearingDate ?? "");
       setStatusDraft(wsRes.worksheet.status);
+      setFilingDeadlineDraft(wsRes.worksheet.filingDeadline ?? "");
+      setCadPortalUrlDraft(wsRes.worksheet.cadPortalUrl ?? "");
       const turns: ChatTurnUI[] = (wsRes.worksheet.conversationJson ?? [])
         .filter((t) => t.role === "user" || t.role === "assistant")
         .map((t, idx) => ({
@@ -353,6 +362,8 @@ export function TaxProtestPage() {
 
   const hearingDays =
     worksheet?.hearingDate != null ? daysUntil(worksheet.hearingDate) : null;
+  const filingDeadlineDays =
+    worksheet?.filingDeadline != null ? daysUntil(worksheet.filingDeadline) : null;
 
   const send = useCallback(async () => {
     if (!propertyId || !worksheet) return;
@@ -424,7 +435,7 @@ export function TaxProtestPage() {
   }, [propertyId, worksheet, message, pendingAttachment, year, addToast]);
 
   const updateWorksheet = useCallback(
-    async (patch: { status?: ProtestStatus; hearingDate?: string | null }) => {
+    async (patch: { status?: ProtestStatus; hearingDate?: string | null; filingDeadline?: string | null; cadPortalUrl?: string | null }) => {
       if (!propertyId || !worksheet) return;
       try {
         const res = await apiJson<WorksheetResponse>(
@@ -437,6 +448,8 @@ export function TaxProtestPage() {
         setWorksheet(res.worksheet);
         setStatusDraft(res.worksheet.status);
         setHearingDraft(res.worksheet.hearingDate ?? "");
+        setFilingDeadlineDraft(res.worksheet.filingDeadline ?? "");
+        setCadPortalUrlDraft(res.worksheet.cadPortalUrl ?? "");
       } catch (err) {
         addToast("red", err instanceof Error ? err.message : "Failed to update worksheet");
       }
@@ -469,23 +482,23 @@ export function TaxProtestPage() {
     setDownloading(true);
     try {
       const tok = getToken();
-      const res = await fetch(`/api/protest/${propertyId}/evidence-packet?year=${year}`, {
+      const res = await fetch(`/api/protest/${propertyId}/evidence-packet?year=${year}&format=${docFormat}`, {
         headers: tok ? { Authorization: `Bearer ${tok}` } : {}
       });
-      if (!res.ok) throw new Error(`PDF generation failed (${res.status})`);
+      if (!res.ok) throw new Error(`Document generation failed (${res.status})`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `ARB_Evidence_${year}.pdf`;
+      a.download = `ARB_Evidence_${year}.${docFormat}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      addToast("red", err instanceof Error ? err.message : "Failed to generate PDF");
+      addToast("red", err instanceof Error ? err.message : "Failed to generate document");
     } finally {
       setDownloading(false);
     }
-  }, [propertyId, year, addToast]);
+  }, [propertyId, year, docFormat, addToast]);
 
   if (!token) return <Navigate to="/" replace />;
   if (loading) return <GrovePageLoader label="Loading protest assistant…" />;
@@ -547,15 +560,23 @@ export function TaxProtestPage() {
             w={100}
           />
         </Group>
-        <Button
-          leftSection={<IconFileText size={16} />}
-          variant="default"
-          loading={downloading}
-          disabled={!propertyId}
-          onClick={handleDownload}
-        >
-          Generate Document
-        </Button>
+        <Group gap="xs" align="flex-end">
+          <SegmentedControl
+            value={docFormat}
+            onChange={(v) => setDocFormat(v as "pdf" | "docx")}
+            data={[{ label: "PDF", value: "pdf" }, { label: "Word", value: "docx" }]}
+            size="sm"
+          />
+          <Button
+            leftSection={<IconFileText size={16} />}
+            variant="default"
+            loading={downloading}
+            disabled={!propertyId}
+            onClick={handleDownload}
+          >
+            Generate Document
+          </Button>
+        </Group>
       </Group>
 
       {/* Deadline banner */}
@@ -906,6 +927,17 @@ export function TaxProtestPage() {
             <Stepper.Step label="ARB Hearing" />
             <Stepper.Step label="Resolved" />
           </Stepper>
+          {worksheet?.filingDeadline != null &&
+            filingDeadlineDays != null &&
+            filingDeadlineDays >= 0 &&
+            filingDeadlineDays <= 7 &&
+            worksheet.status !== "resolved" ? (
+            <Alert color="red" icon={<IconCalendarEvent size={16} />} title="Filing Deadline Approaching">
+              Protest filing deadline for {propertyLabel} is{" "}
+              <strong>{filingDeadlineDays === 0 ? "today" : filingDeadlineDays === 1 ? "tomorrow" : `in ${filingDeadlineDays} days`}</strong>{" "}
+              ({formatDate(worksheet.filingDeadline)}).
+            </Alert>
+          ) : null}
           <Grid>
             <Grid.Col span={{ base: 12, sm: 6 }}>
               <Select
@@ -939,6 +971,49 @@ export function TaxProtestPage() {
                     void updateWorksheet({ hearingDate: next });
                   }
                 }}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <TextInput
+                label="Filing Deadline"
+                type="date"
+                value={filingDeadlineDraft}
+                onChange={(e) => setFilingDeadlineDraft(e.currentTarget.value)}
+                onBlur={() => {
+                  if (!worksheet) return;
+                  const next = filingDeadlineDraft.trim() || null;
+                  if ((worksheet.filingDeadline ?? null) !== next) {
+                    void updateWorksheet({ filingDeadline: next });
+                  }
+                }}
+              />
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 6 }}>
+              <TextInput
+                label="CAD Portal URL"
+                placeholder="https://www.dallascad.org/..."
+                value={cadPortalUrlDraft}
+                onChange={(e) => setCadPortalUrlDraft(e.currentTarget.value)}
+                onBlur={() => {
+                  if (!worksheet) return;
+                  const next = cadPortalUrlDraft.trim() || null;
+                  if ((worksheet.cadPortalUrl ?? null) !== next) {
+                    void updateWorksheet({ cadPortalUrl: next });
+                  }
+                }}
+                rightSection={
+                  cadPortalUrlDraft ? (
+                    <ActionIcon
+                      variant="subtle"
+                      component="a"
+                      href={cadPortalUrlDraft}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <IconExternalLink size={16} />
+                    </ActionIcon>
+                  ) : null
+                }
               />
             </Grid.Col>
           </Grid>
