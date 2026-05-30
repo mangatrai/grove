@@ -28,6 +28,8 @@ export type ProtestWorksheetRecord = {
   taxYear: number;
   status: ProtestStatus;
   hearingDate: string | null;
+  filingDeadline: string | null;
+  cadPortalUrl: string | null;
   conversationJson: ConversationTurn[];
   strategyJson: StrategyJson | null;
   createdAt: string;
@@ -41,6 +43,8 @@ type ProtestWorksheetRow = {
   tax_year: number;
   status: ProtestStatus;
   hearing_date: string | Date | null;
+  filing_deadline: string | Date | null;
+  cad_portal_url: string | null;
   conversation_json: unknown;
   strategy_json: unknown;
   created_at: string | Date;
@@ -66,6 +70,8 @@ function rowToRecord(row: ProtestWorksheetRow): ProtestWorksheetRecord {
     taxYear: row.tax_year,
     status: row.status,
     hearingDate: isoDateOnly(row.hearing_date),
+    filingDeadline: isoDateOnly(row.filing_deadline),
+    cadPortalUrl: row.cad_portal_url ?? null,
     conversationJson: Array.isArray(row.conversation_json) ? (row.conversation_json as ConversationTurn[]) : [],
     strategyJson: row.strategy_json && typeof row.strategy_json === "object" ? (row.strategy_json as StrategyJson) : null,
     createdAt: isoDateTime(row.created_at),
@@ -79,7 +85,7 @@ export async function getWorksheet(
   taxYear: number
 ): Promise<ProtestWorksheetRecord | null> {
   const row = await qGet<ProtestWorksheetRow>(
-    `SELECT id, household_id, property_id, tax_year, status, hearing_date, conversation_json, strategy_json, created_at, updated_at
+    `SELECT id, household_id, property_id, tax_year, status, hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json, created_at, updated_at
        FROM protest_worksheet
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
     propertyId,
@@ -137,6 +143,33 @@ export async function updateWorksheetStatus(
     hearingDate,
     worksheetId,
     householdId
+  );
+}
+
+export async function updateWorksheetMeta(
+  worksheetId: string,
+  householdId: string,
+  fields: { filingDeadline?: string | null; cadPortalUrl?: string | null }
+): Promise<void> {
+  const { filingDeadline, cadPortalUrl } = fields;
+  if (filingDeadline === undefined && cadPortalUrl === undefined) return;
+
+  const sets: string[] = ["updated_at = NOW()"];
+  const params: unknown[] = [];
+
+  if (filingDeadline !== undefined) {
+    sets.push("filing_deadline = ?");
+    params.push(filingDeadline);
+  }
+  if (cadPortalUrl !== undefined) {
+    sets.push("cad_portal_url = ?");
+    params.push(cadPortalUrl);
+  }
+
+  params.push(worksheetId, householdId);
+  await qExec(
+    `UPDATE protest_worksheet SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
+    ...params
   );
 }
 
