@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-2c (2026-05-31): `/espp/stock-quote` missing from Vite dev proxy — chip never loads in dev
+
+- **Type:** Bug fix — closes #54
+- **What:** `frontend/vite.config.ts` listed specific ESPP sub-routes in the Vite proxy (`/espp/batches`, `/espp/summary`, etc.) but omitted `/espp/stock-quote`. In dev mode, Vite forwards proxied paths to the Express backend (port 4000). Without the entry, the browser resolved `/espp/stock-quote` to the Vite dev server (port 3000), got no response, and `stockQuote` state stayed null — the IBM price chip never appeared.
+- **Fix:** Added `"/espp/stock-quote": api` to the proxy list.
+- **Files:** `frontend/vite.config.ts`, `docs/CHANGE_HISTORY.md`
+- **GitHub:** https://github.com/mangatrai/grove/issues/54
+
+---
+
 ## FIX-ESPP-2b (2026-05-31): Stock quote scheduler mode + API path prefix bugs
 
 - **Type:** Bug fixes — closes #52, closes #53
