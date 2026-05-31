@@ -1115,6 +1115,11 @@ paths:
                   assistantMessage: { type: string }
                   strategyUpdated: { type: boolean }
                   compsAdded: { type: integer }
+                  soldCompsRefreshed: { type: boolean }
+                  valuationAgeHours:
+                    type: integer
+                    nullable: true
+                    description: Hours since valuation_fetched_at; null if never valued via Redfin
         "400":
           description: Validation error
         "404":

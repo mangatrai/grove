@@ -53,6 +53,7 @@ type PropertyRecord = {
   latestValueUsd: number | null;
   latestValueAsOf: string | null;
   valuationDetail: unknown | null;
+  valuationFetchedAt: string | null;
   purchasePrice: number | null;
   purchaseDate: string | null;
   monthlyRent: number | null;
@@ -134,7 +135,7 @@ type PropertyResponse = { property: PropertyRecord };
 type WorksheetResponse = { worksheet: Worksheet };
 type CompsResponse = { comps: CADComp[] };
 type SoldCompsResponse = { comps: SoldComp[] };
-type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number; soldCompsRefreshed: boolean };
+type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number; soldCompsRefreshed: boolean; valuationAgeHours: number | null };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -226,6 +227,7 @@ export function TaxProtestPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [docFormat, setDocFormat] = useState<"pdf" | "docx">("pdf");
+  const [staleAlertDismissed, setStaleAlertDismissed] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -291,6 +293,7 @@ export function TaxProtestPage() {
         ).catch(() => ({ comps: [] as SoldComp[] }))
       ]);
       setProperty(propRes.property);
+      setStaleAlertDismissed(false);
       setWorksheet(wsRes.worksheet);
       setComps(compsRes.comps);
       setSoldComps(soldCompsRes.comps);
@@ -424,6 +427,7 @@ export function TaxProtestPage() {
       }
       if (res.soldCompsRefreshed) {
         addToast("green", "Redfin data refreshed — comparable sold prices updated.");
+        setStaleAlertDismissed(true);
         const soldCompsRes = await apiJson<SoldCompsResponse>(
           `/api/protest/${encodeURIComponent(propertyId)}/sold-comps`
         ).catch(() => ({ comps: [] as SoldComp[] }));
@@ -592,6 +596,19 @@ export function TaxProtestPage() {
         >
           {propertyLabel} · {formatDate(worksheet.hearingDate)} ·{" "}
           <strong>{hearingDays} days away</strong>
+        </Alert>
+      ) : null}
+
+      {/* Stale comps banner */}
+      {!staleAlertDismissed && property?.valuationFetchedAt != null &&
+        (Date.now() - new Date(property.valuationFetchedAt).getTime()) > 24 * 60 * 60 * 1000 ? (
+        <Alert
+          color="yellow"
+          withCloseButton
+          onClose={() => setStaleAlertDismissed(true)}
+          title="Redfin data may be outdated"
+        >
+          {`Sold comps were last fetched ${Math.floor((Date.now() - new Date(property.valuationFetchedAt).getTime()) / (1000 * 60 * 60 * 24))} day(s) ago. Ask the AI to "refresh Redfin data" for the latest sold comparables.`}
         </Alert>
       ) : null}
 

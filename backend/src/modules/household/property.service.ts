@@ -340,7 +340,7 @@ export async function refreshPropertyValuation(
   householdId: string
 ): Promise<
   | { ok: true; estimate: number; fetchedAt: string }
-  | { ok: false; code: "NOT_FOUND" | "NO_ADDRESS" | "API_NOT_CONFIGURED" | "API_ERROR"; message: string }
+  | { ok: false; code: "NOT_FOUND" | "NO_ADDRESS" | "API_NOT_CONFIGURED" | "API_ERROR" | "RATE_LIMITED"; message: string }
 > {
   if (!isRealtyApiConfigured()) {
     return { ok: false, code: "API_NOT_CONFIGURED", message: "REALTYAPI_KEY not configured" };
@@ -354,13 +354,21 @@ export async function refreshPropertyValuation(
     zip: string | null;
     api_property_id: string | null;
     api_listing_id: string | null;
+    valuation_fetched_at: string | null;
   }>(
-    `SELECT id, address_line1, city, state, zip, api_property_id, api_listing_id
+    `SELECT id, address_line1, city, state, zip, api_property_id, api_listing_id, valuation_fetched_at
        FROM property WHERE id = ? AND household_id = ?`,
     propertyId,
     householdId
   );
   if (!prop) return { ok: false, code: "NOT_FOUND", message: "Property not found" };
+
+  if (prop.valuation_fetched_at) {
+    const ageMs = Date.now() - new Date(prop.valuation_fetched_at).getTime();
+    if (ageMs < 24 * 60 * 60 * 1000) {
+      return { ok: false, code: "RATE_LIMITED", message: "Valuation refreshed within the last 24 hours — try again later." };
+    }
+  }
 
   let result;
   try {

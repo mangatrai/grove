@@ -18,6 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-RE-7 + FIX-RE-6 (2026-05-31): Redfin cooldown guard + stale comps banner
+
+- **Type:** Bug fix — closes #46, closes #45
+- **What:**
+  - **FIX-RE-7:** `refreshPropertyValuation()` now checks `valuation_fetched_at` before calling Redfin. If the valuation is less than 24 hours old, returns `{ ok: false, code: "RATE_LIMITED", message: "..." }` immediately — no external API call. Prevents the protest AI's `refresh_redfin_comps` tool from hammering RealtyAPI on every chat turn.
+  - **FIX-RE-6:** `protest.routes.ts` handles the new `RATE_LIMITED` code in the tool handler (tells the LLM comps are still fresh) and includes `valuationAgeHours: number | null` in the chat response. `TaxProtestPage.tsx` shows a dismissible yellow `Alert` banner when `property.valuationFetchedAt` is >24 h old, prompting the user to ask the AI to refresh. Banner auto-dismisses when `soldCompsRefreshed` is true and resets on property switch.
+- **Files:** `backend/src/modules/household/property.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`
+- **GitHub:** https://github.com/mangatrai/grove/issues/46, https://github.com/mangatrai/grove/issues/45
+
 ## FIX-PT-6 (2026-05-30): DCAD comparable search — county-derived office, street-name fallback, debug logging
 
 - **Type:** Bug fix — closes #47

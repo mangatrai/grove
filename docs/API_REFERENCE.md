@@ -144,9 +144,13 @@ Assistant chat endpoint for protest planning and comp analysis.
   "assistantMessage": "Start with unequal-appraisal comp framing...",
   "strategyUpdated": true,
   "compsAdded": 4,
-  "soldCompsRefreshed": false
+  "soldCompsRefreshed": false,
+  "valuationAgeHours": 30
 }
 ```
+
+- **`valuationAgeHours`**: Hours since `valuation_fetched_at` was last updated for this property. `null` if the property has never been valued via Redfin. Use to surface a stale-data prompt in the UI.
+- **`refresh_redfin_comps` tool cooldown:** The underlying `refreshPropertyValuation()` enforces a 24-hour cooldown. If the valuation is <24 h old the tool returns a "still fresh" message to the LLM without hitting the Redfin API.
 
 ---
 

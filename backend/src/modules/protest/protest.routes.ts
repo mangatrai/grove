@@ -364,6 +364,8 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
         if (result.ok) {
           soldCompsRefreshed = true;
           toolResult = `Redfin data refreshed. Updated AVM: ${money(result.estimate)}. The sold comps list has been updated.`;
+        } else if (result.code === "RATE_LIMITED") {
+          toolResult = "Redfin valuation was refreshed recently (within the last 24 hours). Current data is still fresh — no refresh needed.";
         } else {
           toolResult = `Redfin refresh failed: ${result.message}`;
         }
@@ -462,11 +464,16 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   await appendConversationTurn(worksheet.id, userTurn);
   await appendConversationTurn(worksheet.id, assistantTurn);
 
+  const valuationAgeHours = property.valuationFetchedAt
+    ? Math.floor((Date.now() - new Date(property.valuationFetchedAt).getTime()) / (1000 * 60 * 60))
+    : null;
+
   res.status(200).json({
     assistantMessage,
     strategyUpdated,
     compsAdded,
-    soldCompsRefreshed
+    soldCompsRefreshed,
+    valuationAgeHours
   });
 });
 
