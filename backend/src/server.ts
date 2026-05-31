@@ -42,10 +42,10 @@ void (async () => {
   try {
     await getSql();
     await checkExportCoverage();
+    startStockQuoteScheduler();
     if (env.MODE !== "TEST") {
       startBackupScheduler();
       startRealtyScheduler();
-      startStockQuoteScheduler();
       void purgeOldNotifications();
     }
     const server = app.listen(port, () => {
