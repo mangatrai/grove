@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-PT-7 (2026-05-31): Protest status — branching flow + outcome tracking
+
+- **Type:** Feature — closes #51
+- **What:** Replaces the flat `Select` dropdown for protest status with a branching, context-sensitive action panel. The horizontal stepper remains as a progress indicator.
+  - **New DB columns** (`0058_pt7_protest_outcome.sql`): `outcome TEXT CHECK (outcome IN ('settled_informal','won_arb','lost_arb','withdrawn'))` and `informal_offer_usd INTEGER` on `protest_worksheet`.
+  - **Backend service** (`protest-worksheet.service.ts`): Added `ProtestOutcome` type. `updateWorksheetStatus()` refactored to accept `opts: { hearingDate?, outcome?, informalOfferUsd? }` instead of positional `hearingDate` arg. `getWorksheet()` SELECT and `rowToRecord()` updated to include both new fields.
+  - **Backend route** (`protest.routes.ts`): `patchWorksheetBodySchema` extended with `outcome` (enum nullable) and `informalOfferUsd` (int nullable). PATCH handler passes both to `updateWorksheetStatus()`.
+  - **Frontend** (`TaxProtestPage.tsx`): Status flow shows contextual action buttons per stage — `not_filed` → "Mark as Filed"; `filed` → offer amount input + "Informal Offer Received"; `informal` → "Accept Offer — Settle" (green, sets `resolved/settled_informal`) or "Reject — Escalate to ARB" (orange, sets `arb`); `arb` → "Won at ARB" / "Lost at ARB" / "Withdrew Protest"; `resolved` → outcome badge + optional settlement value + "Reset protest status" button. `statusIndex()` positions stepper at step 3 (not 4) when settled at informal. Removed dead `statusDraft` state.
+- **Deferred:** PT-5b (Web Push, GH #49) and PT-6 (non-TX CAD, GH #50) moved to Deferred in backlog.
+- **Files:** `backend/db/migrations/0058_pt7_protest_outcome.sql` (new), `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/BACKLOG.md`
+- **GitHub:** https://github.com/mangatrai/grove/issues/51
+
 ## FIX-RE-7 + FIX-RE-6 (2026-05-31): Redfin cooldown guard + stale comps banner
 
 - **Type:** Bug fix — closes #46, closes #45

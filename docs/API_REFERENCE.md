@@ -247,22 +247,29 @@ Generates an ARB evidence packet for the given property and tax year. Returns PD
 
 ### `PATCH /api/protest/:propertyId/worksheet`
 
-Updates worksheet status, hearing date, filing deadline, and CAD portal URL.
+Updates worksheet status, outcome, informal offer amount, hearing date, filing deadline, and CAD portal URL.
 
 **Request body:**
 ```json
 {
   "year": 2026,
-  "status": "informal",
+  "status": "resolved",
+  "outcome": "settled_informal",
+  "informalOfferUsd": 485000,
   "hearingDate": "2026-07-15",
   "filingDeadline": "2026-05-15",
   "cadPortalUrl": "https://www.dallascad.org/protest"
 }
 ```
 
-All fields except `year` are optional. `hearingDate` and `filingDeadline` accept `YYYY-MM-DD` or `null` to clear. `cadPortalUrl` accepts a valid URL or `null` to clear.
+All fields except `year` are optional.
+- `status` — one of `not_filed` | `filed` | `informal` | `arb` | `resolved`.
+- `outcome` — one of `settled_informal` | `won_arb` | `lost_arb` | `withdrawn` or `null` to clear. Meaningful only when `status = "resolved"` (or when resetting).
+- `informalOfferUsd` — integer USD value of the appraiser's informal offer; `null` to clear.
+- `hearingDate` and `filingDeadline` — `YYYY-MM-DD` or `null` to clear.
+- `cadPortalUrl` — valid URL or `null` to clear.
 
-**Response 200:** `{ "worksheet": { ...updated worksheet with all fields... } }`
+**Response 200:** `{ "worksheet": { ...updated worksheet including outcome, informalOfferUsd... } }`
 
 ---
 

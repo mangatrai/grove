@@ -40,12 +40,15 @@ const chatBodySchema = z.object({
   attachmentType: z.enum(["pdf", "url", "text"]).optional(),
   year: z.number().int().min(2000).max(2100).optional()
 });
+const protestOutcomeSchema = z.enum(["settled_informal", "won_arb", "lost_arb", "withdrawn"]);
 const patchWorksheetBodySchema = z.object({
   year: z.number().int().min(2000).max(2100),
   status: worksheetStatusSchema.optional(),
   hearingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   filingDeadline: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  cadPortalUrl: z.string().url().nullable().optional()
+  cadPortalUrl: z.string().url().nullable().optional(),
+  outcome: protestOutcomeSchema.nullable().optional(),
+  informalOfferUsd: z.number().int().min(0).nullable().optional()
 });
 
 function thisYear(): number {
@@ -582,7 +585,11 @@ protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, 
     worksheet.id,
     householdId,
     parsed.data.status ?? worksheet.status,
-    parsed.data.hearingDate
+    {
+      hearingDate: parsed.data.hearingDate,
+      outcome: parsed.data.outcome,
+      informalOfferUsd: parsed.data.informalOfferUsd
+    }
   );
   if (parsed.data.filingDeadline !== undefined || parsed.data.cadPortalUrl !== undefined) {
     await updateWorksheetMeta(worksheet.id, householdId, {

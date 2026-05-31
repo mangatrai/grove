@@ -20,6 +20,7 @@ export type StrategyJson = {
 };
 
 export type ProtestStatus = "not_filed" | "filed" | "informal" | "arb" | "resolved";
+export type ProtestOutcome = "settled_informal" | "won_arb" | "lost_arb" | "withdrawn";
 
 export type ProtestWorksheetRecord = {
   id: string;
@@ -27,6 +28,8 @@ export type ProtestWorksheetRecord = {
   propertyId: string;
   taxYear: number;
   status: ProtestStatus;
+  outcome: ProtestOutcome | null;
+  informalOfferUsd: number | null;
   hearingDate: string | null;
   filingDeadline: string | null;
   cadPortalUrl: string | null;
@@ -42,6 +45,8 @@ type ProtestWorksheetRow = {
   property_id: string;
   tax_year: number;
   status: ProtestStatus;
+  outcome: string | null;
+  informal_offer_usd: number | null;
   hearing_date: string | Date | null;
   filing_deadline: string | Date | null;
   cad_portal_url: string | null;
@@ -69,6 +74,8 @@ function rowToRecord(row: ProtestWorksheetRow): ProtestWorksheetRecord {
     propertyId: row.property_id,
     taxYear: row.tax_year,
     status: row.status,
+    outcome: (row.outcome as ProtestOutcome | null) ?? null,
+    informalOfferUsd: row.informal_offer_usd != null ? Number(row.informal_offer_usd) : null,
     hearingDate: isoDateOnly(row.hearing_date),
     filingDeadline: isoDateOnly(row.filing_deadline),
     cadPortalUrl: row.cad_portal_url ?? null,
@@ -85,7 +92,8 @@ export async function getWorksheet(
   taxYear: number
 ): Promise<ProtestWorksheetRecord | null> {
   const row = await qGet<ProtestWorksheetRow>(
-    `SELECT id, household_id, property_id, tax_year, status, hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json, created_at, updated_at
+    `SELECT id, household_id, property_id, tax_year, status, outcome, informal_offer_usd,
+            hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json, created_at, updated_at
        FROM protest_worksheet
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
     propertyId,
@@ -122,27 +130,28 @@ export async function updateWorksheetStatus(
   worksheetId: string,
   householdId: string,
   status: ProtestStatus,
-  hearingDate?: string | null
+  opts: { hearingDate?: string | null; outcome?: string | null; informalOfferUsd?: number | null } = {}
 ): Promise<void> {
-  if (hearingDate === undefined) {
-    await qExec(
-      `UPDATE protest_worksheet
-          SET status = ?, updated_at = NOW()
-        WHERE id = ? AND household_id = ?`,
-      status,
-      worksheetId,
-      householdId
-    );
-    return;
+  const sets: string[] = ["status = ?", "updated_at = NOW()"];
+  const params: unknown[] = [status];
+
+  if (opts.hearingDate !== undefined) {
+    sets.push("hearing_date = ?");
+    params.push(opts.hearingDate);
   }
+  if (opts.outcome !== undefined) {
+    sets.push("outcome = ?");
+    params.push(opts.outcome);
+  }
+  if (opts.informalOfferUsd !== undefined) {
+    sets.push("informal_offer_usd = ?");
+    params.push(opts.informalOfferUsd);
+  }
+
+  params.push(worksheetId, householdId);
   await qExec(
-    `UPDATE protest_worksheet
-        SET status = ?, hearing_date = ?, updated_at = NOW()
-      WHERE id = ? AND household_id = ?`,
-    status,
-    hearingDate,
-    worksheetId,
-    householdId
+    `UPDATE protest_worksheet SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
+    ...params
   );
 }
 

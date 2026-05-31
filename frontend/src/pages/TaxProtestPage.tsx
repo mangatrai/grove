@@ -6,10 +6,12 @@ import {
   Button,
   Card,
   Chip,
+  Divider,
   Drawer,
   Grid,
   Group,
   List,
+  NumberInput,
   Paper,
   Progress,
   ScrollArea,
@@ -41,6 +43,7 @@ import { apiJson, getToken, useAuthToken } from "../api";
 import { GrovePageLoader } from "../components/GroveLoader";
 
 type ProtestStatus = "not_filed" | "filed" | "informal" | "arb" | "resolved";
+type ProtestOutcome = "settled_informal" | "won_arb" | "lost_arb" | "withdrawn";
 type AttachmentType = "pdf" | "url" | "text";
 
 type PropertyRecord = {
@@ -80,6 +83,8 @@ type Worksheet = {
   propertyId: string;
   taxYear: number;
   status: ProtestStatus;
+  outcome: ProtestOutcome | null;
+  informalOfferUsd: number | null;
   hearingDate: string | null;
   filingDeadline: string | null;
   cadPortalUrl: string | null;
@@ -174,12 +179,29 @@ function daysUntil(iso: string): number | null {
   return Math.ceil((dt.getTime() - Date.now()) / 86_400_000);
 }
 
-function statusIndex(status: ProtestStatus): number {
+function statusIndex(status: ProtestStatus, outcome: ProtestOutcome | null): number {
   if (status === "filed") return 1;
   if (status === "informal") return 2;
   if (status === "arb") return 3;
-  if (status === "resolved") return 4;
+  if (status === "resolved") {
+    return outcome === "settled_informal" ? 3 : 4;
+  }
   return 0;
+}
+
+function outcomeColor(outcome: ProtestOutcome | null): string {
+  if (outcome === "settled_informal" || outcome === "won_arb") return "green";
+  if (outcome === "lost_arb") return "red";
+  if (outcome === "withdrawn") return "gray";
+  return "yellow";
+}
+
+function outcomeLabel(outcome: ProtestOutcome | null): string {
+  if (outcome === "settled_informal") return "Settled at Informal";
+  if (outcome === "won_arb") return "Won at ARB";
+  if (outcome === "lost_arb") return "Lost at ARB";
+  if (outcome === "withdrawn") return "Withdrew Protest";
+  return "Resolved";
 }
 
 function markdownLines(text: string): string[] {
@@ -220,7 +242,7 @@ export function TaxProtestPage() {
   const [message, setMessage] = useState("");
   const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
   const [hearingDraft, setHearingDraft] = useState("");
-  const [statusDraft, setStatusDraft] = useState<ProtestStatus>("not_filed");
+  const [informalOfferDraft, setInformalOfferDraft] = useState<number | "">("");
   const [filingDeadlineDraft, setFilingDeadlineDraft] = useState("");
   const [cadPortalUrlDraft, setCadPortalUrlDraft] = useState("");
   const [thinking, setThinking] = useState(false);
@@ -298,7 +320,7 @@ export function TaxProtestPage() {
       setComps(compsRes.comps);
       setSoldComps(soldCompsRes.comps);
       setHearingDraft(wsRes.worksheet.hearingDate ?? "");
-      setStatusDraft(wsRes.worksheet.status);
+      setInformalOfferDraft("");
       setFilingDeadlineDraft(wsRes.worksheet.filingDeadline ?? "");
       setCadPortalUrlDraft(wsRes.worksheet.cadPortalUrl ?? "");
       const turns: ChatTurnUI[] = (wsRes.worksheet.conversationJson ?? [])
@@ -443,7 +465,14 @@ export function TaxProtestPage() {
   }, [propertyId, worksheet, message, pendingAttachment, year, addToast]);
 
   const updateWorksheet = useCallback(
-    async (patch: { status?: ProtestStatus; hearingDate?: string | null; filingDeadline?: string | null; cadPortalUrl?: string | null }) => {
+    async (patch: {
+      status?: ProtestStatus;
+      outcome?: ProtestOutcome | null;
+      informalOfferUsd?: number | null;
+      hearingDate?: string | null;
+      filingDeadline?: string | null;
+      cadPortalUrl?: string | null;
+    }) => {
       if (!propertyId || !worksheet) return;
       try {
         const res = await apiJson<WorksheetResponse>(
@@ -454,10 +483,12 @@ export function TaxProtestPage() {
           }
         );
         setWorksheet(res.worksheet);
-        setStatusDraft(res.worksheet.status);
         setHearingDraft(res.worksheet.hearingDate ?? "");
         setFilingDeadlineDraft(res.worksheet.filingDeadline ?? "");
         setCadPortalUrlDraft(res.worksheet.cadPortalUrl ?? "");
+        if (patch.status && patch.status !== "informal") {
+          setInformalOfferDraft("");
+        }
       } catch (err) {
         addToast("red", err instanceof Error ? err.message : "Failed to update worksheet");
       }
@@ -938,7 +969,7 @@ export function TaxProtestPage() {
         <Stack gap="md">
           <Title order={4}>Protest Status</Title>
           <Stepper
-            active={worksheet ? statusIndex(worksheet.status) : 0}
+            active={worksheet ? statusIndex(worksheet.status, worksheet.outcome) : 0}
             size="xs"
             iconSize={20}
           >
@@ -948,6 +979,7 @@ export function TaxProtestPage() {
             <Stepper.Step label="ARB Hearing" />
             <Stepper.Step label="Resolved" />
           </Stepper>
+
           {worksheet?.filingDeadline != null &&
             filingDeadlineDays != null &&
             filingDeadlineDays >= 0 &&
@@ -959,27 +991,144 @@ export function TaxProtestPage() {
               ({formatDate(worksheet.filingDeadline)}).
             </Alert>
           ) : null}
+
+          {/* Contextual status actions */}
+          {worksheet ? (
+            <Stack gap="xs">
+              {worksheet.status === "not_filed" ? (
+                <Group>
+                  <Button
+                    size="sm"
+                    variant="filled"
+                    onClick={() => void updateWorksheet({ status: "filed" })}
+                  >
+                    Mark as Filed
+                  </Button>
+                </Group>
+              ) : worksheet.status === "filed" ? (
+                <Stack gap="xs">
+                  <Text size="sm" fw={500}>Informal offer received?</Text>
+                  <Group align="flex-end">
+                    <NumberInput
+                      label="Appraiser's offer amount (optional)"
+                      placeholder="e.g. 485000"
+                      prefix="$"
+                      value={informalOfferDraft}
+                      onChange={(v) => setInformalOfferDraft(typeof v === "number" ? v : "")}
+                      min={0}
+                      thousandSeparator=","
+                      w={240}
+                      size="sm"
+                    />
+                    <Button
+                      size="sm"
+                      variant="filled"
+                      onClick={() =>
+                        void updateWorksheet({
+                          status: "informal",
+                          informalOfferUsd: typeof informalOfferDraft === "number" ? informalOfferDraft : null
+                        })
+                      }
+                    >
+                      Informal Offer Received
+                    </Button>
+                  </Group>
+                </Stack>
+              ) : worksheet.status === "informal" ? (
+                <Stack gap="xs">
+                  {worksheet.informalOfferUsd != null ? (
+                    <Text size="sm">
+                      Appraiser&apos;s offer: <strong>{money(worksheet.informalOfferUsd)}</strong>
+                    </Text>
+                  ) : null}
+                  <Group>
+                    <Button
+                      size="sm"
+                      color="green"
+                      variant="filled"
+                      onClick={() =>
+                        void updateWorksheet({ status: "resolved", outcome: "settled_informal" })
+                      }
+                    >
+                      Accept Offer — Settle
+                    </Button>
+                    <Button
+                      size="sm"
+                      color="orange"
+                      variant="outline"
+                      onClick={() => void updateWorksheet({ status: "arb" })}
+                    >
+                      Reject — Escalate to ARB
+                    </Button>
+                  </Group>
+                </Stack>
+              ) : worksheet.status === "arb" ? (
+                <Stack gap="xs">
+                  <Text size="sm" fw={500}>ARB hearing outcome</Text>
+                  <Group>
+                    <Button
+                      size="sm"
+                      color="green"
+                      variant="filled"
+                      onClick={() =>
+                        void updateWorksheet({ status: "resolved", outcome: "won_arb" })
+                      }
+                    >
+                      Won at ARB
+                    </Button>
+                    <Button
+                      size="sm"
+                      color="red"
+                      variant="filled"
+                      onClick={() =>
+                        void updateWorksheet({ status: "resolved", outcome: "lost_arb" })
+                      }
+                    >
+                      Lost at ARB
+                    </Button>
+                    <Button
+                      size="sm"
+                      color="gray"
+                      variant="outline"
+                      onClick={() =>
+                        void updateWorksheet({ status: "resolved", outcome: "withdrawn" })
+                      }
+                    >
+                      Withdrew Protest
+                    </Button>
+                  </Group>
+                </Stack>
+              ) : worksheet.status === "resolved" ? (
+                <Stack gap="xs">
+                  <Group align="center">
+                    <Badge size="lg" color={outcomeColor(worksheet.outcome)}>
+                      {outcomeLabel(worksheet.outcome)}
+                    </Badge>
+                    {worksheet.outcome === "settled_informal" && worksheet.informalOfferUsd != null ? (
+                      <Text size="sm" c="dimmed">
+                        Settlement value: {money(worksheet.informalOfferUsd)}
+                      </Text>
+                    ) : null}
+                  </Group>
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    color="gray"
+                    onClick={() =>
+                      void updateWorksheet({ status: "not_filed", outcome: null })
+                    }
+                  >
+                    Reset protest status
+                  </Button>
+                </Stack>
+              ) : null}
+            </Stack>
+          ) : null}
+
+          <Divider />
+
           <Grid>
-            <Grid.Col span={{ base: 12, sm: 6 }}>
-              <Select
-                label="Update status"
-                value={statusDraft}
-                data={[
-                  { value: "not_filed", label: "Not Filed" },
-                  { value: "filed", label: "Filed" },
-                  { value: "informal", label: "Informal Offer" },
-                  { value: "arb", label: "ARB Hearing" },
-                  { value: "resolved", label: "Resolved" }
-                ]}
-                onChange={(v) => {
-                  if (!v) return;
-                  const next = v as ProtestStatus;
-                  setStatusDraft(next);
-                  void updateWorksheet({ status: next });
-                }}
-              />
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6 }}>
+            <Grid.Col span={{ base: 12, sm: 4 }}>
               <TextInput
                 label="Hearing Date"
                 type="date"
@@ -994,7 +1143,7 @@ export function TaxProtestPage() {
                 }}
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6 }}>
+            <Grid.Col span={{ base: 12, sm: 4 }}>
               <TextInput
                 label="Filing Deadline"
                 type="date"
@@ -1009,7 +1158,7 @@ export function TaxProtestPage() {
                 }}
               />
             </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6 }}>
+            <Grid.Col span={{ base: 12, sm: 4 }}>
               <TextInput
                 label="CAD Portal URL"
                 placeholder="https://www.dallascad.org/..."

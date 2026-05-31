@@ -1065,6 +1065,8 @@ paths:
               properties:
                 year: { type: integer, minimum: 2000, maximum: 2100 }
                 status: { type: string, enum: [not_filed, filed, informal, arb, resolved] }
+                outcome: { type: string, enum: [settled_informal, won_arb, lost_arb, withdrawn], nullable: true }
+                informalOfferUsd: { type: integer, minimum: 0, nullable: true }
                 hearingDate: { type: string, format: date, nullable: true }
                 filingDeadline: { type: string, format: date, nullable: true }
                 cadPortalUrl: { type: string, format: uri, nullable: true }
@@ -4098,6 +4100,8 @@ components:
         propertyId: { type: string, format: uuid }
         taxYear: { type: integer }
         status: { type: string, enum: [not_filed, filed, informal, arb, resolved] }
+        outcome: { type: string, enum: [settled_informal, won_arb, lost_arb, withdrawn], nullable: true }
+        informalOfferUsd: { type: integer, nullable: true }
         hearingDate: { type: string, format: date, nullable: true }
         filingDeadline: { type: string, format: date, nullable: true }
         cadPortalUrl: { type: string, format: uri, nullable: true }
