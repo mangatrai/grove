@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-ESPP-2 (2026-05-31): IBM last close price chip on ESPP screen
+
+- **Type:** Feature — closes #36
+- **What:** Adds a compact IBM stock quote chip to the ESPP page header row ("IBM · $XXX.XX · close YYYY-MM-DD").
+  - **New service** (`espp-stock.service.ts`): Fetches IBM quote via `yahoo-finance2` v3 (`new YahooFinance()`). 1-hour in-memory TTL. Scheduled refresh at ~4:15 PM ET weekdays (checked on 5-min interval; both EDT=20:15 UTC and EST=21:15 UTC windows covered). Initial fetch on server startup.
+  - **New route** (`GET /espp/stock-quote`): Returns `{ symbol, price, previousClose, asOf }`. 503 if no quote cached yet.
+  - **Frontend** (`EsppPage.tsx`): `Badge` chip added to page header Group, next to the ESPP title. Fetched once on mount; silently absent if endpoint returns an error or is still loading.
+  - **Scheduler wired** in `server.ts` via `startStockQuoteScheduler()`.
+  - **Dep:** `yahoo-finance2@^3.15.2` added to `backend/package.json`.
+  - **Bug fix (incidental):** `searchDCADByAddress` call in `protest-worksheet.service.ts` was missing the required `county` arg — fixed (passes `null`).
+- **Files:** `backend/src/modules/espp/espp-stock.service.ts` (new), `backend/src/modules/espp/espp.routes.ts`, `backend/src/server.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `frontend/src/pages/EsppPage.tsx`, `backend/package.json`
+
+---
+
 ## CR-PT-7 (2026-05-31): Protest status — branching flow + outcome tracking
 
 - **Type:** Feature — closes #51

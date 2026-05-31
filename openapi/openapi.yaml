@@ -24,6 +24,7 @@ tags:
   - name: insights
   - name: gdrive
   - name: protest
+  - name: espp
 paths:
   /health:
     get:
@@ -1126,6 +1127,146 @@ paths:
           description: Validation error
         "404":
           description: Property not found
+  /api/espp/stock-quote:
+    get:
+      tags: [espp]
+      summary: IBM last close price (1-hour in-memory cache)
+      description: |
+        Returns the most recent IBM stock quote. Cache is populated on server startup and refreshed
+        automatically at ~4:15 PM ET on weekdays via `yahoo-finance2`. Returns 503 if the cache
+        has never been populated (server just started and initial fetch failed).
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Cached stock quote
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [symbol, price, previousClose, asOf]
+                properties:
+                  symbol: { type: string, example: IBM }
+                  price: { type: number, example: 297.80 }
+                  previousClose: { type: number, example: 264.22 }
+                  asOf: { type: string, format: date, example: "2026-05-30" }
+        "503":
+          description: Quote unavailable (cache empty)
+  /api/espp/batches:
+    get:
+      tags: [espp]
+      summary: List ESPP purchase batches with sale history for a year
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, minimum: 2020, maximum: 2099 }
+      responses:
+        "200":
+          description: Batch list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batches:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EsppBatch"
+        "400":
+          description: Missing or invalid year
+  /api/espp/summary:
+    get:
+      tags: [espp]
+      summary: Aggregated ESPP year summary
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: year
+          in: query
+          required: true
+          schema: { type: integer, minimum: 2020, maximum: 2099 }
+      responses:
+        "200":
+          description: Year summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EsppYearSummary"
+        "400":
+          description: Missing or invalid year
+  /api/espp/import:
+    post:
+      tags: [espp]
+      summary: Import ESPP batch from EquatePlus PDF and/or CSV
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                pdf:
+                  type: string
+                  format: binary
+                csv:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Batch imported/upserted
+        "400":
+          description: No files provided
+        "422":
+          description: Parse or validation error
+  /api/espp/sales:
+    post:
+      tags: [espp]
+      summary: Record sales for one or more ESPP batches
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [saleDate, rows]
+              properties:
+                saleDate: { type: string, format: date }
+                rows:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [batchId, sharesSold, salePricePerShare]
+                    properties:
+                      batchId: { type: string, format: uuid }
+                      sharesSold: { type: number, exclusiveMinimum: 0 }
+                      salePricePerShare: { type: number, exclusiveMinimum: 0 }
+      responses:
+        "201":
+          description: Sales recorded
+        "400":
+          description: Validation error
+        "404":
+          description: Batch not found
+        "422":
+          description: Business rule violation (insufficient shares, etc.)
+  /api/espp/sales/{saleId}:
+    delete:
+      tags: [espp]
+      summary: Delete a sale record
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: saleId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Sale not found
   /gdrive/oauth/callback:
     get:
       tags: [gdrive]
@@ -3344,6 +3485,47 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    EsppBatch:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        purchaseDate: { type: string, format: date }
+        sharesGranted: { type: number }
+        fmvPerShare: { type: number }
+        costBasisPerShare: { type: number }
+        discountPerShare: { type: number }
+        sharesTransferred: { type: number }
+        sharesSold: { type: number }
+        held: { type: number }
+        status:
+          type: string
+          enum: [Unsold, Partially Sold, Fully Sold]
+        sales:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              batchId: { type: string, format: uuid }
+              saleDate: { type: string, format: date }
+              sharesSold: { type: number }
+              salePricePerShare: { type: number }
+              proceeds: { type: number }
+              ordinaryIncome: { type: number }
+              capGainLoss: { type: number }
+    EsppYearSummary:
+      type: object
+      properties:
+        year: { type: integer }
+        sharesPurchased: { type: number }
+        sharesTransferred: { type: number }
+        sharesSold: { type: number }
+        totalInvested: { type: number }
+        discountReceivedYtd: { type: number }
+        saleProceeds: { type: number }
+        realizedGainLoss: { type: number }
+        ordinaryIncomeYtd: { type: number }
+        capGainLossYtd: { type: number }
     ExportBundleManifest:
       type: object
       description: Manifest JSON embedded in the exported .hfb backup payload.

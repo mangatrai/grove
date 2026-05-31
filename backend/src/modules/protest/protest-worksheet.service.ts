@@ -260,7 +260,7 @@ export async function triggerDCADBackfill(
 ): Promise<void> {
   const year = new Date().getUTCFullYear();
   log.info("triggerDCADBackfill: starting", { propertyId, address, year });
-  const comps = await searchDCADByAddress(address, year);
+  const comps = await searchDCADByAddress(address, year, null);
   if (comps.length > 0) {
     await getOrCreateWorksheet(propertyId, householdId, year);
     await saveCADComps(propertyId, householdId, year, comps);

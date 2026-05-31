@@ -3133,6 +3133,27 @@ IBM ESPP purchase batch and sale history management. All endpoints require authe
 
 ---
 
+### GET /espp/stock-quote
+
+Returns the latest IBM stock quote from a 1-hour in-memory cache. Populated on server startup and refreshed automatically at ~4:15 PM ET on weekdays via `yahoo-finance2`.
+
+**Response 200**
+```json
+{
+  "symbol": "IBM",
+  "price": 297.80,
+  "previousClose": 264.22,
+  "asOf": "2026-05-30"
+}
+```
+
+**Response 503** — cache empty (server just started and initial fetch failed):
+```json
+{ "message": "Stock quote unavailable" }
+```
+
+---
+
 ### GET /espp/batches
 
 Returns all purchase batches with their sale history for the specified year.
