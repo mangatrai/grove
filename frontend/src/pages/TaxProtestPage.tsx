@@ -601,7 +601,7 @@ export function TaxProtestPage() {
 
       {/* Stale comps banner */}
       {!staleAlertDismissed && property?.valuationFetchedAt != null &&
-        (Date.now() - new Date(property.valuationFetchedAt).getTime()) > 24 * 60 * 60 * 1000 ? (
+        (Date.now() - new Date(property.valuationFetchedAt).getTime()) > 7 * 24 * 60 * 60 * 1000 ? (
         <Alert
           color="yellow"
           withCloseButton
