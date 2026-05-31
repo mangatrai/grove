@@ -35,7 +35,6 @@ export default defineConfig({
       "/notifications": api,
       // ESPP API only — do not proxy bare `/espp` (same path as the React route).
       "/espp/stock-quote": api,
-      "/espp/recalculate-payslip-links": api,
       "/espp/batches": api,
       "/espp/summary": api,
       "/espp/import": api,

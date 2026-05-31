@@ -1267,26 +1267,6 @@ paths:
           description: Deleted
         "404":
           description: Sale not found
-  /api/espp/recalculate-payslip-links:
-    post:
-      tags: [espp]
-      summary: Refresh payslip-linked deduction fields on all batches
-      description: |
-        Re-runs the payslip aggregation query for every existing batch and updates
-        `payslip_id`, `espp_discount_payslip`, `espp_salary_deduction`, and
-        `espp_other_deduction`. Use to repair stale data (batches imported before
-        FIX-ESPP-11/FIX-ESPP-12) without re-uploading PDFs.
-      security: [{ bearerAuth: [] }]
-      responses:
-        "200":
-          description: Count of batch rows updated
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  ok: { type: boolean, example: true }
-                  updated: { type: integer, example: 3 }
   /gdrive/oauth/callback:
     get:
       tags: [gdrive]

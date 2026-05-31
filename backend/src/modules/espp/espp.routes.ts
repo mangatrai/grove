@@ -12,7 +12,6 @@ import {
   getYearSummary,
   importBatch,
   listBatchesWithSales,
-  recalculatePayslipLinks,
   recordSales,
 } from "./espp.service.js";
 
@@ -109,14 +108,6 @@ esppRouter.post(
     res.status(201).json({ batches: result.data });
   }
 );
-
-/** POST /espp/recalculate-payslip-links — refreshes discount/salary/other on all batches from payslips */
-esppRouter.post('/recalculate-payslip-links', async (req: AuthenticatedRequest, res) => {
-  const { householdId } = req.authUser!;
-  const updated = await recalculatePayslipLinks(householdId);
-  log.info({ updated, householdId }, 'espp:recalculate-payslip-links done');
-  res.json({ ok: true, updated });
-});
 
 /** POST /espp/sales */
 esppRouter.post('/sales', async (req: AuthenticatedRequest, res) => {

@@ -28,7 +28,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
   - Extended ESPP-11 test: seeds "ESPP (Stock Salary)" ($500 + $400) and "ESPP (Stock Other)" ($10 + $5) on both payslips; asserts totals $900 and $15 respectively alongside the $120 discount.
   - Added `recalculatePayslipLinks(householdId)` service function that re-runs `findPayslipLink` for every batch and updates `payslip_id`, `espp_discount_payslip`, `espp_salary_deduction`, `espp_other_deduction`.
   - Exposed as `POST /espp/recalculate-payslip-links` (auth-gated, returns `{ ok: true, updated: N }`). Call once to repair existing batch rows without re-importing PDFs.
-- **Files:** `backend/src/modules/espp/espp.service.ts`, `backend/src/modules/espp/espp.routes.ts`, `backend/tests/espp.test.ts`, `frontend/vite.config.ts`
+- **Files:** `backend/tests/espp.test.ts` (test extension retained); recalculate endpoint reverted — use the one-time SQL below instead.
+- **One-time data repair SQL** (run in psql, single date first to verify, then full):
+  ```sql
+  -- Single date (verify first):
+  BEGIN;
+  UPDATE espp_batch b SET ... WHERE b.purchase_date = '2026-MM-DD';
+  SELECT purchase_date, espp_salary_deduction, espp_other_deduction FROM espp_batch;
+  ROLLBACK; -- or COMMIT once satisfied
+  ```
+  See CHANGE_HISTORY for full SQL.
 - **GitHub:** https://github.com/mangatrai/grove/issues/55
 
 ---
