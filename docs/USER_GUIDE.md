@@ -432,6 +432,10 @@ These do not prevent saving; they are informational.
 
 The **ESPP** page tracks IBM ESPP purchase batches, stock disposals, and year-to-date tax exposure (ordinary income vs. capital gain/loss). Access it via **ESPP** in the sidebar.
 
+### IBM Stock Price Chip
+
+The page header displays a live IBM stock quote chip — **IBM · $XXX.XX · close YYYY-MM-DD** — next to the ESPP title. The price is the last confirmed closing price, fetched from Yahoo Finance. It updates automatically at ~4:15 PM ET on weekdays; at other times it shows the most recently cached value. The chip is absent only if the backend has not yet fetched a quote since its last restart.
+
 ### Year Summary Strip
 
 Ten KPI cards across two rows display the current year's activity:

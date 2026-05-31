@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-2b (2026-05-31): Stock quote scheduler mode + API path prefix bugs
+
+- **Type:** Bug fixes — closes #52, closes #53
+- **What:**
+  - `startStockQuoteScheduler()` was inside the `MODE !== TEST` guard in `server.ts`. Since `MODE` defaults to `"TEST"`, the scheduler never started in dev and the IBM price chip showed nothing. Yahoo Finance is free and keyless — no reason to gate it. Moved above the guard so it runs in all modes. (GH #53)
+  - `/espp` was missing from `API_PATH_PREFIXES` in `app.ts`. In PROD, the SPA middleware intercepts any unregistered path and serves `index.html`. All ESPP endpoints returned the SPA shell instead of JSON in production. (GH #52)
+  - Removed 1-hour TTL from `getStockQuote()`. Cache is now served as-is until the scheduler updates it — on-demand Yahoo Finance calls at arbitrary hours made no sense. First request after server start fetches once if cache is empty.
+- **Files:** `backend/src/server.ts`, `backend/src/app.ts`, `backend/src/modules/espp/espp-stock.service.ts`, `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md`
+
+---
+
 ## CR-ESPP-2 (2026-05-31): IBM last close price chip on ESPP screen
 
 - **Type:** Feature — closes #36

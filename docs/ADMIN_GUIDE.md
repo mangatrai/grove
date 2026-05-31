@@ -402,7 +402,21 @@ For Drive backup/restore (CR-106):
 | `VITE_DEV_SIGNIN_EMAIL` | Email prefill on `/` (dev only) |
 | `VITE_DEV_SIGNIN_PASSWORD` | Password prefill on `/` (dev only) |
 
-### 4.10 Hardcoded Defaults (Non-Configurable)
+### 4.10 Background Schedulers
+
+Three background jobs start automatically when the server boots. The stock quote scheduler runs in **all modes** (dev, test, prod). The other two are skipped in `MODE=TEST` to avoid hitting paid/auth-gated external APIs during automated test runs.
+
+| Scheduler | Runs in | Trigger | What it does |
+|-----------|---------|---------|--------------|
+| **Stock quote** (`espp-stock.service.ts`) | All modes | On startup (once), then ~4:15 PM ET weekdays | Fetches IBM last close via `yahoo-finance2` (free, no API key). Caches in memory. Serves stale cache outside market hours. |
+| **Realty** (`realty-scheduler.service.ts`) | PROD only | On startup + every 6 hours | Refreshes Redfin AVM valuations for properties not updated in 28 days. Uses stored `api_property_id` for 1-credit calls. |
+| **Backup** (`gdrive-scheduler.service.ts`) | PROD only | Configurable schedule | Exports `.hfb` bundles to Google Drive if `GDRIVE_*` vars are set. |
+
+No configuration is needed for the stock quote scheduler — it runs unconditionally. If Yahoo Finance is unreachable at startup the chip is absent until the next retry (next 4:15 PM ET window, or next server restart).
+
+---
+
+### 4.11 Hardcoded Defaults (Non-Configurable)
 
 | Item | Location | Details |
 |------|----------|---------|
