@@ -3,7 +3,6 @@ import YahooFinance from "yahoo-finance2";
 import { log } from "../../logger.js";
 
 const SYMBOL = "IBM";
-const TTL_MS = 60 * 60 * 1000; // 1 hour
 const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // check every 5 min
 
 export type StockQuote = {
@@ -15,10 +14,12 @@ export type StockQuote = {
 
 const yf = new YahooFinance({ suppressNotices: ["yahooSurvey"] });
 
-let cache: { quote: StockQuote; fetchedAt: number } | null = null;
+let cache: StockQuote | null = null;
 
+// Returns cached quote if available (even if stale — scheduler handles updates).
+// Only calls Yahoo Finance if cache is empty (first request after server start).
 export async function getStockQuote(): Promise<StockQuote | null> {
-  if (cache && Date.now() - cache.fetchedAt < TTL_MS) return cache.quote;
+  if (cache) return cache;
   return refreshQuote();
 }
 
@@ -34,12 +35,12 @@ async function refreshQuote(): Promise<StockQuote | null> {
       previousClose: result.regularMarketPreviousClose ?? 0,
       asOf,
     };
-    cache = { quote, fetchedAt: Date.now() };
+    cache = quote;
     log.info({ symbol: SYMBOL, price: quote.price, asOf }, "espp-stock: quote refreshed");
     return quote;
   } catch (err) {
     log.warn({ err }, "espp-stock: failed to fetch quote");
-    return cache?.quote ?? null;
+    return cache;
   }
 }
 

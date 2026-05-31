@@ -68,6 +68,7 @@ const API_PATH_PREFIXES = [
   "/budget",
   "/recurring-overrides",
   "/insights",
+  "/espp",
   "/api/protest"
 ];
 
