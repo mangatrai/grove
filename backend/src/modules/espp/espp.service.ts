@@ -451,6 +451,35 @@ export async function recordSales(
   return { ok: true, data: inserted };
 }
 
+export async function recalculatePayslipLinks(householdId: string): Promise<number> {
+  const batches = await qAll<{ purchase_date: string }>(
+    `SELECT purchase_date FROM espp_batch WHERE household_id = ?`,
+    householdId
+  );
+  const now = new Date().toISOString();
+  let count = 0;
+  for (const batch of batches) {
+    const link = await findPayslipLink(householdId, batch.purchase_date);
+    if (!link) continue;
+    await qExec(
+      `UPDATE espp_batch SET
+         payslip_id            = ?,
+         espp_discount_payslip = ?,
+         espp_salary_deduction = ?,
+         espp_other_deduction  = ?,
+         updated_at            = ?
+       WHERE household_id = ? AND purchase_date = ?`,
+      link.id,
+      link.discount > 0 ? link.discount : null,
+      link.salary   > 0 ? link.salary   : null,
+      link.other    > 0 ? link.other    : null,
+      now, householdId, batch.purchase_date
+    );
+    count++;
+  }
+  return count;
+}
+
 export async function deleteSale(
   householdId: string,
   saleId: string

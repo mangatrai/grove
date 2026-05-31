@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-ESPP-12 (2026-05-31): ESPP salary/other deduction not summed across dual payslips — test gap + stale data fix
+
+- **Type:** Test coverage gap + data-repair endpoint — closes #55
+- **What:** FIX-ESPP-11 (`c4cd463`) removed `GROUP BY ps.id LIMIT 1` from `findPayslipLink`, which correctly aggregates `espp_discount_payslip`, `espp_salary_deduction`, and `espp_other_deduction` across all payslips on the purchase date. However:
+  1. The ESPP-11 test only asserted `esppDiscountPayslip` — salary/other were never verified and could silently regress.
+  2. Batches imported before FIX-ESPP-11 still had single-payslip values in the DB. No repair path existed without full PDF re-import.
+- **Fix:**
+  - Extended ESPP-11 test: seeds "ESPP (Stock Salary)" ($500 + $400) and "ESPP (Stock Other)" ($10 + $5) on both payslips; asserts totals $900 and $15 respectively alongside the $120 discount.
+  - Added `recalculatePayslipLinks(householdId)` service function that re-runs `findPayslipLink` for every batch and updates `payslip_id`, `espp_discount_payslip`, `espp_salary_deduction`, `espp_other_deduction`.
+  - Exposed as `POST /espp/recalculate-payslip-links` (auth-gated, returns `{ ok: true, updated: N }`). Call once to repair existing batch rows without re-importing PDFs.
+- **Files:** `backend/src/modules/espp/espp.service.ts`, `backend/src/modules/espp/espp.routes.ts`, `backend/tests/espp.test.ts`, `frontend/vite.config.ts`
+- **GitHub:** https://github.com/mangatrai/grove/issues/55
+
+---
+
 ## FIX-ESPP-2c (2026-05-31): `/espp/stock-quote` missing from Vite dev proxy — chip never loads in dev
 
 - **Type:** Bug fix — closes #54

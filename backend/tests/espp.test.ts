@@ -271,7 +271,9 @@ describe("importBatch", () => {
        ON CONFLICT (id) DO NOTHING`
     ).run(ps2Id, HOUSEHOLD_ID, 'commission.pdf', 'chk2', 'generic', purchaseDate);
 
-    // ESPP deduction on salary payslip: $80; on commissions payslip: $40 → total $120
+    // Payslip 1: Discount=$80, Salary=$500, Other=$10
+    // Payslip 2: Discount=$40, Salary=$400, Other=$5
+    // Expected totals: Discount=$120, Salary=$900, Other=$15
     await sqlStmt(
       `INSERT INTO payslip_line_item
          (id, payslip_snapshot_id, household_id, section, name, amount_current)
@@ -285,6 +287,34 @@ describe("importBatch", () => {
        VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP Discount', 40)
        ON CONFLICT (id) DO NOTHING`
     ).run('test-pli-espp11-2', ps2Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Salary)', 500)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-3', ps1Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Salary)', 400)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-4', ps2Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Other)', 10)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-5', ps1Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Other)', 5)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-6', ps2Id, HOUSEHOLD_ID);
 
     try {
       const pdfText = `
@@ -300,10 +330,14 @@ describe("importBatch", () => {
 
       const batch = result.data.find(b => b.purchaseDate === purchaseDate);
       expect(batch).toBeDefined();
-      // Must reflect the combined deduction from both payslips
+      // All three fields must reflect the combined sum across both payslips
       expect(batch!.esppDiscountPayslip).toBeCloseTo(120, 2);
+      expect(batch!.esppSalaryDeduction).toBeCloseTo(900, 2);
+      expect(batch!.esppOtherDeduction).toBeCloseTo(15, 2);
     } finally {
-      await sqlStmt(`DELETE FROM payslip_line_item WHERE id IN (?, ?)`).run('test-pli-espp11-1', 'test-pli-espp11-2');
+      await sqlStmt(`DELETE FROM payslip_line_item WHERE id IN (?, ?, ?, ?, ?, ?)`)
+        .run('test-pli-espp11-1', 'test-pli-espp11-2', 'test-pli-espp11-3',
+             'test-pli-espp11-4', 'test-pli-espp11-5', 'test-pli-espp11-6');
       await sqlStmt(`DELETE FROM payslip_snapshot WHERE id IN (?, ?)`).run(ps1Id, ps2Id);
       await cleanupBatch(purchaseDate);
     }

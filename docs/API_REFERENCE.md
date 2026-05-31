@@ -3305,6 +3305,22 @@ Removes a sale record. The parent batch's held/status will reflect the change on
 
 ---
 
+### POST /espp/recalculate-payslip-links
+
+Re-runs the payslip-link aggregation query for every existing batch and updates `payslip_id`, `espp_discount_payslip`, `espp_salary_deduction`, and `espp_other_deduction` in place. Use this to repair batches imported before FIX-ESPP-11/FIX-ESPP-12 without re-uploading PDFs. Skips batches for which no matching payslip line items exist.
+
+**Auth:** Required
+
+**Request body:** none
+
+**Response `200`:**
+```json
+{ "ok": true, "updated": 3 }
+```
+`updated` is the count of batch rows whose payslip fields were refreshed.
+
+---
+
 ## Error Response Format
 
 Validation errors use `400` with shape:
