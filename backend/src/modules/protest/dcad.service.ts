@@ -1,5 +1,4 @@
 import { log } from "../../logger.js";
-import { env } from "../../config/env.js";
 
 type TokenCache = {
   token: string;
@@ -38,7 +37,8 @@ const DCAD_AUTH_URL = "https://prod-container.trueprodigyapi.com/trueprodigy/cad
 const DCAD_SEARCH_URL = "https://prod-container.trueprodigyapi.com/public/property/searchfulltext?page=1&pageSize=20";
 const DCAD_SEARCH_BY_ID_URL = "https://prod-container.trueprodigyapi.com/public/property/search?page=1&pageSize=20";
 
-let tokenCache: TokenCache | null = null;
+// Keyed by office name — different counties need different tokens.
+const tokenCacheMap = new Map<string, TokenCache>();
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -72,6 +72,18 @@ function decodeJwtExpMs(token: string): number | null {
   } catch {
     return null;
   }
+}
+
+/** "Denton County" → "Denton", "Collin County" → "Collin", "Denton" → "Denton" */
+function countyToOffice(county: string | null | undefined): string {
+  if (!county?.trim()) return "Denton";
+  return county.trim().replace(/\s+county$/i, "").trim();
+}
+
+/** Strip house number and city/state/zip — "123 Main St, Frisco, TX 75036" → "Main St" */
+function toStreetName(address: string): string {
+  const withoutNumber = address.replace(/^\d+\s+/, "");
+  return withoutNumber.split(",")[0].trim();
 }
 
 function extractRows(raw: unknown): Record<string, unknown>[] {
@@ -116,22 +128,17 @@ function mapProperty(row: Record<string, unknown>): DCADProperty | null {
   };
 }
 
-/** Strip house number and city/state/zip — "123 Main St, Frisco, TX 75036" → "Main St". */
-function toStreetName(address: string): string {
-  const withoutNumber = address.replace(/^\d+\s+/, "");
-  return withoutNumber.split(",")[0].trim();
-}
-
-export async function getToken(): Promise<string> {
+export async function getToken(office: string): Promise<string> {
   const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt - now > 60_000) {
-    return tokenCache.token;
+  const cached = tokenCacheMap.get(office);
+  if (cached && cached.expiresAt - now > 60_000) {
+    return cached.token;
   }
   try {
     const res = await fetch(DCAD_AUTH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ office: env.DCAD_OFFICE })
+      body: JSON.stringify({ office })
     });
     if (!res.ok) {
       throw new Error(`token fetch failed (${res.status})`);
@@ -143,13 +150,10 @@ export async function getToken(): Promise<string> {
     }
     const jwtExp = decodeJwtExpMs(token);
     const fallbackExp = Date.now() + 4 * 60_000;
-    tokenCache = {
-      token,
-      expiresAt: jwtExp ?? fallbackExp
-    };
+    tokenCacheMap.set(office, { token, expiresAt: jwtExp ?? fallbackExp });
     return token;
   } catch (err) {
-    log.error("DCAD token fetch failed", { err: err instanceof Error ? err.message : String(err) });
+    log.error("DCAD token fetch failed", { err: err instanceof Error ? err.message : String(err), office });
     throw new Error("DCAD API unavailable");
   }
 }
@@ -182,10 +186,15 @@ async function doSearch(token: string, query: string, taxYear: number): Promise<
   return rows.map(mapProperty).filter((x): x is DCADProperty => x != null);
 }
 
-export async function searchDCADByAddress(address: string, taxYear: number): Promise<DCADProperty[]> {
-  log.info("DCAD search start", { address, taxYear, office: env.DCAD_OFFICE });
+export async function searchDCADByAddress(
+  address: string,
+  taxYear: number,
+  county: string | null | undefined
+): Promise<DCADProperty[]> {
+  const office = countyToOffice(county);
+  log.info("DCAD search start", { address, taxYear, office });
   try {
-    const token = await getToken();
+    const token = await getToken(office);
 
     const results = await doSearch(token, address, taxYear);
     if (results.length > 0) {
@@ -196,23 +205,28 @@ export async function searchDCADByAddress(address: string, taxYear: number): Pro
     // Fallback: street name only (strip house number + city/state/zip)
     const streetName = toStreetName(address);
     if (streetName !== address && streetName.length > 0) {
-      log.info("DCAD search: retrying with street name only", { streetName, taxYear });
+      log.info("DCAD search: retrying with street name only", { streetName, taxYear, office });
       const fallback = await doSearch(token, streetName, taxYear);
       log.info("DCAD search fallback result", { streetName, taxYear, count: fallback.length });
       return fallback;
     }
 
-    log.info("DCAD search: no results", { address, taxYear });
+    log.info("DCAD search: no results", { address, taxYear, office });
     return [];
   } catch (err) {
-    log.error("DCAD search exception", { err: err instanceof Error ? err.message : String(err), address, taxYear });
+    log.error("DCAD search exception", { err: err instanceof Error ? err.message : String(err), address, taxYear, office });
     return [];
   }
 }
 
-export async function getDCADPropertyById(dcadPropertyId: string, taxYear: number): Promise<DCADProperty | null> {
+export async function getDCADPropertyById(
+  dcadPropertyId: string,
+  taxYear: number,
+  county: string | null | undefined
+): Promise<DCADProperty | null> {
+  const office = countyToOffice(county);
   try {
-    const token = await getToken();
+    const token = await getToken(office);
     const res = await fetch(DCAD_SEARCH_BY_ID_URL, {
       method: "POST",
       headers: {
@@ -231,7 +245,7 @@ export async function getDCADPropertyById(dcadPropertyId: string, taxYear: numbe
     const first = extractRows(body).map(mapProperty).find((x): x is DCADProperty => x != null);
     return first ?? null;
   } catch (err) {
-    log.error("DCAD search by id failed", { err: err instanceof Error ? err.message : String(err), dcadPropertyId, taxYear });
+    log.error("DCAD search by id failed", { err: err instanceof Error ? err.message : String(err), dcadPropertyId, taxYear, office });
     return null;
   }
 }

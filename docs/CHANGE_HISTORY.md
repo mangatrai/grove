@@ -18,15 +18,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## FIX-PT-6 (2026-05-30): DCAD comparable search — env-var office, street-name fallback, debug logging
+## FIX-PT-6 (2026-05-30): DCAD comparable search — county-derived office, street-name fallback, debug logging
 
 - **Type:** Bug fix — closes #47
 - **What:**
-  - `getToken()` now reads `env.DCAD_OFFICE` (default `"Denton"`) instead of hardcoding the county. Set `DCAD_OFFICE=Collin` (or other CAD name) for properties in a different county.
-  - `searchDCADByAddress()` refactored around private `doSearch()`. If the full address returns 0 results, automatically retries with street-name-only (house number stripped, city/state/zip stripped at first comma). Covers the case where TrueProdigy's fulltext index doesn't match on full civic addresses.
-  - When `doSearch()` extracts 0 rows, logs `responseSnippet` (first 500 chars of raw API body) at `debug` level — surfaces the actual TrueProdigy response envelope without spamming `info` logs.
-  - `log.info("DCAD search start")` now includes `office` field so county is visible in logs.
-- **Files:** `backend/src/modules/protest/dcad.service.ts`, `backend/src/config/env.ts`, `docs/ADMIN_GUIDE.md`
+  - `getToken(office)` now accepts the office name as a parameter. `searchDCADByAddress()` and `getDCADPropertyById()` accept `county: string | null | undefined` and derive the TrueProdigy office via `countyToOffice()` — strips " County" suffix so "Denton County" → "Denton". Token cache is keyed by office name so multi-county households work correctly.
+  - Call site in `protest.routes.ts` passes `property.valuationDetail?.county` — the county Redfin already stored in the DB — eliminating any hardcoded or config-based assumption about which CAD to query.
+  - `searchDCADByAddress()` refactored around private `doSearch()`. If the full address returns 0 results, automatically retries with street-name-only (house number stripped, city/state/zip stripped at first comma).
+  - When `doSearch()` extracts 0 rows, logs `responseSnippet` (first 500 chars of raw API body) at `debug` level.
+- **Files:** `backend/src/modules/protest/dcad.service.ts`, `backend/src/modules/protest/protest.routes.ts`
 - **GitHub:** https://github.com/mangatrai/grove/issues/47
 
 ## UX-PT-7 (2026-05-29): TaxProtestPage — chat drawer Mantine theming + dark/light mode fix

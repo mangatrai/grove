@@ -415,7 +415,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
         const queryAddress = typeof args.address === "string" && args.address.trim().length > 0
           ? args.address.trim()
           : address;
-        const comps = await searchDCADByAddress(queryAddress, year);
+        const comps = await searchDCADByAddress(queryAddress, year, property.valuationDetail?.county);
         compsAdded = await saveCADComps(property.id, householdId, year, comps);
         toolResult = formatCompSummary(comps);
       } else if (call.function.name === "update_strategy") {
