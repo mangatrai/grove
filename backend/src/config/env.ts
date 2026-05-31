@@ -108,7 +108,9 @@ const envSchema = z.object({
   /** RealtyAPI key for Redfin property valuation (D-2). Optional — feature degrades to manual if absent. */
   REALTY_API_KEY: z.string().optional(),
   /** Tavily search API key for AI protest assistant web search (PT-3). Optional — search_web tool disabled if absent. */
-  TAVILY_API_KEY: z.string().optional()
+  TAVILY_API_KEY: z.string().optional(),
+  /** TrueProdigy CAD public API office name for DCAD comparable search (PT-6). Default "Denton". */
+  DCAD_OFFICE: z.string().default("Denton")
 });
 
 export const env = envSchema.parse(process.env);

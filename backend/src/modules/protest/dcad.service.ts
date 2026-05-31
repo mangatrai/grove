@@ -1,4 +1,5 @@
 import { log } from "../../logger.js";
+import { env } from "../../config/env.js";
 
 type TokenCache = {
   token: string;
@@ -115,6 +116,12 @@ function mapProperty(row: Record<string, unknown>): DCADProperty | null {
   };
 }
 
+/** Strip house number and city/state/zip — "123 Main St, Frisco, TX 75036" → "Main St". */
+function toStreetName(address: string): string {
+  const withoutNumber = address.replace(/^\d+\s+/, "");
+  return withoutNumber.split(",")[0].trim();
+}
+
 export async function getToken(): Promise<string> {
   const now = Date.now();
   if (tokenCache && tokenCache.expiresAt - now > 60_000) {
@@ -124,7 +131,7 @@ export async function getToken(): Promise<string> {
     const res = await fetch(DCAD_AUTH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ office: "Denton" })
+      body: JSON.stringify({ office: env.DCAD_OFFICE })
     });
     if (!res.ok) {
       throw new Error(`token fetch failed (${res.status})`);
@@ -147,29 +154,56 @@ export async function getToken(): Promise<string> {
   }
 }
 
+async function doSearch(token: string, query: string, taxYear: number): Promise<DCADProperty[]> {
+  const res = await fetch(DCAD_SEARCH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      pYear: { operator: "=", value: String(taxYear) },
+      fullTextSearch: { operator: "match", value: query }
+    })
+  });
+  if (!res.ok) {
+    log.error("DCAD search HTTP error", { status: res.status, query, taxYear });
+    return [];
+  }
+  const body = (await res.json()) as TrueProdigySearchResponse;
+  const rows = extractRows(body);
+  if (rows.length === 0) {
+    log.debug("DCAD search: 0 rows", {
+      query,
+      taxYear,
+      responseSnippet: JSON.stringify(body).slice(0, 500)
+    });
+  }
+  return rows.map(mapProperty).filter((x): x is DCADProperty => x != null);
+}
+
 export async function searchDCADByAddress(address: string, taxYear: number): Promise<DCADProperty[]> {
-  log.info("DCAD search start", { address, taxYear });
+  log.info("DCAD search start", { address, taxYear, office: env.DCAD_OFFICE });
   try {
     const token = await getToken();
-    const res = await fetch(DCAD_SEARCH_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        pYear: { operator: "=", value: String(taxYear) },
-        fullTextSearch: { operator: "match", value: address }
-      })
-    });
-    if (!res.ok) {
-      log.error("DCAD search failed", { status: res.status, address, taxYear });
-      return [];
+
+    const results = await doSearch(token, address, taxYear);
+    if (results.length > 0) {
+      log.info("DCAD search success", { address, taxYear, count: results.length });
+      return results;
     }
-    const body = (await res.json()) as TrueProdigySearchResponse;
-    const mapped = extractRows(body).map(mapProperty).filter((x): x is DCADProperty => x != null);
-    log.info("DCAD search success", { address, taxYear, count: mapped.length });
-    return mapped;
+
+    // Fallback: street name only (strip house number + city/state/zip)
+    const streetName = toStreetName(address);
+    if (streetName !== address && streetName.length > 0) {
+      log.info("DCAD search: retrying with street name only", { streetName, taxYear });
+      const fallback = await doSearch(token, streetName, taxYear);
+      log.info("DCAD search fallback result", { streetName, taxYear, count: fallback.length });
+      return fallback;
+    }
+
+    log.info("DCAD search: no results", { address, taxYear });
+    return [];
   } catch (err) {
     log.error("DCAD search exception", { err: err instanceof Error ? err.message : String(err), address, taxYear });
     return [];
@@ -201,4 +235,3 @@ export async function getDCADPropertyById(dcadPropertyId: string, taxYear: numbe
     return null;
   }
 }
-

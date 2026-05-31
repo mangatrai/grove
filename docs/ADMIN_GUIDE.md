@@ -354,6 +354,7 @@ Required for the property tax protest chat assistant and live web search:
 | `OPENAI_API_KEY` | OpenAI API key; used for the protest chat tool-use loop (GPT-4.1) |
 | `OPENAI_MODEL` | Chat model ID; default `gpt-4.1` |
 | `TAVILY_API_KEY` | Tavily search API key for live web search during protest chat. Free tier: 1 000 credits/month. If unset, the `search_web` tool responds with a graceful "not configured" message — all other protest features remain functional. |
+| `DCAD_OFFICE` | TrueProdigy CAD public API office name used when fetching comparable properties. Default: `"Denton"`. Set to the CAD office name for your county if your property is not in Denton County (e.g. `"Collin"` for Collin CAD). |
 
 **Document generation** (`GET /api/protest/:id/evidence-packet?format=pdf|docx`) uses `pdfkit` for PDF and the `docx` npm package for Word. Both are bundled dependencies — no system fonts or native binaries required.
 
