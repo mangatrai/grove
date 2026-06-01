@@ -359,10 +359,12 @@ export async function addCADComp(
   propertyId: string,
   householdId: string,
   taxYear: number,
-  comp: ManualComp
+  comp: ManualComp,
+  existingCadPropertyId?: string
 ): Promise<string> {
   const id = randomUUID();
-  const cadPropertyId = `manual-${randomUUID()}`;
+  const cadPropertyId = existingCadPropertyId ?? `manual-${randomUUID()}`;
+  const rawJson = existingCadPropertyId ? {} : { manual: true };
   const perSqft =
     comp.assessedValueUsd != null && comp.sqft != null && comp.sqft > 0
       ? comp.assessedValueUsd / comp.sqft
@@ -386,7 +388,7 @@ export async function addCADComp(
     comp.baths ?? null,
     comp.yearBuilt ?? null,
     perSqft,
-    { manual: true }
+    rawJson
   );
   return cadPropertyId;
 }

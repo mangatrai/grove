@@ -11,6 +11,7 @@ import {
   Grid,
   Group,
   List,
+  Loader,
   NumberInput,
   Paper,
   Progress,
@@ -35,6 +36,7 @@ import {
   IconMessage,
   IconPaperclip,
   IconPlus,
+  IconSearch,
   IconSend,
   IconTrash,
   IconX,
@@ -120,6 +122,18 @@ type SoldComp = {
   soldDate: string | null;
   pricePerSqft: number | null;
   listPrice: number | null;
+};
+
+type CadSearchResult = {
+  cadPropertyId: string;
+  address: string | null;
+  city: string | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  yearBuilt: number | null;
+  assessedValue: number | null;
+  marketValue: number | null;
 };
 
 type Toast = { id: number; color: "green" | "red" | "yellow"; message: string };
@@ -255,6 +269,7 @@ export function TaxProtestPage() {
   const [staleAlertDismissed, setStaleAlertDismissed] = useState(false);
   const [excludedSoldComps, setExcludedSoldComps] = useState<string[]>([]);
   const [addCompOpen, setAddCompOpen] = useState(false);
+  const [addCompStep, setAddCompStep] = useState<"search" | "results" | "manual">("search");
   const [addCompAddress, setAddCompAddress] = useState("");
   const [addCompCity, setAddCompCity] = useState("");
   const [addCompSqft, setAddCompSqft] = useState<number | "">("");
@@ -263,6 +278,10 @@ export function TaxProtestPage() {
   const [addCompYearBuilt, setAddCompYearBuilt] = useState<number | "">("");
   const [addCompAssessed, setAddCompAssessed] = useState<number | "">("");
   const [addingComp, setAddingComp] = useState(false);
+  const [cadSearchLoading, setCadSearchLoading] = useState(false);
+  const [cadSearchResults, setCadSearchResults] = useState<CadSearchResult[]>([]);
+  const [selectedCadResult, setSelectedCadResult] = useState<CadSearchResult | null>(null);
+  const [cadHasAdapter, setCadHasAdapter] = useState(true);
   const [removingCompId, setRemovingCompId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -447,40 +466,89 @@ export function TaxProtestPage() {
     }
   }, [propertyId, worksheet, year, excludedSoldComps, addToast]);
 
-  const submitAddComp = useCallback(async () => {
+  const resetAddCompModal = useCallback(() => {
+    setAddCompStep("search");
+    setAddCompAddress("");
+    setAddCompCity("");
+    setAddCompSqft("");
+    setAddCompBeds("");
+    setAddCompBaths("");
+    setAddCompYearBuilt("");
+    setAddCompAssessed("");
+    setCadSearchResults([]);
+    setSelectedCadResult(null);
+    setCadHasAdapter(true);
+    setCadSearchLoading(false);
+  }, []);
+
+  const searchCad = useCallback(async () => {
     if (!propertyId || !addCompAddress.trim()) return;
+    setCadSearchLoading(true);
+    setCadSearchResults([]);
+    setSelectedCadResult(null);
+    try {
+      const res = await apiJson<{ results: CadSearchResult[]; hasAdapter: boolean }>(
+        `/api/protest/${encodeURIComponent(propertyId)}/cad-search?address=${encodeURIComponent(addCompAddress.trim())}&year=${year}`
+      );
+      setCadHasAdapter(res.hasAdapter);
+      if (!res.hasAdapter) {
+        setAddCompStep("manual");
+      } else {
+        setCadSearchResults(res.results);
+        setAddCompStep("results");
+      }
+    } catch {
+      addToast("red", "CAD search failed");
+    } finally {
+      setCadSearchLoading(false);
+    }
+  }, [propertyId, addCompAddress, year, addToast]);
+
+  const submitAddComp = useCallback(async () => {
+    if (!propertyId) return;
+    if (!selectedCadResult && !addCompAddress.trim()) return;
     setAddingComp(true);
     try {
-      const body = {
-        year: Number(year),
-        addressLine1: addCompAddress.trim(),
-        city: addCompCity.trim() || null,
-        sqft: addCompSqft !== "" ? Number(addCompSqft) : null,
-        beds: addCompBeds !== "" ? Number(addCompBeds) : null,
-        baths: addCompBaths !== "" ? Number(addCompBaths) : null,
-        yearBuilt: addCompYearBuilt !== "" ? Number(addCompYearBuilt) : null,
-        assessedValueUsd: addCompAssessed !== "" ? Number(addCompAssessed) : null
-      };
+      let body: Record<string, unknown>;
+      if (selectedCadResult) {
+        body = {
+          year: Number(year),
+          cadPropertyId: selectedCadResult.cadPropertyId,
+          addressLine1: selectedCadResult.address ?? addCompAddress.trim(),
+          city: selectedCadResult.city,
+          sqft: selectedCadResult.sqft,
+          beds: selectedCadResult.beds,
+          baths: selectedCadResult.baths,
+          yearBuilt: selectedCadResult.yearBuilt,
+          assessedValueUsd: selectedCadResult.assessedValue,
+          marketValueUsd: selectedCadResult.marketValue,
+        };
+      } else {
+        body = {
+          year: Number(year),
+          addressLine1: addCompAddress.trim(),
+          city: addCompCity.trim() || null,
+          sqft: addCompSqft !== "" ? Number(addCompSqft) : null,
+          beds: addCompBeds !== "" ? Number(addCompBeds) : null,
+          baths: addCompBaths !== "" ? Number(addCompBaths) : null,
+          yearBuilt: addCompYearBuilt !== "" ? Number(addCompYearBuilt) : null,
+          assessedValueUsd: addCompAssessed !== "" ? Number(addCompAssessed) : null,
+        };
+      }
       const res = await apiJson<{ ok: boolean; comps: CADComp[] }>(
         `/api/protest/${encodeURIComponent(propertyId)}/comps`,
         { method: "POST", body: JSON.stringify(body) }
       );
       if (Array.isArray(res.comps)) setComps(res.comps);
       addToast("green", "Comp added");
+      resetAddCompModal();
       setAddCompOpen(false);
-      setAddCompAddress("");
-      setAddCompCity("");
-      setAddCompSqft("");
-      setAddCompBeds("");
-      setAddCompBaths("");
-      setAddCompYearBuilt("");
-      setAddCompAssessed("");
     } catch (err) {
       addToast("red", err instanceof Error ? err.message : "Failed to add comp");
     } finally {
       setAddingComp(false);
     }
-  }, [propertyId, year, addCompAddress, addCompCity, addCompSqft, addCompBeds, addCompBaths, addCompYearBuilt, addCompAssessed, addToast]);
+  }, [propertyId, year, selectedCadResult, addCompAddress, addCompCity, addCompSqft, addCompBeds, addCompBaths, addCompYearBuilt, addCompAssessed, addToast, resetAddCompModal]);
 
   const send = useCallback(async () => {
     if (!propertyId || !worksheet) return;
@@ -1345,78 +1413,167 @@ export function TaxProtestPage() {
       {/* Add Comp modal */}
       <Modal
         opened={addCompOpen}
-        onClose={() => setAddCompOpen(false)}
+        onClose={() => { resetAddCompModal(); setAddCompOpen(false); }}
         title="Add Comparable Property"
         size="md"
       >
-        <Stack gap="sm">
-          <TextInput
-            label="Address"
-            required
-            value={addCompAddress}
-            onChange={(e) => setAddCompAddress(e.currentTarget.value)}
-            placeholder="123 Main St"
-          />
-          <TextInput
-            label="City"
-            value={addCompCity}
-            onChange={(e) => setAddCompCity(e.currentTarget.value)}
-            placeholder="Dallas"
-          />
-          <Group grow>
-            <NumberInput
-              label="Sqft"
-              value={addCompSqft}
-              onChange={(v) => setAddCompSqft(v as number | "")}
-              min={1}
-              max={100000}
-              thousandSeparator=","
+        {addCompStep === "search" && (
+          <Stack gap="sm">
+            <TextInput
+              label="Address"
+              required
+              value={addCompAddress}
+              onChange={(e) => setAddCompAddress(e.currentTarget.value)}
+              placeholder="123 Oak Lane"
+              onKeyDown={(e) => { if (e.key === "Enter" && addCompAddress.trim() && !cadSearchLoading) void searchCad(); }}
             />
-            <NumberInput
-              label="Beds"
-              value={addCompBeds}
-              onChange={(v) => setAddCompBeds(v as number | "")}
-              min={0}
-              max={50}
-              decimalScale={0}
+            <Group justify="space-between" mt="xs">
+              <Button
+                variant="subtle"
+                size="sm"
+                onClick={() => setAddCompStep("manual")}
+              >
+                Add manually instead
+              </Button>
+              <Button
+                leftSection={cadSearchLoading ? <Loader size={14} color="white" /> : <IconSearch size={16} />}
+                disabled={!addCompAddress.trim() || cadSearchLoading}
+                onClick={() => void searchCad()}
+              >
+                Search CAD
+              </Button>
+            </Group>
+          </Stack>
+        )}
+
+        {addCompStep === "results" && (
+          <Stack gap="sm">
+            {cadSearchResults.length === 0 ? (
+              <Text size="sm" c="dimmed">No CAD records found for that address.</Text>
+            ) : (
+              cadSearchResults.map((r) => (
+                <Card
+                  key={r.cadPropertyId}
+                  withBorder
+                  style={{
+                    cursor: "pointer",
+                    borderColor: selectedCadResult?.cadPropertyId === r.cadPropertyId ? "var(--mantine-color-blue-5)" : undefined,
+                    borderWidth: selectedCadResult?.cadPropertyId === r.cadPropertyId ? 2 : 1,
+                  }}
+                  onClick={() => setSelectedCadResult(r)}
+                  p="sm"
+                >
+                  <Text fw={500} size="sm">
+                    {r.address ?? "(no address)"}{r.city ? `, ${r.city}` : ""}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {[
+                      r.sqft ? `${r.sqft.toLocaleString()} sqft` : null,
+                      r.beds != null ? `${r.beds} bd` : null,
+                      r.baths != null ? `${r.baths} ba` : null,
+                      r.yearBuilt ? `Built ${r.yearBuilt}` : null,
+                    ].filter(Boolean).join(" · ")}
+                  </Text>
+                  {(r.assessedValue != null || r.marketValue != null) && (
+                    <Text size="xs" c="dimmed">
+                      {r.assessedValue != null ? `Assessed: $${r.assessedValue.toLocaleString()}` : ""}
+                      {r.marketValue != null ? `${r.assessedValue != null ? " · " : ""}Market: $${r.marketValue.toLocaleString()}` : ""}
+                    </Text>
+                  )}
+                </Card>
+              ))
+            )}
+            <Group justify="space-between" mt="xs">
+              <Group gap="xs">
+                <Button variant="subtle" size="sm" onClick={() => setAddCompStep("search")}>Back</Button>
+                <Button variant="subtle" size="sm" onClick={() => setAddCompStep("manual")}>Enter manually</Button>
+              </Group>
+              <Button
+                loading={addingComp}
+                disabled={!selectedCadResult}
+                onClick={() => void submitAddComp()}
+              >
+                Add Selected
+              </Button>
+            </Group>
+          </Stack>
+        )}
+
+        {addCompStep === "manual" && (
+          <Stack gap="sm">
+            {!cadHasAdapter && (
+              <Alert color="yellow" title="County not connected">
+                This county isn&apos;t linked to a CAD database yet. Enter property details manually.
+              </Alert>
+            )}
+            <TextInput
+              label="Address"
+              required
+              value={addCompAddress}
+              onChange={(e) => setAddCompAddress(e.currentTarget.value)}
+              placeholder="123 Oak Lane"
             />
-            <NumberInput
-              label="Baths"
-              value={addCompBaths}
-              onChange={(v) => setAddCompBaths(v as number | "")}
-              min={0}
-              max={50}
-              step={0.5}
+            <TextInput
+              label="City"
+              value={addCompCity}
+              onChange={(e) => setAddCompCity(e.currentTarget.value)}
+              placeholder="Dallas"
             />
-          </Group>
-          <Group grow>
-            <NumberInput
-              label="Year Built"
-              value={addCompYearBuilt}
-              onChange={(v) => setAddCompYearBuilt(v as number | "")}
-              min={1800}
-              max={2100}
-            />
-            <NumberInput
-              label="CAD Assessed Value ($)"
-              value={addCompAssessed}
-              onChange={(v) => setAddCompAssessed(v as number | "")}
-              min={0}
-              prefix="$"
-              thousandSeparator=","
-            />
-          </Group>
-          <Group justify="flex-end" mt="xs">
-            <Button variant="default" onClick={() => setAddCompOpen(false)}>Cancel</Button>
-            <Button
-              loading={addingComp}
-              disabled={!addCompAddress.trim()}
-              onClick={() => void submitAddComp()}
-            >
-              Add Comp
-            </Button>
-          </Group>
-        </Stack>
+            <Group grow>
+              <NumberInput
+                label="Sqft"
+                value={addCompSqft}
+                onChange={(v) => setAddCompSqft(v as number | "")}
+                min={1}
+                max={100000}
+                thousandSeparator=","
+              />
+              <NumberInput
+                label="Beds"
+                value={addCompBeds}
+                onChange={(v) => setAddCompBeds(v as number | "")}
+                min={0}
+                max={50}
+                decimalScale={0}
+              />
+              <NumberInput
+                label="Baths"
+                value={addCompBaths}
+                onChange={(v) => setAddCompBaths(v as number | "")}
+                min={0}
+                max={50}
+                step={0.5}
+              />
+            </Group>
+            <Group grow>
+              <NumberInput
+                label="Year Built"
+                value={addCompYearBuilt}
+                onChange={(v) => setAddCompYearBuilt(v as number | "")}
+                min={1800}
+                max={2100}
+              />
+              <NumberInput
+                label="CAD Assessed Value ($)"
+                value={addCompAssessed}
+                onChange={(v) => setAddCompAssessed(v as number | "")}
+                min={0}
+                prefix="$"
+                thousandSeparator=","
+              />
+            </Group>
+            <Group justify="space-between" mt="xs">
+              <Button variant="subtle" size="sm" onClick={() => setAddCompStep("search")}>Back</Button>
+              <Button
+                loading={addingComp}
+                disabled={!addCompAddress.trim()}
+                onClick={() => void submitAddComp()}
+              >
+                Add Comp
+              </Button>
+            </Group>
+          </Stack>
+        )}
       </Modal>
 
       {/* Chat drawer */}

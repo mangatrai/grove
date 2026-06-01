@@ -299,8 +299,70 @@ protestRouter.get("/:propertyId/dcad/appeal", async (req: AuthenticatedRequest, 
   res.status(200).json({ appeals });
 });
 
+const cadSearchQuerySchema = z.object({
+  address: z.string().min(1).max(200),
+  year: z.coerce.number().int().min(2000).max(2100).optional()
+});
+
+type CadSearchResult = {
+  cadPropertyId: string;
+  address: string | null;
+  city: string | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  yearBuilt: number | null;
+  assessedValue: number | null;
+  marketValue: number | null;
+};
+
+protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const query = cadSearchQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  const provider = property.cadProvider ?? inferCadProvider(property.state);
+  if (!provider) {
+    res.status(200).json({ results: [], hasAdapter: false });
+    return;
+  }
+  const adapter = getCadAdapter(provider);
+  if (!adapter) {
+    res.status(200).json({ results: [], hasAdapter: false });
+    return;
+  }
+  const year = query.data.year ?? new Date().getUTCFullYear();
+  const comps = await adapter.searchByAddress(query.data.address, year);
+  const results: CadSearchResult[] = comps.map((c) => ({
+    cadPropertyId: c.cadPropertyId,
+    address: c.address,
+    city: c.city,
+    sqft: c.sqft,
+    beds: c.beds,
+    baths: c.baths,
+    yearBuilt: c.yearBuilt,
+    assessedValue: c.assessedValue,
+    marketValue: c.marketValue,
+  }));
+  log.info("cad-search", { propertyId: params.data.propertyId, address: query.data.address, count: results.length });
+  res.status(200).json({ results, hasAdapter: true });
+});
+
 const addCompBodySchema = z.object({
   year: z.number().int().min(2000).max(2100),
+  cadPropertyId: z.string().max(100).optional(),
   addressLine1: z.string().min(1).max(200),
   city: z.string().max(100).nullable().optional(),
   sqft: z.number().int().min(1).max(100_000).nullable().optional(),
@@ -367,9 +429,9 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
     assessedValueUsd: parsed.data.assessedValueUsd ?? null,
     marketValueUsd: parsed.data.marketValueUsd ?? null
   };
-  const cadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp);
+  const cadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp, parsed.data.cadPropertyId);
   const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
-  log.info("protest comp added manually", { propertyId: property.id, year: parsed.data.year, cadPropertyId });
+  log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, cadPropertyId, source: parsed.data.cadPropertyId ? "cad-search" : "manual" });
   res.status(201).json({ ok: true, cadPropertyId, comps });
 });
 

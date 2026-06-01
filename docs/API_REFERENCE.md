@@ -224,14 +224,50 @@ Hard-deletes a CAD comparable property from `protest_comp_cad`. Use this to remo
 
 ---
 
+### `GET /api/protest/:propertyId/cad-search`
+
+Searches the registered CAD adapter (e.g. DCAD) for comparable properties by address. Used by the Add Comp modal before adding a real CAD record. Returns `hasAdapter: false` when the property's county has no registered adapter.
+
+**Query params:** `address` (required), `year` (optional, defaults to current year).
+
+**Response 200:**
+```json
+{
+  "hasAdapter": true,
+  "results": [
+    {
+      "cadPropertyId": "12345-abcde",
+      "address": "789 Pine Rd",
+      "city": "Flower Mound",
+      "sqft": 2100,
+      "beds": 4,
+      "baths": 2.0,
+      "yearBuilt": 2003,
+      "assessedValue": 480000,
+      "marketValue": 510000
+    }
+  ]
+}
+```
+
+When `hasAdapter` is `false`, `results` is always `[]`. The `raw` field from the adapter is stripped before returning.
+
+**404:** Property not found.
+
+---
+
 ### `POST /api/protest/:propertyId/comps`
 
-Manually adds a comparable property to the Unequal Appraisal evidence table. Generates a stable `cadPropertyId` of the form `manual-<uuid>`.
+Adds a comparable property to the Unequal Appraisal evidence table. Supports two modes:
+
+- **CAD-sourced:** Supply `cadPropertyId` from a prior `GET .../cad-search` result; the real CAD ID is stored directly (no `manual-` prefix). `raw_json` is `{}`.
+- **Manual:** Omit `cadPropertyId`; a stable ID of the form `manual-<uuid>` is generated. `raw_json` is `{ "manual": true }`.
 
 **Request body:**
 ```json
 {
   "year": 2026,
+  "cadPropertyId": "12345-abcde",
   "addressLine1": "789 Pine Rd",
   "city": "Flower Mound",
   "sqft": 2100,
@@ -239,17 +275,17 @@ Manually adds a comparable property to the Unequal Appraisal evidence table. Gen
   "baths": 2,
   "yearBuilt": 2003,
   "assessedValueUsd": 480000,
-  "marketValueUsd": null
+  "marketValueUsd": 510000
 }
 ```
 
-`city`, `sqft`, `beds`, `baths`, `yearBuilt`, `assessedValueUsd`, `marketValueUsd` are all optional. `per_sqft_usd` is computed from `assessedValueUsd / sqft` if both are provided.
+`cadPropertyId`, `city`, `sqft`, `beds`, `baths`, `yearBuilt`, `assessedValueUsd`, `marketValueUsd` are all optional. `per_sqft_usd` is computed from `assessedValueUsd / sqft` if both are provided.
 
 **Response 201:**
 ```json
 {
   "ok": true,
-  "cadPropertyId": "manual-<uuid>",
+  "cadPropertyId": "12345-abcde",
   "comps": [ /* full updated comp list for the property/year */ ]
 }
 ```

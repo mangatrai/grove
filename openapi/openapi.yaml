@@ -984,10 +984,53 @@ paths:
                 properties:
                   ok: { type: boolean }
         "404": { description: Property not found }
+  /api/protest/{propertyId}/cad-search:
+    get:
+      tags: [protest]
+      summary: Search CAD adapter by address for comparable property lookup
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: address
+          in: query
+          required: true
+          schema: { type: string }
+        - name: year
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Search results (empty when no adapter registered for this county)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hasAdapter: { type: boolean }
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        cadPropertyId: { type: string }
+                        address: { type: string, nullable: true }
+                        city: { type: string, nullable: true }
+                        sqft: { type: integer, nullable: true }
+                        beds: { type: number, nullable: true }
+                        baths: { type: number, nullable: true }
+                        yearBuilt: { type: integer, nullable: true }
+                        assessedValue: { type: integer, nullable: true }
+                        marketValue: { type: integer, nullable: true }
+        "400": { description: Validation error }
+        "404": { description: Property not found }
   /api/protest/{propertyId}/comps:
     post:
       tags: [protest]
-      summary: Manually add a comparable property to the Unequal Appraisal evidence table
+      summary: Add a comparable property (CAD-sourced or manual) to the Unequal Appraisal evidence table
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1003,6 +1046,7 @@ paths:
               required: [year, addressLine1]
               properties:
                 year: { type: integer }
+                cadPropertyId: { type: string, description: "Real CAD ID from cad-search; omit to generate manual-<uuid>" }
                 addressLine1: { type: string }
                 city: { type: string, nullable: true }
                 sqft: { type: integer, nullable: true }

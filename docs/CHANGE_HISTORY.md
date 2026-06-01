@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-15 (2026-06-01): Fix Add Comp modal — address-only CAD search with real IDs
+
+- **Type:** Feature — closes #65
+- **What changed:**
+  - Add Comp modal is now a 3-step flow: **search → results → (manual fallback)**
+  - Step 1: user types an address and clicks "Search CAD". Backend calls the registered CAD adapter (`searchByAddress`) and returns stripped `CadSearchResult[]` plus `hasAdapter` flag.
+  - Step 2 (CAD results): shows selectable result cards (address, sqft/bd/ba/year, assessed/market values). "Add Selected" submits with the real `cadPropertyId` from the adapter — no more `manual-<uuid>` for CAD-sourced comps.
+  - Auto-advance to manual step when `hasAdapter: false` (county not supported) with an explanatory alert.
+  - Step 3 (manual): all original fields preserved; "Back" returns to search.
+- **New backend route:** `GET /api/protest/:propertyId/cad-search?address=&year=` — adapter lookup, `raw` field stripped before response.
+- **Backend service:** `addCADComp` now accepts optional `existingCadPropertyId`; if supplied, uses it directly and sets `raw_json: {}` instead of `{ manual: true }`.
+- **Files changed:**
+  - `backend/src/modules/protest/protest.routes.ts` — new route + `cadPropertyId` in `addCompBodySchema`
+  - `backend/src/modules/protest/protest-worksheet.service.ts` — `addCADComp` signature
+  - `frontend/src/pages/TaxProtestPage.tsx` — new state, `searchCad`/`resetAddCompModal` callbacks, modal JSX
+- **GitHub:** closes #65
+
+---
+
 ## PT-14 (2026-06-01): CAD adapter pattern — generic county support
 
 - **Type:** Architecture refactor — closes #64
