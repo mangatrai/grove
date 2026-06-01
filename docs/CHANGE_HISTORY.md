@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-8 (2026-06-01): DCAD account APIs — value history, taxable breakdown, appeal status
+
+- **Type:** Feature — closes #56
+- **What:** Three new protest routes backed by TrueProdigy account-specific endpoints:
+  - `GET /api/protest/:propertyId/dcad/value-history` → year-by-year CAD tax assessed value history
+  - `GET /api/protest/:propertyId/dcad/taxable` → current taxable value breakdown after exemptions
+  - `GET /api/protest/:propertyId/dcad/appeal` → live protest/appeal status from DCAD
+- **How subject is identified:** `triggerDCADBackfill` (and the `fetch_dcad_comps` AI tool call) now extract `dcadPropertyId` and `dcadPAccountId` from DCAD search results and store them on the `property` row. Subject is matched by house number prefix in the search address; falls back to the first result.
+- **Migration:** `0059_pt8_dcad_property_ids.sql` — adds `dcad_property_id TEXT` and `dcad_p_account_id BIGINT` to `property` table.
+- **Files:** `backend/db/migrations/0059_pt8_dcad_property_ids.sql`, `backend/src/modules/household/property.service.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/protest/dcad.service.ts` (unchanged — functions already written), `openapi/openapi.yaml`
+- **GitHub:** https://github.com/mangatrai/grove/issues/56
+
+---
+
 ## FIX-RE-6 (2026-06-01): Add diagnostic logging for empty Redfin comps on protest page
 
 - **Type:** Observability improvement — refs #45

@@ -951,6 +951,85 @@ paths:
                         pricePerSqft: { type: number, nullable: true }
                         listPrice: { type: number, nullable: true }
         "404": { description: Property not found }
+  /api/protest/{propertyId}/dcad/value-history:
+    get:
+      tags: [protest]
+      summary: DCAD assessed value history for subject property (year-by-year tax values)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Year-by-year CAD tax assessed value history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        year: { type: integer }
+                        marketValue: { type: number, nullable: true }
+                        assessedValue: { type: number, nullable: true }
+                        landValue: { type: number, nullable: true }
+                        improvementValue: { type: number, nullable: true }
+        "404": { description: Property not found or DCAD account ID not on file }
+  /api/protest/{propertyId}/dcad/taxable:
+    get:
+      tags: [protest]
+      summary: DCAD taxable value breakdown (after exemptions) for subject property
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Taxable value rows after exemptions from DCAD
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taxable:
+                    type: array
+                    items: { type: object }
+        "404": { description: Property not found or DCAD account ID not on file }
+  /api/protest/{propertyId}/dcad/appeal:
+    get:
+      tags: [protest]
+      summary: DCAD protest/appeal status for subject property
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Current protest/appeal records from DCAD
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  appeals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        year: { type: string, nullable: true }
+                        status: { type: string, nullable: true }
+                        hearingDate: { type: string, nullable: true }
+                        filedDate: { type: string, nullable: true }
+        "404": { description: Property not found or DCAD account ID not on file }
   /api/protest/{propertyId}/comps:
     get:
       tags: [protest]

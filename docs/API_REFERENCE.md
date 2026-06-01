@@ -213,6 +213,51 @@ Returns Redfin comparable sold properties from the property's stored `valuation_
 
 ---
 
+### `GET /api/protest/:propertyId/dcad/value-history`
+
+Returns year-by-year CAD tax assessed value history for the subject property from TrueProdigy. Requires `dcad_p_account_id` to be stored on the property (set automatically after the first DCAD comps search).
+
+**Response 200:**
+```json
+{
+  "history": [
+    { "year": 2026, "marketValue": 1101813, "assessedValue": 1101813, "landValue": 188000, "improvementValue": 913813 },
+    { "year": 2025, "marketValue": 1025000, "assessedValue": 1025000, "landValue": 188000, "improvementValue": 837000 }
+  ]
+}
+```
+
+**404:** Property not found, or DCAD account ID not on file (trigger a DCAD comps search first via the protest chat).
+
+---
+
+### `GET /api/protest/:propertyId/dcad/taxable`
+
+Returns the current taxable value breakdown after exemptions (homestead, over-65, etc.) for the subject property. Raw rows from TrueProdigy — shape varies by county/exemption type.
+
+**Response 200:** `{ "taxable": [ { ... } ] }`
+
+**404:** Property not found, or DCAD account ID not on file.
+
+---
+
+### `GET /api/protest/:propertyId/dcad/appeal`
+
+Returns live protest/appeal status from DCAD for the subject property.
+
+**Response 200:**
+```json
+{
+  "appeals": [
+    { "year": "2026", "status": "Pending", "hearingDate": null, "filedDate": "2026-05-01" }
+  ]
+}
+```
+
+**404:** Property not found, or DCAD account ID not on file.
+
+---
+
 ### `GET /api/protest/:propertyId/evidence-packet?year=YYYY&format=pdf|docx`
 
 Generates an ARB evidence packet for the given property and tax year. Returns PDF (default) or Word DOCX.

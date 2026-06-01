@@ -264,10 +264,31 @@ export async function triggerDCADBackfill(
   if (comps.length > 0) {
     await getOrCreateWorksheet(propertyId, householdId, year);
     await saveCADComps(propertyId, householdId, year, comps);
+    await saveDCADSubjectIds(propertyId, comps, address);
     log.info("triggerDCADBackfill: done", { propertyId, year, count: comps.length });
   } else {
     log.info("triggerDCADBackfill: no comps found", { propertyId, address });
   }
+}
+
+/** Identify subject property in DCAD search results and persist its IDs on the property row. */
+export async function saveDCADSubjectIds(
+  propertyId: string,
+  comps: DCADProperty[],
+  searchAddress: string
+): Promise<void> {
+  const houseNum = searchAddress.match(/^\d+/)?.[0];
+  const subject = houseNum
+    ? (comps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? comps[0])
+    : comps[0];
+  if (!subject?.pAccountId) return;
+  await qExec(
+    `UPDATE property SET dcad_property_id = ?, dcad_p_account_id = ? WHERE id = ?`,
+    subject.dcadPropertyId,
+    subject.pAccountId,
+    propertyId
+  );
+  log.info("saveDCADSubjectIds: stored", { propertyId, dcadPropertyId: subject.dcadPropertyId, dcadPAccountId: subject.pAccountId });
 }
 
 export type ProtestComp = {
