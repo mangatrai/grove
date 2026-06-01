@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import { qAll, qExec, qGet } from "../../db/query.js";
-import { searchDCADByAddress, type DCADProperty } from "./dcad.service.js";
 import { log } from "../../logger.js";
+import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
+import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
 
 export type ConversationTurn = {
   role: "user" | "assistant" | "tool";
@@ -208,15 +209,15 @@ export async function saveCADComps(
   propertyId: string,
   householdId: string,
   taxYear: number,
-  comps: DCADProperty[]
+  comps: CadProperty[]
 ): Promise<number> {
   for (const comp of comps) {
     await qExec(
       `INSERT INTO protest_comp_cad
-        (id, household_id, property_id, tax_year, dcad_property_id, address_line1, city, assessed_value_usd,
+        (id, household_id, property_id, tax_year, cad_property_id, address_line1, city, assessed_value_usd,
          market_value_usd, sqft, beds, baths, year_built, per_sqft_usd, raw_json, fetched_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-       ON CONFLICT (property_id, tax_year, dcad_property_id)
+       ON CONFLICT (property_id, tax_year, cad_property_id)
        DO UPDATE SET
          address_line1 = EXCLUDED.address_line1,
          city = EXCLUDED.city,
@@ -233,7 +234,7 @@ export async function saveCADComps(
       householdId,
       propertyId,
       taxYear,
-      comp.dcadPropertyId,
+      comp.cadPropertyId,
       comp.address,
       comp.city,
       comp.assessedValue,
@@ -250,49 +251,60 @@ export async function saveCADComps(
 }
 
 /**
- * Async DCAD data fetch triggered at property creation for TX properties.
+ * Async CAD data fetch triggered at property creation. Infers adapter from state.
  * Called fire-and-forget — errors are logged but do not block the create response.
  */
-export async function triggerDCADBackfill(
+export async function triggerCadBackfill(
   propertyId: string,
   householdId: string,
-  address: string
+  address: string,
+  state?: string | null
 ): Promise<void> {
+  const provider = inferCadProvider(state);
+  if (!provider) {
+    log.info("triggerCadBackfill: no adapter for state", { propertyId, state });
+    return;
+  }
+  const adapter = getCadAdapter(provider);
+  if (!adapter) return;
+
   const year = new Date().getUTCFullYear();
-  log.info("triggerDCADBackfill: starting", { propertyId, address, year });
-  const comps = await searchDCADByAddress(address, year, null);
+  log.info("triggerCadBackfill: starting", { propertyId, address, year, provider });
+  const comps = await adapter.searchByAddress(address, year);
   if (comps.length > 0) {
     await getOrCreateWorksheet(propertyId, householdId, year);
     await saveCADComps(propertyId, householdId, year, comps);
-    await saveDCADSubjectIds(propertyId, comps, address);
-    log.info("triggerDCADBackfill: done", { propertyId, year, count: comps.length });
+    await saveCadSubjectIds(propertyId, provider, comps, address);
+    log.info("triggerCadBackfill: done", { propertyId, year, count: comps.length, provider });
   } else {
-    log.info("triggerDCADBackfill: no comps found", { propertyId, address });
+    log.info("triggerCadBackfill: no comps found", { propertyId, address, provider });
   }
 }
 
-/** Identify subject property in DCAD search results and persist its IDs on the property row. */
-export async function saveDCADSubjectIds(
+/** Identify subject property in CAD search results and persist its IDs on the property row. */
+export async function saveCadSubjectIds(
   propertyId: string,
-  comps: DCADProperty[],
+  cadProvider: string,
+  comps: CadProperty[],
   searchAddress: string
 ): Promise<void> {
   const houseNum = searchAddress.match(/^\d+/)?.[0];
   const subject = houseNum
     ? (comps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? comps[0])
     : comps[0];
-  if (!subject?.pAccountId) return;
+  if (!subject?.accountId) return;
   await qExec(
-    `UPDATE property SET dcad_property_id = ?, dcad_p_account_id = ? WHERE id = ?`,
-    subject.dcadPropertyId,
-    subject.pAccountId,
+    `UPDATE property SET cad_property_id = ?, cad_account_id = ?, cad_provider = ? WHERE id = ?`,
+    subject.cadPropertyId,
+    subject.accountId,
+    cadProvider,
     propertyId
   );
-  log.info("saveDCADSubjectIds: stored", { propertyId, dcadPropertyId: subject.dcadPropertyId, dcadPAccountId: subject.pAccountId });
+  log.info("saveCadSubjectIds: stored", { propertyId, cadPropertyId: subject.cadPropertyId, cadAccountId: subject.accountId, cadProvider });
 }
 
 export type ProtestComp = {
-  dcadPropertyId: string;
+  cadPropertyId: string;
   addressLine1: string | null;
   city: string | null;
   assessedValueUsd: number | null;
@@ -305,7 +317,7 @@ export type ProtestComp = {
 };
 
 type CompRow = {
-  dcad_property_id: string;
+  cad_property_id: string;
   address_line1: string | null;
   city: string | null;
   assessed_value_usd: number | null;
@@ -321,14 +333,14 @@ export async function deleteCADComp(
   propertyId: string,
   householdId: string,
   taxYear: number,
-  dcadPropertyId: string
+  cadPropertyId: string
 ): Promise<void> {
   await qExec(
-    `DELETE FROM protest_comp_cad WHERE property_id = ? AND household_id = ? AND tax_year = ? AND dcad_property_id = ?`,
+    `DELETE FROM protest_comp_cad WHERE property_id = ? AND household_id = ? AND tax_year = ? AND cad_property_id = ?`,
     propertyId,
     householdId,
     taxYear,
-    dcadPropertyId
+    cadPropertyId
   );
 }
 
@@ -350,21 +362,21 @@ export async function addCADComp(
   comp: ManualComp
 ): Promise<string> {
   const id = randomUUID();
-  const dcadPropertyId = `manual-${randomUUID()}`;
+  const cadPropertyId = `manual-${randomUUID()}`;
   const perSqft =
     comp.assessedValueUsd != null && comp.sqft != null && comp.sqft > 0
       ? comp.assessedValueUsd / comp.sqft
       : null;
   await qExec(
     `INSERT INTO protest_comp_cad
-      (id, household_id, property_id, tax_year, dcad_property_id, address_line1, city, assessed_value_usd,
+      (id, household_id, property_id, tax_year, cad_property_id, address_line1, city, assessed_value_usd,
        market_value_usd, sqft, beds, baths, year_built, per_sqft_usd, raw_json, fetched_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
     id,
     householdId,
     propertyId,
     taxYear,
-    dcadPropertyId,
+    cadPropertyId,
     comp.addressLine1,
     comp.city ?? null,
     comp.assessedValueUsd ?? null,
@@ -376,7 +388,7 @@ export async function addCADComp(
     perSqft,
     { manual: true }
   );
-  return dcadPropertyId;
+  return cadPropertyId;
 }
 
 export async function setExcludedSoldComps(
@@ -418,7 +430,7 @@ export async function listWorksheetComps(
   taxYear: number
 ): Promise<ProtestComp[]> {
   const rows = await qAll<CompRow>(
-    `SELECT dcad_property_id, address_line1, city, assessed_value_usd, market_value_usd,
+    `SELECT cad_property_id, address_line1, city, assessed_value_usd, market_value_usd,
             sqft, beds, baths, year_built, per_sqft_usd
        FROM protest_comp_cad
       WHERE household_id = ? AND property_id = ? AND tax_year = ?
@@ -428,7 +440,7 @@ export async function listWorksheetComps(
     taxYear
   );
   return rows.map((r) => ({
-    dcadPropertyId: r.dcad_property_id,
+    cadPropertyId: r.cad_property_id,
     addressLine1: r.address_line1,
     city: r.city,
     assessedValueUsd: r.assessed_value_usd != null ? Number(r.assessed_value_usd) : null,

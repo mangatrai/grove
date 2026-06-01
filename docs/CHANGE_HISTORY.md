@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-14 (2026-06-01): CAD adapter pattern — generic county support
+
+- **Type:** Architecture refactor — closes #64
+- **Migration:** `0061_pt14_cad_adapter_columns.sql`
+  - `property.dcad_property_id` → `property.cad_property_id`
+  - `property.dcad_p_account_id` → `property.cad_account_id`
+  - `property.cad_provider TEXT` (new) — stores adapter key e.g. `"dcad"`
+  - `protest_comp_cad.dcad_property_id` → `protest_comp_cad.cad_property_id`
+  - Unique index renamed `uq_protest_comp_property_year_cadid`
+- **New files:** `backend/src/modules/protest/cad-adapters/`
+  - `cad-adapter.types.ts` — `CadProperty`, `CadValueHistoryEntry`, `CadAppealEntry`, `CadAdapter` interface
+  - `dcad.adapter.ts` — `DcadAdapter` implements `CadAdapter`; wraps existing `dcad.service.ts` API calls
+  - `registry.ts` — `getCadAdapter(provider)`, `inferCadProvider(state)` (TX → `"dcad"`)
+- **Updated services/routes:**
+  - `protest-worksheet.service.ts` — `triggerDCADBackfill` → `triggerCadBackfill` (uses registry, supports any state); `saveDCADSubjectIds` → `saveCadSubjectIds` (sets `cad_provider` column); `saveCADComps`/`deleteCADComp`/`addCADComp`/`listWorksheetComps` use `cad_property_id` column; `ProtestComp.dcadPropertyId` → `cadPropertyId`
+  - `protest.routes.ts` — all DCAD data routes (`/dcad/value-history`, `/dcad/taxable`, `/dcad/appeal`) now use registry + adapter; `fetch_dcad_comps` AI tool uses adapter; no direct `dcad.service.ts` imports remain in routes
+  - `household.routes.ts` — `triggerDCADBackfill` → `triggerCadBackfill`; state guard removed (adapter handles unsupported states gracefully)
+  - `property.service.ts` — `PropertyRecord.dcadPropertyId`/`dcadPAccountId` → `cadPropertyId`/`cadAccountId`/`cadProvider`
+  - `frontend/src/pages/PropertyDetailPage.tsx` + `TaxProtestPage.tsx` — field renames to match
+- **Adding Shelby County TN:** create `shelby.adapter.ts` implementing `CadAdapter`, register as `{ "shelby-tn": new ShelbyAdapter() }` in `registry.ts`, add `inferCadProvider("TN")` → `"shelby-tn"`.
+
+---
+
 ## PT-10 (2026-06-01): Comp management UI — Add/Remove on evidence tables
 
 - **Type:** Feature — closes #60

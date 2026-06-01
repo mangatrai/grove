@@ -33,7 +33,7 @@ import {
   type PropertyUse
 } from "./property.service.js";
 import { isRealtyApiConfigured, type ValuationDetail } from "./realty-api.service.js";
-import { triggerDCADBackfill } from "../protest/protest-worksheet.service.js";
+import { triggerCadBackfill } from "../protest/protest-worksheet.service.js";
 import { qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 
@@ -417,9 +417,9 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
 
     // Fire-and-forget DCAD data backfill for TX properties (non-blocking)
     const addressParts = [parsed.data.addressLine1, parsed.data.city, parsed.data.state, parsed.data.zip].filter(Boolean);
-    if (parsed.data.state === "TX" && addressParts.length >= 3) {
-      void triggerDCADBackfill(id, householdId, addressParts.join(", ")).catch((err) => {
-        log.warn("DCAD backfill failed at property creation", {
+    if (addressParts.length >= 3) {
+      void triggerCadBackfill(id, householdId, addressParts.join(", "), parsed.data.state).catch((err) => {
+        log.warn("CAD backfill failed at property creation", {
           propertyId: id,
           err: err instanceof Error ? err.message : String(err)
         });

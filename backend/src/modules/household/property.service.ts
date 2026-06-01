@@ -30,8 +30,9 @@ export type PropertyRecord = {
   linkedMortgageId: string | null;
   linkedMortgageInstitution: string | null;
   linkedMortgageMask: string | null;
-  dcadPropertyId: string | null;
-  dcadPAccountId: number | null;
+  cadPropertyId: string | null;
+  cadAccountId: number | null;
+  cadProvider: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -70,8 +71,9 @@ type PropertyRow = {
   linked_mortgage_id: string | null;
   linked_mortgage_institution: string | null;
   linked_mortgage_mask: string | null;
-  dcad_property_id: string | null;
-  dcad_p_account_id: number | null;
+  cad_property_id: string | null;
+  cad_account_id: number | null;
+  cad_provider: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -109,8 +111,9 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     linkedMortgageId: row.linked_mortgage_id ?? null,
     linkedMortgageInstitution: row.linked_mortgage_institution ?? null,
     linkedMortgageMask: row.linked_mortgage_mask ?? null,
-    dcadPropertyId: row.dcad_property_id ?? null,
-    dcadPAccountId: row.dcad_p_account_id ?? null,
+    cadPropertyId: row.cad_property_id ?? null,
+    cadAccountId: row.cad_account_id ?? null,
+    cadProvider: row.cad_provider ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

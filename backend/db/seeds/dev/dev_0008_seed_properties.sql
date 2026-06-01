@@ -125,7 +125,7 @@ VALUES (
 
 INSERT INTO protest_comp_cad (
   id, household_id, property_id, tax_year,
-  dcad_property_id, address_line1, city,
+  cad_property_id, address_line1, city,
   assessed_value_usd, sqft, beds, baths, year_built, per_sqft_usd,
   raw_json, fetched_at
 ) VALUES

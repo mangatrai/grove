@@ -8,7 +8,8 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { getProperty, refreshPropertyValuation } from "../household/property.service.js";
-import { searchDCADByAddress, getDCADValueHistory, getDCADTaxable, getDCADAppeal } from "./dcad.service.js";
+import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
+import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
 import {
   appendConversationTurn,
   getOrCreateWorksheet,
@@ -20,7 +21,7 @@ import {
   type ProtestStatus,
   type StrategyJson,
   saveCADComps,
-  saveDCADSubjectIds,
+  saveCadSubjectIds,
   deleteCADComp,
   addCADComp,
   type ManualComp,
@@ -111,7 +112,7 @@ Texas property tax protest grounds:
 You have access to tools to fetch DCAD comparable properties and update the protest worksheet. When the user asks about analysis or strategy, use both grounds and tell them which is stronger based on available data. Be concise and direct.`;
 }
 
-function formatCompSummary(comps: Awaited<ReturnType<typeof searchDCADByAddress>>): string {
+function formatCompSummary(comps: CadProperty[]): string {
   if (comps.length === 0) return "No comparable properties found.";
   const rows = comps.map((c) => {
     const perSqft = c.assessedValue != null && c.sqft != null && c.sqft > 0 ? c.assessedValue / c.sqft : null;
@@ -235,11 +236,16 @@ protestRouter.get("/:propertyId/dcad/value-history", async (req: AuthenticatedRe
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  if (!property.dcadPAccountId) {
-    res.status(404).json({ message: "DCAD account ID not on file — trigger a DCAD comps search first" });
+  if (!property.cadAccountId || !property.cadProvider) {
+    res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
     return;
   }
-  const history = await getDCADValueHistory(property.dcadPAccountId, property.valuationDetail?.county ?? null);
+  const adapter = getCadAdapter(property.cadProvider);
+  if (!adapter) {
+    res.status(404).json({ message: `No CAD adapter registered for provider: ${property.cadProvider}` });
+    return;
+  }
+  const history = await adapter.getValueHistory(property.cadAccountId);
   res.status(200).json({ history });
 });
 
@@ -255,11 +261,16 @@ protestRouter.get("/:propertyId/dcad/taxable", async (req: AuthenticatedRequest,
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  if (!property.dcadPAccountId) {
-    res.status(404).json({ message: "DCAD account ID not on file — trigger a DCAD comps search first" });
+  if (!property.cadAccountId || !property.cadProvider) {
+    res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
     return;
   }
-  const taxable = await getDCADTaxable(property.dcadPAccountId, property.valuationDetail?.county ?? null);
+  const adapter = getCadAdapter(property.cadProvider);
+  if (!adapter) {
+    res.status(404).json({ message: `No CAD adapter registered for provider: ${property.cadProvider}` });
+    return;
+  }
+  const taxable = await adapter.getTaxable(property.cadAccountId);
   res.status(200).json({ taxable });
 });
 
@@ -275,11 +286,16 @@ protestRouter.get("/:propertyId/dcad/appeal", async (req: AuthenticatedRequest, 
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  if (!property.dcadPAccountId) {
-    res.status(404).json({ message: "DCAD account ID not on file — trigger a DCAD comps search first" });
+  if (!property.cadAccountId || !property.cadProvider) {
+    res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
     return;
   }
-  const appeals = await getDCADAppeal(property.dcadPAccountId, property.valuationDetail?.county ?? null);
+  const adapter = getCadAdapter(property.cadProvider);
+  if (!adapter) {
+    res.status(404).json({ message: `No CAD adapter registered for provider: ${property.cadProvider}` });
+    return;
+  }
+  const appeals = await adapter.getAppeal(property.cadAccountId);
   res.status(200).json({ appeals });
 });
 
@@ -300,7 +316,7 @@ const soldCompExclusionBodySchema = z.object({
   excluded: z.array(z.string()).max(100)
 });
 
-protestRouter.delete("/:propertyId/comps/:dcadPropertyId", async (req: AuthenticatedRequest, res) => {
+protestRouter.delete("/:propertyId/comps/:cadPropertyId", async (req: AuthenticatedRequest, res) => {
   const params = propertyIdSchema.safeParse(req.params);
   if (!params.success) {
     res.status(400).json({ errors: params.error.issues });
@@ -312,15 +328,15 @@ protestRouter.delete("/:propertyId/comps/:dcadPropertyId", async (req: Authentic
     return;
   }
   const year = query.data.year ?? thisYear();
-  const { dcadPropertyId } = req.params;
+  const { cadPropertyId } = req.params;
   const householdId = req.authUser!.householdId;
   const property = await getProperty(params.data.propertyId, householdId);
   if (!property) {
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  await deleteCADComp(property.id, householdId, year, dcadPropertyId);
-  log.info("protest comp deleted", { propertyId: property.id, year, dcadPropertyId });
+  await deleteCADComp(property.id, householdId, year, cadPropertyId);
+  log.info("protest comp deleted", { propertyId: property.id, year, cadPropertyId });
   res.status(200).json({ ok: true });
 });
 
@@ -351,10 +367,10 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
     assessedValueUsd: parsed.data.assessedValueUsd ?? null,
     marketValueUsd: parsed.data.marketValueUsd ?? null
   };
-  const dcadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp);
+  const cadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp);
   const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
-  log.info("protest comp added manually", { propertyId: property.id, year: parsed.data.year, dcadPropertyId });
-  res.status(201).json({ ok: true, dcadPropertyId, comps });
+  log.info("protest comp added manually", { propertyId: property.id, year: parsed.data.year, cadPropertyId });
+  res.status(201).json({ ok: true, cadPropertyId, comps });
 });
 
 protestRouter.patch("/:propertyId/sold-comps/exclusions", async (req: AuthenticatedRequest, res) => {
@@ -585,12 +601,18 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
         const queryAddress = typeof args.address === "string" && args.address.trim().length > 0
           ? args.address.trim()
           : address;
-        const comps = await searchDCADByAddress(queryAddress, year, property.valuationDetail?.county);
-        compsAdded = await saveCADComps(property.id, householdId, year, comps);
-        if (comps.length > 0) {
-          await saveDCADSubjectIds(property.id, comps, queryAddress);
+        const provider = property.cadProvider ?? inferCadProvider(property.state);
+        const cadAdapter = provider ? getCadAdapter(provider) : null;
+        if (!cadAdapter) {
+          toolResult = "No CAD adapter configured for this property's county.";
+        } else {
+          const comps = await cadAdapter.searchByAddress(queryAddress, year);
+          compsAdded = await saveCADComps(property.id, householdId, year, comps);
+          if (comps.length > 0) {
+            await saveCadSubjectIds(property.id, provider!, comps, queryAddress);
+          }
+          toolResult = formatCompSummary(comps);
         }
-        toolResult = formatCompSummary(comps);
       } else if (call.function.name === "update_strategy") {
         const parsed = (() => {
           try {

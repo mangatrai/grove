@@ -957,7 +957,7 @@ paths:
                     type: array
                     items: { type: string }
         "404": { description: Property not found }
-  /api/protest/{propertyId}/comps/{dcadPropertyId}:
+  /api/protest/{propertyId}/comps/{cadPropertyId}:
     delete:
       tags: [protest]
       summary: Hard-delete a CAD comparable property
@@ -967,7 +967,7 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - name: dcadPropertyId
+        - name: cadPropertyId
           in: path
           required: true
           schema: { type: string }
@@ -1020,7 +1020,7 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
-                  dcadPropertyId: { type: string }
+                  cadPropertyId: { type: string }
                   comps: { type: array, items: { type: object } }
         "400": { description: Validation error }
         "404": { description: Property not found }
@@ -1163,7 +1163,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        dcadPropertyId: { type: string }
+                        cadPropertyId: { type: string }
                         addressLine1: { type: string, nullable: true }
                         city: { type: string, nullable: true }
                         assessedValueUsd: { type: number, nullable: true }

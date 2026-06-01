@@ -165,7 +165,7 @@ Returns saved DCAD comparable properties for a property and tax year.
 {
   "comps": [
     {
-      "dcadPropertyId": "12345-000000",
+      "cadPropertyId": "12345-000000",
       "addressLine1": "456 Elm St",
       "city": "Flower Mound",
       "assessedValueUsd": 320000,
@@ -214,7 +214,7 @@ Returns Redfin comparable sold properties from the property's stored `valuation_
 
 ---
 
-### `DELETE /api/protest/:propertyId/comps/:dcadPropertyId?year=YYYY`
+### `DELETE /api/protest/:propertyId/comps/:cadPropertyId?year=YYYY`
 
 Hard-deletes a CAD comparable property from `protest_comp_cad`. Use this to remove a comp that was fetched from DCAD or added manually. Year defaults to current year.
 
@@ -226,7 +226,7 @@ Hard-deletes a CAD comparable property from `protest_comp_cad`. Use this to remo
 
 ### `POST /api/protest/:propertyId/comps`
 
-Manually adds a comparable property to the Unequal Appraisal evidence table. Generates a stable `dcadPropertyId` of the form `manual-<uuid>`.
+Manually adds a comparable property to the Unequal Appraisal evidence table. Generates a stable `cadPropertyId` of the form `manual-<uuid>`.
 
 **Request body:**
 ```json
@@ -249,7 +249,7 @@ Manually adds a comparable property to the Unequal Appraisal evidence table. Gen
 ```json
 {
   "ok": true,
-  "dcadPropertyId": "manual-<uuid>",
+  "cadPropertyId": "manual-<uuid>",
   "comps": [ /* full updated comp list for the property/year */ ]
 }
 ```

@@ -96,7 +96,7 @@ type Worksheet = {
 };
 
 type CADComp = {
-  dcadPropertyId: string;
+  cadPropertyId: string;
   addressLine1: string | null;
   city: string | null;
   assessedValueUsd: number | null;
@@ -414,15 +414,15 @@ export function TaxProtestPage() {
     [soldComps, excludedSoldComps]
   );
 
-  const removeCADComp = useCallback(async (dcadPropertyId: string) => {
+  const removeCADComp = useCallback(async (cadPropertyId: string) => {
     if (!propertyId) return;
-    setRemovingCompId(dcadPropertyId);
+    setRemovingCompId(cadPropertyId);
     try {
       await apiJson(
-        `/api/protest/${encodeURIComponent(propertyId)}/comps/${encodeURIComponent(dcadPropertyId)}?year=${year}`,
+        `/api/protest/${encodeURIComponent(propertyId)}/comps/${encodeURIComponent(cadPropertyId)}?year=${year}`,
         { method: "DELETE" }
       );
-      setComps((prev) => prev.filter((c) => c.dcadPropertyId !== dcadPropertyId));
+      setComps((prev) => prev.filter((c) => c.cadPropertyId !== cadPropertyId));
       addToast("green", "Comp removed");
     } catch {
       addToast("red", "Failed to remove comp");
@@ -965,7 +965,7 @@ export function TaxProtestPage() {
                   {comps.map((comp) => {
                     const color = vsSubjectColor(comp.perSqftUsd, subjectAssessedPpsf);
                     return (
-                      <Table.Tr key={comp.dcadPropertyId}>
+                      <Table.Tr key={comp.cadPropertyId}>
                         <Table.Td>{comp.addressLine1 ?? "—"}</Table.Td>
                         <Table.Td>{comp.city ?? "—"}</Table.Td>
                         <Table.Td style={{ textAlign: "right" }}>
@@ -988,8 +988,8 @@ export function TaxProtestPage() {
                               variant="subtle"
                               color="red"
                               size="sm"
-                              loading={removingCompId === comp.dcadPropertyId}
-                              onClick={() => void removeCADComp(comp.dcadPropertyId)}
+                              loading={removingCompId === comp.cadPropertyId}
+                              onClick={() => void removeCADComp(comp.cadPropertyId)}
                               aria-label="Remove comp"
                             >
                               <IconTrash size={13} />

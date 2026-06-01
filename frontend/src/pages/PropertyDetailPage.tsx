@@ -52,7 +52,7 @@ type PropertyRecord = {
   linkedMortgageId: string | null;
   linkedMortgageInstitution: string | null;
   linkedMortgageMask: string | null;
-  dcadPAccountId?: number | null;
+  cadAccountId?: number | null;
 };
 
 type EquityPoint = { date: string; avm: number; mortgageBalance: number; equity: number };
@@ -158,9 +158,9 @@ export function PropertyDetailPage() {
   }, [token, load, loadEquityHistory]);
 
   useEffect(() => {
-    if (!token || !property?.dcadPAccountId) return;
-    void loadDcadValueHistory(property.dcadPAccountId);
-  }, [token, property?.dcadPAccountId, loadDcadValueHistory]);
+    if (!token || !property?.cadAccountId) return;
+    void loadDcadValueHistory(property.cadAccountId);
+  }, [token, property?.cadAccountId, loadDcadValueHistory]);
 
   const refreshValuation = useCallback(async () => {
     if (!propertyId) return;
