@@ -52,6 +52,7 @@ type PropertyRecord = {
   linkedMortgageId: string | null;
   linkedMortgageInstitution: string | null;
   linkedMortgageMask: string | null;
+  dcadPAccountId?: number | null;
 };
 
 type EquityPoint = { date: string; avm: number; mortgageBalance: number; equity: number };
@@ -112,6 +113,7 @@ export function PropertyDetailPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [equityHistory, setEquityHistory] = useState<EquityPoint[]>([]);
+  const [dcadValueHistory, setDcadValueHistory] = useState<{ year: number; assessedValue: number | null }[]>([]);
 
   const load = useCallback(async () => {
     if (!propertyId) return;
@@ -137,11 +139,28 @@ export function PropertyDetailPage() {
     }
   }, [propertyId]);
 
+  const loadDcadValueHistory = useCallback(async (_pAccountId: number) => {
+    if (!propertyId) return;
+    try {
+      const res = await apiJson<{ history: { year: number; assessedValue: number | null }[] }>(
+        `/api/protest/${encodeURIComponent(propertyId)}/dcad/value-history`
+      );
+      if (Array.isArray(res.history)) setDcadValueHistory(res.history);
+    } catch {
+      // non-critical — chart falls back to Redfin data
+    }
+  }, [propertyId]);
+
   useEffect(() => {
     if (!token) return;
     void load();
     void loadEquityHistory();
   }, [token, load, loadEquityHistory]);
+
+  useEffect(() => {
+    if (!token || !property?.dcadPAccountId) return;
+    void loadDcadValueHistory(property.dcadPAccountId);
+  }, [token, property?.dcadPAccountId, loadDcadValueHistory]);
 
   const refreshValuation = useCallback(async () => {
     if (!propertyId) return;
@@ -183,9 +202,20 @@ export function PropertyDetailPage() {
         });
       }
     }
+    // DCAD is authoritative for tax assessed values. Override Redfin for all years DCAD has data; add years Redfin lacks.
+    const dcadMap = new Map(dcadValueHistory.map((e) => [e.year, e.assessedValue]));
+    for (const entry of dcadValueHistory) {
+      if (!history.some((h) => h.year === entry.year)) {
+        history.push({ year: entry.year, assessedValue: entry.assessedValue, taxesDue: null });
+      }
+    }
+    for (const row of history) {
+      const dcadVal = dcadMap.get(row.year);
+      if (dcadVal != null) row.assessedValue = dcadVal;
+    }
     return [...history]
       .sort((a, b) => a.year - b.year)
-      .slice(-5)
+      .slice(-7)
       .map((row, idx, arr) => {
         const prev = idx > 0 ? arr[idx - 1].assessedValue : null;
         const yoy = prev != null && prev > 0 && row.assessedValue != null
@@ -197,7 +227,7 @@ export function PropertyDetailPage() {
           yoyLabel: yoy == null ? "" : `${yoy >= 0 ? "+" : ""}${yoy.toFixed(1)}%`
         };
       });
-  }, [property?.valuationDetail]);
+  }, [property?.valuationDetail, dcadValueHistory]);
 
   if (!token) return <Navigate to="/" replace />;
   if (!propertyId) return <Navigate to="/real-estate" replace />;
@@ -433,7 +463,7 @@ export function PropertyDetailPage() {
         <Grid.Col span={{ base: 12, md: 6 }}>
           <Card withBorder radius="md" p="md" h="100%">
             <Text size="xs" tt="uppercase" fw={600} lts="0.06em" c="dimmed" mb="sm">Value · Mortgage · Equity</Text>
-            {equityHistory.length >= 2 ? (
+            {equityHistory.length >= 1 ? (
               <Box h={240}>
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={equityHistory} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
@@ -442,16 +472,16 @@ export function PropertyDetailPage() {
                     <YAxis tickFormatter={(v: number) => `$${Math.round(v / 1000)}k`} tick={{ fontSize: 10 }} width={48} />
                     <Tooltip formatter={(v: number | string, name: string) => [money(Number(v)), name]} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Line type="monotone" dataKey="avm" stroke="var(--mantine-color-green-7)" strokeWidth={2} dot={false} name="AVM" />
+                    <Line type="monotone" dataKey="avm" stroke="var(--mantine-color-green-7)" strokeWidth={2} dot={{ r: 4 }} name="AVM" />
                     {hasMortgage ? (
-                      <Line type="monotone" dataKey="mortgageBalance" stroke="var(--mantine-color-red-5)" strokeWidth={2} dot={false} name="Mortgage" />
+                      <Line type="monotone" dataKey="mortgageBalance" stroke="var(--mantine-color-red-5)" strokeWidth={2} dot={{ r: 4 }} name="Mortgage" />
                     ) : null}
-                    <Line type="monotone" dataKey="equity" stroke="var(--mantine-color-blue-5)" strokeWidth={2} dot={false} name="Equity" />
+                    <Line type="monotone" dataKey="equity" stroke="var(--mantine-color-blue-5)" strokeWidth={2} dot={{ r: 4 }} name="Equity" />
                   </LineChart>
                 </ResponsiveContainer>
               </Box>
             ) : (
-              <Text c="dimmed" size="sm">Add value snapshots to track equity over time.</Text>
+              <Text c="dimmed" size="sm">Refresh valuation to start tracking equity over time.</Text>
             )}
           </Card>
         </Grid.Col>

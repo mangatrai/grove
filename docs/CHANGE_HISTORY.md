@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-RE-8 (2026-06-01): Equity chart empty with single snapshot; Assessment History missing DCAD years
+
+- **Type:** Bug fix + feature integration — refs #45
+- **Issues fixed:**
+  1. **Equity chart**: Frontend required `equityHistory.length >= 2` before showing chart. First-time property always has exactly 1 snapshot. Changed threshold to `>= 1`. Added `dot={{ r: 4 }}` to lines so single-point data is visible. Updated empty state message.
+  2. **Assessment History**: Chart only consumed `valuationDetail.taxHistory` (Redfin public records). 2023/2024 data missing because Redfin didn't have it. Now fetches `GET /api/protest/:propertyId/dcad/value-history` after property loads (if `dcadPAccountId` is set). **DCAD is the authority for tax assessed values** — for every year DCAD has data, it overrides Redfin's assessedValue. DCAD also adds years Redfin didn't return. Slice extended from 5 to 7 years.
+- **Frontend:** `PropertyDetailPage.tsx` — added `dcadPAccountId` to type, `dcadValueHistory` state, `loadDcadValueHistory` callback, secondary useEffect, DCAD merge in `chartData` useMemo.
+- **Files:** `frontend/src/pages/PropertyDetailPage.tsx`
+
+---
+
 ## PT-8 (2026-06-01): DCAD account APIs — value history, taxable breakdown, appeal status
 
 - **Type:** Feature — closes #56
