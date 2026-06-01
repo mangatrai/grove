@@ -303,7 +303,22 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
 
   // Comparable sales
   const rawComps = avmRoot?.comparables;
+  if (!Array.isArray(rawComps) || rawComps.length === 0) {
+    log.warn("RealtyAPI: comparables missing or empty", {
+      rawCompsType: typeof rawComps,
+      isArray: Array.isArray(rawComps),
+      avmRootKeys: avmRoot ? Object.keys(avmRoot).slice(0, 15) : null
+    });
+  }
   const comps = parseComps(rawComps);
+  if (Array.isArray(rawComps) && rawComps.length > 0 && comps.length === 0) {
+    log.warn("RealtyAPI: parseComps returned 0 from non-empty array — structure mismatch", {
+      rawCount: rawComps.length,
+      firstEntryKeys: rawComps[0] && typeof rawComps[0] === "object" ? Object.keys(rawComps[0] as object).slice(0, 10) : null
+    });
+  } else {
+    log.info("RealtyAPI: comparables parsed", { rawCount: Array.isArray(rawComps) ? rawComps.length : 0, parsedCount: comps.length });
+  }
 
   // Subject property physical characteristics (from public records)
   const basicInfo = pubRecords?.basicInfo as Record<string, unknown> | undefined;

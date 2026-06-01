@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-RE-6 (2026-06-01): Add diagnostic logging for empty Redfin comps on protest page
+
+- **Type:** Observability improvement — refs #45
+- **What:** `GET /:propertyId/sold-comps` returns an empty array when `property.valuation_detail_json.comps` is empty, but nothing surfaced why. Root cause unknown (API may omit `avmRoot.comparables` in `/detailsbyid` responses; or `parseComps` structure may no longer match).
+- **Fix:** Added two warn-level logs in `parseRedfinResponse()` (`realty-api.service.ts`):
+  1. Logs `avmRoot` keys when `comparables` is missing or empty — distinguishes "API didn't return it" from "it's there but parse fails".
+  2. Logs first-entry keys when `parseComps` discards all entries from a non-empty array — surfaces structure mismatch.
+  Also added `compsCount` to `refreshPropertyValuation: done` log in `property.service.ts`.
+- **FIX-RE-7 note:** 24h cooldown on `refreshPropertyValuation()` was already implemented at `property.service.ts:366-371`. Issue #46 closed as already-fixed.
+- **Files:** `backend/src/modules/household/realty-api.service.ts`, `backend/src/modules/household/property.service.ts`
+- **GitHub:** https://github.com/mangatrai/grove/issues/45
+
+---
+
 ## FIX-ESPP-12 (2026-05-31): ESPP salary/other deduction not summed across dual payslips — test gap + stale data fix
 
 - **Type:** Test coverage gap + data-repair endpoint — closes #55

@@ -417,7 +417,7 @@ export async function refreshPropertyValuation(
     apiProvider: "redfin"
   });
 
-  log.info("refreshPropertyValuation: done", { propertyId, estimate: result.estimate });
+  log.info("refreshPropertyValuation: done", { propertyId, estimate: result.estimate, compsCount: result.detail.comps.length });
   return { ok: true, estimate: result.estimate, fetchedAt: today };
 }
 
