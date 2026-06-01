@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-10 (2026-06-01): Comp management UI — Add/Remove on evidence tables
+
+- **Type:** Feature — closes #60
+- **Backend:**
+  - Migration `0060_pt10_excluded_sold_comps.sql` — adds `excluded_sold_comps_json TEXT DEFAULT '[]'` to `protest_worksheet`.
+  - `protest-worksheet.service.ts` — added `deleteCADComp`, `addCADComp`, `setExcludedSoldComps`, `getExcludedSoldComps` (plus `ManualComp` type).
+  - `protest.routes.ts`:
+    - `DELETE /api/protest/:propertyId/comps/:dcadPropertyId?year=` — hard-deletes a CAD comp from `protest_comp_cad`.
+    - `POST /api/protest/:propertyId/comps` — manually adds a CAD comp (body: `year`, `addressLine1`, optional `city/sqft/beds/baths/yearBuilt/assessedValueUsd/marketValueUsd`). Returns updated `comps` array.
+    - `PATCH /api/protest/:propertyId/sold-comps/exclusions` — saves an exclusion list of Redfin sold-comp addresses per worksheet year.
+    - `GET /api/protest/:propertyId/sold-comps` — now accepts `?year=` and returns `excluded: string[]` alongside `comps`.
+    - Evidence packet (`GET /api/protest/:propertyId/evidence-packet`) — now filters sold comps by `excluded_sold_comps_json` so the PDF/DOCX respects removals.
+- **Frontend:** `TaxProtestPage.tsx`
+  - Market Value Evidence table — trash icon per row (optimistically updates `excludedSoldComps`, PATCHes exclusions). Header count shows `(N hidden)` when comps are removed.
+  - Unequal Appraisal Evidence table — trash icon per row (DELETEs comp), "Add Comp" button opens a modal form (address, city, sqft, beds, baths, year built, assessed value). Backend returns updated comp list on success.
+- **Files:** `backend/db/migrations/0060_pt10_excluded_sold_comps.sql`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `openapi/openapi.yaml`, `docs/API_REFERENCE.md`
+- **GitHub:** closes #60
+
+---
+
 ## FIX-RE-8 (2026-06-01): Equity chart empty with single snapshot; Assessment History missing DCAD years
 
 - **Type:** Bug fix + feature integration — refs #45

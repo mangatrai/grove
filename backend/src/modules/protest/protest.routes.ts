@@ -20,7 +20,12 @@ import {
   type ProtestStatus,
   type StrategyJson,
   saveCADComps,
-  saveDCADSubjectIds
+  saveDCADSubjectIds,
+  deleteCADComp,
+  addCADComp,
+  type ManualComp,
+  setExcludedSoldComps,
+  getExcludedSoldComps
 } from "./protest-worksheet.service.js";
 import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
@@ -179,6 +184,12 @@ protestRouter.get("/:propertyId/sold-comps", async (req: AuthenticatedRequest, r
     res.status(400).json({ errors: params.error.issues });
     return;
   }
+  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
+    return;
+  }
+  const year = query.data.year ?? thisYear();
   const householdId = req.authUser!.householdId;
   const property = await getProperty(params.data.propertyId, householdId);
   if (!property) {
@@ -208,7 +219,8 @@ protestRouter.get("/:propertyId/sold-comps", async (req: AuthenticatedRequest, r
       listPrice: asNumber(r.listPrice)
     };
   });
-  res.status(200).json({ comps });
+  const excluded = await getExcludedSoldComps(property.id, householdId, year);
+  res.status(200).json({ comps, excluded });
 });
 
 protestRouter.get("/:propertyId/dcad/value-history", async (req: AuthenticatedRequest, res) => {
@@ -269,6 +281,102 @@ protestRouter.get("/:propertyId/dcad/appeal", async (req: AuthenticatedRequest, 
   }
   const appeals = await getDCADAppeal(property.dcadPAccountId, property.valuationDetail?.county ?? null);
   res.status(200).json({ appeals });
+});
+
+const addCompBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  addressLine1: z.string().min(1).max(200),
+  city: z.string().max(100).nullable().optional(),
+  sqft: z.number().int().min(1).max(100_000).nullable().optional(),
+  beds: z.number().min(0).max(50).nullable().optional(),
+  baths: z.number().min(0).max(50).nullable().optional(),
+  yearBuilt: z.number().int().min(1800).max(2100).nullable().optional(),
+  assessedValueUsd: z.number().int().min(0).nullable().optional(),
+  marketValueUsd: z.number().int().min(0).nullable().optional()
+});
+
+const soldCompExclusionBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100),
+  excluded: z.array(z.string()).max(100)
+});
+
+protestRouter.delete("/:propertyId/comps/:dcadPropertyId", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) {
+    res.status(400).json({ errors: query.error.issues });
+    return;
+  }
+  const year = query.data.year ?? thisYear();
+  const { dcadPropertyId } = req.params;
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  await deleteCADComp(property.id, householdId, year, dcadPropertyId);
+  log.info("protest comp deleted", { propertyId: property.id, year, dcadPropertyId });
+  res.status(200).json({ ok: true });
+});
+
+protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const parsed = addCompBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  const comp: ManualComp = {
+    addressLine1: parsed.data.addressLine1,
+    city: parsed.data.city ?? null,
+    sqft: parsed.data.sqft ?? null,
+    beds: parsed.data.beds ?? null,
+    baths: parsed.data.baths ?? null,
+    yearBuilt: parsed.data.yearBuilt ?? null,
+    assessedValueUsd: parsed.data.assessedValueUsd ?? null,
+    marketValueUsd: parsed.data.marketValueUsd ?? null
+  };
+  const dcadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp);
+  const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
+  log.info("protest comp added manually", { propertyId: property.id, year: parsed.data.year, dcadPropertyId });
+  res.status(201).json({ ok: true, dcadPropertyId, comps });
+});
+
+protestRouter.patch("/:propertyId/sold-comps/exclusions", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ errors: params.error.issues });
+    return;
+  }
+  const parsed = soldCompExclusionBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ errors: parsed.error.issues });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) {
+    res.status(404).json({ message: "Property not found" });
+    return;
+  }
+  const worksheet = await getOrCreateWorksheet(property.id, householdId, parsed.data.year);
+  await setExcludedSoldComps(worksheet.id, householdId, parsed.data.excluded);
+  res.status(200).json({ ok: true, excluded: parsed.data.excluded });
 });
 
 protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) => {
@@ -570,24 +678,28 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const avm = (typeof detail?.estimate === "number" ? detail.estimate : null) ?? property.latestValueUsd;
 
   const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
-  const soldComps: SoldComp[] = rawSoldComps.map((c) => {
-    const r = asRecord(c) ?? {};
-    const soldPrice = asNumber(r.soldPrice);
-    const sqft = asNumber(r.sqft);
-    return {
-      address: typeof r.address === "string" ? r.address : null,
-      sqft,
-      beds: asNumber(r.beds),
-      baths: asNumber(r.baths),
-      soldPrice,
-      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
-      pricePerSqft:
-        soldPrice != null && sqft != null && sqft > 0
-          ? Math.round(soldPrice / sqft)
-          : asNumber(r.pricePerSqft),
-      listPrice: asNumber(r.listPrice)
-    };
-  });
+  const excluded = await getExcludedSoldComps(property.id, householdId, year);
+  const excludedSet = new Set(excluded);
+  const soldComps: SoldComp[] = rawSoldComps
+    .map((c) => {
+      const r = asRecord(c) ?? {};
+      const soldPrice = asNumber(r.soldPrice);
+      const sqft = asNumber(r.sqft);
+      return {
+        address: typeof r.address === "string" ? r.address : null,
+        sqft,
+        beds: asNumber(r.beds),
+        baths: asNumber(r.baths),
+        soldPrice,
+        soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
+        pricePerSqft:
+          soldPrice != null && sqft != null && sqft > 0
+            ? Math.round(soldPrice / sqft)
+            : asNumber(r.pricePerSqft),
+        listPrice: asNumber(r.listPrice)
+      };
+    })
+    .filter((c) => !excludedSet.has(c.address ?? ""));
 
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown Property";
   const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);

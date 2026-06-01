@@ -926,9 +926,12 @@ paths:
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - name: year
+          in: query
+          schema: { type: integer }
       responses:
         "200":
-          description: Array of Redfin comp records (soldPrice/pricePerSqft may be null in TX)
+          description: Array of Redfin comp records plus per-year exclusion list
           content:
             application/json:
               schema:
@@ -950,6 +953,109 @@ paths:
                         soldDate: { type: string, nullable: true }
                         pricePerSqft: { type: number, nullable: true }
                         listPrice: { type: number, nullable: true }
+                  excluded:
+                    type: array
+                    items: { type: string }
+        "404": { description: Property not found }
+  /api/protest/{propertyId}/comps/{dcadPropertyId}:
+    delete:
+      tags: [protest]
+      summary: Hard-delete a CAD comparable property
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: dcadPropertyId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: year
+          in: query
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Comp deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "404": { description: Property not found }
+  /api/protest/{propertyId}/comps:
+    post:
+      tags: [protest]
+      summary: Manually add a comparable property to the Unequal Appraisal evidence table
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, addressLine1]
+              properties:
+                year: { type: integer }
+                addressLine1: { type: string }
+                city: { type: string, nullable: true }
+                sqft: { type: integer, nullable: true }
+                beds: { type: number, nullable: true }
+                baths: { type: number, nullable: true }
+                yearBuilt: { type: integer, nullable: true }
+                assessedValueUsd: { type: integer, nullable: true }
+                marketValueUsd: { type: integer, nullable: true }
+      responses:
+        "201":
+          description: Comp added; returns updated comp list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  dcadPropertyId: { type: string }
+                  comps: { type: array, items: { type: object } }
+        "400": { description: Validation error }
+        "404": { description: Property not found }
+  /api/protest/{propertyId}/sold-comps/exclusions:
+    patch:
+      tags: [protest]
+      summary: Set the exclusion list for Redfin sold comps (addresses hidden from Market Value evidence)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [year, excluded]
+              properties:
+                year: { type: integer }
+                excluded:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Exclusion list saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  excluded: { type: array, items: { type: string } }
         "404": { description: Property not found }
   /api/protest/{propertyId}/dcad/value-history:
     get:

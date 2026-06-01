@@ -317,6 +317,101 @@ type CompRow = {
   per_sqft_usd: number | null;
 };
 
+export async function deleteCADComp(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  dcadPropertyId: string
+): Promise<void> {
+  await qExec(
+    `DELETE FROM protest_comp_cad WHERE property_id = ? AND household_id = ? AND tax_year = ? AND dcad_property_id = ?`,
+    propertyId,
+    householdId,
+    taxYear,
+    dcadPropertyId
+  );
+}
+
+export type ManualComp = {
+  addressLine1: string;
+  city?: string | null;
+  sqft?: number | null;
+  beds?: number | null;
+  baths?: number | null;
+  yearBuilt?: number | null;
+  assessedValueUsd?: number | null;
+  marketValueUsd?: number | null;
+};
+
+export async function addCADComp(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  comp: ManualComp
+): Promise<string> {
+  const id = randomUUID();
+  const dcadPropertyId = `manual-${randomUUID()}`;
+  const perSqft =
+    comp.assessedValueUsd != null && comp.sqft != null && comp.sqft > 0
+      ? comp.assessedValueUsd / comp.sqft
+      : null;
+  await qExec(
+    `INSERT INTO protest_comp_cad
+      (id, household_id, property_id, tax_year, dcad_property_id, address_line1, city, assessed_value_usd,
+       market_value_usd, sqft, beds, baths, year_built, per_sqft_usd, raw_json, fetched_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+    id,
+    householdId,
+    propertyId,
+    taxYear,
+    dcadPropertyId,
+    comp.addressLine1,
+    comp.city ?? null,
+    comp.assessedValueUsd ?? null,
+    comp.marketValueUsd ?? null,
+    comp.sqft ?? null,
+    comp.beds ?? null,
+    comp.baths ?? null,
+    comp.yearBuilt ?? null,
+    perSqft,
+    { manual: true }
+  );
+  return dcadPropertyId;
+}
+
+export async function setExcludedSoldComps(
+  worksheetId: string,
+  householdId: string,
+  excluded: string[]
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet SET excluded_sold_comps_json = ?, updated_at = NOW() WHERE id = ? AND household_id = ?`,
+    JSON.stringify(excluded),
+    worksheetId,
+    householdId
+  );
+}
+
+export async function getExcludedSoldComps(
+  propertyId: string,
+  householdId: string,
+  taxYear: number
+): Promise<string[]> {
+  const row = await qGet<{ excluded_sold_comps_json: string | null }>(
+    `SELECT excluded_sold_comps_json FROM protest_worksheet WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
+    propertyId,
+    householdId,
+    taxYear
+  );
+  if (!row?.excluded_sold_comps_json) return [];
+  try {
+    const parsed = JSON.parse(row.excluded_sold_comps_json) as unknown;
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function listWorksheetComps(
   propertyId: string,
   householdId: string,

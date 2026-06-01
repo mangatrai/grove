@@ -184,9 +184,9 @@ Returns an empty array if no DCAD comps have been fetched for this property/year
 
 ---
 
-### `GET /api/protest/:propertyId/sold-comps`
+### `GET /api/protest/:propertyId/sold-comps?year=YYYY`
 
-Returns Redfin comparable sold properties from the property's stored `valuation_detail`. No `year` param — comps are property-level.
+Returns Redfin comparable sold properties from the property's stored `valuation_detail`. `year` defaults to current year and is used to load the per-year exclusion list.
 
 **Response 200:**
 ```json
@@ -205,11 +205,67 @@ Returns Redfin comparable sold properties from the property's stored `valuation_
       "pricePerSqft": null,
       "listPrice": 420000
     }
-  ]
+  ],
+  "excluded": ["123 Oak Ave"]
 }
 ```
 
-`soldPrice` and `pricePerSqft` are frequently null in Texas (non-disclosure state). `listPrice` is shown as a fallback. Array is empty if the property has no Redfin valuation data or no comps were returned by Redfin.
+`soldPrice` and `pricePerSqft` are frequently null in Texas (non-disclosure state). `excluded` is the list of addresses the user has hidden from their evidence (see `PATCH .../sold-comps/exclusions`).
+
+---
+
+### `DELETE /api/protest/:propertyId/comps/:dcadPropertyId?year=YYYY`
+
+Hard-deletes a CAD comparable property from `protest_comp_cad`. Use this to remove a comp that was fetched from DCAD or added manually. Year defaults to current year.
+
+**Response 200:** `{ "ok": true }`
+
+**404:** Property not found.
+
+---
+
+### `POST /api/protest/:propertyId/comps`
+
+Manually adds a comparable property to the Unequal Appraisal evidence table. Generates a stable `dcadPropertyId` of the form `manual-<uuid>`.
+
+**Request body:**
+```json
+{
+  "year": 2026,
+  "addressLine1": "789 Pine Rd",
+  "city": "Flower Mound",
+  "sqft": 2100,
+  "beds": 4,
+  "baths": 2,
+  "yearBuilt": 2003,
+  "assessedValueUsd": 480000,
+  "marketValueUsd": null
+}
+```
+
+`city`, `sqft`, `beds`, `baths`, `yearBuilt`, `assessedValueUsd`, `marketValueUsd` are all optional. `per_sqft_usd` is computed from `assessedValueUsd / sqft` if both are provided.
+
+**Response 201:**
+```json
+{
+  "ok": true,
+  "dcadPropertyId": "manual-<uuid>",
+  "comps": [ /* full updated comp list for the property/year */ ]
+}
+```
+
+---
+
+### `PATCH /api/protest/:propertyId/sold-comps/exclusions`
+
+Saves (replaces) the list of Redfin sold-comp addresses to hide from the Market Value Evidence table and the evidence packet PDF/DOCX for the given year.
+
+**Request body:**
+```json
+{ "year": 2026, "excluded": ["123 Oak Ave", "456 Birch Ln"] }
+```
+
+**Response 200:** `{ "ok": true, "excluded": ["123 Oak Ave", "456 Birch Ln"] }`
 
 ---
 
