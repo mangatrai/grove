@@ -5,8 +5,9 @@ type TokenCache = {
   expiresAt: number;
 };
 
+// Actual response shape: { user: { token: "..." } }
 type TrueProdigyTokenResponse = {
-  token?: unknown;
+  user?: { token?: unknown };
 };
 
 type TrueProdigySearchResponse = {
@@ -18,6 +19,7 @@ type TrueProdigySearchResponse = {
 
 export type DCADProperty = {
   dcadPropertyId: string;
+  pAccountId: number | null;
   address: string | null;
   city: string | null;
   assessedValue: number | null;
@@ -33,12 +35,48 @@ export type DCADProperty = {
   raw: Record<string, unknown>;
 };
 
+export type DCADValueHistoryEntry = {
+  year: number;
+  marketValue: number | null;
+  assessedValue: number | null;
+  landValue: number | null;
+  improvementValue: number | null;
+};
+
+export type DCADAppealEntry = {
+  year: string | null;
+  status: string | null;
+  hearingDate: string | null;
+  filedDate: string | null;
+  raw: Record<string, unknown>;
+};
+
 const DCAD_AUTH_URL = "https://prod-container.trueprodigyapi.com/trueprodigy/cadpublic/auth/token";
 const DCAD_SEARCH_URL = "https://prod-container.trueprodigyapi.com/public/property/searchfulltext?page=1&pageSize=20";
 const DCAD_SEARCH_BY_ID_URL = "https://prod-container.trueprodigyapi.com/public/property/search?page=1&pageSize=20";
+const DCAD_ACCOUNT_BASE = "https://prod-container.trueprodigyapi.com/public/propertyaccount";
 
 // Keyed by office name — different counties need different tokens.
 const tokenCacheMap = new Map<string, TokenCache>();
+
+// TrueProdigy validates the Origin header server-side — requests without it return HTTP 500.
+const BROWSER_HEADERS = {
+  "accept": "*/*",
+  "accept-language": "en-US,en;q=0.9",
+  "cache-control": "no-cache",
+  "dnt": "1",
+  "origin": "https://denton.prodigycad.com",
+  "priority": "u=1, i",
+  "referer": "https://denton.prodigycad.com/",
+  "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"macOS"',
+  "sec-fetch-dest": "empty",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-site": "cross-site",
+  "sec-gpc": "1",
+  "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+} as const;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -104,26 +142,30 @@ function extractRows(raw: unknown): Record<string, unknown>[] {
 }
 
 function mapProperty(row: Record<string, unknown>): DCADProperty | null {
-  const dcadPropertyId =
-    asString(row.propertyId) ??
-    asString(row.id) ??
-    asString(row.accountNumber) ??
-    asString(row.dcadPropertyId);
+  // Search results use `pid` (integer); detail endpoints may use propertyId/id/accountNumber
+  const pidRaw = row.pid ?? row.propertyId ?? row.id ?? row.accountNumber ?? row.dcadPropertyId;
+  const dcadPropertyId = typeof pidRaw === "number" ? String(pidRaw) : asString(pidRaw);
   if (!dcadPropertyId) return null;
+
+  const pAccountIdRaw = row.pAccountID ?? row.pAccountId ?? row.accountID ?? row.accountId;
+  const pAccountId = typeof pAccountIdRaw === "number" ? pAccountIdRaw : asNumber(pAccountIdRaw);
+
   return {
     dcadPropertyId,
-    address: asString(row.address) ?? asString(row.streetPrimary) ?? asString(row.situsAddress),
-    city: asString(row.city),
-    assessedValue: asNumber(row.assessedValue) ?? asNumber(row.assessed_value),
+    pAccountId,
+    address: asString(row.streetPrimary) ?? asString(row.address) ?? asString(row.situsAddress) ?? asString(row.addrDeliveryLine),
+    city: asString(row.city) ?? asString(row.addrCity),
+    // Search returns appraisedValue; some endpoints use assessedValue
+    assessedValue: asNumber(row.appraisedValue) ?? asNumber(row.assessedValue) ?? asNumber(row.assessed_value),
     marketValue: asNumber(row.marketValue) ?? asNumber(row.market_value),
     landValue: asNumber(row.landValue) ?? asNumber(row.land_value),
-    sqft: asNumber(row.sqft) ?? asNumber(row.improvementSqft),
+    sqft: asNumber(row.sqft) ?? asNumber(row.improvementSqft) ?? asNumber(row.livingArea),
     beds: asNumber(row.beds) ?? asNumber(row.bedrooms),
     baths: asNumber(row.baths) ?? asNumber(row.bathrooms),
     yearBuilt: asNumber(row.yearBuilt),
-    owner: asString(row.owner) ?? asString(row.ownerName),
+    owner: asString(row.name) ?? asString(row.owner) ?? asString(row.ownerName) ?? asString(row.displayName),
     legalDescription: asString(row.legalDescription),
-    apn: asString(row.apn) ?? asString(row.accountNumber),
+    apn: asString(row.taxOfficeRef) ?? asString(row.apn) ?? asString(row.accountNumber) ?? dcadPropertyId,
     raw: row
   };
 }
@@ -137,14 +179,18 @@ export async function getToken(office: string): Promise<string> {
   try {
     const res = await fetch(DCAD_AUTH_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        ...BROWSER_HEADERS,
+        "content-type": "application/json",
+        "authorization": "null"
+      },
       body: JSON.stringify({ office })
     });
     if (!res.ok) {
       throw new Error(`token fetch failed (${res.status})`);
     }
     const body = (await res.json()) as TrueProdigyTokenResponse;
-    const token = asString(body.token);
+    const token = asString(body.user?.token);
     if (!token) {
       throw new Error("token missing from response");
     }
@@ -162,8 +208,9 @@ async function doSearch(token: string, query: string, taxYear: number): Promise<
   const res = await fetch(DCAD_SEARCH_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json"
+      ...BROWSER_HEADERS,
+      "content-type": "application/json",
+      "authorization": token
     },
     body: JSON.stringify({
       pYear: { operator: "=", value: String(taxYear) },
@@ -230,8 +277,9 @@ export async function getDCADPropertyById(
     const res = await fetch(DCAD_SEARCH_BY_ID_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json"
+        ...BROWSER_HEADERS,
+        "content-type": "application/json",
+        "authorization": token
       },
       body: JSON.stringify({
         pYear: { operator: "=", value: String(taxYear) },
@@ -247,5 +295,104 @@ export async function getDCADPropertyById(
   } catch (err) {
     log.error("DCAD search by id failed", { err: err instanceof Error ? err.message : String(err), dcadPropertyId, taxYear, office });
     return null;
+  }
+}
+
+/** Year-by-year DCAD assessed/appraised value history for a property account. */
+export async function getDCADValueHistory(
+  pAccountId: number,
+  county: string | null | undefined
+): Promise<DCADValueHistoryEntry[]> {
+  const office = countyToOffice(county);
+  try {
+    const token = await getToken(office);
+    const res = await fetch(`${DCAD_ACCOUNT_BASE}/${pAccountId}/valuehistory`, {
+      headers: {
+        ...BROWSER_HEADERS,
+        "authorization": token
+      }
+    });
+    if (!res.ok) {
+      log.warn("DCAD value history HTTP error", { pAccountId, status: res.status });
+      return [];
+    }
+    const body = await res.json() as unknown;
+    const rows = extractRows(body);
+    return rows
+      .map(asRecord)
+      .filter((r): r is Record<string, unknown> => r != null)
+      .map((r) => ({
+        year: asNumber(r.pYear ?? r.year ?? r.taxYear) ?? 0,
+        marketValue: asNumber(r.marketValue ?? r.market_value),
+        assessedValue: asNumber(r.appraisedValue ?? r.assessedValue ?? r.appraised_value),
+        landValue: asNumber(r.landValue ?? r.land_value),
+        improvementValue: asNumber(r.improvementValue ?? r.improvement_value)
+      }))
+      .filter((e) => e.year > 0);
+  } catch (err) {
+    log.error("DCAD value history failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
+    return [];
+  }
+}
+
+/** Current-year taxable value breakdown (after exemptions) for a property account. */
+export async function getDCADTaxable(
+  pAccountId: number,
+  county: string | null | undefined
+): Promise<Record<string, unknown>[]> {
+  const office = countyToOffice(county);
+  try {
+    const token = await getToken(office);
+    const res = await fetch(`${DCAD_ACCOUNT_BASE}/${pAccountId}/taxable`, {
+      headers: {
+        ...BROWSER_HEADERS,
+        "authorization": token
+      }
+    });
+    if (!res.ok) {
+      log.warn("DCAD taxable HTTP error", { pAccountId, status: res.status });
+      return [];
+    }
+    const body = await res.json() as unknown;
+    return extractRows(body);
+  } catch (err) {
+    log.error("DCAD taxable failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
+    return [];
+  }
+}
+
+/** Live protest/appeal status from DCAD for a property account. */
+export async function getDCADAppeal(
+  pAccountId: number,
+  county: string | null | undefined
+): Promise<DCADAppealEntry[]> {
+  const office = countyToOffice(county);
+  try {
+    const token = await getToken(office);
+    const res = await fetch(`${DCAD_ACCOUNT_BASE}/${pAccountId}/appeal`, {
+      headers: {
+        ...BROWSER_HEADERS,
+        "authorization": token
+      }
+    });
+    if (!res.ok) {
+      log.warn("DCAD appeal HTTP error", { pAccountId, status: res.status });
+      return [];
+    }
+    const body = await res.json() as unknown;
+    const rows = extractRows(body);
+    return rows
+      .map(asRecord)
+      .filter((r): r is Record<string, unknown> => r != null)
+      .map((r) => ({
+        year: asString(r.pYear ?? r.year ?? r.taxYear),
+        status: asString(r.status ?? r.appealStatus ?? r.protestStatus),
+        hearingDate: asString(r.hearingDate ?? r.hearing_date),
+        filedDate: asString(r.filedDate ?? r.filed_date ?? r.protestDate),
+        raw: r
+      }));
+  } catch (err) {
+    log.error("DCAD appeal failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
+    return [];
   }
 }

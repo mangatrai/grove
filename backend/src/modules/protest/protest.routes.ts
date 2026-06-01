@@ -79,8 +79,6 @@ function buildSystemPrompt(input: {
   city: string | null;
   state: string | null;
   cadAssessed: number | null;
-  avm: number | null;
-  overPct: number | null;
   sqft: number | null;
   beds: number | null;
   baths: number | null;
@@ -93,16 +91,18 @@ function buildSystemPrompt(input: {
   return `You are a property tax protest assistant for ${input.address}, ${input.city ?? ""} ${input.state ?? ""}.
 
 Property facts:
-- Assessed value (CAD): ${money(input.cadAssessed)}
-- AVM (Redfin): ${money(input.avm)}
-- Overassessment: ${input.overPct == null ? "—" : `${input.overPct.toFixed(1)}%`}
+- CAD assessed value (tax year ${input.year}): ${money(input.cadAssessed)}
 - Sqft: ${input.sqft ?? "—"} | Beds: ${input.beds ?? "—"} | Baths: ${input.baths ?? "—"} | Year built: ${input.yearBuilt ?? "—"}
 - Purchase price: ${money(input.purchasePrice)} (${input.purchaseDate ?? "—"})
 
 Current protest status: ${input.status}
 Tax year: ${input.year}
 
-You have access to tools to fetch CAD comparable properties and update the protest worksheet. Use them when the user asks about specific properties or requests analysis. When generating legal arguments, cite applicable Texas Tax Code sections (§41.41 for market value, §41.43 for unequal appraisal). Be concise and strategic.`;
+Texas property tax protest grounds:
+- §41.41 (Market value): Subject property's assessed value exceeds its market value. Argue using recent arm's-length sale prices of comparable properties.
+- §41.43 (Unequal appraisal): Subject property is assessed at a higher ratio than comparable properties. Argue using CAD-assessed values of similar nearby properties — not Redfin AVM or Zillow estimates, which have no standing at ARB.
+
+You have access to tools to fetch DCAD comparable properties and update the protest worksheet. When the user asks about analysis or strategy, use both grounds and tell them which is stronger based on available data. Be concise and direct.`;
 }
 
 function formatCompSummary(comps: Awaited<ReturnType<typeof searchDCADByAddress>>): string {
@@ -239,16 +239,12 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   const subject = asRecord(detail?.subject);
   const taxCurrent = asRecord(detail?.taxCurrent);
   const cadAssessed = asNumber(taxCurrent?.assessedValue);
-  const avm = (typeof detail?.estimate === "number" ? detail.estimate : null) ?? property.latestValueUsd;
-  const overPct = cadAssessed != null && avm != null && avm > 0 ? ((cadAssessed / avm) - 1) * 100 : null;
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown property";
   const systemPrompt = buildSystemPrompt({
     address,
     city: property.city,
     state: property.state,
     cadAssessed,
-    avm,
-    overPct,
     sqft: asNumber(subject?.sqFt),
     beds: asNumber(subject?.beds),
     baths: asNumber(subject?.baths),
