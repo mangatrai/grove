@@ -4,6 +4,7 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
 import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
+import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
 
 export type ConversationTurn = {
   role: "user" | "assistant" | "tool";
@@ -28,6 +29,8 @@ export type SoldCompCadEntry = {
   assessedValueUsd: number | null;
 };
 
+export type { CadEvidenceData };
+
 export type ProtestWorksheetRecord = {
   id: string;
   householdId: string;
@@ -42,6 +45,9 @@ export type ProtestWorksheetRecord = {
   conversationJson: ConversationTurn[];
   strategyJson: StrategyJson | null;
   soldCompsCadJson: Record<string, SoldCompCadEntry>;
+  cadEvidenceJson: CadEvidenceData | null;
+  cadEvidenceFilename: string | null;
+  soldCompsNotesJson: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 };
@@ -60,6 +66,9 @@ type ProtestWorksheetRow = {
   conversation_json: unknown;
   strategy_json: unknown;
   sold_comps_cad_json: unknown;
+  cad_evidence_json: unknown;
+  cad_evidence_filename: string | null;
+  sold_comps_notes_json: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 };
@@ -92,6 +101,13 @@ function rowToRecord(row: ProtestWorksheetRow): ProtestWorksheetRecord {
     soldCompsCadJson: (row.sold_comps_cad_json && typeof row.sold_comps_cad_json === "object" && !Array.isArray(row.sold_comps_cad_json))
       ? (row.sold_comps_cad_json as Record<string, SoldCompCadEntry>)
       : {},
+    cadEvidenceJson: (row.cad_evidence_json && typeof row.cad_evidence_json === "object" && !Array.isArray(row.cad_evidence_json) && Object.keys(row.cad_evidence_json as object).length > 0)
+      ? (row.cad_evidence_json as CadEvidenceData)
+      : null,
+    cadEvidenceFilename: row.cad_evidence_filename ?? null,
+    soldCompsNotesJson: (row.sold_comps_notes_json && typeof row.sold_comps_notes_json === "object" && !Array.isArray(row.sold_comps_notes_json))
+      ? (row.sold_comps_notes_json as Record<string, string>)
+      : {},
     createdAt: isoDateTime(row.created_at),
     updatedAt: isoDateTime(row.updated_at)
   };
@@ -105,7 +121,8 @@ export async function getWorksheet(
   const row = await qGet<ProtestWorksheetRow>(
     `SELECT id, household_id, property_id, tax_year, status, outcome, informal_offer_usd,
             hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json,
-            sold_comps_cad_json, created_at, updated_at
+            sold_comps_cad_json, cad_evidence_json, cad_evidence_filename, sold_comps_notes_json,
+            created_at, updated_at
        FROM protest_worksheet
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
     propertyId,
@@ -343,6 +360,7 @@ export type ProtestComp = {
   baths: number | null;
   yearBuilt: number | null;
   perSqftUsd: number | null;
+  notes: string | null;
 };
 
 type CompRow = {
@@ -356,6 +374,7 @@ type CompRow = {
   baths: number | null;
   year_built: number | null;
   per_sqft_usd: number | null;
+  notes: string | null;
 };
 
 export async function deleteCADComp(
@@ -462,7 +481,7 @@ export async function listWorksheetComps(
 ): Promise<ProtestComp[]> {
   const rows = await qAll<CompRow>(
     `SELECT cad_property_id, address_line1, city, assessed_value_usd, market_value_usd,
-            sqft, beds, baths, year_built, per_sqft_usd
+            sqft, beds, baths, year_built, per_sqft_usd, notes
        FROM protest_comp_cad
       WHERE household_id = ? AND property_id = ? AND tax_year = ?
       ORDER BY fetched_at DESC`,
@@ -480,6 +499,89 @@ export async function listWorksheetComps(
     beds: r.beds != null ? Number(r.beds) : null,
     baths: r.baths != null ? Number(r.baths) : null,
     yearBuilt: r.year_built,
-    perSqftUsd: r.per_sqft_usd != null ? Number(r.per_sqft_usd) : null
+    perSqftUsd: r.per_sqft_usd != null ? Number(r.per_sqft_usd) : null,
+    notes: r.notes ?? null,
   }));
+}
+
+export async function saveCadEvidence(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  data: CadEvidenceData,
+  filename: string
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet
+        SET cad_evidence_json = ?,
+            cad_evidence_filename = ?,
+            updated_at = NOW()
+      WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
+    JSON.stringify(data),
+    filename,
+    propertyId,
+    householdId,
+    taxYear
+  );
+}
+
+export async function deleteCadEvidence(
+  propertyId: string,
+  householdId: string,
+  taxYear: number
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet
+        SET cad_evidence_json = '{}'::jsonb,
+            cad_evidence_filename = NULL,
+            updated_at = NOW()
+      WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
+    propertyId,
+    householdId,
+    taxYear
+  );
+}
+
+export async function saveSoldCompNote(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  address: string,
+  notes: string
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet
+        SET sold_comps_notes_json = jsonb_set(
+              COALESCE(sold_comps_notes_json, '{}'::jsonb),
+              ARRAY[?::text],
+              to_jsonb(?::text),
+              true
+            ),
+            updated_at = NOW()
+      WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
+    address,
+    notes,
+    propertyId,
+    householdId,
+    taxYear
+  );
+}
+
+export async function updateCompNote(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  cadPropertyId: string,
+  notes: string
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_comp_cad
+        SET notes = ?
+      WHERE property_id = ? AND household_id = ? AND tax_year = ? AND cad_property_id = ?`,
+    notes || null,
+    propertyId,
+    householdId,
+    taxYear,
+    cadPropertyId
+  );
 }

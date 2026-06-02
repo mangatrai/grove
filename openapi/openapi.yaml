@@ -1119,6 +1119,113 @@ paths:
         "400": { description: Validation error }
         "404": { description: Property not found }
 
+  /api/protest/{propertyId}/cad-evidence:
+    post:
+      tags: [protest]
+      summary: Upload and parse the official DCAD evidence packet PDF
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary, description: "DCAD evidence packet PDF (max 20 MB)" }
+      responses:
+        "200":
+          description: Parsed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filename: { type: string }
+                  data: { $ref: "#/components/schemas/CadEvidenceData" }
+        "400": { description: No file or wrong format }
+        "404": { description: Property not found }
+        "422": { description: PDF could not be parsed as a DCAD evidence packet }
+    delete:
+      tags: [protest]
+      summary: Clear stored CAD evidence data for the given year
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      responses:
+        "204": { description: Cleared }
+        "404": { description: Property not found }
+
+  /api/protest/{propertyId}/sold-comps/notes:
+    patch:
+      tags: [protest]
+      summary: Save a free-text annotation on a Redfin sold comp
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, notes]
+              properties:
+                address: { type: string, description: "Comp address (key in sold_comps_notes_json)" }
+                notes: { type: string, description: "Free-text annotation; empty string clears the note" }
+      responses:
+        "204": { description: Saved }
+        "404": { description: Property not found }
+
+  /api/protest/{propertyId}/comps/{cadPropertyId}/notes:
+    patch:
+      tags: [protest]
+      summary: Save a free-text annotation on an equity comp
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: cadPropertyId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notes]
+              properties:
+                notes: { type: string, description: "Free-text annotation; empty string clears the note" }
+      responses:
+        "204": { description: Saved }
+        "404": { description: Property not found }
+
   /api/protest/{propertyId}/sold-comps/exclusions:
     patch:
       tags: [protest]
@@ -3778,6 +3885,51 @@ components:
         baths: { type: number, nullable: true }
         yearBuilt: { type: number, nullable: true }
         perSqftUsd: { type: number, nullable: true }
+    CadSalesComp:
+      type: object
+      properties:
+        compNum: { type: integer }
+        propId: { type: string }
+        address: { type: string }
+        distanceMi: { type: number, nullable: true }
+        saleDate: { type: string, nullable: true }
+        salePriceUsd: { type: number, nullable: true }
+        cadMarketValueUsd: { type: number, nullable: true }
+        cadIndValueUsd: { type: number, nullable: true }
+    CadEquityComp:
+      type: object
+      properties:
+        compNum: { type: integer }
+        propId: { type: string }
+        address: { type: string }
+        distanceMi: { type: number, nullable: true }
+        cadMarketValueUsd: { type: number, nullable: true }
+        cadIndValueUsd: { type: number, nullable: true }
+    CadEvidenceData:
+      type: object
+      properties:
+        uploadedAt: { type: string, format: date-time }
+        subjectCadPropertyId: { type: string, nullable: true }
+        subjectAddress: { type: string, nullable: true }
+        assessedValueUsd: { type: number, nullable: true }
+        improvementsUsd: { type: number, nullable: true }
+        landValueUsd: { type: number, nullable: true }
+        percentGood: { type: number, nullable: true }
+        livingAreaSqft: { type: number, nullable: true }
+        lotSqft: { type: number, nullable: true }
+        yearBuilt: { type: number, nullable: true }
+        salesAnalysis:
+          type: object
+          properties:
+            comps: { type: array, items: { $ref: "#/components/schemas/CadSalesComp" } }
+            medianIndValueUsd: { type: number, nullable: true }
+            medianValuePerSqft: { type: number, nullable: true }
+        equityAnalysis:
+          type: object
+          properties:
+            comps: { type: array, items: { $ref: "#/components/schemas/CadEquityComp" } }
+            medianIndValueUsd: { type: number, nullable: true }
+            medianValuePerSqft: { type: number, nullable: true }
     SoldComp:
       type: object
       properties:

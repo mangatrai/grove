@@ -326,6 +326,83 @@ On rate-limit: `"redfin": { "ok": false, "code": "RATE_LIMITED", "message": "Val
 
 ---
 
+### `POST /api/protest/:propertyId/cad-evidence?taxYear=YYYY`
+
+Upload the official DCAD evidence packet PDF (multipart/form-data, field name `file`, max 20 MB). Parses the PDF and stores the result in `protest_worksheet.cad_evidence_json`. The parser extracts both the CAD Sales Analysis (§41.41) and Subject Equity Analysis (§41.43) comp tables, their medians, and subject property details from the public card page.
+
+**Request:** `multipart/form-data` with field `file` (PDF only).
+
+**Response 200:**
+```json
+{
+  "filename": "cad-evidence-2026.pdf",
+  "data": {
+    "uploadedAt": "2026-06-02T10:00:00Z",
+    "subjectCadPropertyId": "560912",
+    "subjectAddress": "7070 COULTER LAKE RD",
+    "assessedValueUsd": 1101813,
+    "improvementsUsd": 817120,
+    "landValueUsd": 284693,
+    "percentGood": 92.0,
+    "livingAreaSqft": 4008.8,
+    "lotSqft": 9817,
+    "yearBuilt": 2017,
+    "salesAnalysis": {
+      "comps": [
+        { "compNum": 1, "propId": "680344", "address": "2362 CHAFFEE RD FRISCO TX 75036", "distanceMi": 0.4, "saleDate": "2025-05-20", "salePriceUsd": 1275000, "cadMarketValueUsd": 1136736, "cadIndValueUsd": 1228707 }
+      ],
+      "medianIndValueUsd": 1196015,
+      "medianValuePerSqft": 298.35
+    },
+    "equityAnalysis": {
+      "comps": [
+        { "compNum": 1, "propId": "660008", "address": "7495 COULTER LAKE RD FRISCO TX 75036", "distanceMi": 0.24, "cadMarketValueUsd": 1014668, "cadIndValueUsd": 1075760 }
+      ],
+      "medianIndValueUsd": 1077571,
+      "medianValuePerSqft": 268.80
+    }
+  }
+}
+```
+
+**Response 422:** `{ "message": "Failed to parse PDF. Ensure this is a DCAD evidence packet." }`
+
+---
+
+### `DELETE /api/protest/:propertyId/cad-evidence?taxYear=YYYY`
+
+Clears the stored CAD evidence data (`cad_evidence_json` reset to `{}`, `cad_evidence_filename` set to NULL).
+
+**Response 204:** No content.
+
+---
+
+### `PATCH /api/protest/:propertyId/sold-comps/notes?taxYear=YYYY`
+
+Saves a free-text annotation on a Redfin sold comp (keyed by address). Stored in `protest_worksheet.sold_comps_notes_json`. Passed to the AI assistant in the system prompt context.
+
+**Request body:**
+```json
+{ "address": "2362 CHAFFEE RD FRISCO TX 75036", "notes": "Has pool and outdoor kitchen — DCAD made no adjustment" }
+```
+
+**Response 204:** No content.
+
+---
+
+### `PATCH /api/protest/:propertyId/comps/:cadPropertyId/notes?taxYear=YYYY`
+
+Saves a free-text annotation on an equity comp row in `protest_comp_cad`. Passed to the AI assistant in the system prompt context.
+
+**Request body:**
+```json
+{ "notes": "Listed at $977K, not selling — market evidence of over-assessment" }
+```
+
+**Response 204:** No content.
+
+---
+
 ### `PATCH /api/protest/:propertyId/sold-comps/exclusions`
 
 Saves (replaces) the list of Redfin sold-comp addresses to hide from the Market Value Evidence table and the evidence packet PDF/DOCX for the given year.

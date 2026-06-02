@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-9 (2026-06-02): CAD evidence PDF upload + parse + comp annotations — closes #59
+
+**What changed:**
+- New upload endpoint `POST /api/protest/:id/cad-evidence` (multer memoryStorage, 20 MB limit). Parses the official DCAD evidence packet PDF using `extractPdfText` + regex section detection. Extracts both comp tables (sales + equity), medians, and subject property details from the public card page.
+- New `DELETE /api/protest/:id/cad-evidence` to clear stored evidence.
+- Migration 0063: `cad_evidence_json JSONB`, `cad_evidence_filename TEXT`, `sold_comps_notes_json JSONB` added to `protest_worksheet`; `notes TEXT` added to `protest_comp_cad`.
+- New `PATCH /api/protest/:id/sold-comps/notes` — saves a free-text annotation on any Redfin sold comp (keyed by address in `sold_comps_notes_json` via `jsonb_set`).
+- New `PATCH /api/protest/:id/comps/:cadPropertyId/notes` — saves a free-text annotation on any equity comp (`protest_comp_cad.notes`).
+- `GET /api/protest/:id/worksheet` now returns `cadEvidenceJson`, `cadEvidenceFilename`, `soldCompsNotesJson`.
+- `GET /api/protest/:id/comps` now returns `notes` on each comp row.
+- `buildSystemPrompt` updated: injects parsed CAD evidence (both comp tables, medians, §41.43 delta) and all comp annotations into the AI system prompt context.
+- New parser service `cad-evidence-parser.service.ts`: section-detection + regex extraction for DCAD evidence packet format.
+- **UI — CAD Evidence card**: Upload button, §41.43 signal badge (green if CAD equity median < assessed value), DCAD Sales comps table (§41.41), DCAD Equity comps table (§41.43).
+- **UI — Comp annotations**: Notebook icon on every row in Market Value + Unequal Appraisal tables. Clicking opens a Popover Textarea; saves on blur with optimistic UI update.
+
+**Files:** `backend/db/migrations/0063_pt9_cad_evidence.sql`, `backend/src/modules/protest/cad-evidence-parser.service.ts` (new), `protest-worksheet.service.ts`, `protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+
+---
+
 ## PT-11 (2026-06-01): Auto-fetch CAD assessed values for Redfin sold comps (§41.43 support)
 
 - **Type:** Feature — closes #61

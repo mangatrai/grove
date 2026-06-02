@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { Router } from "express";
+import multer from "multer";
 import { z } from "zod";
 
 import { env } from "../../config/env.js";
@@ -29,13 +30,20 @@ import {
   addCADComp,
   type ManualComp,
   setExcludedSoldComps,
-  getExcludedSoldComps
+  getExcludedSoldComps,
+  saveCadEvidence,
+  deleteCadEvidence,
+  saveSoldCompNote,
+  updateCompNote,
+  type CadEvidenceData,
 } from "./protest-worksheet.service.js";
+import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
 import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
 
 const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const worksheetStatusSchema = z.enum(["not_filed", "filed", "informal", "arb", "resolved"]);
 const propertyIdSchema = z.object({ propertyId: z.string().uuid() });
@@ -123,6 +131,69 @@ function matchCadAssessedValue(cadComps: CadProperty[], searchAddress: string): 
   return { cadPropertyId: match.cadPropertyId, assessedValueUsd: match.assessedValue };
 }
 
+function buildCadEvidenceContext(cadEvidence: CadEvidenceData | null, cadAssessed: number | null): string {
+  if (!cadEvidence) return "";
+
+  const lines: string[] = ["\nCAD Evidence (from official DCAD Evidence Packet):"];
+
+  if (cadEvidence.assessedValueUsd != null) {
+    lines.push(`- Subject assessed: ${money(cadEvidence.assessedValueUsd)} | Improvements: ${money(cadEvidence.improvementsUsd)} | Land: ${money(cadEvidence.landValueUsd)}`);
+  }
+  if (cadEvidence.percentGood != null) {
+    lines.push(`- Condition: ${cadEvidence.percentGood}% good | Year built: ${cadEvidence.yearBuilt ?? "—"} | Living area: ${cadEvidence.livingAreaSqft ?? "—"} sqft | Lot: ${cadEvidence.lotSqft ?? "—"} sqft`);
+  }
+
+  const salesMedian = cadEvidence.salesAnalysis.medianIndValueUsd;
+  if (salesMedian != null) {
+    lines.push(`- CAD Sales Analysis median (§41.41): ${money(salesMedian)}`);
+  }
+
+  const equityMedian = cadEvidence.equityAnalysis.medianIndValueUsd;
+  if (equityMedian != null) {
+    const delta = cadAssessed != null ? cadAssessed - equityMedian : null;
+    const deltaStr = delta != null ? ` → subject is ${money(Math.abs(delta))} ${delta > 0 ? "ABOVE equity median — §41.43 unequal appraisal SUPPORTED" : "below equity median"}` : "";
+    lines.push(`- CAD Equity Analysis median (§41.43): ${money(equityMedian)}${deltaStr}`);
+  }
+
+  if (cadEvidence.salesAnalysis.comps.length > 0) {
+    lines.push("- CAD Sales Comps (§41.41):");
+    for (const c of cadEvidence.salesAnalysis.comps) {
+      lines.push(`  Comp ${c.compNum}: ${c.address} | sold ${money(c.salePriceUsd)} on ${c.saleDate ?? "—"} | DCAD market ${money(c.cadMarketValueUsd)} | ind ${money(c.cadIndValueUsd)}`);
+    }
+  }
+
+  if (cadEvidence.equityAnalysis.comps.length > 0) {
+    lines.push("- CAD Equity Comps (§41.43):");
+    for (const c of cadEvidence.equityAnalysis.comps) {
+      lines.push(`  Comp ${c.compNum}: ${c.address} | DCAD market ${money(c.cadMarketValueUsd)} | ind ${money(c.cadIndValueUsd)}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function buildCompNotesContext(
+  soldCompsNotes: Record<string, string>,
+  equityComps: Array<{ addressLine1: string | null; notes: string | null }>
+): string {
+  const lines: string[] = [];
+
+  const soldEntries = Object.entries(soldCompsNotes).filter(([, n]) => n.trim());
+  const equityEntries = equityComps.filter(c => c.notes?.trim());
+
+  if (soldEntries.length === 0 && equityEntries.length === 0) return "";
+
+  lines.push("\nComp annotations (user research notes):");
+  for (const [addr, note] of soldEntries) {
+    lines.push(`- ${addr}: "${note}"`);
+  }
+  for (const c of equityEntries) {
+    lines.push(`- ${c.addressLine1 ?? "unknown"}: "${c.notes}"`);
+  }
+
+  return lines.join("\n");
+}
+
 function buildSystemPrompt(input: {
   address: string;
   city: string | null;
@@ -136,7 +207,13 @@ function buildSystemPrompt(input: {
   purchaseDate: string | null;
   status: ProtestStatus;
   year: number;
+  cadEvidence: CadEvidenceData | null;
+  soldCompsNotes: Record<string, string>;
+  equityComps: Array<{ addressLine1: string | null; notes: string | null }>;
 }): string {
+  const evidenceContext = buildCadEvidenceContext(input.cadEvidence, input.cadAssessed);
+  const notesContext = buildCompNotesContext(input.soldCompsNotes, input.equityComps);
+
   return `You are a property tax protest assistant for ${input.address}, ${input.city ?? ""} ${input.state ?? ""}.
 
 Property facts:
@@ -150,7 +227,7 @@ Tax year: ${input.year}
 Texas property tax protest grounds:
 - §41.41 (Market value): Subject property's assessed value exceeds its market value. Argue using recent arm's-length sale prices of comparable properties.
 - §41.43 (Unequal appraisal): Subject property is assessed at a higher ratio than comparable properties. Argue using CAD-assessed values of similar nearby properties — not Redfin AVM or Zillow estimates, which have no standing at ARB.
-
+${evidenceContext}${notesContext}
 You have access to tools to fetch DCAD comparable properties and update the protest worksheet. When the user asks about analysis or strategy, use both grounds and tell them which is stronger based on available data. Be concise and direct.`;
 }
 
@@ -596,6 +673,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   const taxCurrent = asRecord(detail?.taxCurrent);
   const cadAssessed = asNumber(taxCurrent?.assessedValue);
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown property";
+  const equityComps = await listWorksheetComps(property.id, householdId, year);
   const systemPrompt = buildSystemPrompt({
     address,
     city: property.city,
@@ -608,7 +686,10 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     purchasePrice: property.purchasePrice,
     purchaseDate: property.purchaseDate,
     status: worksheet.status,
-    year
+    year,
+    cadEvidence: worksheet.cadEvidenceJson,
+    soldCompsNotes: worksheet.soldCompsNotesJson,
+    equityComps,
   });
 
   const userText = parsedBody.data.attachmentText
@@ -951,4 +1032,73 @@ protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, 
     status: parsed.data.status ?? worksheet.status
   });
   res.status(200).json({ worksheet: updated });
+});
+
+// POST /:propertyId/cad-evidence — upload + parse CAD evidence PDF
+protestRouter.post(
+  "/:propertyId/cad-evidence",
+  upload.single("file"),
+  async (req: AuthenticatedRequest, res) => {
+    const params = propertyIdSchema.safeParse(req.params);
+    if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+    const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+    const householdId = req.authUser!.householdId;
+    const property = await getProperty(params.data.propertyId, householdId);
+    if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+    if (!req.file) { res.status(400).json({ message: "No file uploaded" }); return; }
+    if (!req.file.originalname.toLowerCase().endsWith(".pdf")) {
+      res.status(400).json({ message: "Only PDF files are supported" });
+      return;
+    }
+    try {
+      const data = await parseCadEvidencePdf(req.file.buffer);
+      await getOrCreateWorksheet(property.id, householdId, taxYear);
+      await saveCadEvidence(property.id, householdId, taxYear, data, req.file.originalname);
+      log.info("cad-evidence uploaded", { propertyId: property.id, taxYear, salesComps: data.salesAnalysis.comps.length, equityComps: data.equityAnalysis.comps.length });
+      res.status(200).json({ data, filename: req.file.originalname });
+    } catch (err) {
+      log.error("cad-evidence parse failed", { err });
+      res.status(422).json({ message: "Failed to parse PDF. Ensure this is a DCAD evidence packet." });
+    }
+  }
+);
+
+// DELETE /:propertyId/cad-evidence — clear parsed evidence
+protestRouter.delete("/:propertyId/cad-evidence", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  await deleteCadEvidence(property.id, householdId, taxYear);
+  res.status(204).send();
+});
+
+// PATCH /:propertyId/sold-comps/notes — save annotation on a Redfin sold comp
+protestRouter.patch("/:propertyId/sold-comps/notes", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+  const parsed = z.object({ address: z.string().min(1), notes: z.string() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  await saveSoldCompNote(property.id, householdId, taxYear, parsed.data.address, parsed.data.notes);
+  res.status(204).send();
+});
+
+// PATCH /:propertyId/comps/:cadPropertyId/notes — save annotation on an equity comp
+protestRouter.patch("/:propertyId/comps/:cadPropertyId/notes", async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid(), cadPropertyId: z.string().min(1) }).safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+  const parsed = z.object({ notes: z.string() }).safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  await updateCompNote(property.id, householdId, taxYear, params.data.cadPropertyId, parsed.data.notes);
+  res.status(204).send();
 });

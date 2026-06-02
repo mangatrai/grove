@@ -14,6 +14,7 @@ import {
   Loader,
   NumberInput,
   Paper,
+  Popover,
   Progress,
   ScrollArea,
   SegmentedControl,
@@ -34,6 +35,7 @@ import {
   IconExternalLink,
   IconFileText,
   IconMessage,
+  IconNote,
   IconPaperclip,
   IconPlus,
   IconRefresh,
@@ -96,6 +98,9 @@ type Worksheet = {
   cadPortalUrl: string | null;
   conversationJson: ConversationTurn[];
   strategyJson: StrategyJson | null;
+  cadEvidenceJson: CadEvidenceData | null;
+  cadEvidenceFilename: string | null;
+  soldCompsNotesJson: Record<string, string>;
 };
 
 type CADComp = {
@@ -109,6 +114,42 @@ type CADComp = {
   baths: number | null;
   yearBuilt: number | null;
   perSqftUsd: number | null;
+  notes: string | null;
+};
+
+type CadSalesComp = {
+  compNum: number;
+  propId: string;
+  address: string;
+  distanceMi: number | null;
+  saleDate: string | null;
+  salePriceUsd: number | null;
+  cadMarketValueUsd: number | null;
+  cadIndValueUsd: number | null;
+};
+
+type CadEquityComp = {
+  compNum: number;
+  propId: string;
+  address: string;
+  distanceMi: number | null;
+  cadMarketValueUsd: number | null;
+  cadIndValueUsd: number | null;
+};
+
+type CadEvidenceData = {
+  uploadedAt: string;
+  subjectCadPropertyId: string | null;
+  subjectAddress: string | null;
+  assessedValueUsd: number | null;
+  improvementsUsd: number | null;
+  landValueUsd: number | null;
+  percentGood: number | null;
+  livingAreaSqft: number | null;
+  lotSqft: number | null;
+  yearBuilt: number | null;
+  salesAnalysis: { comps: CadSalesComp[]; medianIndValueUsd: number | null; medianValuePerSqft: number | null };
+  equityAnalysis: { comps: CadEquityComp[]; medianIndValueUsd: number | null; medianValuePerSqft: number | null };
 };
 
 type SoldComp = {
@@ -241,6 +282,45 @@ function vsSubjectLabel(compPpsf: number | null, subjectPpsf: number | null): st
   return `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`;
 }
 
+function CompNotePopover({ note, onSave }: { note: string | null; onSave: (v: string) => void }) {
+  const [opened, setOpened] = useState(false);
+  const [value, setValue] = useState(note ?? "");
+
+  useEffect(() => { setValue(note ?? ""); }, [note]);
+
+  return (
+    <Popover opened={opened} onClose={() => { setOpened(false); onSave(value); }} withArrow>
+      <Popover.Target>
+        <Tooltip label={note ? "Edit note" : "Add note"} withArrow>
+          <ActionIcon
+            variant={note ? "light" : "subtle"}
+            color={note ? "yellow" : "gray"}
+            size="sm"
+            onClick={() => setOpened((o) => !o)}
+            aria-label="Note"
+          >
+            <IconNote size={13} />
+          </ActionIcon>
+        </Tooltip>
+      </Popover.Target>
+      <Popover.Dropdown>
+        <Textarea
+          value={value}
+          onChange={(e) => setValue(e.currentTarget.value)}
+          placeholder="Add note about this comp..."
+          size="xs"
+          autosize
+          minRows={2}
+          maxRows={5}
+          w={260}
+          onBlur={() => { setOpened(false); onSave(value); }}
+          autoFocus
+        />
+      </Popover.Dropdown>
+    </Popover>
+  );
+}
+
 export function TaxProtestPage() {
   const token = useAuthToken();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -286,9 +366,13 @@ export function TaxProtestPage() {
   const [cadHasAdapter, setCadHasAdapter] = useState(true);
   const [removingCompId, setRemovingCompId] = useState<string | null>(null);
   const [refreshingComps, setRefreshingComps] = useState(false);
+  const [cadEvidence, setCadEvidence] = useState<CadEvidenceData | null>(null);
+  const [soldCompsNotes, setSoldCompsNotes] = useState<Record<string, string>>({});
+  const [uploadingEvidence, setUploadingEvidence] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cadEvidenceFileRef = useRef<HTMLInputElement | null>(null);
 
   const colorScheme = useComputedColorScheme("light");
 
@@ -356,6 +440,8 @@ export function TaxProtestPage() {
       setComps(compsRes.comps);
       setSoldComps(soldCompsRes.comps);
       setExcludedSoldComps(soldCompsRes.excluded ?? []);
+      setCadEvidence(wsRes.worksheet.cadEvidenceJson ?? null);
+      setSoldCompsNotes(wsRes.worksheet.soldCompsNotesJson ?? {});
       setHearingDraft(wsRes.worksheet.hearingDate ?? "");
       setInformalOfferDraft("");
       setFilingDeadlineDraft(wsRes.worksheet.filingDeadline ?? "");
@@ -468,6 +554,75 @@ export function TaxProtestPage() {
       addToast("red", "Failed to remove comp");
     }
   }, [propertyId, worksheet, year, excludedSoldComps, addToast]);
+
+  const uploadCadEvidence = useCallback(async (file: File) => {
+    if (!propertyId) return;
+    const form = new FormData();
+    form.append("file", file);
+    setUploadingEvidence(true);
+    try {
+      await fetch(`/api/protest/${encodeURIComponent(propertyId)}/cad-evidence?taxYear=${year}`, {
+        method: "POST",
+        body: form,
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` }
+      });
+      await loadPropertyAndWorksheet(propertyId, Number(year));
+      addToast("green", "CAD evidence uploaded");
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingEvidence(false);
+    }
+  }, [propertyId, year, loadPropertyAndWorksheet, addToast]);
+
+  const deleteCadEvidence = useCallback(async () => {
+    if (!propertyId) return;
+    setUploadingEvidence(true);
+    try {
+      await fetch(`/api/protest/${encodeURIComponent(propertyId)}/cad-evidence?taxYear=${year}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` }
+      });
+      await loadPropertyAndWorksheet(propertyId, Number(year));
+      addToast("green", "CAD evidence removed");
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setUploadingEvidence(false);
+    }
+  }, [propertyId, year, loadPropertyAndWorksheet, addToast]);
+
+  const saveSoldCompNote = useCallback(async (address: string, notes: string) => {
+    if (!propertyId) return;
+    try {
+      await fetch(`/api/protest/${encodeURIComponent(propertyId)}/sold-comps/notes?taxYear=${year}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`
+        },
+        body: JSON.stringify({ address, notes })
+      });
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to save note");
+    }
+  }, [propertyId, year, addToast]);
+
+  const saveEquityCompNote = useCallback(async (cadPropertyId: string, notes: string) => {
+    if (!propertyId) return;
+    try {
+      await fetch(`/api/protest/${encodeURIComponent(propertyId)}/comps/${encodeURIComponent(cadPropertyId)}/notes?taxYear=${year}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken() ?? ""}`
+        },
+        body: JSON.stringify({ notes })
+      });
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to save note");
+    }
+  }, [propertyId, year, addToast]);
 
   const resetAddCompModal = useCallback(() => {
     setAddCompStep("search");
@@ -945,6 +1100,7 @@ export function TaxProtestPage() {
                       )}
                       <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
                       <Table.Th style={{ width: 36 }} />
+                      <Table.Th style={{ width: 36 }} />
                     </Table.Tr>
                   </Table.Thead>
                   <Table.Tbody>
@@ -999,6 +1155,17 @@ export function TaxProtestPage() {
                             <Text size="xs" c={color} fw={color ? 600 : undefined}>
                               {vsSubjectLabel(comp.pricePerSqft, subjectMarketPpsf)}
                             </Text>
+                          </Table.Td>
+                          <Table.Td>
+                            {comp.address && (
+                              <CompNotePopover
+                                note={soldCompsNotes[comp.address] ?? null}
+                                onSave={(v) => {
+                                  setSoldCompsNotes((prev) => ({ ...prev, [comp.address!]: v }));
+                                  void saveSoldCompNote(comp.address!, v);
+                                }}
+                              />
+                            )}
                           </Table.Td>
                           <Table.Td>
                             {comp.address ? (
@@ -1126,6 +1293,7 @@ export function TaxProtestPage() {
                     <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
                     <Table.Th style={{ width: 36 }} />
+                    <Table.Th style={{ width: 36 }} />
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
@@ -1148,6 +1316,15 @@ export function TaxProtestPage() {
                           <Text size="xs" c={color} fw={color ? 600 : undefined}>
                             {vsSubjectLabel(comp.perSqftUsd, subjectAssessedPpsf)}
                           </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <CompNotePopover
+                            note={comp.notes}
+                            onSave={(v) => {
+                              setComps((prev) => prev.map((c) => c.cadPropertyId === comp.cadPropertyId ? { ...c, notes: v } : c));
+                              void saveEquityCompNote(comp.cadPropertyId, v);
+                            }}
+                          />
                         </Table.Td>
                         <Table.Td>
                           <Tooltip label="Remove comp" withArrow>
@@ -1206,6 +1383,159 @@ export function TaxProtestPage() {
             </Paper>
           )}
         </Stack>
+      </Card>
+
+      {/* CAD Evidence Card */}
+      <Card withBorder shadow="xs" radius="md" p="md">
+        <Group justify="space-between" mb="xs">
+          <Text fw={600} size="sm">CAD Evidence Packet</Text>
+          <Group gap="xs">
+            {cadEvidence && worksheet?.cadEvidenceFilename && (
+              <Text size="xs" c="dimmed">{worksheet.cadEvidenceFilename}</Text>
+            )}
+            <input
+              type="file"
+              accept=".pdf"
+              ref={cadEvidenceFileRef}
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const file = e.currentTarget.files?.[0];
+                if (file) void uploadCadEvidence(file);
+                e.currentTarget.value = "";
+              }}
+            />
+            <Button
+              size="xs"
+              variant="light"
+              loading={uploadingEvidence}
+              onClick={() => cadEvidenceFileRef.current?.click()}
+            >
+              {cadEvidence ? "Re-upload PDF" : "Upload Evidence PDF"}
+            </Button>
+            {cadEvidence && (
+              <Tooltip label="Remove evidence" withArrow>
+                <ActionIcon variant="subtle" color="red" size="sm" onClick={() => void deleteCadEvidence()}>
+                  <IconTrash size={13} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
+        </Group>
+
+        {!cadEvidence && (
+          <Text size="xs" c="dimmed">
+            Upload the official DCAD evidence packet PDF (the one DCAD emails before your ARB hearing).
+            The app will extract DCAD's own comps and feed them to the AI assistant.
+          </Text>
+        )}
+
+        {cadEvidence && (
+          <Stack gap="sm">
+            {/* §41.43 insight badge */}
+            {cadEvidence.equityAnalysis.medianIndValueUsd != null && cadAssessed != null && (
+              <Alert
+                color={cadEvidence.equityAnalysis.medianIndValueUsd < cadAssessed ? "green" : "orange"}
+                variant="light"
+                radius="sm"
+              >
+                <Text size="xs" fw={600}>
+                  §41.43 Signal: CAD equity median {money(cadEvidence.equityAnalysis.medianIndValueUsd)} vs. your assessed {money(cadAssessed)}
+                  {" → "}
+                  {cadEvidence.equityAnalysis.medianIndValueUsd < cadAssessed
+                    ? `${money(cadAssessed - cadEvidence.equityAnalysis.medianIndValueUsd)} over-assessed — §41.43 argument supported`
+                    : `${money(cadEvidence.equityAnalysis.medianIndValueUsd - cadAssessed)} under equity median`}
+                </Text>
+              </Alert>
+            )}
+
+            {/* CAD Sales Analysis comps */}
+            {cadEvidence.salesAnalysis.comps.length > 0 && (
+              <>
+                <Group gap="xs">
+                  <Text size="xs" fw={600}>DCAD Sales Analysis (§41.41)</Text>
+                  {cadEvidence.salesAnalysis.medianIndValueUsd != null && (
+                    <Badge size="xs" variant="light" color="blue">
+                      Median ind. {money(cadEvidence.salesAnalysis.medianIndValueUsd)}
+                    </Badge>
+                  )}
+                </Group>
+                <Box style={{ overflowX: "auto" }}>
+                  <Table withTableBorder withColumnBorders fz="xs" striped>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>#</Table.Th>
+                        <Table.Th>Address</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>Distance</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>Sale Date</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>Sale Price</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>DCAD Market</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>Ind. Value</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {cadEvidence.salesAnalysis.comps.map((c) => (
+                        <Table.Tr key={c.compNum}>
+                          <Table.Td>{c.compNum}</Table.Td>
+                          <Table.Td>{c.address}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{c.distanceMi != null ? `${c.distanceMi} mi` : "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{c.saleDate ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{money(c.salePriceUsd)}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{money(c.cadMarketValueUsd)}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{money(c.cadIndValueUsd)}</Table.Td>
+                        </Table.Tr>
+                      ))}
+                    </Table.Tbody>
+                  </Table>
+                </Box>
+              </>
+            )}
+
+            {/* CAD Equity Analysis comps */}
+            {cadEvidence.equityAnalysis.comps.length > 0 && (
+              <>
+                <Group gap="xs">
+                  <Text size="xs" fw={600}>DCAD Equity Analysis (§41.43)</Text>
+                  {cadEvidence.equityAnalysis.medianIndValueUsd != null && (
+                    <Badge size="xs" variant="light" color="teal">
+                      Median ind. {money(cadEvidence.equityAnalysis.medianIndValueUsd)}
+                    </Badge>
+                  )}
+                </Group>
+                <Box style={{ overflowX: "auto" }}>
+                  <Table withTableBorder withColumnBorders fz="xs" striped>
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>#</Table.Th>
+                        <Table.Th>Address</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>Distance</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>DCAD Market</Table.Th>
+                        <Table.Th style={{ textAlign: "right" }}>Ind. Value</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      {cadEvidence.equityAnalysis.comps.map((c) => {
+                        const isOverAssessed = cadEvidence.equityAnalysis.medianIndValueUsd != null && cadAssessed != null && cadAssessed > cadEvidence.equityAnalysis.medianIndValueUsd;
+                        return (
+                          <Table.Tr key={c.compNum}>
+                            <Table.Td>{c.compNum}</Table.Td>
+                            <Table.Td>{c.address}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>{c.distanceMi != null ? `${c.distanceMi} mi` : "—"}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>{money(c.cadMarketValueUsd)}</Table.Td>
+                            <Table.Td style={{ textAlign: "right" }}>
+                              <Text size="xs" c={isOverAssessed && c.cadIndValueUsd != null && cadAssessed != null && c.cadIndValueUsd < cadAssessed ? "green" : undefined} fw={isOverAssessed ? 600 : undefined}>
+                                {money(c.cadIndValueUsd)}
+                              </Text>
+                            </Table.Td>
+                          </Table.Tr>
+                        );
+                      })}
+                    </Table.Tbody>
+                  </Table>
+                </Box>
+              </>
+            )}
+          </Stack>
+        )}
       </Card>
 
       {/* Strategy panel — only when AI has generated a strategy */}
