@@ -119,7 +119,86 @@ Open `http://127.0.0.1:3000` → sign in with the seeded user:
 
 (Change immediately in production; see §4.)
 
-### 2.4 Health Check and Smoke Tests
+### 2.4 Using Podman Instead of Docker (macOS)
+
+Podman is a daemonless Docker-compatible alternative. On macOS, Podman runs a lightweight Linux VM. One-time machine setup is required before `podman run` or `podman compose` work.
+
+**Step 1 — Initialize the Podman machine (once per machine):**
+
+```bash
+podman machine init --cpus 4 --memory 8192 --disk-size 50
+```
+
+Allocates 4 vCPUs, 8 GB RAM, and 50 GB disk to the VM. Adjust to your hardware.
+
+**Step 2 — Start the machine:**
+
+```bash
+podman machine start
+```
+
+**Step 3 — Verify Podman is working:**
+
+```bash
+podman ps          # should return an empty table (no containers yet)
+podman info        # shows machine/host details
+```
+
+**Step 4 — Start the Postgres container (pgvector image):**
+
+Use `podman compose` as a drop-in replacement for `docker compose`:
+
+```bash
+podman compose up -d
+# Postgres on host port 5433 — same as Docker setup
+```
+
+Or run the container directly without Compose:
+
+```bash
+podman run -d \
+  --name household-finance-app-postgres-1 \
+  -e POSTGRES_USER=household \
+  -e POSTGRES_PASSWORD=<your-local-db-password> \
+  -e POSTGRES_DB=household_finance_test \
+  -p 5433:5432 \
+  -v hf_pg_data:/var/lib/postgresql \
+  pgvector/pgvector:pg18
+```
+
+**Start / stop the container:**
+
+```bash
+podman start household-finance-app-postgres-1
+podman stop household-finance-app-postgres-1
+```
+
+**Start / stop the Podman VM itself (between work sessions):**
+
+```bash
+podman machine start   # before working
+podman machine stop    # when done for the day (frees RAM/CPU)
+```
+
+**Inspect running containers:**
+
+```bash
+podman ps              # running containers
+podman ps -a           # all containers including stopped
+```
+
+**Connect to the Postgres container directly:**
+
+```bash
+podman exec -it household-finance-app-postgres-1 \
+  psql -U household -d household_finance_test
+```
+
+> Note: `docker` and `podman` commands are interchangeable for this project. If you have `podman-docker` installed, `docker compose up -d` routes through Podman automatically and no changes are needed.
+
+---
+
+### 2.5 Health Check and Smoke Tests
 
 ```bash
 # API health
@@ -135,7 +214,7 @@ npm run lint
 npm test
 ```
 
-### 2.5 Reset Local Data
+### 2.6 Reset Local Data
 
 Stop the API before cleanup:
 
