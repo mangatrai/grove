@@ -101,6 +101,9 @@ type Worksheet = {
   cadEvidenceJson: CadEvidenceData | null;
   cadEvidenceFilename: string | null;
   soldCompsNotesJson: Record<string, string>;
+  summarizationCursor: number;
+  conversationSummary: string | null;
+  cycleSummary: string | null;
 };
 
 type CADComp = {
