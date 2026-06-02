@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-11 (2026-06-01): Auto-fetch CAD assessed values for Redfin sold comps (§41.43 support)
+
+- **Type:** Feature — closes #61
+- **What changed:**
+  - `POST /api/protest/:propertyId/refresh-comps` now auto-fetches CAD-assessed values for Redfin sold comp addresses (TX properties only) using the registered CAD adapter. Lookups are sequential with a 200 ms delay; up to 6 new addresses per refresh.
+  - CAD assessed values are cached in a new `sold_comps_cad_json JSONB` column on `protest_worksheet` (migration 0062). Already-cached addresses are skipped on subsequent refreshes.
+  - `GET /api/protest/:propertyId/sold-comps` now returns `cadAssessedValueUsd` on each comp, sourced from the cache.
+  - `SoldComp` type gains `cadAssessedValueUsd: number | null` in both backend (`protest-evidence.service.ts`) and frontend.
+  - Market Value Evidence table gains two new columns for TX properties: **CAD Assessed** and **§41.43 Ratio** (CAD ÷ Sold Price). Comps with a lower ratio than the subject are highlighted green.
+  - Subject row shows its own CAD assessed value and ratio in the new columns.
+  - Evidence PDF (`drawSoldCompsTable`) gains CAD Assessed and §41.43 Ratio columns when any comp has data.
+  - Toast updated: shows "N §41.43 values" when new CAD values are fetched.
+  - `POST /refresh-comps` response now includes `soldCompsCadFetched: number`.
+- **Migration:** `0062_pt11_sold_comps_cad.sql` — adds `sold_comps_cad_json JSONB DEFAULT '{}'::jsonb` to `protest_worksheet`.
+- **New service function:** `saveSoldCompsCadCache(propertyId, householdId, taxYear, cache)` in `protest-worksheet.service.ts`.
+- **Files changed:** `backend/db/migrations/0062_pt11_sold_comps_cad.sql`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest-evidence.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+- **GitHub:** https://github.com/mangatrai/grove/issues/61
+
+---
+
 ## PT-13 (2026-06-01): On-demand comps refresh button
 
 - **Type:** Feature — closes #63

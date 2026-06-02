@@ -13,6 +13,7 @@ export type SoldComp = {
   soldDate: string | null;
   pricePerSqft: number | null;
   listPrice: number | null;
+  cadAssessedValueUsd: number | null;
 };
 
 export type EvidencePacketInput = {
@@ -337,28 +338,43 @@ function drawCADCompsTable(
 
 // ── Section: Sold comps table ─────────────────────────────────────────────────
 
-function drawSoldCompsTable(doc: Doc, comps: SoldComp[]): void {
+function drawSoldCompsTable(doc: Doc, comps: SoldComp[], subjectCadAssessed: number | null): void {
   let y = 50;
+  const hasCadData = comps.some((c) => c.cadAssessedValueUsd != null);
+  const subjectRatio = subjectCadAssessed != null && subjectCadAssessed > 0 ? subjectCadAssessed : null;
 
   doc.font("Helvetica-Bold").fontSize(13).fillColor(CLR.dark)
     .text("Recent Comparable Sales (Redfin)", ML, y);
   y += 16;
   doc.font("Helvetica").fontSize(8).fillColor(CLR.gray)
     .text(
-      "Sold prices from public MLS records via Redfin. Texas is a non-disclosure state — some prices may be estimated.",
+      hasCadData
+        ? "Sold prices from Redfin with CAD-assessed values for §41.43 unequal appraisal analysis."
+        : "Sold prices from public MLS records via Redfin. Texas is a non-disclosure state — some prices may be estimated.",
       ML, y, { width: PW }
     );
   y += 16;
 
-  const cols: ColDef[] = [
-    { label: "Address",    w: 160, align: "left"  },
-    { label: "Sqft",       w: 52,  align: "right" },
-    { label: "Bd/Ba",      w: 45,  align: "right" },
-    { label: "Sold Price", w: 82,  align: "right" },
-    { label: "Sold Date",  w: 72,  align: "right" },
-    { label: "$/sqft",     w: 52,  align: "right" },
-    { label: "List Price", w: 49,  align: "right" }
-  ];
+  const cols: ColDef[] = hasCadData
+    ? [
+        { label: "Address",      w: 120, align: "left"  },
+        { label: "Sqft",         w: 42,  align: "right" },
+        { label: "Bd/Ba",        w: 38,  align: "right" },
+        { label: "Sold Price",   w: 70,  align: "right" },
+        { label: "Sold Date",    w: 60,  align: "right" },
+        { label: "$/sqft",       w: 42,  align: "right" },
+        { label: "CAD Assessed", w: 72,  align: "right" },
+        { label: "§41.43 Ratio", w: 68,  align: "right" }
+      ]
+    : [
+        { label: "Address",    w: 160, align: "left"  },
+        { label: "Sqft",       w: 52,  align: "right" },
+        { label: "Bd/Ba",      w: 45,  align: "right" },
+        { label: "Sold Price", w: 82,  align: "right" },
+        { label: "Sold Date",  w: 72,  align: "right" },
+        { label: "$/sqft",     w: 52,  align: "right" },
+        { label: "List Price", w: 49,  align: "right" }
+      ];
 
   tableHeader(doc, cols, y);
   y += ROW_H;
@@ -369,21 +385,49 @@ function drawSoldCompsTable(doc: Doc, comps: SoldComp[]): void {
     const bedBath = comp.beds != null || comp.baths != null
       ? `${comp.beds ?? "—"}/${comp.baths ?? "—"}` : "—";
 
-    tableRow(doc, cols, [
-      { text: trunc(comp.address, 26) },
-      { text: fmtNum(comp.sqft) },
-      { text: bedBath },
-      { text: fmtMoney(comp.soldPrice) },
-      { text: comp.soldDate ?? "—" },
-      { text: comp.pricePerSqft != null ? `$${Math.round(comp.pricePerSqft)}` : "—" },
-      { text: fmtMoney(comp.listPrice) }
-    ], y, i % 2 === 0 ? CLR.white : CLR.lightGray);
+    if (hasCadData) {
+      const compRatio = comp.cadAssessedValueUsd != null && comp.soldPrice != null && comp.soldPrice > 0
+        ? comp.cadAssessedValueUsd / comp.soldPrice
+        : null;
+      const subjRatioPct = subjectRatio != null && comps[0]?.soldPrice != null ? subjectRatio : null;
+      let ratioText = "—";
+      let ratioColor = CLR.dark;
+      if (compRatio != null) {
+        ratioText = `${(compRatio * 100).toFixed(1)}%`;
+        if (subjRatioPct != null) {
+          const subjR = subjectCadAssessed != null && comp.soldPrice != null ? (subjectCadAssessed / comp.soldPrice) : null;
+          if (subjR != null) {
+            ratioColor = compRatio < subjR ? CLR.green : CLR.dark;
+          }
+        }
+      }
+      tableRow(doc, cols, [
+        { text: trunc(comp.address, 20) },
+        { text: fmtNum(comp.sqft) },
+        { text: bedBath },
+        { text: fmtMoney(comp.soldPrice) },
+        { text: comp.soldDate ?? "—" },
+        { text: comp.pricePerSqft != null ? `$${Math.round(comp.pricePerSqft)}` : "—" },
+        { text: fmtMoney(comp.cadAssessedValueUsd) },
+        { text: ratioText, color: ratioColor }
+      ], y, i % 2 === 0 ? CLR.white : CLR.lightGray);
+    } else {
+      tableRow(doc, cols, [
+        { text: trunc(comp.address, 26) },
+        { text: fmtNum(comp.sqft) },
+        { text: bedBath },
+        { text: fmtMoney(comp.soldPrice) },
+        { text: comp.soldDate ?? "—" },
+        { text: comp.pricePerSqft != null ? `$${Math.round(comp.pricePerSqft)}` : "—" },
+        { text: fmtMoney(comp.listPrice) }
+      ], y, i % 2 === 0 ? CLR.white : CLR.lightGray);
+    }
     y += ROW_H;
   }
 
   y += 10;
   doc.font("Helvetica").fontSize(8).fillColor(CLR.gray)
-    .text("Source: Redfin API via RealtyAPI.io. Data may be delayed up to 30 days.", ML, y, { width: PW });
+    .text("Source: Redfin API via RealtyAPI.io. CAD values from county appraisal district records.", ML, y, { width: PW });
 }
 
 // ── Section: Market value bar chart ──────────────────────────────────────────
@@ -498,7 +542,7 @@ export function generateEvidencePDF(input: EvidencePacketInput): InstanceType<ty
   // Redfin sold comps table
   if (input.soldComps.length > 0) {
     doc.addPage();
-    drawSoldCompsTable(doc, input.soldComps);
+    drawSoldCompsTable(doc, input.soldComps, input.cadAssessed);
   }
 
   // Bar chart

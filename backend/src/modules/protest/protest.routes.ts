@@ -13,6 +13,7 @@ import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
 import {
   appendConversationTurn,
   getOrCreateWorksheet,
+  getWorksheet,
   listWorksheetComps,
   updateStrategy,
   updateWorksheetStatus,
@@ -22,6 +23,8 @@ import {
   type StrategyJson,
   saveCADComps,
   saveCadSubjectIds,
+  saveSoldCompsCadCache,
+  type SoldCompCadEntry,
   deleteCADComp,
   addCADComp,
   type ManualComp,
@@ -79,6 +82,45 @@ function asNumber(value: unknown): number | null {
 function money(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+}
+
+function buildSoldComps(
+  rawComps: unknown[],
+  cadCache: Record<string, SoldCompCadEntry>
+): SoldComp[] {
+  return rawComps.map((c) => {
+    const r = asRecord(c) ?? {};
+    const soldPrice = asNumber(r.soldPrice);
+    const sqft = asNumber(r.sqft);
+    const address = typeof r.address === "string" ? r.address : null;
+    const cached = address ? (cadCache[address] ?? null) : null;
+    return {
+      address,
+      city: typeof r.city === "string" ? r.city : null,
+      state: typeof r.state === "string" ? r.state : null,
+      sqft,
+      beds: asNumber(r.beds),
+      baths: asNumber(r.baths),
+      yearBuilt: asNumber(r.yearBuilt),
+      soldPrice,
+      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
+      pricePerSqft: soldPrice != null && sqft != null && sqft > 0
+        ? Math.round(soldPrice / sqft)
+        : asNumber(r.pricePerSqft),
+      listPrice: asNumber(r.listPrice),
+      cadAssessedValueUsd: cached?.assessedValueUsd ?? null
+    };
+  });
+}
+
+function matchCadAssessedValue(cadComps: CadProperty[], searchAddress: string): SoldCompCadEntry | null {
+  if (cadComps.length === 0) return null;
+  const houseNum = searchAddress.trim().match(/^\d+/)?.[0];
+  const match = houseNum
+    ? (cadComps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? cadComps[0])
+    : cadComps[0];
+  if (!match) return null;
+  return { cadPropertyId: match.cadPropertyId, assessedValueUsd: match.assessedValue };
 }
 
 function buildSystemPrompt(input: {
@@ -199,27 +241,9 @@ protestRouter.get("/:propertyId/sold-comps", async (req: AuthenticatedRequest, r
   }
   const detail = asRecord(property.valuationDetail);
   const rawComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
-  const comps = rawComps.map((c) => {
-    const r = asRecord(c) ?? {};
-    const soldPrice = asNumber(r.soldPrice);
-    const sqft = asNumber(r.sqft);
-    return {
-      address: typeof r.address === "string" ? r.address : null,
-      city: typeof r.city === "string" ? r.city : null,
-      state: typeof r.state === "string" ? r.state : null,
-      sqft,
-      beds: asNumber(r.beds),
-      baths: asNumber(r.baths),
-      yearBuilt: asNumber(r.yearBuilt),
-      soldPrice,
-      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
-      pricePerSqft:
-        soldPrice != null && sqft != null && sqft > 0
-          ? Math.round(soldPrice / sqft)
-          : asNumber(r.pricePerSqft),
-      listPrice: asNumber(r.listPrice)
-    };
-  });
+  const worksheet = await getWorksheet(property.id, householdId, year);
+  const cadCache = worksheet?.soldCompsCadJson ?? {};
+  const comps = buildSoldComps(rawComps, cadCache);
   const excluded = await getExcludedSoldComps(property.id, householdId, year);
   res.status(200).json({ comps, excluded });
 });
@@ -480,27 +504,44 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
   const freshComps = await listWorksheetComps(property.id, householdId, year);
   const detail = asRecord(freshProp?.valuationDetail);
   const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
-  const soldComps = rawSoldComps.map((c) => {
-    const r = asRecord(c) ?? {};
-    const soldPrice = asNumber(r.soldPrice);
-    const sqft = asNumber(r.sqft);
-    return {
-      address: typeof r.address === "string" ? r.address : null,
-      city: typeof r.city === "string" ? r.city : null,
-      state: typeof r.state === "string" ? r.state : null,
-      sqft,
-      beds: asNumber(r.beds),
-      baths: asNumber(r.baths),
-      yearBuilt: asNumber(r.yearBuilt),
-      soldPrice,
-      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
-      pricePerSqft: soldPrice != null && sqft != null && sqft > 0 ? Math.round(soldPrice / sqft) : asNumber(r.pricePerSqft),
-      listPrice: asNumber(r.listPrice)
-    };
-  });
 
-  log.info("refresh-comps", { propertyId: property.id, year, cad: cadResult.ok, redfin: redfinResult.ok });
-  res.status(200).json({ cad: cadResult, redfin: redfinResult, comps: freshComps, soldComps });
+  // Auto-fetch CAD assessed values for Redfin sold comps (§41.43 support, TX only)
+  let soldCompsCadFetched = 0;
+  const existingWorksheet = await getWorksheet(property.id, householdId, year);
+  const cadCache: Record<string, SoldCompCadEntry> = existingWorksheet?.soldCompsCadJson ?? {};
+  const isTx = (property.state ?? "").toUpperCase() === "TX";
+  if (isTx && cadAdapter) {
+    const addressesToFetch = rawSoldComps
+      .map((c) => {
+        const r = asRecord(c) ?? {};
+        return typeof r.address === "string" ? r.address : null;
+      })
+      .filter((a): a is string => a !== null && !(a in cadCache))
+      .slice(0, 6);
+
+    for (const addr of addressesToFetch) {
+      try {
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        const results = await cadAdapter.searchByAddress(addr, year);
+        const entry = matchCadAssessedValue(results, addr);
+        if (entry) {
+          cadCache[addr] = entry;
+          soldCompsCadFetched++;
+        }
+      } catch (err) {
+        log.warn("refresh-comps: sold comp CAD lookup failed", { addr, err: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    if (soldCompsCadFetched > 0) {
+      await saveSoldCompsCadCache(property.id, householdId, year, cadCache);
+    }
+  }
+
+  const soldComps = buildSoldComps(rawSoldComps, cadCache);
+
+  log.info("refresh-comps", { propertyId: property.id, year, cad: cadResult.ok, redfin: redfinResult.ok, soldCompsCadFetched });
+  res.status(200).json({ cad: cadResult, redfin: redfinResult, comps: freshComps, soldComps, soldCompsCadFetched });
 });
 
 protestRouter.patch("/:propertyId/sold-comps/exclusions", async (req: AuthenticatedRequest, res) => {
@@ -832,25 +873,7 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
   const excluded = await getExcludedSoldComps(property.id, householdId, year);
   const excludedSet = new Set(excluded);
-  const soldComps: SoldComp[] = rawSoldComps
-    .map((c) => {
-      const r = asRecord(c) ?? {};
-      const soldPrice = asNumber(r.soldPrice);
-      const sqft = asNumber(r.sqft);
-      return {
-        address: typeof r.address === "string" ? r.address : null,
-        sqft,
-        beds: asNumber(r.beds),
-        baths: asNumber(r.baths),
-        soldPrice,
-        soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
-        pricePerSqft:
-          soldPrice != null && sqft != null && sqft > 0
-            ? Math.round(soldPrice / sqft)
-            : asNumber(r.pricePerSqft),
-        listPrice: asNumber(r.listPrice)
-      };
-    })
+  const soldComps: SoldComp[] = buildSoldComps(rawSoldComps, worksheet.soldCompsCadJson)
     .filter((c) => !excludedSet.has(c.address ?? ""));
 
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown Property";

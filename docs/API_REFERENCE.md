@@ -186,7 +186,7 @@ Returns an empty array if no DCAD comps have been fetched for this property/year
 
 ### `GET /api/protest/:propertyId/sold-comps?year=YYYY`
 
-Returns Redfin comparable sold properties from the property's stored `valuation_detail`. `year` defaults to current year and is used to load the per-year exclusion list.
+Returns Redfin comparable sold properties from the property's stored `valuation_detail`, merged with any cached CAD-assessed values for §41.43 unequal appraisal analysis. `year` defaults to current year and is used to load the per-year exclusion list and CAD cache.
 
 **Response 200:**
 ```json
@@ -203,14 +203,15 @@ Returns Redfin comparable sold properties from the property's stored `valuation_
       "soldPrice": null,
       "soldDate": "2025-10-01",
       "pricePerSqft": null,
-      "listPrice": 420000
+      "listPrice": 420000,
+      "cadAssessedValueUsd": 390000
     }
   ],
   "excluded": ["123 Oak Ave"]
 }
 ```
 
-`soldPrice` and `pricePerSqft` are frequently null in Texas (non-disclosure state). `excluded` is the list of addresses the user has hidden from their evidence (see `PATCH .../sold-comps/exclusions`).
+`soldPrice` and `pricePerSqft` are frequently null in Texas (non-disclosure state). `cadAssessedValueUsd` is the CAD-assessed value fetched via the CAD adapter for that address — null until `POST /refresh-comps` has been called. `excluded` is the list of addresses the user has hidden from their evidence (see `PATCH .../sold-comps/exclusions`).
 
 ---
 
@@ -294,7 +295,7 @@ Adds a comparable property to the Unequal Appraisal evidence table. Supports two
 
 ### `POST /api/protest/:propertyId/refresh-comps`
 
-Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter) and Redfin sold comps (via RealtyAPI). Returns fresh data for both tables so the UI can update without a page reload.
+Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter) and Redfin sold comps (via RealtyAPI). For TX properties, also auto-fetches CAD-assessed values for Redfin sold comp addresses (§41.43 support). Returns fresh data for both tables so the UI can update without a page reload.
 
 **Request body:**
 ```json
@@ -306,6 +307,7 @@ Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter)
 **Behavior:**
 - **CAD:** Calls the adapter's `searchByAddress` for the property's address. Saves new comps to `protest_comp_cad`; updates subject `cad_property_id` / `cad_account_id` on the property row. If no adapter is registered for the county, `cad.ok` is `false` and `cad.message` explains why.
 - **Redfin:** Calls `refreshPropertyValuation`. The 24-hour cooldown still applies — if the data is fresh, `redfin.ok` is `false` and `redfin.code` is `"RATE_LIMITED"` (not an error; surface as a warning in UI, not a failure).
+- **§41.43 CAD lookups (TX only):** After Redfin refresh, for each sold comp address not already in the cache, calls the CAD adapter's `searchByAddress`. Matches by house-number prefix. Stores `{ cadPropertyId, assessedValueUsd }` in `protest_worksheet.sold_comps_cad_json`. Up to 6 new addresses per call; 200 ms delay between lookups.
 
 **Response 200:**
 ```json
@@ -313,9 +315,12 @@ Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter)
   "cad": { "ok": true, "count": 12 },
   "redfin": { "ok": true, "estimate": 950000 },
   "comps": [ /* full CAD comp list for year */ ],
-  "soldComps": [ /* full Redfin sold comp list from updated valuation_detail_json */ ]
+  "soldComps": [ /* Redfin sold comps with cadAssessedValueUsd merged in */ ],
+  "soldCompsCadFetched": 4
 }
 ```
+
+`soldCompsCadFetched` is the number of new sold comp CAD lookups completed this call (0 if all were already cached or property is non-TX).
 
 On rate-limit: `"redfin": { "ok": false, "code": "RATE_LIMITED", "message": "Valuation refreshed within the last 24 hours — try again later." }`
 

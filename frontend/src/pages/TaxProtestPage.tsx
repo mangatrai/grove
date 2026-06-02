@@ -123,6 +123,7 @@ type SoldComp = {
   soldDate: string | null;
   pricePerSqft: number | null;
   listPrice: number | null;
+  cadAssessedValueUsd: number | null;
 };
 
 type CadSearchResult = {
@@ -492,6 +493,7 @@ export function TaxProtestPage() {
         redfin: { ok: boolean; code?: string; message?: string; estimate?: number };
         comps: CADComp[];
         soldComps: SoldComp[];
+        soldCompsCadFetched?: number;
       }>(`/api/protest/${encodeURIComponent(propertyId)}/refresh-comps`, {
         method: "POST",
         body: JSON.stringify({ year: Number(year) })
@@ -504,6 +506,7 @@ export function TaxProtestPage() {
       if (res.redfin.ok) msgs.push("Redfin updated");
       else if (res.redfin.code === "RATE_LIMITED") msgs.push("Redfin refreshed < 24h ago");
       else if (res.redfin.message) msgs.push(`Redfin: ${res.redfin.message}`);
+      if (res.soldCompsCadFetched) msgs.push(`${res.soldCompsCadFetched} §41.43 values`);
       addToast(res.cad.ok || res.redfin.ok ? "green" : "yellow", msgs.join(" · ") || "Refreshed");
     } catch {
       addToast("red", "Comps refresh failed");
@@ -926,6 +929,20 @@ export function TaxProtestPage() {
                       <Table.Th style={{ textAlign: "right" }}>Sold Price</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>Sold Date</Table.Th>
+                      {(property?.state ?? "").toUpperCase() === "TX" && (
+                        <>
+                          <Table.Th style={{ textAlign: "right" }}>
+                            <Tooltip label="CAD-assessed value for this comp (§41.43)" withArrow>
+                              <span>CAD Assessed</span>
+                            </Tooltip>
+                          </Table.Th>
+                          <Table.Th style={{ textAlign: "right" }}>
+                            <Tooltip label="CAD Assessed ÷ Sold Price. Green = comp assessed lower than subject (supports §41.43 unequal appraisal)" withArrow>
+                              <span>§41.43 Ratio</span>
+                            </Tooltip>
+                          </Table.Th>
+                        </>
+                      )}
                       <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
                       <Table.Th style={{ width: 36 }} />
                     </Table.Tr>
@@ -933,6 +950,13 @@ export function TaxProtestPage() {
                   <Table.Tbody>
                     {visibleSoldComps.map((comp, idx) => {
                       const color = vsSubjectColor(comp.pricePerSqft, subjectMarketPpsf);
+                      const subjectRatio = cadAssessed != null && avm != null && avm > 0 ? cadAssessed / avm : null;
+                      const compRatio = comp.cadAssessedValueUsd != null && comp.soldPrice != null && comp.soldPrice > 0
+                        ? comp.cadAssessedValueUsd / comp.soldPrice
+                        : null;
+                      const ratioColor = compRatio != null && subjectRatio != null
+                        ? (compRatio < subjectRatio ? "green" : "red")
+                        : undefined;
                       return (
                         <Table.Tr key={`${comp.address ?? ""}-${idx}`}>
                           <Table.Td>{comp.address ?? "—"}</Table.Td>
@@ -957,6 +981,20 @@ export function TaxProtestPage() {
                           <Table.Td style={{ textAlign: "right" }}>
                             {comp.soldDate ?? "—"}
                           </Table.Td>
+                          {(property?.state ?? "").toUpperCase() === "TX" && (
+                            <>
+                              <Table.Td style={{ textAlign: "right" }}>
+                                {comp.cadAssessedValueUsd != null ? money(comp.cadAssessedValueUsd) : "—"}
+                              </Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>
+                                {compRatio != null ? (
+                                  <Text size="xs" c={ratioColor} fw={ratioColor ? 600 : undefined}>
+                                    {(compRatio * 100).toFixed(1)}%
+                                  </Text>
+                                ) : "—"}
+                              </Table.Td>
+                            </>
+                          )}
                           <Table.Td style={{ textAlign: "right" }}>
                             <Text size="xs" c={color} fw={color ? 600 : undefined}>
                               {vsSubjectLabel(comp.pricePerSqft, subjectMarketPpsf)}
@@ -1000,6 +1038,18 @@ export function TaxProtestPage() {
                         {ppsf(subjectMarketPpsf)}
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>—</Table.Td>
+                      {(property?.state ?? "").toUpperCase() === "TX" && (
+                        <>
+                          <Table.Td style={{ textAlign: "right" }} fw={700}>
+                            {cadAssessed != null ? money(cadAssessed) : "—"}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }} fw={700}>
+                            {cadAssessed != null && avm != null && avm > 0
+                              ? `${((cadAssessed / avm) * 100).toFixed(1)}%`
+                              : "—"}
+                          </Table.Td>
+                        </>
+                      )}
                       <Table.Td style={{ textAlign: "right" }}>
                         <Badge size="xs" variant="light">Subject</Badge>
                       </Table.Td>

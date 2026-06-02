@@ -1113,6 +1113,9 @@ paths:
                   soldComps:
                     type: array
                     items: { $ref: "#/components/schemas/SoldComp" }
+                  soldCompsCadFetched:
+                    type: integer
+                    description: Number of new sold comp CAD lookups completed this call (0 if all cached or non-TX)
         "400": { description: Validation error }
         "404": { description: Property not found }
 
@@ -3789,6 +3792,7 @@ components:
         soldDate: { type: string, nullable: true }
         pricePerSqft: { type: number, nullable: true }
         listPrice: { type: number, nullable: true }
+        cadAssessedValueUsd: { type: number, nullable: true, description: "CAD-assessed value fetched from county adapter for §41.43 analysis; null until refresh-comps has been called" }
     EsppBatch:
       type: object
       properties:
