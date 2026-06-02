@@ -292,6 +292,35 @@ Adds a comparable property to the Unequal Appraisal evidence table. Supports two
 
 ---
 
+### `POST /api/protest/:propertyId/refresh-comps`
+
+Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter) and Redfin sold comps (via RealtyAPI). Returns fresh data for both tables so the UI can update without a page reload.
+
+**Request body:**
+```json
+{ "year": 2026 }
+```
+
+`year` is optional — defaults to the current UTC year.
+
+**Behavior:**
+- **CAD:** Calls the adapter's `searchByAddress` for the property's address. Saves new comps to `protest_comp_cad`; updates subject `cad_property_id` / `cad_account_id` on the property row. If no adapter is registered for the county, `cad.ok` is `false` and `cad.message` explains why.
+- **Redfin:** Calls `refreshPropertyValuation`. The 24-hour cooldown still applies — if the data is fresh, `redfin.ok` is `false` and `redfin.code` is `"RATE_LIMITED"` (not an error; surface as a warning in UI, not a failure).
+
+**Response 200:**
+```json
+{
+  "cad": { "ok": true, "count": 12 },
+  "redfin": { "ok": true, "estimate": 950000 },
+  "comps": [ /* full CAD comp list for year */ ],
+  "soldComps": [ /* full Redfin sold comp list from updated valuation_detail_json */ ]
+}
+```
+
+On rate-limit: `"redfin": { "ok": false, "code": "RATE_LIMITED", "message": "Valuation refreshed within the last 24 hours — try again later." }`
+
+---
+
 ### `PATCH /api/protest/:propertyId/sold-comps/exclusions`
 
 Saves (replaces) the list of Redfin sold-comp addresses to hide from the Market Value Evidence table and the evidence packet PDF/DOCX for the given year.

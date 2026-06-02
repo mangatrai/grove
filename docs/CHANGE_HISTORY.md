@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-13 (2026-06-01): On-demand comps refresh button
+
+- **Type:** Feature — closes #63
+- **What changed:**
+  - "Refresh" button added to both the Market Value Evidence card header and the Unequal Appraisal Evidence card header on TaxProtestPage.
+  - Single click refreshes both Redfin sold comps (via RealtyAPI) and CAD comps (via the registered adapter) in one round-trip. UI state (`comps`, `soldComps`) updates immediately from the response — no page reload needed.
+  - Stale comps alert text updated to reference the Refresh button rather than asking the AI.
+  - Empty sold-comps state replaced "Ask AI" button with a direct "Refresh Comps" button.
+  - 24-hour Redfin cooldown respected: `RATE_LIMITED` surfaces as a yellow toast, not an error.
+- **New backend route:** `POST /api/protest/:propertyId/refresh-comps` — calls adapter `searchByAddress` + `saveCADComps` + `refreshPropertyValuation`; returns `{ cad, redfin, comps, soldComps }`.
+- **Files changed:** `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+- **GitHub:** https://github.com/mangatrai/grove/issues/63
+
+---
+
 ## PT-15 (2026-06-01): Fix Add Comp modal — address-only CAD search with real IDs
 
 - **Type:** Feature — closes #65

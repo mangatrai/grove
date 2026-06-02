@@ -36,6 +36,7 @@ import {
   IconMessage,
   IconPaperclip,
   IconPlus,
+  IconRefresh,
   IconSearch,
   IconSend,
   IconTrash,
@@ -283,6 +284,7 @@ export function TaxProtestPage() {
   const [selectedCadResult, setSelectedCadResult] = useState<CadSearchResult | null>(null);
   const [cadHasAdapter, setCadHasAdapter] = useState(true);
   const [removingCompId, setRemovingCompId] = useState<string | null>(null);
+  const [refreshingComps, setRefreshingComps] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -480,6 +482,35 @@ export function TaxProtestPage() {
     setCadHasAdapter(true);
     setCadSearchLoading(false);
   }, []);
+
+  const refreshComps = useCallback(async () => {
+    if (!propertyId) return;
+    setRefreshingComps(true);
+    try {
+      const res = await apiJson<{
+        cad: { ok: boolean; count: number; message?: string };
+        redfin: { ok: boolean; code?: string; message?: string; estimate?: number };
+        comps: CADComp[];
+        soldComps: SoldComp[];
+      }>(`/api/protest/${encodeURIComponent(propertyId)}/refresh-comps`, {
+        method: "POST",
+        body: JSON.stringify({ year: Number(year) })
+      });
+      if (Array.isArray(res.comps)) setComps(res.comps);
+      if (Array.isArray(res.soldComps)) setSoldComps(res.soldComps);
+      const msgs: string[] = [];
+      if (res.cad.ok) msgs.push(`${res.cad.count} CAD comp${res.cad.count !== 1 ? "s" : ""}`);
+      else if (res.cad.message) msgs.push(`CAD: ${res.cad.message}`);
+      if (res.redfin.ok) msgs.push("Redfin updated");
+      else if (res.redfin.code === "RATE_LIMITED") msgs.push("Redfin refreshed < 24h ago");
+      else if (res.redfin.message) msgs.push(`Redfin: ${res.redfin.message}`);
+      addToast(res.cad.ok || res.redfin.ok ? "green" : "yellow", msgs.join(" · ") || "Refreshed");
+    } catch {
+      addToast("red", "Comps refresh failed");
+    } finally {
+      setRefreshingComps(false);
+    }
+  }, [propertyId, year, addToast]);
 
   const searchCad = useCallback(async () => {
     if (!propertyId || !addCompAddress.trim()) return;
@@ -796,7 +827,7 @@ export function TaxProtestPage() {
           onClose={() => setStaleAlertDismissed(true)}
           title="Redfin data may be outdated"
         >
-          {`Sold comps were last fetched ${Math.floor((Date.now() - new Date(property.valuationFetchedAt).getTime()) / (1000 * 60 * 60 * 24))} day(s) ago. Ask the AI to "refresh Redfin data" for the latest sold comparables.`}
+          {`Sold comps were last fetched ${Math.floor((Date.now() - new Date(property.valuationFetchedAt!).getTime()) / (1000 * 60 * 60 * 24))} day(s) ago. Use the Refresh button in the comps section to fetch the latest data.`}
         </Alert>
       ) : null}
 
@@ -864,11 +895,22 @@ export function TaxProtestPage() {
         <Stack gap="sm">
           <Group justify="space-between">
             <Title order={4}>Market Value Evidence</Title>
-            <Text size="xs" c="dimmed">
-              {soldComps.length > 0
-                ? `${visibleSoldComps.length} Redfin comparable sales${soldComps.length > visibleSoldComps.length ? ` (${soldComps.length - visibleSoldComps.length} hidden)` : ""}`
-                : "No Redfin comps loaded"}
-            </Text>
+            <Group gap="xs">
+              <Text size="xs" c="dimmed">
+                {soldComps.length > 0
+                  ? `${visibleSoldComps.length} Redfin comparable sales${soldComps.length > visibleSoldComps.length ? ` (${soldComps.length - visibleSoldComps.length} hidden)` : ""}`
+                  : "No Redfin comps loaded"}
+              </Text>
+              <Button
+                size="xs"
+                variant="subtle"
+                loading={refreshingComps}
+                leftSection={<IconRefresh size={13} />}
+                onClick={() => void refreshComps()}
+              >
+                Refresh
+              </Button>
+            </Group>
           </Group>
           {soldComps.length > 0 ? (
             <>
@@ -975,18 +1017,16 @@ export function TaxProtestPage() {
               <Stack align="center" gap="xs">
                 <Text size="sm" c="dimmed">No Redfin comparable sales loaded.</Text>
                 <Text size="xs" c="dimmed" ta="center">
-                  Redfin comps load from your property valuation data. Ask the protest assistant to refresh Redfin data.
+                  Redfin comps load from your property valuation data.
                 </Text>
                 <Button
                   size="xs"
                   variant="light"
-                  leftSection={<IconMessage size={14} />}
-                  onClick={() => {
-                    setMessage("Please refresh my Redfin property data and show me comparable sold prices for market value evidence.");
-                    setChatOpen(true);
-                  }}
+                  loading={refreshingComps}
+                  leftSection={<IconRefresh size={14} />}
+                  onClick={() => void refreshComps()}
                 >
-                  Ask AI to refresh Redfin data
+                  Refresh Comps
                 </Button>
               </Stack>
             </Paper>
@@ -1003,6 +1043,15 @@ export function TaxProtestPage() {
               <Text size="xs" c="dimmed">
                 {comps.length > 0 ? `${comps.length} DCAD comparable properties` : "No comps loaded"}
               </Text>
+              <Button
+                size="xs"
+                variant="subtle"
+                loading={refreshingComps}
+                leftSection={<IconRefresh size={13} />}
+                onClick={() => void refreshComps()}
+              >
+                Refresh
+              </Button>
               <Button
                 size="xs"
                 variant="light"

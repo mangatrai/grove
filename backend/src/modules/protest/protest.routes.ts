@@ -378,6 +378,10 @@ const soldCompExclusionBodySchema = z.object({
   excluded: z.array(z.string()).max(100)
 });
 
+const refreshCompsBodySchema = z.object({
+  year: z.number().int().min(2000).max(2100).optional()
+});
+
 protestRouter.delete("/:propertyId/comps/:cadPropertyId", async (req: AuthenticatedRequest, res) => {
   const params = propertyIdSchema.safeParse(req.params);
   if (!params.success) {
@@ -433,6 +437,70 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
   const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
   log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, cadPropertyId, source: parsed.data.cadPropertyId ? "cad-search" : "manual" });
   res.status(201).json({ ok: true, cadPropertyId, comps });
+});
+
+protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const parsed = refreshCompsBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  const year = parsed.data.year ?? thisYear();
+
+  let cadResult: { ok: boolean; count: number; message?: string } = { ok: false, count: 0 };
+  const provider = property.cadProvider ?? inferCadProvider(property.state);
+  const cadAdapter = provider ? getCadAdapter(provider) : null;
+  if (!cadAdapter) {
+    cadResult = { ok: false, count: 0, message: "No CAD adapter for this county" };
+  } else {
+    const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ");
+    try {
+      await getOrCreateWorksheet(property.id, householdId, year);
+      const cadComps = await cadAdapter.searchByAddress(address, year);
+      const count = await saveCADComps(property.id, householdId, year, cadComps);
+      if (cadComps.length > 0) {
+        await saveCadSubjectIds(property.id, provider!, cadComps, address);
+      }
+      cadResult = { ok: true, count };
+    } catch (err) {
+      log.error("refresh-comps: CAD error", { propertyId: property.id, err: err instanceof Error ? err.message : String(err) });
+      cadResult = { ok: false, count: 0, message: "CAD refresh failed" };
+    }
+  }
+
+  let redfinResult: { ok: boolean; code?: string; message?: string; estimate?: number } = { ok: false };
+  const rr = await refreshPropertyValuation(property.id, householdId);
+  redfinResult = rr.ok
+    ? { ok: true, estimate: rr.estimate }
+    : { ok: false, code: rr.code, message: rr.message };
+
+  const freshProp = await getProperty(property.id, householdId);
+  const freshComps = await listWorksheetComps(property.id, householdId, year);
+  const detail = asRecord(freshProp?.valuationDetail);
+  const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
+  const soldComps = rawSoldComps.map((c) => {
+    const r = asRecord(c) ?? {};
+    const soldPrice = asNumber(r.soldPrice);
+    const sqft = asNumber(r.sqft);
+    return {
+      address: typeof r.address === "string" ? r.address : null,
+      city: typeof r.city === "string" ? r.city : null,
+      state: typeof r.state === "string" ? r.state : null,
+      sqft,
+      beds: asNumber(r.beds),
+      baths: asNumber(r.baths),
+      yearBuilt: asNumber(r.yearBuilt),
+      soldPrice,
+      soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
+      pricePerSqft: soldPrice != null && sqft != null && sqft > 0 ? Math.round(soldPrice / sqft) : asNumber(r.pricePerSqft),
+      listPrice: asNumber(r.listPrice)
+    };
+  });
+
+  log.info("refresh-comps", { propertyId: property.id, year, cad: cadResult.ok, redfin: redfinResult.ok });
+  res.status(200).json({ cad: cadResult, redfin: redfinResult, comps: freshComps, soldComps });
 });
 
 protestRouter.patch("/:propertyId/sold-comps/exclusions", async (req: AuthenticatedRequest, res) => {

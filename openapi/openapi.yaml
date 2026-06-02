@@ -1068,6 +1068,54 @@ paths:
                   comps: { type: array, items: { type: object } }
         "400": { description: Validation error }
         "404": { description: Property not found }
+  /api/protest/{propertyId}/refresh-comps:
+    post:
+      tags: [protest]
+      summary: On-demand refresh of CAD and Redfin comps for a property
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                year: { type: integer, minimum: 2000, maximum: 2100 }
+      responses:
+        "200":
+          description: Refresh complete — returns fresh comps and sold comps regardless of individual success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cad:
+                    type: object
+                    properties:
+                      ok: { type: boolean }
+                      count: { type: integer }
+                      message: { type: string }
+                  redfin:
+                    type: object
+                    properties:
+                      ok: { type: boolean }
+                      code: { type: string }
+                      message: { type: string }
+                      estimate: { type: number }
+                  comps:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProtestComp" }
+                  soldComps:
+                    type: array
+                    items: { $ref: "#/components/schemas/SoldComp" }
+        "400": { description: Validation error }
+        "404": { description: Property not found }
+
   /api/protest/{propertyId}/sold-comps/exclusions:
     patch:
       tags: [protest]
@@ -3714,6 +3762,33 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    ProtestComp:
+      type: object
+      properties:
+        cadPropertyId: { type: string }
+        addressLine1: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        assessedValueUsd: { type: number, nullable: true }
+        marketValueUsd: { type: number, nullable: true }
+        sqft: { type: number, nullable: true }
+        beds: { type: number, nullable: true }
+        baths: { type: number, nullable: true }
+        yearBuilt: { type: number, nullable: true }
+        perSqftUsd: { type: number, nullable: true }
+    SoldComp:
+      type: object
+      properties:
+        address: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        sqft: { type: number, nullable: true }
+        beds: { type: number, nullable: true }
+        baths: { type: number, nullable: true }
+        yearBuilt: { type: number, nullable: true }
+        soldPrice: { type: number, nullable: true }
+        soldDate: { type: string, nullable: true }
+        pricePerSqft: { type: number, nullable: true }
+        listPrice: { type: number, nullable: true }
     EsppBatch:
       type: object
       properties:
