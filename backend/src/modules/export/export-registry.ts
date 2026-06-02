@@ -249,5 +249,6 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   "household_gdrive_config",
   // Notification rows are transient UI state — not restored from backups
   "notification",
-  "notification_preference"
+  "notification_preference",
+  "protest_document_chunks"
 ];

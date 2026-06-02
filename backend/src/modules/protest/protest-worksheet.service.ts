@@ -48,6 +48,9 @@ export type ProtestWorksheetRecord = {
   cadEvidenceJson: CadEvidenceData | null;
   cadEvidenceFilename: string | null;
   soldCompsNotesJson: Record<string, string>;
+  summarizationCursor: number;
+  conversationSummary: string | null;
+  cycleSummary: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -69,6 +72,9 @@ type ProtestWorksheetRow = {
   cad_evidence_json: unknown;
   cad_evidence_filename: string | null;
   sold_comps_notes_json: unknown;
+  summarization_cursor: number;
+  conversation_summary: string | null;
+  cycle_summary: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 };
@@ -108,6 +114,9 @@ function rowToRecord(row: ProtestWorksheetRow): ProtestWorksheetRecord {
     soldCompsNotesJson: (row.sold_comps_notes_json && typeof row.sold_comps_notes_json === "object" && !Array.isArray(row.sold_comps_notes_json))
       ? (row.sold_comps_notes_json as Record<string, string>)
       : {},
+    summarizationCursor: row.summarization_cursor ?? 0,
+    conversationSummary: row.conversation_summary ?? null,
+    cycleSummary: row.cycle_summary ?? null,
     createdAt: isoDateTime(row.created_at),
     updatedAt: isoDateTime(row.updated_at)
   };
@@ -122,6 +131,7 @@ export async function getWorksheet(
     `SELECT id, household_id, property_id, tax_year, status, outcome, informal_offer_usd,
             hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json,
             sold_comps_cad_json, cad_evidence_json, cad_evidence_filename, sold_comps_notes_json,
+            summarization_cursor, conversation_summary, cycle_summary,
             created_at, updated_at
        FROM protest_worksheet
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
@@ -181,6 +191,29 @@ export async function updateWorksheetStatus(
   await qExec(
     `UPDATE protest_worksheet SET ${sets.join(", ")} WHERE id = ? AND household_id = ?`,
     ...params
+  );
+}
+
+export async function updateSummarizationState(
+  worksheetId: string,
+  cursor: number,
+  summary: string
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet
+        SET summarization_cursor = ?, conversation_summary = ?, updated_at = NOW()
+      WHERE id = ?`,
+    cursor,
+    summary,
+    worksheetId
+  );
+}
+
+export async function saveCycleSummary(worksheetId: string, summary: string): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet SET cycle_summary = ?, updated_at = NOW() WHERE id = ?`,
+    summary,
+    worksheetId
   );
 }
 

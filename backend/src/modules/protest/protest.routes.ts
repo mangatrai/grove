@@ -36,8 +36,19 @@ import {
   saveSoldCompNote,
   updateCompNote,
   type CadEvidenceData,
+  updateSummarizationState,
+  saveCycleSummary,
 } from "./protest-worksheet.service.js";
 import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
+import { extractPdfText } from "../imports/profiles/pdf-text.js";
+import { chunkText } from "./chunking.service.js";
+import { embedText } from "./embedding.service.js";
+import {
+  saveDocumentChunks,
+  deleteDocumentChunks,
+  querySimilarChunks,
+  listDocuments,
+} from "./document-store.service.js";
 import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
@@ -210,9 +221,13 @@ function buildSystemPrompt(input: {
   cadEvidence: CadEvidenceData | null;
   soldCompsNotes: Record<string, string>;
   equityComps: Array<{ addressLine1: string | null; notes: string | null }>;
+  priorYearSummary?: string | null;
 }): string {
   const evidenceContext = buildCadEvidenceContext(input.cadEvidence, input.cadAssessed);
   const notesContext = buildCompNotesContext(input.soldCompsNotes, input.equityComps);
+  const priorYearBlock = input.priorYearSummary?.trim()
+    ? `\n## Prior year context\n${input.priorYearSummary.trim()}`
+    : "";
 
   return `You are a property tax protest assistant for ${input.address}, ${input.city ?? ""} ${input.state ?? ""}.
 
@@ -227,8 +242,80 @@ Tax year: ${input.year}
 Texas property tax protest grounds:
 - §41.41 (Market value): Subject property's assessed value exceeds its market value. Argue using recent arm's-length sale prices of comparable properties.
 - §41.43 (Unequal appraisal): Subject property is assessed at a higher ratio than comparable properties. Argue using CAD-assessed values of similar nearby properties — not Redfin AVM or Zillow estimates, which have no standing at ARB.
-${evidenceContext}${notesContext}
+${evidenceContext}${notesContext}${priorYearBlock}
 You have access to tools to fetch DCAD comparable properties and update the protest worksheet. When the user asks about analysis or strategy, use both grounds and tell them which is stronger based on available data. Be concise and direct.`;
+}
+
+const CLOSED_PROTEST_OUTCOMES = new Set([
+  "settled_informal",
+  "won_arb",
+  "lost_arb",
+  "withdrawn",
+]);
+
+const LIVE_TURN_LIMIT = 30;
+const SUMMARIZE_CHUNK_SIZE = 10;
+
+async function runConversationSummarization(
+  worksheetId: string,
+  conversationJson: ConversationTurn[],
+  summarizationCursor: number,
+  existingConversationSummary: string | null
+): Promise<void> {
+  const turnsToSummarize = conversationJson.slice(
+    summarizationCursor,
+    summarizationCursor + SUMMARIZE_CHUNK_SIZE
+  );
+  if (turnsToSummarize.length === 0) return;
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    max_tokens: 800,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are summarizing a property tax protest chat. Be concise. Preserve: key facts, property values, comparable properties mentioned, strategy decisions, any agreed figures.",
+      },
+      {
+        role: "user",
+        content: `Summarize these conversation turns:\n${JSON.stringify(turnsToSummarize)}`,
+      },
+    ],
+  });
+  const summaryText = completion.choices[0]?.message?.content?.trim() ?? "";
+  if (!summaryText) return;
+
+  const newSummary = (existingConversationSummary ? `${existingConversationSummary}\n\n` : "") + summaryText;
+  const newCursor = summarizationCursor + SUMMARIZE_CHUNK_SIZE;
+  await updateSummarizationState(worksheetId, newCursor, newSummary);
+  log.info("protest chat summarized", { worksheetId, cursor: summarizationCursor, newCursor });
+}
+
+async function generateCycleSummary(
+  worksheetId: string,
+  conversationJson: ConversationTurn[],
+  status: string
+): Promise<void> {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    max_tokens: 400,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Summarize this property tax protest for future reference. Include: property, tax year, initial assessed value, protest grounds used (§41.41 / §41.43), key comparable properties, negotiation trajectory, and final outcome. Max 200 words.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify(conversationJson),
+      },
+    ],
+  });
+  const summaryText = completion.choices[0]?.message?.content?.trim() ?? "";
+  if (!summaryText) return;
+  await saveCycleSummary(worksheetId, summaryText);
+  log.info("protest cycle summary generated", { worksheetId, status });
 }
 
 function formatCompSummary(comps: CadProperty[]): string {
@@ -674,7 +761,10 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   const cadAssessed = asNumber(taxCurrent?.assessedValue);
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown property";
   const equityComps = await listWorksheetComps(property.id, householdId, year);
-  const systemPrompt = buildSystemPrompt({
+  const priorWorksheet = await getWorksheet(property.id, householdId, year - 1);
+  const priorYearSummary = priorWorksheet?.cycleSummary ?? null;
+
+  let systemPrompt = buildSystemPrompt({
     address,
     city: property.city,
     state: property.state,
@@ -690,21 +780,46 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     cadEvidence: worksheet.cadEvidenceJson,
     soldCompsNotes: worksheet.soldCompsNotesJson,
     equityComps,
+    priorYearSummary,
   });
+
+  const userMessage = parsedBody.data.message;
+  const queryEmbedding = await embedText(userMessage);
+  const ragChunks = await querySimilarChunks({
+    propertyId: property.id,
+    taxYear: year,
+    queryEmbedding,
+    topK: 5,
+  });
+  if (ragChunks.length > 0) {
+    const ragBlock = ragChunks.map((c) => `[${c.documentKey}] ${c.chunkText}`).join("\n\n");
+    systemPrompt += `\n\n## Relevant document context (retrieved by similarity)\n${ragBlock}`;
+  }
 
   const userText = parsedBody.data.attachmentText
     ? `${parsedBody.data.message}\n\nAttachment (${parsedBody.data.attachmentType ?? "text"}):\n${parsedBody.data.attachmentText}`
     : parsedBody.data.message;
 
+  const liveTurns = worksheet.conversationJson.slice(worksheet.summarizationCursor);
+  const historyMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+  if (worksheet.conversationSummary) {
+    historyMessages.push({
+      role: "system",
+      content: `Earlier conversation summary:\n${worksheet.conversationSummary}`,
+    });
+  }
+  for (const turn of liveTurns) {
+    if (turn.role === "tool") {
+      historyMessages.push({ role: "assistant", content: turn.content });
+    } else {
+      historyMessages.push({ role: turn.role, content: turn.content });
+    }
+  }
+
   const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     { role: "system", content: systemPrompt },
-    ...worksheet.conversationJson.map((turn): OpenAI.Chat.Completions.ChatCompletionMessageParam => {
-      if (turn.role === "tool") {
-        return { role: "assistant", content: turn.content };
-      }
-      return { role: turn.role, content: turn.content };
-    }),
-    { role: "user", content: userText }
+    ...historyMessages,
+    { role: "user", content: userText },
   ];
 
   let strategyUpdated = false;
@@ -920,6 +1035,22 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     soldCompsRefreshed,
     valuationAgeHours
   });
+
+  void (async () => {
+    try {
+      const fresh = await getWorksheet(property.id, householdId, year);
+      if (!fresh) return;
+      if (fresh.conversationJson.length - fresh.summarizationCursor <= LIVE_TURN_LIMIT) return;
+      await runConversationSummarization(
+        fresh.id,
+        fresh.conversationJson,
+        fresh.summarizationCursor,
+        fresh.conversationSummary
+      );
+    } catch (err) {
+      log.error("protest chat summarization failed", { worksheetId: worksheet.id, err });
+    }
+  })();
 });
 
 protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedRequest, res) => {
@@ -1026,6 +1157,17 @@ protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, 
     });
   }
   const updated = await getOrCreateWorksheet(property.id, householdId, parsed.data.year);
+  const newOutcome = parsed.data.outcome ?? updated.outcome;
+  if (
+    newOutcome != null &&
+    CLOSED_PROTEST_OUTCOMES.has(newOutcome) &&
+    updated.cycleSummary == null &&
+    env.OPENAI_API_KEY
+  ) {
+    void generateCycleSummary(updated.id, updated.conversationJson, newOutcome).catch((err) => {
+      log.error("protest cycle summary failed", { worksheetId: updated.id, err });
+    });
+  }
   log.info("protest worksheet updated", {
     worksheetId: worksheet.id,
     propertyId: property.id,
@@ -1054,6 +1196,21 @@ protestRouter.post(
       const data = await parseCadEvidencePdf(req.file.buffer);
       await getOrCreateWorksheet(property.id, householdId, taxYear);
       await saveCadEvidence(property.id, householdId, taxYear, data, req.file.originalname);
+      void extractPdfText(req.file.buffer)
+        .then((rawText) => {
+          const chunks = chunkText(rawText);
+          if (chunks.length === 0) return;
+          return saveDocumentChunks({
+            householdId,
+            propertyId: property.id,
+            taxYear,
+            documentKey: "cad_evidence",
+            chunks,
+          });
+        })
+        .catch((err) => {
+          log.error("cad-evidence document chunking failed", { propertyId: property.id, taxYear, err });
+        });
       log.info("cad-evidence uploaded", { propertyId: property.id, taxYear, salesComps: data.salesAnalysis.comps.length, equityComps: data.equityAnalysis.comps.length });
       res.status(200).json({ data, filename: req.file.originalname });
     } catch (err) {
@@ -1086,6 +1243,109 @@ protestRouter.patch("/:propertyId/sold-comps/notes", async (req: AuthenticatedRe
   const property = await getProperty(params.data.propertyId, householdId);
   if (!property) { res.status(404).json({ message: "Property not found" }); return; }
   await saveSoldCompNote(property.id, householdId, taxYear, parsed.data.address, parsed.data.notes);
+  res.status(204).send();
+});
+
+// POST /:propertyId/documents — upload arbitrary PDF or image for RAG
+protestRouter.post(
+  "/:propertyId/documents",
+  upload.single("file"),
+  async (req: AuthenticatedRequest, res) => {
+    const params = propertyIdSchema.safeParse(req.params);
+    if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+    const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+    const householdId = req.authUser!.householdId;
+    const property = await getProperty(params.data.propertyId, householdId);
+    if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+    if (!req.file) { res.status(400).json({ message: "No file uploaded" }); return; }
+    if (!env.OPENAI_API_KEY) {
+      res.status(503).json({ message: "OPENAI_API_KEY not configured", code: "OPENAI_NOT_CONFIGURED" });
+      return;
+    }
+
+    const mime = req.file.mimetype;
+    let chunks: string[] = [];
+    let documentKey: string;
+
+    try {
+      if (mime === "application/pdf") {
+        const rawText = await extractPdfText(req.file.buffer);
+        chunks = chunkText(rawText);
+        documentKey = `file:${req.file.originalname}`;
+      } else if (mime === "image/jpeg" || mime === "image/png" || mime === "image/webp") {
+        const visionRes = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:${mime};base64,${req.file.buffer.toString("base64")}`,
+                },
+              },
+              {
+                type: "text",
+                text:
+                  "Describe this property image in detail. Note visible features, condition, any visible structural issues, lot characteristics, improvements, and anything relevant to a property tax protest.",
+              },
+            ],
+          }],
+        });
+        const description = visionRes.choices[0]?.message?.content ?? "";
+        if (description.trim().length > 20) {
+          chunks = [description.trim()];
+        }
+        documentKey = `image:${req.file.originalname}`;
+      } else {
+        res.status(400).json({ message: "Unsupported file type. Use PDF, JPEG, PNG, or WebP." });
+        return;
+      }
+
+      if (chunks.length === 0) {
+        res.status(422).json({ message: "No extractable text from file" });
+        return;
+      }
+
+      await saveDocumentChunks({
+        householdId,
+        propertyId: property.id,
+        taxYear,
+        documentKey,
+        chunks,
+      });
+      res.status(200).json({ ok: true, documentKey, chunkCount: chunks.length });
+    } catch (err) {
+      log.error("protest document upload failed", { propertyId: property.id, taxYear, err });
+      res.status(500).json({ message: "Failed to process uploaded file" });
+    }
+  }
+);
+
+// GET /:propertyId/documents — list indexed protest documents
+protestRouter.get("/:propertyId/documents", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  const documents = await listDocuments(property.id, taxYear);
+  res.status(200).json({ ok: true, documents });
+});
+
+// DELETE /:propertyId/documents/:documentKey — remove indexed document chunks
+protestRouter.delete("/:propertyId/documents/:documentKey", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const documentKey = decodeURIComponent(String(req.params.documentKey ?? ""));
+  if (!documentKey) { res.status(400).json({ message: "documentKey required" }); return; }
+  const taxYear = parseInt(String(req.query["taxYear"]), 10) || thisYear();
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  await deleteDocumentChunks(property.id, taxYear, documentKey);
   res.status(204).send();
 });
 

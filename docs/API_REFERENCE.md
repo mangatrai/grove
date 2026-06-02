@@ -137,6 +137,8 @@ Assistant chat endpoint for protest planning and comp analysis.
 
 - **`attachmentType`**: `pdf | url | text` (optional).
 - Uses `OPENAI_MODEL` (default `gpt-4o-mini`) with tool calls. Available AI tools: `fetch_dcad_comps`, `refresh_redfin_comps`, `search_web` (Tavily — requires `TAVILY_API_KEY`), `update_strategy`.
+- **RAG:** Each message is embedded (`text-embedding-3-small`); top-5 similar chunks from `protest_document_chunks` (cosine similarity ≥ 0.65) are appended to the system prompt.
+- **Summarization:** When live (unsummarized) turns exceed 30, the server asynchronously compresses the oldest 10 turns into `conversation_summary` via gpt-4o-mini and advances `summarization_cursor`. Prior-year `cycle_summary` (if any) is injected into the system prompt.
 
 **Response 200:**
 ```json
@@ -151,6 +153,55 @@ Assistant chat endpoint for protest planning and comp analysis.
 
 - **`valuationAgeHours`**: Hours since `valuation_fetched_at` was last updated for this property. `null` if the property has never been valued via Redfin. Use to surface a stale-data prompt in the UI.
 - **`refresh_redfin_comps` tool cooldown:** The underlying `refreshPropertyValuation()` enforces a 24-hour cooldown. If the valuation is <24 h old the tool returns a "still fresh" message to the LLM without hitting the Redfin API.
+
+---
+
+### `POST /api/protest/:propertyId/documents`
+
+Upload an arbitrary supporting document (PDF or image) for RAG indexing.
+
+**Query:** `taxYear` (optional; defaults to current calendar year).
+
+**Request:** `multipart/form-data` with field `file` (max 20 MB).
+
+- **PDF** (`application/pdf`): text extracted via `extractPdfText`, split into overlapping word chunks, embedded with `text-embedding-3-small`.
+- **Image** (`image/jpeg`, `image/png`, `image/webp`): described via GPT-4o vision; description stored as a single chunk.
+
+**Response 200:**
+```json
+{ "ok": true, "documentKey": "file:roof-report.pdf", "chunkCount": 4 }
+```
+
+**Errors:** `400` (no file / unsupported type), `404`, `422` (no extractable text), `503` (`OPENAI_API_KEY` missing).
+
+---
+
+### `GET /api/protest/:propertyId/documents`
+
+List indexed documents for a property and tax year.
+
+**Query:** `taxYear` (optional).
+
+**Response 200:**
+```json
+{
+  "ok": true,
+  "documents": [
+    { "documentKey": "cad_evidence", "chunkCount": 12 },
+    { "documentKey": "image:front.jpg", "chunkCount": 1 }
+  ]
+}
+```
+
+---
+
+### `DELETE /api/protest/:propertyId/documents/:documentKey`
+
+Remove all chunks for a document. **`documentKey`** must be URL-encoded (e.g. `file%3Areport.pdf`).
+
+**Query:** `taxYear` (optional).
+
+**Response:** `204`
 
 ---
 

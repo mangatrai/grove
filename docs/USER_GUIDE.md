@@ -522,6 +522,15 @@ The chat panel on the right side drives the workflow. The AI assistant has acces
 
 Type in plain language: "What is my case strength?", "Find recent comparable sales near my address", "How should I open the hearing?" The AI responds with analysis and updates the strategy panel.
 
+The assistant also searches **indexed supporting documents** (uploaded PDFs and photos) for relevant passages on each message. Long chat histories are summarized automatically so context stays within model limits. When you close a protest with an outcome, a short **cycle summary** is saved for reference in the next tax year.
+
+### CAD Evidence and Supporting Documents
+
+In the **CAD Evidence Packet** card:
+
+- **Upload Evidence PDF** — the official DCAD evidence packet; the app parses comps for tables and indexes the full text for chat.
+- **Supporting Documents** — upload additional PDFs or photos (roof damage, lot photos, repair estimates). Images are described by vision AI, then indexed like PDF text. Each file appears in a list with a delete control.
+
 ### Strategy Panel
 
 The left panel shows the AI's structured assessment:

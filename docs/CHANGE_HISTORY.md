@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-12 — RAG document store + conversation summarization (2026-06-02)
+
+- New `protest_document_chunks` table with pgvector 1536-dim embeddings (migration 0064)
+- CAD evidence PDF and arbitrary uploaded files (PDF + image) chunked + embedded at upload time
+- Chat route retrieves top-5 similar chunks per query and injects into system prompt
+- Rolling summarization: conversation history > 30 turns triggers async gpt-4o-mini compression
+- Cycle summary generated on protest close; injected as prior-year context next cycle
+- New endpoints: POST/GET/DELETE `/api/protest/:propertyId/documents`, updated POST `/api/protest/:propertyId/chat`
+- `docker-compose.yml` switched to `pgvector/pgvector:pg18`
+- **GitHub:** closes #62
+
+**Files:** `backend/db/migrations/0064_pt12_document_chunks.sql`, `embedding.service.ts`, `chunking.service.ts`, `document-store.service.ts`, `protest-worksheet.service.ts`, `protest.routes.ts`, `export-registry.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+
+---
+
 ## PT-9 (2026-06-02): CAD evidence PDF upload + parse + comp annotations — closes #59
 
 **What changed:**

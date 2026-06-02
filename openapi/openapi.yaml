@@ -1169,6 +1169,99 @@ paths:
         "204": { description: Cleared }
         "404": { description: Property not found }
 
+  /api/protest/{propertyId}/documents:
+    post:
+      tags: [protest]
+      summary: Upload a supporting PDF or image for RAG indexing
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF, JPEG, PNG, or WebP (max 20 MB)
+      responses:
+        "200":
+          description: Indexed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, documentKey, chunkCount]
+                properties:
+                  ok: { type: boolean, example: true }
+                  documentKey: { type: string, example: "file:roof-report.pdf" }
+                  chunkCount: { type: integer, example: 4 }
+        "400": { description: No file or unsupported MIME type }
+        "404": { description: Property not found }
+        "422": { description: No extractable text }
+        "503": { description: OPENAI_API_KEY not configured }
+    get:
+      tags: [protest]
+      summary: List indexed protest documents for a property/year
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      responses:
+        "200":
+          description: Document list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, documents]
+                properties:
+                  ok: { type: boolean, example: true }
+                  documents:
+                    type: array
+                    items:
+                      type: object
+                      required: [documentKey, chunkCount]
+                      properties:
+                        documentKey: { type: string }
+                        chunkCount: { type: integer }
+        "404": { description: Property not found }
+
+  /api/protest/{propertyId}/documents/{documentKey}:
+    delete:
+      tags: [protest]
+      summary: Delete all chunks for an indexed document
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: documentKey
+          in: path
+          required: true
+          schema: { type: string, description: URL-encoded key (e.g. file%3Areport.pdf) }
+        - name: taxYear
+          in: query
+          schema: { type: integer, example: 2026 }
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Property not found }
+
   /api/protest/{propertyId}/sold-comps/notes:
     patch:
       tags: [protest]

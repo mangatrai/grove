@@ -369,10 +369,13 @@ export function TaxProtestPage() {
   const [cadEvidence, setCadEvidence] = useState<CadEvidenceData | null>(null);
   const [soldCompsNotes, setSoldCompsNotes] = useState<Record<string, string>>({});
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
+  const [supportingDocuments, setSupportingDocuments] = useState<Array<{ documentKey: string; chunkCount: number }>>([]);
+  const [uploadingSupportingDoc, setUploadingSupportingDoc] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cadEvidenceFileRef = useRef<HTMLInputElement | null>(null);
+  const supportingDocFileRef = useRef<HTMLInputElement | null>(null);
 
   const colorScheme = useComputedColorScheme("light");
 
@@ -461,6 +464,64 @@ export function TaxProtestPage() {
     }
   }, []);
 
+  const loadSupportingDocuments = useCallback(async (pid: string, selectedYear: number) => {
+    try {
+      const res = await apiJson<{ ok: boolean; documents: Array<{ documentKey: string; chunkCount: number }> }>(
+        `/api/protest/${encodeURIComponent(pid)}/documents?taxYear=${selectedYear}`
+      );
+      setSupportingDocuments(res.documents ?? []);
+    } catch {
+      setSupportingDocuments([]);
+    }
+  }, []);
+
+  const uploadSupportingDocument = useCallback(async (file: File) => {
+    if (!propertyId) return;
+    const form = new FormData();
+    form.append("file", file);
+    setUploadingSupportingDoc(true);
+    try {
+      const res = await fetch(
+        `/api/protest/${encodeURIComponent(propertyId)}/documents?taxYear=${year}`,
+        {
+          method: "POST",
+          body: form,
+          headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        }
+      );
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(body.message ?? "Upload failed");
+      }
+      await loadSupportingDocuments(propertyId, Number(year));
+      addToast("green", "Document uploaded");
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploadingSupportingDoc(false);
+    }
+  }, [propertyId, year, loadSupportingDocuments, addToast]);
+
+  const deleteSupportingDocument = useCallback(async (documentKey: string) => {
+    if (!propertyId) return;
+    setUploadingSupportingDoc(true);
+    try {
+      await fetch(
+        `/api/protest/${encodeURIComponent(propertyId)}/documents/${encodeURIComponent(documentKey)}?taxYear=${year}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        }
+      );
+      await loadSupportingDocuments(propertyId, Number(year));
+      addToast("green", "Document removed");
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setUploadingSupportingDoc(false);
+    }
+  }, [propertyId, year, loadSupportingDocuments, addToast]);
+
   useEffect(() => {
     if (!token) return;
     void loadBase();
@@ -469,7 +530,8 @@ export function TaxProtestPage() {
   useEffect(() => {
     if (!token || !propertyId) return;
     void loadPropertyAndWorksheet(propertyId, Number(year));
-  }, [token, propertyId, year, loadPropertyAndWorksheet]);
+    void loadSupportingDocuments(propertyId, Number(year));
+  }, [token, propertyId, year, loadPropertyAndWorksheet, loadSupportingDocuments]);
 
   useEffect(() => {
     if (chatOpen) {
@@ -1536,6 +1598,68 @@ export function TaxProtestPage() {
             )}
           </Stack>
         )}
+
+        <Divider my="sm" label="Supporting Documents" labelPosition="left" />
+
+        <Stack gap="xs">
+          <Text size="xs" c="dimmed">
+            Upload PDFs or photos (condition, repairs, lot features). Text is indexed for the protest assistant.
+          </Text>
+          <input
+            type="file"
+            accept=".pdf,image/*"
+            ref={supportingDocFileRef}
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.currentTarget.files?.[0];
+              if (file) void uploadSupportingDocument(file);
+              e.currentTarget.value = "";
+            }}
+          />
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="light"
+              loading={uploadingSupportingDoc}
+              onClick={() => supportingDocFileRef.current?.click()}
+            >
+              Upload document
+            </Button>
+            {uploadingSupportingDoc && <Loader size="xs" />}
+          </Group>
+          {supportingDocuments.length > 0 ? (
+            <List size="sm" spacing="xs">
+              {supportingDocuments.map((doc) => (
+                <List.Item
+                  key={doc.documentKey}
+                  icon={
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      size="sm"
+                      aria-label="Remove document"
+                      loading={uploadingSupportingDoc}
+                      onClick={() => void deleteSupportingDocument(doc.documentKey)}
+                    >
+                      <IconTrash size={13} />
+                    </ActionIcon>
+                  }
+                >
+                  <Group gap="xs" wrap="nowrap">
+                    <Badge size="sm" variant="light">
+                      {doc.chunkCount} chunk{doc.chunkCount === 1 ? "" : "s"}
+                    </Badge>
+                    <Text size="xs" truncate style={{ maxWidth: 280 }}>
+                      {doc.documentKey}
+                    </Text>
+                  </Group>
+                </List.Item>
+              ))}
+            </List>
+          ) : (
+            <Text size="xs" c="dimmed">No supporting documents yet.</Text>
+          )}
+        </Stack>
       </Card>
 
       {/* Strategy panel — only when AI has generated a strategy */}
