@@ -1,5 +1,4 @@
-import OpenAI from "openai";
-import { env } from "../../config/env.js";
+import { getChatAdapter, strongModel } from "../../llm/index.js";
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
 import type { ProtestComp } from "./protest-worksheet.service.js";
 
@@ -142,20 +141,18 @@ Return JSON with EXACTLY this structure (no extra keys):
 }`;
 
 export async function generateArbScript(input: ArbScriptInput): Promise<ArbScript> {
-  const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  const adapter = getChatAdapter();
   const dataBlock = buildDataBlock(input);
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
-    response_format: { type: "json_object" },
-    messages: [
+  const { content } = await adapter.complete(
+    [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: `Generate the ARB oral script for this protest:\n\n${dataBlock}` },
     ],
-    max_tokens: 2500,
-  });
+    { model: strongModel(), maxTokens: 2500 }
+  );
 
-  const raw = completion.choices[0]?.message?.content?.trim() ?? "{}";
+  const raw = content.trim() || "{}";
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>;

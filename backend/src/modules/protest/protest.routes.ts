@@ -1,10 +1,11 @@
-import OpenAI from "openai";
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
+import { getChatAdapter, getToolUseAdapter, getVisionAdapter, chatModel, strongModel, isLlmConfigured } from "../../llm/index.js";
+import type { Tool, ChatMessage } from "../../llm/index.js";
 import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
@@ -55,7 +56,6 @@ import { checkProtestDeadlines } from "../notifications/notification.service.js"
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
 
-const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const worksheetStatusSchema = z.enum(["not_filed", "filed", "informal", "arb", "resolved"]);
@@ -270,10 +270,8 @@ async function runConversationSummarization(
   );
   if (turnsToSummarize.length === 0) return;
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    max_tokens: 800,
-    messages: [
+  const { content: summaryRaw } = await getChatAdapter().complete(
+    [
       {
         role: "system",
         content:
@@ -284,8 +282,9 @@ async function runConversationSummarization(
         content: `Summarize these conversation turns:\n${JSON.stringify(turnsToSummarize)}`,
       },
     ],
-  });
-  const summaryText = completion.choices[0]?.message?.content?.trim() ?? "";
+    { model: chatModel(), maxTokens: 800 }
+  );
+  const summaryText = summaryRaw.trim();
   if (!summaryText) return;
 
   const newSummary = (existingConversationSummary ? `${existingConversationSummary}\n\n` : "") + summaryText;
@@ -299,10 +298,8 @@ async function generateCycleSummary(
   conversationJson: ConversationTurn[],
   status: string
 ): Promise<void> {
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    max_tokens: 400,
-    messages: [
+  const { content: summaryRaw } = await getChatAdapter().complete(
+    [
       {
         role: "system",
         content:
@@ -313,8 +310,9 @@ async function generateCycleSummary(
         content: JSON.stringify(conversationJson),
       },
     ],
-  });
-  const summaryText = completion.choices[0]?.message?.content?.trim() ?? "";
+    { model: chatModel(), maxTokens: 400 }
+  );
+  const summaryText = summaryRaw.trim();
   if (!summaryText) return;
   await saveCycleSummary(worksheetId, summaryText);
   log.info("protest cycle summary generated", { worksheetId, status });
@@ -743,11 +741,6 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     res.status(400).json({ errors: parsedBody.error.issues });
     return;
   }
-  if (!env.OPENAI_API_KEY) {
-    res.status(503).json({ message: "OPENAI_API_KEY not configured", code: "OPENAI_NOT_CONFIGURED" });
-    return;
-  }
-
   const householdId = req.authUser!.householdId;
   const year = parsedBody.data.year ?? thisYear();
   const property = await getProperty(params.data.propertyId, householdId);
@@ -803,7 +796,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     : parsedBody.data.message;
 
   const liveTurns = worksheet.conversationJson.slice(worksheet.summarizationCursor);
-  const historyMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+  const historyMessages: ChatMessage[] = [];
   if (worksheet.conversationSummary) {
     historyMessages.push({
       role: "system",
@@ -814,11 +807,11 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     if (turn.role === "tool") {
       historyMessages.push({ role: "assistant", content: turn.content });
     } else {
-      historyMessages.push({ role: turn.role, content: turn.content });
+      historyMessages.push({ role: turn.role as ChatMessage["role"], content: turn.content });
     }
   }
 
-  const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+  const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
     ...historyMessages,
     { role: "user", content: userText },
@@ -827,189 +820,111 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   let strategyUpdated = false;
   let compsAdded = 0;
   let soldCompsRefreshed = false;
-  let assistantMessage = "";
 
-  for (let iteration = 0; iteration < 5; iteration += 1) {
-    const completion = await openai.chat.completions.create({
-      model: env.OPENAI_MODEL,
-      messages,
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "fetch_dcad_comps",
-            description: "Search DCAD for comparable properties by address",
-            parameters: {
-              type: "object",
-              properties: { address: { type: "string" } },
-              required: ["address"]
-            }
-          }
+  const chatTools: Tool[] = [
+    {
+      name: "fetch_dcad_comps",
+      description: "Search DCAD for comparable properties by address",
+      inputSchema: {
+        type: "object",
+        properties: { address: { type: "string" } },
+        required: ["address"],
+      },
+    },
+    {
+      name: "refresh_redfin_comps",
+      description: "Re-fetch Redfin data for the subject property to get the latest AVM estimate and comparable sold prices.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "search_web",
+      description: "Search the web for comparable property sales, market trends, or appraisal data. Use targeted queries like '123 Main St Dallas TX sold price 2024' or 'Dallas TX property tax protest ARB results 2025'.",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string", description: "Search query" } },
+        required: ["query"],
+      },
+    },
+    {
+      name: "update_strategy",
+      description: "Save the current protest strategy summary",
+      inputSchema: {
+        type: "object",
+        properties: {
+          caseStrength: { type: "number" },
+          targetValueUsd: { type: "number" },
+          primaryStrategy: { type: "string" },
+          draftArguments: { type: "array", items: { type: "string" } },
+          redFlags: { type: "array", items: { type: "string" } },
         },
-        {
-          type: "function",
-          function: {
-            name: "refresh_redfin_comps",
-            description: "Re-fetch Redfin data for the subject property to get the latest AVM estimate and comparable sold prices.",
-            parameters: { type: "object", properties: {} }
-          }
-        },
-        {
-          type: "function",
-          function: {
-            name: "search_web",
-            description: "Search the web for comparable property sales, market trends, or appraisal data. Use targeted queries like '123 Main St Dallas TX sold price 2024' or 'Dallas TX property tax protest ARB results 2025'.",
-            parameters: {
-              type: "object",
-              properties: {
-                query: { type: "string", description: "Search query" }
-              },
-              required: ["query"]
-            }
-          }
-        },
-        {
-          type: "function",
-          function: {
-            name: "update_strategy",
-            description: "Save the current protest strategy summary",
-            parameters: {
-              type: "object",
-              properties: {
-                caseStrength: { type: "number" },
-                targetValueUsd: { type: "number" },
-                primaryStrategy: { type: "string" },
-                draftArguments: { type: "array", items: { type: "string" } },
-                redFlags: { type: "array", items: { type: "string" } }
-              },
-              required: ["caseStrength", "targetValueUsd", "primaryStrategy", "draftArguments", "redFlags"]
-            }
-          }
-        }
-      ],
-      tool_choice: "auto",
-      max_tokens: 2000
-    });
+        required: ["caseStrength", "targetValueUsd", "primaryStrategy", "draftArguments", "redFlags"],
+      },
+    },
+  ];
 
-    const choice = completion.choices[0];
-    const responseMessage = choice?.message;
-    if (!responseMessage) {
-      break;
-    }
-
-    const toolCalls = responseMessage.tool_calls ?? [];
-    if (toolCalls.length === 0) {
-      assistantMessage = responseMessage.content ?? "";
-      break;
-    }
-
-    messages.push({
-      role: "assistant",
-      content: responseMessage.content ?? "",
-      tool_calls: toolCalls
-    });
-
-    for (const call of toolCalls) {
-      if (call.type !== "function") continue;
-      let toolResult = "Unsupported tool call";
-      if (call.function.name === "refresh_redfin_comps") {
+  const { finalResponse } = await getToolUseAdapter().runToolLoop(
+    messages,
+    chatTools,
+    async (toolName, args) => {
+      if (toolName === "refresh_redfin_comps") {
         const result = await refreshPropertyValuation(property.id, householdId);
         if (result.ok) {
           soldCompsRefreshed = true;
-          toolResult = `Redfin data refreshed. Updated AVM: ${money(result.estimate)}. The sold comps list has been updated.`;
-        } else if (result.code === "RATE_LIMITED") {
-          toolResult = "Redfin valuation was refreshed recently (within the last 24 hours). Current data is still fresh — no refresh needed.";
-        } else {
-          toolResult = `Redfin refresh failed: ${result.message}`;
+          return `Redfin data refreshed. Updated AVM: ${money(result.estimate)}. The sold comps list has been updated.`;
         }
-      } else if (call.function.name === "search_web") {
-        if (!env.TAVILY_API_KEY) {
-          toolResult = "Web search is not configured (TAVILY_API_KEY missing).";
-        } else {
-          const args = (() => {
-            try { return JSON.parse(call.function.arguments) as { query?: unknown }; } catch { return {}; }
-          })();
-          const query = typeof args.query === "string" ? args.query.trim() : "";
-          if (!query) {
-            toolResult = "No query provided.";
-          } else {
-            try {
-              const tavilyRes = await fetch("https://api.tavily.com/search", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  api_key: env.TAVILY_API_KEY,
-                  query,
-                  search_depth: "basic",
-                  max_results: 5
-                }),
-                signal: AbortSignal.timeout(10_000)
-              });
-              if (!tavilyRes.ok) {
-                toolResult = `Tavily returned HTTP ${tavilyRes.status}.`;
-              } else {
-                const data = await tavilyRes.json() as { results?: Array<{ title: string; url: string; content: string }> };
-                const results = data.results ?? [];
-                toolResult = results.length === 0
-                  ? "No results found."
-                  : results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content}`).join("\n\n");
-              }
-            } catch (err) {
-              toolResult = `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.`;
-            }
-          }
+        if (result.code === "RATE_LIMITED") {
+          return "Redfin valuation was refreshed recently (within the last 24 hours). Current data is still fresh — no refresh needed.";
         }
-      } else if (call.function.name === "fetch_dcad_comps") {
-        const args = (() => {
-          try {
-            return JSON.parse(call.function.arguments) as { address?: unknown };
-          } catch {
-            return {};
-          }
-        })();
+        return `Redfin refresh failed: ${result.message}`;
+      }
+
+      if (toolName === "search_web") {
+        if (!env.TAVILY_API_KEY) return "Web search is not configured (TAVILY_API_KEY missing).";
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        if (!query) return "No query provided.";
+        try {
+          const tavilyRes = await fetch("https://api.tavily.com/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ api_key: env.TAVILY_API_KEY, query, search_depth: "basic", max_results: 5 }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!tavilyRes.ok) return `Tavily returned HTTP ${tavilyRes.status}.`;
+          const data = await tavilyRes.json() as { results?: Array<{ title: string; url: string; content: string }> };
+          const results = data.results ?? [];
+          return results.length === 0
+            ? "No results found."
+            : results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content}`).join("\n\n");
+        } catch (err) {
+          return `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.`;
+        }
+      }
+
+      if (toolName === "fetch_dcad_comps") {
         const queryAddress = typeof args.address === "string" && args.address.trim().length > 0
           ? args.address.trim()
           : address;
         const provider = property.cadProvider ?? inferCadProvider(property.state);
         const cadAdapter = provider ? getCadAdapter(provider) : null;
-        if (!cadAdapter) {
-          toolResult = "No CAD adapter configured for this property's county.";
-        } else {
-          const comps = await cadAdapter.searchByAddress(queryAddress, year);
-          compsAdded = await saveCADComps(property.id, householdId, year, comps);
-          if (comps.length > 0) {
-            await saveCadSubjectIds(property.id, provider!, comps, queryAddress);
-          }
-          toolResult = formatCompSummary(comps);
-        }
-      } else if (call.function.name === "update_strategy") {
-        const parsed = (() => {
-          try {
-            return JSON.parse(call.function.arguments) as StrategyJson;
-          } catch {
-            return null;
-          }
-        })();
-        if (parsed) {
-          await updateStrategy(worksheet.id, parsed);
-          strategyUpdated = true;
-          toolResult = "Strategy saved.";
-        } else {
-          toolResult = "Invalid strategy payload.";
-        }
+        if (!cadAdapter) return "No CAD adapter configured for this property's county.";
+        const comps = await cadAdapter.searchByAddress(queryAddress, year);
+        compsAdded = await saveCADComps(property.id, householdId, year, comps);
+        if (comps.length > 0) await saveCadSubjectIds(property.id, provider!, comps, queryAddress);
+        return formatCompSummary(comps);
       }
 
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        content: toolResult
-      });
-    }
-  }
+      if (toolName === "update_strategy") {
+        await updateStrategy(worksheet.id, args as unknown as StrategyJson);
+        strategyUpdated = true;
+        return "Strategy saved.";
+      }
 
-  if (!assistantMessage) {
-    assistantMessage = "I could not generate a response right now. Please try again.";
-  }
+      return "Unsupported tool call";
+    },
+    { model: strongModel(), maxTokens: 2000, maxIterations: 5 }
+  );
+
+  const assistantMessage = finalResponse || "I could not generate a response right now. Please try again.";
 
   const userTurn: ConversationTurn = {
     role: "user",
@@ -1164,7 +1079,7 @@ protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, 
     newOutcome != null &&
     CLOSED_PROTEST_OUTCOMES.has(newOutcome) &&
     updated.cycleSummary == null &&
-    env.OPENAI_API_KEY
+    isLlmConfigured()
   ) {
     void generateCycleSummary(updated.id, updated.conversationJson, newOutcome).catch((err) => {
       log.error("protest cycle summary failed", { worksheetId: updated.id, err });
@@ -1260,8 +1175,8 @@ protestRouter.post(
     const property = await getProperty(params.data.propertyId, householdId);
     if (!property) { res.status(404).json({ message: "Property not found" }); return; }
     if (!req.file) { res.status(400).json({ message: "No file uploaded" }); return; }
-    if (!env.OPENAI_API_KEY) {
-      res.status(503).json({ message: "OPENAI_API_KEY not configured", code: "OPENAI_NOT_CONFIGURED" });
+    if (!isLlmConfigured()) {
+      res.status(503).json({ message: "LLM provider not configured", code: "LLM_NOT_CONFIGURED" });
       return;
     }
 
@@ -1275,27 +1190,19 @@ protestRouter.post(
         chunks = chunkText(rawText);
         documentKey = `file:${req.file.originalname}`;
       } else if (mime === "image/jpeg" || mime === "image/png" || mime === "image/webp") {
-        const visionRes = await openai.chat.completions.create({
-          model: "gpt-4o",
-          max_tokens: 1000,
-          messages: [{
+        const { content: description } = await getVisionAdapter().complete(
+          [{
             role: "user",
             content: [
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${mime};base64,${req.file.buffer.toString("base64")}`,
-                },
-              },
+              { type: "image", mimeType: mime, base64Data: req.file.buffer.toString("base64") },
               {
                 type: "text",
-                text:
-                  "Describe this property image in detail. Note visible features, condition, any visible structural issues, lot characteristics, improvements, and anything relevant to a property tax protest.",
+                text: "Describe this property image in detail. Note visible features, condition, any visible structural issues, lot characteristics, improvements, and anything relevant to a property tax protest.",
               },
             ],
           }],
-        });
-        const description = visionRes.choices[0]?.message?.content ?? "";
+          { model: strongModel(), maxTokens: 1000 }
+        );
         if (description.trim().length > 20) {
           chunks = [description.trim()];
         }
@@ -1368,8 +1275,8 @@ protestRouter.patch("/:propertyId/comps/:cadPropertyId/notes", async (req: Authe
 protestRouter.post("/:propertyId/generate-arb-script", async (req: AuthenticatedRequest, res) => {
   const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
   if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
-  if (!env.OPENAI_API_KEY) {
-    res.status(503).json({ message: "OPENAI_API_KEY not configured", code: "OPENAI_NOT_CONFIGURED" });
+  if (!isLlmConfigured()) {
+    res.status(503).json({ message: "LLM provider not configured", code: "LLM_NOT_CONFIGURED" });
     return;
   }
   const householdId = req.authUser!.householdId;

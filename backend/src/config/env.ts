@@ -72,14 +72,22 @@ const envSchema = z.object({
    */
   ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
+  /** Fast/cheap model for one-shot completions (insights, summarization). */
   OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  /** Capable model for vision, agentic loops, and complex generation. */
+  OPENAI_STRONG_MODEL: z.string().default("gpt-4o"),
   BACKUP_ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, "BACKUP_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)")
     .optional(),
   LLM_PROVIDER: z.enum(["openai", "anthropic"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  /** Fast/cheap Anthropic model for one-shot completions. */
+  ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5-20251001"),
+  /** Capable Anthropic model for vision, agentic loops, and complex generation. */
+  ANTHROPIC_STRONG_MODEL: z.string().default("claude-sonnet-4-6"),
+  /** Embedding provider — independent of LLM_PROVIDER (Voyage AI, Cohere, etc. may differ). */
+  EMBEDDING_PROVIDER: z.string().default("openai"),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: optionalIntEnv(587, 1, 65535),
   SMTP_SECURE: optionalBoolEnv(false),

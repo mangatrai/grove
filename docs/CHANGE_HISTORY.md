@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## LLM-1 — Provider-agnostic LLM adapter layer; no hardcoded model names (2026-06-02)
+
+**What changed:**
+- Introduced `backend/src/llm/` module: four typed adapters (`ChatCompletionAdapter`, `ToolUseAdapter`, `VisionAdapter`, `EmbeddingAdapter`) with OpenAI and Anthropic implementations.
+- All six LLM call sites refactored to use adapters — no raw SDK imports remain outside the `llm/providers/` directory.
+- Two model tiers surfaced via `chatModel()` (fast/cheap: `OPENAI_MODEL` / `ANTHROPIC_MODEL`) and `strongModel()` (capable: `OPENAI_STRONG_MODEL` / `ANTHROPIC_STRONG_MODEL`).
+- New env vars: `OPENAI_STRONG_MODEL` (default `gpt-4o`), `ANTHROPIC_STRONG_MODEL` (default `claude-sonnet-4-6`), `EMBEDDING_PROVIDER` (default `openai`). `ANTHROPIC_MODEL` default changed to `claude-haiku-4-5-20251001`.
+- `isLlmConfigured()` is now provider-aware (checks correct key for active `LLM_PROVIDER`).
+- All `OPENAI_NOT_CONFIGURED` error codes → `LLM_NOT_CONFIGURED`.
+- Payslip `LlmUsage.total_tokens` renamed to camelCase `totalTokens` throughout.
+
+**Why:** Every LLM call site previously hard-coded `"gpt-4o"` or `"gpt-4o-mini"` strings and imported the OpenAI SDK directly. Switching provider or model required touching six separate files. The adapter layer lets `LLM_PROVIDER=anthropic` work end-to-end with only env changes.
+
+**Files:** `backend/src/llm/types.ts`, `backend/src/llm/chat.ts`, `backend/src/llm/tool-use.ts`, `backend/src/llm/vision.ts`, `backend/src/llm/embeddings.ts`, `backend/src/llm/index.ts`, `backend/src/llm/providers/openai.ts`, `backend/src/llm/providers/anthropic.ts`, `backend/src/config/env.ts`, `backend/src/modules/insights/llm-provider.service.ts`, `backend/src/modules/protest/arb-script.service.ts`, `backend/src/modules/protest/embedding.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts`, `backend/src/modules/payslip/payslip-parse.service.ts`, `.env.example`, `docs/ADMIN_GUIDE.md`
+
+**GitHub:** closes #73
+
+---
+
 ## OPS-1/2/3/4 — Convert all schedulers to node-cron; add import file purge (2026-06-02)
 
 **What changed:**

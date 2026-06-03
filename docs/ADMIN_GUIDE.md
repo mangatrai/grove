@@ -418,12 +418,32 @@ The app reads a **repository root `.env`** file (created from `.env.example`). I
 
 ### 4.4 PDF Payslip Extraction (Optional)
 
-Required for **IBM and Deloitte payslip PDF parsing**:
+Required for **IBM and Deloitte payslip PDF parsing**, **protest chat**, **document OCR**, and **spending insights**. All LLM calls go through the adapter layer — the active provider is selected by `LLM_PROVIDER`.
 
-| Variable | Purpose |
-|----------|---------|
-| `OPENAI_API_KEY` | OpenAI API key (if payslip extraction is enabled) |
-| `OPENAI_MODEL` | Chat model ID; default `gpt-4o-mini` |
+#### Provider selection
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `LLM_PROVIDER` | Active provider: `openai` or `anthropic` | `openai` |
+| `EMBEDDING_PROVIDER` | Embedding provider (independent of LLM_PROVIDER): `openai` | `openai` |
+
+#### OpenAI (when `LLM_PROVIDER=openai`)
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OPENAI_API_KEY` | OpenAI API key | _(required)_ |
+| `OPENAI_MODEL` | Fast/cheap model — insights, summarization | `gpt-4.1` |
+| `OPENAI_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops | `gpt-4o` |
+
+> Recommended `OPENAI_MODEL=gpt-4.1` for payslip extraction. `gpt-4.1-mini`/`gpt-4o-mini` have known issues with column-type disambiguation on Deloitte stubs.
+
+#### Anthropic (when `LLM_PROVIDER=anthropic`)
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic API key | _(required)_ |
+| `ANTHROPIC_MODEL` | Fast/cheap model — insights, summarization | `claude-haiku-4-5-20251001` |
+| `ANTHROPIC_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops | `claude-sonnet-4-6` |
 
 ### 4.5 Tax Protest AI (Optional)
 
@@ -431,8 +451,6 @@ Required for the property tax protest chat assistant and live web search:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | OpenAI API key; used for the protest chat tool-use loop (GPT-4.1) and document embedding |
-| `OPENAI_MODEL` | Chat model ID; default `gpt-4.1` |
 | `TAVILY_API_KEY` | Tavily search API key for live web search during protest chat. Free tier: 1 000 credits/month. If unset, the `search_web` tool responds with a graceful "not configured" message — all other protest features remain functional. |
 | `EMBEDDING_MODEL` | OpenAI embedding model for pgvector RAG. Default `text-embedding-3-small` (1536 dims). **Changing this requires a new DB migration and full re-embed of all document chunks.** |
 | `EMBEDDING_MAX_INPUT_CHARS` | Characters passed to embedding API per chunk before truncation. Default `8000`. |
