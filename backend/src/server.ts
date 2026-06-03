@@ -11,6 +11,7 @@ import { startBackupScheduler } from "./modules/gdrive/gdrive-scheduler.service.
 import { startStockQuoteScheduler } from "./modules/espp/espp-stock.service.js";
 import { startRealtyScheduler } from "./modules/household/realty-scheduler.service.js";
 import { startImportCleanupScheduler } from "./modules/imports/import-session.service.js";
+import { startPayslipAsyncScheduler } from "./modules/imports/payslip-async-scheduler.service.js";
 import { purgeOldNotifications } from "./modules/notifications/notification.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
@@ -48,6 +49,7 @@ void (async () => {
       startBackupScheduler();
       startRealtyScheduler();
       startImportCleanupScheduler();
+      startPayslipAsyncScheduler();
       void purgeOldNotifications();
     }
     const server = app.listen(port, () => {

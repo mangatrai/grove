@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-224 — Payslip async scheduler + line item add refresh (2026-06-03)
+
+**What:**
+1. IBM (and Deloitte) payslips uploaded via import were stuck in "processing" indefinitely after I-2 unified both profiles to the async queue. There was no background scheduler to drive the queue — `PAYSLIP_ASYNC_POLL_INTERVAL_MS` existed in env.ts but was wired to nothing.
+2. Adding a new line item to an existing payslip on the detail page (+ Add row → Add) saved correctly to the DB but the new row did not appear in the UI until the page was refreshed. Root cause: incremental state update in `handleAddLineItem` did not reliably reflect the server's grouped response in all rendering paths. Fixed by replacing the optimistic state merge with an `await load()` call that fetches the authoritative server state after a successful POST.
+
+**Changes:**
+- `backend/src/modules/imports/payslip-async-scheduler.service.ts` — new scheduler that queries all pending `openai_llm_payslip` import files across all households and calls `reconcilePayslipAsyncImportSession` for each unique session. Runs at `PAYSLIP_ASYNC_POLL_INTERVAL_MS` (default 120 s), fires once on startup.
+- `backend/src/server.ts` — import and call `startPayslipAsyncScheduler()` in the non-TEST branch (alongside existing schedulers).
+- `frontend/src/pages/PayslipDetailPage.tsx` — `handleAddLineItem`: replaced `applyLineItemMutation(data) + manual state merge` with `await load()` for guaranteed server-authoritative refresh after POST.
+
+**GitHub:** Closes #75
+
+---
+
 ## FIX-222 — Net worth cache no longer wiped on logout (2026-06-03)
 
 **What:** `setToken(null)` called `clearAllCaches()` on logout, deleting all `hfa:*` localStorage keys including the `networth` and `dashboard` cached payloads. For a single-household app this is wrong — all members share the same household data, so there is no isolation reason to clear caches on session end. Every re-login hit the network cold, negating the 7-day / 24-hour TTL design. Also corrected ADMIN_GUIDE: balance-sheet snapshot TTL was documented as 1 hour but the code has used 24 hours since FIX-221.
