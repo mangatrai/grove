@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import archiver from "archiver";
+import cron from "node-cron";
 
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { resolveDataPath } from "../../paths.js";
@@ -274,8 +275,9 @@ export async function purgeExpiredExports(): Promise<void> {
   log.info(`Export purge: expired ${expired.length} export job(s) older than ${EXPORT_TTL_HOURS}h`);
 }
 
-/** Run purge on startup and every hour thereafter. */
+/** Run purge on startup then at the top of every hour. */
 export function startExportCleanupSchedule(): void {
   void purgeExpiredExports();
-  setInterval(() => { void purgeExpiredExports(); }, 60 * 60 * 1000);
+  // Top of every hour — no timezone dependency since this is purely TTL-based.
+  cron.schedule("0 * * * *", () => { void purgeExpiredExports(); });
 }

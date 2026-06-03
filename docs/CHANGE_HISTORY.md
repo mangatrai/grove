@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## OPS-1/2/3/4 — Convert all schedulers to node-cron; add import file purge (2026-06-02)
+
+**What changed:**
+- **OPS-1 (GDrive backup):** Replaced 30-minute `setInterval` heartbeat with `node-cron` firing nightly at 11 PM CT (`"0 23 * * *"`, `America/Chicago`). `checkAndQueueDueBackups()` logic unchanged — still guards per-household `backup_frequency_hours`.
+- **OPS-2 (Realty valuation):** Replaced 6-hour `setInterval` heartbeat with `node-cron` firing on the 1st of every month at 10 PM CT (`"0 22 1 * *"`). 28-day SQL guard in `checkAndRefreshProperties()` unchanged.
+- **OPS-3 (Export cleanup):** Replaced `setInterval` hourly with `node-cron` `"0 * * * *"`. No timezone dependency; purely TTL-based cleanup.
+- **OPS-4 (Import file purge — new):** Nightly at 2 AM CT (`"0 2 * * *"`), `purgeStaleImportFiles()` deletes on-disk staged import files for sessions older than 30 days and sets `stored_path = NULL`. DB rows (import_session, import_file) are never deleted — audit trail preserved.
+
+**Why:** All schedulers now use deterministic wall-clock firing via IANA timezones rather than elapsed-time heartbeats that could drift or be skipped on cold start. OPS-4 prevents unbounded disk growth from abandoned import sessions.
+
+**Files:** `backend/src/modules/gdrive/gdrive-scheduler.service.ts`, `backend/src/modules/household/realty-scheduler.service.ts`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/imports/import-session.service.ts`, `backend/src/server.ts`
+
+**GitHub:** closes #68, closes #69, closes #70, closes #71
+
+---
+
 ## OPS — Env-drive embedding/RAG config; remove hardcoded model strings (2026-06-02)
 
 **What:** Moved all hardcoded embedding/RAG values out of source code and into env vars:

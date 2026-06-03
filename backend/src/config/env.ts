@@ -42,6 +42,8 @@ function optionalBoolEnv(defaultVal: boolean) {
 
 const envSchema = z.object({
   PORT: z.string().default("4000"),
+  /** IANA timezone for wall-clock schedulers and log timestamps. Must match Koyeb env var. */
+  TZ: z.string().default("America/Chicago"),
   MODE: z
     .string()
     .transform((value) => value.toUpperCase())

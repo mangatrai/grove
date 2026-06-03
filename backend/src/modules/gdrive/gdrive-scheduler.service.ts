@@ -1,10 +1,9 @@
+import cron from "node-cron";
+
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { queueBackupJob, scheduleBackupJobProcessing } from "../export/gdrive-backup.service.js";
-
-const HEARTBEAT_MS = 30 * 60 * 1000;
-const STARTUP_DELAY_MS = 30_000;
 
 type SchedulerHouseholdRow = {
   household_id: string;
@@ -14,16 +13,12 @@ type SchedulerHouseholdRow = {
 let schedulerStarted = false;
 
 export function startBackupScheduler(): void {
-  if (schedulerStarted) {
-    return;
-  }
+  if (schedulerStarted) return;
   schedulerStarted = true;
-  setTimeout(() => {
-    void checkAndQueueDueBackups();
-  }, STARTUP_DELAY_MS);
-  setInterval(() => {
-    void checkAndQueueDueBackups();
-  }, HEARTBEAT_MS);
+  // Nightly at 11 PM local time (TZ env var). Fires at wall-clock time regardless of DST.
+  cron.schedule("0 23 * * *", () => { void checkAndQueueDueBackups(); }, {
+    timezone: env.TZ,
+  });
 }
 
 /**
