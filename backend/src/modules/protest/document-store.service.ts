@@ -1,4 +1,5 @@
 import { qAll, qBegin, qExec, sqlBind } from "../../db/query.js";
+import { env } from "../../config/env.js";
 import { embedBatch } from "./embedding.service.js";
 
 const EMBED_BATCH_SIZE = 100;
@@ -91,8 +92,8 @@ export async function querySimilarChunks(args: {
   topK?: number;
   minSimilarity?: number;
 }): Promise<DocumentChunkHit[]> {
-  const topK = args.topK ?? 5;
-  const minSimilarity = args.minSimilarity ?? 0.65;
+  const topK = args.topK ?? env.RAG_TOP_K;
+  const minSimilarity = args.minSimilarity ?? env.RAG_MIN_SIMILARITY;
   const embeddingJson = JSON.stringify(args.queryEmbedding);
 
   const rows = await qAll<{

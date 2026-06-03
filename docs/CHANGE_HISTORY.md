@@ -18,6 +18,21 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## OPS — Env-drive embedding/RAG config; remove hardcoded model strings (2026-06-02)
+
+**What:** Moved all hardcoded embedding/RAG values out of source code and into env vars:
+- `EMBEDDING_MODEL` (default `text-embedding-3-small`) — controls OpenAI embedding model; changing it requires a DB migration + re-embed
+- `EMBEDDING_MAX_INPUT_CHARS` (default `8000`) — truncation limit per chunk before embedding API call
+- `RAG_TOP_K` (default `5`) — number of nearest-neighbour chunks returned by similarity query
+- `RAG_MIN_SIMILARITY` (default `0.65`) — cosine similarity floor; chunks below filtered from context
+- Added `optionalFloatEnv()` helper to `env.ts` for bounded float env vars (no prior helper existed)
+
+**Why:** Model names and RAG tuning values change frequently; hardcoding forces code edits for operational changes. All values now configurable without a redeploy for tuning, and switchable to another embedding provider with only env changes.
+
+**Files:** `backend/src/config/env.ts`, `backend/src/modules/protest/embedding.service.ts`, `backend/src/modules/protest/document-store.service.ts`, `.env.example`, `docs/ADMIN_GUIDE.md`, `docs/PRD_AND_CRS.md` (D-019 updated)
+
+---
+
 ## PT-17 — AI oral ARB script generation (2026-06-02)
 
 - New `POST /api/protest/:propertyId/generate-arb-script?year=N` endpoint generates a 6-step oral hearing script via GPT-4o

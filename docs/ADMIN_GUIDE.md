@@ -431,9 +431,13 @@ Required for the property tax protest chat assistant and live web search:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | OpenAI API key; used for the protest chat tool-use loop (GPT-4.1) |
+| `OPENAI_API_KEY` | OpenAI API key; used for the protest chat tool-use loop (GPT-4.1) and document embedding |
 | `OPENAI_MODEL` | Chat model ID; default `gpt-4.1` |
 | `TAVILY_API_KEY` | Tavily search API key for live web search during protest chat. Free tier: 1 000 credits/month. If unset, the `search_web` tool responds with a graceful "not configured" message — all other protest features remain functional. |
+| `EMBEDDING_MODEL` | OpenAI embedding model for pgvector RAG. Default `text-embedding-3-small` (1536 dims). **Changing this requires a new DB migration and full re-embed of all document chunks.** |
+| `EMBEDDING_MAX_INPUT_CHARS` | Characters passed to embedding API per chunk before truncation. Default `8000`. |
+| `RAG_TOP_K` | Number of nearest-neighbour chunks returned per similarity query. Default `5`. Range 1–20. |
+| `RAG_MIN_SIMILARITY` | Cosine similarity floor; chunks below this score are filtered from context. Default `0.65`. Range 0–1. |
 
 **Document generation** (`GET /api/protest/:id/evidence-packet?format=pdf|docx`) uses `pdfkit` for PDF and the `docx` npm package for Word. Both are bundled dependencies — no system fonts or native binaries required.
 

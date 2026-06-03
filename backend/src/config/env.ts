@@ -18,6 +18,18 @@ function optionalIntEnv(defaultVal: number, min: number, max: number) {
   );
 }
 
+/** Float env with default; empty or invalid falls back to `defaultVal`. */
+function optionalFloatEnv(defaultVal: number, min: number, max: number) {
+  return z.preprocess(
+    (val: unknown) => {
+      if (val === undefined || val === "") return defaultVal;
+      const n = Number(val);
+      return Number.isFinite(n) ? n : defaultVal;
+    },
+    z.number().min(min).max(max)
+  );
+}
+
 function optionalBoolEnv(defaultVal: boolean) {
   return z.preprocess((val: unknown) => {
     if (val === undefined || val === "") return defaultVal;
@@ -108,7 +120,19 @@ const envSchema = z.object({
   /** RealtyAPI key for Redfin property valuation (D-2). Optional — feature degrades to manual if absent. */
   REALTY_API_KEY: z.string().optional(),
   /** Tavily search API key for AI protest assistant web search (PT-3). Optional — search_web tool disabled if absent. */
-  TAVILY_API_KEY: z.string().optional()
+  TAVILY_API_KEY: z.string().optional(),
+  /**
+   * OpenAI embedding model for pgvector RAG (protest document store).
+   * Changing this requires a new migration (different vector dims) and full re-embed of all chunks.
+   * Defaults to text-embedding-3-small (1536 dims).
+   */
+  EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
+  /** Max characters passed to the embedding API per chunk (truncates before sending). */
+  EMBEDDING_MAX_INPUT_CHARS: optionalIntEnv(8000, 1000, 32000),
+  /** Number of nearest-neighbour chunks returned by vector similarity search. */
+  RAG_TOP_K: optionalIntEnv(5, 1, 20),
+  /** Cosine similarity floor; chunks below this score are filtered out (0–1). */
+  RAG_MIN_SIMILARITY: optionalFloatEnv(0.65, 0, 1)
 });
 
 export const env = envSchema.parse(process.env);
