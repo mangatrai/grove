@@ -1868,45 +1868,85 @@ export function TaxProtestPage() {
           {/* DCAD Live Appeal Status */}
           {dcadAppeals.length > 0 && dcadAppeals.map((appeal, i) => {
             const docketDate = appeal.hearingDate?.split(" ")[0] ?? null;
-            const hearingMismatch = docketDate && (!hearingDraft || hearingDraft !== docketDate);
+            // Map DCAD appealStatus → our protest workflow status
+            const dcadMappedStatus: ProtestStatus | null =
+              appeal.status === "REJECTED" ? "arb"
+              : appeal.status === "OPEN" ? "filed"
+              : appeal.status === "SETTLED" ? "resolved"
+              : null;
+            const statusMismatch = dcadMappedStatus && worksheet && worksheet.status !== dcadMappedStatus && worksheet.status !== "resolved";
+            const hearingMismatch = docketDate && docketDate !== (worksheet?.hearingDate ?? null);
+            const needsSync = statusMismatch || hearingMismatch;
             return (
-              <Alert key={i} color="blue" variant="light" title="DCAD Appeal Record" icon={<IconCalendarEvent size={16} />}>
-                <Group gap="xl" wrap="wrap">
-                  <div>
-                    <Text size="xs" c="dimmed">Appeal Status</Text>
-                    <Badge size="sm" color={appeal.status === "REJECTED" ? "orange" : appeal.status === "APPROVED" ? "green" : "blue"} variant="light">
-                      {appeal.status ?? "Unknown"}
-                    </Badge>
-                    {appeal.status === "REJECTED" && (
-                      <Text size="xs" c="dimmed" mt={2}>Informal offer rejected — escalated to ARB</Text>
+              <Alert
+                key={i}
+                color={needsSync ? "orange" : "blue"}
+                variant="light"
+                title="DCAD Appeal Record"
+                icon={<IconCalendarEvent size={16} />}
+              >
+                <Stack gap="xs">
+                  <Group gap="xl" wrap="wrap">
+                    <div>
+                      <Text size="xs" c="dimmed">DCAD Status</Text>
+                      <Badge size="sm" color={appeal.status === "REJECTED" ? "orange" : appeal.status === "SETTLED" ? "green" : "blue"} variant="light">
+                        {appeal.status ?? "Unknown"}
+                      </Badge>
+                      {appeal.status === "REJECTED" && (
+                        <Text size="xs" c="dimmed" mt={2}>Informal rejected → ARB scheduled</Text>
+                      )}
+                    </div>
+                    {appeal.hearingDate && (
+                      <div>
+                        <Text size="xs" c="dimmed">ARB Docket</Text>
+                        <Text size="sm" fw={600}>{appeal.hearingDate}</Text>
+                      </div>
                     )}
-                  </div>
-                  {appeal.hearingDate && (
-                    <div>
-                      <Text size="xs" c="dimmed">ARB Docket</Text>
-                      <Text size="sm" fw={600}>{appeal.hearingDate}</Text>
-                    </div>
-                  )}
-                  {appeal.appealType && (
-                    <div>
-                      <Text size="xs" c="dimmed">Type</Text>
-                      <Text size="sm">{appeal.appealType}</Text>
-                    </div>
-                  )}
-                  {hearingMismatch && worksheet && (
+                    {appeal.appealType && (
+                      <div>
+                        <Text size="xs" c="dimmed">Type</Text>
+                        <Text size="sm">{appeal.appealType}</Text>
+                      </div>
+                    )}
+                    {dcadMappedStatus && worksheet && (
+                      <div>
+                        <Text size="xs" c="dimmed">Maps to</Text>
+                        <Badge size="sm" variant="outline" color={statusMismatch ? "orange" : "gray"}>
+                          {dcadMappedStatus === "arb" ? "ARB Hearing"
+                            : dcadMappedStatus === "filed" ? "Filed"
+                            : "Resolved"}
+                        </Badge>
+                        {statusMismatch && (
+                          <Text size="xs" c="orange" mt={2}>
+                            App shows: {worksheet.status === "not_filed" ? "Not Filed" : worksheet.status === "filed" ? "Filed" : worksheet.status === "informal" ? "Informal Offer" : worksheet.status}
+                          </Text>
+                        )}
+                      </div>
+                    )}
+                  </Group>
+                  {needsSync && worksheet && (
                     <Button
                       size="xs"
-                      variant="light"
-                      color="blue"
+                      variant="filled"
+                      color="orange"
                       onClick={() => {
-                        setHearingDraft(docketDate!);
-                        void updateWorksheet({ hearingDate: docketDate });
+                        const updates: Parameters<typeof updateWorksheet>[0] = {};
+                        if (dcadMappedStatus && statusMismatch) updates.status = dcadMappedStatus;
+                        if (hearingMismatch && docketDate) {
+                          updates.hearingDate = docketDate;
+                          setHearingDraft(docketDate);
+                        }
+                        void updateWorksheet(updates);
                       }}
                     >
-                      Sync hearing date from DCAD
+                      {statusMismatch && hearingMismatch
+                        ? `Sync: mark as ${dcadMappedStatus === "arb" ? "ARB" : dcadMappedStatus} + set hearing date`
+                        : statusMismatch
+                        ? `Sync: mark as ${dcadMappedStatus === "arb" ? "ARB Hearing" : dcadMappedStatus}`
+                        : "Sync hearing date from DCAD"}
                     </Button>
                   )}
-                </Group>
+                </Stack>
               </Alert>
             );
           })}
