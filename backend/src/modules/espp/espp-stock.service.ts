@@ -1,9 +1,9 @@
+import cron from "node-cron";
 import YahooFinance from "yahoo-finance2";
 
 import { log } from "../../logger.js";
 
 const SYMBOL = "IBM";
-const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // check every 5 min
 
 export type StockQuote = {
   symbol: string;
@@ -48,17 +48,9 @@ export function startStockQuoteScheduler(): void {
   // Initial fetch on startup
   refreshQuote().catch(() => {});
 
-  // Refresh at ~4:15 PM ET on weekdays (4:15 PM EDT = 20:15 UTC; EST = 21:15 UTC)
-  setInterval(() => {
-    const now = new Date();
-    const dow = now.getUTCDay(); // 0=Sun, 1-5=Mon-Fri
-    const isWeekday = dow >= 1 && dow <= 5;
-    const h = now.getUTCHours();
-    const m = now.getUTCMinutes();
-    const inEdtWindow = h === 20 && m >= 15 && m < 20;
-    const inEstWindow = h === 21 && m >= 15 && m < 20;
-    if (isWeekday && (inEdtWindow || inEstWindow)) {
-      refreshQuote().catch(() => {});
-    }
-  }, SCHEDULER_INTERVAL_MS);
+  // 4:15 PM ET Mon–Fri = 3:15 PM CT = after NYSE/NASDAQ close.
+  // node-cron fires exactly at this time regardless of DST; no UTC offset math needed.
+  cron.schedule("15 16 * * 1-5", () => { refreshQuote().catch(() => {}); }, {
+    timezone: "America/New_York",
+  });
 }

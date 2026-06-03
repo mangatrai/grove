@@ -405,6 +405,7 @@ The app reads a **repository root `.env`** file (created from `.env.example`). I
 | `PORT` | `4000` | Backend API listen port |
 | `FRONTEND_PORT` | `3000` | Frontend dev server port (dev only; ignored in `MODE=PROD`) |
 | `MODE` | (see above) | `TEST` or `PROD` |
+| `TZ` | (system default) | Process timezone. Set to `America/Chicago` to anchor `new Date()` locale methods and log timestamps to US Central Time. **Required in Koyeb** — cloud servers default to UTC. Does not affect UTC-based DB timestamps. |
 | `LOG_LEVEL` | `info` | Backend logging: `debug`, `info`, `warn`, `error`, `silent` |
 | `LOG_FILE` | (unset) | Optional file path for log output (appended; stdout still printed). Repo-relative or absolute. |
 | `ALLOWED_ORIGIN` | (unset in TEST, none in PROD) | CORS origin lock (e.g. `https://finance.example.com` in production) |
