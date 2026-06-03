@@ -395,12 +395,51 @@ Time-and-expense reporting for household employees (nanny, cleaner, au pair). St
 - Owner name search: `assessormelvinburgess.com/realPropertyDetails?FirstName=...&LastName=...&active=owner&Page=property`
 - Appeal: Board of Equalization (different process from TX ARB)
 
-#### Property Tax Protest Assistant (PT-1)
-- Chat-based agentic pipeline: GPT-4.1 + OpenAI tool use.
-- Tools: `fetch_dcad_comps`, `update_strategy`.
-- System prompt injects property facts, AVM, assessed value, comps.
-- Conversation + structured strategy (`caseStrength`, `targetValueUsd`, `primaryStrategy`, `draftArguments`, `redFlags`) stored in `protest_worksheet`.
-- Protest status stepper: `not_filed → filed → informal → arb → resolved`.
+#### Property Tax Protest Assistant (PT-1 through PT-17)
+
+**Chat pipeline:**
+- GPT-4o (configurable via `OPENAI_MODEL`) with OpenAI tool use.
+- Tools: `fetch_dcad_comps`, `refresh_redfin_comps`, `search_web` (Tavily), `update_strategy`.
+- System prompt injects: property facts, CAD assessed value, parsed CAD evidence packet (§41.41 sales comps + §41.43 equity comps with medians), per-comp annotation notes, Redfin sold comp research notes, cross-year cycle summary.
+- Conversation stored as `conversation_json JSONB` on `protest_worksheet`. Strategy stored as `strategy_json JSONB`.
+
+**Protest status flow:**
+- `not_filed → filed → informal → arb → resolved` (linear) with branching outcomes: `settled_informal`, `won_arb`, `lost_arb`, `withdrawn`.
+- Contextual action buttons per status. Resolved state shows outcome badge + savings summary.
+
+**CAD evidence (PT-9):**
+- Upload official DCAD evidence packet PDF. Text extracted + parsed with GPT-4o into `cad_evidence_json JSONB`: subject facts (assessed, improvements, land, % good, sqft, year built), 3 §41.41 sales comps with medians, 5 §41.43 equity comps with medians.
+- Dual approach: structured JSON for precise prompt injection; also chunked into pgvector for narrative RAG retrieval (see D-019).
+
+**CAD adapter pattern (PT-14):**
+- `CadAdapter` interface with `searchByAddress()`. `DcadAdapter` (Denton County, TX via TrueProdigy public API) is the only shipped implementation.
+- Registry in `cad-adapters/registry.ts` — adding a new county = one new adapter file + registry entry. See D-020.
+
+**Comp management (PT-10, PT-11, PT-15):**
+- Add/remove equity comps directly from protest page. Notebook icon on every comp row for free-text annotation notes passed to AI system prompt.
+- Auto-fetch DCAD assessed values for Redfin sold comps on refresh (`sold_comps_cad_json JSONB`). Surfaces CAD Assessed + §41.43 Ratio columns in Market Value table (TX only).
+
+**RAG document store (PT-12):**
+- `protest_document_chunks` table with pgvector `vector(1536)` embeddings. HNSW index for approximate cosine similarity search.
+- Arbitrary uploads: PDF (text extracted) or image (GPT-4o vision description). Chunked at 300 words / 40-word overlap. Embedded with `text-embedding-3-small`.
+- Chat retrieves top-5 similar chunks per user message, injected into system prompt as context. See D-019.
+
+**Conversation summarization (PT-12):**
+- Rolling summarization: when live turns exceed 30 since last cursor, oldest 10 turns compressed async with `gpt-4o-mini`. Stored as `conversation_summary TEXT` + `summarization_cursor INT`. See D-021.
+- Cycle summary: on protest close (terminal outcome), `gpt-4o-mini` generates a ≤200-word summary stored as `cycle_summary TEXT`. Injected as "Prior year context" into next year's system prompt.
+
+**ARB oral script (PT-17):**
+- `POST /api/protest/:propertyId/generate-arb-script` — available when `status = 'arb'`.
+- GPT-4o generates 6-step oral hearing script: negotiation thresholds (open ask / ideal settle / walk-away min), §41.41 and §41.43 arguments, IF/THEN appraiser rebuttals, closing ask, panel Q&A.
+- Uses all available evidence: CAD evidence packet, equity comp notes, Redfin research notes, AI strategy. Persisted to `arb_script_json JSONB`.
+
+**Evidence packet generation (PT-4, PT-4b):**
+- PDF: cover page, DCAD comps table, Redfin sold comps table, horizontal $/sqft bar chart.
+- Word (.docx): ARB Board section + Protestor Reference Sheet with oral script, negotiation table, quick-reference card.
+
+**Filing deadline and notifications (PT-5):**
+- `filing_deadline DATE` and `cad_portal_url TEXT` on `protest_worksheet`.
+- In-app + email notifications at 30/7/1 days before filing deadline and hearing date. Deduped per 2-day window.
 
 ### 3.14 Export, Backup, and Restore (FR-11, PRD §19)
 
@@ -557,6 +596,30 @@ Time-and-expense reporting for household employees (nanny, cleaner, au pair). St
 **Date:** 2026-03-28 (Decision DECISIONS_LOG.md D-018)  
 **Decision:** Treat consumer cloud PFM products (Quicken Simplifi, Rocket Money, Mint/Credit Karma) as reference for positioning, copy tone, and sectioning patterns only — **not** as feature backlog.  
 **Consequence:** Ongoing UX/copy improvements may cite PFM_COMPETITIVE_UX_REFERENCE.md; no obligation to match commercial feature matrices.
+
+### D-019: pgvector RAG for Protest Document Store — Rejected LLM-Side Storage
+**Date:** 2026-06-02 (PT-12)  
+**Decision:** Store protest document chunks + embeddings in Postgres (`protest_document_chunks`, `vector(1536)`, HNSW index). Retrieve top-K similar chunks per chat message and inject into system prompt. Rejected: Claude Projects, OpenAI Assistants API file storage.  
+**Context:** LLM-side storage creates vendor lock-in, limits cross-year and cross-session retrieval, and gives no control over what gets injected. pgvector keeps data under household ownership, works with the existing Postgres stack (both local Docker and Koyeb managed), and allows deterministic similarity thresholds. `protest_document_chunks` is registered in `EXPORT_EPHEMERAL_TABLES` — embeddings are regenerable, excluded from backup payload.  
+**Consequence:** `CREATE EXTENSION vector` required on Postgres. Local dev uses `pgvector/pgvector:pg18` Docker image. Koyeb managed Postgres (Neon-backed) supports `vector` natively. Chunking at 300 words / 40-word overlap; embedding model `text-embedding-3-small` (1536 dims). CAD evidence PDF gets dual treatment: structured JSON extraction for precise prompt injection + raw text chunked for RAG narrative retrieval.
+
+### D-020: CAD Adapter Pattern — Generic County Extensibility
+**Date:** 2026-06-01 (PT-14)  
+**Decision:** Abstract all county CAD API calls behind a `CadAdapter` interface (`searchByAddress`, `getValueHistory`, `getTaxable`, `getAppeal`). `DcadAdapter` (Denton County, TX via TrueProdigy public API) is the only shipped implementation. Registry in `cad-adapters/registry.ts` maps provider string → adapter instance.  
+**Context:** Initial implementation hardcoded DCAD-specific field names (`pid`, `appraisedValue`, `pAccountID`) and API behavior (short-lived public JWT, browser-mimicking headers) throughout the protest module. This made adding Harris County (HCAD) or other counties require deep changes. The adapter pattern isolates all county-specific logic to one file per county.  
+**Consequence:** DB columns renamed to generic `cad_property_id`, `cad_account_id`, `cad_provider` (migration 0061). Adding a new county = one new adapter file + one registry entry, no other changes. HCAD and Travis County adapters are in the deferred backlog (PT-6).
+
+### D-021: Protest Chat — Rolling Summarization Over Sliding Window
+**Date:** 2026-06-02 (PT-12)  
+**Decision:** When live conversation turns (since last summarization cursor) exceed 30, compress the oldest 10 turns into a running `conversation_summary TEXT` using `gpt-4o-mini`, advance `summarization_cursor`, and store both on `protest_worksheet`. Rejected: sliding window (drop oldest N turns without summarization).  
+**Context:** Sliding window loses information silently — comp prices mentioned early in a session, negotiation context, user-stated constraints. A protest conversation is research-dense; losing early turns means the AI re-asks questions already answered. True summarization preserves key facts (values, comps, decisions) at low token cost (~800 tokens output). Cycle summary (generated on protest close, injected as "Prior year context" next year) gives multi-year continuity without replaying full history.  
+**Consequence:** Two async `gpt-4o-mini` calls possible per chat turn (summarization + cycle summary on close). Both are fire-and-forget after response is sent. `summarization_cursor INT` and `conversation_summary TEXT` and `cycle_summary TEXT` on `protest_worksheet` (migration 0064).
+
+### D-022: Scheduler Anchoring — TZ=America/Chicago + node-cron for Wall-Clock Targets
+**Date:** 2026-06-02 (FIX-TZ-1)  
+**Decision:** Set `TZ=America/Chicago` as a required process environment variable (Koyeb env vars + `.env.example`). Schedulers with specific wall-clock targets (stock quote refresh at NYSE close) use `node-cron` with IANA timezone strings. Interval-based schedulers (GDrive backup heartbeat, realty valuation check, export file purge) remain as `setInterval` — they are elapsed-time checks with no time-of-day requirement.  
+**Context:** Cloud servers (Koyeb) default to UTC. The stock quote scheduler used a narrow 5-minute UTC-window `setInterval` check that silently missed the window when the heartbeat misaligned with the start time. `TZ` env var anchors `new Date()` locale methods and log timestamps to CT. `node-cron` with explicit timezone handles DST transitions automatically with no UTC offset math.  
+**Consequence:** NYSE close (4 PM ET / 3 PM CT) is expressed as `15 16 * * 1-5` with `timezone: 'America/New_York'` in `node-cron` — New York tz is correct since market hours are defined in ET regardless of where the app is hosted. OPS-1/2/3/4 backlog items will migrate remaining interval schedulers to node-cron with CT-anchored times.
 
 ---
 
