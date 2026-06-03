@@ -45,6 +45,7 @@ export type DCADValueHistoryEntry = {
 
 export type DCADAppealEntry = {
   year: string | null;
+  appealType: string | null;
   status: string | null;
   hearingDate: string | null;
   filedDate: string | null;
@@ -443,9 +444,10 @@ export async function getDCADAppeal(
       .filter((r): r is Record<string, unknown> => r != null)
       .map((r) => ({
         year: asString(r.pYear ?? r.year ?? r.taxYear),
-        status: asString(r.status ?? r.appealStatus ?? r.protestStatus),
-        hearingDate: asString(r.hearingDate ?? r.hearing_date),
-        filedDate: asString(r.filedDate ?? r.filed_date ?? r.protestDate),
+        appealType: asString(r.appealType ?? r.appeal_type),
+        status: asString(r.appealStatus ?? r.status ?? r.protestStatus),
+        hearingDate: asString(r.docketDt ?? r.hearingDate ?? r.hearing_date),
+        filedDate: asString(r.informalDt ?? r.filedDate ?? r.filed_date ?? r.protestDate),
         raw: r
       }));
   } catch (err) {

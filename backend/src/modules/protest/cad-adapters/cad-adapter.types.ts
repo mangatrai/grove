@@ -26,6 +26,7 @@ export type CadValueHistoryEntry = {
 
 export type CadAppealEntry = {
   year: string | null;
+  appealType: string | null;
   status: string | null;
   hearingDate: string | null;
   filedDate: string | null;

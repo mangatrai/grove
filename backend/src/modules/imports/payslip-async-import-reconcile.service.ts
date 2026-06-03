@@ -115,7 +115,7 @@ export async function reconcilePayslipAsyncImportSession(
         continue;
       }
 
-      const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
+      const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.totalTokens ?? null);
       const buffer = fs.readFileSync(file.stored_path);
       const checksum = sha256Hex(buffer);
 
@@ -161,7 +161,7 @@ export async function reconcilePayslipAsyncImportSession(
           profile: file.parser_profile_id,
           payslipSnapshotId: ins.snapshot.id,
           payslipAsyncProvider: OPENAI_LLM_PAYSLIP_PROVIDER,
-          usageTokens: usage?.total_tokens ?? null
+          usageTokens: usage?.totalTokens ?? null
         }),
         file.id
       );

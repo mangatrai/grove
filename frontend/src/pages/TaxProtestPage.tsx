@@ -188,6 +188,14 @@ type CadSearchResult = {
   marketValue: number | null;
 };
 
+type DcadAppeal = {
+  year: string | null;
+  appealType: string | null;
+  status: string | null;
+  hearingDate: string | null;
+  filedDate: string | null;
+};
+
 type ArbNegotiationThresholds = {
   openAskUsd: number;
   idealSettleUsd: number;
@@ -405,6 +413,7 @@ export function TaxProtestPage() {
   const [uploadingSupportingDoc, setUploadingSupportingDoc] = useState(false);
   const [arbScript, setArbScript] = useState<ArbScript | null>(null);
   const [arbScriptLoading, setArbScriptLoading] = useState(false);
+  const [dcadAppeals, setDcadAppeals] = useState<DcadAppeal[]>([]);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -510,6 +519,13 @@ export function TaxProtestPage() {
     }
   }, []);
 
+  const loadDcadAppeals = useCallback(async (pid: string) => {
+    try {
+      const res = await apiJson<{ appeals: DcadAppeal[] }>(`/api/protest/${encodeURIComponent(pid)}/dcad/appeal`);
+      setDcadAppeals(res.appeals ?? []);
+    } catch { /* non-critical — no CAD adapter or account ID */ }
+  }, []);
+
   const uploadSupportingDocument = useCallback(async (file: File) => {
     if (!propertyId) return;
     const form = new FormData();
@@ -566,7 +582,8 @@ export function TaxProtestPage() {
     if (!token || !propertyId) return;
     void loadPropertyAndWorksheet(propertyId, Number(year));
     void loadSupportingDocuments(propertyId, Number(year));
-  }, [token, propertyId, year, loadPropertyAndWorksheet, loadSupportingDocuments]);
+    void loadDcadAppeals(propertyId);
+  }, [token, propertyId, year, loadPropertyAndWorksheet, loadSupportingDocuments, loadDcadAppeals]);
 
   useEffect(() => {
     if (chatOpen) {
@@ -1371,7 +1388,9 @@ export function TaxProtestPage() {
             <Title order={4}>Unequal Appraisal Evidence</Title>
             <Group gap="xs">
               <Text size="xs" c="dimmed">
-                {comps.length > 0 ? `${comps.length} DCAD comparable properties` : "No comps loaded"}
+                {comps.length + soldComps.filter(c => !excludedSoldComps.includes(c.address ?? "")).length > 0
+                  ? `${comps.length + soldComps.filter(c => !excludedSoldComps.includes(c.address ?? "")).length} comparable properties`
+                  : "No comps loaded"}
               </Text>
               <Button
                 size="xs"
@@ -1392,7 +1411,7 @@ export function TaxProtestPage() {
               </Button>
             </Group>
           </Group>
-          {comps.length > 0 ? (
+          {(comps.length > 0 || soldComps.some(c => !excludedSoldComps.includes(c.address ?? ""))) ? (
             <Box style={{ overflowX: "auto" }}>
               <Table striped highlightOnHover withTableBorder withColumnBorders fz="xs">
                 <Table.Thead>
@@ -1410,6 +1429,51 @@ export function TaxProtestPage() {
                   </Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
+                  {/* Redfin comps pre-loaded for §41.43 equity analysis */}
+                  {soldComps
+                    .filter(c => !excludedSoldComps.includes(c.address ?? ""))
+                    .map((comp) => {
+                      const cadPpsf = comp.cadAssessedValueUsd != null && comp.sqft ? comp.cadAssessedValueUsd / comp.sqft : null;
+                      const color = vsSubjectColor(cadPpsf, subjectAssessedPpsf);
+                      return (
+                        <Table.Tr key={`redfin-${comp.address}`}>
+                          <Table.Td>
+                            <Group gap={4} wrap="nowrap">
+                              <Badge size="xs" color="violet" variant="light">Redfin</Badge>
+                              <Text size="xs" truncate>{comp.address ?? "—"}</Text>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>{comp.city ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            {comp.sqft != null ? comp.sqft.toLocaleString() : "—"}
+                          </Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{comp.beds ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{comp.baths ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{money(comp.cadAssessedValueUsd)}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{ppsf(cadPpsf)}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>
+                            <Text size="xs" c={color} fw={color ? 600 : undefined}>
+                              {vsSubjectLabel(cadPpsf, subjectAssessedPpsf)}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td />
+                          <Table.Td>
+                            <Tooltip label="Remove from equity evidence" withArrow>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                size="sm"
+                                onClick={() => void removeSoldComp(comp.address ?? "")}
+                                aria-label="Remove comp"
+                              >
+                                <IconTrash size={13} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
+                  {/* DCAD comps */}
                   {comps.map((comp) => {
                     const color = vsSubjectColor(comp.perSqftUsd, subjectAssessedPpsf);
                     return (
@@ -1481,6 +1545,7 @@ export function TaxProtestPage() {
                       <Badge size="xs" variant="light">Subject</Badge>
                     </Table.Td>
                     <Table.Td />
+                    <Table.Td />
                   </Table.Tr>
                 </Table.Tbody>
               </Table>
@@ -1488,9 +1553,9 @@ export function TaxProtestPage() {
           ) : (
             <Paper withBorder p="md" radius="md">
               <Stack align="center" gap="xs">
-                <Text size="sm" c="dimmed">No DCAD comparable properties loaded.</Text>
+                <Text size="sm" c="dimmed">No comparable properties loaded.</Text>
                 <Text size="xs" c="dimmed">
-                  DCAD comps are fetched automatically for TX properties or can be requested via the protest assistant.
+                  Redfin comps load automatically from market value evidence. DCAD comps can be added via the protest assistant or "Add Comp".
                 </Text>
               </Stack>
             </Paper>
@@ -1498,218 +1563,234 @@ export function TaxProtestPage() {
         </Stack>
       </Card>
 
-      {/* CAD Evidence Card */}
+      {/* Evidence Documents Card */}
       <Card withBorder shadow="xs" radius="md" p="md">
-        <Group justify="space-between" mb="xs">
-          <Text fw={600} size="sm">CAD Evidence Packet</Text>
-          <Group gap="xs">
-            {cadEvidence && worksheet?.cadEvidenceFilename && (
-              <Text size="xs" c="dimmed">{worksheet.cadEvidenceFilename}</Text>
-            )}
-            <input
-              type="file"
-              accept=".pdf"
-              ref={cadEvidenceFileRef}
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const file = e.currentTarget.files?.[0];
-                if (file) void uploadCadEvidence(file);
-                e.currentTarget.value = "";
-              }}
-            />
-            <Button
-              size="xs"
-              variant="light"
-              loading={uploadingEvidence}
-              onClick={() => cadEvidenceFileRef.current?.click()}
-            >
-              {cadEvidence ? "Re-upload PDF" : "Upload Evidence PDF"}
-            </Button>
-            {cadEvidence && (
-              <Tooltip label="Remove evidence" withArrow>
-                <ActionIcon variant="subtle" color="red" size="sm" onClick={() => void deleteCadEvidence()}>
-                  <IconTrash size={13} />
-                </ActionIcon>
-              </Tooltip>
-            )}
-          </Group>
-        </Group>
-
-        {!cadEvidence && (
-          <Text size="xs" c="dimmed">
-            Upload the official DCAD evidence packet PDF (the one DCAD emails before your ARB hearing).
-            The app will extract DCAD's own comps and feed them to the AI assistant.
-          </Text>
-        )}
-
-        {cadEvidence && (
-          <Stack gap="sm">
-            {/* §41.43 insight badge */}
-            {cadEvidence.equityAnalysis.medianIndValueUsd != null && cadAssessed != null && (
-              <Alert
-                color={cadEvidence.equityAnalysis.medianIndValueUsd < cadAssessed ? "green" : "orange"}
-                variant="light"
-                radius="sm"
-              >
-                <Text size="xs" fw={600}>
-                  §41.43 Signal: CAD equity median {money(cadEvidence.equityAnalysis.medianIndValueUsd)} vs. your assessed {money(cadAssessed)}
-                  {" → "}
-                  {cadEvidence.equityAnalysis.medianIndValueUsd < cadAssessed
-                    ? `${money(cadAssessed - cadEvidence.equityAnalysis.medianIndValueUsd)} over-assessed — §41.43 argument supported`
-                    : `${money(cadEvidence.equityAnalysis.medianIndValueUsd - cadAssessed)} under equity median`}
+        <Stack gap="md">
+          {/* DCAD Evidence Packet sub-section */}
+          <Stack gap="xs">
+            <Group justify="space-between" align="flex-start">
+              <div>
+                <Text fw={600} size="sm">DCAD Evidence Packet</Text>
+                <Text size="xs" c="dimmed">
+                  Official PDF emailed by DCAD before your ARB hearing. Comps are extracted and fed to the AI assistant.
                 </Text>
+              </div>
+              <Group gap="xs">
+                {cadEvidence && worksheet?.cadEvidenceFilename && (
+                  <Text size="xs" c="dimmed" style={{ alignSelf: "center" }}>{worksheet.cadEvidenceFilename}</Text>
+                )}
+                <input
+                  type="file"
+                  accept=".pdf"
+                  ref={cadEvidenceFileRef}
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.currentTarget.files?.[0];
+                    if (file) void uploadCadEvidence(file);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconFileText size={13} />}
+                  loading={uploadingEvidence}
+                  onClick={() => cadEvidenceFileRef.current?.click()}
+                >
+                  {cadEvidence ? "Re-upload PDF" : "Upload Evidence PDF"}
+                </Button>
+                {cadEvidence && (
+                  <Tooltip label="Remove evidence" withArrow>
+                    <ActionIcon variant="subtle" color="red" size="sm" onClick={() => void deleteCadEvidence()}>
+                      <IconTrash size={13} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </Group>
+            </Group>
+
+            {cadEvidence && cadEvidence.salesAnalysis.comps.length === 0 && cadEvidence.equityAnalysis.comps.length === 0 && (
+              <Alert color="yellow" variant="light" radius="sm">
+                <Text size="xs">PDF uploaded but no comps were extracted. The parser may not support this PDF format. Try re-uploading the DCAD evidence packet.</Text>
               </Alert>
             )}
 
-            {/* CAD Sales Analysis comps */}
-            {cadEvidence.salesAnalysis.comps.length > 0 && (
-              <>
-                <Group gap="xs">
-                  <Text size="xs" fw={600}>DCAD Sales Analysis (§41.41)</Text>
-                  {cadEvidence.salesAnalysis.medianIndValueUsd != null && (
-                    <Badge size="xs" variant="light" color="blue">
-                      Median ind. {money(cadEvidence.salesAnalysis.medianIndValueUsd)}
-                    </Badge>
-                  )}
-                </Group>
-                <Box style={{ overflowX: "auto" }}>
-                  <Table withTableBorder withColumnBorders fz="xs" striped>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>#</Table.Th>
-                        <Table.Th>Address</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>Distance</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>Sale Date</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>Sale Price</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>DCAD Market</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>Ind. Value</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {cadEvidence.salesAnalysis.comps.map((c) => (
-                        <Table.Tr key={c.compNum}>
-                          <Table.Td>{c.compNum}</Table.Td>
-                          <Table.Td>{c.address}</Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>{c.distanceMi != null ? `${c.distanceMi} mi` : "—"}</Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>{c.saleDate ?? "—"}</Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>{money(c.salePriceUsd)}</Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>{money(c.cadMarketValueUsd)}</Table.Td>
-                          <Table.Td style={{ textAlign: "right" }}>{money(c.cadIndValueUsd)}</Table.Td>
-                        </Table.Tr>
-                      ))}
-                    </Table.Tbody>
-                  </Table>
-                </Box>
-              </>
-            )}
+            {cadEvidence && (cadEvidence.salesAnalysis.comps.length > 0 || cadEvidence.equityAnalysis.comps.length > 0) && (
+              <Stack gap="sm">
+                {/* §41.43 insight badge */}
+                {cadEvidence.equityAnalysis.medianIndValueUsd != null && cadAssessed != null && (
+                  <Alert
+                    color={cadEvidence.equityAnalysis.medianIndValueUsd < cadAssessed ? "green" : "orange"}
+                    variant="light"
+                    radius="sm"
+                  >
+                    <Text size="xs" fw={600}>
+                      §41.43 Signal: CAD equity median {money(cadEvidence.equityAnalysis.medianIndValueUsd)} vs. your assessed {money(cadAssessed)}
+                      {" → "}
+                      {cadEvidence.equityAnalysis.medianIndValueUsd < cadAssessed
+                        ? `${money(cadAssessed - cadEvidence.equityAnalysis.medianIndValueUsd)} over-assessed — §41.43 argument supported`
+                        : `${money(cadEvidence.equityAnalysis.medianIndValueUsd - cadAssessed)} under equity median`}
+                    </Text>
+                  </Alert>
+                )}
 
-            {/* CAD Equity Analysis comps */}
-            {cadEvidence.equityAnalysis.comps.length > 0 && (
-              <>
-                <Group gap="xs">
-                  <Text size="xs" fw={600}>DCAD Equity Analysis (§41.43)</Text>
-                  {cadEvidence.equityAnalysis.medianIndValueUsd != null && (
-                    <Badge size="xs" variant="light" color="teal">
-                      Median ind. {money(cadEvidence.equityAnalysis.medianIndValueUsd)}
-                    </Badge>
-                  )}
-                </Group>
-                <Box style={{ overflowX: "auto" }}>
-                  <Table withTableBorder withColumnBorders fz="xs" striped>
-                    <Table.Thead>
-                      <Table.Tr>
-                        <Table.Th>#</Table.Th>
-                        <Table.Th>Address</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>Distance</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>DCAD Market</Table.Th>
-                        <Table.Th style={{ textAlign: "right" }}>Ind. Value</Table.Th>
-                      </Table.Tr>
-                    </Table.Thead>
-                    <Table.Tbody>
-                      {cadEvidence.equityAnalysis.comps.map((c) => {
-                        const isOverAssessed = cadEvidence.equityAnalysis.medianIndValueUsd != null && cadAssessed != null && cadAssessed > cadEvidence.equityAnalysis.medianIndValueUsd;
-                        return (
-                          <Table.Tr key={c.compNum}>
-                            <Table.Td>{c.compNum}</Table.Td>
-                            <Table.Td>{c.address}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>{c.distanceMi != null ? `${c.distanceMi} mi` : "—"}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>{money(c.cadMarketValueUsd)}</Table.Td>
-                            <Table.Td style={{ textAlign: "right" }}>
-                              <Text size="xs" c={isOverAssessed && c.cadIndValueUsd != null && cadAssessed != null && c.cadIndValueUsd < cadAssessed ? "green" : undefined} fw={isOverAssessed ? 600 : undefined}>
-                                {money(c.cadIndValueUsd)}
-                              </Text>
-                            </Table.Td>
+                {/* CAD Sales Analysis comps */}
+                {cadEvidence.salesAnalysis.comps.length > 0 && (
+                  <>
+                    <Group gap="xs">
+                      <Text size="xs" fw={600}>DCAD Sales Analysis (§41.41)</Text>
+                      {cadEvidence.salesAnalysis.medianIndValueUsd != null && (
+                        <Badge size="xs" variant="light" color="blue">
+                          Median ind. {money(cadEvidence.salesAnalysis.medianIndValueUsd)}
+                        </Badge>
+                      )}
+                    </Group>
+                    <Box style={{ overflowX: "auto" }}>
+                      <Table withTableBorder withColumnBorders fz="xs" striped>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>#</Table.Th>
+                            <Table.Th>Address</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>Distance</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>Sale Date</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>Sale Price</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>DCAD Market</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>Ind. Value</Table.Th>
                           </Table.Tr>
-                        );
-                      })}
-                    </Table.Tbody>
-                  </Table>
-                </Box>
-              </>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {cadEvidence.salesAnalysis.comps.map((c) => (
+                            <Table.Tr key={c.compNum}>
+                              <Table.Td>{c.compNum}</Table.Td>
+                              <Table.Td>{c.address}</Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>{c.distanceMi != null ? `${c.distanceMi} mi` : "—"}</Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>{c.saleDate ?? "—"}</Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>{money(c.salePriceUsd)}</Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>{money(c.cadMarketValueUsd)}</Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>{money(c.cadIndValueUsd)}</Table.Td>
+                            </Table.Tr>
+                          ))}
+                        </Table.Tbody>
+                      </Table>
+                    </Box>
+                  </>
+                )}
+
+                {/* CAD Equity Analysis comps */}
+                {cadEvidence.equityAnalysis.comps.length > 0 && (
+                  <>
+                    <Group gap="xs">
+                      <Text size="xs" fw={600}>DCAD Equity Analysis (§41.43)</Text>
+                      {cadEvidence.equityAnalysis.medianIndValueUsd != null && (
+                        <Badge size="xs" variant="light" color="teal">
+                          Median ind. {money(cadEvidence.equityAnalysis.medianIndValueUsd)}
+                        </Badge>
+                      )}
+                    </Group>
+                    <Box style={{ overflowX: "auto" }}>
+                      <Table withTableBorder withColumnBorders fz="xs" striped>
+                        <Table.Thead>
+                          <Table.Tr>
+                            <Table.Th>#</Table.Th>
+                            <Table.Th>Address</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>Distance</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>DCAD Market</Table.Th>
+                            <Table.Th style={{ textAlign: "right" }}>Ind. Value</Table.Th>
+                          </Table.Tr>
+                        </Table.Thead>
+                        <Table.Tbody>
+                          {cadEvidence.equityAnalysis.comps.map((c) => {
+                            const isOverAssessed = cadEvidence.equityAnalysis.medianIndValueUsd != null && cadAssessed != null && cadAssessed > cadEvidence.equityAnalysis.medianIndValueUsd;
+                            return (
+                              <Table.Tr key={c.compNum}>
+                                <Table.Td>{c.compNum}</Table.Td>
+                                <Table.Td>{c.address}</Table.Td>
+                                <Table.Td style={{ textAlign: "right" }}>{c.distanceMi != null ? `${c.distanceMi} mi` : "—"}</Table.Td>
+                                <Table.Td style={{ textAlign: "right" }}>{money(c.cadMarketValueUsd)}</Table.Td>
+                                <Table.Td style={{ textAlign: "right" }}>
+                                  <Text size="xs" c={isOverAssessed && c.cadIndValueUsd != null && cadAssessed != null && c.cadIndValueUsd < cadAssessed ? "green" : undefined} fw={isOverAssessed ? 600 : undefined}>
+                                    {money(c.cadIndValueUsd)}
+                                  </Text>
+                                </Table.Td>
+                              </Table.Tr>
+                            );
+                          })}
+                        </Table.Tbody>
+                      </Table>
+                    </Box>
+                  </>
+                )}
+              </Stack>
             )}
           </Stack>
-        )}
 
-        <Divider my="sm" label="Supporting Documents" labelPosition="left" />
+          <Divider />
 
-        <Stack gap="xs">
-          <Text size="xs" c="dimmed">
-            Upload PDFs or photos (condition, repairs, lot features). Text is indexed for the protest assistant.
-          </Text>
-          <input
-            type="file"
-            accept=".pdf,image/*"
-            ref={supportingDocFileRef}
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const file = e.currentTarget.files?.[0];
-              if (file) void uploadSupportingDocument(file);
-              e.currentTarget.value = "";
-            }}
-          />
-          <Group gap="xs">
-            <Button
-              size="xs"
-              variant="light"
-              loading={uploadingSupportingDoc}
-              onClick={() => supportingDocFileRef.current?.click()}
-            >
-              Upload document
-            </Button>
-            {uploadingSupportingDoc && <Loader size="xs" />}
-          </Group>
-          {supportingDocuments.length > 0 ? (
-            <List size="sm" spacing="xs">
-              {supportingDocuments.map((doc) => (
-                <List.Item
-                  key={doc.documentKey}
-                  icon={
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      size="sm"
-                      aria-label="Remove document"
-                      loading={uploadingSupportingDoc}
-                      onClick={() => void deleteSupportingDocument(doc.documentKey)}
-                    >
-                      <IconTrash size={13} />
-                    </ActionIcon>
-                  }
+          {/* Supporting Documents sub-section */}
+          <Stack gap="xs">
+            <Group justify="space-between" align="flex-start">
+              <div>
+                <Text fw={600} size="sm">Supporting Documents</Text>
+                <Text size="xs" c="dimmed">
+                  PDFs or photos (condition, repairs, lot features). Text is indexed for the protest assistant.
+                </Text>
+              </div>
+              <Group gap="xs">
+                <input
+                  type="file"
+                  accept=".pdf,image/*"
+                  ref={supportingDocFileRef}
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.currentTarget.files?.[0];
+                    if (file) void uploadSupportingDocument(file);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconPaperclip size={13} />}
+                  loading={uploadingSupportingDoc}
+                  onClick={() => supportingDocFileRef.current?.click()}
                 >
-                  <Group gap="xs" wrap="nowrap">
-                    <Badge size="sm" variant="light">
-                      {doc.chunkCount} chunk{doc.chunkCount === 1 ? "" : "s"}
-                    </Badge>
-                    <Text size="xs" truncate style={{ maxWidth: 280 }}>
-                      {doc.documentKey}
-                    </Text>
-                  </Group>
-                </List.Item>
-              ))}
-            </List>
-          ) : (
-            <Text size="xs" c="dimmed">No supporting documents yet.</Text>
-          )}
+                  Upload Document
+                </Button>
+              </Group>
+            </Group>
+            {supportingDocuments.length > 0 ? (
+              <List size="sm" spacing="xs">
+                {supportingDocuments.map((doc) => (
+                  <List.Item
+                    key={doc.documentKey}
+                    icon={
+                      <ActionIcon
+                        variant="subtle"
+                        color="red"
+                        size="sm"
+                        aria-label="Remove document"
+                        loading={uploadingSupportingDoc}
+                        onClick={() => void deleteSupportingDocument(doc.documentKey)}
+                      >
+                        <IconTrash size={13} />
+                      </ActionIcon>
+                    }
+                  >
+                    <Group gap="xs" wrap="nowrap">
+                      <Badge size="sm" variant="light">
+                        {doc.chunkCount} chunk{doc.chunkCount === 1 ? "" : "s"}
+                      </Badge>
+                      <Text size="xs" truncate style={{ maxWidth: 280 }}>
+                        {doc.documentKey}
+                      </Text>
+                    </Group>
+                  </List.Item>
+                ))}
+              </List>
+            ) : (
+              <Text size="xs" c="dimmed">No supporting documents yet.</Text>
+            )}
+          </Stack>
         </Stack>
       </Card>
 
@@ -1783,6 +1864,52 @@ export function TaxProtestPage() {
             <Stepper.Step label="ARB Hearing" />
             <Stepper.Step label="Resolved" />
           </Stepper>
+
+          {/* DCAD Live Appeal Status */}
+          {dcadAppeals.length > 0 && dcadAppeals.map((appeal, i) => {
+            const docketDate = appeal.hearingDate?.split(" ")[0] ?? null;
+            const hearingMismatch = docketDate && (!hearingDraft || hearingDraft !== docketDate);
+            return (
+              <Alert key={i} color="blue" variant="light" title="DCAD Appeal Record" icon={<IconCalendarEvent size={16} />}>
+                <Group gap="xl" wrap="wrap">
+                  <div>
+                    <Text size="xs" c="dimmed">Appeal Status</Text>
+                    <Badge size="sm" color={appeal.status === "REJECTED" ? "orange" : appeal.status === "APPROVED" ? "green" : "blue"} variant="light">
+                      {appeal.status ?? "Unknown"}
+                    </Badge>
+                    {appeal.status === "REJECTED" && (
+                      <Text size="xs" c="dimmed" mt={2}>Informal offer rejected — escalated to ARB</Text>
+                    )}
+                  </div>
+                  {appeal.hearingDate && (
+                    <div>
+                      <Text size="xs" c="dimmed">ARB Docket</Text>
+                      <Text size="sm" fw={600}>{appeal.hearingDate}</Text>
+                    </div>
+                  )}
+                  {appeal.appealType && (
+                    <div>
+                      <Text size="xs" c="dimmed">Type</Text>
+                      <Text size="sm">{appeal.appealType}</Text>
+                    </div>
+                  )}
+                  {hearingMismatch && worksheet && (
+                    <Button
+                      size="xs"
+                      variant="light"
+                      color="blue"
+                      onClick={() => {
+                        setHearingDraft(docketDate!);
+                        void updateWorksheet({ hearingDate: docketDate });
+                      }}
+                    >
+                      Sync hearing date from DCAD
+                    </Button>
+                  )}
+                </Group>
+              </Alert>
+            );
+          })}
 
           {worksheet?.filingDeadline != null &&
             filingDeadlineDays != null &&

@@ -1494,9 +1494,10 @@ paths:
                       type: object
                       properties:
                         year: { type: string, nullable: true }
-                        status: { type: string, nullable: true }
-                        hearingDate: { type: string, nullable: true }
-                        filedDate: { type: string, nullable: true }
+                        appealType: { type: string, nullable: true, description: "e.g. OLA (Online Appeal)" }
+                        status: { type: string, nullable: true, description: "e.g. REJECTED means informal rejected → ARB" }
+                        hearingDate: { type: string, nullable: true, description: "ARB docket date/time from docketDt field" }
+                        filedDate: { type: string, nullable: true, description: "Informal hearing date from informalDt field" }
         "404": { description: Property not found or DCAD account ID not on file }
   /api/protest/{propertyId}/comps:
     get:

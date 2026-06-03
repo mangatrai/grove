@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-226 — DCAD appeal wiring + Unequal Appraisal pre-load + evidence section redesign (2026-06-03)
+
+**What:**
+1. DCAD appeal API endpoint existed but was never called by the frontend — appeal hearing date/status never shown.
+2. `getDCADAppeal` mapped wrong field names: used `r.hearingDate` but actual API returns `docketDt`; used `r.filedDate` but API returns `informalDt`. `appealType` was not extracted at all.
+3. Unequal Appraisal Evidence section only showed manually added DCAD comps, not the Redfin comps already present in Market Value Evidence.
+4. CAD Evidence section had confusing layout: one card called "CAD Evidence Packet" with two unrelated upload actions sharing the same visual level — redesigned into "Evidence Documents" with two clearly separated sub-sections.
+5. After evidence PDF upload with 0 extracted comps, UI showed nothing with no feedback.
+6. Pre-existing TS error: `LlmUsage.total_tokens` should be `totalTokens` in `payslip-async-import-reconcile.service.ts`.
+
+**Changes:**
+- `backend/src/modules/protest/dcad.service.ts` — `DCADAppealEntry`: add `appealType` field. `getDCADAppeal`: fix field mapping (`docketDt` → `hearingDate`, `informalDt` → `filedDate`, `appealType`/`appealStatus` correct precedence).
+- `backend/src/modules/protest/cad-adapters/cad-adapter.types.ts` — add `appealType` to `CadAppealEntry`.
+- `backend/src/modules/imports/payslip-async-import-reconcile.service.ts` — fix `total_tokens` → `totalTokens` (TS error from LLM refactor).
+- `frontend/src/pages/TaxProtestPage.tsx` — add `DcadAppeal` type; add `dcadAppeals` state; add `loadDcadAppeals` callback; wire into main useEffect; display DCAD appeal record (status badge, docket date, type, "Sync hearing date" button) in Protest Status card. Unequal Appraisal Evidence: pre-populate with Redfin sold comps (Redfin badge, violet), remove button excludes via `removeSoldComp`, CAD assessed ppsf for equity comparison. Evidence Documents: renamed from "CAD Evidence Packet"; split into two vertical sub-sections with matching header+description+action layout; zero-comps warning after upload.
+
+**GitHub:** closes #77
+
 ## FIX-225 — DCAD value history field mapping + taxable parsing (2026-06-03)
 
 **What:**
