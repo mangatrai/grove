@@ -1435,7 +1435,7 @@ paths:
   /api/protest/{propertyId}/dcad/taxable:
     get:
       tags: [protest]
-      summary: DCAD taxable value breakdown (after exemptions) for subject property
+      summary: DCAD current-year taxable value breakdown (after exemptions) for subject property
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1444,15 +1444,31 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200":
-          description: Taxable value rows after exemptions from DCAD
+          description: Current-year taxable breakdown from DCAD (null if unavailable)
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   taxable:
-                    type: array
-                    items: { type: object }
+                    nullable: true
+                    type: object
+                    properties:
+                      estimatedTaxes: { type: number, nullable: true }
+                      estimatedTaxesWoutExemptions: { type: number, nullable: true }
+                      totalTaxRate: { type: number, nullable: true }
+                      taxingUnits:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            code: { type: string, nullable: true }
+                            name: { type: string, nullable: true }
+                            taxRate: { type: number, nullable: true }
+                            netAppraisedValue: { type: number, nullable: true }
+                            taxableValue: { type: number, nullable: true }
+                            estimatedTaxes: { type: number, nullable: true }
+                            estimatedTaxesWoutExemptions: { type: number, nullable: true }
         "404": { description: Property not found or DCAD account ID not on file }
   /api/protest/{propertyId}/dcad/appeal:
     get:

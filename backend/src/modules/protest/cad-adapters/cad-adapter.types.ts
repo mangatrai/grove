@@ -32,6 +32,23 @@ export type CadAppealEntry = {
   raw: Record<string, unknown>;
 };
 
+export type CadTaxableUnit = {
+  code: string | null;
+  name: string | null;
+  taxRate: number | null;
+  netAppraisedValue: number | null;
+  taxableValue: number | null;
+  estimatedTaxes: number | null;
+  estimatedTaxesWoutExemptions: number | null;
+};
+
+export type CadTaxableResult = {
+  estimatedTaxes: number | null;
+  estimatedTaxesWoutExemptions: number | null;
+  totalTaxRate: number | null;
+  taxingUnits: CadTaxableUnit[];
+};
+
 export interface CadAdapter {
   readonly provider: string;
   readonly state: string;
@@ -40,6 +57,6 @@ export interface CadAdapter {
   searchByAddress(address: string, taxYear: number): Promise<CadProperty[]>;
   getById(cadPropertyId: string, taxYear: number): Promise<CadProperty | null>;
   getValueHistory(accountId: number): Promise<CadValueHistoryEntry[]>;
-  getTaxable(accountId: number): Promise<Record<string, unknown>[]>;
+  getTaxable(accountId: number): Promise<CadTaxableResult | null>;
   getAppeal(accountId: number): Promise<CadAppealEntry[]>;
 }

@@ -6,7 +6,7 @@ import {
   getDCADAppeal,
   type DCADProperty,
 } from "../dcad.service.js";
-import type { CadAdapter, CadAppealEntry, CadProperty, CadValueHistoryEntry } from "./cad-adapter.types.js";
+import type { CadAdapter, CadAppealEntry, CadProperty, CadTaxableResult, CadValueHistoryEntry } from "./cad-adapter.types.js";
 
 function toCADProperty(p: DCADProperty): CadProperty {
   return {
@@ -47,7 +47,7 @@ export class DcadAdapter implements CadAdapter {
     return getDCADValueHistory(accountId, null);
   }
 
-  async getTaxable(accountId: number): Promise<Record<string, unknown>[]> {
+  async getTaxable(accountId: number): Promise<CadTaxableResult | null> {
     return getDCADTaxable(accountId, null);
   }
 

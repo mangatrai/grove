@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-225 — DCAD value history field mapping + taxable parsing (2026-06-03)
+
+**What:**
+1. DCAD value history chart showed null/zero for all years because the code read `r.appraisedValue`, `r.marketValue`, etc., but the TrueProdigy API actually returns `owner*`-prefixed fields (`ownerAppraisedValue`, `ownerMarketValue`, `ownerLandValue`, `ownerImprovementValue`). All mapped values were null.
+2. `getDCADTaxable` returned an empty array because it called `extractRows(body)` against a response where `body.results` is an **object** (not array). `extractRows` couldn't handle this shape, returning `[]`. The taxable breakdown — including the current-year `estimatedTaxes` total — was never returned.
+3. Added debug logging (`log.debug`) on all DCAD request/response paths (valuehistory, taxable, appeal) for diagnosability.
+
+**Changes:**
+- `backend/src/modules/protest/dcad.service.ts` — `getDCADValueHistory`: add `owner*` prefix fallbacks first in all field reads. `getDCADTaxable`: remove `extractRows`, directly parse `body.results.taxingUnits` + `body.results.estimatedTaxes`; change return type from `Record<string, unknown>[]` to `DCADTaxableResult | null`; add `DCADTaxableUnit` and `DCADTaxableResult` types. Add `log.debug` throughout all DCAD API calls.
+- `backend/src/modules/protest/cad-adapters/cad-adapter.types.ts` — add `CadTaxableUnit` + `CadTaxableResult` types; update `CadAdapter.getTaxable` signature to `Promise<CadTaxableResult | null>`.
+- `backend/src/modules/protest/cad-adapters/dcad.adapter.ts` — import `CadTaxableResult`; update `getTaxable` return type.
+- `frontend/src/pages/PropertyDetailPage.tsx` — add `dcadEstimatedTaxes` state; add `loadDcadTaxable` callback calling `/dcad/taxable`; trigger in the CAD account `useEffect`; use `estimatedTaxes` to fill `taxesDue` for the most recent DCAD year in `chartData`.
+- `openapi/openapi.yaml` — update `/dcad/taxable` response schema to structured object.
+
+**GitHub:** Closes #76
+
+---
+
 ## FIX-224 — Payslip async scheduler + line item add refresh (2026-06-03)
 
 **What:**

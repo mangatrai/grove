@@ -51,6 +51,23 @@ export type DCADAppealEntry = {
   raw: Record<string, unknown>;
 };
 
+export type DCADTaxableUnit = {
+  code: string | null;
+  name: string | null;
+  taxRate: number | null;
+  netAppraisedValue: number | null;
+  taxableValue: number | null;
+  estimatedTaxes: number | null;
+  estimatedTaxesWoutExemptions: number | null;
+};
+
+export type DCADTaxableResult = {
+  estimatedTaxes: number | null;
+  estimatedTaxesWoutExemptions: number | null;
+  totalTaxRate: number | null;
+  taxingUnits: DCADTaxableUnit[];
+};
+
 const DCAD_AUTH_URL = "https://prod-container.trueprodigyapi.com/trueprodigy/cadpublic/auth/token";
 const DCAD_SEARCH_URL = "https://prod-container.trueprodigyapi.com/public/property/searchfulltext?page=1&pageSize=20";
 const DCAD_SEARCH_BY_ID_URL = "https://prod-container.trueprodigyapi.com/public/property/search?page=1&pageSize=20";
@@ -304,31 +321,38 @@ export async function getDCADValueHistory(
   county: string | null | undefined
 ): Promise<DCADValueHistoryEntry[]> {
   const office = countyToOffice(county);
+  const url = `${DCAD_ACCOUNT_BASE}/${pAccountId}/valuehistory`;
+  log.debug("DCAD value history request", { pAccountId, url, office });
   try {
     const token = await getToken(office);
-    const res = await fetch(`${DCAD_ACCOUNT_BASE}/${pAccountId}/valuehistory`, {
+    const res = await fetch(url, {
       headers: {
         ...BROWSER_HEADERS,
         "authorization": token
       }
     });
+    log.debug("DCAD value history response", { pAccountId, status: res.status, ok: res.ok });
     if (!res.ok) {
       log.warn("DCAD value history HTTP error", { pAccountId, status: res.status });
       return [];
     }
     const body = await res.json() as unknown;
     const rows = extractRows(body);
-    return rows
+    log.debug("DCAD value history rows", { pAccountId, count: rows.length, firstRow: rows[0] ?? null });
+    const entries = rows
       .map(asRecord)
       .filter((r): r is Record<string, unknown> => r != null)
       .map((r) => ({
         year: asNumber(r.pYear ?? r.year ?? r.taxYear) ?? 0,
-        marketValue: asNumber(r.marketValue ?? r.market_value),
-        assessedValue: asNumber(r.appraisedValue ?? r.assessedValue ?? r.appraised_value),
-        landValue: asNumber(r.landValue ?? r.land_value),
-        improvementValue: asNumber(r.improvementValue ?? r.improvement_value)
+        // TrueProdigy uses owner* prefix for ownership-adjusted values — these are authoritative
+        marketValue: asNumber(r.ownerMarketValue ?? r.marketValue ?? r.market_value),
+        assessedValue: asNumber(r.ownerAppraisedValue ?? r.appraisedValue ?? r.assessedValue ?? r.appraised_value),
+        landValue: asNumber(r.ownerLandValue ?? r.landValue ?? r.land_value),
+        improvementValue: asNumber(r.ownerImprovementValue ?? r.improvementValue ?? r.improvement_value),
       }))
       .filter((e) => e.year > 0);
+    log.debug("DCAD value history mapped", { pAccountId, entries: entries.map((e) => ({ year: e.year, assessedValue: e.assessedValue })) });
+    return entries;
   } catch (err) {
     log.error("DCAD value history failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
     return [];
@@ -339,25 +363,55 @@ export async function getDCADValueHistory(
 export async function getDCADTaxable(
   pAccountId: number,
   county: string | null | undefined
-): Promise<Record<string, unknown>[]> {
+): Promise<DCADTaxableResult | null> {
   const office = countyToOffice(county);
+  const url = `${DCAD_ACCOUNT_BASE}/${pAccountId}/taxable`;
+  log.debug("DCAD taxable request", { pAccountId, url, office });
   try {
     const token = await getToken(office);
-    const res = await fetch(`${DCAD_ACCOUNT_BASE}/${pAccountId}/taxable`, {
+    const res = await fetch(url, {
       headers: {
         ...BROWSER_HEADERS,
         "authorization": token
       }
     });
+    log.debug("DCAD taxable response", { pAccountId, status: res.status, ok: res.ok });
     if (!res.ok) {
       log.warn("DCAD taxable HTTP error", { pAccountId, status: res.status });
-      return [];
+      return null;
     }
     const body = await res.json() as unknown;
-    return extractRows(body);
+    // Response shape: { results: { taxingUnits: [...], estimatedTaxes: "...", ... } }
+    // extractRows() can't handle this because results is an object, not an array.
+    const top = asRecord(body);
+    const results = asRecord(top?.results);
+    log.debug("DCAD taxable parsed results", { pAccountId, estimatedTaxes: results?.estimatedTaxes ?? null, unitCount: Array.isArray(results?.taxingUnits) ? (results.taxingUnits as unknown[]).length : 0 });
+    if (!results) return null;
+
+    const taxingUnits: DCADTaxableUnit[] = Array.isArray(results.taxingUnits)
+      ? (results.taxingUnits as unknown[])
+          .map(asRecord)
+          .filter((u): u is Record<string, unknown> => u != null)
+          .map((u) => ({
+            code: asString(u.taxingUnitCode),
+            name: asString(u.taxingUnitName),
+            taxRate: asNumber(u.totalTaxRate),
+            netAppraisedValue: asNumber(u.netAppraisedValue),
+            taxableValue: asNumber(u.taxableValue),
+            estimatedTaxes: asNumber(u.estimatedTaxes),
+            estimatedTaxesWoutExemptions: asNumber(u.estimatedTaxesWoutExemptions),
+          }))
+      : [];
+
+    return {
+      estimatedTaxes: asNumber(results.estimatedTaxes),
+      estimatedTaxesWoutExemptions: asNumber(results.estimatedTaxesWoutExemptions),
+      totalTaxRate: asNumber(results.totalTaxRate),
+      taxingUnits,
+    };
   } catch (err) {
     log.error("DCAD taxable failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
-    return [];
+    return null;
   }
 }
 
@@ -367,14 +421,17 @@ export async function getDCADAppeal(
   county: string | null | undefined
 ): Promise<DCADAppealEntry[]> {
   const office = countyToOffice(county);
+  const url = `${DCAD_ACCOUNT_BASE}/${pAccountId}/appeal`;
+  log.debug("DCAD appeal request", { pAccountId, url, office });
   try {
     const token = await getToken(office);
-    const res = await fetch(`${DCAD_ACCOUNT_BASE}/${pAccountId}/appeal`, {
+    const res = await fetch(url, {
       headers: {
         ...BROWSER_HEADERS,
         "authorization": token
       }
     });
+    log.debug("DCAD appeal response", { pAccountId, status: res.status, ok: res.ok });
     if (!res.ok) {
       log.warn("DCAD appeal HTTP error", { pAccountId, status: res.status });
       return [];

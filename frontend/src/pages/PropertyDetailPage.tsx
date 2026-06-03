@@ -114,6 +114,7 @@ export function PropertyDetailPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [equityHistory, setEquityHistory] = useState<EquityPoint[]>([]);
   const [dcadValueHistory, setDcadValueHistory] = useState<{ year: number; assessedValue: number | null }[]>([]);
+  const [dcadEstimatedTaxes, setDcadEstimatedTaxes] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!propertyId) return;
@@ -151,6 +152,18 @@ export function PropertyDetailPage() {
     }
   }, [propertyId]);
 
+  const loadDcadTaxable = useCallback(async () => {
+    if (!propertyId) return;
+    try {
+      const res = await apiJson<{ taxable: { estimatedTaxes: number | null } | null }>(
+        `/api/protest/${encodeURIComponent(propertyId)}/dcad/taxable`
+      );
+      if (res.taxable?.estimatedTaxes != null) setDcadEstimatedTaxes(res.taxable.estimatedTaxes);
+    } catch {
+      // non-critical
+    }
+  }, [propertyId]);
+
   useEffect(() => {
     if (!token) return;
     void load();
@@ -160,7 +173,8 @@ export function PropertyDetailPage() {
   useEffect(() => {
     if (!token || !property?.cadAccountId) return;
     void loadDcadValueHistory(property.cadAccountId);
-  }, [token, property?.cadAccountId, loadDcadValueHistory]);
+    void loadDcadTaxable();
+  }, [token, property?.cadAccountId, loadDcadValueHistory, loadDcadTaxable]);
 
   const refreshValuation = useCallback(async () => {
     if (!propertyId) return;
@@ -202,7 +216,7 @@ export function PropertyDetailPage() {
         });
       }
     }
-    // DCAD is authoritative for tax assessed values. Override Redfin for all years DCAD has data; add years Redfin lacks.
+    // DCAD is authoritative for assessed values (all years) and estimated taxes (current year).
     const dcadMap = new Map(dcadValueHistory.map((e) => [e.year, e.assessedValue]));
     for (const entry of dcadValueHistory) {
       if (!history.some((h) => h.year === entry.year)) {
@@ -212,6 +226,12 @@ export function PropertyDetailPage() {
     for (const row of history) {
       const dcadVal = dcadMap.get(row.year);
       if (dcadVal != null) row.assessedValue = dcadVal;
+    }
+    // Use DCAD taxable estimatedTaxes for the most recent DCAD year (current assessment year)
+    if (dcadEstimatedTaxes != null && dcadValueHistory.length > 0) {
+      const maxYear = Math.max(...dcadValueHistory.map((e) => e.year));
+      const curRow = history.find((h) => h.year === maxYear);
+      if (curRow) curRow.taxesDue = dcadEstimatedTaxes;
     }
     return [...history]
       .sort((a, b) => a.year - b.year)
@@ -227,7 +247,7 @@ export function PropertyDetailPage() {
           yoyLabel: yoy == null ? "" : `${yoy >= 0 ? "+" : ""}${yoy.toFixed(1)}%`
         };
       });
-  }, [property?.valuationDetail, dcadValueHistory]);
+  }, [property?.valuationDetail, dcadValueHistory, dcadEstimatedTaxes]);
 
   if (!token) return <Navigate to="/" replace />;
   if (!propertyId) return <Navigate to="/real-estate" replace />;
