@@ -72,8 +72,8 @@ const envSchema = z.object({
    */
   ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
-  /** Fast/cheap model for one-shot completions (insights, summarization). */
-  OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  /** Fast/cheap model — payslip vision extraction, insights, summarization. */
+  OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
   /** Capable model for vision, agentic loops, and complex generation. */
   OPENAI_STRONG_MODEL: z.string().default("gpt-4o"),
   BACKUP_ENCRYPTION_KEY: z

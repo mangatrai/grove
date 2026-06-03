@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## LLM-1 followup — Payslip vision uses chatModel(); OPENAI_MODEL default → gpt-4.1-mini (2026-06-02)
+
+**What:** Reverted payslip PDF extraction (`extract-payslip-llm.ts`) from `strongModel()` back to `chatModel()`. Also updated `OPENAI_MODEL` default from `gpt-4o-mini` to `gpt-4.1-mini` (newer, confirmed working on both IBM and Deloitte stubs). `strongModel()` is now exclusively for the protest tool-use loop and ARB script.
+
+**Why:** The LLM-1 refactor inadvertently moved payslip from `OPENAI_MODEL` (what it was using before, i.e. `gpt-4.1-mini`) to `OPENAI_STRONG_MODEL` (`gpt-4o`), a ~6× cost increase with no observed quality benefit for IBM stubs. Deloitte stubs were also working on mini in testing. Backlog item LLM-2 tracks: if Deloitte extraction errors appear in prod, revisit.
+
+**Files:** `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts`, `backend/src/config/env.ts`, `.env.example`, `docs/BACKLOG.md`
+
+---
+
 ## LLM-1 — Provider-agnostic LLM adapter layer; no hardcoded model names (2026-06-02)
 
 **What changed:**
