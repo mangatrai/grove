@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { clearAllCaches, invalidateCacheByUrl } from "./cache";
+import { invalidateCacheByUrl } from "./cache";
 
 const TOKEN_KEY = "hf_jwt";
 
@@ -28,8 +28,6 @@ export function setToken(token: string | null): void {
     localStorage.setItem(TOKEN_KEY, token);
   } else {
     localStorage.removeItem(TOKEN_KEY);
-    // Clear all cached data on logout so a subsequent login starts fresh.
-    clearAllCaches();
   }
   notifyTokenListeners();
 }

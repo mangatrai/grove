@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-222 — Net worth cache no longer wiped on logout (2026-06-03)
+
+**What:** `setToken(null)` called `clearAllCaches()` on logout, deleting all `hfa:*` localStorage keys including the `networth` and `dashboard` cached payloads. For a single-household app this is wrong — all members share the same household data, so there is no isolation reason to clear caches on session end. Every re-login hit the network cold, negating the 7-day / 24-hour TTL design. Also corrected ADMIN_GUIDE: balance-sheet snapshot TTL was documented as 1 hour but the code has used 24 hours since FIX-221.
+
+**Changes:**
+- `frontend/src/api.ts` — removed `clearAllCaches()` call and import from `setToken(null)` logout path; JWT removal remains the security boundary
+- `frontend/src/cache.ts` — updated JSDoc on `clearAllCaches` (function kept, used in tests)
+- `docs/ADMIN_GUIDE.md` — §7.2 snapshot TTL corrected 1h → 24h; §7.4 Logout updated to reflect new behaviour
+
+**GitHub:** Closes #74
+
+---
+
 ## I-2 — IBM payslip imports unified to async queue in Import flow (2026-06-03)
 
 **What:** IBM payslip PDFs now go through the same async queue as Deloitte when imported via `POST /imports/sessions/:id/parse`. Previously IBM called OpenAI inline (synchronously during the HTTP request); Deloitte was already queued. The unification makes all LLM-based payslip profiles behave identically in the Import flow.

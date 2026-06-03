@@ -741,7 +741,7 @@ The frontend uses **localStorage-based caching** to avoid re-running expensive b
 |---|---|---|
 | `GET /reports/cash-summary` | 7 days | ~30–40 table scans per month window |
 | `GET /reports/balance-sheet/history` | 7 days | Up to 180 sequential queries (full balance sheet for each date) |
-| `GET /reports/balance-sheet` (snapshot) | 1 hour | Joins accounts, snapshots, properties; fires on every load + filter |
+| `GET /reports/balance-sheet` (snapshot) | 24 hours | Joins accounts, snapshots, properties; fires on every load + filter |
 | `GET /reports/balance-sheet/history?accountIds=…` (per-account) | 7 days | One call per expanded row; up to 10–20 calls |
 
 ### 7.3 Invalidation Trigger
@@ -752,7 +752,7 @@ After any successful non-GET request (POST/PATCH/DELETE), `apiJson()` calls `inv
 
 ### 7.4 Logout
 
-`setToken(null)` calls `clearAllCaches()`, removing all `hfa:*` keys from localStorage. Prevents a subsequent login from seeing a previous user's cached data.
+`setToken(null)` removes the JWT token from localStorage. Data caches (`dashboard`, `networth`, `recurring`) are preserved across logout — they are household-scoped and shared by all members, so clearing them on logout would cause unnecessary cold-cache loads on re-login. Caches expire via their TTL or manual Refresh.
 
 ---
 

@@ -82,7 +82,7 @@ export function invalidateCacheByUrl(path: string): void {
 
 // ── Logout / session clear ───────────────────────────────────────────────────
 
-/** Clear all hfa:* keys from localStorage. Call this on logout. */
+/** Clear all hfa:* keys from localStorage. Used in tests to reset state. */
 export function clearAllCaches(): void {
   const toRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
