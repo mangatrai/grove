@@ -564,6 +564,19 @@ Once you have comps and a strategy, select a format using the **PDF / Word** tog
 
 Print the PDF packet and bring it to your hearing. Use the Word version when you need to hand-edit arguments or paste content into your CAD's own submission template.
 
+### ARB Oral Script
+
+When your protest status is set to **ARB** (formal hearing scheduled), an **ARB Oral Script** card appears on the protest page.
+
+Click **Generate ARB Script** to have GPT-4o write a step-by-step presentation for your ARB panel, using all available evidence: the CAD evidence packet, your equity comps and their annotation notes, Redfin sold comp research notes, and your AI-derived strategy.
+
+The script includes:
+
+- **Negotiation Guide** — three thresholds: *Open Ask* (your first offer to the panel), *Ideal Settle*, and *Walk-Away Min* (below which you accept the panel's decision), with a brief rationale.
+- **6 presentation steps** — Opening Statement, §41.41 Market Value Argument, §41.43 Unequal Appraisal Argument, Supporting Evidence, Closing Ask, and Panel Questions. Each step shows your spoken text and, where relevant, the most likely appraiser objection and your rebuttal.
+
+Use **Copy Script** to copy the full script as plain text. Click **Regenerate** after adding more evidence or comp notes to get an updated version. The last generated script is saved to your worksheet and survives page reloads.
+
 ### Filing Deadline and CAD Portal
 
 In the **Protest Status** section, two additional fields help you stay on top of your protest timeline:

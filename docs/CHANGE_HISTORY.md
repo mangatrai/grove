@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## PT-17 — AI oral ARB script generation (2026-06-02)
+
+- New `POST /api/protest/:propertyId/generate-arb-script?year=N` endpoint generates a 6-step oral hearing script via GPT-4o
+- Script includes: negotiation thresholds (open ask / ideal settle / walk-away min), §41.41 and §41.43 arguments with IF/THEN appraiser rebuttals, closing ask, panel Q&A
+- Script persisted to `protest_worksheet.arb_script_json` (migration 0065); survives page reload
+- Frontend: ARB Oral Script card visible when `status === 'arb'`; Accordion sections, negotiation table, Copy Script and Regenerate buttons
+- Uses all available evidence: CAD evidence packet, equity comps with notes, Redfin sold comp research notes, AI strategy
+- **GitHub:** closes #66
+
+**Files:** `backend/db/migrations/0065_pt17_arb_script.sql`, `backend/src/modules/protest/arb-script.service.ts` (new), `protest-worksheet.service.ts`, `protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `docs/USER_GUIDE.md`, `openapi/openapi.yaml`
+
+---
+
 ## PT-12 — RAG document store + conversation summarization (2026-06-02)
 
 - New `protest_document_chunks` table with pgvector 1536-dim embeddings (migration 0064)

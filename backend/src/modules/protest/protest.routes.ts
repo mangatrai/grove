@@ -38,7 +38,9 @@ import {
   type CadEvidenceData,
   updateSummarizationState,
   saveCycleSummary,
+  saveArbScript,
 } from "./protest-worksheet.service.js";
+import { generateArbScript, type ArbScriptInput } from "./arb-script.service.js";
 import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
 import { extractPdfText } from "../imports/profiles/pdf-text.js";
 import { chunkText } from "./chunking.service.js";
@@ -1361,4 +1363,58 @@ protestRouter.patch("/:propertyId/comps/:cadPropertyId/notes", async (req: Authe
   if (!property) { res.status(404).json({ message: "Property not found" }); return; }
   await updateCompNote(property.id, householdId, taxYear, params.data.cadPropertyId, parsed.data.notes);
   res.status(204).send();
+});
+
+protestRouter.post("/:propertyId/generate-arb-script", async (req: AuthenticatedRequest, res) => {
+  const params = z.object({ propertyId: z.string().uuid() }).safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  if (!env.OPENAI_API_KEY) {
+    res.status(503).json({ message: "OPENAI_API_KEY not configured", code: "OPENAI_NOT_CONFIGURED" });
+    return;
+  }
+  const householdId = req.authUser!.householdId;
+  const year = parseInt(String(req.query["year"] ?? ""), 10) || thisYear();
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+
+  const worksheet = await getWorksheet(property.id, householdId, year);
+  if (!worksheet) { res.status(404).json({ message: "Worksheet not found" }); return; }
+  if (worksheet.status !== "arb") {
+    res.status(400).json({ message: "ARB script can only be generated when protest status is 'arb'", code: "STATUS_NOT_ARB" });
+    return;
+  }
+
+  const equityComps = await listWorksheetComps(property.id, householdId, year);
+
+  const detail = asRecord(property.valuationDetail);
+  const subject = asRecord(detail?.subject);
+  const taxCurrent = asRecord(detail?.taxCurrent);
+  const cadAssessed = worksheet.cadEvidenceJson?.assessedValueUsd ?? asNumber(taxCurrent?.assessedValue);
+
+  const input: ArbScriptInput = {
+    address: property.addressLine1 ?? "",
+    city: property.city,
+    state: property.state,
+    cadAssessed,
+    sqft: asNumber(subject?.sqFt),
+    beds: asNumber(subject?.beds),
+    baths: asNumber(subject?.baths),
+    yearBuilt: asNumber(subject?.yearBuilt),
+    purchasePrice: property.purchasePrice,
+    purchaseDate: property.purchaseDate,
+    hearingDate: worksheet.hearingDate,
+    taxYear: year,
+    cadEvidence: worksheet.cadEvidenceJson,
+    equityComps,
+    soldCompsNotes: worksheet.soldCompsNotesJson,
+    strategyTargetValueUsd: worksheet.strategyJson?.targetValueUsd ?? null,
+    strategyPrimaryStrategy: worksheet.strategyJson?.primaryStrategy ?? null,
+    strategyArguments: worksheet.strategyJson?.draftArguments ?? [],
+  };
+
+  log.info("generate-arb-script: starting", { propertyId: property.id, year });
+  const script = await generateArbScript(input);
+  await saveArbScript(property.id, householdId, year, script);
+  log.info("generate-arb-script: done", { propertyId: property.id, year });
+  res.json({ script });
 });

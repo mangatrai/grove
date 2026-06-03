@@ -205,6 +205,50 @@ Remove all chunks for a document. **`documentKey`** must be URL-encoded (e.g. `f
 
 ---
 
+### `POST /api/protest/:propertyId/generate-arb-script?year=YYYY`
+
+Generate an AI oral ARB hearing script for the protest. Requires `protest_worksheet.status === 'arb'`.
+
+**Query:** `year` (optional; defaults to current calendar year).
+
+**Response 200:**
+```json
+{
+  "script": {
+    "generatedAt": "2026-06-02T18:00:00.000Z",
+    "targetValueUsd": 480000,
+    "negotiationThresholds": {
+      "openAskUsd": 460000,
+      "idealSettleUsd": 475000,
+      "walkAwayMinUsd": 490000,
+      "rationale": "Equity median supports opening below assessed; panel typically splits the difference."
+    },
+    "sections": [
+      {
+        "step": 1,
+        "title": "Opening Statement",
+        "speech": "...",
+        "appraiserMayRespond": null,
+        "yourRebuttal": null
+      },
+      {
+        "step": 2,
+        "title": "§41.41 Market Value Argument",
+        "speech": "...",
+        "appraiserMayRespond": "Your property is in better condition than the comps.",
+        "yourRebuttal": "..."
+      }
+    ]
+  }
+}
+```
+
+**Script persisted:** `arb_script_json` written to `protest_worksheet` and returned on subsequent `GET /worksheet` calls.
+
+**Errors:** `400` (`STATUS_NOT_ARB` — worksheet is not in arb status), `404`, `503` (`OPENAI_API_KEY` missing).
+
+---
+
 ### `GET /api/protest/:propertyId/comps?year=YYYY`
 
 Returns saved DCAD comparable properties for a property and tax year.

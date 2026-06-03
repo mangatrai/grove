@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { qAll, qExec, qGet } from "../../db/query.js";
+import type { ArbScript } from "./arb-script.service.js";
 import { log } from "../../logger.js";
 import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
 import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
@@ -51,6 +52,7 @@ export type ProtestWorksheetRecord = {
   summarizationCursor: number;
   conversationSummary: string | null;
   cycleSummary: string | null;
+  arbScriptJson: ArbScript | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -75,6 +77,7 @@ type ProtestWorksheetRow = {
   summarization_cursor: number;
   conversation_summary: string | null;
   cycle_summary: string | null;
+  arb_script_json: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 };
@@ -117,6 +120,9 @@ function rowToRecord(row: ProtestWorksheetRow): ProtestWorksheetRecord {
     summarizationCursor: row.summarization_cursor ?? 0,
     conversationSummary: row.conversation_summary ?? null,
     cycleSummary: row.cycle_summary ?? null,
+    arbScriptJson: (row.arb_script_json && typeof row.arb_script_json === "object" && !Array.isArray(row.arb_script_json))
+      ? (row.arb_script_json as ArbScript)
+      : null,
     createdAt: isoDateTime(row.created_at),
     updatedAt: isoDateTime(row.updated_at)
   };
@@ -132,7 +138,7 @@ export async function getWorksheet(
             hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json,
             sold_comps_cad_json, cad_evidence_json, cad_evidence_filename, sold_comps_notes_json,
             summarization_cursor, conversation_summary, cycle_summary,
-            created_at, updated_at
+            arb_script_json, created_at, updated_at
        FROM protest_worksheet
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
     propertyId,
@@ -616,5 +622,23 @@ export async function updateCompNote(
     householdId,
     taxYear,
     cadPropertyId
+  );
+}
+
+export async function saveArbScript(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  script: ArbScript
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet
+        SET arb_script_json = ?,
+            updated_at = NOW()
+      WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
+    JSON.stringify(script),
+    propertyId,
+    householdId,
+    taxYear
   );
 }

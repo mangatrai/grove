@@ -1,4 +1,5 @@
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -6,6 +7,7 @@ import {
   Button,
   Card,
   Chip,
+  CopyButton,
   Divider,
   Drawer,
   Grid,
@@ -32,9 +34,12 @@ import {
 } from "@mantine/core";
 import {
   IconCalendarEvent,
+  IconCheck,
+  IconCopy,
   IconExternalLink,
   IconFileText,
   IconMessage,
+  IconMicrophone,
   IconNote,
   IconPaperclip,
   IconPlus,
@@ -104,6 +109,7 @@ type Worksheet = {
   summarizationCursor: number;
   conversationSummary: string | null;
   cycleSummary: string | null;
+  arbScriptJson: ArbScript | null;
 };
 
 type CADComp = {
@@ -182,6 +188,28 @@ type CadSearchResult = {
   marketValue: number | null;
 };
 
+type ArbNegotiationThresholds = {
+  openAskUsd: number;
+  idealSettleUsd: number;
+  walkAwayMinUsd: number;
+  rationale: string;
+};
+
+type ArbScriptSection = {
+  step: number;
+  title: string;
+  speech: string;
+  appraiserMayRespond: string | null;
+  yourRebuttal: string | null;
+};
+
+type ArbScript = {
+  generatedAt: string;
+  targetValueUsd: number;
+  negotiationThresholds: ArbNegotiationThresholds;
+  sections: ArbScriptSection[];
+};
+
 type Toast = { id: number; color: "green" | "red" | "yellow"; message: string };
 type ChatTurnUI = {
   id: string;
@@ -204,6 +232,7 @@ type WorksheetResponse = { worksheet: Worksheet };
 type CompsResponse = { comps: CADComp[] };
 type SoldCompsResponse = { comps: SoldComp[]; excluded: string[] };
 type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number; soldCompsRefreshed: boolean; valuationAgeHours: number | null };
+type ArbScriptResponse = { script: ArbScript };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -374,6 +403,8 @@ export function TaxProtestPage() {
   const [uploadingEvidence, setUploadingEvidence] = useState(false);
   const [supportingDocuments, setSupportingDocuments] = useState<Array<{ documentKey: string; chunkCount: number }>>([]);
   const [uploadingSupportingDoc, setUploadingSupportingDoc] = useState(false);
+  const [arbScript, setArbScript] = useState<ArbScript | null>(null);
+  const [arbScriptLoading, setArbScriptLoading] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -448,6 +479,7 @@ export function TaxProtestPage() {
       setExcludedSoldComps(soldCompsRes.excluded ?? []);
       setCadEvidence(wsRes.worksheet.cadEvidenceJson ?? null);
       setSoldCompsNotes(wsRes.worksheet.soldCompsNotesJson ?? {});
+      setArbScript(wsRes.worksheet.arbScriptJson ?? null);
       setHearingDraft(wsRes.worksheet.hearingDate ?? "");
       setInformalOfferDraft("");
       setFilingDeadlineDraft(wsRes.worksheet.filingDeadline ?? "");
@@ -906,6 +938,22 @@ export function TaxProtestPage() {
     },
     [propertyId, worksheet, year, addToast]
   );
+
+  const generateArbScriptCb = useCallback(async () => {
+    if (!propertyId) return;
+    setArbScriptLoading(true);
+    try {
+      const res = await apiJson<ArbScriptResponse>(
+        `/api/protest/${encodeURIComponent(propertyId)}/generate-arb-script?year=${year}`,
+        { method: "POST" }
+      );
+      setArbScript(res.script);
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to generate ARB script");
+    } finally {
+      setArbScriptLoading(false);
+    }
+  }, [propertyId, year, addToast]);
 
   const onPickTextFile = useCallback(
     (file: File) => {
@@ -1951,6 +1999,110 @@ export function TaxProtestPage() {
           ) : null}
         </Stack>
       </Card>
+
+      {/* ARB Oral Script */}
+      {worksheet?.status === "arb" ? (
+        <Card withBorder radius="md" p="md">
+          <Stack gap="md">
+            <Group justify="space-between" align="center">
+              <Group gap="xs">
+                <IconMicrophone size={18} />
+                <Title order={4}>ARB Oral Script</Title>
+              </Group>
+              <Group gap="xs">
+                {arbScript ? (
+                  <CopyButton value={arbScript.sections.map((s) =>
+                    `${s.step}. ${s.title}\n${s.speech}${s.appraiserMayRespond ? `\n\nAppraiser may say: ${s.appraiserMayRespond}\nYour response: ${s.yourRebuttal ?? ""}` : ""}`
+                  ).join("\n\n---\n\n")}>
+                    {({ copied, copy }) => (
+                      <Button size="xs" variant="subtle" leftSection={copied ? <IconCheck size={14} /> : <IconCopy size={14} />} onClick={copy}>
+                        {copied ? "Copied" : "Copy Script"}
+                      </Button>
+                    )}
+                  </CopyButton>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant={arbScript ? "outline" : "filled"}
+                  leftSection={arbScriptLoading ? <Loader size={14} /> : <IconMicrophone size={14} />}
+                  onClick={() => void generateArbScriptCb()}
+                  disabled={arbScriptLoading}
+                >
+                  {arbScriptLoading ? "Generating…" : arbScript ? "Regenerate" : "Generate ARB Script"}
+                </Button>
+              </Group>
+            </Group>
+
+            {arbScript ? (
+              <Stack gap="sm">
+                <Paper withBorder p="sm" radius="sm">
+                  <Text size="xs" fw={600} c="dimmed" mb={6} tt="uppercase">Negotiation Guide</Text>
+                  <Table withColumnBorders fz="sm">
+                    <Table.Thead>
+                      <Table.Tr>
+                        <Table.Th>Open Ask</Table.Th>
+                        <Table.Th>Ideal Settle</Table.Th>
+                        <Table.Th>Walk-Away Min</Table.Th>
+                      </Table.Tr>
+                    </Table.Thead>
+                    <Table.Tbody>
+                      <Table.Tr>
+                        <Table.Td fw={600}>{money(arbScript.negotiationThresholds.openAskUsd)}</Table.Td>
+                        <Table.Td fw={600} c="green">{money(arbScript.negotiationThresholds.idealSettleUsd)}</Table.Td>
+                        <Table.Td fw={600} c="orange">{money(arbScript.negotiationThresholds.walkAwayMinUsd)}</Table.Td>
+                      </Table.Tr>
+                    </Table.Tbody>
+                  </Table>
+                  {arbScript.negotiationThresholds.rationale ? (
+                    <Text size="xs" c="dimmed" mt={6}>{arbScript.negotiationThresholds.rationale}</Text>
+                  ) : null}
+                </Paper>
+
+                <Accordion variant="separated" radius="sm">
+                  {arbScript.sections.map((section) => (
+                    <Accordion.Item key={section.step} value={String(section.step)}>
+                      <Accordion.Control>
+                        <Group gap="xs">
+                          <Badge size="sm" variant="light" radius="sm">{section.step}</Badge>
+                          <Text size="sm" fw={500}>{section.title}</Text>
+                        </Group>
+                      </Accordion.Control>
+                      <Accordion.Panel>
+                        <Stack gap="xs">
+                          <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>{section.speech}</Text>
+                          {section.appraiserMayRespond ? (
+                            <>
+                              <Divider />
+                              <Box>
+                                <Text size="xs" fw={600} c="dimmed" mb={4}>Appraiser may say:</Text>
+                                <Text size="sm" c="dimmed" fs="italic">{section.appraiserMayRespond}</Text>
+                              </Box>
+                              {section.yourRebuttal ? (
+                                <Box>
+                                  <Text size="xs" fw={600} c="dimmed" mb={4}>Your response:</Text>
+                                  <Text size="sm">{section.yourRebuttal}</Text>
+                                </Box>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </Stack>
+                      </Accordion.Panel>
+                    </Accordion.Item>
+                  ))}
+                </Accordion>
+
+                <Text size="xs" c="dimmed">
+                  Generated {new Date(arbScript.generatedAt).toLocaleDateString()} · Target value: {money(arbScript.targetValueUsd)}
+                </Text>
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed">
+                Generate a step-by-step oral script for your ARB panel hearing, including IF/THEN appraiser rebuttals and negotiation thresholds.
+              </Text>
+            )}
+          </Stack>
+        </Card>
+      ) : null}
 
       {/* Floating chat FAB — hidden when drawer is open */}
       {!chatOpen && (

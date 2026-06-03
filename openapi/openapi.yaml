@@ -1262,6 +1262,57 @@ paths:
         "204": { description: Deleted }
         "404": { description: Property not found }
 
+  /api/protest/{propertyId}/generate-arb-script:
+    post:
+      tags: [protest]
+      summary: Generate AI oral ARB hearing script (requires status = arb)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: year
+          in: query
+          schema: { type: integer, example: 2026 }
+      responses:
+        "200":
+          description: ARB script generated and persisted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [script]
+                properties:
+                  script:
+                    type: object
+                    required: [generatedAt, targetValueUsd, negotiationThresholds, sections]
+                    properties:
+                      generatedAt: { type: string, format: date-time }
+                      targetValueUsd: { type: integer }
+                      negotiationThresholds:
+                        type: object
+                        required: [openAskUsd, idealSettleUsd, walkAwayMinUsd, rationale]
+                        properties:
+                          openAskUsd: { type: integer }
+                          idealSettleUsd: { type: integer }
+                          walkAwayMinUsd: { type: integer }
+                          rationale: { type: string }
+                      sections:
+                        type: array
+                        items:
+                          type: object
+                          required: [step, title, speech]
+                          properties:
+                            step: { type: integer }
+                            title: { type: string }
+                            speech: { type: string }
+                            appraiserMayRespond: { type: string, nullable: true }
+                            yourRebuttal: { type: string, nullable: true }
+        "400": { description: "STATUS_NOT_ARB — worksheet is not in arb status" }
+        "404": { description: Property or worksheet not found }
+        "503": { description: OPENAI_API_KEY not configured }
+
   /api/protest/{propertyId}/sold-comps/notes:
     patch:
       tags: [protest]
