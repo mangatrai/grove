@@ -1,6 +1,7 @@
 import cron from "node-cron";
 import YahooFinance from "yahoo-finance2";
 
+import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 
 const SYMBOL = "IBM";
@@ -48,9 +49,8 @@ export function startStockQuoteScheduler(): void {
   // Initial fetch on startup
   refreshQuote().catch(() => {});
 
-  // 4:15 PM ET Mon–Fri = 3:15 PM CT = after NYSE/NASDAQ close.
-  // node-cron fires exactly at this time regardless of DST; no UTC offset math needed.
-  cron.schedule("15 16 * * 1-5", () => { refreshQuote().catch(() => {}); }, {
-    timezone: "America/New_York",
+  // 3:15 PM local time (TZ env var) Mon–Fri = after NYSE/NASDAQ close (4:15 PM ET = 3:15 PM CT).
+  cron.schedule("15 15 * * 1-5", () => { refreshQuote().catch(() => {}); }, {
+    timezone: env.TZ,
   });
 }
