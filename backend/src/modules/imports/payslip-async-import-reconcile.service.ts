@@ -15,7 +15,7 @@ import {
   validateCanonicalForImport
 } from "../payslip/llm-extract/payslip-canonical-map.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
-import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "../payslip/payslip.types.js";
+import { LLM_PAYSLIP_PROFILE_IDS } from "../payslip/payslip.types.js";
 
 const LOG_PREFIX = "[Payslip async LLM reconcile]";
 
@@ -53,11 +53,11 @@ export async function reconcilePayslipAsyncImportSession(
             employer_id, owner_scope, owner_person_profile_id
      FROM import_file
      WHERE session_id = ?
-       AND parser_profile_id = ?
+       AND parser_profile_id IN (?, ?)
        AND payslip_async_provider = ?
        AND status = 'processing'`,
     sessionId,
-    DELOITTE_PAYSLIP_PDF_PROFILE_ID,
+    ...LLM_PAYSLIP_PROFILE_IDS,
     OPENAI_LLM_PAYSLIP_PROVIDER
   );
 
@@ -107,7 +107,7 @@ export async function reconcilePayslipAsyncImportSession(
             stage: "failed",
             reason: "llm_canonical_validation_failed",
             detail: validation.reasons,
-            profile: DELOITTE_PAYSLIP_PDF_PROFILE_ID
+            profile: file.parser_profile_id
           }),
           file.id
         );
@@ -123,7 +123,7 @@ export async function reconcilePayslipAsyncImportSession(
         householdId,
         file.file_name,
         checksum,
-        DELOITTE_PAYSLIP_PDF_PROFILE_ID,
+        file.parser_profile_id as string,
         summary,
         file.id,
         file.employer_id,
@@ -141,7 +141,7 @@ export async function reconcilePayslipAsyncImportSession(
             stage: "failed",
             reason: "duplicate_payslip_checksum",
             existingSnapshotId: ins.existing.id,
-            profile: DELOITTE_PAYSLIP_PDF_PROFILE_ID
+            profile: file.parser_profile_id
           }),
           file.id
         );
@@ -158,7 +158,7 @@ export async function reconcilePayslipAsyncImportSession(
         JSON.stringify({
           stage: "parsed",
           parsedRows: 0,
-          profile: DELOITTE_PAYSLIP_PDF_PROFILE_ID,
+          profile: file.parser_profile_id,
           payslipSnapshotId: ins.snapshot.id,
           payslipAsyncProvider: OPENAI_LLM_PAYSLIP_PROVIDER,
           usageTokens: usage?.total_tokens ?? null
@@ -178,7 +178,7 @@ export async function reconcilePayslipAsyncImportSession(
           stage: "failed",
           reason: "llm_extract_failed",
           detail: msg.slice(0, 800),
-          profile: DELOITTE_PAYSLIP_PDF_PROFILE_ID
+          profile: file.parser_profile_id
         }),
         file.id
       );
@@ -189,11 +189,11 @@ export async function reconcilePayslipAsyncImportSession(
   const remaining = await qAll<{ id: string }>(
     `SELECT id FROM import_file
      WHERE session_id = ?
-       AND parser_profile_id = ?
+       AND parser_profile_id IN (?, ?)
        AND payslip_async_provider = ?
        AND status = 'processing'`,
     sessionId,
-    DELOITTE_PAYSLIP_PDF_PROFILE_ID,
+    ...LLM_PAYSLIP_PROFILE_IDS,
     OPENAI_LLM_PAYSLIP_PROVIDER
   );
   if (remaining.length > 0) {

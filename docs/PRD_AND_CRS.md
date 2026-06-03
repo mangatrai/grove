@@ -210,10 +210,13 @@ The system prioritizes **financial correctness and minimal ongoing maintenance**
 - **Not merged to ledger:** Prevents double-counting net pay unless user explicitly links.
 
 #### Parser profiles (v1 shipped)
-- **IBM Pay & Contributions:** OpenAI vision + JSON schema extraction; regex parser remains for tests/sniffing only.
-- **Deloitte Pay Statement:** Same OpenAI vision path; async reconcile in import (UI auto-polls).
+- **IBM Pay & Contributions:** OpenAI vision + JSON schema extraction.
+- **Deloitte Pay Statement:** Same OpenAI vision path.
 - **ADP:** Stub present; full line-item grids deferred.
 - **Prerequisites:** `OPENAI_API_KEY`; Poppler (`pdftoppm` on `PATH`) for PDF rendering.
+
+#### Async queue design (2026-06-03)
+All LLM-based payslip profiles (`LLM_PAYSLIP_PROFILE_IDS`) are queued async during `POST /imports/sessions/:id/parse` — OpenAI extraction runs in the background and the UI polls every 2 minutes until files show "parsed." Previously IBM ran inline (synchronous OpenAI call during the HTTP request) while Deloitte was async — a design drift from when IBM used a local PDF library and Deloitte was the only LLM parser. Unified: both now queue async in the Import flow. Direct `POST /payslips/upload` for IBM retains inline extraction (no timeout risk in practice). `payslip-async-import-reconcile.service.ts` is now profile-agnostic; adding a new LLM payslip profile only requires adding it to `LLM_PAYSLIP_PROFILE_IDS`.
 
 #### Data extraction (v1)
 - **Pay period:** Date range and pay date.

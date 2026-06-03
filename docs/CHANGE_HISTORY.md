@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## I-2 — IBM payslip imports unified to async queue in Import flow (2026-06-03)
+
+**What:** IBM payslip PDFs now go through the same async queue as Deloitte when imported via `POST /imports/sessions/:id/parse`. Previously IBM called OpenAI inline (synchronously during the HTTP request); Deloitte was already queued. The unification makes all LLM-based payslip profiles behave identically in the Import flow.
+
+**Changes:**
+- `payslip.types.ts` — added `LLM_PAYSLIP_PROFILE_IDS = [IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID, DELOITTE_PAYSLIP_PDF_PROFILE_ID]` as the single source of truth for which profiles are async
+- `import-parser.service.ts` — widened `if (profileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID)` to `if (LLM_PAYSLIP_PROFILE_IDS.includes(profileId))`. Log message de-branded from "Deloitte" to generic "LLM payslip"
+- `payslip-async-import-reconcile.service.ts` — SQL queries use `IN (?, ?)` for both IBM and Deloitte profile IDs (was single-value `= ?` hardcoded to Deloitte). Hardcoded `DELOITTE_PAYSLIP_PDF_PROFILE_ID` in JSON confidence_summary fields replaced with `file.parser_profile_id`
+- `ImportWorkspacePage.tsx` — 4 banner/help strings de-branded from "Deloitte PDF(s)" to "payslip PDF(s)"
+- `tests/payslip-upload.test.ts` — IBM import session test updated to expect `asyncPayslipPending: 1`, call `reconcile-payslip-async?force=true`, then check payslip list
+
+**Scope:** Direct `POST /payslips/upload` for IBM is unchanged — it still calls OpenAI inline (acceptable; not a timeout risk in practice). Only the Import session path is affected.
+
+**Why:** Root cause of the drift: IBM was originally parsed by a local PDF library (synchronous, no LLM) so inline processing was correct. When IBM was switched to LLM, the async queue path was never extended to cover it. The design intent was always to treat all payslips the same.
+
+**GitHub:** Closes #26
+
+---
+
 ## LLM-1 followup — Payslip vision uses chatModel(); OPENAI_MODEL default → gpt-4.1-mini (2026-06-02)
 
 **What:** Reverted payslip PDF extraction (`extract-payslip-llm.ts`) from `strongModel()` back to `chatModel()`. Also updated `OPENAI_MODEL` default from `gpt-4o-mini` to `gpt-4.1-mini` (newer, confirmed working on both IBM and Deloitte stubs). `strongModel()` is now exclusively for the protest tool-use loop and ARB script.
