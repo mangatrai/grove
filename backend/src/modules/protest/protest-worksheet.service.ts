@@ -34,6 +34,20 @@ export type SoldCompCadEntry = {
   sqft: number | null;
 };
 
+export type ManualSoldComp = {
+  id: string;
+  address: string;
+  soldPrice: number | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  soldDate: string | null;
+  yearBuilt: number | null;
+  assessedValueUsd: number | null;
+  cadPropertyId: string | null;
+  cadAccountId: number | null;
+};
+
 export type { CadEvidenceData };
 
 export type ProtestWorksheetRecord = {
@@ -53,6 +67,7 @@ export type ProtestWorksheetRecord = {
   cadEvidenceJson: CadEvidenceData | null;
   cadEvidenceFilename: string | null;
   soldCompsNotesJson: Record<string, string>;
+  manualSoldComps: ManualSoldComp[];
   summarizationCursor: number;
   conversationSummary: string | null;
   cycleSummary: string | null;
@@ -78,6 +93,7 @@ type ProtestWorksheetRow = {
   cad_evidence_json: unknown;
   cad_evidence_filename: string | null;
   sold_comps_notes_json: unknown;
+  manual_sold_comps_json: unknown;
   summarization_cursor: number;
   conversation_summary: string | null;
   cycle_summary: string | null;
@@ -121,6 +137,9 @@ function rowToRecord(row: ProtestWorksheetRow): ProtestWorksheetRecord {
     soldCompsNotesJson: (row.sold_comps_notes_json && typeof row.sold_comps_notes_json === "object" && !Array.isArray(row.sold_comps_notes_json))
       ? (row.sold_comps_notes_json as Record<string, string>)
       : {},
+    manualSoldComps: Array.isArray(row.manual_sold_comps_json)
+      ? (row.manual_sold_comps_json as ManualSoldComp[])
+      : [],
     summarizationCursor: row.summarization_cursor ?? 0,
     conversationSummary: row.conversation_summary ?? null,
     cycleSummary: row.cycle_summary ?? null,
@@ -141,7 +160,7 @@ export async function getWorksheet(
     `SELECT id, household_id, property_id, tax_year, status, outcome, informal_offer_usd,
             hearing_date, filing_deadline, cad_portal_url, conversation_json, strategy_json,
             sold_comps_cad_json, cad_evidence_json, cad_evidence_filename, sold_comps_notes_json,
-            summarization_cursor, conversation_summary, cycle_summary,
+            manual_sold_comps_json, summarization_cursor, conversation_summary, cycle_summary,
             arb_script_json, created_at, updated_at
        FROM protest_worksheet
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
@@ -645,4 +664,47 @@ export async function saveArbScript(
     householdId,
     taxYear
   );
+}
+
+export async function saveManualSoldComps(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  comps: ManualSoldComp[]
+): Promise<void> {
+  await qExec(
+    `UPDATE protest_worksheet
+        SET manual_sold_comps_json = ?,
+            updated_at = NOW()
+      WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
+    JSON.stringify(comps),
+    propertyId,
+    householdId,
+    taxYear
+  );
+}
+
+export async function addManualSoldComp(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  comp: Omit<ManualSoldComp, "id">
+): Promise<ManualSoldComp> {
+  const ws = await getOrCreateWorksheet(propertyId, householdId, taxYear);
+  const newComp: ManualSoldComp = { id: randomUUID(), ...comp };
+  const updated = [...ws.manualSoldComps, newComp];
+  await saveManualSoldComps(propertyId, householdId, taxYear, updated);
+  return newComp;
+}
+
+export async function removeManualSoldComp(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  compId: string
+): Promise<void> {
+  const ws = await getWorksheet(propertyId, householdId, taxYear);
+  if (!ws) return;
+  const updated = ws.manualSoldComps.filter((c) => c.id !== compId);
+  await saveManualSoldComps(propertyId, householdId, taxYear, updated);
 }

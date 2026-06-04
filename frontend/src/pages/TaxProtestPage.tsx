@@ -188,6 +188,20 @@ type CadSearchResult = {
   marketValue: number | null;
 };
 
+type ManualSoldComp = {
+  id: string;
+  address: string;
+  soldPrice: number | null;
+  sqft: number | null;
+  beds: number | null;
+  baths: number | null;
+  soldDate: string | null;
+  yearBuilt: number | null;
+  assessedValueUsd: number | null;
+  cadPropertyId: string | null;
+  cadAccountId: number | null;
+};
+
 type DcadAppeal = {
   year: string | null;
   appealType: string | null;
@@ -238,7 +252,7 @@ type PropertiesResponse = { properties: PropertyRecord[] };
 type PropertyResponse = { property: PropertyRecord };
 type WorksheetResponse = { worksheet: Worksheet };
 type CompsResponse = { comps: CADComp[] };
-type SoldCompsResponse = { comps: SoldComp[]; excluded: string[] };
+type SoldCompsResponse = { comps: SoldComp[]; excluded: string[]; manualSoldComps: ManualSoldComp[] };
 type ChatResponse = { assistantMessage: string; strategyUpdated: boolean; compsAdded: number; soldCompsRefreshed: boolean; valuationAgeHours: number | null };
 type ArbScriptResponse = { script: ArbScript };
 
@@ -375,6 +389,17 @@ export function TaxProtestPage() {
   const [worksheet, setWorksheet] = useState<Worksheet | null>(null);
   const [comps, setComps] = useState<CADComp[]>([]);
   const [soldComps, setSoldComps] = useState<SoldComp[]>([]);
+  const [manualSoldComps, setManualSoldComps] = useState<ManualSoldComp[]>([]);
+  const [addSoldCompOpen, setAddSoldCompOpen] = useState(false);
+  const [addSoldCompAddress, setAddSoldCompAddress] = useState("");
+  const [addSoldCompPrice, setAddSoldCompPrice] = useState<number | "">("");
+  const [addSoldCompSqft, setAddSoldCompSqft] = useState<number | "">("");
+  const [addSoldCompBeds, setAddSoldCompBeds] = useState<number | "">("");
+  const [addSoldCompBaths, setAddSoldCompBaths] = useState<number | "">("");
+  const [addSoldCompDate, setAddSoldCompDate] = useState("");
+  const [addSoldCompYearBuilt, setAddSoldCompYearBuilt] = useState<number | "">("");
+  const [addingSoldComp, setAddingSoldComp] = useState(false);
+  const [removingManualCompId, setRemovingManualCompId] = useState<string | null>(null);
   const [year, setYear] = useState<string>("2026");
   const [chat, setChat] = useState<ChatTurnUI[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
@@ -478,7 +503,7 @@ export function TaxProtestPage() {
         ).catch(() => ({ comps: [] as CADComp[] })),
         apiJson<SoldCompsResponse>(
           `/api/protest/${encodeURIComponent(pid)}/sold-comps?year=${selectedYear}`
-        ).catch(() => ({ comps: [] as SoldComp[], excluded: [] as string[] }))
+        ).catch(() => ({ comps: [] as SoldComp[], excluded: [] as string[], manualSoldComps: [] as ManualSoldComp[] }))
       ]);
       setProperty(propRes.property);
       setStaleAlertDismissed(false);
@@ -486,6 +511,7 @@ export function TaxProtestPage() {
       setComps(compsRes.comps);
       setSoldComps(soldCompsRes.comps);
       setExcludedSoldComps(soldCompsRes.excluded ?? []);
+      setManualSoldComps(soldCompsRes.manualSoldComps ?? []);
       setCadEvidence(wsRes.worksheet.cadEvidenceJson ?? null);
       setSoldCompsNotes(wsRes.worksheet.soldCompsNotesJson ?? {});
       setArbScript(wsRes.worksheet.arbScriptJson ?? null);
@@ -763,17 +789,19 @@ export function TaxProtestPage() {
         comps: CADComp[];
         soldComps: SoldComp[];
         soldCompsCadFetched?: number;
+        manualSoldComps?: ManualSoldComp[];
       }>(`/api/protest/${encodeURIComponent(propertyId)}/refresh-comps`, {
         method: "POST",
         body: JSON.stringify({ year: Number(year) })
       });
       if (Array.isArray(res.comps)) setComps(res.comps);
       if (Array.isArray(res.soldComps)) setSoldComps(res.soldComps);
+      if (Array.isArray(res.manualSoldComps)) setManualSoldComps(res.manualSoldComps);
       const msgs: string[] = [];
       if (res.cad.ok) msgs.push(`${res.cad.count} CAD comp${res.cad.count !== 1 ? "s" : ""}`);
       else if (res.cad.message) msgs.push(`CAD: ${res.cad.message}`);
       if (res.redfin.ok) msgs.push("Redfin updated");
-      else if (res.redfin.code === "RATE_LIMITED") msgs.push("Redfin refreshed < 24h ago");
+      else if (res.redfin.code === "RATE_LIMITED") msgs.push("Redfin refreshed < 7 days ago");
       else if (res.redfin.message) msgs.push(`Redfin: ${res.redfin.message}`);
       if (res.soldCompsCadFetched) msgs.push(`${res.soldCompsCadFetched} §41.43 values`);
       addToast(res.cad.ok || res.redfin.ok ? "green" : "yellow", msgs.join(" · ") || "Refreshed");
@@ -852,6 +880,59 @@ export function TaxProtestPage() {
       setAddingComp(false);
     }
   }, [propertyId, year, selectedCadResult, addCompAddress, addCompCity, addCompSqft, addCompBeds, addCompBaths, addCompYearBuilt, addCompAssessed, addToast, resetAddCompModal]);
+
+  const submitAddManualSoldComp = useCallback(async () => {
+    if (!propertyId || !addSoldCompAddress.trim()) return;
+    setAddingSoldComp(true);
+    try {
+      const res = await apiJson<{ ok: boolean; comp: ManualSoldComp }>(
+        `/api/protest/${encodeURIComponent(propertyId)}/sold-comps`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            year: Number(year),
+            address: addSoldCompAddress.trim(),
+            soldPrice: addSoldCompPrice !== "" ? Number(addSoldCompPrice) : null,
+            sqft: addSoldCompSqft !== "" ? Number(addSoldCompSqft) : null,
+            beds: addSoldCompBeds !== "" ? Number(addSoldCompBeds) : null,
+            baths: addSoldCompBaths !== "" ? Number(addSoldCompBaths) : null,
+            soldDate: addSoldCompDate.trim() || null,
+            yearBuilt: addSoldCompYearBuilt !== "" ? Number(addSoldCompYearBuilt) : null,
+          })
+        }
+      );
+      setManualSoldComps((prev) => [...prev, res.comp]);
+      addToast("green", "Comp added");
+      setAddSoldCompOpen(false);
+      setAddSoldCompAddress("");
+      setAddSoldCompPrice("");
+      setAddSoldCompSqft("");
+      setAddSoldCompBeds("");
+      setAddSoldCompBaths("");
+      setAddSoldCompDate("");
+      setAddSoldCompYearBuilt("");
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to add comp");
+    } finally {
+      setAddingSoldComp(false);
+    }
+  }, [propertyId, year, addSoldCompAddress, addSoldCompPrice, addSoldCompSqft, addSoldCompBeds, addSoldCompBaths, addSoldCompDate, addSoldCompYearBuilt, addToast]);
+
+  const deleteManualSoldComp = useCallback(async (compId: string) => {
+    if (!propertyId) return;
+    setRemovingManualCompId(compId);
+    try {
+      await apiJson(
+        `/api/protest/${encodeURIComponent(propertyId)}/sold-comps/${encodeURIComponent(compId)}?year=${year}`,
+        { method: "DELETE" }
+      );
+      setManualSoldComps((prev) => prev.filter((c) => c.id !== compId));
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to remove comp");
+    } finally {
+      setRemovingManualCompId(null);
+    }
+  }, [propertyId, year, addToast]);
 
   const send = useCallback(async () => {
     if (!propertyId || !worksheet) return;
@@ -1185,9 +1266,9 @@ export function TaxProtestPage() {
             <Title order={4}>Market Value Evidence</Title>
             <Group gap="xs">
               <Text size="xs" c="dimmed">
-                {soldComps.length > 0
-                  ? `${visibleSoldComps.length} Redfin comparable sales${soldComps.length > visibleSoldComps.length ? ` (${soldComps.length - visibleSoldComps.length} hidden)` : ""}`
-                  : "No Redfin comps loaded"}
+                {soldComps.length + manualSoldComps.length > 0
+                  ? `${visibleSoldComps.length + manualSoldComps.length} comparable sales${soldComps.length > visibleSoldComps.length ? ` (${soldComps.length - visibleSoldComps.length} hidden)` : ""}`
+                  : "No comps loaded"}
               </Text>
               <Button
                 size="xs"
@@ -1198,9 +1279,17 @@ export function TaxProtestPage() {
               >
                 Refresh
               </Button>
+              <Button
+                size="xs"
+                variant="light"
+                leftSection={<IconPlus size={13} />}
+                onClick={() => setAddSoldCompOpen(true)}
+              >
+                Add
+              </Button>
             </Group>
           </Group>
-          {soldComps.length > 0 ? (
+          {soldComps.length > 0 || manualSoldComps.length > 0 ? (
             <>
               <Box style={{ overflowX: "auto" }}>
                 <Table striped highlightOnHover withTableBorder withColumnBorders fz="xs">
@@ -1352,29 +1441,79 @@ export function TaxProtestPage() {
                       </Table.Td>
                       <Table.Td />
                     </Table.Tr>
+                    {/* Manually added comps */}
+                    {manualSoldComps.map((mc) => {
+                      const manualPpsf = mc.soldPrice != null && mc.sqft ? mc.soldPrice / mc.sqft : null;
+                      const manualColor = vsSubjectColor(manualPpsf, subjectMarketPpsf);
+                      const manualSubjectRatio = cadAssessed != null && avm != null && avm > 0 ? cadAssessed / avm : null;
+                      const manualCompRatio = mc.assessedValueUsd != null && mc.soldPrice != null && mc.soldPrice > 0
+                        ? mc.assessedValueUsd / mc.soldPrice : null;
+                      const manualRatioColor = manualCompRatio != null && manualSubjectRatio != null
+                        ? (manualCompRatio < manualSubjectRatio ? "green" : "red") : undefined;
+                      return (
+                        <Table.Tr key={`manual-${mc.id}`}>
+                          <Table.Td>
+                            <Group gap={4} wrap="nowrap">
+                              <Badge size="xs" color="orange" variant="light">Manual</Badge>
+                              <Text size="xs">{mc.address}</Text>
+                            </Group>
+                          </Table.Td>
+                          <Table.Td>—</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{mc.sqft != null ? mc.sqft.toLocaleString() : "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{mc.beds ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{mc.baths ?? "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{mc.soldPrice != null ? money(mc.soldPrice) : "—"}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{ppsf(manualPpsf)}</Table.Td>
+                          <Table.Td style={{ textAlign: "right" }}>{mc.soldDate ?? "—"}</Table.Td>
+                          {(property?.state ?? "").toUpperCase() === "TX" && (
+                            <>
+                              <Table.Td style={{ textAlign: "right" }}>{mc.assessedValueUsd != null ? money(mc.assessedValueUsd) : "—"}</Table.Td>
+                              <Table.Td style={{ textAlign: "right" }}>
+                                {manualCompRatio != null ? (
+                                  <Text size="xs" c={manualRatioColor} fw={manualRatioColor ? 600 : undefined}>
+                                    {(manualCompRatio * 100).toFixed(1)}%
+                                  </Text>
+                                ) : "—"}
+                              </Table.Td>
+                            </>
+                          )}
+                          <Table.Td style={{ textAlign: "right" }}>
+                            <Text size="xs" c={manualColor} fw={manualColor ? 600 : undefined}>
+                              {vsSubjectLabel(manualPpsf, subjectMarketPpsf)}
+                            </Text>
+                          </Table.Td>
+                          <Table.Td />
+                          <Table.Td>
+                            <Tooltip label="Remove manual comp" withArrow>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                size="sm"
+                                loading={removingManualCompId === mc.id}
+                                onClick={() => void deleteManualSoldComp(mc.id)}
+                                aria-label="Remove manual comp"
+                              >
+                                <IconTrash size={13} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })}
                   </Table.Tbody>
                 </Table>
               </Box>
               <Text size="xs" c="dimmed">
-                Comparable sold prices from Redfin. Texas is a non-disclosure state — sold prices may not be available for all properties. Ask the protest assistant to refresh Redfin data or search for additional evidence.
+                Comparable sold prices from Redfin + manually added comps. Texas is a non-disclosure state — sold prices may not be available for all properties.
               </Text>
             </>
           ) : (
             <Paper withBorder p="md" radius="md">
               <Stack align="center" gap="xs">
-                <Text size="sm" c="dimmed">No Redfin comparable sales loaded.</Text>
+                <Text size="sm" c="dimmed">No comparable sales loaded.</Text>
                 <Text size="xs" c="dimmed" ta="center">
-                  Redfin comps load from your property valuation data.
+                  Use Add to enter a comparable manually, or Refresh to load Redfin comps.
                 </Text>
-                <Button
-                  size="xs"
-                  variant="light"
-                  loading={refreshingComps}
-                  leftSection={<IconRefresh size={14} />}
-                  onClick={() => void refreshComps()}
-                >
-                  Refresh Comps
-                </Button>
               </Stack>
             </Paper>
           )}
@@ -1392,15 +1531,6 @@ export function TaxProtestPage() {
                   ? `${comps.length + soldComps.filter(c => !excludedSoldComps.includes(c.address ?? "")).length} comparable properties`
                   : "No comps loaded"}
               </Text>
-              <Button
-                size="xs"
-                variant="subtle"
-                loading={refreshingComps}
-                leftSection={<IconRefresh size={13} />}
-                onClick={() => void refreshComps()}
-              >
-                Refresh
-              </Button>
               <Button
                 size="xs"
                 variant="light"
@@ -2284,6 +2414,78 @@ export function TaxProtestPage() {
           </ActionIcon>
         </Tooltip>
       )}
+
+      {/* Add Manual Sold Comp modal */}
+      <Modal
+        opened={addSoldCompOpen}
+        onClose={() => setAddSoldCompOpen(false)}
+        title="Add Comparable Sale"
+        size="sm"
+      >
+        <Stack gap="sm">
+          <TextInput
+            label="Address"
+            placeholder="123 Main St, Frisco, TX 75034"
+            value={addSoldCompAddress}
+            onChange={(e) => setAddSoldCompAddress(e.currentTarget.value)}
+            required
+          />
+          <NumberInput
+            label="Sold Price"
+            placeholder="450000"
+            prefix="$"
+            thousandSeparator=","
+            value={addSoldCompPrice}
+            onChange={(v) => setAddSoldCompPrice(v === "" ? "" : Number(v))}
+          />
+          <Group grow>
+            <NumberInput
+              label="Sqft"
+              placeholder="2500"
+              value={addSoldCompSqft}
+              onChange={(v) => setAddSoldCompSqft(v === "" ? "" : Number(v))}
+            />
+            <NumberInput
+              label="Beds"
+              placeholder="4"
+              value={addSoldCompBeds}
+              onChange={(v) => setAddSoldCompBeds(v === "" ? "" : Number(v))}
+            />
+            <NumberInput
+              label="Baths"
+              placeholder="3"
+              step={0.5}
+              value={addSoldCompBaths}
+              onChange={(v) => setAddSoldCompBaths(v === "" ? "" : Number(v))}
+            />
+          </Group>
+          <Group grow>
+            <TextInput
+              label="Sold Date"
+              placeholder="2024-03-15"
+              value={addSoldCompDate}
+              onChange={(e) => setAddSoldCompDate(e.currentTarget.value)}
+            />
+            <NumberInput
+              label="Year Built"
+              placeholder="2005"
+              value={addSoldCompYearBuilt}
+              onChange={(v) => setAddSoldCompYearBuilt(v === "" ? "" : Number(v))}
+            />
+          </Group>
+          <Text size="xs" c="dimmed">CAD assessed value fills in automatically on next Refresh.</Text>
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={() => setAddSoldCompOpen(false)}>Cancel</Button>
+            <Button
+              loading={addingSoldComp}
+              disabled={!addSoldCompAddress.trim()}
+              onClick={() => void submitAddManualSoldComp()}
+            >
+              Add
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       {/* Add Comp modal */}
       <Modal

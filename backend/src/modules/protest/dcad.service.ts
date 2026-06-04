@@ -416,30 +416,51 @@ export async function getDCADTaxable(
   }
 }
 
-/** Improvement features (beds, baths) from DCAD for a property account.
- *  Features encoded as "Bedrooms: 5", "Plumbing: 4.5" etc. */
+/** Beds/baths from DCAD for a property account.
+ *  Two-step: /improvement list → imprvID → /improvement/{imprvID}/features */
 export async function getDCADImprovementFeatures(
   pAccountId: number,
   county: string | null | undefined
 ): Promise<{ beds: number | null; baths: number | null } | null> {
   const office = countyToOffice(county);
-  const url = `${DCAD_ACCOUNT_BASE}/improvement/${pAccountId}/features`;
-  log.debug("DCAD improvement features request", { pAccountId, url, office });
   try {
     const token = await getToken(office);
-    const res = await fetch(url, {
-      headers: { ...BROWSER_HEADERS, "authorization": token }
-    });
-    log.debug("DCAD improvement features response", { pAccountId, status: res.status, ok: res.ok });
-    if (!res.ok) return null;
-    const body = await res.json() as unknown;
-    const rows = extractRows(body);
+
+    // Step 1: get improvement list to find the imprvID
+    const improvUrl = `${DCAD_ACCOUNT_BASE}/${pAccountId}/improvement`;
+    log.debug("DCAD improvement list request", { pAccountId, url: improvUrl });
+    const improvRes = await fetch(improvUrl, { headers: { ...BROWSER_HEADERS, authorization: token } });
+    log.debug("DCAD improvement list response", { pAccountId, status: improvRes.status });
+    if (!improvRes.ok || improvRes.status === 204) return null;
+    const improvBody = await improvRes.json() as unknown;
+    const improvements = extractRows(improvBody);
+    if (!improvements.length) return null;
+
+    // Prefer "MA" (main area) type; fall back to first improvement
+    const primary = improvements.find(
+      (r) => r.imprvDetailType === "MA" || r.imprvType === "MA"
+    ) ?? improvements[0];
+    // Try common field names for the improvement ID
+    const imprvId = asNumber(primary.pDetailID) ?? asNumber(primary.imprvID)
+      ?? asNumber(primary.improvementID) ?? asNumber(primary.id);
+    if (!imprvId) {
+      log.warn("DCAD improvement list: no imprvID found", { pAccountId, fields: Object.keys(primary) });
+      return null;
+    }
+
+    // Step 2: get features for that improvement
+    const featUrl = `${DCAD_ACCOUNT_BASE}/improvement/${imprvId}/features`;
+    log.debug("DCAD improvement features request", { pAccountId, imprvId, url: featUrl });
+    const featRes = await fetch(featUrl, { headers: { ...BROWSER_HEADERS, authorization: token } });
+    log.debug("DCAD improvement features response", { pAccountId, imprvId, status: featRes.status });
+    if (!featRes.ok || featRes.status === 204) return null;
+    const featBody = await featRes.json() as unknown;
+    const rows = extractRows(featBody);
+
     let beds: number | null = null;
     let baths: number | null = null;
     for (const row of rows) {
-      const r = asRecord(row);
-      if (!r) continue;
-      const features = Array.isArray(r.features) ? (r.features as unknown[]) : [];
+      const features = Array.isArray(row.features) ? (row.features as unknown[]) : [];
       for (const feat of features) {
         if (typeof feat !== "string") continue;
         if (/^bedrooms:/i.test(feat)) {
@@ -451,7 +472,7 @@ export async function getDCADImprovementFeatures(
         }
       }
     }
-    log.debug("DCAD improvement features parsed", { pAccountId, beds, baths });
+    log.debug("DCAD improvement features parsed", { pAccountId, imprvId, beds, baths });
     return { beds, baths };
   } catch (err) {
     log.error("DCAD improvement features failed", { err: err instanceof Error ? err.message : String(err), pAccountId });

@@ -40,6 +40,10 @@ import {
   updateSummarizationState,
   saveCycleSummary,
   saveArbScript,
+  addManualSoldComp,
+  removeManualSoldComp,
+  saveManualSoldComps,
+  type ManualSoldComp,
 } from "./protest-worksheet.service.js";
 import { generateArbScript, type ArbScriptInput } from "./arb-script.service.js";
 import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
@@ -420,7 +424,59 @@ protestRouter.get("/:propertyId/sold-comps", async (req: AuthenticatedRequest, r
   const cadCache = worksheet?.soldCompsCadJson ?? {};
   const comps = buildSoldComps(rawComps, cadCache);
   const excluded = await getExcludedSoldComps(property.id, householdId, year);
-  res.status(200).json({ comps, excluded });
+  const manualSoldComps = worksheet?.manualSoldComps ?? [];
+  res.status(200).json({ comps, excluded, manualSoldComps });
+});
+
+const manualSoldCompBodySchema = z.object({
+  address: z.string().min(1),
+  year: z.number().int().min(2000).max(2100).optional(),
+  soldPrice: z.number().nullable().optional(),
+  sqft: z.number().nullable().optional(),
+  beds: z.number().nullable().optional(),
+  baths: z.number().nullable().optional(),
+  soldDate: z.string().nullable().optional(),
+  yearBuilt: z.number().nullable().optional(),
+});
+
+protestRouter.post("/:propertyId/sold-comps", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const parsed = manualSoldCompBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  const year = parsed.data.year ?? thisYear();
+  const comp = await addManualSoldComp(property.id, householdId, year, {
+    address: parsed.data.address,
+    soldPrice: parsed.data.soldPrice ?? null,
+    sqft: parsed.data.sqft ?? null,
+    beds: parsed.data.beds ?? null,
+    baths: parsed.data.baths ?? null,
+    soldDate: parsed.data.soldDate ?? null,
+    yearBuilt: parsed.data.yearBuilt ?? null,
+    assessedValueUsd: null,
+    cadPropertyId: null,
+    cadAccountId: null,
+  });
+  log.info("manual sold comp added", { propertyId: property.id, year, compId: comp.id, address: comp.address });
+  res.status(201).json({ ok: true, comp });
+});
+
+protestRouter.delete("/:propertyId/sold-comps/:compId", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) { res.status(400).json({ errors: query.error.issues }); return; }
+  const year = query.data.year ?? thisYear();
+  const { compId } = req.params;
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+  await removeManualSoldComp(property.id, householdId, year, compId);
+  log.info("manual sold comp deleted", { propertyId: property.id, year, compId });
+  res.status(200).json({ ok: true });
 });
 
 protestRouter.get("/:propertyId/dcad/value-history", async (req: AuthenticatedRequest, res) => {
@@ -731,8 +787,49 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
 
   const soldComps = buildSoldComps(rawSoldComps, cadCache);
 
+  // Process manual sold comps through DCAD for assessed values + improvement features
+  let manualSoldComps: ManualSoldComp[] = existingWorksheet?.manualSoldComps ?? [];
+  if (isTx && cadAdapter && manualSoldComps.length > 0) {
+    const updatedManual = [...manualSoldComps];
+    let manualUpdated = false;
+    for (let i = 0; i < updatedManual.length; i++) {
+      const mc = updatedManual[i];
+      if (mc.assessedValueUsd != null && mc.cadAccountId != null) continue;
+      try {
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        const results = await cadAdapter.searchByAddress(mc.address, year);
+        const entry = matchCadAssessedValue(results, mc.address);
+        if (entry) {
+          updatedManual[i] = {
+            ...mc,
+            assessedValueUsd: mc.assessedValueUsd ?? entry.assessedValueUsd,
+            cadPropertyId: mc.cadPropertyId ?? entry.cadPropertyId,
+            cadAccountId: mc.cadAccountId ?? entry.cadAccountId,
+          };
+          manualUpdated = true;
+          if (entry.cadAccountId != null && (mc.beds == null || mc.baths == null)) {
+            const features = await getDCADImprovementFeatures(entry.cadAccountId, property.cadProvider === "dcad" ? "Denton" : null);
+            if (features) {
+              updatedManual[i] = {
+                ...updatedManual[i],
+                beds: updatedManual[i].beds ?? features.beds,
+                baths: updatedManual[i].baths ?? features.baths,
+              };
+            }
+          }
+        }
+      } catch (err) {
+        log.warn("refresh-comps: manual comp DCAD lookup failed", { addr: mc.address, err: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (manualUpdated) {
+      await saveManualSoldComps(property.id, householdId, year, updatedManual);
+      manualSoldComps = updatedManual;
+    }
+  }
+
   log.info("refresh-comps", { propertyId: property.id, year, cad: cadResult.ok, redfin: redfinResult.ok, soldCompsCadFetched });
-  res.status(200).json({ cad: cadResult, redfin: redfinResult, comps: freshComps, soldComps, soldCompsCadFetched });
+  res.status(200).json({ cad: cadResult, redfin: redfinResult, comps: freshComps, soldComps, soldCompsCadFetched, manualSoldComps });
 });
 
 protestRouter.patch("/:propertyId/sold-comps/exclusions", async (req: AuthenticatedRequest, res) => {

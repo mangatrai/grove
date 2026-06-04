@@ -374,8 +374,8 @@ export async function refreshPropertyValuation(
 
   if (prop.valuation_fetched_at) {
     const ageMs = Date.now() - new Date(prop.valuation_fetched_at).getTime();
-    if (ageMs < 24 * 60 * 60 * 1000) {
-      return { ok: false, code: "RATE_LIMITED", message: "Valuation refreshed within the last 24 hours — try again later." };
+    if (ageMs < 7 * 24 * 60 * 60 * 1000) {
+      return { ok: false, code: "RATE_LIMITED", message: "Valuation refreshed within the last 7 days — try again later." };
     }
   }
 

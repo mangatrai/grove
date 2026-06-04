@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-228 — DCAD improvement two-step fix + manual sold comps + Redfin TTL 7d (2026-06-04)
+
+**What:**
+1. DCAD improvement features call was hitting `/improvement/{pAccountId}/features` (wrong — pAccountId used where imprvID expected → 204 No Content). Now does two steps: `GET /propertyaccount/{pAccountId}/improvement` to get imprvID, then `GET /propertyaccount/improvement/{imprvID}/features`.
+2. Manual sold comp add/delete for Market Value Evidence — `POST/DELETE /api/protest/:propertyId/sold-comps`. Persisted in new `manual_sold_comps_json` column on `protest_worksheet`. On Refresh, DCAD fills in assessed value and improvement features for any manual comps missing them.
+3. Redfin refresh TTL extended from 24 hours to 7 days — Redfin sold comp data does not change daily.
+4. Consolidated two duplicate Refresh buttons (Market Value + Unequal Appraisal) into one — both sections share the same underlying data.
+
+**Changes:**
+- `backend/db/migrations/0066_pt_manual_sold_comps.sql` — add `manual_sold_comps_json JSONB` to `protest_worksheet`.
+- `backend/src/modules/protest/dcad.service.ts` — `getDCADImprovementFeatures`: two-step flow, proper imprvID resolution, 204 handling.
+- `backend/src/modules/protest/protest-worksheet.service.ts` — `ManualSoldComp` type; `addManualSoldComp`, `removeManualSoldComp`, `saveManualSoldComps` functions; `manualSoldComps` in `ProtestWorksheetRecord`.
+- `backend/src/modules/protest/protest.routes.ts` — `POST/DELETE /:propertyId/sold-comps`; `GET /sold-comps` returns `manualSoldComps`; `refresh-comps` processes manual comps through DCAD.
+- `backend/src/modules/household/property.service.ts` — Redfin TTL 7 days.
+- `frontend/src/pages/TaxProtestPage.tsx` — `ManualSoldComp` type; state + callbacks; Add button + modal in Market Value Evidence; manual comp rows in table; remove duplicate Refresh from Unequal Appraisal.
+
+**GitHub:** closes #80
+
+---
+
 ## FIX-227 — Redfin comp parser regression + DCAD improvement features for beds/baths (2026-06-03)
 
 **What:**
