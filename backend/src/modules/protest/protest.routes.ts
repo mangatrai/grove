@@ -55,6 +55,7 @@ import {
 import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
+import { getDCADImprovementFeatures } from "./dcad.service.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -115,18 +116,21 @@ function buildSoldComps(
     const sqft = asNumber(r.sqft);
     const address = typeof r.address === "string" ? r.address : null;
     const cached = address ? (cadCache[address] ?? null) : null;
+    const resolvedBeds = asNumber(r.beds) ?? cached?.beds ?? null;
+    const resolvedBaths = asNumber(r.baths) ?? cached?.baths ?? null;
+    const resolvedSqft = sqft ?? cached?.sqft ?? null;
     return {
       address,
       city: typeof r.city === "string" ? r.city : null,
       state: typeof r.state === "string" ? r.state : null,
-      sqft,
-      beds: asNumber(r.beds),
-      baths: asNumber(r.baths),
+      sqft: resolvedSqft,
+      beds: resolvedBeds,
+      baths: resolvedBaths,
       yearBuilt: asNumber(r.yearBuilt),
       soldPrice,
       soldDate: typeof r.soldDate === "string" ? r.soldDate : null,
-      pricePerSqft: soldPrice != null && sqft != null && sqft > 0
-        ? Math.round(soldPrice / sqft)
+      pricePerSqft: soldPrice != null && resolvedSqft != null && resolvedSqft > 0
+        ? Math.round(soldPrice / resolvedSqft)
         : asNumber(r.pricePerSqft),
       listPrice: asNumber(r.listPrice),
       cadAssessedValueUsd: cached?.assessedValueUsd ?? null
@@ -141,7 +145,14 @@ function matchCadAssessedValue(cadComps: CadProperty[], searchAddress: string): 
     ? (cadComps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? cadComps[0])
     : cadComps[0];
   if (!match) return null;
-  return { cadPropertyId: match.cadPropertyId, assessedValueUsd: match.assessedValue };
+  return {
+    cadPropertyId: match.cadPropertyId,
+    cadAccountId: match.accountId,
+    assessedValueUsd: match.assessedValue,
+    beds: match.beds,
+    baths: match.baths,
+    sqft: match.sqft,
+  };
 }
 
 function buildCadEvidenceContext(cadEvidence: CadEvidenceData | null, cadAssessed: number | null): string {
@@ -691,6 +702,22 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
         if (entry) {
           cadCache[addr] = entry;
           soldCompsCadFetched++;
+          // Fetch beds/baths from DCAD improvement features if CAD search didn't return them
+          if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null)) {
+            try {
+              await new Promise<void>((resolve) => setTimeout(resolve, 150));
+              const features = await getDCADImprovementFeatures(entry.cadAccountId, property.state);
+              if (features) {
+                cadCache[addr] = {
+                  ...cadCache[addr],
+                  beds: cadCache[addr].beds ?? features.beds,
+                  baths: cadCache[addr].baths ?? features.baths,
+                };
+              }
+            } catch (err) {
+              log.warn("refresh-comps: improvement features lookup failed", { addr, err: err instanceof Error ? err.message : String(err) });
+            }
+          }
         }
       } catch (err) {
         log.warn("refresh-comps: sold comp CAD lookup failed", { addr, err: err instanceof Error ? err.message : String(err) });

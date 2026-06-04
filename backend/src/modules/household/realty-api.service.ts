@@ -139,9 +139,9 @@ function msToDate(ms: unknown): string | null {
  *   __atts[4].__atts[26]  = beds
  *   __atts[4].__atts[27]  = baths
  *   __atts[4].__atts[50]  = close/sold price
- *   __atts[6].__atts[3]['1'][0].lastSaleDate = sold date string
+ *   __atts[6].__atts[2]['1'][0].lastSaleDate = sold date string  (index 2, not 3 — confirmed from live response)
  *   __atts[7].__atts      = [state,_,city,_,yearBuilt,streetNum,streetSuffix,_,_,zip,_,_,lat,lon,
- *                             _,_,_,lotSqft,_,streetName,_,_,approxSqft,_,propId]
+ *                             _,_,_,lotSqft,_,streetName,_,approxSqft,_,_,propId]  (sqft at 21, not 22)
  */
 function parseComps(comparables: unknown): ValuationComp[] {
   if (!Array.isArray(comparables)) return [];
@@ -168,10 +168,10 @@ function parseComps(comparables: unknown): ValuationComp[] {
         ? (atIdx<number>(listingArr, 27) as number)
         : null;
 
-      // Sash block — __atts[6].__atts[3]['1'][0].lastSaleDate
+      // Sash block — __atts[6].__atts[2]['1'][0].lastSaleDate
       const sashObj = outerAtts[6] as Record<string, unknown>;
       const sashAtts = Array.isArray(sashObj?.__atts) ? (sashObj.__atts as unknown[]) : [];
-      const sashMap = sashAtts[3] as Record<string, unknown[]> | undefined;
+      const sashMap = sashAtts[2] as Record<string, unknown[]> | undefined;
       const sash1 = Array.isArray(sashMap?.["1"]) ? (sashMap!["1"][0] as Record<string, unknown>) : null;
       const soldDate = parseSashDate(sash1?.lastSaleDate);
 
@@ -189,7 +189,7 @@ function parseComps(comparables: unknown): ValuationComp[] {
       const zip = typeof facts[9] === "string" ? facts[9] : "";
       const yearBuilt = typeof facts[4] === "number" ? facts[4] : null;
       const lotSqft = typeof facts[17] === "number" ? facts[17] : null;
-      const sqft = typeof facts[22] === "number" ? facts[22] : null;
+      const sqft = typeof facts[21] === "number" ? facts[21] : null;
       const pricePerSqft = soldPrice && sqft && sqft > 0 ? Math.round(soldPrice / sqft) : null;
 
       if (!address || !city) continue;

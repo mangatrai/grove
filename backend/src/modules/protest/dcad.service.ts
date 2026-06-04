@@ -416,6 +416,49 @@ export async function getDCADTaxable(
   }
 }
 
+/** Improvement features (beds, baths) from DCAD for a property account.
+ *  Features encoded as "Bedrooms: 5", "Plumbing: 4.5" etc. */
+export async function getDCADImprovementFeatures(
+  pAccountId: number,
+  county: string | null | undefined
+): Promise<{ beds: number | null; baths: number | null } | null> {
+  const office = countyToOffice(county);
+  const url = `${DCAD_ACCOUNT_BASE}/improvement/${pAccountId}/features`;
+  log.debug("DCAD improvement features request", { pAccountId, url, office });
+  try {
+    const token = await getToken(office);
+    const res = await fetch(url, {
+      headers: { ...BROWSER_HEADERS, "authorization": token }
+    });
+    log.debug("DCAD improvement features response", { pAccountId, status: res.status, ok: res.ok });
+    if (!res.ok) return null;
+    const body = await res.json() as unknown;
+    const rows = extractRows(body);
+    let beds: number | null = null;
+    let baths: number | null = null;
+    for (const row of rows) {
+      const r = asRecord(row);
+      if (!r) continue;
+      const features = Array.isArray(r.features) ? (r.features as unknown[]) : [];
+      for (const feat of features) {
+        if (typeof feat !== "string") continue;
+        if (/^bedrooms:/i.test(feat)) {
+          const v = parseFloat(feat.split(":")[1] ?? "");
+          if (!isNaN(v)) beds = v;
+        } else if (/^plumbing:/i.test(feat)) {
+          const v = parseFloat(feat.split(":")[1] ?? "");
+          if (!isNaN(v)) baths = v;
+        }
+      }
+    }
+    log.debug("DCAD improvement features parsed", { pAccountId, beds, baths });
+    return { beds, baths };
+  } catch (err) {
+    log.error("DCAD improvement features failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
+    return null;
+  }
+}
+
 /** Live protest/appeal status from DCAD for a property account. */
 export async function getDCADAppeal(
   pAccountId: number,

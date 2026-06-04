@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-227 — Redfin comp parser regression + DCAD improvement features for beds/baths (2026-06-03)
+
+**What:**
+1. Redfin comp parser regression from commit 36cda59: sash date index changed from `[2]` to `[3]`, but the actual Redfin API response has it at `[2]`. All comp sold dates were null.
+2. Redfin comp sqft index wrong: parser read `facts[22]` but actual JSON shows sqft at `facts[21]`. All comp sqft values were null from Redfin.
+3. DCAD has authoritative beds/baths via `GET /propertyaccount/improvement/{pAccountId}/features` (features array with "Bedrooms: X", "Plumbing: X"). Added `getDCADImprovementFeatures` to fetch these during comp refresh.
+4. `SoldCompCadEntry` extended with `cadAccountId`, `beds`, `baths`, `sqft` — populated from DCAD search and improvement features. `buildSoldComps` now falls back to cached DCAD data when Redfin values are null.
+
+**Changes:**
+- `backend/src/modules/household/realty-api.service.ts` — fix sash index `[3]`→`[2]`; fix sqft index `facts[22]`→`facts[21]`; update comments.
+- `backend/src/modules/protest/dcad.service.ts` — add `getDCADImprovementFeatures(pAccountId)` parsing "Bedrooms:" / "Plumbing:" feature strings.
+- `backend/src/modules/protest/protest-worksheet.service.ts` — extend `SoldCompCadEntry` with `cadAccountId`, `beds`, `baths`, `sqft`.
+- `backend/src/modules/protest/protest.routes.ts` — import `getDCADImprovementFeatures`; `matchCadAssessedValue` now captures `accountId`, `beds`, `baths`, `sqft`; refresh loop calls improvement features for comps with null beds/baths; `buildSoldComps` resolves beds/baths/sqft as `Redfin ?? DCAD`.
+
+**GitHub:** closes #78
+
 ## FIX-226 — DCAD appeal wiring + Unequal Appraisal pre-load + evidence section redesign (2026-06-03)
 
 **What:**

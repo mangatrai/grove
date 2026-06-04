@@ -27,7 +27,11 @@ export type ProtestOutcome = "settled_informal" | "won_arb" | "lost_arb" | "with
 
 export type SoldCompCadEntry = {
   cadPropertyId: string;
+  cadAccountId: number | null;
   assessedValueUsd: number | null;
+  beds: number | null;
+  baths: number | null;
+  sqft: number | null;
 };
 
 export type { CadEvidenceData };
