@@ -2536,6 +2536,7 @@ paths:
     get:
       tags: [imports]
       summary: List financial accounts
+      description: Members see only household-scoped accounts plus their own person-scoped accounts. Owner/admin see all household accounts.
       security: [{ bearerAuth: [] }]
       parameters:
         - name: includeClosedAccounts
@@ -2547,7 +2548,7 @@ paths:
           description: When true, includes closed accounts. Default returns active accounts only.
       responses:
         "200":
-          description: Household financial accounts with import freshness metadata
+          description: Household financial accounts with import freshness metadata (member-filtered for non-admin roles)
           content:
             application/json:
               schema:
@@ -3777,10 +3778,13 @@ paths:
     get:
       tags: [exports]
       summary: Download completed export .hfb backup
+      description: Members may only download export jobs they created (requested_by_user_id). Full household exports by owner/admin are inaccessible to members.
       security: [{ bearerAuth: [] }]
       responses:
         "200":
           description: Binary download (`household-export-{jobId}.hfb`)
+        "403":
+          description: Member attempted to download another user's export job (FORBIDDEN)
         "404":
           description: Job not ready, file missing, or job not found
         "410":
@@ -3789,7 +3793,15 @@ paths:
     get:
       tags: [exports]
       summary: Export job status
+      description: Members may only view export jobs they created (requested_by_user_id).
       security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Export job status
+        "403":
+          description: Member attempted to view another user's export job (FORBIDDEN)
+        "404":
+          description: Export job not found
   /budget/suggest:
     get:
       tags: [budget]

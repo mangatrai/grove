@@ -1833,6 +1833,8 @@ Session processing summary: per-file counts, open review items, and derived "ski
 
 Lists financial accounts for binding uploads before parse.
 
+**RBAC:** Members see only `household`-scoped accounts plus their own `person`-scoped accounts. Owner/admin see all household accounts.
+
 **Query (optional):**
 
 | Param | Description |
@@ -2759,6 +2761,8 @@ Queues an **export** job. Response is immediate (**202**); `.hfb` is built in ba
 
 Poll export job status.
 
+**Auth:** Bearer JWT. Members may only view jobs they created (`requested_by_user_id`); querying another user's job returns **403 FORBIDDEN**.
+
 **Response 200:**
 ```json
 {
@@ -2772,6 +2776,7 @@ Poll export job status.
 ```
 
 **Errors:**
+- **403** — `FORBIDDEN` — member attempted to view another user's export job.
 - **404** — `EXPORT_JOB_NOT_FOUND`.
 
 ---
@@ -2780,9 +2785,12 @@ Poll export job status.
 
 Returns the backup file as binary attachment when job finished successfully.
 
+**Auth:** Bearer JWT. Members may only download jobs they created (`requested_by_user_id`); downloading another user's job returns **403 FORBIDDEN**. Full household exports (created by owner/admin) are not accessible to members.
+
 **Response 200** — binary file (`household-export-{jobId}.hfb`).
 
 **Errors:**
+- **403** — `FORBIDDEN` — member attempted to download another user's export job.
 - **404** — Export not ready, file missing, or job not found.
 - **410** — `EXPORT_EXPIRED` — file auto-deleted after 48-hour retention.
 

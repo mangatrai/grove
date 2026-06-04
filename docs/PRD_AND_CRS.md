@@ -315,6 +315,10 @@ Not in MVP scope. Future enhancement for alerts (unusual spending, bills due, re
 #### Data visibility
 - **Owner/head sees all.**
 - **Members see own by default.**
+  - **Payslips:** Members see and may edit only payslips where `owner_person_profile_id` matches their own profile. Attempting to read or patch another member's payslip returns 404/403.
+  - **Accounts:** Members see household-scoped accounts plus their own person-scoped accounts. Other members' person-scoped accounts are not returned.
+  - **Export jobs:** Members may download only export jobs they created (`requested_by_user_id`). Full household exports created by owner/admin are not accessible to members. Restore is owner-only (full wipe).
+  - **Payslip create:** Members may only create payslips for their own profile; `ownerPersonProfileId` from the request body is ignored and forced to the member's own profile.
 - **Household-level dashboards:** Consolidated for all members; family-level spending/income aggregates.
 - **Account and transaction assignment:** Transactions assigned to a household member for attribution (even if that person has no direct login).
 

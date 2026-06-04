@@ -18,6 +18,30 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## SEC-155 — Member RBAC read isolation: payslips, export download, account list (2026-06-04)
+
+**GitHub:** closes #78
+
+Members could previously read financial data belonging to other household members because read paths were unscoped — write-path enforcement existed but read paths relied on optional client-driven query params.
+
+**Payslips (`backend/src/modules/payslip/payslip.routes.ts`):**
+- `GET /payslips` — member requests are now forced to `ownerScope=person, ownerPersonProfileId=authUser.personProfileId`; client-supplied scope params are ignored.
+- `GET /payslips/:id` — returns 404 if member is not the payslip owner.
+- `PATCH /payslips/:id` — returns 403 if member is not the payslip owner.
+- `POST /payslips/manual` — member cannot set `ownerPersonProfileId` to another profile; it is silently overridden to their own.
+
+**Export jobs (`backend/src/modules/export/exports.routes.ts`):**
+- `GET /exports/:jobId` — member gets 403 for jobs they did not create (`requested_by_user_id`).
+- `GET /exports/:jobId/download` — same gate. Full household `.hfb` exports created by owner/admin are inaccessible to members.
+- Restore remains owner-only (unchanged).
+
+**Accounts (`backend/src/modules/imports/imports.routes.ts`, `import-file-binding.service.ts`):**
+- `GET /imports/accounts` — members see only `household`-scoped accounts plus their own `person`-scoped accounts. Added `memberPersonProfileId` option to `listHouseholdFinancialAccounts`.
+
+**Docs:** `docs/PRD_AND_CRS.md` §3.11 data visibility expanded with explicit per-resource rules. `docs/API_REFERENCE.md` updated for `GET /exports/{jobId}`, `GET /exports/{jobId}/download`, `GET /imports/accounts`.
+
+---
+
 ## FIX-228 — DCAD improvement two-step fix + manual sold comps + Redfin TTL 7d (2026-06-04)
 
 **What:**

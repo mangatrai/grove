@@ -179,11 +179,18 @@ exportsRouter.post("/household", async (req: AuthenticatedRequest, res) => {
 });
 
 exportsRouter.get("/:jobId/download", async (req: AuthenticatedRequest, res) => {
-  const householdId = req.authUser!.householdId;
+  const { householdId, userId, role } = req.authUser!;
   const jobId = req.params.jobId?.trim();
   if (!jobId) {
     res.status(400).json({ message: "Missing job id" });
     return;
+  }
+  if (role === "member") {
+    const job = await getExportJob(householdId, jobId);
+    if (!job || job.requestedByUserId !== userId) {
+      res.status(403).json({ message: "Not allowed to download this export", code: "FORBIDDEN" });
+      return;
+    }
   }
   const file = await readExportFileIfReady(householdId, jobId);
   if (!file.ok) {
@@ -215,7 +222,7 @@ exportsRouter.get("/:jobId/download", async (req: AuthenticatedRequest, res) => 
 });
 
 exportsRouter.get("/:jobId", async (req: AuthenticatedRequest, res) => {
-  const householdId = req.authUser!.householdId;
+  const { householdId, userId, role } = req.authUser!;
   const jobId = req.params.jobId?.trim();
   if (!jobId) {
     res.status(400).json({ message: "Missing job id" });
@@ -224,6 +231,10 @@ exportsRouter.get("/:jobId", async (req: AuthenticatedRequest, res) => {
   const job = await getExportJob(householdId, jobId);
   if (!job) {
     res.status(404).json({ code: "EXPORT_JOB_NOT_FOUND", message: "Export job not found" });
+    return;
+  }
+  if (role === "member" && job.requestedByUserId !== userId) {
+    res.status(403).json({ code: "FORBIDDEN", message: "Not allowed to view this export" });
     return;
   }
   res.json({
