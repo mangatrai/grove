@@ -440,11 +440,10 @@ export async function getDCADImprovementFeatures(
     const primary = improvements.find(
       (r) => r.imprvDetailType === "MA" || r.imprvType === "MA"
     ) ?? improvements[0];
-    // Try common field names for the improvement ID
-    const imprvId = asNumber(primary.pDetailID) ?? asNumber(primary.imprvID)
-      ?? asNumber(primary.improvementID) ?? asNumber(primary.id);
+    const imprvId = asNumber(primary.pImprovementID) ?? asNumber(primary.pDetailID)
+      ?? asNumber(primary.imprvID) ?? asNumber(primary.improvementID) ?? asNumber(primary.id);
     if (!imprvId) {
-      log.warn("DCAD improvement list: no imprvID found", { pAccountId, fields: Object.keys(primary) });
+      log.warn("DCAD improvement list: no imprvID found", { pAccountId, firstKey: Object.keys(primary)[0] });
       return null;
     }
 
