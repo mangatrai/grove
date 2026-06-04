@@ -233,12 +233,12 @@ describe("CACHE_INVALIDATION_MAP patterns", () => {
     expect(scopesFor("/reports/balance-sheet/manual/snap-id-123")).toHaveLength(0);
   });
 
-  it("POST /household/properties/:id/values → networth", () => {
-    expect(scopesFor("/household/properties/prop-uuid/values")).toEqual(["networth"]);
+  it("POST /household/properties/:id/values → networth + networth-history", () => {
+    expect(scopesFor("/household/properties/prop-uuid/values")).toEqual(["networth", "networth-history"]);
   });
 
-  it("POST /household/properties/:id/refresh-valuation → networth", () => {
-    expect(scopesFor("/household/properties/prop-uuid/refresh-valuation")).toEqual(["networth"]);
+  it("POST /household/properties/:id/refresh-valuation → networth + networth-history", () => {
+    expect(scopesFor("/household/properties/prop-uuid/refresh-valuation")).toEqual(["networth", "networth-history"]);
   });
 
   // ── Non-matching paths (read-only or irrelevant)
