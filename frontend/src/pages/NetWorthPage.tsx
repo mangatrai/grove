@@ -329,7 +329,7 @@ export function NetWorthPage() {
     refresh: refreshHistoryCache,
   } = useLocalStorageCache<BalanceSheetHistoryResponse>(
     historyCacheKey,
-    "networth",
+    "networth-history",
     () => {
       const qs = new URLSearchParams({
         from: histRange.from,
@@ -1163,7 +1163,7 @@ export function NetWorthPage() {
           <Title order={3} style={{ fontSize: 16, fontWeight: 600 }}>Balance sheet</Title>
           <HelpIcon label="Snapshot date selects which balances to show. Use the pencil on a row to post or update a manual balance. Each row can still carry its own stored as-of date." />
           <MantineTooltip label="Refresh balances" withArrow position="right">
-            <ActionIcon variant="subtle" size="sm" onClick={() => void reloadAll()} loading={loading} aria-label="Refresh balance sheet">
+            <ActionIcon variant="subtle" size="sm" onClick={refreshSheetCache} loading={loading} aria-label="Refresh balance sheet">
               <IconRefresh size={14} />
             </ActionIcon>
           </MantineTooltip>

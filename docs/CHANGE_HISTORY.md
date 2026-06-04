@@ -18,6 +18,30 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-156 — Net Worth: Trend and Balance Sheet refresh buttons decoupled (2026-06-04)
+
+**GitHub:** closes #81
+
+Pressing either refresh button on the Net Worth page triggered both the Trend chart and Balance Sheet to reload because both `useLocalStorageCache` hooks shared the `"networth"` scope.
+
+- `frontend/src/cache.ts`: Added `"networth-history"` to `CacheScope`; updated property value/valuation CACHE_INVALIDATION_MAP entries to invalidate both `"networth"` and `"networth-history"` (property changes affect both sections).
+- `frontend/src/pages/NetWorthPage.tsx`: History/Trend hook changed to `"networth-history"` scope; Balance Sheet refresh icon changed to call `refreshSheetCache()` only instead of `reloadAll()`. Error "Retry load" button intentionally retains `reloadAll()` since it appears when both sections are in error.
+
+## FIX-157 — Payslip import: non-IBM employer profile no longer defaults to IBM (2026-06-04)
+
+**GitHub:** closes #82
+
+When importing a payslip PDF via an account of type `payslip`, the backend always returned the IBM profile (`ibm_pay_contributions_pdf`) regardless of which employer was configured. The `inferParserProfile` function returned IBM unconditionally for `payslip`+`.pdf` (line 81-83), bypassing the employer `parserProfileId` lookup that existed for PDF files matched by filename heuristic only.
+
+The fix mirrors the frontend logic:
+- Single employer → use `employer.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID`
+- Multiple employers → return `null` (user selects manually)
+- No employers → fall back to IBM
+
+**File:** `backend/src/modules/imports/infer-parser-profile.ts`
+
+---
+
 ## SEC-155 — Member RBAC read isolation: payslips, export download, account list (2026-06-04)
 
 **GitHub:** closes #78

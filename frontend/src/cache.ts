@@ -1,15 +1,15 @@
 /**
  * Client-side localStorage cache infrastructure.
  *
- * Two scopes: 'dashboard' and 'networth'. Each scope has an integer version
- * counter in localStorage. Any successful non-GET mutation to a relevant
- * endpoint bumps that counter via invalidateCacheByUrl(). Cache entries embed
- * the version at write-time; a version mismatch means the entry is stale.
+ * Scopes: 'dashboard', 'networth' (balance sheet snapshot), 'networth-history' (trend chart),
+ * 'recurring'. Each scope has an integer version counter in localStorage. Any successful
+ * non-GET mutation to a relevant endpoint bumps that counter via invalidateCacheByUrl().
+ * Cache entries embed the version at write-time; a version mismatch means the entry is stale.
  *
  * See docs/CACHING.md for the full design, scope map, and invalidation rules.
  */
 
-export type CacheScope = "dashboard" | "networth" | "recurring";
+export type CacheScope = "dashboard" | "networth" | "networth-history" | "recurring";
 
 const NS = "hfa";
 
@@ -37,10 +37,10 @@ export const CACHE_INVALIDATION_MAP: Array<{ pattern: RegExp; scopes: CacheScope
   // saves use apiFetch (no auto-invalidation) so the user can edit multiple
   // accounts without triggering a page reload after each save. The Refresh
   // button on the Net Worth page triggers the reload when the user is done.
-  // Property value snapshot (manual entry)
-  { pattern: /^\/household\/properties\/[^/]+\/values$/, scopes: ["networth"] },
-  // Property valuation refresh (calls Redfin API, inserts new snapshot)
-  { pattern: /^\/household\/properties\/[^/]+\/refresh-valuation$/, scopes: ["networth"] },
+  // Property value snapshot (manual entry) — affects both snapshot and trend
+  { pattern: /^\/household\/properties\/[^/]+\/values$/, scopes: ["networth", "networth-history"] },
+  // Property valuation refresh (calls Redfin API, inserts new snapshot) — affects both
+  { pattern: /^\/household\/properties\/[^/]+\/refresh-valuation$/, scopes: ["networth", "networth-history"] },
 ];
 
 // ── Version counter ──────────────────────────────────────────────────────────
