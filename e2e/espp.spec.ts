@@ -35,12 +35,13 @@ test.describe('ESPP Page', () => {
   });
 
   test('should open and close Import modal', async ({ page }) => {
-    await page.getByRole('button', { name: 'Import' }).click();
-    await expect(page.getByText('Import ESPP Data')).toBeVisible();
-    await expect(page.getByText('Purchase PDF')).toBeVisible();
-    await expect(page.getByText('Allocation CSV')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Import' }).last()).toBeDisabled();
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Import', exact: true }).click();
+    const modal = page.getByRole('dialog');
+    await expect(modal.getByText('Import ESPP Data')).toBeVisible();
+    await expect(modal.getByText('Purchase PDF')).toBeVisible();
+    await expect(modal.getByText('Allocation CSV')).toBeVisible();
+    await expect(modal.getByRole('button', { name: 'Import Files' })).toBeDisabled();
+    await modal.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByText('Import ESPP Data')).not.toBeVisible();
   });
 
