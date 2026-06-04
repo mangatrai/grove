@@ -30,7 +30,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 - `backend/src/modules/household/realty-api.service.ts` — fix sash index `[3]`→`[2]`; fix sqft index `facts[22]`→`facts[21]`; update comments.
 - `backend/src/modules/protest/dcad.service.ts` — add `getDCADImprovementFeatures(pAccountId)` parsing "Bedrooms:" / "Plumbing:" feature strings.
 - `backend/src/modules/protest/protest-worksheet.service.ts` — extend `SoldCompCadEntry` with `cadAccountId`, `beds`, `baths`, `sqft`.
-- `backend/src/modules/protest/protest.routes.ts` — import `getDCADImprovementFeatures`; `matchCadAssessedValue` now captures `accountId`, `beds`, `baths`, `sqft`; refresh loop calls improvement features for comps with null beds/baths; `buildSoldComps` resolves beds/baths/sqft as `Redfin ?? DCAD`.
+- `backend/src/modules/protest/protest.routes.ts` — import `getDCADImprovementFeatures`; `matchCadAssessedValue` now captures `accountId`, `beds`, `baths`, `sqft`; refresh loop calls improvement features for comps with null beds/baths; `buildSoldComps` resolves beds/baths/sqft as `Redfin ?? DCAD`. Fixed `office` parameter: was passing `property.state` ("TX") to `getDCADImprovementFeatures` which caused `countyToOffice` to return "TX" instead of "Denton", resulting in auth failure — now passes `property.cadProvider === "dcad" ? "Denton" : null`.
 
 **GitHub:** closes #78
 

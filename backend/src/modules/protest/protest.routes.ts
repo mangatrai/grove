@@ -706,7 +706,7 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
           if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null)) {
             try {
               await new Promise<void>((resolve) => setTimeout(resolve, 150));
-              const features = await getDCADImprovementFeatures(entry.cadAccountId, property.state);
+              const features = await getDCADImprovementFeatures(entry.cadAccountId, property.cadProvider === "dcad" ? "Denton" : null);
               if (features) {
                 cadCache[addr] = {
                   ...cadCache[addr],
