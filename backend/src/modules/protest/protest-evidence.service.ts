@@ -1,11 +1,13 @@
 import PDFDocument from "pdfkit";
 
-import type { ProtestComp, ProtestStatus, StrategyJson } from "./protest-worksheet.service.js";
+import type { ProtestComp, ProtestStatus, StrategyJson, ManualSoldComp } from "./protest-worksheet.service.js";
+import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type SoldComp = {
   address: string | null;
+  city: string | null;
   sqft: number | null;
   beds: number | null;
   baths: number | null;
@@ -18,7 +20,10 @@ export type SoldComp = {
 
 export type EvidencePacketInput = {
   address: string;
+  city: string | null;
+  state: string | null;
   taxYear: number;
+  cadPropertyId: string | null;
   cadAssessed: number | null;
   avm: number | null;
   equityMedianUsd: number | null;
@@ -26,11 +31,20 @@ export type EvidencePacketInput = {
   beds: number | null;
   baths: number | null;
   yearBuilt: number | null;
+  lotSqft: number | null;
+  percentGood: number | null;
+  improvementsUsd: number | null;
+  landValueUsd: number | null;
+  purchasePrice: number | null;
+  purchaseDate: string | null;
   hearingDate: string | null;
   worksheetStatus: ProtestStatus;
   strategy: StrategyJson | null;
   dcadComps: ProtestComp[];
   soldComps: SoldComp[];
+  manualSoldComps: ManualSoldComp[];
+  soldCompsNotes: Record<string, string>;
+  cadEvidence: CadEvidenceData | null;
 };
 
 // ── Layout constants ─────────────────────────────────────────────────────────

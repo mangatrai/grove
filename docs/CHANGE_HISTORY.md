@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-169 — Tax Protest: Evidence packet restructured into two purpose-built documents (2026-06-05)
+
+**Evidence packet DOCX now generates two documents in one file:**
+
+**Document A: Protest Filing Letter** — Formal letter to the ARB stating grounds (§41.41 market value, §41.43 unequal appraisal) with the requested value and $/sqft. Auto-selects which ground paragraphs to include based on available evidence. Ends with signature block.
+
+**Document B: ARB Hearing Packet** — Modeled on real-world ARB packet structure:
+- Section 1: Subject property detail table (DCAD ID, sqft, beds, baths, lot, condition %, assessed value, $/sqft, improvements, land, purchase price)
+- Section 2: Taxpayer's Requested Value + supporting evidence data points table
+- Section 3: Problems with DCAD's Evidence (3A: sales comp table with upward adjustment, sale age ≥ 18 months, distance ≥ 1 mi automatically flagged; 3B: equity analysis showing subject is the highest-assessed)
+- Section 4: Taxpayer's Supporting Evidence (4A: DCAD equity comps table; 4B: market sales with notes)
+- Section 5: Assessment Comparison Summary — all comps sorted by $/sqft with subject row highlighted (★)
+- Negotiation Tracker — blank table for use during hearing
+
+**Technical changes:**
+- `protest-evidence-docx.service.ts` — complete rewrite (~390 lines); new helpers: `buildFilingLetter`, `buildSubjectDetailTable`, `buildRequestedValueSection`, `buildDcadProblemsSection`, `identifySalesCompIssues`, `buildTaxpayerEvidenceSection`, `buildAssessmentSummary`
+- `protest-evidence.service.ts` — `EvidencePacketInput` expanded with 13 new fields: `city`, `state`, `cadPropertyId`, `avm`, `equityMedianUsd`, `sqft`, `beds`, `baths`, `yearBuilt`, `lotSqft`, `percentGood`, `improvementsUsd`, `landValueUsd`, `purchasePrice`, `purchaseDate`, `hearingDate`; also added `city` to `SoldComp` type
+- `protest.routes.ts` — evidence-packet route updated to spread all new fields from worksheet into `packetInput`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/89
+
+---
+
 ## FIX-168 — Tax Protest: Multiple data quality and UX fixes from E2E testing (2026-06-05)
 
 **Issues fixed (from E2E testing session):**

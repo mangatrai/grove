@@ -1113,22 +1113,35 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown Property";
   const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);
 
-  const equityMedianUsd = worksheet.cadEvidenceJson?.equityAnalysis?.medianIndValueUsd ?? null;
+  const cadEv = worksheet.cadEvidenceJson;
+  const equityMedianUsd = cadEv?.equityAnalysis?.medianIndValueUsd ?? null;
   const packetInput = {
     address,
+    city: property.city ?? null,
+    state: property.state ?? null,
     taxYear: year,
+    cadPropertyId: property.cadPropertyId ?? null,
     cadAssessed,
     avm,
     equityMedianUsd,
-    sqft: asNumber(subject?.sqFt) ?? worksheet.cadEvidenceJson?.livingAreaSqft ?? null,
+    sqft: asNumber(subject?.sqFt) ?? cadEv?.livingAreaSqft ?? null,
     beds: asNumber(subject?.beds),
     baths: asNumber(subject?.baths),
-    yearBuilt: asNumber(subject?.yearBuilt) ?? worksheet.cadEvidenceJson?.yearBuilt ?? null,
+    yearBuilt: asNumber(subject?.yearBuilt) ?? cadEv?.yearBuilt ?? null,
+    lotSqft: cadEv?.lotSqft ?? null,
+    percentGood: cadEv?.percentGood ?? null,
+    improvementsUsd: cadEv?.improvementsUsd ?? null,
+    landValueUsd: cadEv?.landValueUsd ?? null,
+    purchasePrice: property.purchasePrice ?? null,
+    purchaseDate: property.purchaseDate ?? null,
     hearingDate: worksheet.hearingDate,
     worksheetStatus: worksheet.status,
     strategy: worksheet.strategyJson,
     dcadComps,
-    soldComps
+    soldComps,
+    manualSoldComps: worksheet.manualSoldComps ?? [],
+    soldCompsNotes: worksheet.soldCompsNotesJson ?? {},
+    cadEvidence: cadEv ?? null,
   };
 
   log.info("evidence packet generated", { propertyId: property.id, year, format, comps: dcadComps.length });
