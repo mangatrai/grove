@@ -44,6 +44,8 @@ import {
   removeManualSoldComp,
   saveManualSoldComps,
   type ManualSoldComp,
+  matchCadAssessedValue,
+  enrichSoldCompsCad,
 } from "./protest-worksheet.service.js";
 import { generateArbScript, type ArbScriptInput } from "./arb-script.service.js";
 import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
@@ -142,22 +144,6 @@ function buildSoldComps(
   });
 }
 
-function matchCadAssessedValue(cadComps: CadProperty[], searchAddress: string): SoldCompCadEntry | null {
-  if (cadComps.length === 0) return null;
-  const houseNum = searchAddress.trim().match(/^\d+/)?.[0];
-  const match = houseNum
-    ? (cadComps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? cadComps[0])
-    : cadComps[0];
-  if (!match) return null;
-  return {
-    cadPropertyId: match.cadPropertyId,
-    cadAccountId: match.accountId,
-    assessedValueUsd: match.assessedValue,
-    beds: match.beds,
-    baths: match.baths,
-    sqft: match.sqft,
-  };
-}
 
 function buildCadEvidenceContext(cadEvidence: CadEvidenceData | null, cadAssessed: number | null): string {
   if (!cadEvidence) return "";
@@ -260,7 +246,15 @@ Texas property tax protest grounds:
 - §41.41 (Market value): Subject property's assessed value exceeds its market value. Argue using recent arm's-length sale prices of comparable properties.
 - §41.43 (Unequal appraisal): Subject property is assessed at a higher ratio than comparable properties. Argue using CAD-assessed values of similar nearby properties — not Redfin AVM or Zillow estimates, which have no standing at ARB.
 ${evidenceContext}${notesContext}${priorYearBlock}
-You have access to tools to fetch DCAD comparable properties and update the protest worksheet. When the user asks about analysis or strategy, use both grounds and tell them which is stronger based on available data. Be concise and direct.`;
+You are a property tax protest advisor, not a cheerleader. Think like a property tax attorney: analytically rigorous, evidence-driven, and results-oriented. Your job is to WIN the protest — not to validate the homeowner's feelings or avoid disagreement.
+
+Behavioral rules:
+- Commit to positions. When the evidence supports a lower value, say so directly and give the exact number.
+- Push back when warranted. If the user's target is not supportable by the data, say so and explain what is supportable.
+- Use DCAD's own data against them — inequitable assessment using their own comps is the strongest argument.
+- When fetching DCAD comps returns no results, try alternative address formats or nearby street names before concluding data is unavailable. Use the web search tool if DCAD data is insufficient.
+- Never soften a well-supported argument to seem diplomatic. Never "also consider the other side" when the evidence is one-sided.
+- Be concise. Lead with the conclusion, follow with the evidence.`;
 }
 
 const CLOSED_PROTEST_OUTCOMES = new Set([
@@ -430,6 +424,7 @@ protestRouter.get("/:propertyId/sold-comps", async (req: AuthenticatedRequest, r
 
 const manualSoldCompBodySchema = z.object({
   address: z.string().min(1),
+  city: z.string().max(100).nullable().optional(),
   year: z.number().int().min(2000).max(2100).optional(),
   soldPrice: z.number().nullable().optional(),
   sqft: z.number().nullable().optional(),
@@ -450,6 +445,7 @@ protestRouter.post("/:propertyId/sold-comps", async (req: AuthenticatedRequest, 
   const year = parsed.data.year ?? thisYear();
   const comp = await addManualSoldComp(property.id, householdId, year, {
     address: parsed.data.address,
+    city: parsed.data.city ?? null,
     soldPrice: parsed.data.soldPrice ?? null,
     sqft: parsed.data.sqft ?? null,
     beds: parsed.data.beds ?? null,
@@ -606,12 +602,12 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
       let beds = c.beds;
       let baths = c.baths;
       let sqft = c.sqft;
-      if (c.cadPropertyId && (beds == null || baths == null || sqft == null)) {
-        const features = await getDCADImprovementFeatures(c.cadPropertyId, countyHint).catch(() => null);
+      if (c.accountId != null && (beds == null || baths == null || sqft == null)) {
+        const features = await getDCADImprovementFeatures(c.accountId, countyHint).catch(() => null);
         if (features) {
           beds = beds ?? features.beds;
           baths = baths ?? features.baths;
-          sqft = sqft ?? features.sqft;
+          sqft = sqft ?? (features.sqft != null ? Math.round(features.sqft) : null);
         }
       }
       return {
@@ -730,7 +726,7 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
     try {
       await getOrCreateWorksheet(property.id, householdId, year);
       const cadComps = await cadAdapter.searchByAddress(address, year);
-      const count = await saveCADComps(property.id, householdId, year, cadComps);
+      const count = await saveCADComps(property.id, householdId, year, cadComps, address);
       if (cadComps.length > 0) {
         await saveCadSubjectIds(property.id, provider!, cadComps, address);
       }
@@ -758,47 +754,14 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
   const cadCache: Record<string, SoldCompCadEntry> = existingWorksheet?.soldCompsCadJson ?? {};
   const isTx = (property.state ?? "").toUpperCase() === "TX";
   if (isTx && cadAdapter) {
-    const addressesToFetch = rawSoldComps
-      .map((c) => {
-        const r = asRecord(c) ?? {};
-        return typeof r.address === "string" ? r.address : null;
-      })
-      .filter((a): a is string => a !== null && !(a in cadCache))
-      .slice(0, 6);
-
-    for (const addr of addressesToFetch) {
-      try {
-        await new Promise<void>((resolve) => setTimeout(resolve, 200));
-        const results = await cadAdapter.searchByAddress(addr, year);
-        const entry = matchCadAssessedValue(results, addr);
-        if (entry) {
-          cadCache[addr] = entry;
-          soldCompsCadFetched++;
-          // Fetch beds/baths/sqft from DCAD improvement features if CAD search didn't return them
-          if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null || entry.sqft == null)) {
-            try {
-              await new Promise<void>((resolve) => setTimeout(resolve, 150));
-              const features = await getDCADImprovementFeatures(entry.cadAccountId, property.cadProvider === "dcad" ? "Denton" : null);
-              if (features) {
-                cadCache[addr] = {
-                  ...cadCache[addr],
-                  beds: cadCache[addr].beds ?? features.beds,
-                  baths: cadCache[addr].baths ?? features.baths,
-                  sqft: cadCache[addr].sqft ?? features.sqft,
-                };
-              }
-            } catch (err) {
-              log.warn("refresh-comps: improvement features lookup failed", { addr, err: err instanceof Error ? err.message : String(err) });
-            }
-          }
-        }
-      } catch (err) {
-        log.warn("refresh-comps: sold comp CAD lookup failed", { addr, err: err instanceof Error ? err.message : String(err) });
+    const provider = property.cadProvider ?? inferCadProvider(property.state);
+    if (provider) {
+      const { cache: newCache, fetched } = await enrichSoldCompsCad(rawSoldComps, year, provider, cadCache);
+      soldCompsCadFetched = fetched;
+      if (fetched > 0) {
+        Object.assign(cadCache, newCache);
+        await saveSoldCompsCadCache(property.id, householdId, year, cadCache);
       }
-    }
-
-    if (soldCompsCadFetched > 0) {
-      await saveSoldCompsCadCache(property.id, householdId, year, cadCache);
     }
   }
 
@@ -831,7 +794,7 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
                 ...updatedManual[i],
                 beds: updatedManual[i].beds ?? features.beds,
                 baths: updatedManual[i].baths ?? features.baths,
-                sqft: updatedManual[i].sqft ?? features.sqft,
+                sqft: updatedManual[i].sqft ?? (features.sqft != null ? Math.round(features.sqft) : null),
               };
             }
           }
@@ -1050,7 +1013,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
         const cadAdapter = provider ? getCadAdapter(provider) : null;
         if (!cadAdapter) return "No CAD adapter configured for this property's county.";
         const comps = await cadAdapter.searchByAddress(queryAddress, year);
-        compsAdded = await saveCADComps(property.id, householdId, year, comps);
+        compsAdded = await saveCADComps(property.id, householdId, year, comps, queryAddress);
         if (comps.length > 0) await saveCadSubjectIds(property.id, provider!, comps, queryAddress);
         return formatCompSummary(comps);
       }

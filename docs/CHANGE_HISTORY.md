@@ -18,6 +18,38 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-168 — Tax Protest: Multiple data quality and UX fixes from E2E testing (2026-06-05)
+
+**Issues fixed (from E2E testing session):**
+
+1. **DCAD enrichment missing on initial load** — Redfin sold comps (Market Value Evidence / Unequal Appraisal) showed no sqft/beds/baths/assessed values until user manually clicked "Refresh Comps". Root cause: `triggerCadBackfill` (fire-and-forget at property creation) only fetched DCAD equity comps, not sold comp enrichment. Fix: added `enrichSoldCompsCad()` service function (extracted from `refresh-comps` route) and called it from `triggerCadBackfill` if `valuationDetailJson` is present. `household.routes.ts` now passes `valuationDetailJson` to `triggerCadBackfill`.
+
+2. **Sqft decimal display** — DCAD returns sqft as a float (e.g., "4523.9"). All sqft values from `saveCADComps`, `matchCadAssessedValue`, `enrichSoldCompsCad`, and improvement features lookups now go through `Math.round()` before storage.
+
+3. **Manual sold comp city field missing** — "Add Comparable Sale" modal had no city input; the full address including city went into the address field and city column showed "—". Fix: added city TextInput to modal, `city` field to `ManualSoldComp` type (both backend and frontend), wired through API schema and `addManualSoldComp` call.
+
+4. **Notes missing for Redfin comps in Unequal Appraisal table** — Redfin comp rows in the Unequal Appraisal evidence section had an empty notes cell. Fix: added `CompNotePopover` using the shared `soldCompsNotes` state (same as Market Value Evidence notes).
+
+5. **Agent chat: yes-man behavior and "I am limited" language** — System prompt rewritten to act as a property tax advisor, not a cheerleader. Agent now commits to positions, pushes back when evidence doesn't support user's target, and is instructed to try alternative DCAD search terms before giving up.
+
+6. **`matchCadAssessedValue` moved to service** — Extracted from `protest.routes.ts` local scope to `protest-worksheet.service.ts` as an exported function, enabling reuse in `enrichSoldCompsCad` and eliminating duplication.
+
+**Files changed:** `protest-worksheet.service.ts` (new: `matchCadAssessedValue`, `enrichSoldCompsCad`, `asRecord` helper; updated: `triggerCadBackfill`, `saveCADComps`, `ManualSoldComp`), `protest.routes.ts` (system prompt, schema, sqft rounding, removed local `matchCadAssessedValue`), `household.routes.ts` (`triggerCadBackfill` call site), `TaxProtestPage.tsx` (city field, notes for Redfin comps)
+
+---
+
+## FIX-162 — Tax Protest: Subject property appearing twice in Unequal Appraisal table (2026-06-05)
+
+**Root cause:** `saveCADComps` saved every result from `cadAdapter.searchByAddress()` to `protest_comp_cad`, including the subject property itself. `listWorksheetComps` then returned all rows — so the subject appeared once as a regular DCAD comp row and again as the dedicated subject row shown separately in the UI. Because the CAD API returns different assessed values across tax years, a property that had been refreshed for both 2025 and 2026 would accumulate two subject rows with different valuations.
+
+**Fix — prevention:** Added `searchAddress?: string` param to `saveCADComps`. When provided, the subject is identified by house-number prefix (same logic as `saveCadSubjectIds`) and excluded before the INSERT loop. All three call sites updated to pass the search address.
+
+**Fix — existing data:** `listWorksheetComps` query now JOINs `property` and filters `pcc.cad_property_id != p.cad_property_id`, so any subject rows already persisted in `protest_comp_cad` are silently excluded from results without requiring a migration.
+
+**Files changed:** `protest-worksheet.service.ts` (`saveCADComps`, `listWorksheetComps`, `triggerCadBackfill`), `protest.routes.ts` (two call sites)
+
+---
+
 ## FIX-161 — Tax Protest: CAD evidence PDF parser broken for Denton CAD column-order extraction + sqft from improvement API (2026-06-05)
 
 **Parser column-order bug:** Denton CAD evidence PDFs extract text column-by-column, meaning comp data appears *before* each section heading (not after). The original `parseCadEvidencePdf` used `findSection(header)` which slices from the heading forward — capturing only the median summary, missing all comp rows. Added `findSectionBefore(text, header, prevMarker)` and restructured parsing: `findSectionBefore` for comp data, `findSection` retained for medians (which correctly follow their heading).

@@ -6,6 +6,14 @@ import { log } from "../../logger.js";
 import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
 import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
+import { getDCADImprovementFeatures } from "./dcad.service.js";
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
 
 export type ConversationTurn = {
   role: "user" | "assistant" | "tool";
@@ -37,6 +45,7 @@ export type SoldCompCadEntry = {
 export type ManualSoldComp = {
   id: string;
   address: string;
+  city: string | null;
   soldPrice: number | null;
   sqft: number | null;
   beds: number | null;
@@ -299,9 +308,15 @@ export async function saveCADComps(
   propertyId: string,
   householdId: string,
   taxYear: number,
-  comps: CadProperty[]
+  comps: CadProperty[],
+  searchAddress?: string
 ): Promise<number> {
-  for (const comp of comps) {
+  const houseNum = searchAddress?.match(/^\d+/)?.[0];
+  const subjectId = houseNum
+    ? (comps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? comps[0])?.cadPropertyId
+    : searchAddress != null ? comps[0]?.cadPropertyId : undefined;
+  const toSave = subjectId ? comps.filter((c) => c.cadPropertyId !== subjectId) : comps;
+  for (const comp of toSave) {
     await qExec(
       `INSERT INTO protest_comp_cad
         (id, household_id, property_id, tax_year, cad_property_id, address_line1, city, assessed_value_usd,
@@ -329,7 +344,7 @@ export async function saveCADComps(
       comp.city,
       comp.assessedValue,
       comp.marketValue,
-      comp.sqft,
+      comp.sqft != null ? Math.round(comp.sqft) : null,
       comp.beds,
       comp.baths,
       comp.yearBuilt,
@@ -337,7 +352,7 @@ export async function saveCADComps(
       comp.raw
     );
   }
-  return comps.length;
+  return toSave.length;
 }
 
 /**
@@ -348,7 +363,8 @@ export async function triggerCadBackfill(
   propertyId: string,
   householdId: string,
   address: string,
-  state?: string | null
+  state?: string | null,
+  valuationDetailJson?: unknown
 ): Promise<void> {
   const provider = inferCadProvider(state);
   if (!provider) {
@@ -363,11 +379,23 @@ export async function triggerCadBackfill(
   const comps = await adapter.searchByAddress(address, year);
   if (comps.length > 0) {
     await getOrCreateWorksheet(propertyId, householdId, year);
-    await saveCADComps(propertyId, householdId, year, comps);
+    await saveCADComps(propertyId, householdId, year, comps, address);
     await saveCadSubjectIds(propertyId, provider, comps, address);
     log.info("triggerCadBackfill: done", { propertyId, year, count: comps.length, provider });
   } else {
     log.info("triggerCadBackfill: no comps found", { propertyId, address, provider });
+  }
+
+  // Enrich Redfin sold comps with DCAD data so Market Value Evidence loads with full data on first visit
+  const detail = asRecord(valuationDetailJson);
+  const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
+  if (rawSoldComps.length > 0) {
+    await getOrCreateWorksheet(propertyId, householdId, year);
+    const { cache, fetched } = await enrichSoldCompsCad(rawSoldComps, year, provider);
+    if (fetched > 0) {
+      await saveSoldCompsCadCache(propertyId, householdId, year, cache);
+      log.info("triggerCadBackfill: enriched sold comps", { propertyId, year, fetched });
+    }
   }
 }
 
@@ -409,6 +437,82 @@ export async function saveSoldCompsCadCache(
     householdId,
     taxYear
   );
+}
+
+/** Identifies the best-match CAD entry for a sold comp address from a DCAD search result set. */
+export function matchCadAssessedValue(cadComps: CadProperty[], searchAddress: string): SoldCompCadEntry | null {
+  if (cadComps.length === 0) return null;
+  const houseNum = searchAddress.trim().match(/^\d+/)?.[0];
+  const match = houseNum
+    ? (cadComps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? cadComps[0])
+    : cadComps[0];
+  if (!match) return null;
+  return {
+    cadPropertyId: match.cadPropertyId,
+    cadAccountId: match.accountId,
+    assessedValueUsd: match.assessedValue,
+    beds: match.beds,
+    baths: match.baths,
+    sqft: match.sqft != null ? Math.round(match.sqft) : null,
+  };
+}
+
+/**
+ * Enriches Redfin sold comps with DCAD assessed value + improvement features.
+ * Returns the updated cache. Addresses already in `existingCache` are skipped.
+ * Safe to call fire-and-forget — all errors are logged, not thrown.
+ */
+export async function enrichSoldCompsCad(
+  rawSoldComps: unknown[],
+  taxYear: number,
+  cadProvider: string,
+  existingCache: Record<string, SoldCompCadEntry> = {}
+): Promise<{ cache: Record<string, SoldCompCadEntry>; fetched: number }> {
+  const adapter = getCadAdapter(cadProvider);
+  if (!adapter) return { cache: existingCache, fetched: 0 };
+
+  const countyHint = cadProvider === "dcad" ? "Denton" : null;
+  const addressesToFetch = rawSoldComps
+    .map((c) => {
+      const r = asRecord(c);
+      return typeof r?.address === "string" ? r.address : null;
+    })
+    .filter((a): a is string => a !== null && !(a in existingCache))
+    .slice(0, 6);
+
+  const cache = { ...existingCache };
+  let fetched = 0;
+
+  for (const addr of addressesToFetch) {
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      const results = await adapter.searchByAddress(addr, taxYear);
+      const entry = matchCadAssessedValue(results, addr);
+      if (entry) {
+        cache[addr] = entry;
+        fetched++;
+        if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null || entry.sqft == null)) {
+          try {
+            await new Promise<void>((resolve) => setTimeout(resolve, 150));
+            const features = await getDCADImprovementFeatures(entry.cadAccountId, countyHint);
+            if (features) {
+              cache[addr] = {
+                ...cache[addr],
+                beds: cache[addr].beds ?? features.beds,
+                baths: cache[addr].baths ?? features.baths,
+                sqft: cache[addr].sqft ?? (features.sqft != null ? Math.round(features.sqft) : null),
+              };
+            }
+          } catch (err) {
+            log.warn("enrichSoldCompsCad: improvement features failed", { addr, err: err instanceof Error ? err.message : String(err) });
+          }
+        }
+      }
+    } catch (err) {
+      log.warn("enrichSoldCompsCad: CAD lookup failed", { addr, err: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { cache, fetched };
 }
 
 export type ProtestComp = {
@@ -542,11 +646,13 @@ export async function listWorksheetComps(
   taxYear: number
 ): Promise<ProtestComp[]> {
   const rows = await qAll<CompRow>(
-    `SELECT cad_property_id, address_line1, city, assessed_value_usd, market_value_usd,
-            sqft, beds, baths, year_built, per_sqft_usd, notes
-       FROM protest_comp_cad
-      WHERE household_id = ? AND property_id = ? AND tax_year = ?
-      ORDER BY fetched_at DESC`,
+    `SELECT pcc.cad_property_id, pcc.address_line1, pcc.city, pcc.assessed_value_usd, pcc.market_value_usd,
+            pcc.sqft, pcc.beds, pcc.baths, pcc.year_built, pcc.per_sqft_usd, pcc.notes
+       FROM protest_comp_cad pcc
+       JOIN property p ON p.id = pcc.property_id
+      WHERE pcc.household_id = ? AND pcc.property_id = ? AND pcc.tax_year = ?
+        AND (p.cad_property_id IS NULL OR pcc.cad_property_id != p.cad_property_id)
+      ORDER BY pcc.fetched_at DESC`,
     householdId,
     propertyId,
     taxYear

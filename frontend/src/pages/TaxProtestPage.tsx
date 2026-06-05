@@ -191,6 +191,7 @@ type CadSearchResult = {
 type ManualSoldComp = {
   id: string;
   address: string;
+  city: string | null;
   soldPrice: number | null;
   sqft: number | null;
   beds: number | null;
@@ -392,6 +393,7 @@ export function TaxProtestPage() {
   const [manualSoldComps, setManualSoldComps] = useState<ManualSoldComp[]>([]);
   const [addSoldCompOpen, setAddSoldCompOpen] = useState(false);
   const [addSoldCompAddress, setAddSoldCompAddress] = useState("");
+  const [addSoldCompCity, setAddSoldCompCity] = useState("");
   const [addSoldCompPrice, setAddSoldCompPrice] = useState<number | "">("");
   const [addSoldCompSqft, setAddSoldCompSqft] = useState<number | "">("");
   const [addSoldCompBeds, setAddSoldCompBeds] = useState<number | "">("");
@@ -892,6 +894,7 @@ export function TaxProtestPage() {
           body: JSON.stringify({
             year: Number(year),
             address: addSoldCompAddress.trim(),
+            city: addSoldCompCity.trim() || null,
             soldPrice: addSoldCompPrice !== "" ? Number(addSoldCompPrice) : null,
             sqft: addSoldCompSqft !== "" ? Number(addSoldCompSqft) : null,
             beds: addSoldCompBeds !== "" ? Number(addSoldCompBeds) : null,
@@ -905,6 +908,7 @@ export function TaxProtestPage() {
       addToast("green", "Comp added");
       setAddSoldCompOpen(false);
       setAddSoldCompAddress("");
+      setAddSoldCompCity("");
       setAddSoldCompPrice("");
       setAddSoldCompSqft("");
       setAddSoldCompBeds("");
@@ -916,7 +920,7 @@ export function TaxProtestPage() {
     } finally {
       setAddingSoldComp(false);
     }
-  }, [propertyId, year, addSoldCompAddress, addSoldCompPrice, addSoldCompSqft, addSoldCompBeds, addSoldCompBaths, addSoldCompDate, addSoldCompYearBuilt, addToast]);
+  }, [propertyId, year, addSoldCompAddress, addSoldCompCity, addSoldCompPrice, addSoldCompSqft, addSoldCompBeds, addSoldCompBaths, addSoldCompDate, addSoldCompYearBuilt, addToast]);
 
   const deleteManualSoldComp = useCallback(async (compId: string) => {
     if (!propertyId) return;
@@ -1458,7 +1462,7 @@ export function TaxProtestPage() {
                               <Text size="xs">{mc.address}</Text>
                             </Group>
                           </Table.Td>
-                          <Table.Td>—</Table.Td>
+                          <Table.Td>{mc.city ?? "—"}</Table.Td>
                           <Table.Td style={{ textAlign: "right" }}>{mc.sqft != null ? mc.sqft.toLocaleString() : "—"}</Table.Td>
                           <Table.Td style={{ textAlign: "right" }}>{mc.beds ?? "—"}</Table.Td>
                           <Table.Td style={{ textAlign: "right" }}>{mc.baths ?? "—"}</Table.Td>
@@ -1586,7 +1590,15 @@ export function TaxProtestPage() {
                               {vsSubjectLabel(cadPpsf, subjectAssessedPpsf)}
                             </Text>
                           </Table.Td>
-                          <Table.Td />
+                          <Table.Td>
+                            <CompNotePopover
+                              note={soldCompsNotes[comp.address ?? ""] ?? null}
+                              onSave={(v) => {
+                                setSoldCompsNotes((prev) => ({ ...prev, [comp.address ?? ""]: v }));
+                                void saveSoldCompNote(comp.address ?? "", v);
+                              }}
+                            />
+                          </Table.Td>
                           <Table.Td>
                             <Tooltip label="Remove from equity evidence" withArrow>
                               <ActionIcon
@@ -2425,10 +2437,16 @@ export function TaxProtestPage() {
         <Stack gap="sm">
           <TextInput
             label="Address"
-            placeholder="123 Main St, Frisco, TX 75034"
+            placeholder="123 Main St"
             value={addSoldCompAddress}
             onChange={(e) => setAddSoldCompAddress(e.currentTarget.value)}
             required
+          />
+          <TextInput
+            label="City"
+            placeholder="Frisco"
+            value={addSoldCompCity}
+            onChange={(e) => setAddSoldCompCity(e.currentTarget.value)}
           />
           <NumberInput
             label="Sold Price"
