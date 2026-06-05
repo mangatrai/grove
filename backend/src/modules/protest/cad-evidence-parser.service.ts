@@ -81,20 +81,29 @@ function parseMedianSection(sectionText: string): { medianIndValueUsd: number | 
   };
 }
 
+function extractAddress(raw: string): string {
+  // Stop at section boundary markers that appear after the last comp's address lines
+  const stopAt = raw.search(/\n(?:Situs Address|PROPERTY ID|Subject)\n/);
+  const slice = stopAt !== -1 ? raw.slice(0, stopAt) : raw;
+  return slice.trim().replace(/\n/g, " ");
+}
+
 function parseSalesMapComps(mapText: string): Array<{ compNum: number; propId: string; distanceMi: number | null; salePriceUsd: number | null; address: string }> {
   const results: Array<{ compNum: number; propId: string; distanceMi: number | null; salePriceUsd: number | null; address: string }> = [];
-  const re = /Comp\s+(\d+)\s+(\d+)\s+([\d.]+)\s+\$([\d,]+)\s+/g;
+  // Denton CAD format: "Comp 10.4$1,275,000680344\n<address>" — compNum, distance, $price, propId concatenated
+  // Price uses comma-grouped pattern so it stops cleanly; propId is 6 digits (regex backtracks correctly)
+  const re = /Comp (\d{1,2})(\d+\.\d+)\$(\d{1,3}(?:,\d{3})*)(\d{6})/g;
   const matches = [...mapText.matchAll(re)];
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
     const startIdx = match.index! + match[0].length;
     const endIdx = i + 1 < matches.length ? matches[i + 1].index! : mapText.length;
-    const address = mapText.slice(startIdx, endIdx).trim().replace(/\n/g, " ");
+    const address = extractAddress(mapText.slice(startIdx, endIdx));
     results.push({
       compNum: parseInt(match[1], 10),
-      propId: match[2],
-      distanceMi: parseFloat(match[3]),
-      salePriceUsd: parseInt(match[4].replace(/,/g, ""), 10),
+      distanceMi: parseFloat(match[2]),
+      salePriceUsd: parseInt(match[3].replace(/,/g, ""), 10),
+      propId: match[4],
       address,
     });
   }
@@ -103,19 +112,19 @@ function parseSalesMapComps(mapText: string): Array<{ compNum: number; propId: s
 
 function parseEquityMapComps(mapText: string): Array<{ compNum: number; propId: string; distanceMi: number | null; address: string }> {
   const results: Array<{ compNum: number; propId: string; distanceMi: number | null; address: string }> = [];
-  // Equity map: "Comp N propId distance address..." (no sale price)
-  // Stop before any line that starts a new section
-  const re = /Comp\s+(\d+)\s+(\d+)\s+([\d.]+)\s+/g;
+  // Denton CAD format: "Comp 10.24660008\n<address>" — compNum, distance, propId concatenated (no sale price)
+  // propId is 6 digits; regex backtracks to find the right split between distance decimal and propId
+  const re = /Comp (\d{1,2})(\d+\.\d+)(\d{6})/g;
   const matches = [...mapText.matchAll(re)];
   for (let i = 0; i < matches.length; i++) {
     const match = matches[i];
     const startIdx = match.index! + match[0].length;
     const endIdx = i + 1 < matches.length ? matches[i + 1].index! : mapText.length;
-    const address = mapText.slice(startIdx, endIdx).trim().replace(/\n/g, " ");
+    const address = extractAddress(mapText.slice(startIdx, endIdx));
     results.push({
       compNum: parseInt(match[1], 10),
-      propId: match[2],
-      distanceMi: parseFloat(match[3]),
+      distanceMi: parseFloat(match[2]),
+      propId: match[3],
       address,
     });
   }
@@ -233,18 +242,18 @@ export async function parseCadEvidencePdf(buffer: Buffer): Promise<CadEvidenceDa
   // Denton CAD column-order extraction: section heading appears at the END of each
   // section's raw text, not the beginning. Data is BEFORE its heading, summary is AFTER.
   //
-  // salesCompDataText  : comp column values from page 2 (before "COMPARABLE SALES ANALYSIS")
-  // salesAnalysisText  : summary + median from page 2 tail (after "COMPARABLE SALES ANALYSIS")
-  // salesMapText       : map comp table from page 3 (between the two headings)
-  // equityCompDataText : comp column values from page 4 (before "SUBJECT EQUITY ANALYSIS")
-  // equityAnalysisText : summary + median from page 4 tail (after "SUBJECT EQUITY ANALYSIS")
-  // equityMapText      : map comp table from page 5 (between the two headings)
+  // Denton CAD column-order extraction layout:
+  //   salesCompDataText  : comp column values (before "COMPARABLE SALES ANALYSIS" heading)
+  //   salesAnalysisText  : summary + map table (after "COMPARABLE SALES ANALYSIS", before "MARKET COMPARABLE SALES MAP")
+  //   equityCompDataText : comp column values (after "MARKET COMPARABLE SALES MAP", before "SUBJECT EQUITY ANALYSIS")
+  //   equityAnalysisText : summary (after "SUBJECT EQUITY ANALYSIS", before "EQUITY COMPARABLES MAP")
+  //   equityMapText      : equity map table (after "EQUITY COMPARABLES MAP", before "PUBLIC CARD WITH SKETCH")
   const salesCompDataText  = findSectionBefore(text, "COMPARABLE SALES ANALYSIS");
   const salesAnalysisText  = findSection(text, "COMPARABLE SALES ANALYSIS", "MARKET COMPARABLE SALES MAP");
-  const salesMapText       = findSectionBefore(text, "MARKET COMPARABLE SALES MAP", "COMPARABLE SALES ANALYSIS");
+  const salesMapText       = salesAnalysisText; // map table is embedded in salesAnalysisText
   const equityCompDataText = findSectionBefore(text, "SUBJECT EQUITY ANALYSIS", "MARKET COMPARABLE SALES MAP");
   const equityAnalysisText = findSection(text, "SUBJECT EQUITY ANALYSIS", "EQUITY COMPARABLES MAP");
-  const equityMapText      = findSectionBefore(text, "EQUITY COMPARABLES MAP", "SUBJECT EQUITY ANALYSIS");
+  const equityMapText      = findSection(text, "EQUITY COMPARABLES MAP", "PUBLIC CARD WITH SKETCH");
   const publicCardText     = findSection(text, "PUBLIC CARD WITH SKETCH");
 
   const salesMapComps   = parseSalesMapComps(salesMapText);

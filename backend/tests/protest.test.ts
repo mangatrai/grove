@@ -62,7 +62,9 @@ COMPARABLE SALES ANALYSIS
 Summary of Indicated Values
 Median $650,000
 
-Comp 1 999001 0.25 $450,000 123 Test St, Dallas TX 75201
+Sale PriceComp #Situs AddressProp IDDistance (mi)
+Comp 10.25$450,000999001
+123 Test St, Dallas TX 75201
 MARKET COMPARABLE SALES MAP
 
 SUBJECT EQUITY ANALYSIS

@@ -30,6 +30,8 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 **GitHub:** https://github.com/mangatrai/grove/issues/87
 
+**Parser addendum (same commit):** Added `extractAddress()` helper to stop comp address extraction at Denton CAD section boundaries ("Situs Address", "Subject", "PROPERTY ID") — prevents last comp's address from bleeding into the public card section. Also corrected `equityMapText` source to use `findSection("EQUITY COMPARABLES MAP", "PUBLIC CARD WITH SKETCH")` (rows are after the heading, not before). Regex for both map parsers updated to handle Denton CAD's concatenated format with proper grouping.
+
 ---
 
 ## FIX-160 — Tax Protest: ARB script crash + sqft fallback + CAD search enrichment + evidence packet AVM removal (2026-06-05)

@@ -77,6 +77,9 @@ async function countProtestNotifications(type?: string): Promise<number> {
  */
 function buildCadEvidenceText(opts?: { assessedLine?: string }): string {
   const assessed = opts?.assessedLine ?? "$600,000";
+  // Matches real Denton CAD column-order extraction:
+  //   comp column values (including "Comp N" labels) appear BEFORE the section heading,
+  //   the compact map table appears AFTER the heading, equity map rows appear AFTER EQUITY COMPARABLES MAP.
   return `
 999001
 0.25
@@ -87,8 +90,8 @@ VB2
 2020 / 2020
 1500.0
 12000
-123 TEST ST
-DALLAS TX 75201
+123 Test St
+Dallas TX 75201
 0.2750
 $200,000
 $750,000
@@ -112,8 +115,8 @@ A1
 0.2750
 $200,000
 ${assessed}
-456 SUBJECT AVE
-DALLAS TX 75201
+456 Subject Ave
+Dallas TX 75201
 123456
 VB2
 
@@ -125,14 +128,18 @@ Value / Sqft Sqft Lot Sqft
 Value
 $433.33
 
-Comp 1 999001 0.25 $450,000 123 Test St
+Sale PriceComp #Situs AddressProp IDDistance (mi)
+Comp 10.25$450,000999001
+123 Test St
 Dallas TX 75201
 MARKET COMPARABLE SALES MAP
 
 SUBJECT EQUITY ANALYSIS
+Summary of Equity Indicated Values
 
 EQUITY COMPARABLES MAP
-
+Property ID
+Comp #Situs AddressProp IDDistance (mi)
 PUBLIC CARD WITH SKETCH
 IMPROVEMENTS
 200,000
