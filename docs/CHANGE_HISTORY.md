@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-161 — Tax Protest: CAD evidence PDF parser broken for Denton CAD column-order extraction + sqft from improvement API (2026-06-05)
+
+**Parser column-order bug:** Denton CAD evidence PDFs extract text column-by-column, meaning comp data appears *before* each section heading (not after). The original `parseCadEvidencePdf` used `findSection(header)` which slices from the heading forward — capturing only the median summary, missing all comp rows. Added `findSectionBefore(text, header, prevMarker)` and restructured parsing: `findSectionBefore` for comp data, `findSection` retained for medians (which correctly follow their heading).
+
+**sqft from improvement API:** `getDCADImprovementFeatures` only returned `{ beds, baths }`. Extended to also return `sqft` aggregated from `livingArea` on the improvement list response (step 1). Updated cad-search enrichment and both refresh-comps callers in `protest.routes.ts` to populate `sqft` from the features result.
+
+**Test fixtures updated:** Both `protest-service.test.ts` and `protest.test.ts` synthetic CAD evidence fixtures were rewritten to match real Denton CAD extraction order (comp data before headings).
+
+**Files changed:** `cad-evidence-parser.service.ts`, `dcad.service.ts`, `protest.routes.ts`, `tests/protest-service.test.ts`, `tests/protest.test.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/87
+
+---
+
 ## FIX-160 — Tax Protest: ARB script crash + sqft fallback + CAD search enrichment + evidence packet AVM removal (2026-06-05)
 
 **ARB script crash:** `generateArbScript` (arb-script.service.ts) threw "invalid JSON" because GPT-4o wraps JSON responses in ```json…``` markdown fences even when the prompt says not to. Fixed by stripping leading/trailing fences before JSON.parse. Added log.error with response preview for future debugging.

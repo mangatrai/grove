@@ -54,6 +54,20 @@ function findSection(text: string, header: string, stopHeader?: string): string 
   return slice;
 }
 
+// Denton CAD PDFs extract text column-by-column, so each section's data appears
+// BEFORE its own heading in the extracted text stream. This helper returns the
+// text that precedes `header` (optionally bounded by a previous marker).
+function findSectionBefore(text: string, header: string, prevMarker?: string): string {
+  const idx = text.indexOf(header);
+  if (idx === -1) return "";
+  let start = 0;
+  if (prevMarker) {
+    const prevIdx = text.indexOf(prevMarker);
+    if (prevIdx !== -1) start = prevIdx + prevMarker.length;
+  }
+  return text.slice(start, idx);
+}
+
 function parseMedianSection(sectionText: string): { medianIndValueUsd: number | null; medianValuePerSqft: number | null } {
   const m = sectionText.match(/Summary of (?:Indicated|Equity Indicated) Values([\s\S]{0,400})/);
   if (!m) return { medianIndValueUsd: null, medianValuePerSqft: null };
@@ -216,17 +230,28 @@ function parseImprovementsFromPublicCard(cardText: string): number | null {
 export async function parseCadEvidencePdf(buffer: Buffer): Promise<CadEvidenceData> {
   const text = await extractPdfText(buffer);
 
-  const salesAnalysisText = findSection(text, "COMPARABLE SALES ANALYSIS", "MARKET COMPARABLE SALES MAP");
-  const salesMapText = findSection(text, "MARKET COMPARABLE SALES MAP", "SUBJECT EQUITY ANALYSIS");
+  // Denton CAD column-order extraction: section heading appears at the END of each
+  // section's raw text, not the beginning. Data is BEFORE its heading, summary is AFTER.
+  //
+  // salesCompDataText  : comp column values from page 2 (before "COMPARABLE SALES ANALYSIS")
+  // salesAnalysisText  : summary + median from page 2 tail (after "COMPARABLE SALES ANALYSIS")
+  // salesMapText       : map comp table from page 3 (between the two headings)
+  // equityCompDataText : comp column values from page 4 (before "SUBJECT EQUITY ANALYSIS")
+  // equityAnalysisText : summary + median from page 4 tail (after "SUBJECT EQUITY ANALYSIS")
+  // equityMapText      : map comp table from page 5 (between the two headings)
+  const salesCompDataText  = findSectionBefore(text, "COMPARABLE SALES ANALYSIS");
+  const salesAnalysisText  = findSection(text, "COMPARABLE SALES ANALYSIS", "MARKET COMPARABLE SALES MAP");
+  const salesMapText       = findSectionBefore(text, "MARKET COMPARABLE SALES MAP", "COMPARABLE SALES ANALYSIS");
+  const equityCompDataText = findSectionBefore(text, "SUBJECT EQUITY ANALYSIS", "MARKET COMPARABLE SALES MAP");
   const equityAnalysisText = findSection(text, "SUBJECT EQUITY ANALYSIS", "EQUITY COMPARABLES MAP");
-  const equityMapText = findSection(text, "EQUITY COMPARABLES MAP", "PUBLIC CARD WITH SKETCH");
-  const publicCardText = findSection(text, "PUBLIC CARD WITH SKETCH");
+  const equityMapText      = findSectionBefore(text, "EQUITY COMPARABLES MAP", "SUBJECT EQUITY ANALYSIS");
+  const publicCardText     = findSection(text, "PUBLIC CARD WITH SKETCH");
 
-  const salesMapComps = parseSalesMapComps(salesMapText);
-  const equityMapComps = parseEquityMapComps(equityMapText);
+  const salesMapComps   = parseSalesMapComps(salesMapText);
+  const equityMapComps  = parseEquityMapComps(equityMapText);
 
-  const salesValues = extractCompValues(salesAnalysisText, salesMapComps.length, true);
-  const equityValues = extractCompValues(equityAnalysisText, equityMapComps.length, false);
+  const salesValues  = extractCompValues(salesCompDataText, salesMapComps.length, true);
+  const equityValues = extractCompValues(equityCompDataText, equityMapComps.length, false);
 
   const salesComps: CadSalesComp[] = salesMapComps.map((c, i) => ({
     compNum: c.compNum,
@@ -250,7 +275,7 @@ export async function parseCadEvidencePdf(buffer: Buffer): Promise<CadEvidenceDa
 
   const salesMedian = parseMedianSection(salesAnalysisText);
   const equityMedian = parseMedianSection(equityAnalysisText);
-  const subject = parseSubjectFromAnalysis(salesAnalysisText);
+  const subject = parseSubjectFromAnalysis(salesCompDataText);
   const improvementsUsd = parseImprovementsFromPublicCard(publicCardText);
 
   return {

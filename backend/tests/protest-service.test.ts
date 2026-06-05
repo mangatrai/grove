@@ -63,35 +63,71 @@ async function countProtestNotifications(type?: string): Promise<number> {
   return Number(row?.count ?? 0);
 }
 
-/** Minimal DCAD-style text for parseCadEvidencePdf (pdf layer mocked to return UTF-8). */
+/**
+ * Minimal DCAD-style text for parseCadEvidencePdf.
+ *
+ * Mirrors actual Denton CAD extraction order: PDF text is extracted column-by-column
+ * so each section's data appears BEFORE its heading, and the summary appears AFTER.
+ *
+ * Page 2 (sales analysis): comp column data → Subject block → "COMPARABLE SALES ANALYSIS" → Summary
+ * Page 3 (sales map):      Comp table rows → "MARKET COMPARABLE SALES MAP"
+ * Page 4 (equity analysis): equity comp columns → "SUBJECT EQUITY ANALYSIS" → Summary
+ * Page 5 (equity map):      Equity table rows → "EQUITY COMPARABLES MAP"
+ * Page 6 (public card):     "PUBLIC CARD WITH SKETCH" → improvements value
+ */
 function buildCadEvidenceText(opts?: { assessedLine?: string }): string {
   const assessed = opts?.assessedLine ?? "$600,000";
   return `
-COMPARABLE SALES ANALYSIS
-Subject
-123456
-2020 / 2024
-12000
+999001
+0.25
+A1
+S06
+DC99999
+VB2
+2020 / 2020
 1500.0
-92.0
-$200,000
-${assessed}
+12000
 123 TEST ST
-
-Summary of Indicated Values
-$250,000
-$166
-
-Comp 1
+DALLAS TX 75201
+0.2750
+$200,000
 $750,000
 Comp 1
 2026-03-01
 $450,000
-$600,000
+$150,000
 $650,000
+91.0 $5,000
+$0
 
+Subject
+XY1234
+92.0
+S06
+DC99999
+A1
+2020 / 2024
+12000
+1500.0
+0.2750
+$200,000
+${assessed}
+456 SUBJECT AVE
+DALLAS TX 75201
+123456
+VB2
+
+COMPARABLE SALES ANALYSIS
+Summary of Indicated Values
+Median $650,000
+Value / Sqft Sqft Lot Sqft
+1,500 12,000
+Value
+$433.33
+
+Comp 1 999001 0.25 $450,000 123 Test St
+Dallas TX 75201
 MARKET COMPARABLE SALES MAP
-Comp 1 999001 0.25 $450,000 123 Test St, Dallas TX 75201
 
 SUBJECT EQUITY ANALYSIS
 

@@ -605,18 +605,20 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
     comps.map(async (c) => {
       let beds = c.beds;
       let baths = c.baths;
-      if (c.cadPropertyId && (beds == null || baths == null)) {
+      let sqft = c.sqft;
+      if (c.cadPropertyId && (beds == null || baths == null || sqft == null)) {
         const features = await getDCADImprovementFeatures(c.cadPropertyId, countyHint).catch(() => null);
         if (features) {
           beds = beds ?? features.beds;
           baths = baths ?? features.baths;
+          sqft = sqft ?? features.sqft;
         }
       }
       return {
         cadPropertyId: c.cadPropertyId,
         address: c.address,
         city: c.city,
-        sqft: c.sqft,
+        sqft,
         beds,
         baths,
         yearBuilt: c.yearBuilt,
@@ -772,8 +774,8 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
         if (entry) {
           cadCache[addr] = entry;
           soldCompsCadFetched++;
-          // Fetch beds/baths from DCAD improvement features if CAD search didn't return them
-          if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null)) {
+          // Fetch beds/baths/sqft from DCAD improvement features if CAD search didn't return them
+          if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null || entry.sqft == null)) {
             try {
               await new Promise<void>((resolve) => setTimeout(resolve, 150));
               const features = await getDCADImprovementFeatures(entry.cadAccountId, property.cadProvider === "dcad" ? "Denton" : null);
@@ -782,6 +784,7 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
                   ...cadCache[addr],
                   beds: cadCache[addr].beds ?? features.beds,
                   baths: cadCache[addr].baths ?? features.baths,
+                  sqft: cadCache[addr].sqft ?? features.sqft,
                 };
               }
             } catch (err) {
@@ -821,13 +824,14 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
             cadAccountId: mc.cadAccountId ?? entry.cadAccountId,
           };
           manualUpdated = true;
-          if (entry.cadAccountId != null && (mc.beds == null || mc.baths == null)) {
+          if (entry.cadAccountId != null && (mc.beds == null || mc.baths == null || mc.sqft == null)) {
             const features = await getDCADImprovementFeatures(entry.cadAccountId, property.cadProvider === "dcad" ? "Denton" : null);
             if (features) {
               updatedManual[i] = {
                 ...updatedManual[i],
                 beds: updatedManual[i].beds ?? features.beds,
                 baths: updatedManual[i].baths ?? features.baths,
+                sqft: updatedManual[i].sqft ?? features.sqft,
               };
             }
           }
