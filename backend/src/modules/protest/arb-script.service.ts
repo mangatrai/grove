@@ -1,4 +1,5 @@
 import { getChatAdapter, strongModel } from "../../llm/index.js";
+import { log } from "../../logger.js";
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
 import type { ProtestComp } from "./protest-worksheet.service.js";
 
@@ -152,12 +153,14 @@ export async function generateArbScript(input: ArbScriptInput): Promise<ArbScrip
     { model: strongModel(), maxTokens: 2500 }
   );
 
-  const raw = content.trim() || "{}";
+  // GPT-4o sometimes wraps JSON in ```json … ``` fences despite the prompt — strip them.
+  const raw = content.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim() || "{}";
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    throw new Error("ARB script generation returned invalid JSON");
+    log.error("ARB script: invalid JSON from model", { preview: raw.slice(0, 300) });
+    throw new Error(`ARB script generation returned invalid JSON — model response did not parse. Preview: ${raw.slice(0, 200)}`);
   }
 
   return {

@@ -21,6 +21,7 @@ export type EvidencePacketInput = {
   taxYear: number;
   cadAssessed: number | null;
   avm: number | null;
+  equityMedianUsd: number | null;
   sqft: number | null;
   beds: number | null;
   baths: number | null;
@@ -138,37 +139,48 @@ function drawHeader(doc: Doc, address: string, year: number): number {
 // ── Section: Valuation summary boxes ────────────────────────────────────────
 
 function drawValuationSummary(doc: Doc, input: EvidencePacketInput, y: number): number {
-  const { cadAssessed, avm, strategy } = input;
+  const { cadAssessed, equityMedianUsd, strategy } = input;
+  const targetValue = strategy?.targetValueUsd ?? null;
+  const reductionUsd =
+    cadAssessed != null && targetValue != null ? cadAssessed - targetValue : null;
   const overPct =
-    cadAssessed != null && avm != null && avm > 0
-      ? ((cadAssessed / avm) - 1) * 100
+    cadAssessed != null && equityMedianUsd != null && equityMedianUsd > 0
+      ? ((cadAssessed / equityMedianUsd) - 1) * 100
       : null;
 
   type StatBox = { label: string; value: string; valueColor?: string };
   const boxes: StatBox[] = [
-    { label: "CAD Assessed", value: fmtMoney(cadAssessed) },
-    { label: "AVM Estimate", value: fmtMoney(avm) },
+    { label: "CAD Assessed Value", value: fmtMoney(cadAssessed) },
+    { label: "Requested Value", value: fmtMoney(targetValue), valueColor: CLR.green },
     {
-      label: "Overassessment",
-      value: overPct != null ? `${overPct >= 0 ? "+" : ""}${overPct.toFixed(1)}%` : "—",
-      valueColor: overPct != null && overPct > 0 ? CLR.red : CLR.green
+      label: "DCAD Equity Median",
+      value: equityMedianUsd != null ? fmtMoney(equityMedianUsd) : "—",
     },
-    { label: "Target Value", value: fmtMoney(strategy?.targetValueUsd) }
+    {
+      label: "Reduction Requested",
+      value: reductionUsd != null ? fmtMoney(reductionUsd) : "—",
+      valueColor: reductionUsd != null && reductionUsd > 0 ? CLR.green : CLR.dark
+    },
+    {
+      label: "Overassessment vs Equity",
+      value: overPct != null ? `${overPct >= 0 ? "+" : ""}${overPct.toFixed(1)}%` : "—",
+      valueColor: overPct != null && overPct > 0 ? CLR.red : CLR.dark
+    },
   ];
 
-  const bw = 116;
-  const gap = (PW - boxes.length * bw) / (boxes.length - 1);
-  const bh = 50;
+  const bw = Math.floor(PW / boxes.length) - 4;
+  const gap = Math.floor((PW - boxes.length * bw) / (boxes.length - 1));
+  const bh = 52;
 
   for (let i = 0; i < boxes.length; i++) {
     const bx = ML + i * (bw + gap);
     const box = boxes[i];
     doc.rect(bx, y, bw, bh).fill(CLR.lightGray);
     doc.save().rect(bx, y, bw, bh).strokeColor(CLR.border).lineWidth(0.5).stroke().restore();
-    doc.font("Helvetica").fontSize(8).fillColor(CLR.gray)
-      .text(box.label, bx + 7, y + 7, { width: bw - 14 });
-    doc.font("Helvetica-Bold").fontSize(13).fillColor(box.valueColor ?? CLR.dark)
-      .text(box.value, bx + 7, y + 21, { width: bw - 14 });
+    doc.font("Helvetica").fontSize(7).fillColor(CLR.gray)
+      .text(box.label, bx + 6, y + 6, { width: bw - 12 });
+    doc.font("Helvetica-Bold").fontSize(11).fillColor(box.valueColor ?? CLR.dark)
+      .text(box.value, bx + 6, y + 20, { width: bw - 12 });
   }
   return y + bh + 8;
 }
@@ -433,28 +445,28 @@ function drawSoldCompsTable(doc: Doc, comps: SoldComp[], subjectCadAssessed: num
 // ── Section: Market value bar chart ──────────────────────────────────────────
 
 function drawBarChart(doc: Doc, input: EvidencePacketInput): void {
-  const { dcadComps, cadAssessed, avm, address } = input;
+  const { dcadComps, cadAssessed, address } = input;
   let y = 50;
 
   doc.font("Helvetica-Bold").fontSize(13).fillColor(CLR.dark)
-    .text("Market Value Comparison", ML, y);
+    .text("§41.43 Unequal Appraisal — Assessed Value Comparison", ML, y);
   y += 16;
   doc.font("Helvetica").fontSize(8).fillColor(CLR.gray)
     .text(
-      "Subject AVM vs DCAD comparable market values. Green bars are below subject (support your protest argument).",
+      "DCAD assessed values of comparable properties vs subject. Green bars show comps assessed below subject — supporting unequal appraisal.",
       ML, y, { width: PW }
     );
   y += 20;
 
-  // Subject value: prefer AVM (market-based), fallback to CAD assessed
-  const subjectVal = avm ?? cadAssessed;
+  // Show DCAD assessed values for §41.43 unequal appraisal argument
+  const subjectVal = cadAssessed;
 
   type Bar = { label: string; value: number | null; isSubject: boolean };
   const bars: Bar[] = [
     { label: `${trunc(address, 35)} (Subject)`, value: subjectVal, isSubject: true },
     ...dcadComps.slice(0, 9).map((c) => ({
       label: trunc(c.addressLine1, 35),
-      value: c.marketValueUsd,
+      value: c.assessedValueUsd,
       isSubject: false
     }))
   ];

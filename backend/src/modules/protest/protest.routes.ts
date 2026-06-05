@@ -600,17 +600,31 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
   }
   const year = query.data.year ?? new Date().getUTCFullYear();
   const comps = await adapter.searchByAddress(query.data.address, year);
-  const results: CadSearchResult[] = comps.map((c) => ({
-    cadPropertyId: c.cadPropertyId,
-    address: c.address,
-    city: c.city,
-    sqft: c.sqft,
-    beds: c.beds,
-    baths: c.baths,
-    yearBuilt: c.yearBuilt,
-    assessedValue: c.assessedValue,
-    marketValue: c.marketValue,
-  }));
+  const countyHint = property.cadProvider === "dcad" ? "Denton" : null;
+  const results: CadSearchResult[] = await Promise.all(
+    comps.map(async (c) => {
+      let beds = c.beds;
+      let baths = c.baths;
+      if (c.cadPropertyId && (beds == null || baths == null)) {
+        const features = await getDCADImprovementFeatures(c.cadPropertyId, countyHint).catch(() => null);
+        if (features) {
+          beds = beds ?? features.beds;
+          baths = baths ?? features.baths;
+        }
+      }
+      return {
+        cadPropertyId: c.cadPropertyId,
+        address: c.address,
+        city: c.city,
+        sqft: c.sqft,
+        beds,
+        baths,
+        yearBuilt: c.yearBuilt,
+        assessedValue: c.assessedValue,
+        marketValue: c.marketValue,
+      };
+    })
+  );
   log.info("cad-search", { propertyId: params.data.propertyId, address: query.data.address, count: results.length });
   res.status(200).json({ results, hasAdapter: true });
 });
@@ -888,10 +902,10 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     city: property.city,
     state: property.state,
     cadAssessed,
-    sqft: asNumber(subject?.sqFt),
+    sqft: asNumber(subject?.sqFt) ?? worksheet.cadEvidenceJson?.livingAreaSqft ?? null,
     beds: asNumber(subject?.beds),
     baths: asNumber(subject?.baths),
-    yearBuilt: asNumber(subject?.yearBuilt),
+    yearBuilt: asNumber(subject?.yearBuilt) ?? worksheet.cadEvidenceJson?.yearBuilt ?? null,
     purchasePrice: property.purchasePrice,
     purchaseDate: property.purchaseDate,
     status: worksheet.status,
@@ -1132,15 +1146,17 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown Property";
   const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);
 
+  const equityMedianUsd = worksheet.cadEvidenceJson?.equityAnalysis?.medianIndValueUsd ?? null;
   const packetInput = {
     address,
     taxYear: year,
     cadAssessed,
     avm,
-    sqft: asNumber(subject?.sqFt),
+    equityMedianUsd,
+    sqft: asNumber(subject?.sqFt) ?? worksheet.cadEvidenceJson?.livingAreaSqft ?? null,
     beds: asNumber(subject?.beds),
     baths: asNumber(subject?.baths),
-    yearBuilt: asNumber(subject?.yearBuilt),
+    yearBuilt: asNumber(subject?.yearBuilt) ?? worksheet.cadEvidenceJson?.yearBuilt ?? null,
     hearingDate: worksheet.hearingDate,
     worksheetStatus: worksheet.status,
     strategy: worksheet.strategyJson,
@@ -1427,10 +1443,10 @@ protestRouter.post("/:propertyId/generate-arb-script", async (req: Authenticated
     city: property.city,
     state: property.state,
     cadAssessed,
-    sqft: asNumber(subject?.sqFt),
+    sqft: asNumber(subject?.sqFt) ?? worksheet.cadEvidenceJson?.livingAreaSqft ?? null,
     beds: asNumber(subject?.beds),
     baths: asNumber(subject?.baths),
-    yearBuilt: asNumber(subject?.yearBuilt),
+    yearBuilt: asNumber(subject?.yearBuilt) ?? worksheet.cadEvidenceJson?.yearBuilt ?? null,
     purchasePrice: property.purchasePrice,
     purchaseDate: property.purchaseDate,
     hearingDate: worksheet.hearingDate,

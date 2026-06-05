@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-160 — Tax Protest: ARB script crash + sqft fallback + CAD search enrichment + evidence packet AVM removal (2026-06-05)
+
+**ARB script crash:** `generateArbScript` (arb-script.service.ts) threw "invalid JSON" because GPT-4o wraps JSON responses in ```json…``` markdown fences even when the prompt says not to. Fixed by stripping leading/trailing fences before JSON.parse. Added log.error with response preview for future debugging.
+
+**sqft/yearBuilt from CAD evidence:** When Redfin valuation detail is missing sqft or yearBuilt (common), the evidence packet, ARB script, and chat agent prompt all showed "—". Added fallback to `worksheet.cadEvidenceJson.livingAreaSqft` and `.yearBuilt` in the three places in protest.routes.ts that assemble these fields.
+
+**CAD search beds/baths enrichment:** The cad-search endpoint returned beds/baths as null for DCAD results because the search API doesn't include improvement details. Now calls `getDCADImprovementFeatures()` for any result where beds or baths are null (same pattern already used in sold-comps refresh). Results are fetched in parallel.
+
+**Evidence packet — removed AVM:** The valuation summary showed "AVM Estimate" (Redfin automated value) which is not valid Texas ARB evidence. Replaced with: CAD Assessed Value, Requested Value, Reduction Requested, DCAD Equity Median, Overassessment vs Equity. DCAD equity median comes from `cadEvidenceJson.equityAnalysis.medianIndValueUsd`. Bar chart retitled "§41.43 Unequal Appraisal — Assessed Value Comparison" and now plots assessed values (not market values) to support the unequal appraisal argument. Both PDF and DOCX updated.
+
+**Files changed:** `arb-script.service.ts`, `protest.routes.ts`, `protest-evidence.service.ts`, `protest-evidence-docx.service.ts`
+
+---
+
 ## FIX-159 — Tax Protest: JSONB double-encode bug + data repair migration + test coverage (2026-06-05)
 
 **Bug:** Five write functions in `protest-worksheet.service.ts` passed `JSON.stringify(value)` into JSONB columns. The postgres driver re-serialized the string as a JSONB text value, causing reads to return `null` / `[]` instead of the real data. Silent data loss — no errors logged.

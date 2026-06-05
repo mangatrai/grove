@@ -103,10 +103,12 @@ function blankLine(): Paragraph {
 // ── Section 1: ARB Board Packet ───────────────────────────────────────────────
 
 function buildValuationTable(input: EvidencePacketInput): Table {
-  const { cadAssessed, avm, strategy } = input;
+  const { cadAssessed, equityMedianUsd, strategy } = input;
+  const targetValue = strategy?.targetValueUsd ?? null;
+  const reductionUsd = cadAssessed != null && targetValue != null ? cadAssessed - targetValue : null;
   const overPct =
-    cadAssessed != null && avm != null && avm > 0
-      ? `${(((cadAssessed / avm) - 1) * 100).toFixed(1)}%`
+    cadAssessed != null && equityMedianUsd != null && equityMedianUsd > 0
+      ? `${(((cadAssessed / equityMedianUsd) - 1) * 100).toFixed(1)}%`
       : "—";
 
   return new Table({
@@ -114,18 +116,20 @@ function buildValuationTable(input: EvidencePacketInput): Table {
     rows: [
       new TableRow({
         children: [
-          headerCell("CAD Assessed"),
-          headerCell("AVM Estimate"),
-          headerCell("Overassessment"),
-          headerCell("Target Value"),
+          headerCell("CAD Assessed Value"),
+          headerCell("Requested Value"),
+          headerCell("Reduction Requested"),
+          headerCell("DCAD Equity Median"),
+          headerCell("Overassessment vs Equity"),
         ],
       }),
       new TableRow({
         children: [
           dataCell(fmtMoney(cadAssessed), true, true),
-          dataCell(fmtMoney(avm), true, true),
+          dataCell(fmtMoney(targetValue), true, true),
+          dataCell(reductionUsd != null ? fmtMoney(reductionUsd) : "—", true, true),
+          dataCell(equityMedianUsd != null ? fmtMoney(equityMedianUsd) : "—", true, true),
           dataCell(overPct, true, true),
-          dataCell(fmtMoney(strategy?.targetValueUsd), true, true),
         ],
       }),
     ],
