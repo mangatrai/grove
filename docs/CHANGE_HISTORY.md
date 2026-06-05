@@ -26,9 +26,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 **Impact:** CAD evidence uploads and manual sold comps were stored but unreadable, so evidence packets silently omitted those sections.
 
-**Fixes:**
-- `protest-worksheet.service.ts`: Removed `JSON.stringify()` wrapper from `saveCadEvidence`, `saveManualSoldComps`, `saveSoldCompsCadCache`, `saveArbScript` — pass native JS objects/arrays directly.
-- `backend/db/migrations/0067_fix_jsonb_double_encode.sql`: Data repair migration — uses `jsonb_typeof(col) = 'string'` to detect corrupted rows and `(col #>> '{}')::jsonb` to decode them in-place. Safe no-op on clean rows.
+**Fix:** `protest-worksheet.service.ts` — removed `JSON.stringify()` wrapper from `saveCadEvidence`, `saveManualSoldComps`, `saveSoldCompsCadCache`, `saveArbScript`. No data repair migration needed: all affected columns were introduced in v5 migrations (0063, 0066) and never reached production.
 
 **Tests added:** `backend/tests/protest-service.test.ts` (24 new tests) covering worksheet state machine, manual comp CRUD, conversation persistence, deadline notifications, and CAD parser. `backend/tests/protest.test.ts` extended with 13 HTTP route integration tests (CAD comps, worksheet PATCH, CAD evidence upload/delete). Total backend: 551 tests.
 
