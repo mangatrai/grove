@@ -18,6 +18,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-159 — Tax Protest: JSONB double-encode bug + data repair migration + test coverage (2026-06-05)
+
+**Bug:** Five write functions in `protest-worksheet.service.ts` passed `JSON.stringify(value)` into JSONB columns. The postgres driver re-serialized the string as a JSONB text value, causing reads to return `null` / `[]` instead of the real data. Silent data loss — no errors logged.
+
+**Affected columns (all JSONB):** `cad_evidence_json`, `manual_sold_comps_json`, `sold_comps_cad_json`, `arb_script_json`. (`excluded_sold_comps_json` is TEXT — `JSON.stringify` is correct there.)
+
+**Impact:** CAD evidence uploads and manual sold comps were stored but unreadable, so evidence packets silently omitted those sections.
+
+**Fixes:**
+- `protest-worksheet.service.ts`: Removed `JSON.stringify()` wrapper from `saveCadEvidence`, `saveManualSoldComps`, `saveSoldCompsCadCache`, `saveArbScript` — pass native JS objects/arrays directly.
+- `backend/db/migrations/0067_fix_jsonb_double_encode.sql`: Data repair migration — uses `jsonb_typeof(col) = 'string'` to detect corrupted rows and `(col #>> '{}')::jsonb` to decode them in-place. Safe no-op on clean rows.
+
+**Tests added:** `backend/tests/protest-service.test.ts` (24 new tests) covering worksheet state machine, manual comp CRUD, conversation persistence, deadline notifications, and CAD parser. `backend/tests/protest.test.ts` extended with 13 HTTP route integration tests (CAD comps, worksheet PATCH, CAD evidence upload/delete). Total backend: 551 tests.
+
+## FIX-158 — E2E: ESPP import modal test updated for topbar button ambiguity (2026-06-04)
+
+**GitHub:** closes #84
+
+After the topbar "New import" button was added (I-2 async import), `getByRole('button', { name: 'Import' })` resolved to two elements. Updated selector to `{ exact: true }`, scoped `Purchase PDF` / `Allocation CSV` assertions to the dialog, and updated submit button label to its actual value `Import Files`.
+
+**File:** `e2e/espp.spec.ts`
+
 ## FIX-156 — Net Worth: Trend and Balance Sheet refresh buttons decoupled (2026-06-04)
 
 **GitHub:** closes #81

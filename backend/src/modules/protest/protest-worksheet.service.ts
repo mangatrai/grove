@@ -404,7 +404,7 @@ export async function saveSoldCompsCadCache(
         SET sold_comps_cad_json = ?,
             updated_at = NOW()
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
-    JSON.stringify(cache),
+    cache,
     propertyId,
     householdId,
     taxYear
@@ -579,7 +579,7 @@ export async function saveCadEvidence(
             cad_evidence_filename = ?,
             updated_at = NOW()
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
-    JSON.stringify(data),
+    data,
     filename,
     propertyId,
     householdId,
@@ -659,7 +659,7 @@ export async function saveArbScript(
         SET arb_script_json = ?,
             updated_at = NOW()
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
-    JSON.stringify(script),
+    script,
     propertyId,
     householdId,
     taxYear
@@ -677,7 +677,7 @@ export async function saveManualSoldComps(
         SET manual_sold_comps_json = ?,
             updated_at = NOW()
       WHERE property_id = ? AND household_id = ? AND tax_year = ?`,
-    JSON.stringify(comps),
+    comps,
     propertyId,
     householdId,
     taxYear
