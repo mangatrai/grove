@@ -381,6 +381,7 @@ export async function triggerCadBackfill(
     await getOrCreateWorksheet(propertyId, householdId, year);
     await saveCADComps(propertyId, householdId, year, comps, address);
     await saveCadSubjectIds(propertyId, provider, comps, address);
+    await enrichAndUpdateCadCompsImprovement(propertyId, householdId, year, comps, address, provider);
     log.info("triggerCadBackfill: done", { propertyId, year, count: comps.length, provider });
   } else {
     log.info("triggerCadBackfill: no comps found", { propertyId, address, provider });
@@ -395,6 +396,73 @@ export async function triggerCadBackfill(
     if (fetched > 0) {
       await saveSoldCompsCadCache(propertyId, householdId, year, cache);
       log.info("triggerCadBackfill: enriched sold comps", { propertyId, year, fetched });
+    }
+  }
+}
+
+/**
+ * After bulk save, enrich each comp row with sqft from improvement features API.
+ * Always prefers improvement-features sqft (more accurate than search-result placeholder).
+ * Appends pool/spa notes to the notes column when Misc Imp entries are found.
+ */
+async function enrichAndUpdateCadCompsImprovement(
+  propertyId: string,
+  householdId: string,
+  taxYear: number,
+  comps: CadProperty[],
+  searchAddress: string,
+  cadProvider: string
+): Promise<void> {
+  const countyHint = cadProvider === "dcad" ? "Denton" : null;
+  const houseNum = searchAddress?.match(/^\d+/)?.[0];
+  const subjectId = houseNum
+    ? (comps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? comps[0])?.cadPropertyId
+    : comps[0]?.cadPropertyId;
+  const toEnrich = subjectId ? comps.filter((c) => c.cadPropertyId !== subjectId) : comps;
+
+  for (const comp of toEnrich) {
+    if (comp.accountId == null) continue;
+    try {
+      await new Promise<void>((resolve) => setTimeout(resolve, 150));
+      const features = await getDCADImprovementFeatures(comp.accountId, countyHint);
+      if (!features) continue;
+
+      const newSqft = features.sqft != null ? Math.round(features.sqft) : null;
+      const poolNote =
+        features.miscImprovements.length > 0
+          ? features.miscImprovements
+              .map((m) => {
+                const parts = [m.description];
+                if (m.yearBuilt) parts.push(`built ${m.yearBuilt}`);
+                if (m.valueUsd != null) parts.push(`$${Math.round(m.valueUsd).toLocaleString()}`);
+                return parts.join(", ");
+              })
+              .join("; ")
+          : null;
+
+      await qExec(
+        `UPDATE protest_comp_cad
+            SET sqft         = COALESCE(?, sqft),
+                beds         = COALESCE(beds, ?),
+                baths        = COALESCE(baths, ?),
+                per_sqft_usd = CASE WHEN ? IS NOT NULL AND assessed_value_usd IS NOT NULL AND ? > 0
+                                    THEN assessed_value_usd::numeric / ?
+                                    ELSE per_sqft_usd END,
+                notes        = CASE WHEN notes IS NULL AND ? IS NOT NULL THEN ? ELSE notes END,
+                fetched_at   = NOW()
+          WHERE property_id = ? AND household_id = ? AND tax_year = ? AND cad_property_id = ?`,
+        newSqft,
+        features.beds,
+        features.baths,
+        newSqft, newSqft, newSqft,
+        poolNote, poolNote,
+        propertyId, householdId, taxYear, comp.cadPropertyId
+      );
+    } catch (err) {
+      log.warn("enrichAndUpdateCadCompsImprovement: failed", {
+        cadPropertyId: comp.cadPropertyId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

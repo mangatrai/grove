@@ -18,6 +18,10 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-171 — Tax Protest: extend backfill to enrich comp sqft + pool notes via improvement API (2026-06-06)
+
+`triggerCadBackfill` in `protest-worksheet.service.ts` now calls `getDCADImprovementFeatures` for every comp after the bulk DCAD address search. New function `enrichAndUpdateCadCompsImprovement` iterates non-subject comps, fetches improvement features, and UPDATEs `protest_comp_cad` with: corrected sqft (always prefer improvement-features over raw search result), beds/baths (fill-in if null), and pool/spa notes in the `notes` column when Misc Imp entries are found. Previously this enrichment only happened in the real-time manual search UI path — historically stored comps with sqft=1 required the user to manually re-add them. DCAD is a free public API; 20–30 calls per property creation is not a concern. File: `protest-worksheet.service.ts`. GitHub: https://github.com/mangatrai/grove/issues/92
+
 ## FIX-170 — Tax Protest: 6 bug fixes + pool detection feature (2026-06-05)
 
 **Bug 1 — CRITICAL: Property ID overwrite in `saveCadSubjectIds`**
