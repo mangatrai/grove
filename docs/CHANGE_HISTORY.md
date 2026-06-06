@@ -18,6 +18,31 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-170 — Tax Protest: 6 bug fixes + pool detection feature (2026-06-05)
+
+**Bug 1 — CRITICAL: Property ID overwrite in `saveCadSubjectIds`**
+Removed `?? comps[0]` fallback. When subject not found by house-number match in DCAD search results, function now logs a warning and exits cleanly — never overwrites `property.cad_property_id` with a random comp's CAD ID. File: `protest-worksheet.service.ts`.
+
+**Bug 2 — Stale 2025 assessed value in evidence packet**
+`cadAssessed` in the evidence-packet route now prefers `cadEv?.assessedValueUsd` (from uploaded CAD evidence PDF, always current year) over `property.valuationDetail.taxCurrent.assessedValue` (Redfin data, can lag a year). File: `protest.routes.ts`.
+
+**Bug 3 — ARB script JSON parse failure**
+Model occasionally returns JS numeric literal syntax (`1_077_571`) which is valid JS but invalid JSON. Added `replace(/(\d)_(\d)/g, "$1$2")` to the raw-cleanup step before `JSON.parse`. File: `arb-script.service.ts`.
+
+**Bug 4 — sqft = 1 for comps with pools**
+`getDCADImprovementFeatures` now sums sqft only from Residential improvements (excludes Misc Imp entries like pools). `mapProperty` treats sqft ≤ 0 as null. The comp-search enrichment triggers when sqft is null or ≤ 1 (DCAD placeholder), and now always overwrites sqft with improvement-features value when available. Files: `dcad.service.ts`, `protest.routes.ts`.
+
+**Bug 5 — Research notes leaking into ARB hearing packet (Document B)**
+Removed `soldCompsNotes` rendering from Document B's Section 4B (Recent Market Sales table). Research notes are private and belong in Document A only. File: `protest-evidence-docx.service.ts`.
+
+**Bug 6 — Account creation date default shows UTC date (wrong day after ~6pm CST)**
+`SettingsPage.tsx` was using `new Date().toISOString().slice(0, 10)` (UTC) for `initialBalanceDate` default. Replaced with `localDateStr()` (uses local timezone `getFullYear/getMonth/getDate`) — pattern already used in `TransactionsPage.tsx`. File: `frontend/src/pages/SettingsPage.tsx`.
+
+**Feature 7 — Pool / Misc Imp detection from DCAD improvements**
+`getDCADImprovementFeatures` now collects Misc Imp entries (pools, spas, outbuildings) into a `miscImprovements: MiscImprovement[]` array. Returned in `GET /:propertyId/cad-search` results as `miscImprovements` per comp so the UI can display pool/spa presence. Files: `dcad.service.ts`, `protest.routes.ts`.
+
+---
+
 ## CR-169 — Tax Protest: Evidence packet restructured into two purpose-built documents (2026-06-05)
 
 **Evidence packet DOCX now generates two documents in one file:**

@@ -408,9 +408,12 @@ export async function saveCadSubjectIds(
 ): Promise<void> {
   const houseNum = searchAddress.match(/^\d+/)?.[0];
   const subject = houseNum
-    ? (comps.find((c) => c.address != null && c.address.startsWith(houseNum)) ?? comps[0])
-    : comps[0];
-  if (!subject?.accountId) return;
+    ? comps.find((c) => c.address != null && c.address.startsWith(houseNum))
+    : null;
+  if (!subject?.accountId) {
+    log.warn("saveCadSubjectIds: no subject match in search results, skipping cad_property_id update", { propertyId, searchAddress });
+    return;
+  }
   await qExec(
     `UPDATE property SET cad_property_id = ?, cad_account_id = ?, cad_provider = ? WHERE id = ?`,
     subject.cadPropertyId,

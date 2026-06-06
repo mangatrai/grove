@@ -476,7 +476,7 @@ function identifySalesCompIssues(c: CadSalesComp): string {
 // ── Document B Section 4: Taxpayer's Supporting Evidence ──────────────────────
 
 function buildTaxpayerEvidenceSection(input: EvidencePacketInput, subjectPpsf: number | null): (Paragraph | Table)[] {
-  const { dcadComps, soldComps, manualSoldComps, soldCompsNotes } = input;
+  const { dcadComps, soldComps, manualSoldComps } = input;
   const parts: (Paragraph | Table)[] = [h2("Section 4 — Taxpayer's Supporting Evidence")];
 
   // 4A: Equity comps (DCAD-verified)
@@ -566,7 +566,6 @@ function buildTaxpayerEvidenceSection(input: EvidencePacketInput, subjectPpsf: n
       const c = allSoldComps[i];
       const shade = i % 2 === 0 ? "FFFFFF" : "f9fafb";
       const addr = c.address ?? "—";
-      const note = soldCompsNotes[addr];
       const ratio = c.cadAssessedValueUsd != null && c.soldPrice != null && c.soldPrice > 0
         ? `${((c.cadAssessedValueUsd / c.soldPrice) * 100).toFixed(0)}%` : "—";
       const pps = "pricePerSqft" in c ? (c as SoldComp).pricePerSqft : (c as { pricePerSqft: number | null }).pricePerSqft;
@@ -582,13 +581,6 @@ function buildTaxpayerEvidenceSection(input: EvidencePacketInput, subjectPpsf: n
           dataCell(ratio, { right: true, shade }),
         ],
       }));
-      if (note) {
-        rows.push(new TableRow({
-          children: [
-            new TableCell({ columnSpan: 8, shading: { fill: "fef9c3" }, children: [new Paragraph({ children: [new TextRun({ text: `Note: ${note}`, italics: true, size: 16 })] })] }),
-          ],
-        }));
-      }
     }
 
     parts.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows }));

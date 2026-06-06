@@ -40,6 +40,13 @@ import { BackupRestoreSection } from "./settings/BackupRestoreSection";
 import { GroveLoader } from "../components/GroveLoader";
 import { AddPropertyModal } from "../components/AddPropertyModal";
 
+function localDateStr(d = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications"] as const;
 type SettingsTab = (typeof TABS)[number];
 
@@ -446,7 +453,7 @@ export function SettingsPage() {
     belongsTo: "household" as BelongsToChoice,
     status: "active" as "active" | "closed",
     initialBalance: "",
-    initialBalanceDate: new Date().toISOString().slice(0, 10)
+    initialBalanceDate: localDateStr()
   });
   const [addPropertyModal, setAddPropertyModal] = useState<{
     open: boolean;
@@ -745,7 +752,7 @@ export function SettingsPage() {
       // Initial balance only sent on creation (not on edit — use Net Worth page to update)
       if (!accountDraft.id && parsedInitialBalance !== null && Number.isFinite(parsedInitialBalance)) {
         body.initialBalance = parsedInitialBalance;
-        body.initialBalanceDate = accountDraft.initialBalanceDate || new Date().toISOString().slice(0, 10);
+        body.initialBalanceDate = accountDraft.initialBalanceDate || localDateStr();
       }
       let newAccountId: string | null = null;
       if (accountDraft.id) {
@@ -776,7 +783,7 @@ export function SettingsPage() {
         belongsTo: "household",
         status: "active",
         initialBalance: "",
-        initialBalanceDate: new Date().toISOString().slice(0, 10)
+        initialBalanceDate: localDateStr()
       });
 
       if (justCreatedMortgage) {
@@ -1901,7 +1908,7 @@ export function SettingsPage() {
                         belongsTo: "household",
                         status: "active",
                         initialBalance: "",
-                        initialBalanceDate: new Date().toISOString().slice(0, 10)
+                        initialBalanceDate: localDateStr()
                       })
                     }
                   >
@@ -1974,7 +1981,7 @@ export function SettingsPage() {
                                     : "household",
                                 status: a.status === "closed" ? "closed" : "active",
                                 initialBalance: "",
-                                initialBalanceDate: new Date().toISOString().slice(0, 10)
+                                initialBalanceDate: localDateStr()
                               })
                             }
                           >

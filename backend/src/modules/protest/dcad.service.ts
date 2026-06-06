@@ -177,7 +177,7 @@ function mapProperty(row: Record<string, unknown>): DCADProperty | null {
     assessedValue: asNumber(row.appraisedValue) ?? asNumber(row.assessedValue) ?? asNumber(row.assessed_value),
     marketValue: asNumber(row.marketValue) ?? asNumber(row.market_value),
     landValue: asNumber(row.landValue) ?? asNumber(row.land_value),
-    sqft: asNumber(row.sqft) ?? asNumber(row.improvementSqft) ?? asNumber(row.livingArea),
+    sqft: (() => { const s = asNumber(row.sqft) ?? asNumber(row.improvementSqft) ?? asNumber(row.livingArea); return s != null && s > 0 ? s : null; })(),
     beds: asNumber(row.beds) ?? asNumber(row.bedrooms),
     baths: asNumber(row.baths) ?? asNumber(row.bathrooms),
     yearBuilt: asNumber(row.yearBuilt),
@@ -416,12 +416,14 @@ export async function getDCADTaxable(
   }
 }
 
-/** Beds, baths, and sqft (livingArea) from DCAD for a property account.
- *  Two-step: /improvement list (sqft from livingArea) → imprvID → /improvement/{imprvID}/features (beds/baths) */
+export type MiscImprovement = { description: string; valueUsd: number | null; yearBuilt: number | null };
+
+/** Beds, baths, sqft (livingArea), and Misc Imp features (pools, spa, etc.) from DCAD.
+ *  Two-step: /improvement list → imprvID → /improvement/{imprvID}/features (beds/baths) */
 export async function getDCADImprovementFeatures(
   pAccountId: number,
   county: string | null | undefined
-): Promise<{ beds: number | null; baths: number | null; sqft: number | null } | null> {
+): Promise<{ beds: number | null; baths: number | null; sqft: number | null; miscImprovements: MiscImprovement[] } | null> {
   const office = countyToOffice(county);
   try {
     const token = await getToken(office);
@@ -436,15 +438,27 @@ export async function getDCADImprovementFeatures(
     const improvements = extractRows(improvBody);
     if (!improvements.length) return null;
 
-    // Prefer "MA" (main area) type; fall back to first improvement
-    const primary = improvements.find(
-      (r) => r.imprvDetailType === "MA" || r.imprvType === "MA"
-    ) ?? improvements[0];
+    // Separate Residential from Misc Imp (pools, spas, outbuildings, etc.)
+    const residentialImprovements = improvements.filter(
+      (r) => asString(r.imprvDescription)?.toLowerCase() !== "misc imp"
+    );
+    const miscImprovements: MiscImprovement[] = improvements
+      .filter((r) => asString(r.imprvDescription)?.toLowerCase() === "misc imp")
+      .map((r) => ({
+        description: asString(r.imprvSpecificDescription) ?? asString(r.imprvDescription) ?? "Unknown",
+        valueUsd: asNumber(r.improvementValue),
+        yearBuilt: asNumber(r.effYearBuilt) ?? asNumber(r.actualYearBuilt) ?? asNumber(r.yearBuilt),
+      }));
 
-    // livingArea is on the improvement list row — aggregate all improvements for total sqft
-    const sqft = improvements.reduce<number | null>((sum, r) => {
+    // Prefer "MA" (main area) type from residential improvements; fall back to first residential
+    const primary = residentialImprovements.find(
+      (r) => r.imprvDetailType === "MA" || r.imprvType === "MA"
+    ) ?? residentialImprovements[0] ?? improvements[0];
+
+    // Sum sqft only from Residential improvements — excludes pool/spa gross area from living sqft
+    const sqft = residentialImprovements.reduce<number | null>((sum, r) => {
       const v = asNumber(r.livingArea) ?? asNumber(r.improvementSqft) ?? asNumber(r.sqft);
-      if (v == null) return sum;
+      if (v == null || v <= 0) return sum;
       return (sum ?? 0) + v;
     }, null);
 
@@ -452,7 +466,7 @@ export async function getDCADImprovementFeatures(
       ?? asNumber(primary.imprvID) ?? asNumber(primary.improvementID) ?? asNumber(primary.id);
     if (!imprvId) {
       log.warn("DCAD improvement list: no imprvID found", { pAccountId, firstKey: Object.keys(primary)[0] });
-      return { beds: null, baths: null, sqft };
+      return { beds: null, baths: null, sqft, miscImprovements };
     }
 
     // Step 2: get features for that improvement — contains beds and baths
@@ -460,7 +474,7 @@ export async function getDCADImprovementFeatures(
     log.debug("DCAD improvement features request", { pAccountId, imprvId, url: featUrl });
     const featRes = await fetch(featUrl, { headers: { ...BROWSER_HEADERS, authorization: token } });
     log.debug("DCAD improvement features response", { pAccountId, imprvId, status: featRes.status });
-    if (!featRes.ok || featRes.status === 204) return { beds: null, baths: null, sqft };
+    if (!featRes.ok || featRes.status === 204) return { beds: null, baths: null, sqft, miscImprovements };
     const featBody = await featRes.json() as unknown;
     const rows = extractRows(featBody);
 
@@ -479,8 +493,8 @@ export async function getDCADImprovementFeatures(
         }
       }
     }
-    log.debug("DCAD improvement features parsed", { pAccountId, imprvId, beds, baths, sqft });
-    return { beds, baths, sqft };
+    log.debug("DCAD improvement features parsed", { pAccountId, imprvId, beds, baths, sqft, miscImprovements: miscImprovements.length });
+    return { beds, baths, sqft, miscImprovements };
   } catch (err) {
     log.error("DCAD improvement features failed", { err: err instanceof Error ? err.message : String(err), pAccountId });
     return null;

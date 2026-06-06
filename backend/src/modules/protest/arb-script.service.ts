@@ -180,8 +180,12 @@ export async function generateArbScript(input: ArbScriptInput): Promise<ArbScrip
     { model: strongModel(), maxTokens: 4000 }
   );
 
-  // GPT-4o sometimes wraps JSON in ```json … ``` fences despite the prompt — strip them.
-  const raw = content.trim().replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim() || "{}";
+  // Strip markdown fences (GPT-4o sometimes wraps despite the prompt) and JS numeric separators
+  // e.g. 1_077_571 is valid JS but not valid JSON — replace (\d)_(\d) globally
+  const raw = content.trim()
+    .replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "")
+    .replace(/(\d)_(\d)/g, "$1$2")
+    .trim() || "{}";
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>;

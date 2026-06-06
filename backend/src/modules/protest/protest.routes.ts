@@ -565,6 +565,7 @@ type CadSearchResult = {
   yearBuilt: number | null;
   assessedValue: number | null;
   marketValue: number | null;
+  miscImprovements: { description: string; valueUsd: number | null; yearBuilt: number | null }[];
 };
 
 protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, res) => {
@@ -602,12 +603,16 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
       let beds = c.beds;
       let baths = c.baths;
       let sqft = c.sqft;
-      if (c.accountId != null && (beds == null || baths == null || sqft == null)) {
+      let miscImprovements: { description: string; valueUsd: number | null; yearBuilt: number | null }[] = [];
+      // Enrich when any field is missing OR sqft is suspiciously small (DCAD sometimes returns 0 or 1 as placeholder)
+      if (c.accountId != null && (beds == null || baths == null || sqft == null || (sqft != null && sqft <= 1))) {
         const features = await getDCADImprovementFeatures(c.accountId, countyHint).catch(() => null);
         if (features) {
           beds = beds ?? features.beds;
           baths = baths ?? features.baths;
-          sqft = sqft ?? (features.sqft != null ? Math.round(features.sqft) : null);
+          // Always prefer improvement-features sqft when available — more accurate than search result placeholder
+          sqft = features.sqft != null ? Math.round(features.sqft) : sqft;
+          miscImprovements = features.miscImprovements;
         }
       }
       return {
@@ -620,6 +625,7 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
         yearBuilt: c.yearBuilt,
         assessedValue: c.assessedValue,
         marketValue: c.marketValue,
+        miscImprovements,
       };
     })
   );
@@ -1101,7 +1107,6 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const detail = asRecord(property.valuationDetail);
   const subject = asRecord(detail?.subject);
   const taxCurrent = asRecord(detail?.taxCurrent);
-  const cadAssessed = asNumber(taxCurrent?.assessedValue);
   const avm = (typeof detail?.estimate === "number" ? detail.estimate : null) ?? property.latestValueUsd;
 
   const rawSoldComps = Array.isArray(detail?.comps) ? (detail.comps as unknown[]) : [];
@@ -1114,6 +1119,8 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);
 
   const cadEv = worksheet.cadEvidenceJson;
+  // Prefer CAD evidence (uploaded from DCAD — always current year) over Redfin which can lag by a year
+  const cadAssessed = cadEv?.assessedValueUsd ?? asNumber(taxCurrent?.assessedValue);
   const equityMedianUsd = cadEv?.equityAnalysis?.medianIndValueUsd ?? null;
   const packetInput = {
     address,
