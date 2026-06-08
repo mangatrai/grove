@@ -483,13 +483,14 @@ export async function saveCadSubjectIds(
     return;
   }
   await qExec(
-    `UPDATE property SET cad_property_id = ?, cad_account_id = ?, cad_provider = ? WHERE id = ?`,
+    `UPDATE property SET cad_property_id = ?, cad_account_id = ?, cad_provider = ?, cad_assessed_value_usd = ? WHERE id = ?`,
     subject.cadPropertyId,
     subject.accountId,
     cadProvider,
+    subject.assessedValue ?? null,
     propertyId
   );
-  log.info("saveCadSubjectIds: stored", { propertyId, cadPropertyId: subject.cadPropertyId, cadAccountId: subject.accountId, cadProvider });
+  log.info("saveCadSubjectIds: stored", { propertyId, cadPropertyId: subject.cadPropertyId, cadAccountId: subject.accountId, cadProvider, cadAssessedValueUsd: subject.assessedValue });
 }
 
 export async function saveSoldCompsCadCache(

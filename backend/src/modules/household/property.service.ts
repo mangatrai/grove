@@ -33,6 +33,7 @@ export type PropertyRecord = {
   cadPropertyId: string | null;
   cadAccountId: number | null;
   cadProvider: string | null;
+  cadAssessedValueUsd: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -74,6 +75,7 @@ type PropertyRow = {
   cad_property_id: string | null;
   cad_account_id: number | null;
   cad_provider: string | null;
+  cad_assessed_value_usd: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -114,6 +116,7 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     cadPropertyId: row.cad_property_id ?? null,
     cadAccountId: row.cad_account_id ?? null,
     cadProvider: row.cad_provider ?? null,
+    cadAssessedValueUsd: row.cad_assessed_value_usd != null ? Number(row.cad_assessed_value_usd) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

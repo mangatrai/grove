@@ -866,7 +866,7 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   const detail = asRecord(property.valuationDetail);
   const subject = asRecord(detail?.subject);
   const taxCurrent = asRecord(detail?.taxCurrent);
-  const cadAssessed = asNumber(taxCurrent?.assessedValue);
+  const cadAssessed = worksheet.cadEvidenceJson?.assessedValueUsd ?? property.cadAssessedValueUsd ?? asNumber(taxCurrent?.assessedValue);
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown property";
   const equityComps = await listWorksheetComps(property.id, householdId, year);
   const priorWorksheet = await getWorksheet(property.id, householdId, year - 1);
@@ -1121,8 +1121,8 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   const safeAddr = address.replace(/[^a-zA-Z0-9 ,]/g, "").replace(/\s+/g, "_").slice(0, 40);
 
   const cadEv = worksheet.cadEvidenceJson;
-  // Prefer CAD evidence (uploaded from DCAD — always current year) over Redfin which can lag by a year
-  const cadAssessed = cadEv?.assessedValueUsd ?? asNumber(taxCurrent?.assessedValue);
+  // Prefer CAD evidence PDF → DCAD-stored value → Redfin (Redfin taxCurrent can lag by a year)
+  const cadAssessed = cadEv?.assessedValueUsd ?? property.cadAssessedValueUsd ?? asNumber(taxCurrent?.assessedValue);
   const equityMedianUsd = cadEv?.equityAnalysis?.medianIndValueUsd ?? null;
   const packetInput = {
     address,
@@ -1196,8 +1196,8 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
   const pad = (s: string | null | undefined, w: number) =>
     String(s ?? "—").padEnd(w).slice(0, w);
 
-  // Assessed value — prefer CAD evidence PDF (authoritative) over Redfin
-  const proposedAssessed: number | null = cadEv?.assessedValueUsd ?? vd?.taxCurrent?.assessedValue ?? null;
+  // Assessed value — prefer CAD evidence PDF → DCAD-stored value → Redfin (Redfin taxCurrent can lag a year)
+  const proposedAssessed: number | null = cadEv?.assessedValueUsd ?? property.cadAssessedValueUsd ?? (vd?.taxCurrent?.assessedValue ?? null);
   const redfinEstimate: number | null = vd?.estimate ?? null;
   const subjectSqft: number | null = cadEv?.livingAreaSqft ?? (subject?.sqFt ?? null);
   const subjectPerSqft: number | null =
@@ -1222,7 +1222,7 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
       : null;
 
   // Sold comps: merge Redfin comps (prices) + soldCompsCadJson (assessed values)
-  const excluded = new Set<string>(worksheet ? (await getExcludedSoldComps(worksheet.id, householdId)) : []);
+  const excluded = new Set<string>(worksheet ? (await getExcludedSoldComps(property.id, householdId, year)) : []);
   const redfinComps = (vd?.comps ?? []).filter((c) => !excluded.has(c.address));
   const cadSoldCache = worksheet?.soldCompsCadJson ?? {};
 

@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-173 — Tax Protest: protest-brief crash + stale DCAD assessed value (2026-06-08)
+
+**protest-brief: UNDEFINED_VALUE crash fixed (critical)**
+`GET /:propertyId/protest-brief` called `getExcludedSoldComps(worksheet.id, householdId)` — two bugs in one line: (a) `worksheet.id` is the worksheet UUID not the property ID, and (b) the required `taxYear` third argument was missing, passing `undefined` to postgres. The postgres driver throws `UNDEFINED_VALUE` which then corrupts the connection pool, causing every subsequent DB call to fail with 500 until the process restarts. Fix: corrected to `getExcludedSoldComps(property.id, householdId, year)`. File: `protest.routes.ts`.
+
+**property.cad_assessed_value_usd — new column (migration 0067)**
+`saveCadSubjectIds` previously stored only `cad_property_id`, `cad_account_id`, and `cad_provider` on the `property` row, discarding the DCAD-sourced `assessedValue`. This meant the ARB script, evidence packet, and protest brief all fell back to Redfin's `taxCurrent.assessedValue` (which lags by one year) when no CAD evidence PDF was uploaded. Fix: added `cad_assessed_value_usd BIGINT` to the `property` table; `saveCadSubjectIds` now stores `subject.assessedValue` there on every refresh-comps / backfill run. The fallback chain in all three consumers is now: `cadEv.assessedValueUsd ?? property.cadAssessedValueUsd ?? taxCurrent.assessedValue`. Trigger a refresh-comps to populate the value for existing properties. Files: `migrations/0067_property_cad_assessed_value.sql`, `protest-worksheet.service.ts`, `property.service.ts`, `protest.routes.ts`.
+
+**GitHub:** none
+
+---
+
 ## CR-172 — Tax Protest: "Copy Protest Brief" button + accountId persistence fix (2026-06-07)
 
 **accountId gap fixed (POST /comps path)**
