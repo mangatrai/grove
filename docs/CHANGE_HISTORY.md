@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-172 — Tax Protest: "Copy Protest Brief" button + accountId persistence fix (2026-06-07)
+
+**accountId gap fixed (POST /comps path)**
+When a comp was added via the CAD search UI (cad-search → POST /comps), the DCAD `accountId` was available in memory but not persisted — `addCADComp` wrote `raw_json = {}`. Any subsequent re-enrichment (e.g., pool notes backfill) would skip that comp because `accountId` was missing. Fix: `CadSearchResult` now includes `accountId`; POST /comps schema accepts it; `addCADComp` stores it in `raw_json: { accountId }` when provided. Files: `protest.routes.ts`, `protest-worksheet.service.ts`, `TaxProtestPage.tsx`.
+
+**cad-search: always enrich sqft from improvement features**
+Removed the conditional `(sqft == null || sqft <= 1)` guard. Now always calls `getDCADImprovementFeatures` for every comp with a known `accountId`, regardless of whether the raw search result already has an sqft value. Fixes properties where DCAD search returns a non-zero but wrong sqft (e.g., pool row returned first). File: `protest.routes.ts`.
+
+**"Try property ID" hint on zero cad-search results**
+When cad-search returns no results, the UI now shows an explanatory hint: DCAD address search can fail when street suffix differs (Rd vs Dr), and suggests trying the DCAD Property ID directly. File: `TaxProtestPage.tsx`.
+
+**"Copy Protest Brief" button + backend formatter**
+New `GET /protest/:propertyId/claude-seed?year=YYYY` endpoint. Deterministically formats all protest data (subject property, YoY valuations, CAD equity comps with $/sqft analysis, Redfin + manual sold comps, strategy notes, prior-year cycle summary) into a structured plain-text brief. Every number is read directly from the database — no LLM generation. Excluded sold comps are omitted. Includes opinionated analysis instructions that work with any AI assistant (Claude, ChatGPT, Gemini). Frontend: violet "Copy Protest Brief" button with Tooltip explanation; copies text to clipboard on click. Files: `protest.routes.ts`, `TaxProtestPage.tsx`.
+
 ## FIX-171 — Tax Protest: extend backfill to enrich comp sqft + pool notes via improvement API (2026-06-06)
 
 `triggerCadBackfill` in `protest-worksheet.service.ts` now calls `getDCADImprovementFeatures` for every comp after the bulk DCAD address search. New function `enrichAndUpdateCadCompsImprovement` iterates non-subject comps, fetches improvement features, and UPDATEs `protest_comp_cad` with: corrected sqft (always prefer improvement-features over raw search result), beds/baths (fill-in if null), and pool/spa notes in the `notes` column when Misc Imp entries are found. Previously this enrichment only happened in the real-time manual search UI path — historically stored comps with sqft=1 required the user to manually re-add them. DCAD is a free public API; 20–30 calls per property creation is not a concern. File: `protest-worksheet.service.ts`. GitHub: https://github.com/mangatrai/grove/issues/92

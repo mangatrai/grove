@@ -38,6 +38,7 @@ import {
   IconCopy,
   IconExternalLink,
   IconFileText,
+  IconInfoCircle,
   IconMessage,
   IconMicrophone,
   IconNote,
@@ -178,6 +179,7 @@ type SoldComp = {
 
 type CadSearchResult = {
   cadPropertyId: string;
+  accountId: number | null;
   address: string | null;
   city: string | null;
   sqft: number | null;
@@ -414,6 +416,7 @@ export function TaxProtestPage() {
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [generatingBrief, setGeneratingBrief] = useState(false);
   const [docFormat, setDocFormat] = useState<"pdf" | "docx">("pdf");
   const [staleAlertDismissed, setStaleAlertDismissed] = useState(false);
   const [excludedSoldComps, setExcludedSoldComps] = useState<string[]>([]);
@@ -847,6 +850,7 @@ export function TaxProtestPage() {
         body = {
           year: Number(year),
           cadPropertyId: selectedCadResult.cadPropertyId,
+          accountId: selectedCadResult.accountId ?? null,
           addressLine1: selectedCadResult.address ?? addCompAddress.trim(),
           city: selectedCadResult.city,
           sqft: selectedCadResult.sqft,
@@ -1100,6 +1104,25 @@ export function TaxProtestPage() {
     }
   }, [propertyId, year, docFormat, addToast]);
 
+  const handleGenerateBrief = useCallback(async () => {
+    if (!propertyId) return;
+    setGeneratingBrief(true);
+    try {
+      const tok = getToken();
+      const res = await fetch(`/api/protest/${propertyId}/claude-seed?year=${year}`, {
+        headers: tok ? { Authorization: `Bearer ${tok}` } : {}
+      });
+      if (!res.ok) throw new Error(`Brief generation failed (${res.status})`);
+      const text = await res.text();
+      await navigator.clipboard.writeText(text);
+      addToast("green", "Protest brief copied to clipboard");
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to generate brief");
+    } finally {
+      setGeneratingBrief(false);
+    }
+  }, [propertyId, year, addToast]);
+
   if (!token) return <Navigate to="/" replace />;
   if (loading) return <GrovePageLoader label="Loading protest assistant…" />;
 
@@ -1176,6 +1199,23 @@ export function TaxProtestPage() {
           >
             Generate Document
           </Button>
+          <Tooltip
+            label="Generates a structured text brief with all property data, comps, and analysis instructions grounded in real numbers — ready to paste into Claude, ChatGPT, Gemini, or any AI assistant."
+            multiline
+            w={320}
+            withArrow
+          >
+            <Button
+              leftSection={generatingBrief ? <Loader size={14} color="white" /> : <IconCopy size={16} />}
+              rightSection={<IconInfoCircle size={14} opacity={0.6} />}
+              variant="light"
+              color="violet"
+              disabled={!propertyId || generatingBrief}
+              onClick={() => void handleGenerateBrief()}
+            >
+              Copy Protest Brief
+            </Button>
+          </Tooltip>
         </Group>
       </Group>
 
@@ -2544,7 +2584,10 @@ export function TaxProtestPage() {
         {addCompStep === "results" && (
           <Stack gap="sm">
             {cadSearchResults.length === 0 ? (
-              <Text size="sm" c="dimmed">No CAD records found for that address.</Text>
+              <Stack gap={2}>
+                <Text size="sm" c="dimmed">No CAD records found for that address.</Text>
+                <Text size="xs" c="dimmed">DCAD can miss addresses where the street suffix differs (e.g., "Rd" vs "Dr"). Try entering the DCAD Property ID number directly in the search field.</Text>
+              </Stack>
             ) : (
               cadSearchResults.map((r) => (
                 <Card

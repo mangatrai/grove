@@ -557,6 +557,7 @@ const cadSearchQuerySchema = z.object({
 
 type CadSearchResult = {
   cadPropertyId: string;
+  accountId: number | null;
   address: string | null;
   city: string | null;
   sqft: number | null;
@@ -604,8 +605,7 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
       let baths = c.baths;
       let sqft = c.sqft;
       let miscImprovements: { description: string; valueUsd: number | null; yearBuilt: number | null }[] = [];
-      // Enrich when any field is missing OR sqft is suspiciously small (DCAD sometimes returns 0 or 1 as placeholder)
-      if (c.accountId != null && (beds == null || baths == null || sqft == null || (sqft != null && sqft <= 1))) {
+      if (c.accountId != null) {
         const features = await getDCADImprovementFeatures(c.accountId, countyHint).catch(() => null);
         if (features) {
           beds = beds ?? features.beds;
@@ -617,6 +617,7 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
       }
       return {
         cadPropertyId: c.cadPropertyId,
+        accountId: c.accountId,
         address: c.address,
         city: c.city,
         sqft,
@@ -636,6 +637,7 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
 const addCompBodySchema = z.object({
   year: z.number().int().min(2000).max(2100),
   cadPropertyId: z.string().max(100).optional(),
+  accountId: z.number().int().positive().nullable().optional(),
   addressLine1: z.string().min(1).max(200),
   city: z.string().max(100).nullable().optional(),
   sqft: z.number().int().min(1).max(100_000).nullable().optional(),
@@ -706,7 +708,7 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
     assessedValueUsd: parsed.data.assessedValueUsd ?? null,
     marketValueUsd: parsed.data.marketValueUsd ?? null
   };
-  const cadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp, parsed.data.cadPropertyId);
+  const cadPropertyId = await addCADComp(property.id, householdId, parsed.data.year, comp, parsed.data.cadPropertyId, parsed.data.accountId ?? null);
   const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
   log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, cadPropertyId, source: parsed.data.cadPropertyId ? "cad-search" : "manual" });
   res.status(201).json({ ok: true, cadPropertyId, comps });
@@ -1164,6 +1166,233 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
     res.setHeader("Content-Disposition", `attachment; filename="${safeAddr}_ARB_${year}.pdf"`);
     doc.pipe(res);
   }
+});
+
+// ── GET /:propertyId/claude-seed ─────────────────────────────────────────────
+// Deterministic backend formatter: assembles all property + protest data into a
+// structured plain-text brief suitable for pasting into any AI assistant.
+// Numbers come directly from the database — no LLM generation involved.
+protestRouter.get("/:propertyId/claude-seed", async (req: AuthenticatedRequest, res) => {
+  const params = propertyIdSchema.safeParse(req.params);
+  if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
+  const query = worksheetQuerySchema.safeParse(req.query ?? {});
+  if (!query.success) { res.status(400).json({ errors: query.error.issues }); return; }
+  const householdId = req.authUser!.householdId;
+  const property = await getProperty(params.data.propertyId, householdId);
+  if (!property) { res.status(404).json({ message: "Property not found" }); return; }
+
+  const year = query.data.year ?? new Date().getUTCFullYear();
+  const worksheet = await getWorksheet(property.id, householdId, year);
+  const cadComps = await listWorksheetComps(property.id, householdId, year);
+
+  const vd = property.valuationDetail;
+  const cadEv = worksheet?.cadEvidenceJson ?? null;
+  const subject = vd?.subject ?? null;
+
+  const fmt = (n: number | null | undefined, prefix = "$") =>
+    n != null ? `${prefix}${Math.round(n).toLocaleString()}` : "—";
+  const fmtPct = (a: number | null | undefined, b: number | null | undefined) =>
+    a != null && b != null && b > 0 ? `${((a / b) * 100).toFixed(1)}%` : "—";
+  const pad = (s: string | null | undefined, w: number) =>
+    String(s ?? "—").padEnd(w).slice(0, w);
+
+  // Assessed value — prefer CAD evidence PDF (authoritative) over Redfin
+  const proposedAssessed: number | null = cadEv?.assessedValueUsd ?? vd?.taxCurrent?.assessedValue ?? null;
+  const redfinEstimate: number | null = vd?.estimate ?? null;
+  const subjectSqft: number | null = cadEv?.livingAreaSqft ?? (subject?.sqFt ?? null);
+  const subjectPerSqft: number | null =
+    proposedAssessed != null && subjectSqft != null && subjectSqft > 0
+      ? proposedAssessed / subjectSqft
+      : null;
+
+  // YoY history from Redfin
+  const taxHistory = [...(vd?.taxHistory ?? [])].sort((a, b) => b.year - a.year).slice(0, 5);
+
+  // Equity comps $/sqft stats
+  const compPerSqfts = cadComps
+    .filter((c) => c.perSqftUsd != null && c.sqft != null && c.sqft > 0)
+    .map((c) => c.perSqftUsd!);
+  const compMedianPerSqft =
+    compPerSqfts.length > 0
+      ? compPerSqfts.sort((a, b) => a - b)[Math.floor(compPerSqfts.length / 2)]
+      : null;
+  const impliedValue =
+    compMedianPerSqft != null && subjectSqft != null
+      ? Math.round(compMedianPerSqft * subjectSqft)
+      : null;
+
+  // Sold comps: merge Redfin comps (prices) + soldCompsCadJson (assessed values)
+  const excluded = new Set<string>(worksheet ? (await getExcludedSoldComps(worksheet.id, householdId)) : []);
+  const redfinComps = (vd?.comps ?? []).filter((c) => !excluded.has(c.address));
+  const cadSoldCache = worksheet?.soldCompsCadJson ?? {};
+
+  // Prior year cycle summary
+  const priorWorksheet = await getWorksheet(property.id, householdId, year - 1);
+
+  const lines: string[] = [];
+  const h = (s: string) => { lines.push(""); lines.push(s); lines.push("=".repeat(s.length)); };
+  const sub = (s: string) => { lines.push(""); lines.push(s); lines.push("-".repeat(s.length)); };
+
+  lines.push(`TAX PROTEST BRIEF — ${property.addressLine1?.toUpperCase()}, ${property.city ?? ""} ${property.state ?? ""}`);
+  lines.push(`Tax Year ${year}  |  Generated ${new Date().toISOString().slice(0, 10)}`);
+  lines.push("");
+  lines.push("Every number in this brief is pulled directly from official records or uploaded documents.");
+  lines.push("Validate each figure independently. Challenge the analysis where evidence is thin.");
+
+  h("1. SUBJECT PROPERTY");
+  lines.push(`Address      : ${property.addressLine1}, ${property.city ?? ""}, ${property.state ?? ""}`);
+  lines.push(`CAD Provider : ${property.cadProvider?.toUpperCase() ?? "—"}`);
+  lines.push(`CAD Account  : ${property.cadAccountId ?? "—"}`);
+  lines.push(`CAD Prop ID  : ${property.cadPropertyId ?? "—"}`);
+  lines.push(`Year Built   : ${cadEv?.yearBuilt ?? subject?.yearBuilt ?? "—"}`);
+  lines.push(`Living Area  : ${subjectSqft != null ? subjectSqft.toLocaleString() + " sqft" : "—"}`);
+  lines.push(`Lot Area     : ${cadEv?.lotSqft != null ? cadEv.lotSqft.toLocaleString() + " sqft" : subject?.lotSqFt != null ? subject.lotSqFt.toLocaleString() + " sqft" : "—"}`);
+  lines.push(`Beds / Baths : ${subject?.beds ?? "—"} bd / ${subject?.baths ?? "—"} ba`);
+  lines.push(`Property Type: ${subject?.propertyType ?? "Single Family Residential"}`);
+
+  h("2. PROPOSED ASSESSMENT — TAX YEAR " + year);
+  if (cadEv) {
+    lines.push(`Source: CAD Evidence PDF (${worksheet?.cadEvidenceFilename ?? "uploaded"})`);
+    lines.push(`  Proposed Assessed Value : ${fmt(cadEv.assessedValueUsd)}`);
+    lines.push(`  Land Value              : ${fmt(cadEv.landValueUsd)}`);
+    lines.push(`  Improvements            : ${fmt(cadEv.improvementsUsd)}`);
+    lines.push(`  Percent Good            : ${cadEv.percentGood != null ? cadEv.percentGood + "%" : "—"}`);
+    lines.push(`  Living Area (PDF)       : ${cadEv.livingAreaSqft != null ? cadEv.livingAreaSqft.toLocaleString() + " sqft" : "—"}`);
+  } else {
+    lines.push(`Source: Redfin / Realty API (no CAD evidence PDF uploaded)`);
+    lines.push(`  Assessed Value (Redfin) : ${fmt(vd?.taxCurrent?.assessedValue)}`);
+    lines.push(`  Tax Year (Redfin)       : ${vd?.taxCurrent?.year ?? "—"}`);
+  }
+  lines.push(`Redfin AVM Estimate     : ${fmt(redfinEstimate)}`);
+  lines.push(`Assessed / Market Ratio : ${fmtPct(proposedAssessed, redfinEstimate)}`);
+  if (subjectPerSqft != null) lines.push(`Subject $/sqft          : $${subjectPerSqft.toFixed(2)}/sqft`);
+
+  if (taxHistory.length > 0) {
+    sub("Year-Over-Year Assessed Value History");
+    lines.push("Year  | Assessed       | Change");
+    lines.push("------+----------------+-------");
+    taxHistory.forEach((t, i) => {
+      const prev = taxHistory[i + 1];
+      const chg =
+        prev?.assessedValue != null && t.assessedValue != null
+          ? (((t.assessedValue - prev.assessedValue) / prev.assessedValue) * 100).toFixed(1) + "%"
+          : "—";
+      lines.push(`${t.year}  | ${pad(fmt(t.assessedValue), 14)} | ${chg}`);
+    });
+  }
+
+  h("3. PROTEST STATUS");
+  lines.push(`Status          : ${worksheet?.status ?? "not_filed"}`);
+  lines.push(`ARB Hearing     : ${worksheet?.hearingDate ?? "—"}`);
+  lines.push(`Filing Deadline : ${worksheet?.filingDeadline ?? "—"}`);
+  lines.push(`Informal Offer  : ${fmt(worksheet?.informalOfferUsd)}`);
+  if (worksheet?.cadPortalUrl) lines.push(`CAD Portal      : ${worksheet.cadPortalUrl}`);
+  if (worksheet?.outcome) lines.push(`Outcome         : ${worksheet.outcome}`);
+
+  h("4. EQUITY COMPS — UNEQUAL APPRAISAL (Texas Tax Code §41.43)");
+  lines.push(`Subject is assessed at ${subjectPerSqft != null ? "$" + subjectPerSqft.toFixed(2) + "/sqft" : "an unknown $/sqft"} based on ${fmt(proposedAssessed)} / ${subjectSqft != null ? subjectSqft.toLocaleString() + " sqft" : "unknown sqft"}.`);
+  lines.push(`Comps below are similar properties assessed by the same CAD in the same tax year.`);
+  if (cadComps.length === 0) {
+    lines.push("No equity comps loaded. Run 'Refresh Comps' to populate.");
+  } else {
+    lines.push("");
+    lines.push("#  | Address                    | Sqft   | Bd/Ba  | Yr Blt | Assessed       | $/sqft  | Notes");
+    lines.push("---+----------------------------+--------+--------+--------+----------------+---------+------");
+    cadComps.forEach((c, i) => {
+      const ps = c.perSqftUsd != null ? "$" + c.perSqftUsd.toFixed(2) : "—";
+      lines.push(
+        `${String(i + 1).padStart(2)} | ${pad(c.addressLine1, 26)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad((c.beds ?? "—") + "/" + (c.baths ?? "—"), 6)} | ${pad(String(c.yearBuilt ?? "—"), 6)} | ${pad(fmt(c.assessedValueUsd), 14)} | ${pad(ps, 7)} | ${c.notes ?? ""}`
+      );
+    });
+    if (compMedianPerSqft != null) {
+      lines.push("");
+      lines.push(`Comp $/sqft range  : $${Math.min(...compPerSqfts).toFixed(2)} – $${Math.max(...compPerSqfts).toFixed(2)}`);
+      lines.push(`Comp $/sqft median : $${compMedianPerSqft.toFixed(2)}`);
+      lines.push(`Subject $/sqft     : ${subjectPerSqft != null ? "$" + subjectPerSqft.toFixed(2) : "—"}`);
+      if (subjectPerSqft != null && compMedianPerSqft != null) {
+        const gap = subjectPerSqft - compMedianPerSqft;
+        lines.push(`Equity gap         : ${gap > 0 ? "+" : ""}$${gap.toFixed(2)}/sqft — subject assessed ${gap > 0 ? "ABOVE" : "below"} comp median`);
+      }
+      if (impliedValue != null) {
+        lines.push(`Implied reduction  : from ${fmt(proposedAssessed)} to ${fmt(impliedValue)} if brought to comp median`);
+      }
+    }
+  }
+
+  h("5. RECENT MARKET SALES — MARKET VALUE EVIDENCE");
+  if (redfinComps.length === 0 && (worksheet?.manualSoldComps ?? []).length === 0) {
+    lines.push("No sold comps loaded. Run 'Refresh Comps' or add manually.");
+  } else {
+    if (redfinComps.length > 0) {
+      sub("Redfin / Realty Comps");
+      lines.push("#  | Address                    | Sold       | Sale Price     | Sqft   | $/sqft  | DCAD Assessed  | Ratio");
+      lines.push("---+----------------------------+------------+----------------+--------+---------+----------------+------");
+      redfinComps.forEach((c, i) => {
+        const cadEntry = cadSoldCache[c.address];
+        const ratio = c.soldPrice != null && cadEntry?.assessedValueUsd != null
+          ? ((cadEntry.assessedValueUsd / c.soldPrice) * 100).toFixed(1) + "%"
+          : "—";
+        const ps = c.soldPrice != null && c.sqft != null && c.sqft > 0
+          ? "$" + (c.soldPrice / c.sqft).toFixed(2)
+          : "—";
+        lines.push(
+          `${String(i + 1).padStart(2)} | ${pad(c.address, 26)} | ${pad(c.soldDate ?? "—", 10)} | ${pad(fmt(c.soldPrice), 14)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad(ps, 7)} | ${pad(fmt(cadEntry?.assessedValueUsd), 14)} | ${ratio}`
+        );
+      });
+    }
+    const manual = worksheet?.manualSoldComps ?? [];
+    if (manual.length > 0) {
+      sub("Manually Added Sold Comps");
+      lines.push("#  | Address                    | Sold       | Sale Price     | Sqft   | $/sqft  | DCAD Assessed");
+      lines.push("---+----------------------------+------------+----------------+--------+---------+--------------");
+      manual.forEach((c, i) => {
+        const ps = c.soldPrice != null && c.sqft != null && c.sqft > 0
+          ? "$" + (c.soldPrice / c.sqft).toFixed(2)
+          : "—";
+        lines.push(
+          `${String(i + 1).padStart(2)} | ${pad(c.address, 26)} | ${pad(c.soldDate ?? "—", 10)} | ${pad(fmt(c.soldPrice), 14)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad(ps, 7)} | ${fmt(c.assessedValueUsd)}`
+        );
+      });
+    }
+  }
+
+  const strategyNotes = worksheet?.strategyJson;
+  if (strategyNotes) {
+    h("6. STRATEGY NOTES");
+    lines.push(typeof strategyNotes === "string" ? strategyNotes : JSON.stringify(strategyNotes, null, 2));
+  }
+
+  if (priorWorksheet?.cycleSummary) {
+    h(`7. PRIOR YEAR (${year - 1}) OUTCOME SUMMARY`);
+    lines.push(priorWorksheet.cycleSummary);
+  }
+
+  h("INSTRUCTIONS FOR AI ASSISTANT");
+  lines.push(`You are a property tax protest expert with deep knowledge of the Texas Property Tax Code.`);
+  lines.push(`The ARB hearing for this property is scheduled for ${worksheet?.hearingDate ?? "a date TBD"}.`);
+  lines.push(`The proposed assessed value is ${fmt(proposedAssessed)}. The goal is to reduce it.`);
+  lines.push("");
+  lines.push("Please do the following:");
+  lines.push("1. Evaluate BOTH grounds for protest:");
+  lines.push("   a) Unequal appraisal (§41.43): Is the subject assessed at a higher $/sqft than comparable properties?");
+  lines.push("   b) Market value (§41.43(a)): Does the proposed value exceed fair market value based on recent sales?");
+  lines.push("2. For each ground, calculate the specific reduction it would support and rate the evidence strength.");
+  lines.push("3. Identify the 3–4 most favorable comparable properties to cite at the ARB hearing.");
+  lines.push("4. Draft 5–7 talking points for the ARB hearing, ordered by expected impact.");
+  lines.push("5. Proactively flag weaknesses: missing data, thin evidence, comps the appraiser could push back on.");
+  lines.push("6. Recommend a target assessed value with a clear rationale.");
+  lines.push("");
+  lines.push("Rules:");
+  lines.push("- Ground EVERY recommendation in the numbers above. Do not invent comparables or market data.");
+  lines.push("- If a number is missing or ambiguous, say so — do not fill gaps with assumptions.");
+  lines.push("- Challenge your own analysis. If the evidence is weak for a particular argument, say so explicitly.");
+  lines.push("- This prompt is LLM-agnostic. It works with Claude, ChatGPT, Gemini, or any other assistant.");
+
+  const text = lines.join("\n");
+  const safeAddr = (property.addressLine1 ?? "property").replace(/[^a-z0-9]/gi, "_");
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${safeAddr}_protest_brief_${year}.txt"`);
+  res.send(text);
 });
 
 protestRouter.patch("/:propertyId/worksheet", async (req: AuthenticatedRequest, res) => {
