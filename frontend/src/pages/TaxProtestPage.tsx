@@ -1109,7 +1109,7 @@ export function TaxProtestPage() {
     setGeneratingBrief(true);
     try {
       const tok = getToken();
-      const res = await fetch(`/api/protest/${propertyId}/claude-seed?year=${year}`, {
+      const res = await fetch(`/api/protest/${propertyId}/protest-brief?year=${year}`, {
         headers: tok ? { Authorization: `Bearer ${tok}` } : {}
       });
       if (!res.ok) throw new Error(`Brief generation failed (${res.status})`);

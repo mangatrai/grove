@@ -1168,11 +1168,11 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
   }
 });
 
-// ── GET /:propertyId/claude-seed ─────────────────────────────────────────────
+// ── GET /:propertyId/protest-brief ─────────────────────────────────────────────
 // Deterministic backend formatter: assembles all property + protest data into a
 // structured plain-text brief suitable for pasting into any AI assistant.
 // Numbers come directly from the database — no LLM generation involved.
-protestRouter.get("/:propertyId/claude-seed", async (req: AuthenticatedRequest, res) => {
+protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest, res) => {
   const params = propertyIdSchema.safeParse(req.params);
   if (!params.success) { res.status(400).json({ errors: params.error.issues }); return; }
   const query = worksheetQuerySchema.safeParse(req.query ?? {});

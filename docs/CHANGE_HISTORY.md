@@ -30,7 +30,7 @@ Removed the conditional `(sqft == null || sqft <= 1)` guard. Now always calls `g
 When cad-search returns no results, the UI now shows an explanatory hint: DCAD address search can fail when street suffix differs (Rd vs Dr), and suggests trying the DCAD Property ID directly. File: `TaxProtestPage.tsx`.
 
 **"Copy Protest Brief" button + backend formatter**
-New `GET /protest/:propertyId/claude-seed?year=YYYY` endpoint. Deterministically formats all protest data (subject property, YoY valuations, CAD equity comps with $/sqft analysis, Redfin + manual sold comps, strategy notes, prior-year cycle summary) into a structured plain-text brief. Every number is read directly from the database — no LLM generation. Excluded sold comps are omitted. Includes opinionated analysis instructions that work with any AI assistant (Claude, ChatGPT, Gemini). Frontend: violet "Copy Protest Brief" button with Tooltip explanation; copies text to clipboard on click. Files: `protest.routes.ts`, `TaxProtestPage.tsx`.
+New `GET /protest/:propertyId/protest-brief?year=YYYY` endpoint. Deterministically formats all protest data (subject property, YoY valuations, CAD equity comps with $/sqft analysis, Redfin + manual sold comps, strategy notes, prior-year cycle summary) into a structured plain-text brief. Every number is read directly from the database — no LLM generation. Excluded sold comps are omitted. Includes opinionated analysis instructions that work with any AI assistant (Claude, ChatGPT, Gemini). Frontend: violet "Copy Protest Brief" button with Tooltip explanation; copies text to clipboard on click. Files: `protest.routes.ts`, `TaxProtestPage.tsx`.
 
 ## FIX-171 — Tax Protest: extend backfill to enrich comp sqft + pool notes via improvement API (2026-06-06)
 
