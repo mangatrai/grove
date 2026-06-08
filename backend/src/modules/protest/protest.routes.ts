@@ -122,9 +122,9 @@ function buildSoldComps(
     const sqft = asNumber(r.sqft);
     const address = typeof r.address === "string" ? r.address : null;
     const cached = address ? (cadCache[address] ?? null) : null;
-    const resolvedBeds = asNumber(r.beds) ?? cached?.beds ?? null;
-    const resolvedBaths = asNumber(r.baths) ?? cached?.baths ?? null;
-    const resolvedSqft = sqft ?? cached?.sqft ?? null;
+    const resolvedBeds = cached?.beds ?? asNumber(r.beds) ?? null;
+    const resolvedBaths = cached?.baths ?? asNumber(r.baths) ?? null;
+    const resolvedSqft = cached?.sqft ?? sqft ?? null;
     return {
       address,
       city: typeof r.city === "string" ? r.city : null,

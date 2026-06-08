@@ -549,7 +549,12 @@ export async function enrichSoldCompsCad(
       const r = asRecord(c);
       return typeof r?.address === "string" ? r.address : null;
     })
-    .filter((a): a is string => a !== null && !(a in existingCache))
+    .filter((a): a is string => {
+      if (a === null) return false;
+      if (!(a in existingCache)) return true;
+      const cached = existingCache[a];
+      return cached.sqft == null || cached.sqft <= 1;
+    })
     .slice(0, 6);
 
   const cache = { ...existingCache };
@@ -563,16 +568,16 @@ export async function enrichSoldCompsCad(
       if (entry) {
         cache[addr] = entry;
         fetched++;
-        if (entry.cadAccountId != null && (entry.beds == null || entry.baths == null || entry.sqft == null)) {
+        if (entry.cadAccountId != null) {
           try {
             await new Promise<void>((resolve) => setTimeout(resolve, 150));
             const features = await getDCADImprovementFeatures(entry.cadAccountId, countyHint);
             if (features) {
               cache[addr] = {
                 ...cache[addr],
-                beds: cache[addr].beds ?? features.beds,
-                baths: cache[addr].baths ?? features.baths,
-                sqft: cache[addr].sqft ?? (features.sqft != null ? Math.round(features.sqft) : null),
+                beds: features.beds ?? cache[addr].beds,
+                baths: features.baths ?? cache[addr].baths,
+                sqft: features.sqft != null ? Math.round(features.sqft) : cache[addr].sqft,
               };
             }
           } catch (err) {

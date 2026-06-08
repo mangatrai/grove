@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-174 — Tax Protest: Redfin sqft=1 survives DCAD enrichment for sold comps (2026-06-08)
+
+Three-layer bug caused Redfin's sqft=1 for sold comps to persist through DCAD enrichment: (1) `enrichSoldCompsCad` skipped `getDCADImprovementFeatures` when DCAD initial search result already had a non-null sqft (e.g., pool row returning sqft=1); (2) even if improvement features ran, `cache[addr].sqft ??` kept the bad value; (3) `buildSoldComps` preferred Redfin's `r.sqft` over DCAD cache sqft; (4) cache skip filter `!(a in existingCache)` prevented re-fetching once bad sqft was cached.
+
+Fix: `enrichSoldCompsCad` now always calls `getDCADImprovementFeatures` when `cadAccountId` is available, and always uses `features.sqft` as the authoritative value (not a fallback). Cache filter re-fetches any address with cached sqft ≤ 1. `buildSoldComps` now prefers `cached?.sqft` over Redfin sqft. Trigger a "Refresh Comps" on existing properties to clear bad cached sqft values.
+
+**GitHub:** closes #97
+
+Files: `protest-worksheet.service.ts`, `protest.routes.ts`
+
+---
+
 ## FIX-173 — Tax Protest: protest-brief crash + stale DCAD assessed value (2026-06-08)
 
 **protest-brief: UNDEFINED_VALUE crash fixed (critical)**
