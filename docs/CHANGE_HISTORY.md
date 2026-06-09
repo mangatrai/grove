@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-176 — Notifications: add audience RBAC; fix large-transaction debit-only (2026-06-09)
+
+Added `audience: "owner" | "triggering_user" | "all"` to every `NotificationType` default. `createNotification` now resolves recipients by audience when no `userId` is provided: `owner` queries `app_user WHERE role = 'owner'`; `triggering_user` without a `userId` logs a warning and skips (no fan-out); `all` preserves existing fan-out behaviour. Audience assignments: `backup_complete`, `backup_failed`, `restore_complete`, `property_valuation_updated`, `protest_filing_deadline_approaching`, `protest_hearing_approaching` → `owner`; `import_complete`, `export_ready` → `triggering_user`; budget and large-transaction types → `all`. Settings UI now shows a "Tax Protest" group with both protest deadline types; owner-only notification rows are hidden for non-owner members. `large_transaction` alert now fires only for debits (money leaving the account).
+
+**GitHub:** closes #99
+
+Files: `notification.service.ts`, `canonical-ingest.service.ts`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+## FIX-175 — GDrive backup: failed jobs no longer cause perpetual nightly retries (2026-06-09)
+
+`checkAndQueueDueBackups` previously queried only `status = 'complete'` to compute the last-backup timestamp. After any failure, `lastCompleteMs = 0`, making `due` always `true` — the scheduler re-queued a new backup job on every subsequent nightly cron tick. Fixed by changing the query to `status IN ('complete', 'failed')` so a failed attempt resets the 24h due-window the same way a success does.
+
+**GitHub:** closes #98
+
+Files: `gdrive-scheduler.service.ts`
+
+---
+
 ## FIX-174 — Tax Protest: Redfin sqft=1 survives DCAD enrichment for sold comps (2026-06-08)
 
 Three-layer bug caused Redfin's sqft=1 for sold comps to persist through DCAD enrichment: (1) `enrichSoldCompsCad` skipped `getDCADImprovementFeatures` when DCAD initial search result already had a non-null sqft (e.g., pool row returning sqft=1); (2) even if improvement features ran, `cache[addr].sqft ??` kept the bad value; (3) `buildSoldComps` preferred Redfin's `r.sqft` over DCAD cache sqft; (4) cache skip filter `!(a in existingCache)` prevented re-fetching once bad sqft was cached.

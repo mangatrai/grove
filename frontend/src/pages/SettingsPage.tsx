@@ -2193,23 +2193,26 @@ export function SettingsPage() {
             {notifPrefsLoading ? (
               <Group gap="sm"><GroveLoader size="sm" color="muted" /><Text size="sm" c="dimmed">Loading…</Text></Group>
             ) : (() => {
-              type NotifMeta = { label: string; description: string; note?: string };
+              type NotifMeta = { label: string; description: string; note?: string; ownerOnly?: boolean };
               const NOTIF_META: Record<string, NotifMeta> = {
-                import_complete:            { label: "Import complete",          description: "When a bank statement import finishes processing" },
-                export_ready:               { label: "Export ready",             description: "When a data export file is ready to download" },
-                restore_complete:           { label: "Restore complete",         description: "When a household backup restore finishes" },
-                backup_complete:            { label: "Drive backup success",     description: "When an automatic Google Drive backup succeeds" },
-                backup_failed:              { label: "Drive backup failed",      description: "When a backup fails or Drive authorization expires" },
-                budget_threshold_80:        { label: "Budget warning (80%)",     description: "Early alert when monthly spending reaches 80% of the category limit" },
-                budget_threshold_100:       { label: "Budget exceeded (100%)",   description: "Alert when monthly spending crosses the full category budget" },
-                large_transaction:          { label: "Large transaction",        description: "When any transaction exceeds your alert threshold", note: "Set threshold in Settings → Household" },
-                property_valuation_updated: { label: "Property valuation updated", description: "When the monthly property estimate is refreshed" },
+                import_complete:            { label: "Import complete",              description: "When a bank statement import finishes processing" },
+                export_ready:               { label: "Export ready",                description: "When a data export file is ready to download" },
+                restore_complete:           { label: "Restore complete",            description: "When a household backup restore finishes",           ownerOnly: true },
+                backup_complete:            { label: "Drive backup success",        description: "When an automatic Google Drive backup succeeds",     ownerOnly: true },
+                backup_failed:              { label: "Drive backup failed",         description: "When a backup fails or Drive authorization expires", ownerOnly: true },
+                budget_threshold_80:        { label: "Budget warning (80%)",        description: "Early alert when monthly spending reaches 80% of the category limit" },
+                budget_threshold_100:       { label: "Budget exceeded (100%)",      description: "Alert when monthly spending crosses the full category budget" },
+                large_transaction:          { label: "Large transaction",           description: "When a debit exceeds your alert threshold", note: "Set threshold in Settings → Household" },
+                property_valuation_updated: { label: "Property valuation updated",  description: "When the monthly property estimate is refreshed",    ownerOnly: true },
+                protest_filing_deadline_approaching: { label: "Protest filing deadline", description: "Reminder before the property tax protest filing deadline", ownerOnly: true },
+                protest_hearing_approaching:         { label: "ARB hearing approaching",  description: "Reminder before your ARB protest hearing date",           ownerOnly: true },
               };
 
               const GROUPS: Array<{ heading: string; types: string[] }> = [
                 { heading: "Data & Backup", types: ["import_complete", "export_ready", "restore_complete", "backup_complete", "backup_failed"] },
                 { heading: "Budget & Spending", types: ["budget_threshold_80", "budget_threshold_100", "large_transaction"] },
                 { heading: "Properties", types: ["property_valuation_updated"] },
+                { heading: "Tax Protest", types: ["protest_filing_deadline_approaching", "protest_hearing_approaching"] },
               ];
 
               const prefMap = new Map(notifPrefs.map((p) => [p.notificationType, p]));
@@ -2231,7 +2234,11 @@ export function SettingsPage() {
                   <Divider />
 
                   {GROUPS.map((group) => {
-                    const rows = group.types.filter((t) => prefMap.has(t));
+                    const rows = group.types.filter((t) => {
+                      if (!prefMap.has(t)) return false;
+                      if (NOTIF_META[t]?.ownerOnly && !canManageHousehold) return false;
+                      return true;
+                    });
                     if (rows.length === 0) return null;
                     return (
                       <Stack key={group.heading} gap={0}>

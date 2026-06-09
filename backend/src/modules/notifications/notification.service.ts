@@ -17,20 +17,24 @@ export type NotificationType =
   | "protest_filing_deadline_approaching"
   | "protest_hearing_approaching";
 
-type NotificationDefault = { enabledEmail: boolean; enabledInapp: boolean };
+type NotificationDefault = {
+  enabledEmail: boolean;
+  enabledInapp: boolean;
+  audience: "owner" | "triggering_user" | "all";
+};
 
 const NOTIFICATION_DEFAULTS: Record<NotificationType, NotificationDefault> = {
-  import_complete:                       { enabledEmail: false, enabledInapp: true  },
-  export_ready:                          { enabledEmail: true,  enabledInapp: true  },
-  restore_complete:                      { enabledEmail: true,  enabledInapp: true  },
-  backup_complete:                       { enabledEmail: false, enabledInapp: true  },
-  backup_failed:                         { enabledEmail: true,  enabledInapp: true  },
-  property_valuation_updated:            { enabledEmail: false, enabledInapp: true  },
-  budget_threshold_80:                   { enabledEmail: false, enabledInapp: true  },
-  budget_threshold_100:                  { enabledEmail: true,  enabledInapp: true  },
-  large_transaction:                     { enabledEmail: false, enabledInapp: true  },
-  protest_filing_deadline_approaching:   { enabledEmail: true,  enabledInapp: true  },
-  protest_hearing_approaching:           { enabledEmail: true,  enabledInapp: true  },
+  import_complete:                     { enabledEmail: false, enabledInapp: true,  audience: "triggering_user" },
+  export_ready:                        { enabledEmail: true,  enabledInapp: true,  audience: "triggering_user" },
+  restore_complete:                    { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
+  backup_complete:                     { enabledEmail: false, enabledInapp: true,  audience: "owner"            },
+  backup_failed:                       { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
+  property_valuation_updated:          { enabledEmail: false, enabledInapp: true,  audience: "owner"            },
+  budget_threshold_80:                 { enabledEmail: false, enabledInapp: true,  audience: "all"              },
+  budget_threshold_100:                { enabledEmail: true,  enabledInapp: true,  audience: "all"              },
+  large_transaction:                   { enabledEmail: false, enabledInapp: true,  audience: "all"              },
+  protest_filing_deadline_approaching: { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
+  protest_hearing_approaching:         { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
 };
 
 export const ALL_NOTIFICATION_TYPES = Object.keys(NOTIFICATION_DEFAULTS) as NotificationType[];
@@ -112,6 +116,7 @@ export async function createNotification(opts: {
   const { householdId, type, title, body, actionUrl } = opts;
 
   let targets: Array<{ userId: string; email: string }>;
+  const audience = NOTIFICATION_DEFAULTS[type].audience;
   if (opts.userId) {
     const row = await qGet<{ email: string }>(
       `SELECT email FROM app_user WHERE id = ? AND household_id = ?`,
@@ -119,6 +124,15 @@ export async function createNotification(opts: {
       householdId
     );
     targets = row ? [{ userId: opts.userId, email: row.email }] : [];
+  } else if (audience === "owner") {
+    const ownerRow = await qGet<{ id: string; email: string }>(
+      `SELECT id, email FROM app_user WHERE household_id = ? AND role = 'owner' LIMIT 1`,
+      householdId
+    );
+    targets = ownerRow ? [{ userId: ownerRow.id, email: ownerRow.email }] : [];
+  } else if (audience === "triggering_user") {
+    log.warn("createNotification: triggering_user type called without userId — skipped", { type });
+    return;
   } else {
     const rows = await qAll<{ id: string; email: string }>(
       `SELECT id, email FROM app_user WHERE household_id = ? ORDER BY id`,
