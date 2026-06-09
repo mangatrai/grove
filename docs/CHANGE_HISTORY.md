@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-177 — Recurring Payments card: replace inline expand with modal (2026-06-09)
+
+Clicking "+ N more" on the Recurring Payments dashboard card now opens a Mantine Modal listing all recurring charges instead of expanding the card inline. The card always shows the top 5 items; the modal shows all items with the same dismiss buttons. Fixes the visual issue where inline expansion caused all peer cards in the same `SimpleGrid` row to stretch to the same height.
+
+**GitHub:** closes #100
+
+Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
 ## FIX-176 — Notifications: add audience RBAC; fix large-transaction debit-only (2026-06-09)
 
 Added `audience: "owner" | "triggering_user" | "all"` to every `NotificationType` default. `createNotification` now resolves recipients by audience when no `userId` is provided: `owner` queries `app_user WHERE role = 'owner'`; `triggering_user` without a `userId` logs a warning and skips (no fan-out); `all` preserves existing fan-out behaviour. Audience assignments: `backup_complete`, `backup_failed`, `restore_complete`, `property_valuation_updated`, `protest_filing_deadline_approaching`, `protest_hearing_approaching` → `owner`; `import_complete`, `export_ready` → `triggering_user`; budget and large-transaction types → `all`. Settings UI now shows a "Tax Protest" group with both protest deadline types; owner-only notification rows are hidden for non-owner members. `large_transaction` alert now fires only for debits (money leaving the account).
