@@ -1,6 +1,31 @@
 import PDFDocument from "pdfkit";
 
-import type { ProtestComp, ProtestStatus, StrategyJson, ManualSoldComp } from "./protest-worksheet.service.js";
+import type { ProtestStatus, StrategyJson } from "./protest-worksheet.service.js";
+
+type ProtestComp = {
+  cadPropertyId?: string | null;
+  addressLine1: string | null;
+  city: string | null;
+  assessedValueUsd: number | null;
+  marketValueUsd?: number | null;
+  sqft: number | null;
+  beds?: number | null;
+  baths?: number | null;
+  yearBuilt?: number | null;
+  perSqftUsd: number | null;
+  notes?: string | null;
+};
+
+type ManualSoldComp = {
+  address: string;
+  city?: string | null;
+  sqft?: number | null;
+  beds?: number | null;
+  baths?: number | null;
+  soldPrice?: number | null;
+  soldDate?: string | null;
+  assessedValueUsd?: number | null;
+};
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────

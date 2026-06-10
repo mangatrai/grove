@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-178 — Protest flow: appraisal notice modal, land/improvement display, $/sqft and sold date fixes (2026-06-10)
+
+Four bug fixes in the protest worksheet and property detail pages:
+
+1. **Appraisal Notice PDF — auth error**: The "View Appraisal Notice" button was a plain `<a target="_blank">` link which cannot send Bearer tokens, causing a 401. Changed to a click handler that `fetch()`es the PDF with `Authorization: Bearer`, wraps the bytes in a blob URL, and opens it in a Mantine `<Modal>` with an `<iframe>`. No new tab; no auth leak.
+
+2. **$/sqft missing in Market Value Evidence**: `pricePerSqft` is pre-computed server-side and stored in `protest_comp.price_per_sqft`. If parsing yielded null (e.g., close-price index miss), the column showed "—" even when `soldPriceUsd` and `sqft` were visible. Added frontend inline fallback: `comp.pricePerSqft ?? round(comp.soldPriceUsd / comp.sqft)`.
+
+3. **Sold Date clobbered on upsert**: `saveRedfinComps` ON CONFLICT set `sold_date = EXCLUDED.sold_date` unconditionally, overwriting a previously-stored date with null if the sash block failed to parse on a subsequent refresh. Fixed to `COALESCE(EXCLUDED.sold_date, protest_comp.sold_date)`. Same fix for `price_per_sqft`.
+
+4. **Land + Improvement values not surfacing**: `property` table gained `cad_land_value_usd` and `cad_improvement_value_usd` in migration 0068 (populated by `runDcadBackfill`), but `property.service.ts` never read them back and they weren't exposed in any API response. Added all 6 DCAD value columns (`cadLandValueUsd`, `cadImprovementValueUsd`, `cadMarketValueUsd`, `cadAppraisedValueUsd`, `cadNetAppraisedValueUsd`, `cadTaxLimitationValueUsd`) to `PropertyRecord`, `PropertyRow`, `toPropertyRecord()`, and the `PropertyRecord` types in both `TaxProtestPage.tsx` and `PropertyDetailPage.tsx`. Subject property card now shows Land Value and Improvement Value columns. Property detail CAD Assessed section shows land/improvement breakdown inline.
+
+Also fixed pre-existing TS errors from PT-18 migration: `ProtestComp`/`ManualSoldComp` imports removed from `arb-script.service.ts`, `protest-evidence.service.ts`, `protest-evidence-docx.service.ts`; `arb-script.service.ts` now uses `UnifiedComp` with correct field names (`cadAssessedValueUsd`, `cadPerSqftAssessed`); `ArbScriptInput.soldCompsNotes` removed; missing `CadProperty` import added to `protest.routes.ts`; `audience` field fixed in `notification.service.ts`.
+
+Files: `backend/src/modules/household/property.service.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/arb-script.service.ts`, `backend/src/modules/protest/protest-evidence.service.ts`, `backend/src/modules/protest/protest-evidence-docx.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/notifications/notification.service.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`
+
+---
+
 ## UX-177 — Recurring Payments card: replace inline expand with modal (2026-06-09)
 
 Clicking "+ N more" on the Recurring Payments dashboard card now opens a Mantine Modal listing all recurring charges instead of expanding the card inline. The card always shows the top 5 items; the modal shows all items with the same dismiss buttons. Fixes the visual issue where inline expansion caused all peer cards in the same `SimpleGrid` row to stretch to the same height.

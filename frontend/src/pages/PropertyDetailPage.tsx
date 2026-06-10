@@ -53,6 +53,8 @@ type PropertyRecord = {
   linkedMortgageInstitution: string | null;
   linkedMortgageMask: string | null;
   cadAccountId?: number | null;
+  cadLandValueUsd?: number | null;
+  cadImprovementValueUsd?: number | null;
 };
 
 type EquityPoint = { date: string; avm: number; mortgageBalance: number; equity: number };
@@ -269,9 +271,13 @@ export function PropertyDetailPage() {
   const county = typeof d?.county === "string" ? d.county : null;
   const estimateRange = d?.estimateRange as { low: number; high: number } | null | undefined;
 
-  const cadAssessed = asNumber(taxCurrentRec?.assessedValue);
-  const taxesDue = asNumber(taxCurrentRec?.taxesDue);
-  const taxYear = typeof taxCurrentRec?.year === "number" ? (taxCurrentRec.year as number) : null;
+  const dcadMaxYear = dcadValueHistory.length > 0 ? Math.max(...dcadValueHistory.map(e => e.year)) : null;
+  const dcadCurrentAssessed = dcadMaxYear != null
+    ? (dcadValueHistory.find(e => e.year === dcadMaxYear)?.assessedValue ?? null)
+    : null;
+  const cadAssessed = dcadCurrentAssessed ?? asNumber(taxCurrentRec?.assessedValue);
+  const taxesDue = dcadEstimatedTaxes ?? asNumber(taxCurrentRec?.taxesDue);
+  const taxYear = dcadMaxYear ?? (typeof taxCurrentRec?.year === "number" ? (taxCurrentRec.year as number) : null);
   const avm = property.latestValueUsd;
   const overAmt = avm != null && cadAssessed != null ? cadAssessed - avm : null;
   const isOverAssessed = overAmt != null && overAmt > (avm ?? 0) * 0.03;
@@ -416,6 +422,11 @@ export function PropertyDetailPage() {
                   <Text size="xs" c="dimmed">CAD Assessed{taxYear ? ` ${taxYear}` : ""}</Text>
                   <Text fw={700} c={isOverAssessed ? "orange" : undefined}>{money(cadAssessed)}</Text>
                   {taxesDue != null ? <Text size="xs" c="dimmed">Taxes: {money(taxesDue)}</Text> : null}
+                  {(property.cadLandValueUsd != null || property.cadImprovementValueUsd != null) && (
+                    <Text size="xs" c="dimmed" mt={2}>
+                      Land {money(property.cadLandValueUsd)} · Impr {money(property.cadImprovementValueUsd)}
+                    </Text>
+                  )}
                 </Box>
                 <Divider />
                 <Box py={10}>

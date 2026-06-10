@@ -14,8 +14,9 @@ import {
 } from "docx";
 
 import type { EvidencePacketInput, SoldComp } from "./protest-evidence.service.js";
-import type { ProtestComp } from "./protest-worksheet.service.js";
 import type { CadSalesComp, CadEquityComp } from "./cad-evidence-parser.service.js";
+
+type ProtestComp = EvidencePacketInput["dcadComps"][number];
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 

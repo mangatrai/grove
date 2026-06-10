@@ -76,6 +76,9 @@ type PropertyRecord = {
   monthlyRent: number | null;
   propertyNotes: string | null;
   cadAccountId: number | null;
+  cadAssessedValueUsd: number | null;
+  cadLandValueUsd: number | null;
+  cadImprovementValueUsd: number | null;
 };
 
 type ConversationTurn = {
@@ -418,6 +421,8 @@ export function TaxProtestPage() {
   const [arbScript, setArbScript] = useState<ArbScript | null>(null);
   const [arbScriptLoading, setArbScriptLoading] = useState(false);
   const [dcadAppeals, setDcadAppeals] = useState<DcadAppeal[]>([]);
+  const [noticePdfUrl, setNoticePdfUrl] = useState<string | null>(null);
+  const [loadingNotice, setLoadingNotice] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -601,7 +606,7 @@ export function TaxProtestPage() {
     [property?.valuationDetail]
   );
 
-  const cadAssessed = asNumber(assessment?.assessedValue);
+  const cadAssessed = property?.cadAssessedValueUsd ?? asNumber(assessment?.assessedValue);
   const avm = asNumber(estimate?.value) ?? property?.latestValueUsd ?? null;
   const subjectSqft = asNumber(subject?.sqFt);
   const overPct =
@@ -1028,6 +1033,25 @@ export function TaxProtestPage() {
     }
   }, [propertyId, year, docFormat, addToast]);
 
+  const handleViewAppraisalNotice = useCallback(async () => {
+    if (!propertyId) return;
+    setLoadingNotice(true);
+    try {
+      const tok = getToken();
+      const res = await fetch(`/api/protest/${encodeURIComponent(propertyId)}/appraisal-notice-pdf`, {
+        headers: tok ? { Authorization: `Bearer ${tok}` } : {}
+      });
+      if (!res.ok) throw new Error(`Failed to load appraisal notice (${res.status})`);
+      const blob = await res.blob();
+      if (noticePdfUrl) URL.revokeObjectURL(noticePdfUrl);
+      setNoticePdfUrl(URL.createObjectURL(blob));
+    } catch (err) {
+      addToast("red", err instanceof Error ? err.message : "Failed to load appraisal notice");
+    } finally {
+      setLoadingNotice(false);
+    }
+  }, [propertyId, noticePdfUrl, addToast]);
+
   const handleGenerateBrief = useCallback(async () => {
     if (!propertyId) return;
     setGeneratingBrief(true);
@@ -1193,13 +1217,11 @@ export function TaxProtestPage() {
               ) : null}
               {propertyId && property?.cadAccountId && (
                 <Button
-                  component="a"
-                  href={`/api/protest/${encodeURIComponent(propertyId)}/appraisal-notice-pdf`}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   size="xs"
                   variant="light"
-                  leftSection={<IconExternalLink size={13} />}
+                  loading={loadingNotice}
+                  leftSection={<IconFileText size={13} />}
+                  onClick={() => void handleViewAppraisalNotice()}
                 >
                   View Appraisal Notice
                 </Button>
@@ -1238,6 +1260,18 @@ export function TaxProtestPage() {
               <Text size="xs" c="dimmed">Year Built</Text>
               <Text fw={700} size="sm">{asNumber(subject?.yearBuilt) ?? "—"}</Text>
             </Grid.Col>
+            {property?.cadLandValueUsd != null && (
+              <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+                <Text size="xs" c="dimmed">CAD Land Value</Text>
+                <Text fw={700} size="sm">{money(property.cadLandValueUsd)}</Text>
+              </Grid.Col>
+            )}
+            {property?.cadImprovementValueUsd != null && (
+              <Grid.Col span={{ base: 6, sm: 4, md: 2 }}>
+                <Text size="xs" c="dimmed">CAD Improvement</Text>
+                <Text fw={700} size="sm">{money(property.cadImprovementValueUsd)}</Text>
+              </Grid.Col>
+            )}
           </Grid>
         </Stack>
       </Card>
@@ -1287,18 +1321,11 @@ export function TaxProtestPage() {
                       <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
                       <Table.Th style={{ textAlign: "right" }}>Sold Date</Table.Th>
                       {(property?.state ?? "").toUpperCase() === "TX" && (
-                        <>
-                          <Table.Th style={{ textAlign: "right" }}>
-                            <Tooltip label="CAD-assessed value for this comp (§41.43)" withArrow>
-                              <span>CAD Assessed</span>
-                            </Tooltip>
-                          </Table.Th>
-                          <Table.Th style={{ textAlign: "right" }}>
-                            <Tooltip label="CAD Assessed ÷ Sold Price. Green = comp assessed lower than subject (supports §41.43 unequal appraisal)" withArrow>
-                              <span>§41.43 Ratio</span>
-                            </Tooltip>
-                          </Table.Th>
-                        </>
+                        <Table.Th style={{ textAlign: "right" }}>
+                          <Tooltip label="CAD-assessed value for this comp" withArrow>
+                            <span>CAD Assessed</span>
+                          </Tooltip>
+                        </Table.Th>
                       )}
                       <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
                       <Table.Th style={{ width: 36 }} />
@@ -1308,13 +1335,6 @@ export function TaxProtestPage() {
                   <Table.Tbody>
                     {marketComps.map((comp) => {
                       const color = vsSubjectColor(comp.pricePerSqft, subjectMarketPpsf);
-                      const subjectRatio = cadAssessed != null && avm != null && avm > 0 ? cadAssessed / avm : null;
-                      const compRatio = comp.cadAssessedValueUsd != null && comp.soldPriceUsd != null && comp.soldPriceUsd > 0
-                        ? comp.cadAssessedValueUsd / comp.soldPriceUsd
-                        : null;
-                      const ratioColor = compRatio != null && subjectRatio != null
-                        ? (compRatio < subjectRatio ? "green" : "red")
-                        : undefined;
                       const sourceBadge = comp.source === "manual"
                         ? <Badge size="xs" color="orange" variant="light">Manual</Badge>
                         : comp.source === "cad_evidence"
@@ -1344,24 +1364,15 @@ export function TaxProtestPage() {
                             )}
                           </Table.Td>
                           <Table.Td style={{ textAlign: "right" }}>
-                            {ppsf(comp.pricePerSqft)}
+                            {ppsf(comp.pricePerSqft ?? (comp.soldPriceUsd != null && comp.sqft != null && comp.sqft > 0 ? Math.round(comp.soldPriceUsd / comp.sqft) : null))}
                           </Table.Td>
                           <Table.Td style={{ textAlign: "right" }}>
                             {comp.soldDate ?? "—"}
                           </Table.Td>
                           {(property?.state ?? "").toUpperCase() === "TX" && (
-                            <>
-                              <Table.Td style={{ textAlign: "right" }}>
-                                {comp.cadAssessedValueUsd != null ? money(comp.cadAssessedValueUsd) : "—"}
-                              </Table.Td>
-                              <Table.Td style={{ textAlign: "right" }}>
-                                {compRatio != null ? (
-                                  <Text size="xs" c={ratioColor} fw={ratioColor ? 600 : undefined}>
-                                    {(compRatio * 100).toFixed(1)}%
-                                  </Text>
-                                ) : "—"}
-                              </Table.Td>
-                            </>
+                            <Table.Td style={{ textAlign: "right" }}>
+                              {comp.cadAssessedValueUsd != null ? money(comp.cadAssessedValueUsd) : "—"}
+                            </Table.Td>
                           )}
                           <Table.Td style={{ textAlign: "right" }}>
                             <Text size="xs" c={color} fw={color ? 600 : undefined}>
@@ -1411,16 +1422,9 @@ export function TaxProtestPage() {
                       </Table.Td>
                       <Table.Td style={{ textAlign: "right" }}>—</Table.Td>
                       {(property?.state ?? "").toUpperCase() === "TX" && (
-                        <>
-                          <Table.Td style={{ textAlign: "right" }} fw={700}>
-                            {cadAssessed != null ? money(cadAssessed) : "—"}
-                          </Table.Td>
-                          <Table.Td style={{ textAlign: "right" }} fw={700}>
-                            {cadAssessed != null && avm != null && avm > 0
-                              ? `${((cadAssessed / avm) * 100).toFixed(1)}%`
-                              : "—"}
-                          </Table.Td>
-                        </>
+                        <Table.Td style={{ textAlign: "right" }} fw={700}>
+                          {cadAssessed != null ? money(cadAssessed) : "—"}
+                        </Table.Td>
                       )}
                       <Table.Td style={{ textAlign: "right" }}>
                         <Badge size="xs" variant="light">Subject</Badge>
@@ -2551,6 +2555,23 @@ export function TaxProtestPage() {
               </Button>
             </Group>
           </Stack>
+        )}
+      </Modal>
+
+      {/* Appraisal Notice PDF viewer */}
+      <Modal
+        opened={noticePdfUrl != null}
+        onClose={() => { if (noticePdfUrl) URL.revokeObjectURL(noticePdfUrl); setNoticePdfUrl(null); }}
+        title="Appraisal Notice"
+        size="xl"
+        styles={{ body: { padding: 0 } }}
+      >
+        {noticePdfUrl && (
+          <iframe
+            src={noticePdfUrl}
+            style={{ width: "100%", height: "75vh", border: "none", display: "block" }}
+            title="Appraisal Notice PDF"
+          />
         )}
       </Modal>
 

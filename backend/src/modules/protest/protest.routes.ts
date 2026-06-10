@@ -11,6 +11,7 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { getProperty, refreshPropertyValuation, updatePropertyAppraisalNotice } from "../household/property.service.js";
 import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
+import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
 import {
   appendConversationTurn,
   getOrCreateWorksheet,
@@ -1048,7 +1049,7 @@ protestRouter.get("/:propertyId/evidence-packet", async (req: AuthenticatedReque
     dcadComps: dcadCompsForPdf,
     soldComps,
     manualSoldComps: [],
-    soldCompsNotes: {},
+    soldCompsNotes: {} as Record<string, string>,
     cadEvidence: cadEv ?? null,
   };
 

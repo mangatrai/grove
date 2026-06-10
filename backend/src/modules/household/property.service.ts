@@ -35,6 +35,12 @@ export type PropertyRecord = {
   cadAccountId: number | null;
   cadProvider: string | null;
   cadAssessedValueUsd: number | null;
+  cadLandValueUsd: number | null;
+  cadImprovementValueUsd: number | null;
+  cadMarketValueUsd: number | null;
+  cadAppraisedValueUsd: number | null;
+  cadNetAppraisedValueUsd: number | null;
+  cadTaxLimitationValueUsd: number | null;
   cadAppraisalNoticeS3id: string | null;
   cadAppraisalNoticeFetchedAt: string | null;
   createdAt: string;
@@ -79,6 +85,12 @@ type PropertyRow = {
   cad_account_id: number | null;
   cad_provider: string | null;
   cad_assessed_value_usd: number | null;
+  cad_land_value_usd: number | null;
+  cad_improvement_value_usd: number | null;
+  cad_market_value_usd: number | null;
+  cad_appraised_value_usd: number | null;
+  cad_net_appraised_value_usd: number | null;
+  cad_tax_limitation_value_usd: number | null;
   cad_appraisal_notice_s3id: string | null;
   cad_appraisal_notice_fetched_at: string | null;
   created_at: string;
@@ -122,6 +134,12 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     cadAccountId: row.cad_account_id ?? null,
     cadProvider: row.cad_provider ?? null,
     cadAssessedValueUsd: row.cad_assessed_value_usd != null ? Number(row.cad_assessed_value_usd) : null,
+    cadLandValueUsd: row.cad_land_value_usd != null ? Number(row.cad_land_value_usd) : null,
+    cadImprovementValueUsd: row.cad_improvement_value_usd != null ? Number(row.cad_improvement_value_usd) : null,
+    cadMarketValueUsd: row.cad_market_value_usd != null ? Number(row.cad_market_value_usd) : null,
+    cadAppraisedValueUsd: row.cad_appraised_value_usd != null ? Number(row.cad_appraised_value_usd) : null,
+    cadNetAppraisedValueUsd: row.cad_net_appraised_value_usd != null ? Number(row.cad_net_appraised_value_usd) : null,
+    cadTaxLimitationValueUsd: row.cad_tax_limitation_value_usd != null ? Number(row.cad_tax_limitation_value_usd) : null,
     cadAppraisalNoticeS3id: row.cad_appraisal_notice_s3id ?? null,
     cadAppraisalNoticeFetchedAt: row.cad_appraisal_notice_fetched_at ?? null,
     createdAt: row.created_at,

@@ -96,7 +96,7 @@ async function getEffectivePref(
     type
   );
   if (row) {
-    return { enabledEmail: Boolean(row.enabled_email), enabledInapp: Boolean(row.enabled_inapp) };
+    return { enabledEmail: Boolean(row.enabled_email), enabledInapp: Boolean(row.enabled_inapp), audience: NOTIFICATION_DEFAULTS[type].audience };
   }
   return NOTIFICATION_DEFAULTS[type];
 }

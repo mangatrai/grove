@@ -1,7 +1,7 @@
 import { getChatAdapter, strongModel } from "../../llm/index.js";
 import { log } from "../../logger.js";
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
-import type { ProtestComp } from "./protest-worksheet.service.js";
+import type { UnifiedComp } from "./protest-worksheet.service.js";
 
 export type ArbNegotiationThresholds = {
   openAskUsd: number;
@@ -39,8 +39,7 @@ export type ArbScriptInput = {
   hearingDate: string | null;
   taxYear: number;
   cadEvidence: CadEvidenceData | null;
-  equityComps: ProtestComp[];
-  soldCompsNotes: Record<string, string>;
+  equityComps: UnifiedComp[];
   strategyTargetValueUsd: number | null;
   strategyPrimaryStrategy: string | null;
   strategyArguments: string[];
@@ -121,16 +120,8 @@ function buildDataBlock(input: ArbScriptInput): string {
     for (const c of input.equityComps) {
       const addr = [c.addressLine1, c.city].filter(Boolean).join(", ") || "Unknown";
       const notePart = c.notes ? ` | notes: ${c.notes}` : "";
-      const gapPart = c.perSqftUsd != null && subjectPpsf != null ? ` | subject is $${subjectPpsf - Math.round(c.perSqftUsd)}/sqft above this comp` : "";
-      lines.push(`  ${addr} — assessed: ${money(c.assessedValueUsd)}, $/sqft: ${money(c.perSqftUsd)}${gapPart}${notePart}`);
-    }
-  }
-
-  const noteEntries = Object.entries(input.soldCompsNotes).filter(([, v]) => v.trim());
-  if (noteEntries.length > 0) {
-    lines.push("\n## Redfin Sold Comp Research Notes");
-    for (const [addr, note] of noteEntries) {
-      lines.push(`  ${addr}: ${note}`);
+      const gapPart = c.cadPerSqftAssessed != null && subjectPpsf != null ? ` | subject is $${subjectPpsf - Math.round(c.cadPerSqftAssessed)}/sqft above this comp` : "";
+      lines.push(`  ${addr} — assessed: ${money(c.cadAssessedValueUsd)}, $/sqft: ${money(c.cadPerSqftAssessed)}${gapPart}${notePart}`);
     }
   }
 
