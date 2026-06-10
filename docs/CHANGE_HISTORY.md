@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-179 — Protest flow: market evidence empty, sold date deed fallback, saveCadEvidenceComps param mismatch, appraisal notice 404 UX (2026-06-10)
+
+Five bug fixes:
+
+1. **Market Value Evidence table empty after DCAD backfill**: `marketComps` filtered to `source === 'redfin' || 'manual'` only. When Step D merges a Redfin comp into an existing `dcad_search` row, the merged row keeps `source='dcad_search'`, causing it to be invisible in market evidence. Per the original plan design ("no strategy flags — all comps show in both views"), changed both `marketComps` and `equityComps` to use the same filter: all non-excluded comps. Added DCAD source badge (blue) to market evidence table rows.
+
+2. **Sold date falls back to DCAD deed date**: When Step D enriches a Redfin comp and `sold_date` is null (common in TX non-disclosure), now sets `sold_date = COALESCE(sold_date, deedDate)`. For merge path (Redfin → existing dcad_search), uses `COALESCE(sold_date, redfin_sold_date, cad_deed_date)`. Market evidence table also shows `soldDate ?? cadDeedDate` in the Sold Date column.
+
+3. **`saveCadEvidenceComps` param count mismatch**: Sales comp INSERT had 10 `?` placeholders but 11 params were passed — `perSqft` (always null for PDF comps) was included in params but not in the column list. Removed the extra param; `cad_per_sqft_assessed` will be set later by Step D DCAD enrichment.
+
+4. **Appraisal Notice "not available" UX**: DCAD `shownoticelink` returns 400 when no notice is published for a property (expected, especially early in the season). Our server returns 404. Frontend now shows a yellow informational toast ("Appraisal notice not yet available for this property") instead of a red error for 404 responses.
+
+5. **`cadDeedDate` missing from frontend `UnifiedComp` type**: Added `cadDeedDate: string | null` so the deed-date fallback in the Sold Date column compiles.
+
+Files: `frontend/src/pages/TaxProtestPage.tsx`, `backend/src/modules/protest/protest-worksheet.service.ts`
+
+GitHub: closes #103
+
+---
+
 ## FIX-178 — Protest flow: appraisal notice modal, land/improvement display, $/sqft and sold date fixes (2026-06-10)
 
 Four bug fixes in the protest worksheet and property detail pages:

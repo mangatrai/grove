@@ -561,7 +561,6 @@ export async function saveCadEvidenceComps(
 ): Promise<void> {
   // Sales comps (§41.41 — have sale price data)
   for (const c of data.salesAnalysis.comps) {
-    const perSqft = null; // sqft not in PDF comps; will be enriched later
     await qExec(
       `INSERT INTO protest_comp
         (id, household_id, property_id, tax_year, source,
@@ -583,8 +582,7 @@ export async function saveCadEvidenceComps(
       c.cadMarketValueUsd,
       c.cadIndValueUsd,
       c.salePriceUsd,
-      c.saleDate ?? null,
-      perSqft
+      c.saleDate ?? null
     ).catch((err) => {
       log.warn("saveCadEvidenceComps: sales comp insert failed", {
         address: c.address,
@@ -893,11 +891,12 @@ export async function runDcadBackfill(
       );
 
       if (existingDcad) {
-        // Merge: copy sold data into the DCAD row, delete this Redfin/cad_evidence row
+        // Merge: copy sold data into the DCAD row, delete this Redfin/cad_evidence row.
+        // Fall back to cad_deed_date already on the DCAD row if neither row has a sold date.
         await qExec(
           `UPDATE protest_comp SET
              sold_price_usd   = COALESCE(sold_price_usd, ?),
-             sold_date        = COALESCE(sold_date, ?),
+             sold_date        = COALESCE(sold_date, ?, cad_deed_date),
              price_per_sqft   = COALESCE(price_per_sqft, ?),
              raw_realty_json  = COALESCE(raw_realty_json, ?),
              cad_enriched_at  = NOW()
@@ -922,6 +921,7 @@ export async function runDcadBackfill(
              cad_assessed_value_usd = ?,
              cad_per_sqft_assessed  = ?,
              cad_deed_date          = ?,
+             sold_date              = COALESCE(sold_date, ?),
              sqft    = COALESCE(sqft, ?),
              beds    = COALESCE(beds, ?),
              baths   = COALESCE(baths, ?),
@@ -936,6 +936,7 @@ export async function runDcadBackfill(
           canonical.marketValueUsd,
           canonical.appraisedValueUsd,
           perSqft,
+          canonical.deedDate,
           canonical.deedDate,
           sqft, canonical.beds, canonical.baths, canonical.hasPool,
           canonical.rawSearchJson,

@@ -130,6 +130,7 @@ type UnifiedComp = {
   cadAssessedValueUsd: number | null;
   cadMarketValueUsd: number | null;
   cadPerSqftAssessed: number | null;
+  cadDeedDate: string | null;
   soldPriceUsd: number | null;
   listPriceUsd: number | null;
   soldDate: string | null;
@@ -633,14 +634,10 @@ export function TaxProtestPage() {
   const filingDeadlineDays =
     worksheet?.filingDeadline != null ? daysUntil(worksheet.filingDeadline) : null;
 
-  const marketComps = useMemo(
-    () => comps.filter((c) => (c.source === 'redfin' || c.source === 'manual') && !c.excluded),
-    [comps]
-  );
-  const equityComps = useMemo(
-    () => comps.filter((c) => !c.excluded),
-    [comps]
-  );
+  const activeComps = useMemo(() => comps.filter((c) => !c.excluded), [comps]);
+  // Both tables show all non-excluded comps; columns differ per view (plan: no strategy flags)
+  const marketComps = activeComps;
+  const equityComps = activeComps;
 
   const removeComp = useCallback(async (compId: string) => {
     if (!propertyId) return;
@@ -1041,6 +1038,10 @@ export function TaxProtestPage() {
       const res = await fetch(`/api/protest/${encodeURIComponent(propertyId)}/appraisal-notice-pdf`, {
         headers: tok ? { Authorization: `Bearer ${tok}` } : {}
       });
+      if (res.status === 404) {
+        addToast("yellow", "Appraisal notice not yet available for this property");
+        return;
+      }
       if (!res.ok) throw new Error(`Failed to load appraisal notice (${res.status})`);
       const blob = await res.blob();
       if (noticePdfUrl) URL.revokeObjectURL(noticePdfUrl);
@@ -1339,7 +1340,9 @@ export function TaxProtestPage() {
                         ? <Badge size="xs" color="orange" variant="light">Manual</Badge>
                         : comp.source === "cad_evidence"
                           ? <Badge size="xs" color="grape" variant="light">CAD Evidence</Badge>
-                          : <Badge size="xs" color="violet" variant="light">Redfin</Badge>;
+                          : comp.source === "dcad_search"
+                            ? <Badge size="xs" color="blue" variant="light">DCAD</Badge>
+                            : <Badge size="xs" color="violet" variant="light">Redfin</Badge>;
                       return (
                         <Table.Tr key={comp.id}>
                           <Table.Td>
@@ -1367,7 +1370,7 @@ export function TaxProtestPage() {
                             {ppsf(comp.pricePerSqft ?? (comp.soldPriceUsd != null && comp.sqft != null && comp.sqft > 0 ? Math.round(comp.soldPriceUsd / comp.sqft) : null))}
                           </Table.Td>
                           <Table.Td style={{ textAlign: "right" }}>
-                            {comp.soldDate ?? "—"}
+                            {comp.soldDate ?? comp.cadDeedDate ?? "—"}
                           </Table.Td>
                           {(property?.state ?? "").toUpperCase() === "TX" && (
                             <Table.Td style={{ textAlign: "right" }}>
