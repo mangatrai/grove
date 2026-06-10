@@ -714,6 +714,7 @@ export async function runDcadBackfill(
 
   await qExec(
     `UPDATE property SET
+       cad_provider               = 'dcad',
        cad_property_id            = ?,
        cad_account_id             = ?,
        cad_assessed_value_usd     = ?,

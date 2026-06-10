@@ -528,6 +528,7 @@ export async function getDCADAppeal(
       log.warn("DCAD appeal HTTP error", { pAccountId, status: res.status });
       return [];
     }
+    if (res.status === 204) return [];
     const body = await res.json() as unknown;
     const rows = extractRows(body);
     return rows

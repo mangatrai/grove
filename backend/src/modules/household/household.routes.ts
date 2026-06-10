@@ -609,7 +609,7 @@ householdRouter.post("/properties/:propertyId/refresh-valuation", requireRole(["
   const result = await refreshPropertyValuation(params.data.propertyId, householdId);
   if (!result.ok) {
     const statusMap: Record<string, number> = {
-      NOT_FOUND: 404, NO_ADDRESS: 422, API_NOT_CONFIGURED: 503, API_ERROR: 502
+      NOT_FOUND: 404, NO_ADDRESS: 422, API_NOT_CONFIGURED: 503, API_ERROR: 502, RATE_LIMITED: 429
     };
     res.status(statusMap[result.code] ?? 500).json({ message: result.message, code: result.code });
     return;

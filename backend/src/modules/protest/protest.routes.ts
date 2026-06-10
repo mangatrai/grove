@@ -352,13 +352,14 @@ protestRouter.get("/:propertyId/dcad/value-history", async (req: AuthenticatedRe
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  if (!property.cadAccountId || !property.cadProvider) {
+  if (!property.cadAccountId) {
     res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
     return;
   }
-  const adapter = getCadAdapter(property.cadProvider);
+  const provider = property.cadProvider ?? inferCadProvider(property.state);
+  const adapter = provider ? getCadAdapter(provider) : null;
   if (!adapter) {
-    res.status(404).json({ message: `No CAD adapter registered for provider: ${property.cadProvider}` });
+    res.status(404).json({ message: `No CAD adapter registered for provider: ${provider ?? property.state}` });
     return;
   }
   const history = await adapter.getValueHistory(property.cadAccountId);
@@ -377,13 +378,14 @@ protestRouter.get("/:propertyId/dcad/taxable", async (req: AuthenticatedRequest,
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  if (!property.cadAccountId || !property.cadProvider) {
+  if (!property.cadAccountId) {
     res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
     return;
   }
-  const adapter = getCadAdapter(property.cadProvider);
+  const provider = property.cadProvider ?? inferCadProvider(property.state);
+  const adapter = provider ? getCadAdapter(provider) : null;
   if (!adapter) {
-    res.status(404).json({ message: `No CAD adapter registered for provider: ${property.cadProvider}` });
+    res.status(404).json({ message: `No CAD adapter registered for provider: ${provider ?? property.state}` });
     return;
   }
   const taxable = await adapter.getTaxable(property.cadAccountId);
@@ -402,13 +404,14 @@ protestRouter.get("/:propertyId/dcad/appeal", async (req: AuthenticatedRequest, 
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  if (!property.cadAccountId || !property.cadProvider) {
+  if (!property.cadAccountId) {
     res.status(404).json({ message: "CAD account not on file — trigger a CAD comps search first" });
     return;
   }
-  const adapter = getCadAdapter(property.cadProvider);
+  const provider = property.cadProvider ?? inferCadProvider(property.state);
+  const adapter = provider ? getCadAdapter(provider) : null;
   if (!adapter) {
-    res.status(404).json({ message: `No CAD adapter registered for provider: ${property.cadProvider}` });
+    res.status(404).json({ message: `No CAD adapter registered for provider: ${provider ?? property.state}` });
     return;
   }
   const appeals = await adapter.getAppeal(property.cadAccountId);
@@ -592,7 +595,9 @@ const addCompBodySchema = z.object({
   baths: z.number().min(0).max(50).nullable().optional(),
   yearBuilt: z.number().int().min(1800).max(2100).nullable().optional(),
   cadAssessedValueUsd: z.number().int().min(0).nullable().optional(),
-  cadMarketValueUsd: z.number().int().min(0).nullable().optional()
+  cadMarketValueUsd: z.number().int().min(0).nullable().optional(),
+  soldPriceUsd: z.number().int().min(0).nullable().optional(),
+  soldDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
 });
 
 const excludeCompBodySchema = z.object({
@@ -652,6 +657,8 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
     cadMarketValueUsd: parsed.data.cadMarketValueUsd ?? null,
     cadPropertyId: parsed.data.cadPropertyId ?? null,
     cadAccountId: parsed.data.cadAccountId ?? null,
+    soldPriceUsd: parsed.data.soldPriceUsd ?? null,
+    soldDate: parsed.data.soldDate ?? null,
   });
   const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
   log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, compId: comp.id, source: parsed.data.source });
