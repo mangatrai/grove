@@ -150,7 +150,17 @@ function parseComps(comparables: unknown): ValuationComp[] {
   for (const comp of comparables) {
     try {
       const outerAtts = (comp as Record<string, unknown>).__atts;
-      if (!Array.isArray(outerAtts) || outerAtts.length < 8) continue;
+      if (!Array.isArray(outerAtts) || outerAtts.length < 8) {
+        log.warn("RealtyAPI: parseComps — outerAtts length check failed", {
+          isArray: Array.isArray(outerAtts),
+          length: Array.isArray(outerAtts) ? outerAtts.length : null,
+          compKeys: comp && typeof comp === "object" ? Object.keys(comp as object) : null,
+          outerAttsPreview: Array.isArray(outerAtts)
+            ? outerAtts.slice(0, 4).map((el) => (el && typeof el === "object" ? Object.keys(el as object).slice(0, 5) : typeof el))
+            : typeof outerAtts
+        });
+        continue;
+      }
 
       // Listing data — positional array inside __atts[4]
       const listingObj = outerAtts[4] as Record<string, unknown>;
@@ -178,7 +188,15 @@ function parseComps(comparables: unknown): ValuationComp[] {
       // Facts array — __atts[7].__atts (positional)
       const factsObj = outerAtts[7] as Record<string, unknown>;
       const facts = factsObj?.__atts as unknown[];
-      if (!Array.isArray(facts) || facts.length < 20) continue;
+      if (!Array.isArray(facts) || facts.length < 20) {
+        log.warn("RealtyAPI: parseComps — facts array check failed", {
+          isArray: Array.isArray(facts),
+          length: Array.isArray(facts) ? facts.length : null,
+          outerAttsLength: outerAtts.length,
+          idx7Keys: factsObj && typeof factsObj === "object" ? Object.keys(factsObj).slice(0, 5) : null
+        });
+        continue;
+      }
 
       const streetNum = typeof facts[5] === "string" ? facts[5] : "";
       const streetName = typeof facts[19] === "string" ? facts[19] : "";
@@ -192,7 +210,10 @@ function parseComps(comparables: unknown): ValuationComp[] {
       const sqft = typeof facts[21] === "number" ? facts[21] : null;
       const pricePerSqft = soldPrice && sqft && sqft > 0 ? Math.round(soldPrice / sqft) : null;
 
-      if (!address || !city) continue;
+      if (!address || !city) {
+        log.warn("RealtyAPI: parseComps — address/city missing", { streetNum, streetName, streetSuffix, city, facts0: facts[0], facts2: facts[2] });
+        continue;
+      }
 
       result.push({ address, city, state, zip, sqft, beds, baths, yearBuilt, lotSqft, listPrice, soldPrice, soldDate, pricePerSqft });
     } catch (err) {
