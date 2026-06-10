@@ -41,6 +41,9 @@ export type DCADValueHistoryEntry = {
   assessedValue: number | null;
   landValue: number | null;
   improvementValue: number | null;
+  taxLimitationValue: number | null;    // ownerTaxLimitationValue — homestead cap savings amount
+  netAppraisedValue: number | null;     // ownerNetAppraisedValue — what is actually taxed
+  suExclusionValue: number | null;      // ownerSUExclusionValue — special use exclusion
 };
 
 export type DCADAppealEntry = {
@@ -350,6 +353,9 @@ export async function getDCADValueHistory(
         assessedValue: asNumber(r.ownerAppraisedValue ?? r.appraisedValue ?? r.assessedValue ?? r.appraised_value),
         landValue: asNumber(r.ownerLandValue ?? r.landValue ?? r.land_value),
         improvementValue: asNumber(r.ownerImprovementValue ?? r.improvementValue ?? r.improvement_value),
+        taxLimitationValue: asNumber(r.ownerTaxLimitationValue ?? r.taxLimitationValue ?? null),
+        netAppraisedValue: asNumber(r.ownerNetAppraisedValue ?? r.netAppraisedValue ?? null),
+        suExclusionValue: asNumber(r.ownerSUExclusionValue ?? r.suExclusionValue ?? null),
       }))
       .filter((e) => e.year > 0);
     log.debug("DCAD value history mapped", { pAccountId, entries: entries.map((e) => ({ year: e.year, assessedValue: e.assessedValue })) });

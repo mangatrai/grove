@@ -447,6 +447,21 @@ Members could previously read financial data belonging to other household member
 
 ---
 
+## PT-18 — Protest flow architectural redesign: unified protest_comp, DcadEnrichmentService, 5-step backfill (2026-06-09)
+
+- **Migration 0068** (`0068_protest_comp_unified.sql`): new `protest_comp` table replaces `protest_comp_cad` + 4 JSONB blobs (`sold_comps_cad_json`, `sold_comps_notes_json`, `excluded_sold_comps_json`, `manual_sold_comps_json`); adds `appeal_json JSONB` to `protest_worksheet`; adds 14 CAD value columns to `property` (land, improvement, market, appraised, SU exclusion, homestead cap, net appraised, full value history JSON, taxable JSON, sqft/beds/baths/pool, enriched_at, appraisal notice S3 id + fetched_at)
+- **New `dcad-enrichment.service.ts`**: `DcadCanonicalProperty` unified output type; `fetchDcadCanonical()` (search → improvement → optional value history + taxable); `fetchDcadCanonicalBatch()`; `fetchDcadAppeal()`; `fetchDcadAppraisalNoticeS3Id()` (appraisal notice PDF link via shownoticelink endpoint)
+- **Rewritten `protest-worksheet.service.ts`**: `UnifiedComp` type mapping `protest_comp` columns; `listWorksheetComps()` reads from `protest_comp`; `addManualComp()`, `excludeComp()`, `deleteComp()`, `updateCompNote()` all by UUID; `saveCadEvidenceComps()` inserts PDF comps; `saveRedfinComps()` saves Redfin comps at valuation fetch; `runDcadBackfill()` 5-step pipeline (subject enrichment, DCAD comps insert, improvement enrichment with 150ms throttle, Redfin/cad_evidence merge with deduplication, appeal sync); `syncAppealStatus()` persists appeal data + hearing_date to worksheet
+- **Updated `property.service.ts`**: `refreshPropertyValuation` saves Redfin comps to `protest_comp` via `saveRedfinComps()` (fire-and-forget)
+- **Updated `protest.routes.ts`**: removed `/sold-comps` endpoints (GET/POST/DELETE); removed `/sold-comps/exclusions` and `/sold-comps/notes`; comp endpoints use UUID `id` instead of `cadPropertyId`; new `PATCH /comps/:compId/exclude`; `POST /refresh-comps` simplified to `refreshPropertyValuation` + fire-and-forget `runDcadBackfill`; evidence-packet and protest-brief read from `protest_comp` directly
+- **Updated `household.routes.ts`**: property creation fires `runDcadBackfill` instead of old `triggerCadBackfill`
+- **Updated `export-registry.ts`**: `protest_comp` registered (replaced `protest_comp_cad`)
+- **GitHub:** closes #101
+
+**Files:** `backend/db/migrations/0068_protest_comp_unified.sql`, `backend/src/modules/protest/dcad-enrichment.service.ts` (new), `backend/src/modules/protest/dcad.service.ts`, `protest-worksheet.service.ts`, `protest.routes.ts`, `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/export/export-registry.ts`, `backend/db/seeds/dev/dev_0008_seed_properties.sql`
+
+---
+
 ## PT-17 — AI oral ARB script generation (2026-06-02)
 
 - New `POST /api/protest/:propertyId/generate-arb-script?year=N` endpoint generates a 6-step oral hearing script via GPT-4o

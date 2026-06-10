@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { fetchByIds, isRealtyApiConfigured, lookupByAddress, type ValuationDetail } from "./realty-api.service.js";
 import { log } from "../../logger.js";
+import { saveRedfinComps } from "../protest/protest-worksheet.service.js";
 
 export type PropertyUse = "primary" | "rental" | "vacation";
 export type PropertyValueSource = "manual" | "api";
@@ -34,6 +35,8 @@ export type PropertyRecord = {
   cadAccountId: number | null;
   cadProvider: string | null;
   cadAssessedValueUsd: number | null;
+  cadAppraisalNoticeS3id: string | null;
+  cadAppraisalNoticeFetchedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -76,6 +79,8 @@ type PropertyRow = {
   cad_account_id: number | null;
   cad_provider: string | null;
   cad_assessed_value_usd: number | null;
+  cad_appraisal_notice_s3id: string | null;
+  cad_appraisal_notice_fetched_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -117,6 +122,8 @@ function toPropertyRecord(row: PropertyRow): PropertyRecord {
     cadAccountId: row.cad_account_id ?? null,
     cadProvider: row.cad_provider ?? null,
     cadAssessedValueUsd: row.cad_assessed_value_usd != null ? Number(row.cad_assessed_value_usd) : null,
+    cadAppraisalNoticeS3id: row.cad_appraisal_notice_s3id ?? null,
+    cadAppraisalNoticeFetchedAt: row.cad_appraisal_notice_fetched_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -430,6 +437,38 @@ export async function refreshPropertyValuation(
   });
 
   log.info("refreshPropertyValuation: done", { propertyId, estimate: result.estimate, compsCount: result.detail.comps.length });
+
+  // Save Redfin comps to protest_comp for unified protest view
+  if (result.detail.comps.length > 0) {
+    const taxYear = new Date().getUTCFullYear();
+    void saveRedfinComps(
+      propertyId,
+      householdId,
+      taxYear,
+      result.detail.comps.map((c) => ({
+        address: c.address,
+        city: c.city,
+        state: c.state,
+        zip: c.zip,
+        sqft: c.sqft,
+        beds: c.beds,
+        baths: c.baths,
+        yearBuilt: c.yearBuilt,
+        lotSqft: c.lotSqft,
+        soldPrice: c.soldPrice,
+        listPrice: c.listPrice,
+        soldDate: c.soldDate,
+        pricePerSqft: c.pricePerSqft,
+        raw: c as unknown,
+      }))
+    ).catch((err) => {
+      log.warn("refreshPropertyValuation: saveRedfinComps failed", {
+        propertyId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
   return { ok: true, estimate: result.estimate, fetchedAt: today };
 }
 
@@ -507,6 +546,23 @@ export async function deleteProperty(
   );
 
   return { ok: true, unlinkedAccounts };
+}
+
+export async function updatePropertyAppraisalNotice(
+  propertyId: string,
+  householdId: string,
+  s3id: string
+): Promise<void> {
+  await qExec(
+    `UPDATE property
+        SET cad_appraisal_notice_s3id = ?,
+            cad_appraisal_notice_fetched_at = NOW(),
+            updated_at = NOW()
+      WHERE id = ? AND household_id = ?`,
+    s3id,
+    propertyId,
+    householdId
+  );
 }
 
 /**

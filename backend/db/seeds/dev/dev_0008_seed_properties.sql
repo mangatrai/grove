@@ -123,16 +123,16 @@ VALUES (
   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 ) ON CONFLICT DO NOTHING;
 
-INSERT INTO protest_comp_cad (
-  id, household_id, property_id, tax_year,
+INSERT INTO protest_comp (
+  id, household_id, property_id, tax_year, source,
   cad_property_id, address_line1, city,
-  assessed_value_usd, sqft, beds, baths, year_built, per_sqft_usd,
-  raw_json, fetched_at
+  cad_assessed_value_usd, sqft, beds, baths, year_built, cad_per_sqft_assessed,
+  raw_dcad_json, fetched_at
 ) VALUES
-  ('d0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 2026,
+  ('d0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 2026, 'dcad_search',
    'DCAD-DEMO-101', '101 Demo Oak Dr', 'Flower Mound', 370000, 2750, 4, 3, 2005, 134.55, '{"source":"dev-seed"}'::jsonb, CURRENT_TIMESTAMP),
-  ('d0000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 2026,
+  ('d0000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 2026, 'dcad_search',
    'DCAD-DEMO-102', '102 Demo Oak Dr', 'Flower Mound', 365000, 2710, 4, 2, 2004, 134.69, '{"source":"dev-seed"}'::jsonb, CURRENT_TIMESTAMP),
-  ('d0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 2026,
+  ('d0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001', 2026, 'dcad_search',
    'DCAD-DEMO-103', '103 Demo Oak Dr', 'Flower Mound', 378000, 2820, 4, 3, 2006, 134.04, '{"source":"dev-seed"}'::jsonb, CURRENT_TIMESTAMP)
 ON CONFLICT DO NOTHING;

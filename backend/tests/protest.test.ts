@@ -85,7 +85,7 @@ async function login(): Promise<string> {
 }
 
 async function cleanupRouteYear(): Promise<void> {
-  await sqlStmt(`DELETE FROM protest_comp_cad WHERE property_id = ? AND tax_year = ?`).run(
+  await sqlStmt(`DELETE FROM protest_comp WHERE property_id = ? AND tax_year = ?`).run(
     PROPERTY_ID,
     ROUTE_TAX_YEAR
   );
@@ -179,11 +179,11 @@ describe("protest CAD comp routes", () => {
         addressLine1: "123 Test St, Dallas TX 75201",
         city: "Dallas",
         sqft: 1500,
-        assessedValueUsd: 200_000,
-        marketValueUsd: 250_000,
+        cadAssessedValueUsd: 200_000,
+        cadMarketValueUsd: 250_000,
       });
     expect(post.status).toBe(201);
-    expect(post.body.cadPropertyId).toBeTruthy();
+    expect(post.body.comp?.id).toBeTruthy();
 
     const get = await request(app)
       .get(`/api/protest/${PROPERTY_ID}/comps?year=${ROUTE_TAX_YEAR}`)
@@ -213,20 +213,47 @@ describe("protest CAD comp routes", () => {
       .send({
         year: ROUTE_TAX_YEAR,
         addressLine1: "456 Delete Me St, Dallas TX 75201",
-        assessedValueUsd: 200_000,
+        cadAssessedValueUsd: 200_000,
       });
-    const cadPropertyId = post.body.cadPropertyId as string;
+    const compId = post.body.comp?.id as string;
 
     const del = await request(app)
-      .delete(`/api/protest/${PROPERTY_ID}/comps/${cadPropertyId}?year=${ROUTE_TAX_YEAR}`)
+      .delete(`/api/protest/${PROPERTY_ID}/comps/${compId}`)
       .set("Authorization", `Bearer ${token}`);
     expect(del.status).toBe(200);
 
     const get = await request(app)
       .get(`/api/protest/${PROPERTY_ID}/comps?year=${ROUTE_TAX_YEAR}`)
       .set("Authorization", `Bearer ${token}`);
-    const ids = (get.body.comps as Array<{ cadPropertyId: string }>).map((c) => c.cadPropertyId);
-    expect(ids).not.toContain(cadPropertyId);
+    const ids = (get.body.comps as Array<{ id: string }>).map((c) => c.id);
+    expect(ids).not.toContain(compId);
+  });
+
+  it("PATCH comp exclude hides row from default GET comps then shows with includeExcluded", async () => {
+    const post = await request(app)
+      .post(`/api/protest/${PROPERTY_ID}/comps`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ year: ROUTE_TAX_YEAR, addressLine1: "321 Exclude St, Dallas TX 75201" });
+    const compId = post.body.comp?.id as string;
+
+    await request(app)
+      .patch(`/api/protest/${PROPERTY_ID}/comps/${compId}/exclude`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ excluded: true });
+
+    const hidden = await request(app)
+      .get(`/api/protest/${PROPERTY_ID}/comps?year=${ROUTE_TAX_YEAR}`)
+      .set("Authorization", `Bearer ${token}`);
+    const hiddenIds = (hidden.body.comps as Array<{ id: string }>).map((c) => c.id);
+    expect(hiddenIds).not.toContain(compId);
+
+    const visible = await request(app)
+      .get(`/api/protest/${PROPERTY_ID}/comps?year=${ROUTE_TAX_YEAR}&includeExcluded=true`)
+      .set("Authorization", `Bearer ${token}`);
+    const visibleMatch = (visible.body.comps as Array<{ id: string; excluded: boolean }>).find(
+      (c) => c.id === compId
+    );
+    expect(visibleMatch?.excluded).toBe(true);
   });
 
   it("PATCH comp notes round-trips through GET comps", async () => {
@@ -237,10 +264,10 @@ describe("protest CAD comp routes", () => {
         year: ROUTE_TAX_YEAR,
         addressLine1: "789 Notes St, Dallas TX 75201",
       });
-    const cadPropertyId = post.body.cadPropertyId as string;
+    const compId = post.body.comp?.id as string;
 
     const patch = await request(app)
-      .patch(`/api/protest/${PROPERTY_ID}/comps/${cadPropertyId}/notes?taxYear=${ROUTE_TAX_YEAR}`)
+      .patch(`/api/protest/${PROPERTY_ID}/comps/${compId}/notes`)
       .set("Authorization", `Bearer ${token}`)
       .send({ notes: "Equity comp research note" });
     expect(patch.status).toBe(204);
@@ -248,62 +275,16 @@ describe("protest CAD comp routes", () => {
     const get = await request(app)
       .get(`/api/protest/${PROPERTY_ID}/comps?year=${ROUTE_TAX_YEAR}`)
       .set("Authorization", `Bearer ${token}`);
-    const comp = (get.body.comps as Array<{ cadPropertyId: string; notes: string | null }>).find(
-      (c) => c.cadPropertyId === cadPropertyId
+    const comp = (get.body.comps as Array<{ id: string; notes: string | null }>).find(
+      (c) => c.id === compId
     );
     expect(comp?.notes).toBe("Equity comp research note");
   });
 });
 
-describe("protest manual sold comp routes", () => {
-  let token: string;
-
-  beforeAll(async () => {
-    token = await login();
-    await cleanupRouteYear();
-  });
-
-  afterEach(async () => {
-    await cleanupRouteYear();
-  });
-
-  it("POST sold-comps adds a manual comp", async () => {
-    const res = await request(app)
-      .post(`/api/protest/${PROPERTY_ID}/sold-comps`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        year: ROUTE_TAX_YEAR,
-        address: "123 Test St, Dallas TX 75201",
-        soldPrice: 400_000,
-        sqft: 1500,
-      });
-    expect(res.status).toBe(201);
-    expect(res.body.comp.address).toBe("123 Test St, Dallas TX 75201");
-  });
-
-  it("DELETE sold-comps removes the manual comp", async () => {
-    const post = await request(app)
-      .post(`/api/protest/${PROPERTY_ID}/sold-comps`)
-      .set("Authorization", `Bearer ${token}`)
-      .send({
-        year: ROUTE_TAX_YEAR,
-        address: "222 Remove Sold St, Dallas TX 75201",
-        soldPrice: 350_000,
-      });
-    const compId = post.body.comp.id as string;
-
-    const del = await request(app)
-      .delete(`/api/protest/${PROPERTY_ID}/sold-comps/${compId}?year=${ROUTE_TAX_YEAR}`)
-      .set("Authorization", `Bearer ${token}`);
-    expect(del.status).toBe(200);
-
-    const list = await request(app)
-      .get(`/api/protest/${PROPERTY_ID}/sold-comps?year=${ROUTE_TAX_YEAR}`)
-      .set("Authorization", `Bearer ${token}`);
-    const ids = (list.body.manualSoldComps as Array<{ id: string }>).map((c) => c.id);
-    expect(ids).not.toContain(compId);
-  });
-});
+// The sold-comps routes have been deprecated and consolidated into /comps.
+// These tests were for the old POST/DELETE /sold-comps endpoints.
+// With the unified protest_comp table, use POST /comps, DELETE /comps/:compId instead.
 
 describe("protest worksheet routes", () => {
   let token: string;

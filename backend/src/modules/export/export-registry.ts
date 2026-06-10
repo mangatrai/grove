@@ -224,8 +224,8 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     memberScopeInclude: false
   },
   {
-    tableKey: "protest_comp_cad",
-    tableName: "protest_comp_cad",
+    tableKey: "protest_comp",
+    tableName: "protest_comp",
     restoreOrder: 24,
     householdIdColumn: "household_id",
     memberScopeInclude: false

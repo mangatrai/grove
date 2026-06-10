@@ -916,64 +916,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceErrorResponse'
-  /api/protest/{propertyId}/sold-comps:
-    get:
-      tags: [protest]
-      summary: List Redfin comparable sold properties from property valuation data
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: propertyId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - name: year
-          in: query
-          schema: { type: integer }
-      responses:
-        "200":
-          description: Array of Redfin comp records plus per-year exclusion list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  comps:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        address: { type: string, nullable: true }
-                        city: { type: string, nullable: true }
-                        state: { type: string, nullable: true }
-                        sqft: { type: number, nullable: true }
-                        beds: { type: number, nullable: true }
-                        baths: { type: number, nullable: true }
-                        yearBuilt: { type: number, nullable: true }
-                        soldPrice: { type: number, nullable: true }
-                        soldDate: { type: string, nullable: true }
-                        pricePerSqft: { type: number, nullable: true }
-                        listPrice: { type: number, nullable: true }
-                  excluded:
-                    type: array
-                    items: { type: string }
-        "404": { description: Property not found }
-  /api/protest/{propertyId}/comps/{cadPropertyId}:
+  /api/protest/{propertyId}/comps/{compId}:
     delete:
       tags: [protest]
-      summary: Hard-delete a CAD comparable property
+      summary: Hard-delete a comparable property by UUID (any source)
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
           in: path
           required: true
           schema: { type: string, format: uuid }
-        - name: cadPropertyId
+        - name: compId
           in: path
           required: true
-          schema: { type: string }
-        - name: year
-          in: query
-          schema: { type: integer }
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Comp deleted
@@ -983,7 +939,72 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
-        "404": { description: Property not found }
+        "404": { description: Property or comp not found }
+    patch:
+      tags: [protest]
+      summary: Update notes on a comp row (any source)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: compId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [notes]
+              properties:
+                notes: { type: string, description: "Free-text annotation; empty string clears the note" }
+      responses:
+        "200":
+          description: Note saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "404": { description: Property or comp not found }
+  /api/protest/{propertyId}/comps/{compId}/exclude:
+    patch:
+      tags: [protest]
+      summary: Set or clear the excluded flag on a comp row
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: compId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [excluded]
+              properties:
+                excluded: { type: boolean }
+      responses:
+        "200":
+          description: Flag updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        "404": { description: Property or comp not found }
   /api/protest/{propertyId}/cad-search:
     get:
       tags: [protest]
@@ -1030,7 +1051,7 @@ paths:
   /api/protest/{propertyId}/comps:
     post:
       tags: [protest]
-      summary: Add a comparable property (CAD-sourced or manual) to the Unequal Appraisal evidence table
+      summary: Add a manually-entered comparable property (source=manual) to protest_comp
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1043,35 +1064,38 @@ paths:
           application/json:
             schema:
               type: object
-              required: [year, addressLine1]
+              required: [year]
               properties:
                 year: { type: integer }
-                cadPropertyId: { type: string, description: "Real CAD ID from cad-search; omit to generate manual-<uuid>" }
-                addressLine1: { type: string }
+                addressLine1: { type: string, nullable: true }
                 city: { type: string, nullable: true }
-                sqft: { type: integer, nullable: true }
+                state: { type: string, nullable: true }
+                zip: { type: string, nullable: true }
+                sqft: { type: number, nullable: true }
                 beds: { type: number, nullable: true }
                 baths: { type: number, nullable: true }
                 yearBuilt: { type: integer, nullable: true }
-                assessedValueUsd: { type: integer, nullable: true }
-                marketValueUsd: { type: integer, nullable: true }
+                cadAssessedValueUsd: { type: integer, nullable: true }
+                cadMarketValueUsd: { type: integer, nullable: true }
+                soldPriceUsd: { type: integer, nullable: true }
+                soldDate: { type: string, format: date, nullable: true }
+                notes: { type: string, nullable: true }
       responses:
         "201":
-          description: Comp added; returns updated comp list
+          description: Comp added
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   ok: { type: boolean }
-                  cadPropertyId: { type: string }
-                  comps: { type: array, items: { type: object } }
+                  comp: { $ref: "#/components/schemas/UnifiedComp" }
         "400": { description: Validation error }
         "404": { description: Property not found }
   /api/protest/{propertyId}/refresh-comps:
     post:
       tags: [protest]
-      summary: On-demand refresh of CAD and Redfin comps for a property
+      summary: On-demand property valuation refresh + full DCAD backfill pipeline
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1088,34 +1112,26 @@ paths:
                 year: { type: integer, minimum: 2000, maximum: 2100 }
       responses:
         "200":
-          description: Refresh complete — returns fresh comps and sold comps regardless of individual success
+          description: Refresh complete — returns updated comp list
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  cad:
-                    type: object
-                    properties:
-                      ok: { type: boolean }
-                      count: { type: integer }
-                      message: { type: string }
                   redfin:
                     type: object
                     properties:
                       ok: { type: boolean }
-                      code: { type: string }
-                      message: { type: string }
-                      estimate: { type: number }
+                      code: { type: string, nullable: true }
+                      message: { type: string, nullable: true }
+                      estimate: { type: number, nullable: true }
+                  dcad:
+                    type: object
+                    properties:
+                      ok: { type: boolean }
                   comps:
                     type: array
-                    items: { $ref: "#/components/schemas/ProtestComp" }
-                  soldComps:
-                    type: array
-                    items: { $ref: "#/components/schemas/SoldComp" }
-                  soldCompsCadFetched:
-                    type: integer
-                    description: Number of new sold comp CAD lookups completed this call (0 if all cached or non-TX)
+                    items: { $ref: "#/components/schemas/UnifiedComp" }
         "400": { description: Validation error }
         "404": { description: Property not found }
 
@@ -1313,96 +1329,6 @@ paths:
         "404": { description: Property or worksheet not found }
         "503": { description: OPENAI_API_KEY not configured }
 
-  /api/protest/{propertyId}/sold-comps/notes:
-    patch:
-      tags: [protest]
-      summary: Save a free-text annotation on a Redfin sold comp
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: propertyId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - name: taxYear
-          in: query
-          schema: { type: integer, example: 2026 }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [address, notes]
-              properties:
-                address: { type: string, description: "Comp address (key in sold_comps_notes_json)" }
-                notes: { type: string, description: "Free-text annotation; empty string clears the note" }
-      responses:
-        "204": { description: Saved }
-        "404": { description: Property not found }
-
-  /api/protest/{propertyId}/comps/{cadPropertyId}/notes:
-    patch:
-      tags: [protest]
-      summary: Save a free-text annotation on an equity comp
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: propertyId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - name: cadPropertyId
-          in: path
-          required: true
-          schema: { type: string }
-        - name: taxYear
-          in: query
-          schema: { type: integer, example: 2026 }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [notes]
-              properties:
-                notes: { type: string, description: "Free-text annotation; empty string clears the note" }
-      responses:
-        "204": { description: Saved }
-        "404": { description: Property not found }
-
-  /api/protest/{propertyId}/sold-comps/exclusions:
-    patch:
-      tags: [protest]
-      summary: Set the exclusion list for Redfin sold comps (addresses hidden from Market Value evidence)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - name: propertyId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [year, excluded]
-              properties:
-                year: { type: integer }
-                excluded:
-                  type: array
-                  items: { type: string }
-      responses:
-        "200":
-          description: Exclusion list saved
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  ok: { type: boolean }
-                  excluded: { type: array, items: { type: string } }
-        "404": { description: Property not found }
   /api/protest/{propertyId}/dcad/value-history:
     get:
       tags: [protest]
@@ -1499,10 +1425,50 @@ paths:
                         hearingDate: { type: string, nullable: true, description: "ARB docket date/time from docketDt field" }
                         filedDate: { type: string, nullable: true, description: "Informal hearing date from informalDt field" }
         "404": { description: Property not found or DCAD account ID not on file }
+  /api/protest/{propertyId}/appraisal-notice-link:
+    get:
+      tags: [protest]
+      summary: Get the DCAD appraisal notice S3 key for this property (cached)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Appraisal notice availability and S3 key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  available: { type: boolean }
+                  s3Id: { type: string, nullable: true }
+                  fetchedAt: { type: string, format: date-time, nullable: true }
+        "404": { description: Property not found or DCAD account ID not on file }
+  /api/protest/{propertyId}/appraisal-notice-pdf:
+    get:
+      tags: [protest]
+      summary: Stream the DCAD appraisal notice PDF for this property
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: PDF byte stream
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "404": { description: Property not found or notice not available }
+        "501": { description: PDF proxy not yet implemented }
   /api/protest/{propertyId}/comps:
     get:
       tags: [protest]
-      summary: List saved DCAD comparable properties for a protest worksheet
+      summary: List all comparable properties for a protest worksheet (all sources)
       security: [{ bearerAuth: [] }]
       parameters:
         - name: propertyId
@@ -1513,9 +1479,23 @@ paths:
           in: query
           required: false
           schema: { type: integer, minimum: 2000, maximum: 2100 }
+        - name: includeExcluded
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+        - name: sources
+          in: query
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [dcad_search, redfin, manual, cad_evidence]
+          style: form
+          explode: true
       responses:
         "200":
-          description: Array of DCAD comp records
+          description: Array of unified comp records (all sources)
           content:
             application/json:
               schema:
@@ -1523,19 +1503,7 @@ paths:
                 properties:
                   comps:
                     type: array
-                    items:
-                      type: object
-                      properties:
-                        cadPropertyId: { type: string }
-                        addressLine1: { type: string, nullable: true }
-                        city: { type: string, nullable: true }
-                        assessedValueUsd: { type: number, nullable: true }
-                        marketValueUsd: { type: number, nullable: true }
-                        sqft: { type: number, nullable: true }
-                        beds: { type: number, nullable: true }
-                        baths: { type: number, nullable: true }
-                        yearBuilt: { type: integer, nullable: true }
-                        perSqftUsd: { type: number, nullable: true }
+                    items: { $ref: "#/components/schemas/UnifiedComp" }
         "404": { description: Property not found }
   /api/protest/{propertyId}/evidence-packet:
     get:
@@ -4045,8 +4013,43 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    UnifiedComp:
+      type: object
+      description: A comparable property from any source (dcad_search, redfin, manual, cad_evidence)
+      properties:
+        id: { type: string, format: uuid }
+        source:
+          type: string
+          enum: [dcad_search, redfin, manual, cad_evidence]
+        addressLine1: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        zip: { type: string, nullable: true }
+        sqft: { type: number, nullable: true }
+        beds: { type: number, nullable: true }
+        baths: { type: number, nullable: true }
+        yearBuilt: { type: integer, nullable: true }
+        lotSqft: { type: number, nullable: true }
+        hasPool: { type: boolean, nullable: true }
+        cadPropertyId: { type: string, nullable: true }
+        cadAccountId: { type: integer, nullable: true }
+        cadLandValueUsd: { type: integer, nullable: true }
+        cadImprovementValueUsd: { type: integer, nullable: true }
+        cadMarketValueUsd: { type: integer, nullable: true }
+        cadAssessedValueUsd: { type: integer, nullable: true }
+        cadPerSqftAssessed: { type: number, nullable: true }
+        cadDeedDate: { type: string, format: date, nullable: true }
+        cadEnrichedAt: { type: string, format: date-time, nullable: true }
+        soldPriceUsd: { type: integer, nullable: true }
+        listPriceUsd: { type: integer, nullable: true }
+        soldDate: { type: string, format: date, nullable: true }
+        pricePerSqft: { type: number, nullable: true }
+        notes: { type: string, nullable: true }
+        excluded: { type: boolean }
+        fetchedAt: { type: string, format: date-time }
     ProtestComp:
       type: object
+      description: Deprecated — use UnifiedComp
       properties:
         cadPropertyId: { type: string }
         addressLine1: { type: string, nullable: true }

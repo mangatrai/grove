@@ -251,7 +251,7 @@ Generate an AI oral ARB hearing script for the protest. Requires `protest_worksh
 
 ### `GET /api/protest/:propertyId/comps?year=YYYY`
 
-Returns saved DCAD comparable properties for a property and tax year.
+Returns all non-excluded comps from `protest_comp` for a property and tax year. Includes all sources: `dcad_search`, `redfin`, `manual`, `cad_evidence`.
 
 - **`year`** optional; defaults to current year.
 
@@ -260,63 +260,58 @@ Returns saved DCAD comparable properties for a property and tax year.
 {
   "comps": [
     {
-      "cadPropertyId": "12345-000000",
+      "id": "d0000000-0000-0000-0000-000000000001",
+      "source": "dcad_search",
       "addressLine1": "456 Elm St",
       "city": "Flower Mound",
-      "assessedValueUsd": 320000,
-      "marketValueUsd": 380000,
       "sqft": 1950,
       "beds": 3,
       "baths": 2,
       "yearBuilt": 2005,
-      "perSqftUsd": 164.1
+      "hasPool": false,
+      "cadPropertyId": "12345-000000",
+      "cadAccountId": 99001,
+      "cadLandValueUsd": 48000,
+      "cadImprovementValueUsd": 272000,
+      "cadMarketValueUsd": 320000,
+      "cadAssessedValueUsd": 320000,
+      "cadPerSqftAssessed": 164.1,
+      "cadDeedDate": "2018-05-14",
+      "soldPriceUsd": null,
+      "soldDate": null,
+      "pricePerSqft": null,
+      "notes": null,
+      "excluded": false,
+      "fetchedAt": "2026-06-09T10:00:00Z"
     }
   ]
 }
 ```
 
-Returns an empty array if no DCAD comps have been fetched for this property/year. Comps are populated automatically for TX properties at creation (fire-and-forget backfill) or on demand via the chat endpoint.
+Use `source` to determine which strategy view a comp belongs to: `dcad_search` and `cad_evidence` comps appear in the Unequal Appraisal (§41.43) view; `redfin` and `manual` comps appear in the Market Evidence (§41.41) view. All non-excluded comps are returned — filter by source in the UI.
 
 ---
 
-### `GET /api/protest/:propertyId/sold-comps?year=YYYY`
+### `DELETE /api/protest/:propertyId/comps/:compId`
 
-Returns Redfin comparable sold properties from the property's stored `valuation_detail`, merged with any cached CAD-assessed values for §41.43 unequal appraisal analysis. `year` defaults to current year and is used to load the per-year exclusion list and CAD cache.
-
-**Response 200:**
-```json
-{
-  "comps": [
-    {
-      "address": "456 Elm St",
-      "city": "Flower Mound",
-      "state": "TX",
-      "sqft": 1950,
-      "beds": 3,
-      "baths": 2,
-      "yearBuilt": 2005,
-      "soldPrice": null,
-      "soldDate": "2025-10-01",
-      "pricePerSqft": null,
-      "listPrice": 420000,
-      "cadAssessedValueUsd": 390000
-    }
-  ],
-  "excluded": ["123 Oak Ave"]
-}
-```
-
-`soldPrice` and `pricePerSqft` are frequently null in Texas (non-disclosure state). `cadAssessedValueUsd` is the CAD-assessed value fetched via the CAD adapter for that address — null until `POST /refresh-comps` has been called. `excluded` is the list of addresses the user has hidden from their evidence (see `PATCH .../sold-comps/exclusions`).
-
----
-
-### `DELETE /api/protest/:propertyId/comps/:cadPropertyId?year=YYYY`
-
-Hard-deletes a CAD comparable property from `protest_comp_cad`. Use this to remove a comp that was fetched from DCAD or added manually. Year defaults to current year.
+Deletes a comp by UUID from `protest_comp`. Works for any source.
 
 **Response 200:** `{ "ok": true }`
+**404:** Property or comp not found.
 
-**404:** Property not found.
+---
+
+### `PATCH /api/protest/:propertyId/comps/:compId/exclude`
+
+Sets or clears the excluded flag on a comp.
+
+**Request body:**
+```json
+{ "excluded": true }
+```
+
+**Response 200:** `{ "ok": true }`
+**404:** Property or comp not found.
 
 ---
 
@@ -354,35 +349,35 @@ When `hasAdapter` is `false`, `results` is always `[]`. The `raw` field from the
 
 ### `POST /api/protest/:propertyId/comps`
 
-Adds a comparable property to the Unequal Appraisal evidence table. Supports two modes:
-
-- **CAD-sourced:** Supply `cadPropertyId` from a prior `GET .../cad-search` result; the real CAD ID is stored directly (no `manual-` prefix). `raw_json` is `{}`.
-- **Manual:** Omit `cadPropertyId`; a stable ID of the form `manual-<uuid>` is generated. `raw_json` is `{ "manual": true }`.
+Adds a manually-entered comparable property to `protest_comp` with `source = 'manual'`. Appears in both strategy views. DCAD enrichment for this comp runs automatically as part of the next `runDcadBackfill` call.
 
 **Request body:**
 ```json
 {
   "year": 2026,
-  "cadPropertyId": "12345-abcde",
   "addressLine1": "789 Pine Rd",
   "city": "Flower Mound",
+  "state": "TX",
+  "zip": "75028",
   "sqft": 2100,
   "beds": 4,
   "baths": 2,
   "yearBuilt": 2003,
-  "assessedValueUsd": 480000,
-  "marketValueUsd": 510000
+  "cadAssessedValueUsd": 480000,
+  "cadMarketValueUsd": 510000,
+  "soldPriceUsd": 520000,
+  "soldDate": "2025-11-10",
+  "notes": "Has pool — DCAD made no adjustment"
 }
 ```
 
-`cadPropertyId`, `city`, `sqft`, `beds`, `baths`, `yearBuilt`, `assessedValueUsd`, `marketValueUsd` are all optional. `per_sqft_usd` is computed from `assessedValueUsd / sqft` if both are provided.
+All fields except `year` are optional. `cadPerSqftAssessed` is computed from `cadAssessedValueUsd / sqft` and `pricePerSqft` from `soldPriceUsd / sqft` if both are provided.
 
 **Response 201:**
 ```json
 {
   "ok": true,
-  "cadPropertyId": "12345-abcde",
-  "comps": [ /* full updated comp list for the property/year */ ]
+  "comp": { /* newly inserted UnifiedComp row */ }
 }
 ```
 
@@ -390,7 +385,7 @@ Adds a comparable property to the Unequal Appraisal evidence table. Supports two
 
 ### `POST /api/protest/:propertyId/refresh-comps`
 
-Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter) and Redfin sold comps (via RealtyAPI). For TX properties, also auto-fetches CAD-assessed values for Redfin sold comp addresses (§41.43 support). Returns fresh data for both tables so the UI can update without a page reload.
+Triggers an on-demand property valuation refresh followed by a full DCAD backfill pipeline. Both `refreshPropertyValuation` and `runDcadBackfill` complete before the response is returned.
 
 **Request body:**
 ```json
@@ -400,24 +395,19 @@ Triggers an on-demand refresh of both CAD comps (via the registered CAD adapter)
 `year` is optional — defaults to the current UTC year.
 
 **Behavior:**
-- **CAD:** Calls the adapter's `searchByAddress` for the property's address. Saves new comps to `protest_comp_cad`; updates subject `cad_property_id` / `cad_account_id` on the property row. If no adapter is registered for the county, `cad.ok` is `false` and `cad.message` explains why.
-- **Redfin:** Calls `refreshPropertyValuation`. The 24-hour cooldown still applies — if the data is fresh, `redfin.ok` is `false` and `redfin.code` is `"RATE_LIMITED"` (not an error; surface as a warning in UI, not a failure).
-- **§41.43 CAD lookups (TX only):** After Redfin refresh, for each sold comp address not already in the cache, calls the CAD adapter's `searchByAddress`. Matches by house-number prefix. Stores `{ cadPropertyId, assessedValueUsd }` in `protest_worksheet.sold_comps_cad_json`. Up to 6 new addresses per call; 200 ms delay between lookups.
+1. Calls `refreshPropertyValuation` (Realty/Redfin API). The 24-hour cooldown applies — if fresh, `redfin.ok` is `false` with `code: "RATE_LIMITED"` (surface as a warning, not a failure). New Redfin comps are saved to `protest_comp` with `source = 'redfin'` as a side effect.
+2. Runs `runDcadBackfill` (5 steps): enriches subject property with full DCAD value history, inserts/updates DCAD search comps, enriches improvement details for comps, merges Redfin/CAD-evidence comps with DCAD data, syncs appeal status.
 
 **Response 200:**
 ```json
 {
-  "cad": { "ok": true, "count": 12 },
-  "redfin": { "ok": true, "estimate": 950000 },
-  "comps": [ /* full CAD comp list for year */ ],
-  "soldComps": [ /* Redfin sold comps with cadAssessedValueUsd merged in */ ],
-  "soldCompsCadFetched": 4
+  "redfin": { "ok": true, "estimate": 480000 },
+  "dcad": { "ok": true },
+  "comps": [ /* full updated UnifiedComp list for the property/year */ ]
 }
 ```
 
-`soldCompsCadFetched` is the number of new sold comp CAD lookups completed this call (0 if all were already cached or property is non-TX).
-
-On rate-limit: `"redfin": { "ok": false, "code": "RATE_LIMITED", "message": "Valuation refreshed within the last 24 hours — try again later." }`
+On rate-limit: `"redfin": { "ok": false, "code": "RATE_LIMITED", "message": "Valuation refreshed within the last 24 hours — try again later." }`. DCAD backfill still runs in this case.
 
 ---
 
@@ -472,42 +462,17 @@ Clears the stored CAD evidence data (`cad_evidence_json` reset to `{}`, `cad_evi
 
 ---
 
-### `PATCH /api/protest/:propertyId/sold-comps/notes?taxYear=YYYY`
+### `PATCH /api/protest/:propertyId/comps/:compId/notes`
 
-Saves a free-text annotation on a Redfin sold comp (keyed by address). Stored in `protest_worksheet.sold_comps_notes_json`. Passed to the AI assistant in the system prompt context.
-
-**Request body:**
-```json
-{ "address": "2362 CHAFFEE RD FRISCO TX 75036", "notes": "Has pool and outdoor kitchen — DCAD made no adjustment" }
-```
-
-**Response 204:** No content.
-
----
-
-### `PATCH /api/protest/:propertyId/comps/:cadPropertyId/notes?taxYear=YYYY`
-
-Saves a free-text annotation on an equity comp row in `protest_comp_cad`. Passed to the AI assistant in the system prompt context.
+Updates the `notes` field on a single comp row (any source).
 
 **Request body:**
 ```json
-{ "notes": "Listed at $977K, not selling — market evidence of over-assessment" }
+{ "notes": "Has pool and outdoor kitchen — DCAD made no adjustment" }
 ```
 
-**Response 204:** No content.
-
----
-
-### `PATCH /api/protest/:propertyId/sold-comps/exclusions`
-
-Saves (replaces) the list of Redfin sold-comp addresses to hide from the Market Value Evidence table and the evidence packet PDF/DOCX for the given year.
-
-**Request body:**
-```json
-{ "year": 2026, "excluded": ["123 Oak Ave", "456 Birch Ln"] }
-```
-
-**Response 200:** `{ "ok": true, "excluded": ["123 Oak Ave", "456 Birch Ln"] }`
+**Response 200:** `{ "ok": true }`
+**404:** Comp not found or does not belong to this property.
 
 ---
 
@@ -553,6 +518,33 @@ Returns live protest/appeal status from DCAD for the subject property.
 ```
 
 **404:** Property not found, or DCAD account ID not on file.
+
+---
+
+### `GET /api/protest/:propertyId/appraisal-notice-link`
+
+Returns the S3 key for the current year's appraisal notice PDF from DCAD. The result is cached on `property.cad_appraisal_notice_s3id` so repeated calls are cheap.
+
+**Response 200:**
+```json
+{ "available": true, "s3Id": "denton/d335f122-39c5-11f1-9a34-0242ac110006.pdf", "fetchedAt": "2026-06-01T00:00:00Z" }
+```
+
+`available: false` means DCAD has not published a notice for this property yet. `s3Id` and `fetchedAt` are `null` when `available` is `false`.
+
+**404:** Property not found, or DCAD account ID not on file.
+
+---
+
+### `GET /api/protest/:propertyId/appraisal-notice-pdf`
+
+Streams the current year's DCAD appraisal notice PDF as `Content-Type: application/pdf`. Fetches the PDF bytes via the DCAD document endpoint using the cached `s3Id`. Open in a new browser tab — native PDF rendering, no iframe needed.
+
+**Response 200:** PDF byte stream.
+
+**Response 501:** `{ "message": "Appraisal notice PDF proxy not yet implemented." }` — returned until the DCAD PDF download URL is confirmed. Use `appraisal-notice-link` to retrieve the `s3Id` and open the DCAD portal directly in the meantime.
+
+**404:** Property not found, or notice not available.
 
 ---
 

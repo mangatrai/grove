@@ -8,13 +8,14 @@ vi.mock("../src/modules/imports/profiles/pdf-text.js", () => ({
 
 import { parseCadEvidencePdf } from "../src/modules/protest/cad-evidence-parser.service.js";
 import {
-  addManualSoldComp,
+  addManualComp,
   appendConversationTurn,
+  excludeComp,
   getOrCreateWorksheet,
   getWorksheet,
-  removeManualSoldComp,
+  listWorksheetComps,
+  saveRedfinComps,
   saveCycleSummary,
-  saveSoldCompNote,
   updateSummarizationState,
   updateWorksheetStatus,
   type ConversationTurn,
@@ -39,7 +40,7 @@ async function cleanupServiceWorksheet(): Promise<void> {
     `DELETE FROM notification
       WHERE household_id = ? AND type IN ('protest_filing_deadline_approaching', 'protest_hearing_approaching')`
   ).run(HOUSEHOLD_ID);
-  await sqlStmt(`DELETE FROM protest_comp_cad WHERE property_id = ? AND tax_year = ?`).run(
+  await sqlStmt(`DELETE FROM protest_comp WHERE property_id = ? AND tax_year = ?`).run(
     PROPERTY_ID,
     SERVICE_TAX_YEAR
   );
@@ -203,113 +204,62 @@ describe("worksheet state machine", () => {
   });
 });
 
-describe("manual sold comp CRUD", () => {
-  const ADDR = "123 Test St, Dallas TX 75201";
+describe("unified protest_comp CRUD", () => {
+  beforeAll(cleanupServiceWorksheet);
+  afterEach(cleanupServiceWorksheet);
 
-  it("addManualSoldComp inserts a row and returns it", async () => {
-    const comp = await addManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
-      address: ADDR,
-      soldPrice: 400_000,
-      sqft: 1500,
-      beds: 3,
-      baths: 2,
-      soldDate: "2026-02-01",
-      yearBuilt: 2005,
-      assessedValueUsd: 200_000,
-      cadPropertyId: null,
-      cadAccountId: null,
+  it("addManualComp inserts a row visible in listWorksheetComps", async () => {
+    await addManualComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
+      addressLine1: "100 Manual Way, Flower Mound TX 75028",
+      city: "Flower Mound",
+      sqft: 2000,
+      cadAssessedValueUsd: 300_000,
+      cadMarketValueUsd: 320_000,
     });
-    expect(comp.id).toBeTruthy();
-    expect(comp.address).toBe(ADDR);
-    const ws = await getWorksheet(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
-    expect(ws?.manualSoldComps).toHaveLength(1);
-    expect(ws?.manualSoldComps[0]?.id).toBe(comp.id);
+    const comps = await listWorksheetComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
+    const match = comps.find((c) => c.addressLine1?.includes("100 Manual Way"));
+    expect(match?.source).toBe("manual");
+    expect(match?.cadAssessedValueUsd).toBe(300_000);
   });
 
-  it("allows duplicate address entries (no dedup at service layer)", async () => {
-    await addManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
-      address: ADDR,
-      soldPrice: 400_000,
-      sqft: 1500,
-      beds: null,
-      baths: null,
-      soldDate: null,
-      yearBuilt: null,
-      assessedValueUsd: null,
-      cadPropertyId: null,
-      cadAccountId: null,
+  it("excludeComp hides a comp from default listing", async () => {
+    const comp = await addManualComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
+      addressLine1: "200 Exclude Way, Flower Mound TX 75028",
     });
-    await addManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
-      address: ADDR,
-      soldPrice: 410_000,
-      sqft: 1500,
-      beds: null,
-      baths: null,
-      soldDate: null,
-      yearBuilt: null,
-      assessedValueUsd: null,
-      cadPropertyId: null,
-      cadAccountId: null,
-    });
-    const ws = await getWorksheet(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
-    expect(ws?.manualSoldComps).toHaveLength(2);
+    const compId = comp.id;
+
+    await excludeComp(PROPERTY_ID, HOUSEHOLD_ID, compId, true);
+
+    const visible = await listWorksheetComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
+    expect(visible.some((c) => c.id === compId)).toBe(false);
+
+    const all = await listWorksheetComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, { includeExcluded: true });
+    const found = all.find((c) => c.id === compId);
+    expect(found?.excluded).toBe(true);
   });
 
-  it("removeManualSoldComp deletes only the targeted comp", async () => {
-    const a = await addManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
-      address: "111 Keep St, Dallas TX 75201",
-      soldPrice: 300_000,
-      sqft: 1400,
-      beds: null,
-      baths: null,
-      soldDate: null,
-      yearBuilt: null,
-      assessedValueUsd: null,
-      cadPropertyId: null,
-      cadAccountId: null,
+  it("saveRedfinComps inserts rows with source=redfin and skips duplicates", async () => {
+    await saveRedfinComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, [
+      { address: "300 Redfin Ave, Dallas TX 75201", city: "Dallas", state: "TX", zip: "75201",
+        sqft: 1800, beds: 3, baths: 2, yearBuilt: 2005, soldPrice: 410_000, soldDate: "2025-09-15",
+        pricePerSqft: 228, raw: {} },
+    ]);
+    const comps = await listWorksheetComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
+      sources: ["redfin"],
     });
-    const b = await addManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
-      address: "222 Remove St, Dallas TX 75201",
-      soldPrice: 320_000,
-      sqft: 1450,
-      beds: null,
-      baths: null,
-      soldDate: null,
-      yearBuilt: null,
-      assessedValueUsd: null,
-      cadPropertyId: null,
-      cadAccountId: null,
-    });
-    await removeManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, b.id);
-    const ws = await getWorksheet(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
-    expect(ws?.manualSoldComps).toHaveLength(1);
-    expect(ws?.manualSoldComps[0]?.id).toBe(a.id);
-  });
+    expect(comps.some((c) => c.addressLine1?.includes("300 Redfin Ave"))).toBe(true);
 
-  it("removeManualSoldComp with wrong household is a no-op", async () => {
-    const comp = await addManualSoldComp(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
-      address: ADDR,
-      soldPrice: 400_000,
-      sqft: 1500,
-      beds: null,
-      baths: null,
-      soldDate: null,
-      yearBuilt: null,
-      assessedValueUsd: null,
-      cadPropertyId: null,
-      cadAccountId: null,
+    // second call with same address is idempotent
+    await saveRedfinComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, [
+      { address: "300 Redfin Ave, Dallas TX 75201", city: "Dallas", state: "TX", zip: "75201",
+        sqft: 1800, beds: 3, baths: 2, yearBuilt: 2005, soldPrice: 415_000, soldDate: "2025-09-15",
+        pricePerSqft: 230, raw: {} },
+    ]);
+    const dedupe = await listWorksheetComps(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, {
+      sources: ["redfin"],
     });
-    const otherHousehold = crypto.randomUUID();
-    await removeManualSoldComp(PROPERTY_ID, otherHousehold, SERVICE_TAX_YEAR, comp.id);
-    const ws = await getWorksheet(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
-    expect(ws?.manualSoldComps).toHaveLength(1);
-  });
-
-  it("saveSoldCompNote stores a note retrievable on worksheet load", async () => {
-    await getOrCreateWorksheet(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
-    await saveSoldCompNote(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR, ADDR, "Test comp note");
-    const ws = await getWorksheet(PROPERTY_ID, HOUSEHOLD_ID, SERVICE_TAX_YEAR);
-    expect(ws?.soldCompsNotesJson[ADDR]).toBe("Test comp note");
+    const rfCount = dedupe.filter((c) => c.addressLine1?.includes("300 Redfin Ave")).length;
+    expect(rfCount).toBe(1);
   });
 });
 
