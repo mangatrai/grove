@@ -52,8 +52,8 @@ import {
 import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
-import { getDCADImprovementFeatures, getToken } from "./dcad.service.js";
-import { fetchDcadAppraisalNoticeS3Id } from "./dcad-enrichment.service.js";
+import { getDCADImprovementFeatures } from "./dcad.service.js";
+import { fetchDcadAppraisalNoticeS3Id, fetchDcadAppraisalNoticePdf } from "./dcad-enrichment.service.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -419,18 +419,6 @@ protestRouter.get("/:propertyId/dcad/appeal", async (req: AuthenticatedRequest, 
   res.status(200).json({ appeals });
 });
 
-const DCAD_FILEDOWNLOAD_BASE = "https://prod-container.trueprodigyapi.com/public/filedownload";
-const DCAD_BROWSER_HEADERS = {
-  "accept": "*/*",
-  "accept-language": "en-US,en;q=0.9",
-  "cache-control": "no-cache",
-  "origin": "https://denton.prodigycad.com",
-  "referer": "https://denton.prodigycad.com/",
-  "sec-fetch-dest": "empty",
-  "sec-fetch-mode": "cors",
-  "sec-fetch-site": "cross-site",
-  "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-};
 
 protestRouter.get("/:propertyId/appraisal-notice-link", async (req: AuthenticatedRequest, res) => {
   const params = propertyIdSchema.safeParse(req.params);
@@ -442,8 +430,8 @@ protestRouter.get("/:propertyId/appraisal-notice-link", async (req: Authenticate
     res.status(404).json({ message: "DCAD account ID not on file — trigger a DCAD backfill first" });
     return;
   }
-  const county = property.cadProvider?.replace("dcad_", "") ?? "Denton";
-  const s3Id = await fetchDcadAppraisalNoticeS3Id(property.cadAccountId, county);
+  const county = property.cadProvider === "dcad" ? "Denton" : null;
+  const s3Id = await fetchDcadAppraisalNoticeS3Id(property.cadAccountId, county ?? undefined);
   if (s3Id) {
     await updatePropertyAppraisalNotice(params.data.propertyId, householdId, s3Id).catch(() => {});
   }
@@ -464,10 +452,10 @@ protestRouter.get("/:propertyId/appraisal-notice-pdf", async (req: Authenticated
     res.status(404).json({ message: "DCAD account ID not on file" });
     return;
   }
-  const county = property.cadProvider?.replace("dcad_", "") ?? "Denton";
+  const county = property.cadProvider === "dcad" ? "Denton" : null;
   let s3Id = property.cadAppraisalNoticeS3id;
   if (!s3Id) {
-    s3Id = await fetchDcadAppraisalNoticeS3Id(property.cadAccountId, county);
+    s3Id = await fetchDcadAppraisalNoticeS3Id(property.cadAccountId, county ?? undefined);
     if (s3Id) {
       await updatePropertyAppraisalNotice(params.data.propertyId, householdId, s3Id).catch(() => {});
     }
@@ -476,28 +464,14 @@ protestRouter.get("/:propertyId/appraisal-notice-pdf", async (req: Authenticated
     res.status(404).json({ message: "Appraisal notice not available for this property" });
     return;
   }
-  try {
-    const token = await getToken(county);
-    const url = `${DCAD_FILEDOWNLOAD_BASE}/${s3Id}`;
-    const upstream = await fetch(url, { headers: { ...DCAD_BROWSER_HEADERS, authorization: token } });
-    if (!upstream.ok) {
-      log.warn("appraisal-notice-pdf: upstream error", { s3Id, status: upstream.status });
-      res.status(502).json({ message: "Failed to fetch PDF from DCAD" });
-      return;
-    }
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="appraisal-notice.pdf"`);
-    if (upstream.body) {
-      const { Readable } = await import("node:stream");
-      Readable.fromWeb(upstream.body as import("stream/web").ReadableStream).pipe(res);
-    } else {
-      const buf = await upstream.arrayBuffer();
-      res.end(Buffer.from(buf));
-    }
-  } catch (err) {
-    log.error("appraisal-notice-pdf: error", { err: err instanceof Error ? err.message : String(err) });
-    res.status(500).json({ message: "Internal error fetching appraisal notice" });
+  const pdf = await fetchDcadAppraisalNoticePdf(s3Id, county ?? undefined);
+  if (!pdf.ok) {
+    res.status(502).json({ message: "Failed to fetch PDF from DCAD" });
+    return;
   }
+  res.setHeader("Content-Type", pdf.contentType);
+  res.setHeader("Content-Disposition", `inline; filename="appraisal-notice.pdf"`);
+  res.end(pdf.buffer);
 });
 
 const cadSearchQuerySchema = z.object({

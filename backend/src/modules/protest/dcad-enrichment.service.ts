@@ -6,7 +6,12 @@ import {
   getDCADTaxable,
   type DCADAppealEntry,
   getDCADAppeal,
+  getToken,
+  BROWSER_HEADERS,
 } from "./dcad.service.js";
+
+const DCAD_ACCOUNT_BASE = "https://prod-container.trueprodigyapi.com/public/propertyaccount";
+const DCAD_FILEDOWNLOAD_BASE = "https://prod-container.trueprodigyapi.com/public/filedownload";
 
 export type DcadCanonicalProperty = {
   cadPropertyId: string;    // pid (stable across years)
@@ -288,28 +293,10 @@ export async function fetchDcadAppraisalNoticeS3Id(
   county?: string
 ): Promise<string | null> {
   const office = county?.trim() ?? "Denton";
-  const { getToken } = await import("./dcad.service.js");
-  const DCAD_ACCOUNT_BASE = "https://prod-container.trueprodigyapi.com/public/propertyaccount";
-  const BROWSER_HEADERS = {
-    "accept": "*/*",
-    "accept-language": "en-US,en;q=0.9",
-    "cache-control": "no-cache",
-    "dnt": "1",
-    "origin": "https://denton.prodigycad.com",
-    "referer": "https://denton.prodigycad.com/",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "cross-site",
-    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
-  };
-
   try {
     const token = await getToken(office);
-    const taxYear = new Date().getFullYear();
-    const url = `${DCAD_ACCOUNT_BASE}/${cadAccountId}/shownoticelink?pYear=${taxYear}`;
-    const res = await fetch(url, {
-      headers: { ...BROWSER_HEADERS, authorization: token }
-    });
+    const url = `${DCAD_ACCOUNT_BASE}/${cadAccountId}/shownoticelink`;
+    const res = await fetch(url, { headers: { ...BROWSER_HEADERS, authorization: token } });
     if (!res.ok) {
       const errBody = await res.text().catch(() => "");
       log.warn("fetchDcadAppraisalNoticeS3Id: HTTP error", { cadAccountId, status: res.status, body: errBody });
@@ -321,9 +308,33 @@ export async function fetchDcadAppraisalNoticeS3Id(
     return typeof results.s3ID === "string" ? results.s3ID : null;
   } catch (err) {
     log.warn("fetchDcadAppraisalNoticeS3Id: failed", {
-      cadAccountId,
-      err: err instanceof Error ? err.message : String(err),
+      cadAccountId, err: err instanceof Error ? err.message : String(err),
     });
     return null;
+  }
+}
+
+/** Fetch appraisal notice PDF bytes from DCAD. Returns null on error or not found. */
+export async function fetchDcadAppraisalNoticePdf(
+  s3Id: string,
+  county?: string
+): Promise<{ ok: true; buffer: Buffer; contentType: string } | { ok: false; status: number }> {
+  const office = county?.trim() ?? "Denton";
+  try {
+    const token = await getToken(office);
+    const url = `${DCAD_FILEDOWNLOAD_BASE}/${s3Id}`;
+    const res = await fetch(url, { headers: { ...BROWSER_HEADERS, authorization: token } });
+    if (!res.ok) {
+      log.warn("fetchDcadAppraisalNoticePdf: upstream error", { s3Id, status: res.status });
+      return { ok: false, status: res.status };
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    const contentType = res.headers.get("content-type") ?? "application/pdf";
+    return { ok: true, buffer: buf, contentType };
+  } catch (err) {
+    log.warn("fetchDcadAppraisalNoticePdf: failed", {
+      s3Id, err: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, status: 500 };
   }
 }

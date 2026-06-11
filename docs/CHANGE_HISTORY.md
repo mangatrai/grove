@@ -18,13 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
-## FIX-180 — Protest: Redfin comps never persisted (race condition), appraisal notice 400 (missing pYear) (2026-06-10)
+## FIX-180 — Protest: Redfin comps race condition; appraisal notice 400 (wrong office in JWT) (2026-06-10)
 
 Two root-cause fixes:
 
 1. **Redfin comps never in `protest_comp` (race condition)**: `refreshPropertyValuation` called `saveRedfinComps` with `void` — fire-and-forget. The `refresh-comps` route `await`s `refreshPropertyValuation` then immediately queries `listWorksheetComps`, but `saveRedfinComps` hadn't committed yet. All 6 parsed comps were silently lost on every refresh. Fixed: changed to `await saveRedfinComps(...)` so inserts complete before the function returns. Files: `backend/src/modules/household/property.service.ts`.
 
-2. **Appraisal notice DCAD 400 (missing `pYear` parameter)**: `shownoticelink` endpoint requires a `?pYear=` query param to identify which tax year's notice to return. We were calling without it, getting 400. Fixed: append `?pYear=${currentYear}` to the URL. Also added response body logging on non-2xx so future failures are diagnosable. Files: `backend/src/modules/protest/dcad-enrichment.service.ts`.
+2. **Appraisal notice DCAD 400 (wrong office in JWT) + centralized service**: Both appraisal-notice routes derived `county` via `property.cadProvider?.replace("dcad_", "")` — for Denton properties where `cadProvider = "dcad"`, this produces `"dcad"` instead of `"Denton"`. `getToken("dcad")` then requests a JWT with `"office":"dcad"`, which DCAD's `shownoticelink` endpoint rejects with 400. All other protest routes correctly use `property.cadProvider === "dcad" ? "Denton" : null`. Fixed both routes. Additionally, the PDF route was calling `getToken` and `fetch` directly in `protest.routes.ts`, duplicating DCAD auth logic that belongs in `dcad-enrichment.service.ts`. Added `fetchDcadAppraisalNoticePdf(s3Id, county)` to the central service; route now calls it. Exported `BROWSER_HEADERS` from `dcad.service.ts`; `dcad-enrichment.service.ts` now uses static import instead of dynamic. Response body logging added on non-2xx. Files: `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/protest/dcad-enrichment.service.ts`, `backend/src/modules/protest/dcad.service.ts`.
 
 GitHub: closes #104
 

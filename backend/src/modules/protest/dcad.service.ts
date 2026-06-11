@@ -81,7 +81,7 @@ const DCAD_ACCOUNT_BASE = "https://prod-container.trueprodigyapi.com/public/prop
 const tokenCacheMap = new Map<string, TokenCache>();
 
 // TrueProdigy validates the Origin header server-side — requests without it return HTTP 500.
-const BROWSER_HEADERS = {
+export const BROWSER_HEADERS = {
   "accept": "*/*",
   "accept-language": "en-US,en;q=0.9",
   "cache-control": "no-cache",
