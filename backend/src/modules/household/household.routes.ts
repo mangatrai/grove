@@ -33,7 +33,7 @@ import {
   type PropertyUse
 } from "./property.service.js";
 import { isRealtyApiConfigured, type ValuationDetail } from "./realty-api.service.js";
-import { runDcadBackfill } from "../protest/protest-worksheet.service.js";
+import { runDcadBackfill, saveRedfinComps } from "../protest/protest-worksheet.service.js";
 import { qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 
@@ -402,6 +402,27 @@ householdRouter.post("/properties", requireRole(["owner", "admin"]), async (req:
         detail?.photoUrl ?? null,
         id
       );
+
+      // Save Redfin comps from preview into protest_comp immediately so they
+      // appear on the protest worksheet without needing a separate refresh.
+      if (detail?.comps && detail.comps.length > 0) {
+        const taxYear = new Date().getUTCFullYear();
+        await saveRedfinComps(
+          id,
+          householdId,
+          taxYear,
+          detail.comps.map((c) => ({
+            address: c.address, city: c.city, state: c.state, zip: c.zip,
+            sqft: c.sqft, beds: c.beds, baths: c.baths, yearBuilt: c.yearBuilt,
+            lotSqft: c.lotSqft, soldPrice: c.soldPrice, listPrice: c.listPrice,
+            soldDate: c.soldDate, pricePerSqft: c.pricePerSqft, raw: c as unknown,
+          }))
+        ).catch((err) => {
+          log.warn("createProperty: saveRedfinComps failed", {
+            propertyId: id, err: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
     }
 
     if (parsed.data.accountId) {

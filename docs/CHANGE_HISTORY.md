@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-181 — Protest: Redfin comps never saved on new property creation (2026-06-11)
+
+**Root cause:** `POST /properties` receives the full `valuationDetailJson` (including 6 Redfin comps) from the frontend after the preview-valuation flow, saves the Redfin IDs and estimate, and sets `valuation_fetched_at = NOW()`. However, it never called `saveRedfinComps` — those comps only reach `protest_comp` via `refreshPropertyValuation`, which is blocked by the 7-day rate limit since `valuation_fetched_at` was just set. Result: a newly-created TX property showed blank Market Evidence and Unequal Appraisal tables.
+
+**Fix:** After the `UPDATE property SET ... valuation_fetched_at = NOW()` block in `POST /properties`, call `saveRedfinComps(id, householdId, taxYear, detail.comps)` immediately with the comp data already in memory. This is a pure DB write (no extra API call) and completes before the 201 response is sent, so comps are available as soon as the user navigates to the protest worksheet.
+
+Files: `backend/src/modules/household/household.routes.ts`.
+
+GitHub: closes #105
+
+---
+
 ## FIX-180 — Protest: Redfin comps race condition; appraisal notice 400 (wrong office in JWT) (2026-06-10)
 
 Two root-cause fixes:
