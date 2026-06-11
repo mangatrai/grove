@@ -305,12 +305,14 @@ export async function fetchDcadAppraisalNoticeS3Id(
 
   try {
     const token = await getToken(office);
-    const url = `${DCAD_ACCOUNT_BASE}/${cadAccountId}/shownoticelink`;
+    const taxYear = new Date().getFullYear();
+    const url = `${DCAD_ACCOUNT_BASE}/${cadAccountId}/shownoticelink?pYear=${taxYear}`;
     const res = await fetch(url, {
       headers: { ...BROWSER_HEADERS, authorization: token }
     });
     if (!res.ok) {
-      log.warn("fetchDcadAppraisalNoticeS3Id: HTTP error", { cadAccountId, status: res.status });
+      const errBody = await res.text().catch(() => "");
+      log.warn("fetchDcadAppraisalNoticeS3Id: HTTP error", { cadAccountId, status: res.status, body: errBody });
       return null;
     }
     const body = await res.json() as Record<string, unknown>;

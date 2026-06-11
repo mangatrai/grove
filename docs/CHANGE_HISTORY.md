@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-180 — Protest: Redfin comps never persisted (race condition), appraisal notice 400 (missing pYear) (2026-06-10)
+
+Two root-cause fixes:
+
+1. **Redfin comps never in `protest_comp` (race condition)**: `refreshPropertyValuation` called `saveRedfinComps` with `void` — fire-and-forget. The `refresh-comps` route `await`s `refreshPropertyValuation` then immediately queries `listWorksheetComps`, but `saveRedfinComps` hadn't committed yet. All 6 parsed comps were silently lost on every refresh. Fixed: changed to `await saveRedfinComps(...)` so inserts complete before the function returns. Files: `backend/src/modules/household/property.service.ts`.
+
+2. **Appraisal notice DCAD 400 (missing `pYear` parameter)**: `shownoticelink` endpoint requires a `?pYear=` query param to identify which tax year's notice to return. We were calling without it, getting 400. Fixed: append `?pYear=${currentYear}` to the URL. Also added response body logging on non-2xx so future failures are diagnosable. Files: `backend/src/modules/protest/dcad-enrichment.service.ts`.
+
+GitHub: closes #104
+
+---
+
 ## FIX-179 — Protest flow: market evidence empty, sold date deed fallback, saveCadEvidenceComps param mismatch, appraisal notice 404 UX (2026-06-10)
 
 Five bug fixes:

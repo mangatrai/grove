@@ -456,10 +456,11 @@ export async function refreshPropertyValuation(
 
   log.info("refreshPropertyValuation: done", { propertyId, estimate: result.estimate, compsCount: result.detail.comps.length });
 
-  // Save Redfin comps to protest_comp for unified protest view
+  // Save Redfin comps to protest_comp — must complete before returning so the
+  // refresh-comps route can query them synchronously.
   if (result.detail.comps.length > 0) {
     const taxYear = new Date().getUTCFullYear();
-    void saveRedfinComps(
+    await saveRedfinComps(
       propertyId,
       householdId,
       taxYear,
