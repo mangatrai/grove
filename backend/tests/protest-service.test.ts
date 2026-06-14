@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/modules/imports/profiles/pdf-text.js", () => ({

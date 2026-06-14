@@ -11,7 +11,6 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
 import { getProperty, refreshPropertyValuation, updatePropertyAppraisalNotice } from "../household/property.service.js";
 import { getCadAdapter, inferCadProvider } from "./cad-adapters/registry.js";
-import type { CadProperty } from "./cad-adapters/cad-adapter.types.js";
 import {
   appendConversationTurn,
   getOrCreateWorksheet,
@@ -23,7 +22,6 @@ import {
   type ConversationTurn,
   type ProtestStatus,
   type StrategyJson,
-  type UnifiedComp,
   type CompSource,
   deleteComp,
   addManualComp,
@@ -36,7 +34,6 @@ import {
   saveCycleSummary,
   saveArbScript,
   runDcadBackfill,
-  syncAppealStatus,
 } from "./protest-worksheet.service.js";
 import { generateArbScript, type ArbScriptInput } from "./arb-script.service.js";
 import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
@@ -260,19 +257,6 @@ async function generateCycleSummary(
   if (!summaryText) return;
   await saveCycleSummary(worksheetId, summaryText);
   log.info("protest cycle summary generated", { worksheetId, status });
-}
-
-function formatCompSummary(comps: CadProperty[]): string {
-  if (comps.length === 0) return "No comparable properties found.";
-  const rows = comps.map((c) => {
-    const perSqft = c.assessedValue != null && c.sqft != null && c.sqft > 0 ? c.assessedValue / c.sqft : null;
-    return {
-      address: c.address ?? "Unknown",
-      assessed: c.assessedValue,
-      perSqft
-    };
-  });
-  return JSON.stringify(rows);
 }
 
 export const protestRouter = Router();
@@ -1200,9 +1184,6 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
     lines.push("#  | Address                    | Sold       | Sale Price     | Sqft   | $/sqft  | DCAD Assessed  | Notes");
     lines.push("---+----------------------------+------------+----------------+--------+---------+----------------+------");
     soldCompsFromDb.forEach((c, i) => {
-      const ratio = c.soldPriceUsd != null && c.cadAssessedValueUsd != null
-        ? ((c.cadAssessedValueUsd / c.soldPriceUsd) * 100).toFixed(1) + "%"
-        : "—";
       const ps = c.soldPriceUsd != null && c.sqft != null && c.sqft > 0
         ? "$" + (c.soldPriceUsd / c.sqft).toFixed(2)
         : "—";

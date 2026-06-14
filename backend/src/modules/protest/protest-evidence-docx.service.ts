@@ -10,13 +10,10 @@ import {
   TableRow,
   TextRun,
   WidthType,
-  BorderStyle,
 } from "docx";
 
 import type { EvidencePacketInput, SoldComp } from "./protest-evidence.service.js";
-import type { CadSalesComp, CadEquityComp } from "./cad-evidence-parser.service.js";
-
-type ProtestComp = EvidencePacketInput["dcadComps"][number];
+import type { CadSalesComp } from "./cad-evidence-parser.service.js";
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
@@ -33,11 +30,6 @@ function fmtNum(n: number | null | undefined): string {
 function str(v: unknown): string {
   if (v == null) return "—";
   return String(v);
-}
-
-function ppsf(assessed: number | null, sqft: number | null): string {
-  if (assessed == null || sqft == null || sqft === 0) return "—";
-  return `$${Math.round(assessed / sqft)}/sqft`;
 }
 
 // ── Low-level docx helpers ────────────────────────────────────────────────────
@@ -64,14 +56,6 @@ function body(text: string, bold = false): Paragraph {
 function bodySmall(text: string, italic = false): Paragraph {
   return new Paragraph({
     children: [new TextRun({ text, size: 18, italics: italic })],
-    spacing: { after: 80 },
-  });
-}
-
-function bullet(text: string): Paragraph {
-  return new Paragraph({
-    children: [new TextRun({ text, size: 20 })],
-    bullet: { level: 0 },
     spacing: { after: 80 },
   });
 }
@@ -123,21 +107,6 @@ function kvRow(label: string, value: string, highlightValue = false): TableRow {
         })],
       }),
     ],
-  });
-}
-
-function noBorderTable(rows: TableRow[]): Table {
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    borders: {
-      top: { style: BorderStyle.NONE, size: 0 },
-      bottom: { style: BorderStyle.NONE, size: 0 },
-      left: { style: BorderStyle.NONE, size: 0 },
-      right: { style: BorderStyle.NONE, size: 0 },
-      insideHorizontal: { style: BorderStyle.NONE, size: 0 },
-      insideVertical: { style: BorderStyle.NONE, size: 0 },
-    },
-    rows,
   });
 }
 

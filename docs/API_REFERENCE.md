@@ -580,6 +580,28 @@ Generates an ARB evidence packet for the given property and tax year. Returns PD
 
 ---
 
+### `GET /api/protest/:propertyId/protest-brief?year=YYYY`
+
+Generates a structured plain-text protest brief for use with any AI assistant (Claude, ChatGPT, Gemini, etc.). All numbers are sourced directly from the database — no LLM generation.
+
+**Auth:** Bearer token required. `year` defaults to current year if omitted.
+
+**Response 200:**
+- `Content-Type: text/plain; charset=utf-8`
+- `Content-Disposition: attachment; filename="<address>_protest_brief_<year>.txt"`
+
+**Sections in the brief:**
+1. Subject property — address, CAD ID/account, sqft, beds/baths, lot, AVM
+2. DCAD assessed values — land/improvement split, appraised vs net appraised (homestead cap), YoY tax history
+3. Equity analysis (§41.43) — DCAD comp table with $/sqft, median $/sqft, implied value at median, delta vs subject
+4. Market value analysis (§41.41) — sold comps table with sold price, $/sqft, sold date, CAD assessed value
+5. Notes — worksheet strategy notes and prior-year cycle summary
+6. AI analysis prompt — LLM-agnostic instructions for an AI to generate protest arguments
+
+**Errors:** `400` invalid params · `404` property not found
+
+---
+
 ### `PATCH /api/protest/:propertyId/worksheet`
 
 Updates worksheet status, outcome, informal offer amount, hearing date, filing deadline, and CAD portal URL.

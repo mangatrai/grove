@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-182 — Protest: openapi duplicate /comps path, missing protest-brief docs, dead code cleanup (2026-06-13)
+
+Three follow-up fixes for PT-18:
+
+1. **openapi.yaml duplicate path**: `/api/protest/{propertyId}/comps` was defined twice — once with only `post:` (add manual comp) and once with only `get:` (list comps). In YAML, duplicate keys cause the second to silently overwrite the first. Merged both operations under one path key.
+
+2. **`GET /protest-brief` undocumented**: Endpoint shipped in CR-172 but was never added to `openapi/openapi.yaml` or `docs/API_REFERENCE.md`. Added full documentation: query params (`year`), response type (`text/plain`), sections in the output, `Content-Disposition` header.
+
+3. **Dead code removed from protest module**: Unused imports and unreachable functions left over from the PT-18 migration:
+   - `protest.routes.ts`: removed `type UnifiedComp`, `syncAppealStatus`, `CadProperty` imports (all unused); removed `formatCompSummary` function (defined but never called); removed `ratio` local variable in protest-brief loop (computed but not in output string)
+   - `protest-evidence-docx.service.ts`: removed `CadEquityComp`, `BorderStyle` imports; removed `ProtestComp` type alias; removed `ppsf`, `bullet`, `noBorderTable` helper functions (all defined but never called)
+   - `protest-service.test.ts`: removed `import crypto` (unused)
+
+GitHub: closes #105
+
+Files: `openapi/openapi.yaml`, `docs/API_REFERENCE.md`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/protest/protest-evidence-docx.service.ts`, `backend/tests/protest-service.test.ts`
+
+---
+
 ## FIX-181 — Protest: Redfin comps never saved on new property creation (2026-06-11)
 
 **Root cause:** `POST /properties` receives the full `valuationDetailJson` (including 6 Redfin comps) from the frontend after the preview-valuation flow, saves the Redfin IDs and estimate, and sets `valuation_fetched_at = NOW()`. However, it never called `saveRedfinComps` — those comps only reach `protest_comp` via `refreshPropertyValuation`, which is blocked by the 7-day rate limit since `valuation_fetched_at` was just set. Result: a newly-created TX property showed blank Market Evidence and Unequal Appraisal tables.
@@ -26,7 +45,7 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 Files: `backend/src/modules/household/household.routes.ts`.
 
-GitHub: closes #105
+GitHub: closes #106
 
 ---
 
