@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-184 — Realty API: schema-driven Redfin comp parsing via avm.__att_names (2026-06-15)
+
+Replaced hardcoded `__atts` positional indices in `parseComps` with a schema-driven approach using Redfin's own `avm.__att_names` descriptor.
+
+**How it works:** `avm.__att_names` is an array-of-arrays where `att_names[N]` lists field names in position order for type N. Every encoded object carries `__t_idx: N`. We build `AttSchema` (`Map<typeIdx, Map<fieldName, position>>`) from this at parse time, then look up fields by name via `attField(obj, "city", schema)` instead of `facts[3]`.
+
+**Failure modes now covered:**
+- **Position shifts** (what broke FIX-183): invisible — `attField` always finds the right slot
+- **Field rename/removal**: `checkSchemaFields()` emits WARN at production log level before any comp fails to parse, listing exactly which fields went missing
+- **`__att_names` itself missing**: WARN logged; `parseComps` returns 0 with clear message
+- **Total comp parse failure** (0 from non-empty): existing WARN retained
+
+**Removed dead code:** `atIdx<T>()` helper and `parseSashDate()` (both replaced by schema-driven lookup and `msToDate`).
+
+**Files:** `backend/src/modules/household/realty-api.service.ts`
+
+**GitHub:** closes #108
+
+---
+
 ## FIX-183 — Realty API: Redfin comparable sales parser broken after API schema change (2026-06-14)
 
 `parseComps` in `realty-api.service.ts` returned 0 comps despite the API returning 6 results. Root cause: Redfin changed their `__atts` positional encoding schema.

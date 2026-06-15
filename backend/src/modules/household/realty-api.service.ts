@@ -103,121 +103,174 @@ async function realtyGet(endpoint: string, params: Record<string, string>): Prom
   return res.json() as Promise<unknown>;
 }
 
-/** Safe positional read from an array — returns null if out of bounds or nullish. */
-function atIdx<T>(arr: unknown, idx: number): T | null {
-  if (!Array.isArray(arr) || idx >= arr.length) return null;
-  const v = arr[idx];
-  return v !== null && v !== undefined ? (v as T) : null;
-}
-
-/** Parse Redfin sash date string "APR 24, 2026" → "2026-04-24". */
-function parseSashDate(s: unknown): string | null {
-  if (typeof s !== "string") return null;
-  const months: Record<string, string> = {
-    JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
-    JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12"
-  };
-  const m = s.match(/^([A-Z]{3})\s+(\d{1,2}),\s+(\d{4})$/);
-  if (!m) return null;
-  const [, mon, day, year] = m;
-  const mo = months[mon!];
-  if (!mo) return null;
-  return `${year}-${mo}-${String(parseInt(day!, 10)).padStart(2, "0")}`;
-}
-
 /** Parse unix ms timestamp → "YYYY-MM-DD" UTC. */
 function msToDate(ms: unknown): string | null {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+// ── Schema-driven __atts decoder ─────────────────────────────────────────────
+//
+// Redfin encodes objects as { __t_idx: N, __atts: [...values] }.
+// avm.__att_names is an array-of-arrays: att_names[N] lists field names in
+// position order for type N. We build a reverse index (type → name → position)
+// so field lookups are by name, not hardcoded position. If Redfin shifts
+// positions in a future deploy, attField still finds the right slot. If they
+// rename a field, checkSchemaFields emits a WARN in production immediately.
+
+/** Map<typeIdx, Map<fieldName, position>> built from avm.__att_names */
+type AttSchema = Map<number, Map<string, number>>;
+
+function buildAttSchema(raw: unknown): AttSchema {
+  const index = new Map<number, Map<string, number>>();
+  if (!Array.isArray(raw)) return index;
+  for (let ti = 0; ti < raw.length; ti++) {
+    const fields = raw[ti];
+    if (!Array.isArray(fields)) continue;
+    const fm = new Map<string, number>();
+    for (let pos = 0; pos < fields.length; pos++) {
+      if (typeof fields[pos] === "string") fm.set(fields[pos] as string, pos);
+    }
+    index.set(ti, fm);
+  }
+  return index;
+}
+
 /**
- * Parse comparable sales from Redfin's positional __atts encoding.
- *
- * Schema source: avm.__att_names (array of field-name arrays; index = __t_idx on each object).
- * Positions confirmed from live /detailsbyaddress response (2026-06-14):
- *
- *   outerAtts[5] (__t_idx=1, att_names[1]) — listing block:
- *     [22]=listingPrice  [27]=numBedrooms  [28]=numBathrooms  [51]=salePrice
- *
- *   outerAtts[6] (__t_idx=6, att_names[6]) — extra block:
- *     [0]=lastSaleInfo (__t_idx=7, att_names[7]):
- *       [3]=saleListingLastSaleDate (unix ms)
- *
- *   outerAtts[7] (__t_idx=9, att_names[9]) — property block:
- *     [0]=sqFtFinished  [1]=stateOrProvinceCode  [3]=city  [5]=yearBuilt
- *     [6]=streetNumber  [7]=streetType  [10]=postalCode  [18]=lotSqFt  [20]=streetName
+ * Read a named field from a { __t_idx, __atts } encoded object.
+ * Returns undefined when the schema type is unknown or the field is absent —
+ * both are signals that the API structure changed.
  */
-function parseComps(comparables: unknown): ValuationComp[] {
-  if (!Array.isArray(comparables)) return [];
+function attField(obj: Record<string, unknown>, field: string, schema: AttSchema): unknown {
+  const ti = typeof obj.__t_idx === "number" ? obj.__t_idx : null;
+  if (ti === null) return undefined;
+  const pos = schema.get(ti)?.get(field);
+  if (pos === undefined) return undefined;
+  const atts = obj.__atts;
+  if (!Array.isArray(atts) || pos >= atts.length) return undefined;
+  const v = atts[pos];
+  return v !== null && v !== undefined ? v : undefined;
+}
+
+/**
+ * Emit a WARN if any of the required field names are absent from the schema
+ * for this object's type. One log line per object type, fires in production.
+ */
+function checkSchemaFields(
+  obj: Record<string, unknown>,
+  requiredFields: string[],
+  schema: AttSchema,
+  label: string
+): void {
+  const ti = typeof obj.__t_idx === "number" ? obj.__t_idx : -1;
+  if (ti < 0 || !schema.has(ti)) {
+    log.warn("RealtyAPI: parseComps — schema type not registered (API changed?)", { label, typeIdx: ti });
+    return;
+  }
+  const fieldMap = schema.get(ti)!;
+  const missing = requiredFields.filter(f => !fieldMap.has(f));
+  if (missing.length > 0) {
+    log.warn("RealtyAPI: parseComps — schema missing expected fields (API changed?)", {
+      label, typeIdx: ti, missingFields: missing,
+      presentFields: [...fieldMap.keys()].filter(k => requiredFields.includes(k))
+    });
+  }
+}
+
+/**
+ * Parse comparable sales using Redfin's self-describing __att_names schema.
+ *
+ * Fields are resolved by name via each object's __t_idx — position shifts in
+ * future API responses are handled automatically. WARN logs fire at the top of
+ * the first comp if Redfin renames or removes a field we depend on, giving
+ * production-visible signal before comps start failing.
+ */
+function parseComps(comparables: unknown, schema: AttSchema): ValuationComp[] {
+  if (!Array.isArray(comparables) || comparables.length === 0) return [];
+
   const result: ValuationComp[] = [];
+  let innerValidated = false;
 
   for (const comp of comparables) {
     try {
-      const outerAtts = (comp as Record<string, unknown>).__atts;
-      if (!Array.isArray(outerAtts) || outerAtts.length < 8) {
-        log.warn("RealtyAPI: parseComps — outerAtts length check failed", {
-          isArray: Array.isArray(outerAtts),
-          length: Array.isArray(outerAtts) ? outerAtts.length : null,
-          compKeys: comp && typeof comp === "object" ? Object.keys(comp as object) : null,
+      const outerObj = comp as Record<string, unknown>;
+      if (!Array.isArray(outerObj.__atts)) {
+        log.warn("RealtyAPI: parseComps — comp missing __atts", { compKeys: Object.keys(outerObj) });
+        continue;
+      }
+
+      const listingObj = attField(outerObj, "listing", schema) as Record<string, unknown> | undefined;
+      const extraObj   = attField(outerObj, "extra",   schema) as Record<string, unknown> | undefined;
+      const propObj    = attField(outerObj, "property", schema) as Record<string, unknown> | undefined;
+
+      if (!listingObj || !extraObj || !propObj) {
+        log.warn("RealtyAPI: parseComps — outer block resolution failed", {
+          hasListing: Boolean(listingObj), hasExtra: Boolean(extraObj), hasProperty: Boolean(propObj),
+          outerTypeIdx: outerObj.__t_idx
         });
         continue;
       }
 
-      // Listing data — positional array inside outerAtts[5] (att_names[1])
-      const listingObj = outerAtts[5] as Record<string, unknown>;
-      const listingArr = listingObj?.__atts as unknown[];
-      const listPrice = typeof atIdx<number>(listingArr, 22) === "number"
-        ? (atIdx<number>(listingArr, 22) as number)
-        : null;
-      const soldPrice = typeof atIdx<number>(listingArr, 51) === "number"
-        ? (atIdx<number>(listingArr, 51) as number)
-        : null;
-      const beds = typeof atIdx<number>(listingArr, 27) === "number"
-        ? (atIdx<number>(listingArr, 27) as number)
-        : null;
-      const baths = typeof atIdx<number>(listingArr, 28) === "number"
-        ? (atIdx<number>(listingArr, 28) as number)
-        : null;
+      // Validate inner schemas once — emits WARN in production if Redfin renames fields
+      if (!innerValidated) {
+        innerValidated = true;
+        checkSchemaFields(outerObj,    ["listing", "extra", "property"],                                                               schema, "outerComp");
+        checkSchemaFields(listingObj,  ["listingPrice", "numBedrooms", "numBathrooms", "salePrice"],                                   schema, "listing");
+        checkSchemaFields(extraObj,    ["lastSaleInfo"],                                                                               schema, "extra");
+        checkSchemaFields(propObj,     ["sqFtFinished", "stateOrProvinceCode", "city", "yearBuilt",
+                                        "streetNumber", "streetType", "postalCode", "lotSqFt", "streetName"], schema, "property");
+      }
 
-      // Sold date — outerAtts[6].lastSaleInfo (extra[0]).saleListingLastSaleDate (unix ms)
-      const extraObj = outerAtts[6] as Record<string, unknown>;
-      const extraAtts = Array.isArray(extraObj?.__atts) ? (extraObj.__atts as unknown[]) : [];
-      const lastSaleInfoObj = extraAtts[0] as Record<string, unknown> | undefined;
-      const lsiAtts = Array.isArray(lastSaleInfoObj?.__atts) ? (lastSaleInfoObj!.__atts as unknown[]) : [];
-      const soldDate = msToDate(lsiAtts[3]);
+      // Listing fields
+      const listPrice = attField(listingObj, "listingPrice",  schema);
+      const soldPrice = attField(listingObj, "salePrice",     schema);
+      const beds      = attField(listingObj, "numBedrooms",   schema);
+      const baths     = attField(listingObj, "numBathrooms",  schema);
 
-      // Property/facts array — outerAtts[7].__atts (positional, att_names[9])
-      const factsObj = outerAtts[7] as Record<string, unknown>;
-      const facts = factsObj?.__atts as unknown[];
-      if (!Array.isArray(facts) || facts.length < 21) {
-        log.warn("RealtyAPI: parseComps — facts array check failed", {
-          isArray: Array.isArray(facts),
-          length: Array.isArray(facts) ? facts.length : null,
-          outerAttsLength: outerAtts.length,
-          idx7Keys: factsObj && typeof factsObj === "object" ? Object.keys(factsObj).slice(0, 5) : null
+      // Sold date via lastSaleInfo.saleListingLastSaleDate (unix ms)
+      const lastSaleInfo = attField(extraObj, "lastSaleInfo", schema) as Record<string, unknown> | undefined;
+      const soldDate = msToDate(lastSaleInfo ? attField(lastSaleInfo, "saleListingLastSaleDate", schema) : undefined);
+
+      // Property / address fields
+      const streetNum  = attField(propObj, "streetNumber",        schema);
+      const streetName = attField(propObj, "streetName",          schema);
+      const streetType = attField(propObj, "streetType",          schema);
+      const city       = attField(propObj, "city",                schema);
+      const state      = attField(propObj, "stateOrProvinceCode", schema);
+      const zip        = attField(propObj, "postalCode",          schema);
+      const yearBuilt  = attField(propObj, "yearBuilt",           schema);
+      const lotSqft    = attField(propObj, "lotSqFt",             schema);
+      const sqft       = attField(propObj, "sqFtFinished",        schema);
+
+      const address = [streetNum, streetName, streetType]
+        .map(v => (typeof v === "string" ? v : ""))
+        .join(" ").replace(/\s+/g, " ").trim();
+
+      if (!address || typeof city !== "string" || !city) {
+        log.warn("RealtyAPI: parseComps — address/city missing after schema extraction", {
+          address, city, streetNum, streetName, streetType, propTypeIdx: propObj.__t_idx
         });
         continue;
       }
 
-      const streetNum = typeof facts[6] === "string" ? facts[6] : "";
-      const streetName = typeof facts[20] === "string" ? facts[20] : "";
-      const streetSuffix = typeof facts[7] === "string" ? facts[7] : "";
-      const address = `${streetNum} ${streetName} ${streetSuffix}`.replace(/\s+/g, " ").trim();
-      const city = typeof facts[3] === "string" ? facts[3] : "";
-      const state = typeof facts[1] === "string" ? facts[1] : "";
-      const zip = typeof facts[10] === "string" ? facts[10] : "";
-      const yearBuilt = typeof facts[5] === "number" ? facts[5] : null;
-      const lotSqft = typeof facts[18] === "number" ? facts[18] : null;
-      const sqft = typeof facts[0] === "number" ? facts[0] : null;
-      const pricePerSqft = soldPrice && sqft && sqft > 0 ? Math.round(soldPrice / sqft) : null;
+      const sqftNum      = typeof sqft      === "number" ? sqft      : null;
+      const soldPriceNum = typeof soldPrice === "number" ? soldPrice : null;
 
-      if (!address || !city) {
-        log.warn("RealtyAPI: parseComps — address/city missing", { streetNum, streetName, streetSuffix, city, facts0: facts[0], facts2: facts[2] });
-        continue;
-      }
-
-      result.push({ address, city, state, zip, sqft, beds, baths, yearBuilt, lotSqft, listPrice, soldPrice, soldDate, pricePerSqft });
+      result.push({
+        address,
+        city:         city as string,
+        state:        typeof state    === "string" ? state    : "",
+        zip:          typeof zip      === "string" ? zip      : "",
+        sqft:         sqftNum,
+        beds:         typeof beds     === "number" ? beds     : null,
+        baths:        typeof baths    === "number" ? baths    : null,
+        yearBuilt:    typeof yearBuilt === "number" ? yearBuilt : null,
+        lotSqft:      typeof lotSqft  === "number" ? lotSqft  : null,
+        listPrice:    typeof listPrice === "number" ? listPrice : null,
+        soldPrice:    soldPriceNum,
+        soldDate,
+        pricePerSqft: soldPriceNum && sqftNum && sqftNum > 0 ? Math.round(soldPriceNum / sqftNum) : null,
+      });
     } catch (err) {
       log.warn("RealtyAPI: parseComps — skipping malformed comp entry", {
         err: err instanceof Error ? err.message : String(err)
@@ -324,6 +377,15 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
     })
     .sort((a, b) => b.year - a.year);
 
+  // Build schema index from avm.__att_names — used by parseComps for name-based field lookup
+  const rawAttNames = (details.avm as Record<string, unknown>)?.__att_names;
+  const attSchema = buildAttSchema(rawAttNames);
+  if (attSchema.size === 0) {
+    log.warn("RealtyAPI: avm.__att_names missing or empty — comp parsing will produce no results", {
+      hasAvm: Boolean(details.avm), attNamesType: typeof rawAttNames
+    });
+  }
+
   // Comparable sales
   const rawComps = avmRoot?.comparables;
   if (!Array.isArray(rawComps) || rawComps.length === 0) {
@@ -333,7 +395,7 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
       avmRootKeys: avmRoot ? Object.keys(avmRoot).slice(0, 15) : null
     });
   }
-  const comps = parseComps(rawComps);
+  const comps = parseComps(rawComps, attSchema);
   if (Array.isArray(rawComps) && rawComps.length > 0 && comps.length === 0) {
     log.warn("RealtyAPI: parseComps returned 0 from non-empty array — structure mismatch", {
       rawCount: rawComps.length,
