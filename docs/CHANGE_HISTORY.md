@@ -18,6 +18,24 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-183 — Realty API: Redfin comparable sales parser broken after API schema change (2026-06-14)
+
+`parseComps` in `realty-api.service.ts` returned 0 comps despite the API returning 6 results. Root cause: Redfin changed their `__atts` positional encoding schema.
+
+**Three things shifted (confirmed against saved live response + `avm.__att_names` schema descriptor):**
+
+1. **Listing block** moved from `outerAtts[4]` → `outerAtts[5]` (new `editableHomeFact` slot inserted at [4]). Within the listing array: `listingPrice` [21→22], `numBedrooms` [26→27], `numBathrooms` [27→28], `salePrice` [50→51].
+2. **Property/facts block** (still at `outerAtts[7]`) positions shifted: `sqFtFinished` now at [0] (was [21]); `city` moved [2→3] (slot [2] is now `countryCode` via `$ref`); `streetNumber` [5→6]; `streetType` [6→7]; `postalCode` [9→10]; `lotSqFt` [17→18]; `streetName` [19→20]; `state` [0→1].
+3. **Sold date** was reading the wrong path (`outerAtts[6].__atts[2]['1'][0].lastSaleDate`). Correct path: `outerAtts[6].__atts[0].__atts[3]` (`lastSaleInfo.saleListingLastSaleDate`, unix ms).
+
+Validated new mapping against all 6 comps in the saved API response before committing.
+
+**Files:** `backend/src/modules/household/realty-api.service.ts`
+
+**GitHub:** closes #107
+
+---
+
 ## FIX-182 — Protest: openapi duplicate /comps path, missing protest-brief docs, dead code cleanup (2026-06-13)
 
 Three follow-up fixes for PT-18:

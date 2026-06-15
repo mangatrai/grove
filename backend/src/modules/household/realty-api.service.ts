@@ -134,14 +134,19 @@ function msToDate(ms: unknown): string | null {
 /**
  * Parse comparable sales from Redfin's positional __atts encoding.
  *
- * Confirmed positions from live /detailsbyaddress responses:
- *   __atts[4].__atts[21]  = list price
- *   __atts[4].__atts[26]  = beds
- *   __atts[4].__atts[27]  = baths
- *   __atts[4].__atts[50]  = close/sold price
- *   __atts[6].__atts[2]['1'][0].lastSaleDate = sold date string  (index 2, not 3 — confirmed from live response)
- *   __atts[7].__atts      = [state,_,city,_,yearBuilt,streetNum,streetSuffix,_,_,zip,_,_,lat,lon,
- *                             _,_,_,lotSqft,_,streetName,_,approxSqft,_,_,propId]  (sqft at 21, not 22)
+ * Schema source: avm.__att_names (array of field-name arrays; index = __t_idx on each object).
+ * Positions confirmed from live /detailsbyaddress response (2026-06-14):
+ *
+ *   outerAtts[5] (__t_idx=1, att_names[1]) — listing block:
+ *     [22]=listingPrice  [27]=numBedrooms  [28]=numBathrooms  [51]=salePrice
+ *
+ *   outerAtts[6] (__t_idx=6, att_names[6]) — extra block:
+ *     [0]=lastSaleInfo (__t_idx=7, att_names[7]):
+ *       [3]=saleListingLastSaleDate (unix ms)
+ *
+ *   outerAtts[7] (__t_idx=9, att_names[9]) — property block:
+ *     [0]=sqFtFinished  [1]=stateOrProvinceCode  [3]=city  [5]=yearBuilt
+ *     [6]=streetNumber  [7]=streetType  [10]=postalCode  [18]=lotSqFt  [20]=streetName
  */
 function parseComps(comparables: unknown): ValuationComp[] {
   if (!Array.isArray(comparables)) return [];
@@ -155,40 +160,37 @@ function parseComps(comparables: unknown): ValuationComp[] {
           isArray: Array.isArray(outerAtts),
           length: Array.isArray(outerAtts) ? outerAtts.length : null,
           compKeys: comp && typeof comp === "object" ? Object.keys(comp as object) : null,
-          outerAttsPreview: Array.isArray(outerAtts)
-            ? outerAtts.slice(0, 4).map((el) => (el && typeof el === "object" ? Object.keys(el as object).slice(0, 5) : typeof el))
-            : typeof outerAtts
         });
         continue;
       }
 
-      // Listing data — positional array inside __atts[4]
-      const listingObj = outerAtts[4] as Record<string, unknown>;
+      // Listing data — positional array inside outerAtts[5] (att_names[1])
+      const listingObj = outerAtts[5] as Record<string, unknown>;
       const listingArr = listingObj?.__atts as unknown[];
-      const listPrice = typeof atIdx<number>(listingArr, 21) === "number"
-        ? (atIdx<number>(listingArr, 21) as number)
+      const listPrice = typeof atIdx<number>(listingArr, 22) === "number"
+        ? (atIdx<number>(listingArr, 22) as number)
         : null;
-      const soldPrice = typeof atIdx<number>(listingArr, 50) === "number"
-        ? (atIdx<number>(listingArr, 50) as number)
+      const soldPrice = typeof atIdx<number>(listingArr, 51) === "number"
+        ? (atIdx<number>(listingArr, 51) as number)
         : null;
-      const beds = typeof atIdx<number>(listingArr, 26) === "number"
-        ? (atIdx<number>(listingArr, 26) as number)
-        : null;
-      const baths = typeof atIdx<number>(listingArr, 27) === "number"
+      const beds = typeof atIdx<number>(listingArr, 27) === "number"
         ? (atIdx<number>(listingArr, 27) as number)
         : null;
+      const baths = typeof atIdx<number>(listingArr, 28) === "number"
+        ? (atIdx<number>(listingArr, 28) as number)
+        : null;
 
-      // Sash block — __atts[6].__atts[2]['1'][0].lastSaleDate
-      const sashObj = outerAtts[6] as Record<string, unknown>;
-      const sashAtts = Array.isArray(sashObj?.__atts) ? (sashObj.__atts as unknown[]) : [];
-      const sashMap = sashAtts[2] as Record<string, unknown[]> | undefined;
-      const sash1 = Array.isArray(sashMap?.["1"]) ? (sashMap!["1"][0] as Record<string, unknown>) : null;
-      const soldDate = parseSashDate(sash1?.lastSaleDate);
+      // Sold date — outerAtts[6].lastSaleInfo (extra[0]).saleListingLastSaleDate (unix ms)
+      const extraObj = outerAtts[6] as Record<string, unknown>;
+      const extraAtts = Array.isArray(extraObj?.__atts) ? (extraObj.__atts as unknown[]) : [];
+      const lastSaleInfoObj = extraAtts[0] as Record<string, unknown> | undefined;
+      const lsiAtts = Array.isArray(lastSaleInfoObj?.__atts) ? (lastSaleInfoObj!.__atts as unknown[]) : [];
+      const soldDate = msToDate(lsiAtts[3]);
 
-      // Facts array — __atts[7].__atts (positional)
+      // Property/facts array — outerAtts[7].__atts (positional, att_names[9])
       const factsObj = outerAtts[7] as Record<string, unknown>;
       const facts = factsObj?.__atts as unknown[];
-      if (!Array.isArray(facts) || facts.length < 20) {
+      if (!Array.isArray(facts) || facts.length < 21) {
         log.warn("RealtyAPI: parseComps — facts array check failed", {
           isArray: Array.isArray(facts),
           length: Array.isArray(facts) ? facts.length : null,
@@ -198,16 +200,16 @@ function parseComps(comparables: unknown): ValuationComp[] {
         continue;
       }
 
-      const streetNum = typeof facts[5] === "string" ? facts[5] : "";
-      const streetName = typeof facts[19] === "string" ? facts[19] : "";
-      const streetSuffix = typeof facts[6] === "string" ? facts[6] : "";
+      const streetNum = typeof facts[6] === "string" ? facts[6] : "";
+      const streetName = typeof facts[20] === "string" ? facts[20] : "";
+      const streetSuffix = typeof facts[7] === "string" ? facts[7] : "";
       const address = `${streetNum} ${streetName} ${streetSuffix}`.replace(/\s+/g, " ").trim();
-      const city = typeof facts[2] === "string" ? facts[2] : "";
-      const state = typeof facts[0] === "string" ? facts[0] : "";
-      const zip = typeof facts[9] === "string" ? facts[9] : "";
-      const yearBuilt = typeof facts[4] === "number" ? facts[4] : null;
-      const lotSqft = typeof facts[17] === "number" ? facts[17] : null;
-      const sqft = typeof facts[21] === "number" ? facts[21] : null;
+      const city = typeof facts[3] === "string" ? facts[3] : "";
+      const state = typeof facts[1] === "string" ? facts[1] : "";
+      const zip = typeof facts[10] === "string" ? facts[10] : "";
+      const yearBuilt = typeof facts[5] === "number" ? facts[5] : null;
+      const lotSqft = typeof facts[18] === "number" ? facts[18] : null;
+      const sqft = typeof facts[0] === "number" ? facts[0] : null;
       const pricePerSqft = soldPrice && sqft && sqft > 0 ? Math.round(soldPrice / sqft) : null;
 
       if (!address || !city) {
