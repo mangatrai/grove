@@ -4,8 +4,8 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import type { ArbScript } from "./arb-script.service.js";
 import { log } from "../../logger.js";
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
-import { searchDCADByAddress, getDCADImprovementFeatures, type MiscImprovement } from "./dcad.service.js";
-import { fetchDcadCanonical, fetchDcadAppeal } from "./dcad-enrichment.service.js";
+import type { MiscImprovement } from "./dcad.service.js";
+import { fetchDcadCanonical, fetchDcadAppeal, searchDcadComps, type DcadCanonicalProperty } from "./dcad-enrichment.service.js";
 
 export type { CadEvidenceData };
 
@@ -148,15 +148,6 @@ function isoDateOnly(value: string | Date | null | undefined): string | null {
 function isoDateTime(value: string | Date): string {
   if (typeof value === "string") return value;
   return value.toISOString();
-}
-
-function asNumber(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const n = Number(v.replace(/,/g, ""));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -688,15 +679,60 @@ function buildPoolNote(items: MiscImprovement[]): string | null {
     .join("; ");
 }
 
+/** Apply a DcadCanonicalProperty to an existing protest_comp row. COALESCE-safe: never overwrites user-entered values. */
+export async function applyCanonicalToComp(compId: string, canonical: DcadCanonicalProperty): Promise<void> {
+  const sqft = canonical.sqft != null ? Math.round(canonical.sqft) : null;
+  const perSqft =
+    canonical.appraisedValueUsd != null && sqft != null && sqft > 0
+      ? canonical.appraisedValueUsd / sqft
+      : null;
+  const poolNote = buildPoolNote(canonical.miscImprovements);
+  await qExec(
+    `UPDATE protest_comp SET
+       cad_property_id           = COALESCE(cad_property_id, ?),
+       cad_account_id            = COALESCE(cad_account_id, ?),
+       cad_land_value_usd        = COALESCE(cad_land_value_usd, ?),
+       cad_improvement_value_usd = COALESCE(cad_improvement_value_usd, ?),
+       cad_market_value_usd      = COALESCE(cad_market_value_usd, ?),
+       cad_assessed_value_usd    = COALESCE(cad_assessed_value_usd, ?),
+       cad_per_sqft_assessed     = COALESCE(cad_per_sqft_assessed, ?),
+       cad_deed_date             = COALESCE(cad_deed_date, ?),
+       sold_date                 = COALESCE(sold_date, ?),
+       sqft                      = COALESCE(sqft, ?),
+       beds                      = COALESCE(beds, ?),
+       baths                     = COALESCE(baths, ?),
+       has_pool                  = COALESCE(has_pool, ?),
+       notes                     = COALESCE(notes, ?),
+       raw_dcad_json             = COALESCE(raw_dcad_json, ?),
+       cad_enriched_at           = NOW()
+     WHERE id = ?`,
+    canonical.cadPropertyId,
+    canonical.cadAccountId,
+    canonical.landValueUsd,
+    canonical.improvementValueUsd,
+    canonical.marketValueUsd,
+    canonical.appraisedValueUsd,
+    perSqft,
+    canonical.deedDate,
+    canonical.deedDate,
+    sqft,
+    canonical.beds,
+    canonical.baths,
+    canonical.hasPool,
+    poolNote,
+    canonical.rawSearchJson,
+    compId
+  );
+}
+
 /**
  * Full DCAD enrichment pipeline for one property.
  * Fire-and-forget safe — all errors are logged, not thrown.
  *
  * Step A: Subject property full enrichment (value history + taxable)
- * Step B: Save DCAD search comps to protest_comp
- * Step C: Improvement enrichment for DCAD comps (beds/baths/sqft/pool)
- * Step D: Enrich Redfin + CAD evidence comps with DCAD data; merge when cad_property_id matches
- * Step E: Sync appeal status to worksheet
+ * Step B: DCAD address search → fetchDcadCanonical per comp → full insert in one shot
+ * Step C: Enrich all other unenriched comps (redfin, cad_evidence, manual) via fetchDcadCanonical; merge when cad_property_id matches a dcad_search row
+ * Step D: Sync appeal status to worksheet
  */
 export async function runDcadBackfill(
   propertyId: string,
@@ -778,97 +814,72 @@ export async function runDcadBackfill(
     poolNote: subjectPoolNote ?? undefined,
   });
 
-  // ── Step B: Save DCAD search comps ──────────────────────────────────────────
-  const allResults = await searchDCADByAddress(address, taxYear, countyName);
+  // ── Step B: Save DCAD search comps (full canonical per comp, no partial inserts) ──
+  const allResults = await searchDcadComps(address, taxYear, countyName);
   const subjectPid = subject.cadPropertyId;
   let stepBCount = 0;
 
-  for (const comp of allResults) {
-    if (comp.dcadPropertyId === subjectPid || comp.pAccountId == null) continue;
-    const raw = comp.raw;
-    const sqft = comp.sqft != null ? Math.round(comp.sqft) : null;
-    const assessed = comp.assessedValue;
-    const perSqft = assessed != null && sqft != null && sqft > 0 ? assessed / sqft : null;
-
-    await qExec(
-      `INSERT INTO protest_comp
-        (id, household_id, property_id, tax_year, source,
-         address_line1, city,
-         cad_property_id, cad_account_id,
-         cad_land_value_usd, cad_improvement_value_usd,
-         cad_market_value_usd, cad_assessed_value_usd, cad_per_sqft_assessed,
-         sqft, beds, baths, year_built,
-         raw_dcad_json, fetched_at)
-       VALUES (?, ?, ?, ?, 'dcad_search', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-       ON CONFLICT (property_id, tax_year, cad_property_id) WHERE cad_property_id IS NOT NULL
-       DO UPDATE SET
-         cad_market_value_usd  = EXCLUDED.cad_market_value_usd,
-         cad_assessed_value_usd = EXCLUDED.cad_assessed_value_usd,
-         cad_per_sqft_assessed = EXCLUDED.cad_per_sqft_assessed,
-         raw_dcad_json         = EXCLUDED.raw_dcad_json,
-         fetched_at            = NOW()`,
-      randomUUID(), householdId, propertyId, taxYear,
-      comp.address, comp.city,
-      comp.dcadPropertyId, comp.pAccountId,
-      comp.landValue, asNumber(raw.improvementValue),
-      comp.marketValue, assessed, perSqft,
-      sqft, comp.beds, comp.baths, comp.yearBuilt,
-      raw
-    ).catch((err) => {
-      log.warn("runDcadBackfill Step B: insert failed", {
-        cadPropertyId: comp.dcadPropertyId,
-        err: err instanceof Error ? err.message : String(err),
-      });
-    });
-    stepBCount++;
-  }
-  log.info("runDcadBackfill: Step B complete", { propertyId, count: stepBCount });
-
-  // ── Step C: Improvement enrichment for DCAD comps ───────────────────────────
-  const needsImprovement = await qAll<{ id: string; cad_account_id: number; cad_property_id: string }>(
-    `SELECT id, cad_account_id, cad_property_id
-       FROM protest_comp
-      WHERE property_id = ? AND household_id = ? AND tax_year = ?
-        AND source = 'dcad_search'
-        AND cad_account_id IS NOT NULL
-        AND (sqft IS NULL OR beds IS NULL OR baths IS NULL)`,
-    propertyId, householdId, taxYear
-  );
-
-  for (const comp of needsImprovement) {
+  for (const compRow of allResults) {
+    if (compRow.dcadPropertyId === subjectPid || compRow.pAccountId == null) continue;
     try {
       await sleep(150);
-      const features = await getDCADImprovementFeatures(comp.cad_account_id, countyName);
-      if (!features) continue;
-      const newSqft = features.sqft != null ? Math.round(features.sqft) : null;
-      const hasPool = features.miscImprovements.some((m) => /pool|spa/i.test(m.description));
-      const compPoolNote = buildPoolNote(features.miscImprovements);
+      const canonical = await fetchDcadCanonical({
+        prefetchedRow: compRow,
+        taxYear,
+        county: countyName ?? undefined,
+      });
+      if (!canonical) continue;
+
+      const sqft = canonical.sqft != null ? Math.round(canonical.sqft) : null;
+      const perSqft =
+        canonical.appraisedValueUsd != null && sqft != null && sqft > 0
+          ? canonical.appraisedValueUsd / sqft
+          : null;
+      const poolNote = buildPoolNote(canonical.miscImprovements);
+
       await qExec(
-        `UPDATE protest_comp SET
-           sqft      = COALESCE(?, sqft),
-           beds      = COALESCE(?, beds),
-           baths     = COALESCE(?, baths),
-           has_pool  = ?,
-           notes     = COALESCE(notes, ?),
-           cad_per_sqft_assessed = CASE
-             WHEN ? IS NOT NULL AND cad_assessed_value_usd IS NOT NULL AND ? > 0
-             THEN cad_assessed_value_usd::numeric / ?
-             ELSE cad_per_sqft_assessed END
-         WHERE id = ?`,
-        newSqft, features.beds, features.baths, hasPool, compPoolNote,
-        newSqft, newSqft, newSqft,
-        comp.id
+        `INSERT INTO protest_comp
+          (id, household_id, property_id, tax_year, source,
+           address_line1, city, state, zip,
+           cad_property_id, cad_account_id,
+           cad_land_value_usd, cad_improvement_value_usd,
+           cad_market_value_usd, cad_assessed_value_usd, cad_per_sqft_assessed,
+           sqft, beds, baths, year_built, has_pool, notes,
+           cad_enriched_at, raw_dcad_json, fetched_at)
+         VALUES (?, ?, ?, ?, 'dcad_search', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
+         ON CONFLICT (property_id, tax_year, cad_property_id) WHERE cad_property_id IS NOT NULL
+         DO UPDATE SET
+           cad_market_value_usd      = EXCLUDED.cad_market_value_usd,
+           cad_assessed_value_usd    = EXCLUDED.cad_assessed_value_usd,
+           cad_per_sqft_assessed     = EXCLUDED.cad_per_sqft_assessed,
+           sqft                      = COALESCE(protest_comp.sqft, EXCLUDED.sqft),
+           beds                      = COALESCE(protest_comp.beds, EXCLUDED.beds),
+           baths                     = COALESCE(protest_comp.baths, EXCLUDED.baths),
+           has_pool                  = EXCLUDED.has_pool,
+           notes                     = COALESCE(protest_comp.notes, EXCLUDED.notes),
+           cad_enriched_at           = NOW(),
+           raw_dcad_json             = EXCLUDED.raw_dcad_json,
+           fetched_at                = NOW()`,
+        randomUUID(), householdId, propertyId, taxYear,
+        canonical.addressLine1, canonical.city, canonical.state, canonical.zip,
+        canonical.cadPropertyId, canonical.cadAccountId,
+        canonical.landValueUsd, canonical.improvementValueUsd,
+        canonical.marketValueUsd, canonical.appraisedValueUsd, perSqft,
+        sqft, canonical.beds, canonical.baths, canonical.yearBuilt, canonical.hasPool, poolNote,
+        canonical.rawSearchJson
       );
+      stepBCount++;
     } catch (err) {
-      log.warn("runDcadBackfill Step C: improvement failed", {
-        cadPropertyId: comp.cad_property_id,
+      log.warn("runDcadBackfill Step B: canonical fetch/insert failed", {
+        cadPropertyId: compRow.dcadPropertyId,
         err: err instanceof Error ? err.message : String(err),
       });
     }
   }
-  log.info("runDcadBackfill: Step C complete", { propertyId, enriched: needsImprovement.length });
+  log.info("runDcadBackfill: Step B complete", { propertyId, count: stepBCount });
 
-  // ── Step D: Enrich Redfin + CAD evidence comps ──────────────────────────────
+  // ── Step C: Enrich all unenriched comps (redfin, cad_evidence, manual) ────────
+  // dcad_search comps are fully enriched in Step B (cad_enriched_at set there).
   const unenriched = await qAll<{
     id: string;
     address_line1: string | null;
@@ -881,7 +892,6 @@ export async function runDcadBackfill(
     `SELECT id, address_line1, cad_property_id, sold_price_usd, sold_date, price_per_sqft, raw_realty_json
        FROM protest_comp
       WHERE property_id = ? AND household_id = ? AND tax_year = ?
-        AND source IN ('redfin', 'cad_evidence')
         AND cad_enriched_at IS NULL
       LIMIT 10`,
     propertyId, householdId, taxYear
@@ -906,7 +916,7 @@ export async function runDcadBackfill(
         continue;
       }
 
-      // Check for an existing DCAD search row with the same cad_property_id
+      // If a dcad_search row already exists for this property, merge sold data into it and drop this row.
       const existingDcad = await qGet<{ id: string }>(
         `SELECT id FROM protest_comp
           WHERE property_id = ? AND tax_year = ? AND cad_property_id = ?
@@ -914,75 +924,35 @@ export async function runDcadBackfill(
         propertyId, taxYear, canonical.cadPropertyId, comp.id
       );
 
-      const canonicalPoolNote = buildPoolNote(canonical.miscImprovements);
-
       if (existingDcad) {
-        // Merge: copy sold data into the DCAD row, delete this Redfin/cad_evidence row.
-        // Fall back to cad_deed_date already on the DCAD row if neither row has a sold date.
         await qExec(
           `UPDATE protest_comp SET
-             sold_price_usd   = COALESCE(sold_price_usd, ?),
-             sold_date        = COALESCE(sold_date, ?, cad_deed_date),
-             price_per_sqft   = COALESCE(price_per_sqft, ?),
-             raw_realty_json  = COALESCE(raw_realty_json, ?),
-             notes            = COALESCE(notes, ?),
-             cad_enriched_at  = NOW()
+             sold_price_usd  = COALESCE(sold_price_usd, ?),
+             sold_date       = COALESCE(sold_date, ?, cad_deed_date),
+             price_per_sqft  = COALESCE(price_per_sqft, ?),
+             raw_realty_json = COALESCE(raw_realty_json, ?),
+             cad_enriched_at = NOW()
            WHERE id = ?`,
           comp.sold_price_usd, comp.sold_date,
           comp.price_per_sqft != null ? Number(comp.price_per_sqft) : null,
           comp.raw_realty_json,
-          canonicalPoolNote,
           existingDcad.id
         );
         await qExec(`DELETE FROM protest_comp WHERE id = ?`, comp.id);
       } else {
-        const sqft = canonical.sqft != null ? Math.round(canonical.sqft) : null;
-        const perSqft = canonical.appraisedValueUsd != null && sqft != null && sqft > 0
-          ? canonical.appraisedValueUsd / sqft : null;
-        await qExec(
-          `UPDATE protest_comp SET
-             cad_property_id        = ?,
-             cad_account_id         = ?,
-             cad_land_value_usd     = ?,
-             cad_improvement_value_usd = ?,
-             cad_market_value_usd   = ?,
-             cad_assessed_value_usd = ?,
-             cad_per_sqft_assessed  = ?,
-             cad_deed_date          = ?,
-             sold_date              = COALESCE(sold_date, ?),
-             sqft    = COALESCE(sqft, ?),
-             beds    = COALESCE(beds, ?),
-             baths   = COALESCE(baths, ?),
-             has_pool = COALESCE(has_pool, ?),
-             notes    = COALESCE(notes, ?),
-             cad_enriched_at = NOW(),
-             raw_dcad_json = ?
-           WHERE id = ?`,
-          canonical.cadPropertyId,
-          canonical.cadAccountId,
-          canonical.landValueUsd,
-          canonical.improvementValueUsd,
-          canonical.marketValueUsd,
-          canonical.appraisedValueUsd,
-          perSqft,
-          canonical.deedDate,
-          canonical.deedDate,
-          sqft, canonical.beds, canonical.baths, canonical.hasPool, canonicalPoolNote,
-          canonical.rawSearchJson,
-          comp.id
-        );
+        await applyCanonicalToComp(comp.id, canonical);
       }
     } catch (err) {
-      log.warn("runDcadBackfill Step D: enrichment failed", {
+      log.warn("runDcadBackfill Step C: enrichment failed", {
         compId: comp.id,
         err: err instanceof Error ? err.message : String(err),
       });
       await qExec(`UPDATE protest_comp SET cad_enriched_at = NOW() WHERE id = ?`, comp.id).catch(() => null);
     }
   }
-  log.info("runDcadBackfill: Step D complete", { propertyId, count: unenriched.length });
+  log.info("runDcadBackfill: Step C complete", { propertyId, count: unenriched.length });
 
-  // ── Step E: Appeal status sync ───────────────────────────────────────────────
+  // ── Step D: Appeal status sync ───────────────────────────────────────────────
   await syncAppealStatus(propertyId, householdId, taxYear, subject.cadAccountId, countyName);
 
   log.info("runDcadBackfill: complete", { propertyId, address, taxYear });

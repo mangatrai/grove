@@ -34,6 +34,7 @@ import {
   saveCycleSummary,
   saveArbScript,
   runDcadBackfill,
+  applyCanonicalToComp,
 } from "./protest-worksheet.service.js";
 import { generateArbScript, type ArbScriptInput } from "./arb-script.service.js";
 import { parseCadEvidencePdf } from "./cad-evidence-parser.service.js";
@@ -49,8 +50,7 @@ import {
 import { checkProtestDeadlines } from "../notifications/notification.service.js";
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
-import { getDCADImprovementFeatures } from "./dcad.service.js";
-import { fetchDcadAppraisalNoticeS3Id, fetchDcadAppraisalNoticePdf } from "./dcad-enrichment.service.js";
+import { fetchDcadCanonical, fetchDcadAppraisalNoticeS3Id, fetchDcadAppraisalNoticePdf, getCompImprovementFeatures } from "./dcad-enrichment.service.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -514,7 +514,7 @@ protestRouter.get("/:propertyId/cad-search", async (req: AuthenticatedRequest, r
       let sqft = c.sqft;
       let miscImprovements: { description: string; valueUsd: number | null; yearBuilt: number | null }[] = [];
       if (c.accountId != null) {
-        const features = await getDCADImprovementFeatures(c.accountId, countyHint).catch(() => null);
+        const features = await getCompImprovementFeatures(c.accountId, countyHint).catch(() => null);
         if (features) {
           beds = beds ?? features.beds;
           baths = baths ?? features.baths;
@@ -619,6 +619,22 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
     soldPriceUsd: parsed.data.soldPriceUsd ?? null,
     soldDate: parsed.data.soldDate ?? null,
   });
+
+  // Fire-and-forget DCAD enrichment so manual comps get CAD data without waiting for Refresh
+  const county = property.cadProvider === "dcad" ? "Denton" : null;
+  void fetchDcadCanonical({
+    address: parsed.data.addressLine1,
+    taxYear: parsed.data.year,
+    county: county ?? undefined,
+  }).then((canonical) => {
+    if (canonical) return applyCanonicalToComp(comp.id, canonical);
+  }).catch((err: unknown) => {
+    log.warn("manual comp DCAD enrichment failed", {
+      compId: comp.id,
+      err: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
   log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, compId: comp.id, source: parsed.data.source });
   res.status(201).json({ ok: true, comp, comps });

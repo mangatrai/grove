@@ -4,6 +4,7 @@ import {
   getDCADImprovementFeatures,
   getDCADValueHistory,
   getDCADTaxable,
+  type DCADProperty,
   type DCADAppealEntry,
   type MiscImprovement,
   getDCADAppeal,
@@ -86,8 +87,9 @@ function sleep(ms: number): Promise<void> {
  * Fetch all available DCAD data for one property and return as a canonical object.
  * Callers use only the fields they need.
  *
- * Pass `address` OR `cadPropertyId` (pid). If both provided, cadPropertyId takes precedence
- * for the search query.
+ * Pass `address` OR `cadPropertyId` (pid) OR `prefetchedRow` (already-fetched DCADProperty).
+ * When `prefetchedRow` is supplied the DCAD search call is skipped — use this when the caller
+ * already has search results in hand (e.g. Step B in runDcadBackfill) to avoid a redundant search.
  *
  * includeValueHistory=true  → fetches /valuehistory (homestead cap, net appraised, history)
  * includeTaxable=true       → fetches /taxable (estimated taxes, taxing units)
@@ -97,6 +99,7 @@ function sleep(ms: number): Promise<void> {
 export async function fetchDcadCanonical(opts: {
   address?: string;
   cadPropertyId?: string;
+  prefetchedRow?: DCADProperty;
   taxYear: number;
   includeValueHistory?: boolean;
   includeTaxable?: boolean;
@@ -104,28 +107,34 @@ export async function fetchDcadCanonical(opts: {
 }): Promise<DcadCanonicalProperty | null> {
   const { taxYear, includeValueHistory = false, includeTaxable = false, county } = opts;
 
-  // ── Step 1: Search by address (all years returned; we filter to taxYear) ──────
-  const searchQuery = opts.address ?? opts.cadPropertyId;
-  if (!searchQuery) {
-    log.warn("fetchDcadCanonical: no address or cadPropertyId provided");
-    return null;
-  }
+  let match: DCADProperty;
 
-  const allResults = await searchDCADByAddress(searchQuery, taxYear, county ?? null);
-  if (allResults.length === 0) {
-    log.info("fetchDcadCanonical: no results", { searchQuery, taxYear });
-    return null;
-  }
+  if (opts.prefetchedRow) {
+    // ── Step 1 skipped — use the pre-fetched row directly ──────────────────────
+    match = opts.prefetchedRow;
+  } else {
+    // ── Step 1: Search by address or cadPropertyId ─────────────────────────────
+    const searchQuery = opts.address ?? opts.cadPropertyId;
+    if (!searchQuery) {
+      log.warn("fetchDcadCanonical: no address or cadPropertyId provided");
+      return null;
+    }
 
-  // Pick the matching property. If cadPropertyId provided, find by pid; otherwise use house-number match.
-  let match = opts.cadPropertyId
-    ? allResults.find((r) => r.dcadPropertyId === opts.cadPropertyId) ?? allResults[0]
-    : (() => {
-        const houseNum = opts.address?.trim().match(/^\d+/)?.[0];
-        return houseNum
-          ? (allResults.find((r) => r.address?.startsWith(houseNum)) ?? allResults[0])
-          : allResults[0];
-      })();
+    const allResults = await searchDCADByAddress(searchQuery, taxYear, county ?? null);
+    if (allResults.length === 0) {
+      log.info("fetchDcadCanonical: no results", { searchQuery, taxYear });
+      return null;
+    }
+
+    match = opts.cadPropertyId
+      ? allResults.find((r) => r.dcadPropertyId === opts.cadPropertyId) ?? allResults[0]
+      : (() => {
+          const houseNum = opts.address?.trim().match(/^\d+/)?.[0];
+          return houseNum
+            ? (allResults.find((r) => r.address?.startsWith(houseNum)) ?? allResults[0])
+            : allResults[0];
+        })();
+  }
 
   if (!match) return null;
 
@@ -233,6 +242,23 @@ export async function fetchDcadCanonical(opts: {
   }
 
   return base;
+}
+
+/** Fetch improvement features (beds/baths/sqft/miscImprovements) for a known pAccountId. Used for display-only paths. */
+export async function getCompImprovementFeatures(
+  pAccountId: number,
+  county?: string | null
+) {
+  return getDCADImprovementFeatures(pAccountId, county ?? null);
+}
+
+/** Search DCAD for all properties near an address. Returns raw DCADProperty rows. */
+export async function searchDcadComps(
+  address: string,
+  taxYear: number,
+  county?: string | null
+): Promise<DCADProperty[]> {
+  return searchDCADByAddress(address, taxYear, county ?? null);
 }
 
 /**

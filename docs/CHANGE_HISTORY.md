@@ -18,6 +18,28 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-186 — DCAD architectural refactor: single canonical service across all paths (2026-06-15)
+
+`fetchDcadCanonical` is now the only DCAD function called outside `dcad-enrichment.service.ts`. All paths — property add, manual comp add, refresh — route through it.
+
+**Changes:**
+- `fetchDcadCanonical` accepts optional `prefetchedRow?: DCADProperty` to skip the redundant search when the caller already has the search result (Step B)
+- New exports from `dcad-enrichment.service.ts`: `searchDcadComps`, `getCompImprovementFeatures` — low-level `searchDCADByAddress` and `getDCADImprovementFeatures` no longer imported anywhere outside the enrichment service
+- `runDcadBackfill` is now 4 steps (A/B/C/D) instead of 5:
+  - Step B: calls `fetchDcadCanonical(prefetchedRow)` per search result → full canonical INSERT in one shot
+  - Step C (was D): removed source restriction — now enriches ALL unenriched comps (`redfin`, `cad_evidence`, `manual`) via `fetchDcadCanonical`; old Step C deleted
+- New export `applyCanonicalToComp(compId, canonical)` — shared helper used by Step C and the manual comp route
+- Manual comp add (`POST /:propertyId/comps`) now fires `fetchDcadCanonical` + `applyCanonicalToComp` immediately after insert (fire-and-forget)
+
+**Files changed:**
+- `backend/src/modules/protest/dcad-enrichment.service.ts`
+- `backend/src/modules/protest/protest-worksheet.service.ts`
+- `backend/src/modules/protest/protest.routes.ts`
+
+GitHub: https://github.com/mangatrai/grove/issues/110
+
+---
+
 ## CR-185 — DCAD pool/spa notes: propagate misc improvement details to property and comp notes (2026-06-15)
 
 When DCAD enrichment finds pool/spa entries in `Misc Imp` improvements, the formatted note (e.g., `"Pool (DCAD: $15,000, built 2010); Spa (DCAD: $5,000)"`) is now written to:
