@@ -4,7 +4,7 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import type { ArbScript } from "./arb-script.service.js";
 import { log } from "../../logger.js";
 import type { CadEvidenceData } from "./cad-evidence-parser.service.js";
-import { searchDCADByAddress, getDCADImprovementFeatures } from "./dcad.service.js";
+import { searchDCADByAddress, getDCADImprovementFeatures, type MiscImprovement } from "./dcad.service.js";
 import { fetchDcadCanonical, fetchDcadAppeal } from "./dcad-enrichment.service.js";
 
 export type { CadEvidenceData };
@@ -675,6 +675,19 @@ export async function saveRedfinComps(
 
 // ── DCAD backfill (5-step enrichment pipeline) ────────────────────────────────
 
+function buildPoolNote(items: MiscImprovement[]): string | null {
+  const poolItems = items.filter((m) => /pool|spa/i.test(m.description));
+  if (poolItems.length === 0) return null;
+  return poolItems
+    .map((m) => {
+      const parts: string[] = [];
+      if (m.valueUsd != null) parts.push(`DCAD: $${m.valueUsd.toLocaleString()}`);
+      if (m.yearBuilt != null) parts.push(`built ${m.yearBuilt}`);
+      return parts.length > 0 ? `${m.description} (${parts.join(", ")})` : m.description;
+    })
+    .join("; ");
+}
+
 /**
  * Full DCAD enrichment pipeline for one property.
  * Fire-and-forget safe — all errors are logged, not thrown.
@@ -750,10 +763,19 @@ export async function runDcadBackfill(
     propertyId,
     householdId
   );
+  const subjectPoolNote = buildPoolNote(subject.miscImprovements);
+  if (subjectPoolNote) {
+    await qExec(
+      `UPDATE property SET property_notes = ? WHERE id = ? AND household_id = ? AND property_notes IS NULL`,
+      subjectPoolNote, propertyId, householdId
+    );
+  }
+
   log.info("runDcadBackfill: Step A complete", {
     propertyId,
     cadPropertyId: subject.cadPropertyId,
     appraisedValue: subject.appraisedValueUsd,
+    poolNote: subjectPoolNote ?? undefined,
   });
 
   // ── Step B: Save DCAD search comps ──────────────────────────────────────────
@@ -820,18 +842,20 @@ export async function runDcadBackfill(
       if (!features) continue;
       const newSqft = features.sqft != null ? Math.round(features.sqft) : null;
       const hasPool = features.miscImprovements.some((m) => /pool|spa/i.test(m.description));
+      const compPoolNote = buildPoolNote(features.miscImprovements);
       await qExec(
         `UPDATE protest_comp SET
            sqft      = COALESCE(?, sqft),
            beds      = COALESCE(?, beds),
            baths     = COALESCE(?, baths),
            has_pool  = ?,
+           notes     = COALESCE(notes, ?),
            cad_per_sqft_assessed = CASE
              WHEN ? IS NOT NULL AND cad_assessed_value_usd IS NOT NULL AND ? > 0
              THEN cad_assessed_value_usd::numeric / ?
              ELSE cad_per_sqft_assessed END
          WHERE id = ?`,
-        newSqft, features.beds, features.baths, hasPool,
+        newSqft, features.beds, features.baths, hasPool, compPoolNote,
         newSqft, newSqft, newSqft,
         comp.id
       );
@@ -890,6 +914,8 @@ export async function runDcadBackfill(
         propertyId, taxYear, canonical.cadPropertyId, comp.id
       );
 
+      const canonicalPoolNote = buildPoolNote(canonical.miscImprovements);
+
       if (existingDcad) {
         // Merge: copy sold data into the DCAD row, delete this Redfin/cad_evidence row.
         // Fall back to cad_deed_date already on the DCAD row if neither row has a sold date.
@@ -899,11 +925,13 @@ export async function runDcadBackfill(
              sold_date        = COALESCE(sold_date, ?, cad_deed_date),
              price_per_sqft   = COALESCE(price_per_sqft, ?),
              raw_realty_json  = COALESCE(raw_realty_json, ?),
+             notes            = COALESCE(notes, ?),
              cad_enriched_at  = NOW()
            WHERE id = ?`,
           comp.sold_price_usd, comp.sold_date,
           comp.price_per_sqft != null ? Number(comp.price_per_sqft) : null,
           comp.raw_realty_json,
+          canonicalPoolNote,
           existingDcad.id
         );
         await qExec(`DELETE FROM protest_comp WHERE id = ?`, comp.id);
@@ -926,6 +954,7 @@ export async function runDcadBackfill(
              beds    = COALESCE(beds, ?),
              baths   = COALESCE(baths, ?),
              has_pool = COALESCE(has_pool, ?),
+             notes    = COALESCE(notes, ?),
              cad_enriched_at = NOW(),
              raw_dcad_json = ?
            WHERE id = ?`,
@@ -938,7 +967,7 @@ export async function runDcadBackfill(
           perSqft,
           canonical.deedDate,
           canonical.deedDate,
-          sqft, canonical.beds, canonical.baths, canonical.hasPool,
+          sqft, canonical.beds, canonical.baths, canonical.hasPool, canonicalPoolNote,
           canonical.rawSearchJson,
           comp.id
         );

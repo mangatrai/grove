@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-185 — DCAD pool/spa notes: propagate misc improvement details to property and comp notes (2026-06-15)
+
+When DCAD enrichment finds pool/spa entries in `Misc Imp` improvements, the formatted note (e.g., `"Pool (DCAD: $15,000, built 2010); Spa (DCAD: $5,000)"`) is now written to:
+
+- **Subject property** (`property.property_notes`) — only when currently NULL, so user-entered notes are never overwritten
+- **DCAD search comps** (`protest_comp.notes`, Step C) — `COALESCE(notes, ?)` so existing user notes win
+- **Redfin/CAD evidence comps** (`protest_comp.notes`, Step D both merge and non-merge paths) — same COALESCE logic
+
+**Root cause of gap:** `fetchDcadCanonical` fetched `miscImprovements[]` from `getDCADImprovementFeatures` but only propagated the `hasPool` boolean, discarding the description/value/yearBuilt detail. `DcadCanonicalProperty` now carries `miscImprovements: MiscImprovement[]`.
+
+No new migration — `property_notes` and `protest_comp.notes` already exist.
+
+**Files changed:**
+- `backend/src/modules/protest/dcad-enrichment.service.ts` — added `miscImprovements` field to `DcadCanonicalProperty`; import `MiscImprovement` type
+- `backend/src/modules/protest/protest-worksheet.service.ts` — added `buildPoolNote()` helper; Steps A/C/D write pool notes
+
+GitHub: https://github.com/mangatrai/grove/issues/109
+
+---
+
 ## CR-184 — Realty API: schema-driven Redfin comp parsing via avm.__att_names (2026-06-15)
 
 Replaced hardcoded `__atts` positional indices in `parseComps` with a schema-driven approach using Redfin's own `avm.__att_names` descriptor.

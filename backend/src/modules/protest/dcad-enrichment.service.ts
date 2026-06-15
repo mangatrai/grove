@@ -5,6 +5,7 @@ import {
   getDCADValueHistory,
   getDCADTaxable,
   type DCADAppealEntry,
+  type MiscImprovement,
   getDCADAppeal,
   getToken,
   BROWSER_HEADERS,
@@ -51,6 +52,7 @@ export type DcadCanonicalProperty = {
   baths: number | null;
   yearBuilt: number | null;
   hasPool: boolean;
+  miscImprovements: MiscImprovement[];
 
   // Raw search payload for this property + year
   rawSearchJson: unknown;
@@ -167,6 +169,7 @@ export async function fetchDcadCanonical(opts: {
     baths: match.baths,
     yearBuilt: match.yearBuilt,
     hasPool: false,
+    miscImprovements: [],
 
     rawSearchJson: raw,
   };
@@ -178,6 +181,7 @@ export async function fetchDcadCanonical(opts: {
       base.sqft = features.sqft ?? base.sqft;
       base.beds = features.beds ?? base.beds;
       base.baths = features.baths ?? base.baths;
+      base.miscImprovements = features.miscImprovements;
       base.hasPool = features.miscImprovements.some(
         (m) => /pool|spa/i.test(m.description)
       );
