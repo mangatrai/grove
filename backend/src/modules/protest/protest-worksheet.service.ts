@@ -464,6 +464,16 @@ export async function addManualComp(
   }
 ): Promise<UnifiedComp> {
   await getOrCreateWorksheet(propertyId, householdId, taxYear);
+
+  // If cadPropertyId is already in the worksheet, return the existing row — don't INSERT a duplicate
+  if (comp.cadPropertyId) {
+    const existing = await qGet<CompRow>(
+      `${COMP_SELECT} WHERE property_id = ? AND household_id = ? AND tax_year = ? AND cad_property_id = ?`,
+      propertyId, householdId, taxYear, comp.cadPropertyId
+    );
+    if (existing) return rowToComp(existing);
+  }
+
   const id = randomUUID();
   const sqft = comp.sqft ?? null;
   const assessed = comp.cadAssessedValueUsd ?? null;

@@ -605,39 +605,45 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
     res.status(404).json({ message: "Property not found" });
     return;
   }
-  const comp = await addManualComp(property.id, householdId, parsed.data.year, {
-    addressLine1: parsed.data.addressLine1,
-    city: parsed.data.city ?? null,
-    sqft: parsed.data.sqft ?? null,
-    beds: parsed.data.beds ?? null,
-    baths: parsed.data.baths ?? null,
-    yearBuilt: parsed.data.yearBuilt ?? null,
-    cadAssessedValueUsd: parsed.data.cadAssessedValueUsd ?? null,
-    cadMarketValueUsd: parsed.data.cadMarketValueUsd ?? null,
-    cadPropertyId: parsed.data.cadPropertyId ?? null,
-    cadAccountId: parsed.data.cadAccountId ?? null,
-    soldPriceUsd: parsed.data.soldPriceUsd ?? null,
-    soldDate: parsed.data.soldDate ?? null,
-  });
 
-  // Fire-and-forget DCAD enrichment so manual comps get CAD data without waiting for Refresh
-  const county = property.cadProvider === "dcad" ? "Denton" : null;
-  void fetchDcadCanonical({
-    address: parsed.data.addressLine1,
-    taxYear: parsed.data.year,
-    county: county ?? undefined,
-  }).then((canonical) => {
-    if (canonical) return applyCanonicalToComp(comp.id, canonical);
-  }).catch((err: unknown) => {
-    log.warn("manual comp DCAD enrichment failed", {
-      compId: comp.id,
-      err: err instanceof Error ? err.message : String(err),
+  try {
+    const comp = await addManualComp(property.id, householdId, parsed.data.year, {
+      addressLine1: parsed.data.addressLine1,
+      city: parsed.data.city ?? null,
+      sqft: parsed.data.sqft ?? null,
+      beds: parsed.data.beds ?? null,
+      baths: parsed.data.baths ?? null,
+      yearBuilt: parsed.data.yearBuilt ?? null,
+      cadAssessedValueUsd: parsed.data.cadAssessedValueUsd ?? null,
+      cadMarketValueUsd: parsed.data.cadMarketValueUsd ?? null,
+      cadPropertyId: parsed.data.cadPropertyId ?? null,
+      cadAccountId: parsed.data.cadAccountId ?? null,
+      soldPriceUsd: parsed.data.soldPriceUsd ?? null,
+      soldDate: parsed.data.soldDate ?? null,
     });
-  });
 
-  const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
-  log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, compId: comp.id, source: parsed.data.source });
-  res.status(201).json({ ok: true, comp, comps });
+    // Fire-and-forget DCAD enrichment so manual comps get CAD data without waiting for Refresh
+    const county = property.cadProvider === "dcad" ? "Denton" : null;
+    void fetchDcadCanonical({
+      address: parsed.data.addressLine1,
+      taxYear: parsed.data.year,
+      county: county ?? undefined,
+    }).then((canonical) => {
+      if (canonical) return applyCanonicalToComp(comp.id, canonical);
+    }).catch((err: unknown) => {
+      log.warn("manual comp DCAD enrichment failed", {
+        compId: comp.id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
+    log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, compId: comp.id, source: parsed.data.source });
+    res.status(201).json({ ok: true, comp, comps });
+  } catch (err) {
+    log.warn("POST /comps failed", { propertyId: property.id, err: err instanceof Error ? err.message : String(err) });
+    res.status(500).json({ message: "Failed to add comp" });
+  }
 });
 
 protestRouter.patch("/:propertyId/comps/:compId/exclude", async (req: AuthenticatedRequest, res) => {
@@ -686,7 +692,9 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
   // 2. Fire-and-forget DCAD backfill
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ");
   const county = property.cadProvider === "dcad" ? "Denton" : null;
-  void runDcadBackfill(property.id, householdId, address, year, county);
+  void runDcadBackfill(property.id, householdId, address, year, county).catch((err: unknown) => {
+    log.warn("runDcadBackfill: uncaught error", { propertyId: property.id, err: err instanceof Error ? err.message : String(err) });
+  });
 
   // 3. Return fresh comps
   const freshComps = await listWorksheetComps(property.id, householdId, year);

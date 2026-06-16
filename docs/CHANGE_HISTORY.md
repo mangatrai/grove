@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-182 — protest comp duplicate-key crash (unhandled rejection) (2026-06-15)
+
+When a user added a comp from the CAD search UI with a `cadPropertyId` that the DCAD backfill had already inserted, `addManualComp` fired a plain `INSERT` with no `ON CONFLICT` clause, violating `protest_comp_by_cad_pid`. Express 4 does not catch async route handler rejections automatically, so the error became an unhandled rejection that crashed the `tsx watch` process. A secondary vector: `void runDcadBackfill(...)` in `POST /refresh-comps` had no `.catch()`.
+
+**Fix:**
+- `protest-worksheet.service.ts` (`addManualComp`): before inserting, check if a comp with the same `cadPropertyId` already exists for the property/year; if so, return the existing row instead of inserting a duplicate
+- `protest.routes.ts` (`POST /:propertyId/comps`): wrapped handler body in try/catch; returns 500 on unexpected DB errors
+- `protest.routes.ts` (`POST /:propertyId/refresh-comps`): added `.catch()` to `void runDcadBackfill(...)` so any error escaping the per-iteration try/catches is logged rather than crashing the process
+
+**GitHub:** https://github.com/mangatrai/grove/issues/111
+
+---
+
 ## CR-186 — DCAD architectural refactor: single canonical service across all paths (2026-06-15)
 
 `fetchDcadCanonical` is now the only DCAD function called outside `dcad-enrichment.service.ts`. All paths — property add, manual comp add, refresh — route through it.
