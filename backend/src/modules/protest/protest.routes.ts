@@ -102,6 +102,45 @@ function money(n: number | null | undefined): string {
 }
 
 
+function buildCompsContext(comps: import("./protest-worksheet.service.js").UnifiedComp[]): string {
+  const equityComps = comps.filter(c => c.source === "dcad_search" || c.source === "cad_evidence");
+  const soldComps = comps.filter(c => (c.source === "redfin" || c.source === "manual") && !c.excluded);
+
+  if (equityComps.length === 0 && soldComps.length === 0) return "";
+
+  const lines: string[] = ["\n## Comparable Properties (already loaded in database — do NOT call fetch_dcad_comps unless user explicitly asks to re-search)"];
+
+  if (equityComps.length > 0) {
+    const perSqfts = equityComps.filter(c => c.cadPerSqftAssessed != null).map(c => c.cadPerSqftAssessed!);
+    const sorted = [...perSqfts].sort((a, b) => a - b);
+    const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : null;
+    const mean = perSqfts.length > 0 ? perSqfts.reduce((s, v) => s + v, 0) / perSqfts.length : null;
+    lines.push(`\n§41.43 Equity Comps — ${equityComps.length} loaded (CAD-assessed comparables):`);
+    for (const c of equityComps) {
+      const ps = c.cadPerSqftAssessed != null ? `$${c.cadPerSqftAssessed.toFixed(2)}/sqft` : "no $/sqft";
+      const pool = c.hasPool ? " pool" : "";
+      lines.push(`  ${c.addressLine1 ?? "—"} | ${c.sqft != null ? c.sqft.toLocaleString() + " sqft" : "—"} | yr ${c.yearBuilt ?? "—"}${pool} | assessed ${money(c.cadAssessedValueUsd)} | ${ps}${c.notes ? ` | NOTE: ${c.notes}` : ""}`);
+    }
+    if (median != null) lines.push(`Equity comp $/sqft — median: $${median.toFixed(2)} | mean: ${mean != null ? "$" + mean.toFixed(2) : "—"} | range: $${sorted[0].toFixed(2)}–$${sorted[sorted.length - 1].toFixed(2)}`);
+  }
+
+  if (soldComps.length > 0) {
+    const soldPsArr = soldComps
+      .filter(c => c.soldPriceUsd != null && c.sqft != null && c.sqft > 0)
+      .map(c => c.soldPriceUsd! / c.sqft!);
+    const soldSorted = [...soldPsArr].sort((a, b) => a - b);
+    const soldMedian = soldSorted.length > 0 ? soldSorted[Math.floor(soldSorted.length / 2)] : null;
+    lines.push(`\n§41.41 Sold Comps — ${soldComps.length} loaded (recent market sales):`);
+    for (const c of soldComps) {
+      const ps = c.soldPriceUsd != null && c.sqft != null && c.sqft > 0 ? `$${(c.soldPriceUsd / c.sqft).toFixed(2)}/sqft` : "no $/sqft";
+      lines.push(`  ${c.addressLine1 ?? "—"} | sold ${c.soldDate ?? "—"} | ${money(c.soldPriceUsd)} | ${c.sqft != null ? c.sqft.toLocaleString() + " sqft" : "—"} | ${ps}${c.notes ? ` | NOTE: ${c.notes}` : ""}`);
+    }
+    if (soldMedian != null) lines.push(`Market sales $/sqft median: $${soldMedian.toFixed(2)}`);
+  }
+
+  return lines.join("\n");
+}
+
 function buildCadEvidenceContext(cadEvidence: CadEvidenceData | null, cadAssessed: number | null): string {
   if (!cadEvidence) return "";
 
@@ -156,37 +195,112 @@ function buildSystemPrompt(input: {
   purchaseDate: string | null;
   status: ProtestStatus;
   year: number;
+  hearingDate: string | null;
+  filingDeadline: string | null;
+  informalOfferUsd: number | null;
   cadEvidence: CadEvidenceData | null;
+  comps: import("./protest-worksheet.service.js").UnifiedComp[];
+  strategyJson: import("./protest-worksheet.service.js").StrategyJson | null;
   priorYearSummary?: string | null;
 }): string {
   const evidenceContext = buildCadEvidenceContext(input.cadEvidence, input.cadAssessed);
+  const compsContext = buildCompsContext(input.comps);
   const priorYearBlock = input.priorYearSummary?.trim()
     ? `\n## Prior year context\n${input.priorYearSummary.trim()}`
     : "";
+  const strategyBlock = input.strategyJson
+    ? `\n## Previously saved strategy\nCase strength: ${input.strategyJson.caseStrength}/10 | Target: ${money(input.strategyJson.targetValueUsd)} | Primary: ${input.strategyJson.primaryStrategy}\nArguments: ${input.strategyJson.draftArguments?.join("; ")}\nRed flags: ${input.strategyJson.redFlags?.join("; ")}`
+    : "";
 
-  return `You are a property tax protest assistant for ${input.address}, ${input.city ?? ""} ${input.state ?? ""}.
+  const deadlineBlock = [
+    input.hearingDate ? `ARB Hearing: ${input.hearingDate}` : null,
+    input.filingDeadline ? `Filing Deadline: ${input.filingDeadline}` : null,
+    input.informalOfferUsd != null ? `Informal offer on table: ${money(input.informalOfferUsd)}` : null,
+  ].filter(Boolean).join(" | ");
 
-Property facts:
-- CAD assessed value (tax year ${input.year}): ${money(input.cadAssessed)}
+  const equityComps = input.comps.filter(c => c.source === "dcad_search" || c.source === "cad_evidence");
+  const equityPerSqfts = equityComps.filter(c => c.cadPerSqftAssessed != null).map(c => c.cadPerSqftAssessed!);
+  const equityMedian = equityPerSqfts.length > 0
+    ? [...equityPerSqfts].sort((a, b) => a - b)[Math.floor(equityPerSqfts.length / 2)]
+    : null;
+  const subjectPerSqft = input.cadAssessed != null && input.sqft != null && input.sqft > 0
+    ? input.cadAssessed / input.sqft
+    : null;
+
+  const strengthSignal = equityMedian != null && subjectPerSqft != null
+    ? `Subject $/sqft: $${subjectPerSqft.toFixed(2)} vs equity comp median: $${equityMedian.toFixed(2)} → gap: ${subjectPerSqft > equityMedian ? "+" : ""}$${(subjectPerSqft - equityMedian).toFixed(2)}/sqft (${subjectPerSqft > equityMedian ? "§41.43 SUPPORTED" : "subject below median — weak §41.43"})`
+    : "";
+
+  const statusInstructions: Record<ProtestStatus, string> = {
+    not_filed: `
+## Your role at status: not_filed
+The protest has NOT been filed yet. Start by gathering the information you need to give a strong recommendation.
+On the FIRST message (or if you lack critical data), ask these preliminary questions before diving into analysis:
+1. Does the user have a target assessed value in mind? Why?
+2. Are there any known issues with the property (condition problems, incorrect sqft, deferred maintenance) that would support a lower value?
+3. Has the user protested before, and what was the outcome?
+Once you have context (or if the data above is sufficient), proactively:
+- Compute the equity gap (subject $/sqft vs. comp median $/sqft) and state whether §41.43 is strong, weak, or inconclusive
+- Compute the implied reduction if brought to comp median
+- Recommend whether to file and on which grounds
+- Flag what data is missing (no comps loaded, no CAD evidence uploaded, etc.)`,
+    filed: `
+## Your role at status: filed
+Protest is filed. Focus on building the strongest evidence package before the informal meeting.
+- Summarize the current evidence: how many comps, what grounds are supportable, case strength estimate
+- Identify gaps: missing comps, thin evidence, data quality issues
+- Recommend what additional data to gather (more comps, CAD evidence PDF, market sales)
+- Advise on the informal meeting: what number to open with, what to accept`,
+    informal: `
+## Your role at status: informal
+The informal meeting is approaching or has occurred${input.informalOfferUsd != null ? `. An offer of ${money(input.informalOfferUsd)} is on the table` : ""}.
+- If an offer exists: evaluate it against the evidence. Should the user accept, counter, or proceed to ARB?
+- Calculate what a successful ARB outcome would likely yield vs. the settlement offer
+- Advise on the risk/reward of going to ARB given the evidence strength
+- If the offer is close to the comp-supported value, recommend accepting — ARB is time-intensive and not guaranteed`,
+    arb: `
+## Your role at status: arb
+The ARB hearing is ${input.hearingDate ? `scheduled for ${input.hearingDate}` : "scheduled"}.
+Focus on hearing preparation:
+- Draft 5–7 talking points ordered by expected impact — lead with §41.43 if equity gap is significant
+- Identify the 3–4 strongest comps to present and explain why they're favorable
+- Anticipate the appraiser's pushback and prepare rebuttals
+- Advise on hearing mechanics: who speaks first, how to present exhibits, what to ask for on the record
+- State the specific reduction target and the legal basis`,
+    resolved: `
+## Your role at status: resolved
+The protest is resolved. Switch to documentation and lessons-learned mode.
+- Summarize what worked and what didn't
+- Note which comps and arguments were most effective for future reference
+- Flag any issues to address before next year's protest cycle`,
+  };
+
+  return `You are a property tax protest strategist for ${input.address}, ${input.city ?? ""} ${input.state ?? ""}.
+
+## Property facts (Tax Year ${input.year})
+- CAD assessed value: ${money(input.cadAssessed)}
 - Sqft: ${input.sqft ?? "—"} | Beds: ${input.beds ?? "—"} | Baths: ${input.baths ?? "—"} | Year built: ${input.yearBuilt ?? "—"}
 - Purchase price: ${money(input.purchasePrice)} (${input.purchaseDate ?? "—"})
+${deadlineBlock ? `- ${deadlineBlock}` : ""}
+${strengthSignal ? `- ${strengthSignal}` : ""}
 
-Current protest status: ${input.status}
-Tax year: ${input.year}
+## Protest status: ${input.status}
+${statusInstructions[input.status] ?? ""}
 
-Texas property tax protest grounds:
-- §41.41 (Market value): Subject property's assessed value exceeds its market value. Argue using recent arm's-length sale prices of comparable properties.
-- §41.43 (Unequal appraisal): Subject property is assessed at a higher ratio than comparable properties. Argue using CAD-assessed values of similar nearby properties — not Redfin AVM or Zillow estimates, which have no standing at ARB.
-${evidenceContext}${priorYearBlock}
-You are a property tax protest advisor, not a cheerleader. Think like a property tax attorney: analytically rigorous, evidence-driven, and results-oriented. Your job is to WIN the protest — not to validate the homeowner's feelings or avoid disagreement.
+## Texas protest grounds
+- §41.41 (Market value): Assessed value exceeds fair market value. Argue with recent arm's-length sale prices of comparable properties.
+- §41.43 (Unequal appraisal): Subject assessed at higher ratio than comparable properties. Argue with CAD-assessed values of similar nearby properties — Redfin AVM and Zillow have no standing at ARB.
+${evidenceContext}${compsContext}${strategyBlock}${priorYearBlock}
 
-Behavioral rules:
-- Commit to positions. When the evidence supports a lower value, say so directly and give the exact number.
-- Push back when warranted. If the user's target is not supportable by the data, say so and explain what is supportable.
-- Use DCAD's own data against them — inequitable assessment using their own comps is the strongest argument.
-- When fetching DCAD comps returns no results, try alternative address formats or nearby street names before concluding data is unavailable. Use the web search tool if DCAD data is insufficient.
-- Never soften a well-supported argument to seem diplomatic. Never "also consider the other side" when the evidence is one-sided.
-- Be concise. Lead with the conclusion, follow with the evidence.`;
+## Advisor rules
+- Think like a property tax attorney: analytically rigorous, evidence-driven, results-oriented. Your job is to WIN.
+- Commit to positions. When evidence supports a lower value, give the exact number.
+- Push back when warranted. If the user's target isn't supportable, say so and state what IS supportable.
+- Use DCAD's own comp data against them — inequitable assessment using their own numbers is the strongest argument.
+- When DCAD comps are missing or thin, use search_web or suggest alternative comp sources before conceding.
+- Never soften a well-supported argument to seem diplomatic.
+- Be concise. Lead with the conclusion, follow with the evidence.
+- After giving your assessment, call update_strategy to save the case strength, target value, and key arguments.`;
 }
 
 const CLOSED_PROTEST_OUTCOMES = new Set([
@@ -728,7 +842,10 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
   const taxCurrent = asRecord(detail?.taxCurrent);
   const cadAssessed = worksheet.cadEvidenceJson?.assessedValueUsd ?? property.cadAssessedValueUsd ?? asNumber(taxCurrent?.assessedValue);
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ") || "Unknown property";
-  const priorWorksheet = await getWorksheet(property.id, householdId, year - 1);
+  const [priorWorksheet, existingComps] = await Promise.all([
+    getWorksheet(property.id, householdId, year - 1),
+    listWorksheetComps(property.id, householdId, year),
+  ]);
   const priorYearSummary = priorWorksheet?.cycleSummary ?? null;
 
   let systemPrompt = buildSystemPrompt({
@@ -744,7 +861,12 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
     purchaseDate: property.purchaseDate,
     status: worksheet.status,
     year,
+    hearingDate: worksheet.hearingDate,
+    filingDeadline: worksheet.filingDeadline,
+    informalOfferUsd: worksheet.informalOfferUsd,
     cadEvidence: worksheet.cadEvidenceJson,
+    comps: existingComps,
+    strategyJson: worksheet.strategyJson,
     priorYearSummary,
   });
 
@@ -1066,7 +1188,7 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
   const year = query.data.year ?? new Date().getUTCFullYear();
   const worksheet = await getWorksheet(property.id, householdId, year);
   const allComps = await listWorksheetComps(property.id, householdId, year);
-  const cadComps = allComps.filter(c => c.source === 'dcad_search' || c.source === 'cad_evidence');
+  const cadComps = allComps.filter(c => !c.excluded);
 
   const vd = property.valuationDetail;
   const cadEv = worksheet?.cadEvidenceJson ?? null;
@@ -1088,8 +1210,21 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
       ? proposedAssessed / subjectSqft
       : null;
 
-  // YoY history from Redfin
-  const taxHistory = [...(vd?.taxHistory ?? [])].sort((a, b) => b.year - a.year).slice(0, 5);
+  // YoY history: prefer live DCAD data, fall back to Redfin
+  let taxHistory: Array<{ year: number; assessedValue: number | null; marketValue?: number | null }> = [];
+  if (property.cadAccountId) {
+    const cadProv = property.cadProvider ?? inferCadProvider(property.state);
+    const cadAdapt = cadProv ? getCadAdapter(cadProv) : null;
+    if (cadAdapt) {
+      try {
+        const hist = await cadAdapt.getValueHistory(property.cadAccountId);
+        if (hist.length > 0) taxHistory = [...hist].sort((a, b) => b.year - a.year).slice(0, 5);
+      } catch (_err) {}
+    }
+  }
+  if (taxHistory.length === 0) {
+    taxHistory = [...(vd?.taxHistory ?? [])].sort((a, b) => b.year - a.year).slice(0, 5);
+  }
 
   // Equity comps $/sqft stats
   const compPerSqfts = cadComps
@@ -1139,14 +1274,33 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
     lines.push(`  Improvements            : ${fmt(cadEv.improvementsUsd)}`);
     lines.push(`  Percent Good            : ${cadEv.percentGood != null ? cadEv.percentGood + "%" : "—"}`);
     lines.push(`  Living Area (PDF)       : ${cadEv.livingAreaSqft != null ? cadEv.livingAreaSqft.toLocaleString() + " sqft" : "—"}`);
+  } else if (property.cadAssessedValueUsd != null) {
+    lines.push(`Source: DCAD records (stored from CAD lookup — no evidence PDF uploaded)`);
+    lines.push(`  CAD Assessed Value      : ${fmt(property.cadAssessedValueUsd)}`);
+    if (property.cadLandValueUsd != null) lines.push(`  CAD Land Value          : ${fmt(property.cadLandValueUsd)}`);
+    if (property.cadImprovementValueUsd != null) lines.push(`  CAD Improvement Value   : ${fmt(property.cadImprovementValueUsd)}`);
   } else {
-    lines.push(`Source: Redfin / Realty API (no CAD evidence PDF uploaded)`);
+    lines.push(`Source: Redfin / Realty API (no CAD data on file)`);
     lines.push(`  Assessed Value (Redfin) : ${fmt(vd?.taxCurrent?.assessedValue)}`);
     lines.push(`  Tax Year (Redfin)       : ${vd?.taxCurrent?.year ?? "—"}`);
   }
   lines.push(`Redfin AVM Estimate     : ${fmt(redfinEstimate)}`);
   lines.push(`Assessed / Market Ratio : ${fmtPct(proposedAssessed, redfinEstimate)}`);
   if (subjectPerSqft != null) lines.push(`Subject $/sqft          : $${subjectPerSqft.toFixed(2)}/sqft`);
+
+  if (property.cadMarketValueUsd != null || property.cadAppraisedValueUsd != null || property.cadNetAppraisedValueUsd != null || property.cadTaxLimitationValueUsd != null || property.cadLandValueUsd != null || property.cadImprovementValueUsd != null) {
+    sub("CAD Valuation Breakdown (DCAD records)");
+    if (property.cadMarketValueUsd != null) lines.push(`  CAD Market Value        : ${fmt(property.cadMarketValueUsd)}`);
+    if (property.cadAppraisedValueUsd != null) lines.push(`  CAD Appraised Value     : ${fmt(property.cadAppraisedValueUsd)}`);
+    if (property.cadNetAppraisedValueUsd != null) lines.push(`  CAD Net Appraised       : ${fmt(property.cadNetAppraisedValueUsd)}`);
+    if (property.cadLandValueUsd != null) lines.push(`  CAD Land Value          : ${fmt(property.cadLandValueUsd)}`);
+    if (property.cadImprovementValueUsd != null) lines.push(`  CAD Improvement Value   : ${fmt(property.cadImprovementValueUsd)}`);
+    if (property.cadTaxLimitationValueUsd != null) lines.push(`  CAD Tax Limitation      : ${fmt(property.cadTaxLimitationValueUsd)}`);
+    if (property.cadMarketValueUsd != null && proposedAssessed != null) {
+      const overage = proposedAssessed - property.cadMarketValueUsd;
+      if (overage > 0) lines.push(`  Assessed exceeds CAD Market Value by ${fmt(overage)} — potential §41.41 signal`);
+    }
+  }
 
   if (taxHistory.length > 0) {
     sub("Year-Over-Year Assessed Value History");
@@ -1177,44 +1331,83 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
     lines.push("No equity comps loaded. Run 'Refresh Comps' to populate.");
   } else {
     lines.push("");
-    lines.push("#  | Address                    | Sqft   | Bd/Ba  | Yr Blt | Assessed       | $/sqft  | Notes");
-    lines.push("---+----------------------------+--------+--------+--------+----------------+---------+------");
+    lines.push("#  | Address                    | Sqft   | Bd/Ba  | Yr Blt | Assessed       | Land Value | Impr. Value | $/sqft  | Notes");
+    lines.push("---+----------------------------+--------+--------+--------+----------------+------------+-------------+---------+------");
     cadComps.forEach((c, i) => {
       const ps = c.cadPerSqftAssessed != null ? "$" + c.cadPerSqftAssessed.toFixed(2) : "—";
       lines.push(
-        `${String(i + 1).padStart(2)} | ${pad(c.addressLine1, 26)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad((c.beds ?? "—") + "/" + (c.baths ?? "—"), 6)} | ${pad(String(c.yearBuilt ?? "—"), 6)} | ${pad(fmt(c.cadAssessedValueUsd), 14)} | ${pad(ps, 7)} | ${c.notes ?? ""}`
+        `${String(i + 1).padStart(2)} | ${pad(c.addressLine1, 26)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad((c.beds ?? "—") + "/" + (c.baths ?? "—"), 6)} | ${pad(String(c.yearBuilt ?? "—"), 6)} | ${pad(fmt(c.cadAssessedValueUsd), 14)} | ${pad(fmt(c.cadLandValueUsd), 10)} | ${pad(fmt(c.cadImprovementValueUsd), 11)} | ${pad(ps, 7)} | ${c.notes ?? ""}`
       );
     });
     if (compMedianPerSqft != null) {
+      const compMeanPerSqft = compPerSqfts.length > 0
+        ? compPerSqfts.reduce((s, v) => s + v, 0) / compPerSqfts.length
+        : null;
+      const impliedMean = compMeanPerSqft != null && subjectSqft != null
+        ? Math.round(compMeanPerSqft * subjectSqft)
+        : null;
+      const impliedAvm = redfinEstimate != null ? redfinEstimate : null;
       lines.push("");
       lines.push(`Comp $/sqft range  : $${Math.min(...compPerSqfts).toFixed(2)} – $${Math.max(...compPerSqfts).toFixed(2)}`);
       lines.push(`Comp $/sqft median : $${compMedianPerSqft.toFixed(2)}`);
+      if (compMeanPerSqft != null) lines.push(`Comp $/sqft mean   : $${compMeanPerSqft.toFixed(2)}`);
       lines.push(`Subject $/sqft     : ${subjectPerSqft != null ? "$" + subjectPerSqft.toFixed(2) : "—"}`);
       if (subjectPerSqft != null && compMedianPerSqft != null) {
         const gap = subjectPerSqft - compMedianPerSqft;
         lines.push(`Equity gap         : ${gap > 0 ? "+" : ""}$${gap.toFixed(2)}/sqft — subject assessed ${gap > 0 ? "ABOVE" : "below"} comp median`);
       }
-      if (impliedValue != null) {
-        lines.push(`Implied reduction  : from ${fmt(proposedAssessed)} to ${fmt(impliedValue)} if brought to comp median`);
+      lines.push("");
+      lines.push("Reduction scenarios (§41.43):");
+      if (impliedValue != null) lines.push(`  → Comp median $/sqft : ${fmt(proposedAssessed)} → ${fmt(impliedValue)}${proposedAssessed != null && impliedValue != null ? " (reduction: " + fmt(proposedAssessed - impliedValue) + ")" : ""}`);
+      if (impliedMean != null) lines.push(`  → Comp mean $/sqft   : ${fmt(proposedAssessed)} → ${fmt(impliedMean)}${proposedAssessed != null ? " (reduction: " + fmt(proposedAssessed - impliedMean) + ")" : ""}`);
+      if (impliedAvm != null && proposedAssessed != null && impliedAvm < proposedAssessed) {
+        lines.push(`  → Redfin AVM (§41.41): ${fmt(proposedAssessed)} → ${fmt(impliedAvm)} (reduction: ${fmt(proposedAssessed - impliedAvm)})`);
       }
     }
   }
 
-  h("5. RECENT MARKET SALES — MARKET VALUE EVIDENCE");
-  if (soldCompsFromDb.length === 0) {
+  h("5. RECENT MARKET SALES — MARKET VALUE EVIDENCE (§41.41)");
+  if (soldCompsFromDb.length === 0 && (!cadEv || cadEv.salesAnalysis.comps.length === 0)) {
     lines.push("No sold comps loaded. Run 'Refresh Comps' or add manually.");
   } else {
-    lines.push("");
-    lines.push("#  | Address                    | Sold       | Sale Price     | Sqft   | $/sqft  | DCAD Assessed  | Notes");
-    lines.push("---+----------------------------+------------+----------------+--------+---------+----------------+------");
-    soldCompsFromDb.forEach((c, i) => {
-      const ps = c.soldPriceUsd != null && c.sqft != null && c.sqft > 0
-        ? "$" + (c.soldPriceUsd / c.sqft).toFixed(2)
-        : "—";
-      lines.push(
-        `${String(i + 1).padStart(2)} | ${pad(c.addressLine1, 26)} | ${pad(c.soldDate ?? "—", 10)} | ${pad(fmt(c.soldPriceUsd), 14)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad(ps, 7)} | ${pad(fmt(c.cadAssessedValueUsd), 14)} | ${c.notes ?? ""}`
-      );
-    });
+    if (soldCompsFromDb.length > 0) {
+      sub("Redfin / Manual Sold Comps");
+      lines.push("#  | Address                    | Sold       | Sale Price     | Sqft   | $/sqft  | DCAD Assessed  | Notes");
+      lines.push("---+----------------------------+------------+----------------+--------+---------+----------------+------");
+      const soldPsArr: number[] = [];
+      soldCompsFromDb.forEach((c, i) => {
+        const ps = c.soldPriceUsd != null && c.sqft != null && c.sqft > 0
+          ? (c.soldPriceUsd / c.sqft)
+          : null;
+        if (ps != null) soldPsArr.push(ps);
+        lines.push(
+          `${String(i + 1).padStart(2)} | ${pad(c.addressLine1, 26)} | ${pad(c.soldDate ?? "—", 10)} | ${pad(fmt(c.soldPriceUsd), 14)} | ${pad(c.sqft?.toLocaleString(), 6)} | ${pad(ps != null ? "$" + ps.toFixed(2) : "—", 7)} | ${pad(fmt(c.cadAssessedValueUsd), 14)} | ${c.notes ?? ""}`
+        );
+      });
+      if (soldPsArr.length > 0) {
+        const sortedPs = [...soldPsArr].sort((a, b) => a - b);
+        const medianPs = sortedPs[Math.floor(sortedPs.length / 2)];
+        const meanPs = soldPsArr.reduce((s, v) => s + v, 0) / soldPsArr.length;
+        lines.push("");
+        lines.push(`Sale $/sqft median : $${medianPs.toFixed(2)} | mean: $${meanPs.toFixed(2)} | range: $${sortedPs[0].toFixed(2)}–$${sortedPs[sortedPs.length - 1].toFixed(2)}`);
+        if (subjectSqft != null) {
+          lines.push(`Implied market value at median $/sqft: ${fmt(Math.round(medianPs * subjectSqft))}`);
+        }
+      }
+    }
+
+    if (cadEv && cadEv.salesAnalysis.comps.length > 0) {
+      sub("CAD Evidence PDF — Sales Analysis Comps (§41.41)");
+      lines.push(`CAD Sales Analysis median (§41.41): ${fmt(cadEv.salesAnalysis.medianIndValueUsd)}`);
+      lines.push("#  | Address                    | Dist  | Sold       | Sale Price     | DCAD Market    | Ind Value");
+      lines.push("---+----------------------------+-------+------------+----------------+----------------+---------");
+      cadEv.salesAnalysis.comps.forEach((c, i) => {
+        const dist = c.distanceMi != null ? `${c.distanceMi.toFixed(2)} mi` : "—";
+        lines.push(
+          `${String(i + 1).padStart(2)} | ${pad(c.address, 26)} | ${pad(dist, 5)} | ${pad(c.saleDate ?? "—", 10)} | ${pad(fmt(c.salePriceUsd), 14)} | ${pad(fmt(c.cadMarketValueUsd), 14)} | ${fmt(c.cadIndValueUsd)}`
+        );
+      });
+    }
   }
 
   const strategyNotes = worksheet?.strategyJson;
@@ -1229,25 +1422,65 @@ protestRouter.get("/:propertyId/protest-brief", async (req: AuthenticatedRequest
   }
 
   h("INSTRUCTIONS FOR AI ASSISTANT");
-  lines.push(`You are a property tax protest expert with deep knowledge of the Texas Property Tax Code.`);
-  lines.push(`The ARB hearing for this property is scheduled for ${worksheet?.hearingDate ?? "a date TBD"}.`);
-  lines.push(`The proposed assessed value is ${fmt(proposedAssessed)}. The goal is to reduce it.`);
+  lines.push("You are a property tax protest expert with deep knowledge of the Texas Property Tax Code (Chapter 41).");
+  lines.push(`Subject property: ${property.addressLine1}, ${property.city ?? ""} ${property.state ?? ""}`);
+  lines.push(`Tax year: ${year} | Proposed assessed value: ${fmt(proposedAssessed)} | ARB hearing: ${worksheet?.hearingDate ?? "TBD"}`);
+  lines.push(`Filing deadline: ${worksheet?.filingDeadline ?? "—"} | Protest status: ${worksheet?.status ?? "not_filed"}`);
+  if (worksheet?.informalOfferUsd != null) lines.push(`Informal settlement offer: ${fmt(worksheet.informalOfferUsd)}`);
   lines.push("");
-  lines.push("Please do the following:");
-  lines.push("1. Evaluate BOTH grounds for protest:");
-  lines.push("   a) Unequal appraisal (§41.43): Is the subject assessed at a higher $/sqft than comparable properties?");
-  lines.push("   b) Market value (§41.43(a)): Does the proposed value exceed fair market value based on recent sales?");
-  lines.push("2. For each ground, calculate the specific reduction it would support and rate the evidence strength.");
-  lines.push("3. Identify the 3–4 most favorable comparable properties to cite at the ARB hearing.");
-  lines.push("4. Draft 5–7 talking points for the ARB hearing, ordered by expected impact.");
-  lines.push("5. Proactively flag weaknesses: missing data, thin evidence, comps the appraiser could push back on.");
-  lines.push("6. Recommend a target assessed value with a clear rationale.");
+  lines.push("DATA SOURCES IN THIS BRIEF:");
+  lines.push("- Section 2: Assessed value from CAD evidence PDF (most authoritative), DCAD stored records, or Redfin (may lag 1 year).");
+  lines.push("- Section 2 CAD Breakdown: DCAD's own market/appraised/net/land/improvement values — use for §41.41 and §41.43 arguments.");
+  lines.push("- Section 2 YoY History: Year-over-year assessed value from DCAD (or Redfin as fallback) — useful for escalating-assessment arguments.");
+  lines.push("- Section 4: Equity comps — ALL active protest comps with CAD-assessed values. These are the foundation of §41.43 (unequal appraisal). Each comp shows land value and improvement value separately — use to identify if DCAD is over-valuing improvements on the subject.");
+  lines.push("- Section 5 (Redfin/Manual): The same comps as Section 4, filtered to those with a sale price. Use sale prices for §41.41 (market value exceeds assessed).");
+  if (cadEv && cadEv.salesAnalysis.comps.length > 0) lines.push("- Section 5 (CAD PDF): DCAD's own sales analysis comps — strongest §41.41 evidence because it's DCAD's own data.");
+  if (worksheet?.strategyJson) lines.push("- Section 6: Previously saved strategy notes — case strength rating, target value, and draft arguments from prior AI analysis sessions.");
   lines.push("");
-  lines.push("Rules:");
-  lines.push("- Ground EVERY recommendation in the numbers above. Do not invent comparables or market data.");
-  lines.push("- If a number is missing or ambiguous, say so — do not fill gaps with assumptions.");
-  lines.push("- Challenge your own analysis. If the evidence is weak for a particular argument, say so explicitly.");
-  lines.push("- This prompt is LLM-agnostic. It works with Claude, ChatGPT, Gemini, or any other assistant.");
+  lines.push("REQUIRED ANALYSIS:");
+  lines.push("1. EVIDENCE SUMMARY");
+  lines.push("   - State how many equity comps are loaded and their $/sqft range vs. subject.");
+  lines.push("   - State how many sold comps are loaded and the median sale price vs. proposed assessed value.");
+  lines.push("   - Flag any data gaps: missing comps, no CAD evidence PDF, stale Redfin data.");
+  lines.push("");
+  lines.push("2. GROUND-BY-GROUND ANALYSIS");
+  lines.push("   §41.43 (Unequal Appraisal):");
+  lines.push("   - Calculate the $/sqft equity gap (subject minus comp median). State whether it's significant (>5% is meaningful; >10% is strong).");
+  lines.push("   - Calculate implied value if subject were assessed at comp median $/sqft.");
+  lines.push("   - Compare subject land value and improvement value (Section 2 CAD Breakdown) to comp land/improvement values in Section 4. Flag if subject's improvement value is disproportionately high vs comps — this is a separate §41.43 argument.");
+  lines.push("   - Rate evidence strength: Strong / Moderate / Weak / Inconclusive, with reasoning.");
+  lines.push("   §41.41 (Market Value):");
+  lines.push("   - Compare proposed assessed value to recent sale prices of comparable properties.");
+  lines.push("   - If CAD evidence PDF is available, use DCAD's own sales analysis median as the anchor.");
+  lines.push("   - Calculate implied market value from sold comp median $/sqft.");
+  lines.push("   - Rate evidence strength: Strong / Moderate / Weak / Inconclusive, with reasoning.");
+  lines.push("");
+  lines.push("3. TARGET VALUE RECOMMENDATION");
+  lines.push("   - Recommend a specific target assessed value supported by the data.");
+  lines.push("   - Choose the stronger ground (§41.41 or §41.43) as the primary argument.");
+  lines.push("   - If both grounds support different values, recommend the lower one.");
+  lines.push("   - If the prior year outcome is available (Section 7), factor it in.");
+  lines.push("   - If Section 6 has a previously saved strategy, evaluate whether it is still supported by the data.");
+  lines.push("   - Use the YoY history (Section 2) to quantify the cumulative assessment increase — helpful for framing the argument.");
+  lines.push("");
+  lines.push("4. ARB HEARING TALKING POINTS (if hearing date is set)");
+  lines.push("   - Draft 5–7 talking points ordered by expected impact.");
+  lines.push("   - Lead with §41.43 if equity gap is significant — DCAD's own comps are hard to rebut.");
+  lines.push("   - Identify the 3–4 strongest individual comps to present as exhibits.");
+  lines.push("   - Anticipate the appraiser's pushback (condition adjustments, lot size, age) and prepare rebuttals.");
+  lines.push("");
+  lines.push("5. RED FLAGS AND WEAKNESSES");
+  lines.push("   - Identify comps the appraiser could exclude or discount (condition outliers, different property type, stale sales).");
+  lines.push("   - Flag any inconsistencies in the data (e.g., Redfin sqft differs from CAD evidence sqft).");
+  lines.push("   - Note if the case would be stronger with additional evidence.");
+  lines.push("");
+  lines.push("RULES:");
+  lines.push("- Ground EVERY recommendation in the numbers in this brief. Do not invent comparables or market data.");
+  lines.push("- If a number is missing or ambiguous, say so explicitly — do not fill gaps with assumptions.");
+  lines.push("- Challenge your own analysis. If the evidence is weak for a particular argument, say so.");
+  lines.push("- Use DCAD's own data against them whenever possible — it's the most credible source at ARB.");
+  lines.push("- Land value vs improvement value breakdown is a powerful §41.43 sub-argument: if DCAD over-valued improvements on subject relative to comps, that is independently protestable.");
+  lines.push("- This brief is LLM-agnostic and works with Claude, ChatGPT, Gemini, or any other assistant.");
 
   const text = lines.join("\n");
   const safeAddr = (property.addressLine1 ?? "property").replace(/[^a-z0-9]/gi, "_");

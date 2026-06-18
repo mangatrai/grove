@@ -128,6 +128,8 @@ type UnifiedComp = {
   yearBuilt: number | null;
   cadPropertyId: string | null;
   cadAssessedValueUsd: number | null;
+  cadLandValueUsd: number | null;
+  cadImprovementValueUsd: number | null;
   cadMarketValueUsd: number | null;
   cadPerSqftAssessed: number | null;
   cadDeedDate: string | null;
@@ -1169,7 +1171,7 @@ export function TaxProtestPage() {
       </Group>
 
       {/* Deadline banner */}
-      {worksheet?.hearingDate != null && hearingDays != null && hearingDays <= 30 ? (
+      {worksheet?.hearingDate != null && hearingDays != null && hearingDays >= 0 && hearingDays <= 30 ? (
         <Alert
           color={hearingDays <= 7 ? "red" : "yellow"}
           icon={<IconCalendarEvent size={16} />}
@@ -1486,6 +1488,8 @@ export function TaxProtestPage() {
                     <Table.Th style={{ textAlign: "right" }}>Beds</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>Baths</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>CAD Assessed</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Land Value</Table.Th>
+                    <Table.Th style={{ textAlign: "right" }}>Impr. Value</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>$/sqft</Table.Th>
                     <Table.Th style={{ textAlign: "right" }}>vs Subject</Table.Th>
                     <Table.Th style={{ width: 36 }} />
@@ -1519,6 +1523,12 @@ export function TaxProtestPage() {
                         <Table.Td style={{ textAlign: "right" }}>{comp.baths ?? "—"}</Table.Td>
                         <Table.Td style={{ textAlign: "right" }}>
                           {comp.cadAssessedValueUsd != null ? money(comp.cadAssessedValueUsd) : "—"}
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>
+                          {comp.cadLandValueUsd != null ? money(comp.cadLandValueUsd) : "—"}
+                        </Table.Td>
+                        <Table.Td style={{ textAlign: "right" }}>
+                          {comp.cadImprovementValueUsd != null ? money(comp.cadImprovementValueUsd) : "—"}
                         </Table.Td>
                         <Table.Td style={{ textAlign: "right" }}>{ppsf(cadPpsf)}</Table.Td>
                         <Table.Td style={{ textAlign: "right" }}>
@@ -1566,6 +1576,12 @@ export function TaxProtestPage() {
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }} fw={700}>
                       {money(cadAssessed)}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {property?.cadLandValueUsd != null ? money(property.cadLandValueUsd) : "—"}
+                    </Table.Td>
+                    <Table.Td style={{ textAlign: "right" }} fw={700}>
+                      {property?.cadImprovementValueUsd != null ? money(property.cadImprovementValueUsd) : "—"}
                     </Table.Td>
                     <Table.Td style={{ textAlign: "right" }} fw={700}>
                       {ppsf(subjectAssessedPpsf)}

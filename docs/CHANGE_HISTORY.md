@@ -18,6 +18,55 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-185 — protest brief: use all active comps for §41.43; prefer DCAD stored data; add land/improvement to CAD breakdown; improve AI instructions (2026-06-17)
+
+**§41.43 comps were blank:** The protest brief's Section 4 filtered equity comps to `dcad_search | cad_evidence` sources only, showing "No equity comps loaded" even when Redfin comps with DCAD-enriched `cadAssessedValueUsd` were present. Changed to use all non-excluded comps (`!c.excluded`) — matching the UI's `equityComps = activeComps` behaviour. Same comps back both §41.41 (via sold price) and §41.43 (via CAD assessed value).
+
+**Section 2 showed Redfin assessed value when DCAD data was stored:** When no CAD evidence PDF was uploaded, the brief fell through to `vd.taxCurrent.assessedValue` (Redfin, may lag one year) even though `property.cadAssessedValueUsd / cadLandValueUsd / cadImprovementValueUsd` were already in the DB from DCAD enrichment. Added middle branch: if `property.cadAssessedValueUsd != null`, use DCAD stored data with land/improvement breakdown.
+
+**YoY history was Redfin-sourced:** Changed the YoY table to call `adapter.getValueHistory(cadAccountId)` inline (same source as the property details page chart), with a silent fallback to Redfin `vd.taxHistory` if DCAD returns empty.
+
+**CAD Breakdown missing land/improvement:** Added `property.cadLandValueUsd` and `property.cadImprovementValueUsd` lines to the CAD Valuation Breakdown section. Updated the `if` condition to also trigger when these fields are populated.
+
+**AI instructions improved:** Updated data-source annotations to reflect actual sources; added reference to Section 6 strategy notes (when present); added §41.43 land/improvement sub-argument guidance (over-valued improvements relative to comps is independently protestable); added instruction to factor in YoY history and prior strategy in target-value recommendation.
+
+**Files:** `backend/src/modules/protest/protest.routes.ts`
+
+---
+
+## FIX-184 — protest chat agent: inject comp data + worksheet context; rewrite system prompt; upgrade protest brief (2026-06-16)
+
+**Chat agent — comps now visible:** The chat agent's system prompt previously had zero visibility into comps already loaded in `protest_comp`. This caused the agent to trigger a redundant DCAD backfill (via `fetch_dcad_comps`) even when comps were already present. Fixed by loading existing comps (`listWorksheetComps`) before building the system prompt and injecting them via a new `buildCompsContext` function. The context now includes equity comp $/sqft table with median/mean/range, and sold comp table with sale prices and $/sqft — with a clear instruction not to re-fetch unless the user explicitly asks.
+
+**Chat agent — worksheet context:** `hearingDate`, `filingDeadline`, `informalOfferUsd`, and previously saved `strategyJson` are now included in the system prompt so the agent can factor in deadlines, settlement offers, and prior analysis without asking the user to re-state them.
+
+**Chat agent — system prompt rewrite:** Rewrote the system prompt to add:
+- A pre-computed equity strength signal (subject $/sqft vs. comp median $/sqft) in the property facts block
+- Status-aware tactical instructions (`not_filed` → ask preliminary questions and size up grounds; `filed` → evidence gaps and informal prep; `informal` → settlement vs. ARB trade-off; `arb` → hearing talking points; `resolved` → lessons learned)
+- Instruction to always call `update_strategy` after giving an assessment
+
+**Protest brief — CAD valuation breakdown:** Added a "CAD Valuation Breakdown" sub-section to Section 2 showing `cadMarketValueUsd`, `cadAppraisedValueUsd`, `cadNetAppraisedValueUsd`, and `cadTaxLimitationValueUsd` from DCAD records when available. Flags if assessed value exceeds CAD market value (§41.41 signal).
+
+**Protest brief — multiple reduction scenarios:** Section 4 equity comp stats now shows comp $/sqft mean in addition to median, and computes three reduction scenarios: comp median $/sqft, comp mean $/sqft, and Redfin AVM (if AVM < assessed).
+
+**Protest brief — CAD evidence sales comps:** Section 5 now has two subsections: Redfin/manual sold comps (existing) and a new "CAD Evidence PDF — Sales Analysis Comps" table showing DCAD's own sales comps from the uploaded evidence PDF with distance, sale date, sale price, DCAD market value, and individual value. This is the strongest §41.41 evidence because it uses DCAD's own data.
+
+**Protest brief — expanded AI instructions:** The "Instructions for AI Assistant" section at the bottom of the brief now includes structured data-source annotations, a required 5-section analysis format (evidence summary, ground-by-ground analysis, target value, ARB talking points, red flags), and explicit rules around using DCAD's own data.
+
+**Files:** `backend/src/modules/protest/protest.routes.ts` (buildCompsContext, buildSystemPrompt, POST /chat, GET /protest-brief)
+
+---
+
+## FIX-183 — re-enrich comps on every Refresh; hide stale ARB hearing banner (2026-06-16)
+
+**Step C re-enrichment**: `runDcadBackfill` Step C was filtering `cad_enriched_at IS NULL`, meaning redfin/manual comps were only DCAD-enriched once. Subsequent Refresh calls skipped them even if the address had been corrected or CAD values had changed. Changed the filter to `source != 'dcad_search'` so all non-dcad_search comps are re-enriched on every Refresh (dcad_search comps are already refreshed in Step B via ON CONFLICT).
+
+**ARB banner**: The "Upcoming ARB Hearing" banner used `hearingDays <= 30` as its only upper bound but had no lower bound, so it continued showing after the hearing passed (e.g., "-7 days away"). Added `hearingDays >= 0` so the banner disappears once the hearing date is in the past.
+
+**Files:** `backend/src/modules/protest/protest-worksheet.service.ts` (Step C query), `frontend/src/pages/TaxProtestPage.tsx` (banner condition)
+
+---
+
 ## FIX-182 — protest comp duplicate-key crash (unhandled rejection) (2026-06-15)
 
 When a user added a comp from the CAD search UI with a `cadPropertyId` that the DCAD backfill had already inserted, `addManualComp` fired a plain `INSERT` with no `ON CONFLICT` clause, violating `protest_comp_by_cad_pid`. Express 4 does not catch async route handler rejections automatically, so the error became an unhandled rejection that crashed the `tsx watch` process. A secondary vector: `void runDcadBackfill(...)` in `POST /refresh-comps` had no `.catch()`.

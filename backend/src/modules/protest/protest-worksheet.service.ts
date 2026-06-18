@@ -902,7 +902,7 @@ export async function runDcadBackfill(
     `SELECT id, address_line1, cad_property_id, sold_price_usd, sold_date, price_per_sqft, raw_realty_json
        FROM protest_comp
       WHERE property_id = ? AND household_id = ? AND tax_year = ?
-        AND cad_enriched_at IS NULL
+        AND source != 'dcad_search'
       LIMIT 10`,
     propertyId, householdId, taxYear
   );
