@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-187 — RAG chunk size: 300 → 150 words; make configurable via RAG_CHUNK_WORDS; tighten EMBEDDING_MAX_INPUT_CHARS (2026-06-17)
+
+**Problem:** `EMBEDDING_MAX_INPUT_CHARS=8000` was a misleading env var — it was only a safety truncation applied before the OpenAI API call, not the actual chunk size. The real chunk size was `CHUNK_WORDS=300` (hardcoded), equivalent to ~1,500–2,000 characters. For structured tax documents (CAD evidence PDFs with tables, dollar amounts, comp addresses), 300-word chunks are too coarse — the embedding vector has to represent too many distinct facts, degrading nearest-neighbour precision.
+
+**Change:** Dropped `CHUNK_WORDS` from 300 → 150 with the same 40-word overlap. At ~750–1,000 chars per chunk, each chunk maps to one semantic unit (a single comp row, a value breakdown, a paragraph) rather than a mixed block. `EMBEDDING_MAX_INPUT_CHARS` lowered from 8000 → 1500 (appropriate safety cap for 150-word chunks; ~8 chars/word × 150 = ~1,200 chars). Both values are now configurable via env.
+
+**Caveat:** Existing stored chunks in `protest_document_chunks` are not re-processed. Only new uploads benefit. Re-upload protest documents to get sharper retrieval.
+
+**Files:** `backend/src/modules/protest/chunking.service.ts`, `backend/src/config/env.ts`
+
+**New env vars:**
+- `RAG_CHUNK_WORDS` (default: 150) — word count per chunk
+- `EMBEDDING_MAX_INPUT_CHARS` default lowered from 8000 → 1500
+
+---
+
 ## FIX-185 — protest brief: use all active comps for §41.43; prefer DCAD stored data; add land/improvement to CAD breakdown; improve AI instructions (2026-06-17)
 
 **§41.43 comps were blank:** The protest brief's Section 4 filtered equity comps to `dcad_search | cad_evidence` sources only, showing "No equity comps loaded" even when Redfin comps with DCAD-enriched `cadAssessedValueUsd` were present. Changed to use all non-excluded comps (`!c.excluded`) — matching the UI's `equityComps = activeComps` behaviour. Same comps back both §41.41 (via sold price) and §41.43 (via CAD assessed value).

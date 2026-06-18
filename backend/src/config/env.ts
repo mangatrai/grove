@@ -137,8 +137,17 @@ const envSchema = z.object({
    * Defaults to text-embedding-3-small (1536 dims).
    */
   EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
-  /** Max characters passed to the embedding API per chunk (truncates before sending). */
-  EMBEDDING_MAX_INPUT_CHARS: optionalIntEnv(8000, 1000, 32000),
+  /**
+   * Word count per RAG chunk (word-based sliding window with 40-word overlap).
+   * Smaller = sharper retrieval on structured docs (tables, dollar amounts); larger = more context per hit.
+   * Changing this only affects new uploads — existing stored chunks are not re-processed.
+   */
+  RAG_CHUNK_WORDS: optionalIntEnv(150, 30, 1000),
+  /**
+   * Safety truncation: max characters passed to the embedding API per chunk.
+   * Should be >= RAG_CHUNK_WORDS * ~8 (avg chars/word). Default 1500 comfortably covers 150-word chunks.
+   */
+  EMBEDDING_MAX_INPUT_CHARS: optionalIntEnv(1500, 200, 32000),
   /** Number of nearest-neighbour chunks returned by vector similarity search. */
   RAG_TOP_K: optionalIntEnv(5, 1, 20),
   /** Cosine similarity floor; chunks below this score are filtered out (0–1). */
