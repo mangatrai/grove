@@ -8,7 +8,10 @@ import { checkExportCoverage } from "./db/export-coverage-check.js";
 import { closeSql, getSql } from "./db/query.js";
 import { log } from "./logger.js";
 import { startBackupScheduler } from "./modules/gdrive/gdrive-scheduler.service.js";
+import { startStockQuoteScheduler } from "./modules/espp/espp-stock.service.js";
 import { startRealtyScheduler } from "./modules/household/realty-scheduler.service.js";
+import { startImportCleanupScheduler } from "./modules/imports/import-session.service.js";
+import { startPayslipAsyncScheduler } from "./modules/imports/payslip-async-scheduler.service.js";
 import { purgeOldNotifications } from "./modules/notifications/notification.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
@@ -41,9 +44,12 @@ void (async () => {
   try {
     await getSql();
     await checkExportCoverage();
+    startStockQuoteScheduler();
     if (env.MODE !== "TEST") {
       startBackupScheduler();
       startRealtyScheduler();
+      startImportCleanupScheduler();
+      startPayslipAsyncScheduler();
       void purgeOldNotifications();
     }
     const server = app.listen(port, () => {

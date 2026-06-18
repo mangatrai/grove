@@ -39,8 +39,8 @@ export async function parsePayslipPdfByProfile(
       if (!validation.ok) {
         return { ok: false, reason: "llm_canonical_validation_failed", detail: validation.reasons };
       }
-      const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.total_tokens ?? null);
-      return { ok: true, summary, hybrid, lineItems, usageTokens: usage?.total_tokens ?? null };
+      const { summary, hybrid, lineItems } = mapCanonicalExtractToPersist(extract, usage?.totalTokens ?? null);
+      return { ok: true, summary, hybrid, lineItems, usageTokens: usage?.totalTokens ?? null };
     } catch (e) {
       log.error("payslip LLM extraction failed", { parserProfileId, err: e });
       const message = e instanceof Error ? e.message : String(e);

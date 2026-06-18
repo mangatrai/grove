@@ -179,7 +179,7 @@ export async function updateImportFileBinding(
 
 export async function listHouseholdFinancialAccounts(
   householdId: string,
-  options?: { includeClosedAccounts?: boolean }
+  options?: { includeClosedAccounts?: boolean; memberPersonProfileId?: string | null }
 ): Promise<
   Array<{
     id: string;
@@ -203,6 +203,10 @@ export async function listHouseholdFinancialAccounts(
 > {
   const includeClosedAccounts = options?.includeClosedAccounts ?? false;
   const statusFilter = includeClosedAccounts ? "" : " AND fa.status = 'active'";
+  const memberProfileId = options?.memberPersonProfileId ?? null;
+  const memberFilter = memberProfileId
+    ? " AND (fa.owner_scope = 'household' OR fa.owner_person_profile_id = ?)"
+    : "";
   const accounts = await qAll<{
     id: string;
     type: string;
@@ -241,12 +245,13 @@ export async function listHouseholdFinancialAccounts(
        LEFT JOIN import_file f
          ON f.financial_account_id = fa.id
         AND f.status = 'parsed'
-      WHERE fa.household_id = ?${statusFilter}
+      WHERE fa.household_id = ?${statusFilter}${memberFilter}
       GROUP BY fa.id, fa.type, fa.sub_type, fa.memo, fa.liquidity, fa.linked_account_id, fa.property_id,
                fa.institution, fa.account_mask, fa.currency, fa.owner_scope,
                fa.owner_person_profile_id, fa.default_parser_profile_id, fa.status, fa.closed_at
       ORDER BY CASE WHEN fa.type = 'payslip' THEN 0 ELSE 1 END, fa.institution, fa.type`,
-    householdId
+    householdId,
+    ...(memberProfileId ? [memberProfileId] : [])
   );
 
   const statementRows = await qAll<{

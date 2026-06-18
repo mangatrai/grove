@@ -6,6 +6,7 @@ import type { AuthenticatedRequest } from "../auth/auth.middleware.js";
 import { requireAuth } from "../auth/auth.middleware.js";
 import { log } from "../../logger.js";
 import { requireRole } from "../rbac/rbac.middleware.js";
+import { getStockQuote } from "./espp-stock.service.js";
 import {
   deleteSale,
   getYearSummary,
@@ -36,6 +37,16 @@ const salesBodySchema = z.object({
 
 esppRouter.use(requireAuth);
 esppRouter.use(requireRole(['owner', 'admin', 'member']));
+
+/** GET /espp/stock-quote — last IBM close price (1-hour in-memory cache) */
+esppRouter.get('/stock-quote', async (_req, res) => {
+  const quote = await getStockQuote();
+  if (!quote) {
+    res.status(503).json({ message: 'Stock quote unavailable' });
+    return;
+  }
+  res.json(quote);
+});
 
 /** GET /espp/batches?year=YYYY */
 esppRouter.get('/batches', async (req: AuthenticatedRequest, res) => {

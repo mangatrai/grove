@@ -13,6 +13,9 @@ import { PayslipDetailPage } from "./pages/PayslipDetailPage";
 import { AddPayslipPage } from "./pages/AddPayslipPage";
 import { PayslipsPage } from "./pages/PayslipsPage";
 import { EsppPage } from "./pages/EsppPage";
+import { RealEstatePage } from "./pages/RealEstatePage";
+import { PropertyDetailPage } from "./pages/PropertyDetailPage";
+import { TaxProtestPage } from "./pages/TaxProtestPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 
@@ -34,6 +37,9 @@ export function App() {
           <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/espp" element={<EsppPage />} />
+          <Route path="/real-estate" element={<RealEstatePage />} />
+          <Route path="/real-estate/:propertyId" element={<PropertyDetailPage />} />
+          <Route path="/tax-protest" element={<TaxProtestPage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
           <Route path="/import" element={<Navigate to="/imports/workspace" replace />} />

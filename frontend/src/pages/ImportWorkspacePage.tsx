@@ -616,7 +616,7 @@ export function ImportWorkspacePage() {
         await load();
         if (r.completedFiles > 0) {
           setMessage(
-            `Payslip LLM: parsed ${r.completedFiles} Deloitte file(s).${r.stillPending ? " More still in progress." : ""}`
+            `Payslip LLM: parsed ${r.completedFiles} file(s).${r.stillPending ? " More still in progress." : ""}`
           );
         } else if (r.polledFiles > 0 && r.stillPending) {
           setMessage("Payslip extraction still running; automatic check every 2 minutes.");
@@ -1095,7 +1095,7 @@ export function ImportWorkspacePage() {
       const up = out.asyncPayslipPending ?? 0;
       if (up > 0) {
         setMessage(
-          `Queued ${up} Deloitte PDF(s) for payslip extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes.`
+          `Queued ${up} payslip PDF(s) for extraction (OpenAI). Session stays in processing until extraction finishes — automatic check every 2 minutes.`
         );
       } else {
         setMessage(`Parse OK: ${out.parsedFiles} file(s), ${out.parsedRows} row(s).`);
@@ -1154,7 +1154,7 @@ export function ImportWorkspacePage() {
       }>(`/imports/sessions/${sessionId}/parse`, { method: "POST", body: JSON.stringify(body) });
       if ((parseOut.asyncPayslipPending ?? 0) > 0) {
         setMessage(
-          'Deloitte PDF(s) queued for payslip extraction. Wait until files show "parsed" (automatic check every 2 minutes), then run import again.'
+          'Payslip PDF(s) queued for extraction. Wait until files show "parsed" (automatic check every 2 minutes), then run import again.'
         );
         setPipelineBusy(false);
         await load();
@@ -1934,7 +1934,7 @@ export function ImportWorkspacePage() {
       <Paper withBorder p="lg" id="import-run-import">
         <Group align="center" gap={6} mb="sm">
           <Title order={3} fz="1.1rem">Run import</Title>
-          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). IBM payslip PDFs finish in one step. Deloitte PDFs are extracted via OpenAI (background) — wait until they show 'parsed', then run import again." />
+          <HelpIcon label="One step parses every file and then loads transactions into your ledger (dedupe included). Payslip PDFs (IBM and Deloitte) are extracted via OpenAI in the background — wait until they show 'parsed', then run import again." />
         </Group>
         <Group gap="sm">
           <Button

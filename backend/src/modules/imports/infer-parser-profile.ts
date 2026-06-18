@@ -79,6 +79,13 @@ export function inferParserProfile(
   const t = account.type.toLowerCase();
 
   if (t === "payslip" && ext === ".pdf") {
+    const emps = income?.employers;
+    if (emps && emps.length > 1) {
+      return null;
+    }
+    if (emps && emps.length === 1) {
+      return emps[0]?.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
+    }
     return IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID;
   }
 

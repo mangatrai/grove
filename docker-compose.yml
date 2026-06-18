@@ -1,9 +1,9 @@
 # Local Postgres for dev (matches managed Postgres major version in use).
 # Start: `docker compose up -d` from repo root; point `.env` at localhost:5433, DATABASE_SSL=0.
 #
-# Image pull: uses Google’s mirror of Docker Hub (`mirror.gcr.io/library/...`) so `docker compose up`
-# does not need to reach registry-1.docker.io directly — helps on VPNs / firewalls / Docker Hub timeouts.
-# To use Docker Hub instead: set `image: postgres:18`.
+# Image: pgvector/pgvector:pg18 — Postgres 18 with the pgvector extension pre-installed.
+# Pulled from Docker Hub directly (GCR mirror only covers official library images).
+# Fallback if pg18 tag is unavailable: build a custom image (see below) or use pgvector/pgvector:pg17.
 #
 # Data persistence (Postgres 18+ images): mount the *parent* directory only — see docker-library/postgres#1259.
 # - Named volume `hf_pg_data` survives restarts; survives `docker compose down` (no -v).
@@ -13,7 +13,7 @@
 # - Bind mount example: `./data/postgres:/var/lib/postgresql`
 services:
   postgres:
-    image: mirror.gcr.io/library/postgres:18
+    image: pgvector/pgvector:pg18
     ports:
       - "5433:5432"
     environment:

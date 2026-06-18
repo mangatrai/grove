@@ -24,6 +24,7 @@ import { resolutionRouter } from "./modules/resolution/resolution.routes.js";
 import { notificationsRouter } from "./modules/notifications/notifications.routes.js";
 import { recurringRouter } from "./modules/recurring/recurring.routes.js";
 import { esppRouter } from "./modules/espp/espp.routes.js";
+import { protestRouter } from "./modules/protest/protest.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -66,7 +67,9 @@ const API_PATH_PREFIXES = [
   "/gdrive",
   "/budget",
   "/recurring-overrides",
-  "/insights"
+  "/insights",
+  "/espp",
+  "/api/protest"
 ];
 
 function isApiPath(urlPath: string): boolean {
@@ -125,14 +128,28 @@ export function buildApp() {
   app.use("/insights", insightsRouter);
   app.use("/notifications", notificationsRouter);
   app.use("/espp", esppRouter);
+  app.use("/api/protest", protestRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
-    app.use(express.static(frontendDist, { index: false }));
+    // Vite hashes all files under assets/ — serve them with a 1-year immutable cache.
+    // manifest.json, icons, and other public/ files are NOT hashed and get no explicit header.
+    app.use(express.static(frontendDist, {
+      index: false,
+      setHeaders(res, filePath) {
+        if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    }));
     app.get("*", (req, res, next) => {
       if (req.method !== "GET" || isApiPath(req.path)) {
         next();
         return;
       }
+      // no-cache forces the browser to revalidate index.html on every load so a new
+      // deployment's hashed asset filenames are picked up immediately, preventing the
+      // stale PWA shell problem on iOS / macOS.
+      res.set("Cache-Control", "no-cache");
       res.sendFile(path.join(frontendDist, "index.html"), (err) => {
         if (err) {
           next(err);

@@ -40,6 +40,9 @@ export interface ValuationDetail {
   source: "redfin";
   estimate: number;              // Redfin AVM predictedValue
   estimateRange: { low: number; high: number } | null;
+  county: string | null;         // County name (e.g. "Denton", "Shelby") from Redfin amenities
+  photoUrl: string | null;       // Exterior photo URL (bigphoto CDN)
+  thumbnailUrl: string | null;   // Exterior thumbnail URL (midphoto CDN)
   lastSold: {
     date: string | null;         // "YYYY-MM-DD"
     price: number | null;        // null in non-disclosure states
@@ -64,6 +67,8 @@ export interface ValuationDetail {
     sqFt: number | null;
     lotSqFt: number | null;
     yearBuilt: number | null;
+    stories: number | null;
+    propertyType: string | null;  // e.g. "Single Family Residential"
     apn: string | null;           // Assessor Parcel Number — encodes county property ID for tax protest lookups
   } | null;
 }
@@ -98,98 +103,174 @@ async function realtyGet(endpoint: string, params: Record<string, string>): Prom
   return res.json() as Promise<unknown>;
 }
 
-/** Safe positional read from an array — returns null if out of bounds or nullish. */
-function atIdx<T>(arr: unknown, idx: number): T | null {
-  if (!Array.isArray(arr) || idx >= arr.length) return null;
-  const v = arr[idx];
-  return v !== null && v !== undefined ? (v as T) : null;
-}
-
-/** Parse Redfin sash date string "APR 24, 2026" → "2026-04-24". */
-function parseSashDate(s: unknown): string | null {
-  if (typeof s !== "string") return null;
-  const months: Record<string, string> = {
-    JAN: "01", FEB: "02", MAR: "03", APR: "04", MAY: "05", JUN: "06",
-    JUL: "07", AUG: "08", SEP: "09", OCT: "10", NOV: "11", DEC: "12"
-  };
-  const m = s.match(/^([A-Z]{3})\s+(\d{1,2}),\s+(\d{4})$/);
-  if (!m) return null;
-  const [, mon, day, year] = m;
-  const mo = months[mon!];
-  if (!mo) return null;
-  return `${year}-${mo}-${String(parseInt(day!, 10)).padStart(2, "0")}`;
-}
-
 /** Parse unix ms timestamp → "YYYY-MM-DD" UTC. */
 function msToDate(ms: unknown): string | null {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+// ── Schema-driven __atts decoder ─────────────────────────────────────────────
+//
+// Redfin encodes objects as { __t_idx: N, __atts: [...values] }.
+// avm.__att_names is an array-of-arrays: att_names[N] lists field names in
+// position order for type N. We build a reverse index (type → name → position)
+// so field lookups are by name, not hardcoded position. If Redfin shifts
+// positions in a future deploy, attField still finds the right slot. If they
+// rename a field, checkSchemaFields emits a WARN in production immediately.
+
+/** Map<typeIdx, Map<fieldName, position>> built from avm.__att_names */
+type AttSchema = Map<number, Map<string, number>>;
+
+function buildAttSchema(raw: unknown): AttSchema {
+  const index = new Map<number, Map<string, number>>();
+  if (!Array.isArray(raw)) return index;
+  for (let ti = 0; ti < raw.length; ti++) {
+    const fields = raw[ti];
+    if (!Array.isArray(fields)) continue;
+    const fm = new Map<string, number>();
+    for (let pos = 0; pos < fields.length; pos++) {
+      if (typeof fields[pos] === "string") fm.set(fields[pos] as string, pos);
+    }
+    index.set(ti, fm);
+  }
+  return index;
+}
+
 /**
- * Parse comparable sales from Redfin's positional __atts encoding.
- *
- * Confirmed positions from live /detailsbyaddress responses:
- *   __atts[4].__atts[21]  = list price
- *   __atts[4].__atts[26]  = beds
- *   __atts[4].__atts[27]  = baths
- *   __atts[4].__atts[50]  = close/sold price
- *   __atts[6].__atts[3]['1'][0].lastSaleDate = sold date string
- *   __atts[7].__atts      = [state,_,city,_,yearBuilt,streetNum,streetSuffix,_,_,zip,_,_,lat,lon,
- *                             _,_,_,lotSqft,_,streetName,_,_,approxSqft,_,propId]
+ * Read a named field from a { __t_idx, __atts } encoded object.
+ * Returns undefined when the schema type is unknown or the field is absent —
+ * both are signals that the API structure changed.
  */
-function parseComps(comparables: unknown): ValuationComp[] {
-  if (!Array.isArray(comparables)) return [];
+function attField(obj: Record<string, unknown>, field: string, schema: AttSchema): unknown {
+  const ti = typeof obj.__t_idx === "number" ? obj.__t_idx : null;
+  if (ti === null) return undefined;
+  const pos = schema.get(ti)?.get(field);
+  if (pos === undefined) return undefined;
+  const atts = obj.__atts;
+  if (!Array.isArray(atts) || pos >= atts.length) return undefined;
+  const v = atts[pos];
+  return v !== null && v !== undefined ? v : undefined;
+}
+
+/**
+ * Emit a WARN if any of the required field names are absent from the schema
+ * for this object's type. One log line per object type, fires in production.
+ */
+function checkSchemaFields(
+  obj: Record<string, unknown>,
+  requiredFields: string[],
+  schema: AttSchema,
+  label: string
+): void {
+  const ti = typeof obj.__t_idx === "number" ? obj.__t_idx : -1;
+  if (ti < 0 || !schema.has(ti)) {
+    log.warn("RealtyAPI: parseComps — schema type not registered (API changed?)", { label, typeIdx: ti });
+    return;
+  }
+  const fieldMap = schema.get(ti)!;
+  const missing = requiredFields.filter(f => !fieldMap.has(f));
+  if (missing.length > 0) {
+    log.warn("RealtyAPI: parseComps — schema missing expected fields (API changed?)", {
+      label, typeIdx: ti, missingFields: missing,
+      presentFields: [...fieldMap.keys()].filter(k => requiredFields.includes(k))
+    });
+  }
+}
+
+/**
+ * Parse comparable sales using Redfin's self-describing __att_names schema.
+ *
+ * Fields are resolved by name via each object's __t_idx — position shifts in
+ * future API responses are handled automatically. WARN logs fire at the top of
+ * the first comp if Redfin renames or removes a field we depend on, giving
+ * production-visible signal before comps start failing.
+ */
+function parseComps(comparables: unknown, schema: AttSchema): ValuationComp[] {
+  if (!Array.isArray(comparables) || comparables.length === 0) return [];
+
   const result: ValuationComp[] = [];
+  let innerValidated = false;
 
   for (const comp of comparables) {
     try {
-      const outerAtts = (comp as Record<string, unknown>).__atts;
-      if (!Array.isArray(outerAtts) || outerAtts.length < 8) continue;
+      const outerObj = comp as Record<string, unknown>;
+      if (!Array.isArray(outerObj.__atts)) {
+        log.warn("RealtyAPI: parseComps — comp missing __atts", { compKeys: Object.keys(outerObj) });
+        continue;
+      }
 
-      // Listing data — positional array inside __atts[4]
-      const listingObj = outerAtts[4] as Record<string, unknown>;
-      const listingArr = listingObj?.__atts as unknown[];
-      const listPrice = typeof atIdx<number>(listingArr, 21) === "number"
-        ? (atIdx<number>(listingArr, 21) as number)
-        : null;
-      const soldPrice = typeof atIdx<number>(listingArr, 50) === "number"
-        ? (atIdx<number>(listingArr, 50) as number)
-        : null;
-      const beds = typeof atIdx<number>(listingArr, 26) === "number"
-        ? (atIdx<number>(listingArr, 26) as number)
-        : null;
-      const baths = typeof atIdx<number>(listingArr, 27) === "number"
-        ? (atIdx<number>(listingArr, 27) as number)
-        : null;
+      const listingObj = attField(outerObj, "listing", schema) as Record<string, unknown> | undefined;
+      const extraObj   = attField(outerObj, "extra",   schema) as Record<string, unknown> | undefined;
+      const propObj    = attField(outerObj, "property", schema) as Record<string, unknown> | undefined;
 
-      // Sash block — __atts[6].__atts[3]['1'][0].lastSaleDate
-      const sashObj = outerAtts[6] as Record<string, unknown>;
-      const sashAtts = Array.isArray(sashObj?.__atts) ? (sashObj.__atts as unknown[]) : [];
-      const sashMap = sashAtts[3] as Record<string, unknown[]> | undefined;
-      const sash1 = Array.isArray(sashMap?.["1"]) ? (sashMap!["1"][0] as Record<string, unknown>) : null;
-      const soldDate = parseSashDate(sash1?.lastSaleDate);
+      if (!listingObj || !extraObj || !propObj) {
+        log.warn("RealtyAPI: parseComps — outer block resolution failed", {
+          hasListing: Boolean(listingObj), hasExtra: Boolean(extraObj), hasProperty: Boolean(propObj),
+          outerTypeIdx: outerObj.__t_idx
+        });
+        continue;
+      }
 
-      // Facts array — __atts[7].__atts (positional)
-      const factsObj = outerAtts[7] as Record<string, unknown>;
-      const facts = factsObj?.__atts as unknown[];
-      if (!Array.isArray(facts) || facts.length < 20) continue;
+      // Validate inner schemas once — emits WARN in production if Redfin renames fields
+      if (!innerValidated) {
+        innerValidated = true;
+        checkSchemaFields(outerObj,    ["listing", "extra", "property"],                                                               schema, "outerComp");
+        checkSchemaFields(listingObj,  ["listingPrice", "numBedrooms", "numBathrooms", "salePrice"],                                   schema, "listing");
+        checkSchemaFields(extraObj,    ["lastSaleInfo"],                                                                               schema, "extra");
+        checkSchemaFields(propObj,     ["sqFtFinished", "stateOrProvinceCode", "city", "yearBuilt",
+                                        "streetNumber", "streetType", "postalCode", "lotSqFt", "streetName"], schema, "property");
+      }
 
-      const streetNum = typeof facts[5] === "string" ? facts[5] : "";
-      const streetName = typeof facts[19] === "string" ? facts[19] : "";
-      const streetSuffix = typeof facts[6] === "string" ? facts[6] : "";
-      const address = `${streetNum} ${streetName} ${streetSuffix}`.replace(/\s+/g, " ").trim();
-      const city = typeof facts[2] === "string" ? facts[2] : "";
-      const state = typeof facts[0] === "string" ? facts[0] : "";
-      const zip = typeof facts[9] === "string" ? facts[9] : "";
-      const yearBuilt = typeof facts[4] === "number" ? facts[4] : null;
-      const lotSqft = typeof facts[17] === "number" ? facts[17] : null;
-      const sqft = typeof facts[22] === "number" ? facts[22] : null;
-      const pricePerSqft = soldPrice && sqft && sqft > 0 ? Math.round(soldPrice / sqft) : null;
+      // Listing fields
+      const listPrice = attField(listingObj, "listingPrice",  schema);
+      const soldPrice = attField(listingObj, "salePrice",     schema);
+      const beds      = attField(listingObj, "numBedrooms",   schema);
+      const baths     = attField(listingObj, "numBathrooms",  schema);
 
-      if (!address || !city) continue;
+      // Sold date via lastSaleInfo.saleListingLastSaleDate (unix ms)
+      const lastSaleInfo = attField(extraObj, "lastSaleInfo", schema) as Record<string, unknown> | undefined;
+      const soldDate = msToDate(lastSaleInfo ? attField(lastSaleInfo, "saleListingLastSaleDate", schema) : undefined);
 
-      result.push({ address, city, state, zip, sqft, beds, baths, yearBuilt, lotSqft, listPrice, soldPrice, soldDate, pricePerSqft });
+      // Property / address fields
+      const streetNum  = attField(propObj, "streetNumber",        schema);
+      const streetName = attField(propObj, "streetName",          schema);
+      const streetType = attField(propObj, "streetType",          schema);
+      const city       = attField(propObj, "city",                schema);
+      const state      = attField(propObj, "stateOrProvinceCode", schema);
+      const zip        = attField(propObj, "postalCode",          schema);
+      const yearBuilt  = attField(propObj, "yearBuilt",           schema);
+      const lotSqft    = attField(propObj, "lotSqFt",             schema);
+      const sqft       = attField(propObj, "sqFtFinished",        schema);
+
+      const address = [streetNum, streetName, streetType]
+        .map(v => (typeof v === "string" ? v : ""))
+        .join(" ").replace(/\s+/g, " ").trim();
+
+      if (!address || typeof city !== "string" || !city) {
+        log.warn("RealtyAPI: parseComps — address/city missing after schema extraction", {
+          address, city, streetNum, streetName, streetType, propTypeIdx: propObj.__t_idx
+        });
+        continue;
+      }
+
+      const sqftNum      = typeof sqft      === "number" ? sqft      : null;
+      const soldPriceNum = typeof soldPrice === "number" ? soldPrice : null;
+
+      result.push({
+        address,
+        city:         city as string,
+        state:        typeof state    === "string" ? state    : "",
+        zip:          typeof zip      === "string" ? zip      : "",
+        sqft:         sqftNum,
+        beds:         typeof beds     === "number" ? beds     : null,
+        baths:        typeof baths    === "number" ? baths    : null,
+        yearBuilt:    typeof yearBuilt === "number" ? yearBuilt : null,
+        lotSqft:      typeof lotSqft  === "number" ? lotSqft  : null,
+        listPrice:    typeof listPrice === "number" ? listPrice : null,
+        soldPrice:    soldPriceNum,
+        soldDate,
+        pricePerSqft: soldPriceNum && sqftNum && sqftNum > 0 ? Math.round(soldPriceNum / sqftNum) : null,
+      });
     } catch (err) {
       log.warn("RealtyAPI: parseComps — skipping malformed comp entry", {
         err: err instanceof Error ? err.message : String(err)
@@ -296,9 +377,33 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
     })
     .sort((a, b) => b.year - a.year);
 
+  // Build schema index from avm.__att_names — used by parseComps for name-based field lookup
+  const rawAttNames = (details.avm as Record<string, unknown>)?.__att_names;
+  const attSchema = buildAttSchema(rawAttNames);
+  if (attSchema.size === 0) {
+    log.warn("RealtyAPI: avm.__att_names missing or empty — comp parsing will produce no results", {
+      hasAvm: Boolean(details.avm), attNamesType: typeof rawAttNames
+    });
+  }
+
   // Comparable sales
   const rawComps = avmRoot?.comparables;
-  const comps = parseComps(rawComps);
+  if (!Array.isArray(rawComps) || rawComps.length === 0) {
+    log.warn("RealtyAPI: comparables missing or empty", {
+      rawCompsType: typeof rawComps,
+      isArray: Array.isArray(rawComps),
+      avmRootKeys: avmRoot ? Object.keys(avmRoot).slice(0, 15) : null
+    });
+  }
+  const comps = parseComps(rawComps, attSchema);
+  if (Array.isArray(rawComps) && rawComps.length > 0 && comps.length === 0) {
+    log.warn("RealtyAPI: parseComps returned 0 from non-empty array — structure mismatch", {
+      rawCount: rawComps.length,
+      firstEntryKeys: rawComps[0] && typeof rawComps[0] === "object" ? Object.keys(rawComps[0] as object).slice(0, 10) : null
+    });
+  } else {
+    log.info("RealtyAPI: comparables parsed", { rawCount: Array.isArray(rawComps) ? rawComps.length : 0, parsedCount: comps.length });
+  }
 
   // Subject property physical characteristics (from public records)
   const basicInfo = pubRecords?.basicInfo as Record<string, unknown> | undefined;
@@ -309,14 +414,44 @@ function parseRedfinResponse(raw: unknown): ValuationLookupResult | null {
       : typeof basicInfo.totalSqFt === "number" ? basicInfo.totalSqFt : null,
     lotSqFt: typeof basicInfo.lotSqFt === "number" ? basicInfo.lotSqFt : null,
     yearBuilt: typeof basicInfo.yearBuilt === "number" ? basicInfo.yearBuilt : null,
+    stories: typeof basicInfo.numStories === "number" ? basicInfo.numStories : null,
+    propertyType: typeof basicInfo.propertyTypeName === "string" ? basicInfo.propertyTypeName : null,
     apn: typeof basicInfo.apn === "string" ? basicInfo.apn : null
   } : null;
+
+  // County name from main house amenities list
+  const aboveTheFold = details.aboveTheFold as Record<string, unknown> | undefined;
+  const mainHouseInfo = aboveTheFold?.mainHouseInfo as Record<string, unknown> | undefined;
+  const amenities = Array.isArray(mainHouseInfo?.selectedAmenities)
+    ? (mainHouseInfo!.selectedAmenities as Array<Record<string, unknown>>)
+    : [];
+  const countyEntry = amenities.find((a) => a.header === "County");
+  const county = typeof countyEntry?.content === "string" ? countyEntry.content : null;
+
+  // Exterior photo URL from tagsByPhotoId (find entry tagged "Exterior")
+  const photoTags = aboveTheFold?.photoTags as Record<string, unknown> | undefined;
+  const tagsByPhotoId = photoTags?.tagsByPhotoId as Record<string, Record<string, unknown>> | undefined;
+  let photoUrl: string | null = null;
+  let thumbnailUrl: string | null = null;
+  if (tagsByPhotoId) {
+    const entries = Object.values(tagsByPhotoId);
+    const exteriorEntry = entries.find(
+      (e) => Array.isArray(e.tags) && (e.tags as string[]).includes("Exterior")
+    ) ?? entries[0];
+    if (exteriorEntry) {
+      photoUrl = typeof exteriorEntry.photoUrl === "string" ? exteriorEntry.photoUrl : null;
+      thumbnailUrl = typeof exteriorEntry.thumbnailphotoUrl === "string" ? exteriorEntry.thumbnailphotoUrl : null;
+    }
+  }
 
   const detail: ValuationDetail = {
     fetchedAt: new Date().toISOString().slice(0, 10),
     source: "redfin",
     estimate: predictedValue,
     estimateRange,
+    county,
+    photoUrl,
+    thumbnailUrl,
     lastSold,
     taxCurrent,
     taxHistory,

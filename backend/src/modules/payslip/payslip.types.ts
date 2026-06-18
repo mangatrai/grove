@@ -29,6 +29,12 @@ export type ParsedPayslipSummary = {
 export const IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID = "ibm_pay_contributions_pdf" as const;
 export const DELOITTE_PAYSLIP_PDF_PROFILE_ID = "deloitte_payslip_pdf" as const;
 
+/** All payslip profiles that use async LLM extraction (queued, not inline). */
+export const LLM_PAYSLIP_PROFILE_IDS = [
+  IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID,
+  DELOITTE_PAYSLIP_PDF_PROFILE_ID
+] as const;
+
 /** Optional LLM hybrid columns; used when inserting from `openai_llm_payslip` pipeline. */
 export type PayslipHybridColumns = {
   canonicalExtractJson: string;

@@ -119,7 +119,86 @@ Open `http://127.0.0.1:3000` → sign in with the seeded user:
 
 (Change immediately in production; see §4.)
 
-### 2.4 Health Check and Smoke Tests
+### 2.4 Using Podman Instead of Docker (macOS)
+
+Podman is a daemonless Docker-compatible alternative. On macOS, Podman runs a lightweight Linux VM. One-time machine setup is required before `podman run` or `podman compose` work.
+
+**Step 1 — Initialize the Podman machine (once per machine):**
+
+```bash
+podman machine init --cpus 4 --memory 8192 --disk-size 50
+```
+
+Allocates 4 vCPUs, 8 GB RAM, and 50 GB disk to the VM. Adjust to your hardware.
+
+**Step 2 — Start the machine:**
+
+```bash
+podman machine start
+```
+
+**Step 3 — Verify Podman is working:**
+
+```bash
+podman ps          # should return an empty table (no containers yet)
+podman info        # shows machine/host details
+```
+
+**Step 4 — Start the Postgres container (pgvector image):**
+
+Use `podman compose` as a drop-in replacement for `docker compose`:
+
+```bash
+podman compose up -d
+# Postgres on host port 5433 — same as Docker setup
+```
+
+Or run the container directly without Compose:
+
+```bash
+podman run -d \
+  --name household-finance-app-postgres-1 \
+  -e POSTGRES_USER=household \
+  -e POSTGRES_PASSWORD=<your-local-db-password> \
+  -e POSTGRES_DB=household_finance_test \
+  -p 5433:5432 \
+  -v hf_pg_data:/var/lib/postgresql \
+  pgvector/pgvector:pg18
+```
+
+**Start / stop the container:**
+
+```bash
+podman start household-finance-app-postgres-1
+podman stop household-finance-app-postgres-1
+```
+
+**Start / stop the Podman VM itself (between work sessions):**
+
+```bash
+podman machine start   # before working
+podman machine stop    # when done for the day (frees RAM/CPU)
+```
+
+**Inspect running containers:**
+
+```bash
+podman ps              # running containers
+podman ps -a           # all containers including stopped
+```
+
+**Connect to the Postgres container directly:**
+
+```bash
+podman exec -it household-finance-app-postgres-1 \
+  psql -U household -d household_finance_test
+```
+
+> Note: `docker` and `podman` commands are interchangeable for this project. If you have `podman-docker` installed, `docker compose up -d` routes through Podman automatically and no changes are needed.
+
+---
+
+### 2.5 Health Check and Smoke Tests
 
 ```bash
 # API health
@@ -135,7 +214,7 @@ npm run lint
 npm test
 ```
 
-### 2.5 Reset Local Data
+### 2.6 Reset Local Data
 
 Stop the API before cleanup:
 
@@ -326,6 +405,7 @@ The app reads a **repository root `.env`** file (created from `.env.example`). I
 | `PORT` | `4000` | Backend API listen port |
 | `FRONTEND_PORT` | `3000` | Frontend dev server port (dev only; ignored in `MODE=PROD`) |
 | `MODE` | (see above) | `TEST` or `PROD` |
+| `TZ` | (system default) | Process timezone. Set to `America/Chicago` to anchor `new Date()` locale methods and log timestamps to US Central Time. **Required in Koyeb** — cloud servers default to UTC. Does not affect UTC-based DB timestamps. |
 | `LOG_LEVEL` | `info` | Backend logging: `debug`, `info`, `warn`, `error`, `silent` |
 | `LOG_FILE` | (unset) | Optional file path for log output (appended; stdout still printed). Repo-relative or absolute. |
 | `ALLOWED_ORIGIN` | (unset in TEST, none in PROD) | CORS origin lock (e.g. `https://finance.example.com` in production) |
@@ -338,14 +418,50 @@ The app reads a **repository root `.env`** file (created from `.env.example`). I
 
 ### 4.4 PDF Payslip Extraction (Optional)
 
-Required for **IBM and Deloitte payslip PDF parsing**:
+Required for **IBM and Deloitte payslip PDF parsing**, **protest chat**, **document OCR**, and **spending insights**. All LLM calls go through the adapter layer — the active provider is selected by `LLM_PROVIDER`.
+
+#### Provider selection
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `LLM_PROVIDER` | Active provider: `openai` or `anthropic` | `openai` |
+| `EMBEDDING_PROVIDER` | Embedding provider (independent of LLM_PROVIDER): `openai` | `openai` |
+
+#### OpenAI (when `LLM_PROVIDER=openai`)
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OPENAI_API_KEY` | OpenAI API key | _(required)_ |
+| `OPENAI_MODEL` | Fast/cheap model — insights, summarization | `gpt-4.1` |
+| `OPENAI_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops | `gpt-4o` |
+
+> Recommended `OPENAI_MODEL=gpt-4.1` for payslip extraction. `gpt-4.1-mini`/`gpt-4o-mini` have known issues with column-type disambiguation on Deloitte stubs.
+
+#### Anthropic (when `LLM_PROVIDER=anthropic`)
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic API key | _(required)_ |
+| `ANTHROPIC_MODEL` | Fast/cheap model — insights, summarization | `claude-haiku-4-5-20251001` |
+| `ANTHROPIC_STRONG_MODEL` | Capable model — vision (payslip OCR), tool-use loops | `claude-sonnet-4-6` |
+
+### 4.5 Tax Protest AI (Optional)
+
+Required for the property tax protest chat assistant and live web search:
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | OpenAI API key (if payslip extraction is enabled) |
-| `OPENAI_MODEL` | Chat model ID; default `gpt-4o-mini` |
+| `TAVILY_API_KEY` | Tavily search API key for live web search during protest chat. Free tier: 1 000 credits/month. If unset, the `search_web` tool responds with a graceful "not configured" message — all other protest features remain functional. |
+| `EMBEDDING_MODEL` | OpenAI embedding model for pgvector RAG. Default `text-embedding-3-small` (1536 dims). **Changing this requires a new DB migration and full re-embed of all document chunks.** |
+| `EMBEDDING_MAX_INPUT_CHARS` | Characters passed to embedding API per chunk before truncation. Default `8000`. |
+| `RAG_TOP_K` | Number of nearest-neighbour chunks returned per similarity query. Default `5`. Range 1–20. |
+| `RAG_MIN_SIMILARITY` | Cosine similarity floor; chunks below this score are filtered from context. Default `0.65`. Range 0–1. |
 
-### 4.5 Backup Encryption (Optional)
+**Document generation** (`GET /api/protest/:id/evidence-packet?format=pdf|docx`) uses `pdfkit` for PDF and the `docx` npm package for Word. Both are bundled dependencies — no system fonts or native binaries required.
+
+**Deadline notifications** fire in-app and by email at 30, 7, and 1 day(s) before the `filing_deadline` and `hearing_date` stored on each protest worksheet. Notifications are triggered when the worksheet page is loaded (fire-and-forget, deduped per 2-day window). Email delivery requires SMTP to be configured (see §4.7). Notification types: `protest_filing_deadline_approaching`, `protest_hearing_approaching`.
+
+### 4.6 Backup Encryption (Optional)
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
@@ -353,7 +469,7 @@ Required for **IBM and Deloitte payslip PDF parsing**:
 
 **Note:** Unencrypted exports can still be restored without this key. Encrypted exports require the matching key.
 
-### 4.6 Email / SMTP (Optional, For Password Reset and Invites)
+### 4.7 Email / SMTP (Optional, For Password Reset and Invites)
 
 | Variable | Default | Example |
 |----------|---------|---------|
@@ -367,7 +483,7 @@ Required for **IBM and Deloitte payslip PDF parsing**:
 
 **Email is optional** until password reset ships. If any `SMTP_*` are absent, email-dependent features degrade gracefully.
 
-### 4.7 Google Drive Backup (Optional)
+### 4.8 Google Drive Backup (Optional)
 
 For Drive backup/restore (CR-106):
 
@@ -380,7 +496,7 @@ For Drive backup/restore (CR-106):
 
 **If all three are missing,** Drive connect is disabled (button grayed out, `OAUTH_NOT_CONFIGURED` shown).
 
-### 4.8 Frontend (Vite, Dev Only)
+### 4.9 Frontend (Vite, Dev Only)
 
 | Variable | Purpose |
 |----------|---------|
@@ -388,7 +504,23 @@ For Drive backup/restore (CR-106):
 | `VITE_DEV_SIGNIN_EMAIL` | Email prefill on `/` (dev only) |
 | `VITE_DEV_SIGNIN_PASSWORD` | Password prefill on `/` (dev only) |
 
-### 4.9 Hardcoded Defaults (Non-Configurable)
+### 4.10 Background Schedulers
+
+Five background jobs start automatically when the server boots using `node-cron` with IANA timezone strings (no UTC offset math, DST-safe). The stock quote scheduler runs in **all modes** (dev, test, prod). The rest are skipped in `MODE=TEST` to avoid hitting paid/auth-gated external APIs during automated test runs.
+
+| Scheduler | Runs in | Trigger | What it does |
+|-----------|---------|---------|--------------|
+| **Stock quote** (`espp-stock.service.ts`) | All modes | On startup (once), then 4:15 PM ET weekdays | Fetches IBM last close via `yahoo-finance2` (free, no API key). Caches in memory. Serves stale cache outside market hours. |
+| **Backup** (`gdrive-scheduler.service.ts`) | PROD only | Nightly 11 PM CT | Scans `household_gdrive_config` for households with auto-backup enabled and queues a job if the last successful backup is older than the configured interval. |
+| **Realty** (`realty-scheduler.service.ts`) | PROD only | 1st of month, 10 PM CT | Refreshes Redfin AVM valuations for properties not updated in 28 days. Uses stored `api_property_id` for 1-credit API calls. |
+| **Export cleanup** (`export-job.service.ts`) | All modes | Top of every hour | Deletes `.hfb` export files and marks `export_job` rows as `expired` for completed exports older than 48 hours. Also purges stale password reset tokens. |
+| **Import file purge** (`import-session.service.ts`) | PROD only | Nightly 2 AM CT | Deletes staged import files from disk for sessions older than 30 days. DB rows (import_session, import_file) are never deleted — audit trail is preserved. |
+
+No configuration is needed for the stock quote or export cleanup schedulers — they run unconditionally. If Yahoo Finance is unreachable at startup the stock chip is absent until the next 4:15 PM ET window or server restart.
+
+---
+
+### 4.11 Hardcoded Defaults (Non-Configurable)
 
 | Item | Location | Details |
 |------|----------|---------|
@@ -609,7 +741,7 @@ The frontend uses **localStorage-based caching** to avoid re-running expensive b
 |---|---|---|
 | `GET /reports/cash-summary` | 7 days | ~30–40 table scans per month window |
 | `GET /reports/balance-sheet/history` | 7 days | Up to 180 sequential queries (full balance sheet for each date) |
-| `GET /reports/balance-sheet` (snapshot) | 1 hour | Joins accounts, snapshots, properties; fires on every load + filter |
+| `GET /reports/balance-sheet` (snapshot) | 24 hours | Joins accounts, snapshots, properties; fires on every load + filter |
 | `GET /reports/balance-sheet/history?accountIds=…` (per-account) | 7 days | One call per expanded row; up to 10–20 calls |
 
 ### 7.3 Invalidation Trigger
@@ -620,7 +752,7 @@ After any successful non-GET request (POST/PATCH/DELETE), `apiJson()` calls `inv
 
 ### 7.4 Logout
 
-`setToken(null)` calls `clearAllCaches()`, removing all `hfa:*` keys from localStorage. Prevents a subsequent login from seeing a previous user's cached data.
+`setToken(null)` removes the JWT token from localStorage. Data caches (`dashboard`, `networth`, `recurring`) are preserved across logout — they are household-scoped and shared by all members, so clearing them on logout would cause unnecessary cold-cache loads on re-login. Caches expire via their TTL or manual Refresh.
 
 ---
 

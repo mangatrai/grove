@@ -3,7 +3,9 @@ import { GroveMark } from "../components/GroveMark";
 import {
   IconHome,
   IconChartBar,
+  IconBuildingEstate,
   IconScale,
+  IconGavel,
   IconReceipt,
   IconFileText,
   IconTrendingUp,
@@ -36,6 +38,13 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { to: "/net-worth", end: false, label: "Net worth", Icon: IconScale },
       { to: "/budget", end: false, label: "Budget", Icon: IconChartBar },
+    ],
+  },
+  {
+    label: "Property & Tax",
+    items: [
+      { to: "/real-estate", end: false, label: "Real Estate", Icon: IconBuildingEstate },
+      { to: "/tax-protest", end: false, label: "Tax Protest", Icon: IconGavel },
     ],
   },
   {

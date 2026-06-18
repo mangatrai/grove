@@ -1,8 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
-import OpenAI from "openai";
 import { z } from "zod";
 
-import { env } from "../../config/env.js";
+import { getChatAdapter, chatModel } from "../../llm/index.js";
 import { log } from "../../logger.js";
 import type { InsightPayload } from "./insights.types.js";
 
@@ -31,20 +29,15 @@ function parseInsightPayload(raw: string): InsightPayload {
   }
   const out = insightPayloadSchema.safeParse(parsed);
   if (!out.success) {
+    // Attempt to extract JSON object from response (Anthropic sometimes wraps in prose)
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const out2 = insightPayloadSchema.safeParse(JSON.parse(match[0]));
+      if (out2.success) return out2.data;
+    }
     throw new Error(`LLM JSON shape invalid: ${out.error.message}`);
   }
   return out.data;
-}
-
-/**
- * Sends the assembled financial context to the configured LLM provider.
- * Returns structured InsightPayload. Throws on timeout or provider error.
- */
-export async function generateInsight(promptInput: object): Promise<InsightPayload> {
-  if (env.LLM_PROVIDER === "anthropic") {
-    return generateWithAnthropic(promptInput);
-  }
-  return generateWithOpenAI(promptInput);
 }
 
 function buildSystemPrompt(): string {
@@ -85,63 +78,19 @@ function buildUserPrompt(input: object): string {
   return `Household financial summary:\n${JSON.stringify(input, null, 2)}\n\nProvide the financial health analysis as JSON.`;
 }
 
-async function generateWithOpenAI(input: object): Promise<InsightPayload> {
-  if (!env.OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY not configured");
-  }
-  const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 60_000 });
-  const signal = AbortSignal.timeout(60_000);
-  const completion = await openai.chat.completions.create(
-    {
-      model: env.OPENAI_MODEL,
-      messages: [
-        { role: "system", content: buildSystemPrompt() },
-        { role: "user", content: buildUserPrompt(input) }
-      ],
-      response_format: { type: "json_object" }
-    },
-    { signal }
+/**
+ * Sends the assembled financial context to the configured LLM provider.
+ * Returns structured InsightPayload. Throws on timeout or provider error.
+ */
+export async function generateInsight(promptInput: object): Promise<InsightPayload> {
+  const adapter = getChatAdapter();
+  const { content } = await adapter.complete(
+    [
+      { role: "system", content: buildSystemPrompt() },
+      { role: "user", content: buildUserPrompt(promptInput) },
+    ],
+    { model: chatModel(), maxTokens: 2000 }
   );
-  const content = completion.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("OpenAI returned empty content");
-  }
+  if (!content) throw new Error("LLM returned empty content");
   return parseInsightPayload(content);
-}
-
-async function generateWithAnthropic(input: object): Promise<InsightPayload> {
-  if (!env.ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY not configured");
-  }
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: 60_000 });
-  const signal = AbortSignal.timeout(60_000);
-  const msg = await client.messages.create(
-    {
-      model: env.ANTHROPIC_MODEL,
-      max_tokens: 2000,
-      system: buildSystemPrompt(),
-      messages: [{ role: "user", content: buildUserPrompt(input) }]
-    },
-    { signal }
-  );
-  const isTextBlock = (block: Anthropic.Messages.ContentBlock): block is Anthropic.Messages.TextBlock =>
-    block.type === "text";
-  const raw = msg.content
-    .filter(isTextBlock)
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
-  if (!raw) {
-    throw new Error("Anthropic returned empty content");
-  }
-  try {
-    return parseInsightPayload(raw);
-  } catch (e) {
-    log.warn("Anthropic response parse failed; attempting to extract JSON object", { err: String(e) });
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) {
-      throw e;
-    }
-    return parseInsightPayload(match[0]);
-  }
 }

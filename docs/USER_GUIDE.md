@@ -432,6 +432,10 @@ These do not prevent saving; they are informational.
 
 The **ESPP** page tracks IBM ESPP purchase batches, stock disposals, and year-to-date tax exposure (ordinary income vs. capital gain/loss). Access it via **ESPP** in the sidebar.
 
+### IBM Stock Price Chip
+
+The page header displays a live IBM stock quote chip — **IBM · $XXX.XX · close YYYY-MM-DD** — next to the ESPP title. The price is the last confirmed closing price, fetched from Yahoo Finance. It updates automatically at ~4:15 PM ET on weekdays; at other times it shows the most recently cached value. The chip is absent only if the backend has not yet fetched a quote since its last restart.
+
 ### Year Summary Strip
 
 Ten KPI cards across two rows display the current year's activity:
@@ -496,6 +500,104 @@ For each row in the modal:
 Below the Proceeds box, **OI** (ordinary income) and **CG** (capital gain/loss) are shown live as you type — OI in gold, CG in forest/terracotta. These are informational; the server recomputes them on submit.
 
 Click **+ Add Row** to record multiple lots in one session (same sale date). The backend rejects the submission if any row exceeds the available held quantity for that batch.
+
+---
+
+## Tax Protest
+
+The **Tax Protest** feature helps you build and submit an Appraisal Review Board (ARB) protest for any owned property. Access it from a property's detail page via the **Prepare Tax Protest** button, or directly from the sidebar under **Real Estate**.
+
+### Selecting a Property and Year
+
+Use the **Property** and **Year** dropdowns at the top of the page to load (or create) a protest worksheet for that property and tax year. A new worksheet starts with status **Not Filed**.
+
+### Chat Assistant
+
+The chat panel on the right side drives the workflow. The AI assistant has access to:
+
+- **Your property facts** — address, beds/baths, sqft, CAD assessed value, and AVM from your linked Redfin data.
+- **DCAD comparable sales** — comparable properties from the county appraisal district, fetched via the **Fetch DCAD comps** tool.
+- **Redfin sold comps** — recent market sale prices near your property, refreshed on demand.
+- **Live web search** — the AI can search for recent sold prices and market trends via Tavily (requires `TAVILY_API_KEY` in the server environment).
+
+Type in plain language: "What is my case strength?", "Find recent comparable sales near my address", "How should I open the hearing?" The AI responds with analysis and updates the strategy panel.
+
+The assistant also searches **indexed supporting documents** (uploaded PDFs and photos) for relevant passages on each message. Long chat histories are summarized automatically so context stays within model limits. When you close a protest with an outcome, a short **cycle summary** is saved for reference in the next tax year.
+
+### CAD Evidence and Supporting Documents
+
+In the **CAD Evidence Packet** card:
+
+- **Upload Evidence PDF** — the official DCAD evidence packet; the app parses comps for tables and indexes the full text for chat.
+- **Supporting Documents** — upload additional PDFs or photos (roof damage, lot photos, repair estimates). Images are described by vision AI, then indexed like PDF text. Each file appears in a list with a delete control.
+
+### Strategy Panel
+
+The left panel shows the AI's structured assessment:
+
+- **Target value** — the value the AI recommends requesting at the hearing.
+- **Case strength** — a 0–100 score with a colour-coded bar (green ≥ 70, amber 40–69, red < 40).
+- **Arguments** — bullet points for your strongest protest grounds.
+- **Red flags** — weaknesses in the case the AI has identified.
+
+The strategy panel is updated automatically when the AI calls `update_strategy` during a chat turn.
+
+### DCAD Comps and Redfin Comps
+
+You can view fetched comps in the **DCAD Comps** and **Redfin Comps** tabs below the chat. Click **Fetch DCAD comps** (or ask the AI to do it) to pull the county's own comparable pool. Redfin comps are refreshed by asking the AI or clicking the refresh button.
+
+### Generating the ARB Evidence Packet
+
+Once you have comps and a strategy, select a format using the **PDF / Word** toggle next to the **Generate Document** button, then click the button to download the packet.
+
+**PDF** — a print-ready multi-page document:
+
+- **Cover page** — property address, tax year, hearing date, valuation summary boxes (CAD assessed, AVM, target ask, savings), and the AI strategy panel.
+- **DCAD comps table** — the county's own comps with your property highlighted in yellow; comps below your assessed value highlighted green.
+- **Redfin sold comps table** — recent market sales near your property.
+- **Horizontal bar chart** — visual comparison of $/sqft across subject and all comps (subject in blue, comps green if below subject or red if above).
+
+**Word (.docx)** — an editable document with two sections you can hand-edit before submitting:
+
+- **Section 1 — ARB Board Packet** (hand to the panel): valuation summary table, property facts, DCAD unequal-appraisal comps table, Redfin market-sales comps table, and the AI's key arguments as bullet points.
+- **Section 2 — Protestor Reference Sheet** (keep for yourself): an oral script from the AI's strategy, a blank negotiation table (CAD Offer / Your Counter / Notes), and a quick-reference card of key facts.
+
+Print the PDF packet and bring it to your hearing. Use the Word version when you need to hand-edit arguments or paste content into your CAD's own submission template.
+
+### ARB Oral Script
+
+When your protest status is set to **ARB** (formal hearing scheduled), an **ARB Oral Script** card appears on the protest page.
+
+Click **Generate ARB Script** to have GPT-4o write a step-by-step presentation for your ARB panel, using all available evidence: the CAD evidence packet, your equity comps and their annotation notes, Redfin sold comp research notes, and your AI-derived strategy.
+
+The script includes:
+
+- **Negotiation Guide** — three thresholds: *Open Ask* (your first offer to the panel), *Ideal Settle*, and *Walk-Away Min* (below which you accept the panel's decision), with a brief rationale.
+- **6 presentation steps** — Opening Statement, §41.41 Market Value Argument, §41.43 Unequal Appraisal Argument, Supporting Evidence, Closing Ask, and Panel Questions. Each step shows your spoken text and, where relevant, the most likely appraiser objection and your rebuttal.
+
+Use **Copy Script** to copy the full script as plain text. Click **Regenerate** after adding more evidence or comp notes to get an updated version. The last generated script is saved to your worksheet and survives page reloads.
+
+### Filing Deadline and CAD Portal
+
+In the **Protest Status** section, two additional fields help you stay on top of your protest timeline:
+
+- **Filing Deadline** — enter the county's protest filing deadline (YYYY-MM-DD). The app will send in-app and email notifications at 30, 7, and 1 day(s) before this date and before the hearing date. A **red alert banner** appears on the protest page if the deadline is within 7 days and the protest has not yet been resolved.
+- **CAD Portal URL** — paste the URL of your county appraisal district's online portal. An external-link icon next to the field opens it in a new tab so you can file directly from the protest page.
+
+### Protest Status
+
+Use the **Status** dropdown to track progress through the workflow:
+
+| Status | Meaning |
+|--------|---------|
+| Not Filed | Worksheet created, no protest submitted yet |
+| Filed | Protest formally submitted to the CAD |
+| Informal Pending | Informal hearing scheduled (pre-ARB settlement attempt) |
+| Informal Settled | Settled before formal ARB hearing |
+| ARB Scheduled | Formal ARB hearing date set |
+| ARB Won | Protest succeeded — assessed value reduced |
+| ARB Lost | Protest denied at the ARB level |
+| Withdrawn | Protest withdrawn by owner |
 
 ---
 

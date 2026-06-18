@@ -250,6 +250,98 @@ describe("importBatch", () => {
     if (result.ok) return;
     expect(result.code).toBe('NO_FILE');
   });
+
+  it("sums ESPP discount across two payslips on the same month-end date (ESPP-11)", async () => {
+    const purchaseDate = '2026-12-15';
+    const ps1Id = 'test-ps-espp11-salary';
+    const ps2Id = 'test-ps-espp11-commission';
+
+    // Insert two payslips for the same pay_date (salary slip + commissions slip)
+    await sqlStmt(
+      `INSERT INTO payslip_snapshot
+         (id, household_id, file_name, file_checksum, parser_profile_id, pay_date)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO NOTHING`
+    ).run(ps1Id, HOUSEHOLD_ID, 'salary.pdf', 'chk1', 'generic', purchaseDate);
+
+    await sqlStmt(
+      `INSERT INTO payslip_snapshot
+         (id, household_id, file_name, file_checksum, parser_profile_id, pay_date)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO NOTHING`
+    ).run(ps2Id, HOUSEHOLD_ID, 'commission.pdf', 'chk2', 'generic', purchaseDate);
+
+    // Payslip 1: Discount=$80, Salary=$500, Other=$10
+    // Payslip 2: Discount=$40, Salary=$400, Other=$5
+    // Expected totals: Discount=$120, Salary=$900, Other=$15
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP Discount', 80)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-1', ps1Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP Discount', 40)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-2', ps2Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Salary)', 500)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-3', ps1Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Salary)', 400)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-4', ps2Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Other)', 10)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-5', ps1Id, HOUSEHOLD_ID);
+
+    await sqlStmt(
+      `INSERT INTO payslip_line_item
+         (id, payslip_snapshot_id, household_id, section, name, amount_current)
+       VALUES (?, ?, ?, 'pre_tax_deductions', 'ESPP (Stock Other)', 5)
+       ON CONFLICT (id) DO NOTHING`
+    ).run('test-pli-espp11-6', ps2Id, HOUSEHOLD_ID);
+
+    try {
+      const pdfText = `
+        Purchase date: December 15, 2026
+        Allocated 10.0
+        Distributed 10.0
+        Cost basis $150.00
+        Purchase FMV $180.00
+      `;
+      const result = await importBatch(HOUSEHOLD_ID, Buffer.from(pdfText), null);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const batch = result.data.find(b => b.purchaseDate === purchaseDate);
+      expect(batch).toBeDefined();
+      // All three fields must reflect the combined sum across both payslips
+      expect(batch!.esppDiscountPayslip).toBeCloseTo(120, 2);
+      expect(batch!.esppSalaryDeduction).toBeCloseTo(900, 2);
+      expect(batch!.esppOtherDeduction).toBeCloseTo(15, 2);
+    } finally {
+      await sqlStmt(`DELETE FROM payslip_line_item WHERE id IN (?, ?, ?, ?, ?, ?)`)
+        .run('test-pli-espp11-1', 'test-pli-espp11-2', 'test-pli-espp11-3',
+             'test-pli-espp11-4', 'test-pli-espp11-5', 'test-pli-espp11-6');
+      await sqlStmt(`DELETE FROM payslip_snapshot WHERE id IN (?, ?)`).run(ps1Id, ps2Id);
+      await cleanupBatch(purchaseDate);
+    }
+  });
 });
 
 describe("recordSales + deleteSale", () => {

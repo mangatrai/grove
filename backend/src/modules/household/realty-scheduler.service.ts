@@ -1,19 +1,20 @@
 /**
  * Monthly background scheduler for real estate property valuation (D-2).
  *
- * Heartbeat every 6 hours. Refreshes each property that has api_property_id set
- * (i.e. Redfin IDs stored) and has not been fetched in the last 28 days.
- * Skips gracefully if REALTYAPI_KEY is not configured.
+ * Fires on the 1st of every month at 10 PM CT. Refreshes each property that has
+ * api_property_id set and has not been fetched in the last 28 days.
+ * Skips gracefully if REALTY_API_KEY is not configured.
  */
 
+import cron from "node-cron";
+
 import { qAll } from "../../db/query.js";
+import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { isRealtyApiConfigured } from "./realty-api.service.js";
 import { refreshPropertyValuation } from "./property.service.js";
 import { createNotification } from "../notifications/notification.service.js";
 
-const HEARTBEAT_MS = 6 * 60 * 60 * 1000;   // every 6 h
-const STARTUP_DELAY_MS = 60_000;             // 1 min after boot
 const REFRESH_INTERVAL_DAYS = 28;
 
 let schedulerStarted = false;
@@ -21,8 +22,10 @@ let schedulerStarted = false;
 export function startRealtyScheduler(): void {
   if (schedulerStarted) return;
   schedulerStarted = true;
-  setTimeout(() => void checkAndRefreshProperties(), STARTUP_DELAY_MS);
-  setInterval(() => void checkAndRefreshProperties(), HEARTBEAT_MS);
+  // 1st of every month at 10 PM local time (TZ env var). Fires at wall-clock time regardless of DST.
+  cron.schedule("0 22 1 * *", () => { void checkAndRefreshProperties(); }, {
+    timezone: env.TZ,
+  });
 }
 
 async function checkAndRefreshProperties(): Promise<void> {

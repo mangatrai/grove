@@ -620,8 +620,7 @@ export function PayslipDetailPage() {
         setAddError(msg);
         return;
       }
-      const data = await res.json() as { snapshot: PayslipSnapshotDetail; lineItems: PayslipLineItemsGrouped; validationWarnings?: ValidationWarning[] };
-      applyLineItemMutation(data);
+      await load();
       setAddFormOpen(false);
       setAddName("");
       setAddAmountCurrent("");
@@ -631,7 +630,7 @@ export function PayslipDetailPage() {
     } finally {
       setAddSaving(false);
     }
-  }, [payslipId, addSection, addName, addAmountCurrent, addAmountYtd, applyLineItemMutation]);
+  }, [payslipId, addSection, addName, addAmountCurrent, addAmountYtd, load]);
 
   const liCtx: LineItemEditCtx = {
     editingRowId: liEditingId,

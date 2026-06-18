@@ -13,20 +13,28 @@ export type NotificationType =
   | "property_valuation_updated"
   | "budget_threshold_80"
   | "budget_threshold_100"
-  | "large_transaction";
+  | "large_transaction"
+  | "protest_filing_deadline_approaching"
+  | "protest_hearing_approaching";
 
-type NotificationDefault = { enabledEmail: boolean; enabledInapp: boolean };
+type NotificationDefault = {
+  enabledEmail: boolean;
+  enabledInapp: boolean;
+  audience: "owner" | "triggering_user" | "all";
+};
 
 const NOTIFICATION_DEFAULTS: Record<NotificationType, NotificationDefault> = {
-  import_complete:              { enabledEmail: false, enabledInapp: true  },
-  export_ready:                 { enabledEmail: true,  enabledInapp: true  },
-  restore_complete:             { enabledEmail: true,  enabledInapp: true  },
-  backup_complete:              { enabledEmail: false, enabledInapp: true  },
-  backup_failed:                { enabledEmail: true,  enabledInapp: true  },
-  property_valuation_updated:   { enabledEmail: false, enabledInapp: true  },
-  budget_threshold_80:          { enabledEmail: false, enabledInapp: true  },
-  budget_threshold_100:         { enabledEmail: true,  enabledInapp: true  },
-  large_transaction:            { enabledEmail: false, enabledInapp: true  },
+  import_complete:                     { enabledEmail: false, enabledInapp: true,  audience: "triggering_user" },
+  export_ready:                        { enabledEmail: true,  enabledInapp: true,  audience: "triggering_user" },
+  restore_complete:                    { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
+  backup_complete:                     { enabledEmail: false, enabledInapp: true,  audience: "owner"            },
+  backup_failed:                       { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
+  property_valuation_updated:          { enabledEmail: false, enabledInapp: true,  audience: "owner"            },
+  budget_threshold_80:                 { enabledEmail: false, enabledInapp: true,  audience: "all"              },
+  budget_threshold_100:                { enabledEmail: true,  enabledInapp: true,  audience: "all"              },
+  large_transaction:                   { enabledEmail: false, enabledInapp: true,  audience: "all"              },
+  protest_filing_deadline_approaching: { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
+  protest_hearing_approaching:         { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
 };
 
 export const ALL_NOTIFICATION_TYPES = Object.keys(NOTIFICATION_DEFAULTS) as NotificationType[];
@@ -88,7 +96,7 @@ async function getEffectivePref(
     type
   );
   if (row) {
-    return { enabledEmail: Boolean(row.enabled_email), enabledInapp: Boolean(row.enabled_inapp) };
+    return { enabledEmail: Boolean(row.enabled_email), enabledInapp: Boolean(row.enabled_inapp), audience: NOTIFICATION_DEFAULTS[type].audience };
   }
   return NOTIFICATION_DEFAULTS[type];
 }
@@ -108,6 +116,7 @@ export async function createNotification(opts: {
   const { householdId, type, title, body, actionUrl } = opts;
 
   let targets: Array<{ userId: string; email: string }>;
+  const audience = NOTIFICATION_DEFAULTS[type].audience;
   if (opts.userId) {
     const row = await qGet<{ email: string }>(
       `SELECT email FROM app_user WHERE id = ? AND household_id = ?`,
@@ -115,6 +124,15 @@ export async function createNotification(opts: {
       householdId
     );
     targets = row ? [{ userId: opts.userId, email: row.email }] : [];
+  } else if (audience === "owner") {
+    const ownerRow = await qGet<{ id: string; email: string }>(
+      `SELECT id, email FROM app_user WHERE household_id = ? AND role = 'owner' LIMIT 1`,
+      householdId
+    );
+    targets = ownerRow ? [{ userId: ownerRow.id, email: ownerRow.email }] : [];
+  } else if (audience === "triggering_user") {
+    log.warn("createNotification: triggering_user type called without userId — skipped", { type });
+    return;
   } else {
     const rows = await qAll<{ id: string; email: string }>(
       `SELECT id, email FROM app_user WHERE household_id = ? ORDER BY id`,
@@ -346,6 +364,78 @@ export async function checkBudgetThresholds(householdId: string): Promise<void> 
           actionUrl: "/budget"
         });
       }
+    }
+  }
+}
+
+/**
+ * Check protest deadlines for all non-resolved worksheets in a household.
+ * Fires deadline notifications at 30/7/1 days before filing_deadline and hearing_date.
+ * Deduped — skips if a notification of the same type + action_url was created in the last 2 days.
+ * Call fire-and-forget when loading a protest worksheet.
+ */
+export async function checkProtestDeadlines(householdId: string, userId: string): Promise<void> {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  type WorksheetDeadlineRow = {
+    id: string;
+    property_id: string;
+    tax_year: number;
+    filing_deadline: string | Date | null;
+    hearing_date: string | Date | null;
+  };
+
+  const worksheets = await qAll<WorksheetDeadlineRow>(
+    `SELECT id, property_id, tax_year, filing_deadline, hearing_date
+       FROM protest_worksheet
+       WHERE household_id = ? AND status != 'resolved'`,
+    householdId
+  );
+  if (worksheets.length === 0) return;
+
+  const THRESHOLDS = [30, 7, 1];
+
+  for (const ws of worksheets) {
+    const actionUrl = `/tax-protest?propertyId=${ws.property_id}&year=${ws.tax_year}`;
+
+    const deadlines: Array<{ date: string | Date | null; type: NotificationType; label: string }> = [
+      { date: ws.filing_deadline, type: "protest_filing_deadline_approaching", label: "Filing deadline" },
+      { date: ws.hearing_date,    type: "protest_hearing_approaching",         label: "ARB hearing"      },
+    ];
+
+    for (const { date, type, label } of deadlines) {
+      if (!date) continue;
+      const d = typeof date === "string" ? new Date(date) : date;
+      d.setUTCHours(0, 0, 0, 0);
+      const daysUntil = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+      if (daysUntil < 0 || daysUntil > 30) continue;
+
+      const matchedThreshold = THRESHOLDS.find((t) => daysUntil <= t);
+      if (!matchedThreshold) continue;
+
+      const alreadySent = await qGet<{ id: string }>(
+        `SELECT id FROM notification
+           WHERE household_id = ? AND user_id = ? AND type = ? AND action_url = ?
+             AND created_at > NOW() - INTERVAL '2 days'
+           LIMIT 1`,
+        householdId,
+        userId,
+        type,
+        actionUrl
+      );
+      if (alreadySent) continue;
+
+      const dateStr = typeof date === "string" ? date.slice(0, 10) : d.toISOString().slice(0, 10);
+      const daysLabel = daysUntil === 0 ? "today" : daysUntil === 1 ? "tomorrow" : `in ${daysUntil} days`;
+      await createNotification({
+        householdId,
+        userId,
+        type,
+        title: `${label} ${daysLabel === "today" ? "is today" : `${daysLabel}`}`,
+        body: `${label} for your property tax protest (year ${ws.tax_year}) is on ${dateStr} — ${daysLabel}.`,
+        actionUrl
+      });
     }
   }
 }

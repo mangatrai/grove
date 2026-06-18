@@ -1,10 +1,9 @@
+import cron from "node-cron";
+
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { queueBackupJob, scheduleBackupJobProcessing } from "../export/gdrive-backup.service.js";
-
-const HEARTBEAT_MS = 30 * 60 * 1000;
-const STARTUP_DELAY_MS = 30_000;
 
 type SchedulerHouseholdRow = {
   household_id: string;
@@ -14,16 +13,12 @@ type SchedulerHouseholdRow = {
 let schedulerStarted = false;
 
 export function startBackupScheduler(): void {
-  if (schedulerStarted) {
-    return;
-  }
+  if (schedulerStarted) return;
   schedulerStarted = true;
-  setTimeout(() => {
-    void checkAndQueueDueBackups();
-  }, STARTUP_DELAY_MS);
-  setInterval(() => {
-    void checkAndQueueDueBackups();
-  }, HEARTBEAT_MS);
+  // Nightly at 11 PM local time (TZ env var). Fires at wall-clock time regardless of DST.
+  cron.schedule("0 23 * * *", () => { void checkAndQueueDueBackups(); }, {
+    timezone: env.TZ,
+  });
 }
 
 /**
@@ -47,23 +42,23 @@ export async function checkAndQueueDueBackups(): Promise<void> {
         continue;
       }
 
-      const lastComplete = await qGet<{ completed_at: string }>(
+      const lastAttempt = await qGet<{ completed_at: string }>(
         `SELECT completed_at FROM backup_job
-          WHERE household_id = ? AND status = 'complete'
+          WHERE household_id = ? AND status IN ('complete', 'failed')
           ORDER BY completed_at DESC NULLS LAST
           LIMIT 1`,
         householdId
       );
 
-      const lastCompleteMs = lastComplete?.completed_at
-        ? new Date(String(lastComplete.completed_at)).getTime()
+      const lastAttemptMs = lastAttempt?.completed_at
+        ? new Date(String(lastAttempt.completed_at)).getTime()
         : 0;
       const now = Date.now();
       const periodMs = freqHours * 3600 * 1000;
-      const due = now - lastCompleteMs >= periodMs;
+      const due = now - lastAttemptMs >= periodMs;
 
-      if (lastComplete && env.MODE === "PROD" && now - lastCompleteMs > 2 * periodMs) {
-        const hoursAgo = Math.floor((now - lastCompleteMs) / 3600000);
+      if (lastAttempt && env.MODE === "PROD" && now - lastAttemptMs > 2 * periodMs) {
+        const hoursAgo = Math.floor((now - lastAttemptMs) / 3600000);
         log.warn(
           `Backup overdue for household ${householdId}: last success was ${hoursAgo}h ago, frequency is ${freqHours}h. Instance may have been sleeping.`
         );

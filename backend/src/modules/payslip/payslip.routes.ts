@@ -148,12 +148,19 @@ payslipRouter.get("/", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid query", issues: parsed.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "member" && !personProfileId) {
+    res.status(403).json({ message: "Your account is not linked to a household profile.", code: "NO_PERSON_PROFILE" });
+    return;
+  }
+  const scopeOpts =
+    role === "member"
+      ? { ownerScope: "person" as const, ownerPersonProfileId: personProfileId }
+      : { ownerScope: parsed.data.ownerScope, ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null };
   const { total, items } = await listPayslipSnapshots(householdId, {
     limit: parsed.data.limit,
     offset: parsed.data.offset,
-    ownerScope: parsed.data.ownerScope,
-    ownerPersonProfileId: parsed.data.ownerPersonProfileId ?? null
+    ...scopeOpts
   });
   res.json({ total, limit: parsed.data.limit, offset: parsed.data.offset, items });
 });
@@ -194,24 +201,35 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
     return;
   }
   const body = parsed.data;
-  const householdId = req.authUser!.householdId;
-  const userId = req.authUser!.userId;
-
-  const ownerScope = body.ownerScope ?? "household";
-  const ownerPersonProfileId = ownerScope === "person" ? (body.ownerPersonProfileId ?? null) : null;
-  if (ownerScope === "person" && !ownerPersonProfileId) {
-    res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
+  const { householdId, userId, role, personProfileId: authPersonProfileId } = req.authUser!;
+  if (role === "member" && !authPersonProfileId) {
+    res.status(403).json({ message: "Your account is not linked to a household profile.", code: "NO_PERSON_PROFILE" });
     return;
   }
-  if (ownerScope === "person" && ownerPersonProfileId) {
-    const ownerOk = await qGet<{ ok: number }>(
-      `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ? LIMIT 1`,
-      ownerPersonProfileId,
-      householdId
-    );
-    if (!ownerOk) {
-      res.status(400).json({ message: "Owner person profile not found for household" });
+
+  // Members may only create payslips for their own profile; ignore any body override.
+  const ownerScope = role === "member" ? "person" : (body.ownerScope ?? "household");
+  const ownerPersonProfileId =
+    role === "member"
+      ? authPersonProfileId
+      : ownerScope === "person"
+        ? (body.ownerPersonProfileId ?? null)
+        : null;
+  if (role !== "member") {
+    if (ownerScope === "person" && !ownerPersonProfileId) {
+      res.status(400).json({ message: "ownerPersonProfileId is required when ownerScope=person" });
       return;
+    }
+    if (ownerScope === "person" && ownerPersonProfileId) {
+      const ownerOk = await qGet<{ ok: number }>(
+        `SELECT 1 AS ok FROM person_profile WHERE id = ? AND household_id = ? LIMIT 1`,
+        ownerPersonProfileId,
+        householdId
+      );
+      if (!ownerOk) {
+        res.status(400).json({ message: "Owner person profile not found for household" });
+        return;
+      }
     }
   }
 
@@ -466,9 +484,13 @@ payslipRouter.get("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payslip id", issues: parsed.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
   const snapshot = await getPayslipSnapshotForHousehold(householdId, parsed.data.id);
   if (!snapshot) {
+    res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+    return;
+  }
+  if (role === "member" && snapshot.ownerPersonProfileId !== personProfileId) {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
     return;
   }
@@ -503,7 +525,18 @@ payslipRouter.patch("/:id", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ message: "Invalid payload", issues: body.error.flatten() });
     return;
   }
-  const householdId = req.authUser!.householdId;
+  const { householdId, role, personProfileId } = req.authUser!;
+  if (role === "member") {
+    const existing = await getPayslipSnapshotForHousehold(householdId, params.data.id);
+    if (!existing) {
+      res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });
+      return;
+    }
+    if (existing.ownerPersonProfileId !== personProfileId) {
+      res.status(403).json({ message: "Not allowed to edit this payslip", code: "FORBIDDEN" });
+      return;
+    }
+  }
   const updated = await patchPayslipSnapshotForHousehold(householdId, params.data.id, body.data);
   if (!updated) {
     res.status(404).json({ message: "Payslip not found", code: "NOT_FOUND" });

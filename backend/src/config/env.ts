@@ -18,6 +18,18 @@ function optionalIntEnv(defaultVal: number, min: number, max: number) {
   );
 }
 
+/** Float env with default; empty or invalid falls back to `defaultVal`. */
+function optionalFloatEnv(defaultVal: number, min: number, max: number) {
+  return z.preprocess(
+    (val: unknown) => {
+      if (val === undefined || val === "") return defaultVal;
+      const n = Number(val);
+      return Number.isFinite(n) ? n : defaultVal;
+    },
+    z.number().min(min).max(max)
+  );
+}
+
 function optionalBoolEnv(defaultVal: boolean) {
   return z.preprocess((val: unknown) => {
     if (val === undefined || val === "") return defaultVal;
@@ -30,6 +42,8 @@ function optionalBoolEnv(defaultVal: boolean) {
 
 const envSchema = z.object({
   PORT: z.string().default("4000"),
+  /** IANA timezone for wall-clock schedulers and log timestamps. Must match Koyeb env var. */
+  TZ: z.string().default("America/Chicago"),
   MODE: z
     .string()
     .transform((value) => value.toUpperCase())
@@ -58,14 +72,22 @@ const envSchema = z.object({
    */
   ALLOWED_ORIGIN: z.string().url().optional().or(z.literal("")),
   OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().default("gpt-4o-mini"),
+  /** Fast/cheap model — payslip vision extraction, insights, summarization. */
+  OPENAI_MODEL: z.string().default("gpt-4.1-mini"),
+  /** Capable model for vision, agentic loops, and complex generation. */
+  OPENAI_STRONG_MODEL: z.string().default("gpt-4o"),
   BACKUP_ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, "BACKUP_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes)")
     .optional(),
   LLM_PROVIDER: z.enum(["openai", "anthropic"]).default("openai"),
   ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  /** Fast/cheap Anthropic model for one-shot completions. */
+  ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5-20251001"),
+  /** Capable Anthropic model for vision, agentic loops, and complex generation. */
+  ANTHROPIC_STRONG_MODEL: z.string().default("claude-sonnet-4-6"),
+  /** Embedding provider — independent of LLM_PROVIDER (Voyage AI, Cohere, etc. may differ). */
+  EMBEDDING_PROVIDER: z.string().default("openai"),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: optionalIntEnv(587, 1, 65535),
   SMTP_SECURE: optionalBoolEnv(false),
@@ -106,7 +128,30 @@ const envSchema = z.object({
    */
   FRONTEND_APP_URL: z.string().default(""),
   /** RealtyAPI key for Redfin property valuation (D-2). Optional — feature degrades to manual if absent. */
-  REALTY_API_KEY: z.string().optional()
+  REALTY_API_KEY: z.string().optional(),
+  /** Tavily search API key for AI protest assistant web search (PT-3). Optional — search_web tool disabled if absent. */
+  TAVILY_API_KEY: z.string().optional(),
+  /**
+   * OpenAI embedding model for pgvector RAG (protest document store).
+   * Changing this requires a new migration (different vector dims) and full re-embed of all chunks.
+   * Defaults to text-embedding-3-small (1536 dims).
+   */
+  EMBEDDING_MODEL: z.string().default("text-embedding-3-small"),
+  /**
+   * Word count per RAG chunk (word-based sliding window with 40-word overlap).
+   * Smaller = sharper retrieval on structured docs (tables, dollar amounts); larger = more context per hit.
+   * Changing this only affects new uploads — existing stored chunks are not re-processed.
+   */
+  RAG_CHUNK_WORDS: optionalIntEnv(150, 30, 1000),
+  /**
+   * Safety truncation: max characters passed to the embedding API per chunk.
+   * Should be >= RAG_CHUNK_WORDS * ~8 (avg chars/word). Default 1500 comfortably covers 150-word chunks.
+   */
+  EMBEDDING_MAX_INPUT_CHARS: optionalIntEnv(1500, 200, 32000),
+  /** Number of nearest-neighbour chunks returned by vector similarity search. */
+  RAG_TOP_K: optionalIntEnv(5, 1, 20),
+  /** Cosine similarity floor; chunks below this score are filtered out (0–1). */
+  RAG_MIN_SIMILARITY: optionalFloatEnv(0.65, 0, 1)
 });
 
 export const env = envSchema.parse(process.env);

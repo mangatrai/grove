@@ -23,6 +23,7 @@ All routes require `Authorization: Bearer <token>` (JWT) unless noted otherwise.
 - [Google Drive Integration](#google-drive-integration)
 - [Notifications](#notifications)
 - [AI Insights](#ai-insights)
+- [Property Tax Protest](#property-tax-protest)
 
 ---
 
@@ -85,6 +86,547 @@ Returns household-level savings target plus the signed-in user's person-level in
 - **`salaryDepositFinancialAccountId`** — optional FK to a household `financial_account` on the signed-in user's `person_profile`.
 - **`employers`** — JSON array on the signed-in user's `person_profile`. Empty when none.
 - **`largeTxnThresholdUsd`** — `null` when unset. Any imported transaction exceeding this amount triggers a `large_transaction` notification.
+
+---
+
+## Property Tax Protest
+
+All protest routes are mounted under `/api/protest` and require owner/admin role.
+
+### `GET /api/protest/:propertyId/worksheet?year=YYYY`
+
+Gets or creates a worksheet for the property and tax year. Also fires a background check for upcoming protest deadlines (filing deadline and hearing date); in-app and email notifications are emitted at 30/7/1 days before each deadline.
+
+- **`year`** optional; defaults to current year.
+
+**Response 200:**
+```json
+{
+  "worksheet": {
+    "id": "uuid",
+    "householdId": "uuid",
+    "propertyId": "uuid",
+    "taxYear": 2026,
+    "status": "not_filed",
+    "hearingDate": null,
+    "filingDeadline": null,
+    "cadPortalUrl": null,
+    "conversationJson": [],
+    "strategyJson": null,
+    "createdAt": "2026-05-28T01:00:00.000Z",
+    "updatedAt": "2026-05-28T01:00:00.000Z"
+  }
+}
+```
+
+---
+
+### `POST /api/protest/:propertyId/chat`
+
+Assistant chat endpoint for protest planning and comp analysis.
+
+**Request body:**
+```json
+{
+  "message": "Draft my informal hearing argument.",
+  "attachmentText": "Optional extracted notes",
+  "attachmentType": "text",
+  "year": 2026
+}
+```
+
+- **`attachmentType`**: `pdf | url | text` (optional).
+- Uses `OPENAI_MODEL` (default `gpt-4o-mini`) with tool calls. Available AI tools: `fetch_dcad_comps`, `refresh_redfin_comps`, `search_web` (Tavily — requires `TAVILY_API_KEY`), `update_strategy`.
+- **RAG:** Each message is embedded (`text-embedding-3-small`); top-5 similar chunks from `protest_document_chunks` (cosine similarity ≥ 0.65) are appended to the system prompt.
+- **Summarization:** When live (unsummarized) turns exceed 30, the server asynchronously compresses the oldest 10 turns into `conversation_summary` via gpt-4o-mini and advances `summarization_cursor`. Prior-year `cycle_summary` (if any) is injected into the system prompt.
+
+**Response 200:**
+```json
+{
+  "assistantMessage": "Start with unequal-appraisal comp framing...",
+  "strategyUpdated": true,
+  "compsAdded": 4,
+  "soldCompsRefreshed": false,
+  "valuationAgeHours": 30
+}
+```
+
+- **`valuationAgeHours`**: Hours since `valuation_fetched_at` was last updated for this property. `null` if the property has never been valued via Redfin. Use to surface a stale-data prompt in the UI.
+- **`refresh_redfin_comps` tool cooldown:** The underlying `refreshPropertyValuation()` enforces a 24-hour cooldown. If the valuation is <24 h old the tool returns a "still fresh" message to the LLM without hitting the Redfin API.
+
+---
+
+### `POST /api/protest/:propertyId/documents`
+
+Upload an arbitrary supporting document (PDF or image) for RAG indexing.
+
+**Query:** `taxYear` (optional; defaults to current calendar year).
+
+**Request:** `multipart/form-data` with field `file` (max 20 MB).
+
+- **PDF** (`application/pdf`): text extracted via `extractPdfText`, split into overlapping word chunks, embedded with `text-embedding-3-small`.
+- **Image** (`image/jpeg`, `image/png`, `image/webp`): described via GPT-4o vision; description stored as a single chunk.
+
+**Response 200:**
+```json
+{ "ok": true, "documentKey": "file:roof-report.pdf", "chunkCount": 4 }
+```
+
+**Errors:** `400` (no file / unsupported type), `404`, `422` (no extractable text), `503` (`OPENAI_API_KEY` missing).
+
+---
+
+### `GET /api/protest/:propertyId/documents`
+
+List indexed documents for a property and tax year.
+
+**Query:** `taxYear` (optional).
+
+**Response 200:**
+```json
+{
+  "ok": true,
+  "documents": [
+    { "documentKey": "cad_evidence", "chunkCount": 12 },
+    { "documentKey": "image:front.jpg", "chunkCount": 1 }
+  ]
+}
+```
+
+---
+
+### `DELETE /api/protest/:propertyId/documents/:documentKey`
+
+Remove all chunks for a document. **`documentKey`** must be URL-encoded (e.g. `file%3Areport.pdf`).
+
+**Query:** `taxYear` (optional).
+
+**Response:** `204`
+
+---
+
+### `POST /api/protest/:propertyId/generate-arb-script?year=YYYY`
+
+Generate an AI oral ARB hearing script for the protest. Requires `protest_worksheet.status === 'arb'`.
+
+**Query:** `year` (optional; defaults to current calendar year).
+
+**Response 200:**
+```json
+{
+  "script": {
+    "generatedAt": "2026-06-02T18:00:00.000Z",
+    "targetValueUsd": 480000,
+    "negotiationThresholds": {
+      "openAskUsd": 460000,
+      "idealSettleUsd": 475000,
+      "walkAwayMinUsd": 490000,
+      "rationale": "Equity median supports opening below assessed; panel typically splits the difference."
+    },
+    "sections": [
+      {
+        "step": 1,
+        "title": "Opening Statement",
+        "speech": "...",
+        "appraiserMayRespond": null,
+        "yourRebuttal": null
+      },
+      {
+        "step": 2,
+        "title": "§41.41 Market Value Argument",
+        "speech": "...",
+        "appraiserMayRespond": "Your property is in better condition than the comps.",
+        "yourRebuttal": "..."
+      }
+    ]
+  }
+}
+```
+
+**Script persisted:** `arb_script_json` written to `protest_worksheet` and returned on subsequent `GET /worksheet` calls.
+
+**Errors:** `400` (`STATUS_NOT_ARB` — worksheet is not in arb status), `404`, `503` (`OPENAI_API_KEY` missing).
+
+---
+
+### `GET /api/protest/:propertyId/comps?year=YYYY`
+
+Returns all non-excluded comps from `protest_comp` for a property and tax year. Includes all sources: `dcad_search`, `redfin`, `manual`, `cad_evidence`.
+
+- **`year`** optional; defaults to current year.
+
+**Response 200:**
+```json
+{
+  "comps": [
+    {
+      "id": "d0000000-0000-0000-0000-000000000001",
+      "source": "dcad_search",
+      "addressLine1": "456 Elm St",
+      "city": "Flower Mound",
+      "sqft": 1950,
+      "beds": 3,
+      "baths": 2,
+      "yearBuilt": 2005,
+      "hasPool": false,
+      "cadPropertyId": "12345-000000",
+      "cadAccountId": 99001,
+      "cadLandValueUsd": 48000,
+      "cadImprovementValueUsd": 272000,
+      "cadMarketValueUsd": 320000,
+      "cadAssessedValueUsd": 320000,
+      "cadPerSqftAssessed": 164.1,
+      "cadDeedDate": "2018-05-14",
+      "soldPriceUsd": null,
+      "soldDate": null,
+      "pricePerSqft": null,
+      "notes": null,
+      "excluded": false,
+      "fetchedAt": "2026-06-09T10:00:00Z"
+    }
+  ]
+}
+```
+
+Use `source` to determine which strategy view a comp belongs to: `dcad_search` and `cad_evidence` comps appear in the Unequal Appraisal (§41.43) view; `redfin` and `manual` comps appear in the Market Evidence (§41.41) view. All non-excluded comps are returned — filter by source in the UI.
+
+---
+
+### `DELETE /api/protest/:propertyId/comps/:compId`
+
+Deletes a comp by UUID from `protest_comp`. Works for any source.
+
+**Response 200:** `{ "ok": true }`
+**404:** Property or comp not found.
+
+---
+
+### `PATCH /api/protest/:propertyId/comps/:compId/exclude`
+
+Sets or clears the excluded flag on a comp.
+
+**Request body:**
+```json
+{ "excluded": true }
+```
+
+**Response 200:** `{ "ok": true }`
+**404:** Property or comp not found.
+
+---
+
+### `GET /api/protest/:propertyId/cad-search`
+
+Searches the registered CAD adapter (e.g. DCAD) for comparable properties by address. Used by the Add Comp modal before adding a real CAD record. Returns `hasAdapter: false` when the property's county has no registered adapter.
+
+**Query params:** `address` (required), `year` (optional, defaults to current year).
+
+**Response 200:**
+```json
+{
+  "hasAdapter": true,
+  "results": [
+    {
+      "cadPropertyId": "12345-abcde",
+      "address": "789 Pine Rd",
+      "city": "Flower Mound",
+      "sqft": 2100,
+      "beds": 4,
+      "baths": 2.0,
+      "yearBuilt": 2003,
+      "assessedValue": 480000,
+      "marketValue": 510000
+    }
+  ]
+}
+```
+
+When `hasAdapter` is `false`, `results` is always `[]`. The `raw` field from the adapter is stripped before returning.
+
+**404:** Property not found.
+
+---
+
+### `POST /api/protest/:propertyId/comps`
+
+Adds a manually-entered comparable property to `protest_comp` with `source = 'manual'`. Appears in both strategy views. DCAD enrichment for this comp runs automatically as part of the next `runDcadBackfill` call.
+
+**Request body:**
+```json
+{
+  "year": 2026,
+  "addressLine1": "789 Pine Rd",
+  "city": "Flower Mound",
+  "state": "TX",
+  "zip": "75028",
+  "sqft": 2100,
+  "beds": 4,
+  "baths": 2,
+  "yearBuilt": 2003,
+  "cadAssessedValueUsd": 480000,
+  "cadMarketValueUsd": 510000,
+  "soldPriceUsd": 520000,
+  "soldDate": "2025-11-10",
+  "notes": "Has pool — DCAD made no adjustment"
+}
+```
+
+All fields except `year` are optional. `cadPerSqftAssessed` is computed from `cadAssessedValueUsd / sqft` and `pricePerSqft` from `soldPriceUsd / sqft` if both are provided.
+
+**Response 201:**
+```json
+{
+  "ok": true,
+  "comp": { /* newly inserted UnifiedComp row */ }
+}
+```
+
+---
+
+### `POST /api/protest/:propertyId/refresh-comps`
+
+Triggers an on-demand property valuation refresh followed by a full DCAD backfill pipeline. Both `refreshPropertyValuation` and `runDcadBackfill` complete before the response is returned.
+
+**Request body:**
+```json
+{ "year": 2026 }
+```
+
+`year` is optional — defaults to the current UTC year.
+
+**Behavior:**
+1. Calls `refreshPropertyValuation` (Realty/Redfin API). The 24-hour cooldown applies — if fresh, `redfin.ok` is `false` with `code: "RATE_LIMITED"` (surface as a warning, not a failure). New Redfin comps are saved to `protest_comp` with `source = 'redfin'` as a side effect.
+2. Runs `runDcadBackfill` (5 steps): enriches subject property with full DCAD value history, inserts/updates DCAD search comps, enriches improvement details for comps, merges Redfin/CAD-evidence comps with DCAD data, syncs appeal status.
+
+**Response 200:**
+```json
+{
+  "redfin": { "ok": true, "estimate": 480000 },
+  "dcad": { "ok": true },
+  "comps": [ /* full updated UnifiedComp list for the property/year */ ]
+}
+```
+
+On rate-limit: `"redfin": { "ok": false, "code": "RATE_LIMITED", "message": "Valuation refreshed within the last 24 hours — try again later." }`. DCAD backfill still runs in this case.
+
+---
+
+### `POST /api/protest/:propertyId/cad-evidence?taxYear=YYYY`
+
+Upload the official DCAD evidence packet PDF (multipart/form-data, field name `file`, max 20 MB). Parses the PDF and stores the result in `protest_worksheet.cad_evidence_json`. The parser extracts both the CAD Sales Analysis (§41.41) and Subject Equity Analysis (§41.43) comp tables, their medians, and subject property details from the public card page.
+
+**Request:** `multipart/form-data` with field `file` (PDF only).
+
+**Response 200:**
+```json
+{
+  "filename": "cad-evidence-2026.pdf",
+  "data": {
+    "uploadedAt": "2026-06-02T10:00:00Z",
+    "subjectCadPropertyId": "560912",
+    "subjectAddress": "7070 COULTER LAKE RD",
+    "assessedValueUsd": 1101813,
+    "improvementsUsd": 817120,
+    "landValueUsd": 284693,
+    "percentGood": 92.0,
+    "livingAreaSqft": 4008.8,
+    "lotSqft": 9817,
+    "yearBuilt": 2017,
+    "salesAnalysis": {
+      "comps": [
+        { "compNum": 1, "propId": "680344", "address": "2362 CHAFFEE RD FRISCO TX 75036", "distanceMi": 0.4, "saleDate": "2025-05-20", "salePriceUsd": 1275000, "cadMarketValueUsd": 1136736, "cadIndValueUsd": 1228707 }
+      ],
+      "medianIndValueUsd": 1196015,
+      "medianValuePerSqft": 298.35
+    },
+    "equityAnalysis": {
+      "comps": [
+        { "compNum": 1, "propId": "660008", "address": "7495 COULTER LAKE RD FRISCO TX 75036", "distanceMi": 0.24, "cadMarketValueUsd": 1014668, "cadIndValueUsd": 1075760 }
+      ],
+      "medianIndValueUsd": 1077571,
+      "medianValuePerSqft": 268.80
+    }
+  }
+}
+```
+
+**Response 422:** `{ "message": "Failed to parse PDF. Ensure this is a DCAD evidence packet." }`
+
+---
+
+### `DELETE /api/protest/:propertyId/cad-evidence?taxYear=YYYY`
+
+Clears the stored CAD evidence data (`cad_evidence_json` reset to `{}`, `cad_evidence_filename` set to NULL).
+
+**Response 204:** No content.
+
+---
+
+### `PATCH /api/protest/:propertyId/comps/:compId/notes`
+
+Updates the `notes` field on a single comp row (any source).
+
+**Request body:**
+```json
+{ "notes": "Has pool and outdoor kitchen — DCAD made no adjustment" }
+```
+
+**Response 200:** `{ "ok": true }`
+**404:** Comp not found or does not belong to this property.
+
+---
+
+### `GET /api/protest/:propertyId/dcad/value-history`
+
+Returns year-by-year CAD tax assessed value history for the subject property from TrueProdigy. Requires `dcad_p_account_id` to be stored on the property (set automatically after the first DCAD comps search).
+
+**Response 200:**
+```json
+{
+  "history": [
+    { "year": 2026, "marketValue": 1101813, "assessedValue": 1101813, "landValue": 188000, "improvementValue": 913813 },
+    { "year": 2025, "marketValue": 1025000, "assessedValue": 1025000, "landValue": 188000, "improvementValue": 837000 }
+  ]
+}
+```
+
+**404:** Property not found, or DCAD account ID not on file (trigger a DCAD comps search first via the protest chat).
+
+---
+
+### `GET /api/protest/:propertyId/dcad/taxable`
+
+Returns the current taxable value breakdown after exemptions (homestead, over-65, etc.) for the subject property. Raw rows from TrueProdigy — shape varies by county/exemption type.
+
+**Response 200:** `{ "taxable": [ { ... } ] }`
+
+**404:** Property not found, or DCAD account ID not on file.
+
+---
+
+### `GET /api/protest/:propertyId/dcad/appeal`
+
+Returns live protest/appeal status from DCAD for the subject property.
+
+**Response 200:**
+```json
+{
+  "appeals": [
+    { "year": "2026", "status": "Pending", "hearingDate": null, "filedDate": "2026-05-01" }
+  ]
+}
+```
+
+**404:** Property not found, or DCAD account ID not on file.
+
+---
+
+### `GET /api/protest/:propertyId/appraisal-notice-link`
+
+Returns the S3 key for the current year's appraisal notice PDF from DCAD. The result is cached on `property.cad_appraisal_notice_s3id` so repeated calls are cheap.
+
+**Response 200:**
+```json
+{ "available": true, "s3Id": "denton/d335f122-39c5-11f1-9a34-0242ac110006.pdf", "fetchedAt": "2026-06-01T00:00:00Z" }
+```
+
+`available: false` means DCAD has not published a notice for this property yet. `s3Id` and `fetchedAt` are `null` when `available` is `false`.
+
+**404:** Property not found, or DCAD account ID not on file.
+
+---
+
+### `GET /api/protest/:propertyId/appraisal-notice-pdf`
+
+Streams the current year's DCAD appraisal notice PDF as `Content-Type: application/pdf`. Fetches the PDF bytes via the DCAD document endpoint using the cached `s3Id`. Open in a new browser tab — native PDF rendering, no iframe needed.
+
+**Response 200:** PDF byte stream.
+
+**Response 501:** `{ "message": "Appraisal notice PDF proxy not yet implemented." }` — returned until the DCAD PDF download URL is confirmed. Use `appraisal-notice-link` to retrieve the `s3Id` and open the DCAD portal directly in the meantime.
+
+**404:** Property not found, or notice not available.
+
+---
+
+### `GET /api/protest/:propertyId/evidence-packet?year=YYYY&format=pdf|docx`
+
+Generates an ARB evidence packet for the given property and tax year. Returns PDF (default) or Word DOCX.
+
+**Auth:** Owner/admin. `year` defaults to current year if omitted.
+
+**Query params:**
+- `year` — optional integer, defaults to current year
+- `format` — `pdf` (default) or `docx`
+
+**Response 200 — PDF (`format=pdf` or omitted):**
+- `Content-Type: application/pdf`
+- `Content-Disposition: attachment; filename="<address>_ARB_<year>.pdf"`
+
+**PDF sections:**
+1. **Cover** — valuation summary boxes (CAD assessed, AVM, overassessment %, target value), property facts, strategy panel (case strength bar, primary approach, key arguments, red flags)
+2. **DCAD Comparable Properties** — table with market value, $/sqft, vs-subject %; subject row highlighted; green/red colour coding
+3. **Recent Comparable Sales** — Redfin sold comps table (if available)
+4. **Market Value Comparison** — horizontal bar chart of AVM vs DCAD comp market values; green bars = comp below subject (supports protest)
+
+**Response 200 — DOCX (`format=docx`):**
+- `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document`
+- `Content-Disposition: attachment; filename="<address>_ARB_<year>.docx"`
+
+**DOCX sections:**
+1. **ARB Board Packet** — valuation summary table, property facts, DCAD comps table, recent sales table, key arguments (submit to the panel)
+2. **Protestor Reference Sheet** — oral script (numbered talking points), negotiation table (blank), quick-reference card (keep for yourself)
+
+**Errors:** `400` invalid params · `404` property not found · `401/403` auth
+
+---
+
+### `GET /api/protest/:propertyId/protest-brief?year=YYYY`
+
+Generates a structured plain-text protest brief for use with any AI assistant (Claude, ChatGPT, Gemini, etc.). All numbers are sourced directly from the database — no LLM generation.
+
+**Auth:** Bearer token required. `year` defaults to current year if omitted.
+
+**Response 200:**
+- `Content-Type: text/plain; charset=utf-8`
+- `Content-Disposition: attachment; filename="<address>_protest_brief_<year>.txt"`
+
+**Sections in the brief:**
+1. Subject property — address, CAD ID/account, sqft, beds/baths, lot, AVM
+2. DCAD assessed values — land/improvement split, appraised vs net appraised (homestead cap), YoY tax history
+3. Equity analysis (§41.43) — DCAD comp table with $/sqft, median $/sqft, implied value at median, delta vs subject
+4. Market value analysis (§41.41) — sold comps table with sold price, $/sqft, sold date, CAD assessed value
+5. Notes — worksheet strategy notes and prior-year cycle summary
+6. AI analysis prompt — LLM-agnostic instructions for an AI to generate protest arguments
+
+**Errors:** `400` invalid params · `404` property not found
+
+---
+
+### `PATCH /api/protest/:propertyId/worksheet`
+
+Updates worksheet status, outcome, informal offer amount, hearing date, filing deadline, and CAD portal URL.
+
+**Request body:**
+```json
+{
+  "year": 2026,
+  "status": "resolved",
+  "outcome": "settled_informal",
+  "informalOfferUsd": 485000,
+  "hearingDate": "2026-07-15",
+  "filingDeadline": "2026-05-15",
+  "cadPortalUrl": "https://www.dallascad.org/protest"
+}
+```
+
+All fields except `year` are optional.
+- `status` — one of `not_filed` | `filed` | `informal` | `arb` | `resolved`.
+- `outcome` — one of `settled_informal` | `won_arb` | `lost_arb` | `withdrawn` or `null` to clear. Meaningful only when `status = "resolved"` (or when resetting).
+- `informalOfferUsd` — integer USD value of the appraiser's informal offer; `null` to clear.
+- `hearingDate` and `filingDeadline` — `YYYY-MM-DD` or `null` to clear.
+- `cadPortalUrl` — valid URL or `null` to clear.
+
+**Response 200:** `{ "worksheet": { ...updated worksheet including outcome, informalOfferUsd... } }`
 
 ---
 
@@ -392,7 +934,21 @@ Creates a property and optionally links it to a mortgage account.
 
 **Auth:** Owner/admin only.
 
-Updates address/use fields. Send at least one of: `addressLine1`, `city`, `state`, `zip`, `propertyUse`.
+Updates address, use, and user-editable metadata fields. Send at least one field. Omitted keys are left unchanged; `null` clears a nullable field.
+
+**Request body (all fields optional; at least one required):**
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `addressLine1` | string \| null | max 200 |
+| `city` | string \| null | max 100 |
+| `state` | string \| null | max 100 |
+| `zip` | string \| null | max 20 |
+| `propertyUse` | `"primary"` \| `"rental"` \| `"vacation"` \| null | |
+| `purchasePrice` | integer \| null | positive, nullable to clear |
+| `purchaseDate` | string \| null | ISO `YYYY-MM-DD`, nullable to clear |
+| `monthlyRent` | integer \| null | ≥ 0, nullable to clear |
+| `propertyNotes` | string \| null | max 2000 chars, nullable to clear |
 
 **Response 200:** `{ "updated": true }`
 
@@ -427,6 +983,26 @@ Lists all `property_value_snapshot` rows for the property (ascending by `asOfDat
       "source": "manual",
       "apiProvider": null,
       "createdAt": "2026-05-10T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+#### `GET /household/properties/:propertyId/equity-history`
+
+Returns AVM, linked mortgage balance, and computed equity per snapshot date. The mortgage balance at each point is resolved from `account_balance_snapshot` for the linked loan account (using the closest balance on or before that date). If no mortgage is linked, `mortgageBalance` is `0` and `equity` equals `avm`.
+
+**Response 200:**
+```json
+{
+  "history": [
+    {
+      "date": "2025-10-01",
+      "avm": 480000,
+      "mortgageBalance": 320000,
+      "equity": 160000
     }
   ]
 }
@@ -1270,6 +1846,8 @@ Session processing summary: per-file counts, open review items, and derived "ski
 ### `GET /imports/accounts`
 
 Lists financial accounts for binding uploads before parse.
+
+**RBAC:** Members see only `household`-scoped accounts plus their own `person`-scoped accounts. Owner/admin see all household accounts.
 
 **Query (optional):**
 
@@ -2197,6 +2775,8 @@ Queues an **export** job. Response is immediate (**202**); `.hfb` is built in ba
 
 Poll export job status.
 
+**Auth:** Bearer JWT. Members may only view jobs they created (`requested_by_user_id`); querying another user's job returns **403 FORBIDDEN**.
+
 **Response 200:**
 ```json
 {
@@ -2210,6 +2790,7 @@ Poll export job status.
 ```
 
 **Errors:**
+- **403** — `FORBIDDEN` — member attempted to view another user's export job.
 - **404** — `EXPORT_JOB_NOT_FOUND`.
 
 ---
@@ -2218,9 +2799,12 @@ Poll export job status.
 
 Returns the backup file as binary attachment when job finished successfully.
 
+**Auth:** Bearer JWT. Members may only download jobs they created (`requested_by_user_id`); downloading another user's job returns **403 FORBIDDEN**. Full household exports (created by owner/admin) are not accessible to members.
+
 **Response 200** — binary file (`household-export-{jobId}.hfb`).
 
 **Errors:**
+- **403** — `FORBIDDEN` — member attempted to download another user's export job.
 - **404** — Export not ready, file missing, or job not found.
 - **410** — `EXPORT_EXPIRED` — file auto-deleted after 48-hour retention.
 
@@ -2911,6 +3495,27 @@ LLM prompt includes only anonymized aggregates and profile/demographic fields. N
 ## ESPP Equity Tracker
 
 IBM ESPP purchase batch and sale history management. All endpoints require authentication.
+
+---
+
+### GET /espp/stock-quote
+
+Returns the latest IBM stock quote from a 1-hour in-memory cache. Populated on server startup and refreshed automatically at ~4:15 PM ET on weekdays via `yahoo-finance2`.
+
+**Response 200**
+```json
+{
+  "symbol": "IBM",
+  "price": 297.80,
+  "previousClose": 264.22,
+  "asOf": "2026-05-30"
+}
+```
+
+**Response 503** — cache empty (server just started and initial fetch failed):
+```json
+{ "message": "Stock quote unavailable" }
+```
 
 ---
 

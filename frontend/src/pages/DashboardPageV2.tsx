@@ -412,7 +412,7 @@ export function DashboardPageV2() {
   const [priorYearTxns, setPriorYearTxns] = useState<LedgerRow[] | null>(null);
   const [recurringOverrides, setRecurringOverrides] = useState<RecurringOverride[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAllRecurring, setShowAllRecurring] = useState(false);
+  const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [showYearReview, setShowYearReview] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -573,7 +573,7 @@ export function DashboardPageV2() {
   }, [loadAll]);
 
   useEffect(() => {
-    setShowAllRecurring(false);
+    setShowRecurringModal(false);
   }, [activeMonth]);
 
   const recurringHeuristic = useMemo(() => detectRecurring(recentTxns ?? []), [recentTxns]);
@@ -609,7 +609,7 @@ export function DashboardPageV2() {
     confirmedRecurringItems,
     suggestedRecurringItems
   ]);
-  const recurringVisible = showAllRecurring ? recurringAll : recurringAll.slice(0, 5);
+  const recurringVisible = recurringAll.slice(0, 5);
   const recurringTotalMonthly = useMemo(
     () => recurringAll.reduce((acc, item) => acc + item.medianAmount, 0),
     [recurringAll]
@@ -1099,13 +1099,13 @@ export function DashboardPageV2() {
                   );
                 })}
               </Stack>
-              {!showAllRecurring && recurringAll.length > 5 ? (
+              {recurringAll.length > 5 ? (
                 <Button
                   type="button"
                   variant="default"
                   size="xs"
                   mt="xs"
-                  onClick={() => setShowAllRecurring(true)}
+                  onClick={() => setShowRecurringModal(true)}
                 >
                   + {recurringAll.length - 5} more
                 </Button>
@@ -1174,6 +1174,46 @@ export function DashboardPageV2() {
           </Paper>
         ) : null}
       </SimpleGrid>
+
+      <Modal
+        opened={showRecurringModal}
+        onClose={() => setShowRecurringModal(false)}
+        title="Recurring Payments"
+        size="sm"
+      >
+        <Text size="sm" c="dimmed" mb="xs">
+          ${formatNoCents(recurringTotalMonthly)} / month across {recurringAll.length} recurring charge{recurringAll.length === 1 ? "" : "s"}
+        </Text>
+        <Stack gap={6}>
+          {recurringAll.map((item) => {
+            const isConfirmed = confirmedRecurringItems.some((confirmed) => confirmed.merchant === item.merchant);
+            return (
+              <Group key={item.merchant} justify="space-between" gap={4} wrap="nowrap">
+                <Group gap={6} wrap="nowrap">
+                  <Text size="sm">{isConfirmed ? "●" : "○"}</Text>
+                  <Text size="sm">{item.merchant}{isConfirmed ? "" : " (Suggested)"}</Text>
+                </Group>
+                <Group gap={8} wrap="nowrap">
+                  <Text size="sm">${formatUsd(item.medianAmount)}/mo</Text>
+                  {!isConfirmed ? (
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      color="gray"
+                      size="compact-xs"
+                      px={4}
+                      onClick={() => void dismissRecurring(item.merchant)}
+                      aria-label={`Dismiss recurring suggestion for ${item.merchant}`}
+                    >
+                      ×
+                    </Button>
+                  ) : null}
+                </Group>
+              </Group>
+            );
+          })}
+        </Stack>
+      </Modal>
 
       <Box mt="md">
         <FinancialHealthCard />

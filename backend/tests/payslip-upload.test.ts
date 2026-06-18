@@ -691,8 +691,17 @@ describe("Import session with ibm_pay_contributions_pdf", () => {
       .set("authorization", `Bearer ${token}`)
       .send({});
     expect(parseRes.status).toBe(200);
-    expect(parseRes.body.parsedFiles).toBe(1);
-    expect(parseRes.body.parsedRows).toBe(0);
+    // IBM is now queued async like Deloitte — parsedFiles=0, asyncPayslipPending=1
+    expect(parseRes.body.parsedFiles).toBe(0);
+    expect(parseRes.body.asyncPayslipPending).toBe(1);
+
+    // Trigger async LLM extraction (force=true skips the 2-minute poll interval)
+    const reconcileRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/reconcile-payslip-async?force=true`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(reconcileRes.status).toBe(200);
+    expect(reconcileRes.body.completedFiles).toBe(1);
 
     const canRes = await request(app)
       .post(`/imports/sessions/${sessionId}/canonicalize`)

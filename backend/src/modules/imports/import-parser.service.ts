@@ -34,7 +34,7 @@ import {
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
 import { upsertImportBalanceSnapshotFromStatement } from "../reports/balance-sheet.service.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
-import { DELOITTE_PAYSLIP_PDF_PROFILE_ID } from "../payslip/payslip.types.js";
+import { LLM_PAYSLIP_PROFILE_IDS } from "../payslip/payslip.types.js";
 import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
 
 export interface ParseColumnMapping {
@@ -331,7 +331,7 @@ export async function parseSessionImportFiles(
         }
         await qExec(`DELETE FROM transaction_raw WHERE file_id = ?`, file.id);
 
-        if (profileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID) {
+        if ((LLM_PAYSLIP_PROFILE_IDS as readonly string[]).includes(profileId)) {
           if (!env.OPENAI_API_KEY?.trim()) {
             await qExec(
               `UPDATE import_file
@@ -348,7 +348,7 @@ export async function parseSessionImportFiles(
             outcome.skippedFiles.push({ fileId: file.id, reason: "payslip_openai_api_not_configured" });
             continue;
           }
-          log.info("[Import parse] queueing Deloitte PDF for async LLM payslip extract", {
+          log.info("[Import parse] queueing payslip PDF for async LLM extract", {
             importFileId: file.id,
             fileName: file.file_name,
             pdfBytes: buffer.byteLength,

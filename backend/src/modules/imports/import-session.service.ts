@@ -2,8 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import cron from "node-cron";
+
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { env } from "../../config/env.js";
 import { resolveDataPath } from "../../paths.js";
+import { log } from "../../logger.js";
 
 import {
   type ImportSessionStatus,
@@ -294,6 +298,44 @@ export async function deleteStagingFilesForSession(sessionId: string): Promise<v
   } catch {
     // best-effort
   }
+}
+
+/**
+ * Delete staged import files from disk for sessions older than 30 days.
+ * DB rows (import_session, import_file) are kept for audit trail — only disk files are removed.
+ * Idempotent: safe to run repeatedly; already-cleared rows have stored_path = NULL and are skipped.
+ */
+export async function purgeStaleImportFiles(): Promise<void> {
+  const rows = await qAll<{ id: string; stored_path: string }>(
+    `SELECT f.id, f.stored_path
+       FROM import_file f
+       JOIN import_session s ON s.id = f.session_id
+      WHERE f.stored_path IS NOT NULL
+        AND s.started_at < NOW() - INTERVAL '30 days'`
+  );
+
+  if (rows.length === 0) return;
+
+  let deleted = 0;
+  for (const row of rows) {
+    try {
+      if (fs.existsSync(row.stored_path)) {
+        fs.unlinkSync(row.stored_path);
+      }
+      await qExec(`UPDATE import_file SET stored_path = NULL WHERE id = ?`, row.id);
+      deleted += 1;
+    } catch (err) {
+      log.warn(`Import purge: could not remove file for import_file ${row.id}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  log.info(`Import purge: cleared ${deleted} staged file(s) from sessions older than 30 days`);
+}
+
+/** Nightly at 2 AM local time (TZ env var) — delete staged import files on disk for sessions older than 30 days. */
+export function startImportCleanupScheduler(): void {
+  cron.schedule("0 2 * * *", () => { void purgeStaleImportFiles(); }, {
+    timezone: env.TZ,
+  });
 }
 
 export type ImportSessionListRow = {

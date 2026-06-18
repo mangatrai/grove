@@ -442,7 +442,7 @@ export async function canonicalizeImportSession(
       inserted += 1;
       diag.inserted += 1;
       insertedCanonicalRows.push({ id: canonicalId, txnDate: normDate });
-      if (largeTxnThreshold !== null && Math.abs(rounded) >= largeTxnThreshold) {
+      if (largeTxnThreshold !== null && Math.abs(rounded) >= largeTxnThreshold && direction === "debit") {
         const displayAmt = `$${Math.abs(rounded).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
         void createNotification({
           householdId,

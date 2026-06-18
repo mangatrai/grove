@@ -4,17 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import OpenAI from "openai";
-
-import { env } from "../../../config/env.js";
+import { getVisionAdapter, chatModel, visionParserSource } from "../../../llm/index.js";
+import type { LlmUsage } from "../../../llm/index.js";
 import {
   payslipDocumentMetadataSchema,
   payslipLlmApiResponseSchema,
   type PayslipLlmExtract
 } from "./payslip-llm.schema.js";
 import { renderPdfPagesToPng } from "./pdf-page-to-png.js";
-
-const PARSER_SOURCE = "openai-chat-completions-json_schema";
 
 function loadPayslipJsonSchema(): Record<string, unknown> {
   const path = fileURLToPath(new URL("./payslip.schema.json", import.meta.url));
@@ -33,25 +30,15 @@ export type ExtractPayslipLlmOptions = {
   pdfPath?: string;
   /** PDF bytes; written to a temp file for rendering (exactly one of `pdfPath` or `pdfBuffer` required). */
   pdfBuffer?: Buffer;
-  /** Override model (defaults to `env.OPENAI_MODEL`). */
-  model?: string;
 };
 
-function requireApiKey(): string {
-  const key = env.OPENAI_API_KEY?.trim();
-  if (!key) {
-    throw new Error("OPENAI_API_KEY is not set in the environment.");
-  }
-  return key;
-}
-
 /**
- * Single OpenAI vision call + structured JSON schema output, Zod validation, merged `document_metadata`.
- * No automatic retries (SDK `maxRetries: 0`).
+ * Vision LLM extraction of payslip PDF pages. Supports any configured LLM_PROVIDER.
+ * Uses structured JSON schema output where available (OpenAI); falls back to prompt-based JSON for Anthropic.
  */
 export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): Promise<{
   extract: PayslipLlmExtract;
-  usage: OpenAI.Chat.Completions.ChatCompletion["usage"];
+  usage: LlmUsage;
 }> {
   const hasPath = options.pdfPath != null && options.pdfPath.length > 0;
   const hasBuf = options.pdfBuffer != null && options.pdfBuffer.byteLength > 0;
@@ -59,9 +46,7 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     throw new Error("Exactly one of pdfPath or pdfBuffer must be provided.");
   }
 
-  const apiKey = requireApiKey();
-  const model = options.model ?? env.OPENAI_MODEL;
-  const client = new OpenAI({ apiKey, maxRetries: 0 });
+  const model = chatModel();
 
   let pdfPathForRender: string;
   let tempDir: string | undefined;
@@ -85,11 +70,10 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     }
   }
 
-  const imageParts: OpenAI.Chat.Completions.ChatCompletionContentPart[] = pages.map((buf) => ({
-    type: "image_url",
-    image_url: {
-      url: `data:image/png;base64,${buf.toString("base64")}`
-    }
+  const imageContentParts = pages.map((buf) => ({
+    type: "image" as const,
+    mimeType: "image/png",
+    base64Data: buf.toString("base64"),
   }));
 
   const systemPrompt = [
@@ -126,36 +110,30 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
 
   const userText = `There are ${pageCount} page image(s) in order (page 1 first). Extract the full payslip per schema.`;
 
-  const completion = await client.chat.completions.create({
-    model,
-    max_tokens: 8192,
-    messages: [
+  const visionAdapter = getVisionAdapter();
+  const { content, usage } = await visionAdapter.complete(
+    [
       { role: "system", content: systemPrompt },
-      {
-        role: "user",
-        content: [{ type: "text", text: userText }, ...imageParts]
-      }
+      { role: "user", content: [{ type: "text", text: userText }, ...imageContentParts] },
     ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "payslip",
-        strict: true,
-        schema: PAYSLIP_JSON_SCHEMA_FOR_OPENAI
-      }
+    {
+      model,
+      maxTokens: 8192,
+      responseFormat: "json",
+      jsonSchema: PAYSLIP_JSON_SCHEMA_FOR_OPENAI,
+      jsonSchemaName: "payslip",
     }
-  });
+  );
 
-  const content = completion.choices[0]?.message?.content;
   if (!content || typeof content !== "string") {
-    throw new Error("OpenAI returned no message content.");
+    throw new Error("Vision LLM returned no message content.");
   }
 
   let raw: unknown;
   try {
     raw = JSON.parse(content) as unknown;
   } catch {
-    throw new Error("OpenAI returned non-JSON message content.");
+    throw new Error("Vision LLM returned non-JSON message content.");
   }
 
   const parsed = payslipLlmApiResponseSchema.parse(raw);
@@ -164,11 +142,11 @@ export async function extractPayslipFromPdf(options: ExtractPayslipLlmOptions): 
     ...parsed,
     document_metadata: payslipDocumentMetadataSchema.parse({
       page_count: pageCount,
-      parser_source: PARSER_SOURCE,
+      parser_source: visionParserSource(),
       extraction_model: model,
       extracted_at: new Date().toISOString()
     })
   };
 
-  return { extract: merged, usage: completion.usage };
+  return { extract: merged, usage };
 }

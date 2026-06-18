@@ -18,6 +18,1297 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-187 — RAG chunk size: 300 → 150 words; make configurable via RAG_CHUNK_WORDS; tighten EMBEDDING_MAX_INPUT_CHARS (2026-06-17)
+
+**Problem:** `EMBEDDING_MAX_INPUT_CHARS=8000` was a misleading env var — it was only a safety truncation applied before the OpenAI API call, not the actual chunk size. The real chunk size was `CHUNK_WORDS=300` (hardcoded), equivalent to ~1,500–2,000 characters. For structured tax documents (CAD evidence PDFs with tables, dollar amounts, comp addresses), 300-word chunks are too coarse — the embedding vector has to represent too many distinct facts, degrading nearest-neighbour precision.
+
+**Change:** Dropped `CHUNK_WORDS` from 300 → 150 with the same 40-word overlap. At ~750–1,000 chars per chunk, each chunk maps to one semantic unit (a single comp row, a value breakdown, a paragraph) rather than a mixed block. `EMBEDDING_MAX_INPUT_CHARS` lowered from 8000 → 1500 (appropriate safety cap for 150-word chunks; ~8 chars/word × 150 = ~1,200 chars). Both values are now configurable via env.
+
+**Caveat:** Existing stored chunks in `protest_document_chunks` are not re-processed. Only new uploads benefit. Re-upload protest documents to get sharper retrieval.
+
+**Files:** `backend/src/modules/protest/chunking.service.ts`, `backend/src/config/env.ts`
+
+**New env vars:**
+- `RAG_CHUNK_WORDS` (default: 150) — word count per chunk
+- `EMBEDDING_MAX_INPUT_CHARS` default lowered from 8000 → 1500
+
+---
+
+## FIX-185 — protest brief: use all active comps for §41.43; prefer DCAD stored data; add land/improvement to CAD breakdown; improve AI instructions (2026-06-17)
+
+**§41.43 comps were blank:** The protest brief's Section 4 filtered equity comps to `dcad_search | cad_evidence` sources only, showing "No equity comps loaded" even when Redfin comps with DCAD-enriched `cadAssessedValueUsd` were present. Changed to use all non-excluded comps (`!c.excluded`) — matching the UI's `equityComps = activeComps` behaviour. Same comps back both §41.41 (via sold price) and §41.43 (via CAD assessed value).
+
+**Section 2 showed Redfin assessed value when DCAD data was stored:** When no CAD evidence PDF was uploaded, the brief fell through to `vd.taxCurrent.assessedValue` (Redfin, may lag one year) even though `property.cadAssessedValueUsd / cadLandValueUsd / cadImprovementValueUsd` were already in the DB from DCAD enrichment. Added middle branch: if `property.cadAssessedValueUsd != null`, use DCAD stored data with land/improvement breakdown.
+
+**YoY history was Redfin-sourced:** Changed the YoY table to call `adapter.getValueHistory(cadAccountId)` inline (same source as the property details page chart), with a silent fallback to Redfin `vd.taxHistory` if DCAD returns empty.
+
+**CAD Breakdown missing land/improvement:** Added `property.cadLandValueUsd` and `property.cadImprovementValueUsd` lines to the CAD Valuation Breakdown section. Updated the `if` condition to also trigger when these fields are populated.
+
+**AI instructions improved:** Updated data-source annotations to reflect actual sources; added reference to Section 6 strategy notes (when present); added §41.43 land/improvement sub-argument guidance (over-valued improvements relative to comps is independently protestable); added instruction to factor in YoY history and prior strategy in target-value recommendation.
+
+**Files:** `backend/src/modules/protest/protest.routes.ts`
+
+---
+
+## FIX-184 — protest chat agent: inject comp data + worksheet context; rewrite system prompt; upgrade protest brief (2026-06-16)
+
+**Chat agent — comps now visible:** The chat agent's system prompt previously had zero visibility into comps already loaded in `protest_comp`. This caused the agent to trigger a redundant DCAD backfill (via `fetch_dcad_comps`) even when comps were already present. Fixed by loading existing comps (`listWorksheetComps`) before building the system prompt and injecting them via a new `buildCompsContext` function. The context now includes equity comp $/sqft table with median/mean/range, and sold comp table with sale prices and $/sqft — with a clear instruction not to re-fetch unless the user explicitly asks.
+
+**Chat agent — worksheet context:** `hearingDate`, `filingDeadline`, `informalOfferUsd`, and previously saved `strategyJson` are now included in the system prompt so the agent can factor in deadlines, settlement offers, and prior analysis without asking the user to re-state them.
+
+**Chat agent — system prompt rewrite:** Rewrote the system prompt to add:
+- A pre-computed equity strength signal (subject $/sqft vs. comp median $/sqft) in the property facts block
+- Status-aware tactical instructions (`not_filed` → ask preliminary questions and size up grounds; `filed` → evidence gaps and informal prep; `informal` → settlement vs. ARB trade-off; `arb` → hearing talking points; `resolved` → lessons learned)
+- Instruction to always call `update_strategy` after giving an assessment
+
+**Protest brief — CAD valuation breakdown:** Added a "CAD Valuation Breakdown" sub-section to Section 2 showing `cadMarketValueUsd`, `cadAppraisedValueUsd`, `cadNetAppraisedValueUsd`, and `cadTaxLimitationValueUsd` from DCAD records when available. Flags if assessed value exceeds CAD market value (§41.41 signal).
+
+**Protest brief — multiple reduction scenarios:** Section 4 equity comp stats now shows comp $/sqft mean in addition to median, and computes three reduction scenarios: comp median $/sqft, comp mean $/sqft, and Redfin AVM (if AVM < assessed).
+
+**Protest brief — CAD evidence sales comps:** Section 5 now has two subsections: Redfin/manual sold comps (existing) and a new "CAD Evidence PDF — Sales Analysis Comps" table showing DCAD's own sales comps from the uploaded evidence PDF with distance, sale date, sale price, DCAD market value, and individual value. This is the strongest §41.41 evidence because it uses DCAD's own data.
+
+**Protest brief — expanded AI instructions:** The "Instructions for AI Assistant" section at the bottom of the brief now includes structured data-source annotations, a required 5-section analysis format (evidence summary, ground-by-ground analysis, target value, ARB talking points, red flags), and explicit rules around using DCAD's own data.
+
+**Files:** `backend/src/modules/protest/protest.routes.ts` (buildCompsContext, buildSystemPrompt, POST /chat, GET /protest-brief)
+
+---
+
+## FIX-183 — re-enrich comps on every Refresh; hide stale ARB hearing banner (2026-06-16)
+
+**Step C re-enrichment**: `runDcadBackfill` Step C was filtering `cad_enriched_at IS NULL`, meaning redfin/manual comps were only DCAD-enriched once. Subsequent Refresh calls skipped them even if the address had been corrected or CAD values had changed. Changed the filter to `source != 'dcad_search'` so all non-dcad_search comps are re-enriched on every Refresh (dcad_search comps are already refreshed in Step B via ON CONFLICT).
+
+**ARB banner**: The "Upcoming ARB Hearing" banner used `hearingDays <= 30` as its only upper bound but had no lower bound, so it continued showing after the hearing passed (e.g., "-7 days away"). Added `hearingDays >= 0` so the banner disappears once the hearing date is in the past.
+
+**Files:** `backend/src/modules/protest/protest-worksheet.service.ts` (Step C query), `frontend/src/pages/TaxProtestPage.tsx` (banner condition)
+
+---
+
+## FIX-182 — protest comp duplicate-key crash (unhandled rejection) (2026-06-15)
+
+When a user added a comp from the CAD search UI with a `cadPropertyId` that the DCAD backfill had already inserted, `addManualComp` fired a plain `INSERT` with no `ON CONFLICT` clause, violating `protest_comp_by_cad_pid`. Express 4 does not catch async route handler rejections automatically, so the error became an unhandled rejection that crashed the `tsx watch` process. A secondary vector: `void runDcadBackfill(...)` in `POST /refresh-comps` had no `.catch()`.
+
+**Fix:**
+- `protest-worksheet.service.ts` (`addManualComp`): before inserting, check if a comp with the same `cadPropertyId` already exists for the property/year; if so, return the existing row instead of inserting a duplicate
+- `protest.routes.ts` (`POST /:propertyId/comps`): wrapped handler body in try/catch; returns 500 on unexpected DB errors
+- `protest.routes.ts` (`POST /:propertyId/refresh-comps`): added `.catch()` to `void runDcadBackfill(...)` so any error escaping the per-iteration try/catches is logged rather than crashing the process
+
+**GitHub:** https://github.com/mangatrai/grove/issues/111
+
+---
+
+## CR-186 — DCAD architectural refactor: single canonical service across all paths (2026-06-15)
+
+`fetchDcadCanonical` is now the only DCAD function called outside `dcad-enrichment.service.ts`. All paths — property add, manual comp add, refresh — route through it.
+
+**Changes:**
+- `fetchDcadCanonical` accepts optional `prefetchedRow?: DCADProperty` to skip the redundant search when the caller already has the search result (Step B)
+- New exports from `dcad-enrichment.service.ts`: `searchDcadComps`, `getCompImprovementFeatures` — low-level `searchDCADByAddress` and `getDCADImprovementFeatures` no longer imported anywhere outside the enrichment service
+- `runDcadBackfill` is now 4 steps (A/B/C/D) instead of 5:
+  - Step B: calls `fetchDcadCanonical(prefetchedRow)` per search result → full canonical INSERT in one shot
+  - Step C (was D): removed source restriction — now enriches ALL unenriched comps (`redfin`, `cad_evidence`, `manual`) via `fetchDcadCanonical`; old Step C deleted
+- New export `applyCanonicalToComp(compId, canonical)` — shared helper used by Step C and the manual comp route
+- Manual comp add (`POST /:propertyId/comps`) now fires `fetchDcadCanonical` + `applyCanonicalToComp` immediately after insert (fire-and-forget)
+
+**Files changed:**
+- `backend/src/modules/protest/dcad-enrichment.service.ts`
+- `backend/src/modules/protest/protest-worksheet.service.ts`
+- `backend/src/modules/protest/protest.routes.ts`
+
+GitHub: https://github.com/mangatrai/grove/issues/110
+
+---
+
+## CR-185 — DCAD pool/spa notes: propagate misc improvement details to property and comp notes (2026-06-15)
+
+When DCAD enrichment finds pool/spa entries in `Misc Imp` improvements, the formatted note (e.g., `"Pool (DCAD: $15,000, built 2010); Spa (DCAD: $5,000)"`) is now written to:
+
+- **Subject property** (`property.property_notes`) — only when currently NULL, so user-entered notes are never overwritten
+- **DCAD search comps** (`protest_comp.notes`, Step C) — `COALESCE(notes, ?)` so existing user notes win
+- **Redfin/CAD evidence comps** (`protest_comp.notes`, Step D both merge and non-merge paths) — same COALESCE logic
+
+**Root cause of gap:** `fetchDcadCanonical` fetched `miscImprovements[]` from `getDCADImprovementFeatures` but only propagated the `hasPool` boolean, discarding the description/value/yearBuilt detail. `DcadCanonicalProperty` now carries `miscImprovements: MiscImprovement[]`.
+
+No new migration — `property_notes` and `protest_comp.notes` already exist.
+
+**Files changed:**
+- `backend/src/modules/protest/dcad-enrichment.service.ts` — added `miscImprovements` field to `DcadCanonicalProperty`; import `MiscImprovement` type
+- `backend/src/modules/protest/protest-worksheet.service.ts` — added `buildPoolNote()` helper; Steps A/C/D write pool notes
+
+GitHub: https://github.com/mangatrai/grove/issues/109
+
+---
+
+## CR-184 — Realty API: schema-driven Redfin comp parsing via avm.__att_names (2026-06-15)
+
+Replaced hardcoded `__atts` positional indices in `parseComps` with a schema-driven approach using Redfin's own `avm.__att_names` descriptor.
+
+**How it works:** `avm.__att_names` is an array-of-arrays where `att_names[N]` lists field names in position order for type N. Every encoded object carries `__t_idx: N`. We build `AttSchema` (`Map<typeIdx, Map<fieldName, position>>`) from this at parse time, then look up fields by name via `attField(obj, "city", schema)` instead of `facts[3]`.
+
+**Failure modes now covered:**
+- **Position shifts** (what broke FIX-183): invisible — `attField` always finds the right slot
+- **Field rename/removal**: `checkSchemaFields()` emits WARN at production log level before any comp fails to parse, listing exactly which fields went missing
+- **`__att_names` itself missing**: WARN logged; `parseComps` returns 0 with clear message
+- **Total comp parse failure** (0 from non-empty): existing WARN retained
+
+**Removed dead code:** `atIdx<T>()` helper and `parseSashDate()` (both replaced by schema-driven lookup and `msToDate`).
+
+**Files:** `backend/src/modules/household/realty-api.service.ts`
+
+**GitHub:** closes #108
+
+---
+
+## FIX-183 — Realty API: Redfin comparable sales parser broken after API schema change (2026-06-14)
+
+`parseComps` in `realty-api.service.ts` returned 0 comps despite the API returning 6 results. Root cause: Redfin changed their `__atts` positional encoding schema.
+
+**Three things shifted (confirmed against saved live response + `avm.__att_names` schema descriptor):**
+
+1. **Listing block** moved from `outerAtts[4]` → `outerAtts[5]` (new `editableHomeFact` slot inserted at [4]). Within the listing array: `listingPrice` [21→22], `numBedrooms` [26→27], `numBathrooms` [27→28], `salePrice` [50→51].
+2. **Property/facts block** (still at `outerAtts[7]`) positions shifted: `sqFtFinished` now at [0] (was [21]); `city` moved [2→3] (slot [2] is now `countryCode` via `$ref`); `streetNumber` [5→6]; `streetType` [6→7]; `postalCode` [9→10]; `lotSqFt` [17→18]; `streetName` [19→20]; `state` [0→1].
+3. **Sold date** was reading the wrong path (`outerAtts[6].__atts[2]['1'][0].lastSaleDate`). Correct path: `outerAtts[6].__atts[0].__atts[3]` (`lastSaleInfo.saleListingLastSaleDate`, unix ms).
+
+Validated new mapping against all 6 comps in the saved API response before committing.
+
+**Files:** `backend/src/modules/household/realty-api.service.ts`
+
+**GitHub:** closes #107
+
+---
+
+## FIX-182 — Protest: openapi duplicate /comps path, missing protest-brief docs, dead code cleanup (2026-06-13)
+
+Three follow-up fixes for PT-18:
+
+1. **openapi.yaml duplicate path**: `/api/protest/{propertyId}/comps` was defined twice — once with only `post:` (add manual comp) and once with only `get:` (list comps). In YAML, duplicate keys cause the second to silently overwrite the first. Merged both operations under one path key.
+
+2. **`GET /protest-brief` undocumented**: Endpoint shipped in CR-172 but was never added to `openapi/openapi.yaml` or `docs/API_REFERENCE.md`. Added full documentation: query params (`year`), response type (`text/plain`), sections in the output, `Content-Disposition` header.
+
+3. **Dead code removed from protest module**: Unused imports and unreachable functions left over from the PT-18 migration:
+   - `protest.routes.ts`: removed `type UnifiedComp`, `syncAppealStatus`, `CadProperty` imports (all unused); removed `formatCompSummary` function (defined but never called); removed `ratio` local variable in protest-brief loop (computed but not in output string)
+   - `protest-evidence-docx.service.ts`: removed `CadEquityComp`, `BorderStyle` imports; removed `ProtestComp` type alias; removed `ppsf`, `bullet`, `noBorderTable` helper functions (all defined but never called)
+   - `protest-service.test.ts`: removed `import crypto` (unused)
+
+GitHub: closes #105
+
+Files: `openapi/openapi.yaml`, `docs/API_REFERENCE.md`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/protest/protest-evidence-docx.service.ts`, `backend/tests/protest-service.test.ts`
+
+---
+
+## FIX-181 — Protest: Redfin comps never saved on new property creation (2026-06-11)
+
+**Root cause:** `POST /properties` receives the full `valuationDetailJson` (including 6 Redfin comps) from the frontend after the preview-valuation flow, saves the Redfin IDs and estimate, and sets `valuation_fetched_at = NOW()`. However, it never called `saveRedfinComps` — those comps only reach `protest_comp` via `refreshPropertyValuation`, which is blocked by the 7-day rate limit since `valuation_fetched_at` was just set. Result: a newly-created TX property showed blank Market Evidence and Unequal Appraisal tables.
+
+**Fix:** After the `UPDATE property SET ... valuation_fetched_at = NOW()` block in `POST /properties`, call `saveRedfinComps(id, householdId, taxYear, detail.comps)` immediately with the comp data already in memory. This is a pure DB write (no extra API call) and completes before the 201 response is sent, so comps are available as soon as the user navigates to the protest worksheet.
+
+Files: `backend/src/modules/household/household.routes.ts`.
+
+GitHub: closes #106
+
+---
+
+## FIX-180 — Protest: Redfin comps race condition; appraisal notice 400 (wrong office in JWT) (2026-06-10)
+
+Two root-cause fixes:
+
+1. **Redfin comps never in `protest_comp` (race condition)**: `refreshPropertyValuation` called `saveRedfinComps` with `void` — fire-and-forget. The `refresh-comps` route `await`s `refreshPropertyValuation` then immediately queries `listWorksheetComps`, but `saveRedfinComps` hadn't committed yet. All 6 parsed comps were silently lost on every refresh. Fixed: changed to `await saveRedfinComps(...)` so inserts complete before the function returns. Files: `backend/src/modules/household/property.service.ts`.
+
+2. **Appraisal notice DCAD 400 (wrong office in JWT) + centralized service**: Both appraisal-notice routes derived `county` via `property.cadProvider?.replace("dcad_", "")` — for Denton properties where `cadProvider = "dcad"`, this produces `"dcad"` instead of `"Denton"`. `getToken("dcad")` then requests a JWT with `"office":"dcad"`, which DCAD's `shownoticelink` endpoint rejects with 400. All other protest routes correctly use `property.cadProvider === "dcad" ? "Denton" : null`. Fixed both routes. Additionally, the PDF route was calling `getToken` and `fetch` directly in `protest.routes.ts`, duplicating DCAD auth logic that belongs in `dcad-enrichment.service.ts`. Added `fetchDcadAppraisalNoticePdf(s3Id, county)` to the central service; route now calls it. Exported `BROWSER_HEADERS` from `dcad.service.ts`; `dcad-enrichment.service.ts` now uses static import instead of dynamic. Response body logging added on non-2xx. Files: `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/protest/dcad-enrichment.service.ts`, `backend/src/modules/protest/dcad.service.ts`.
+
+GitHub: closes #104
+
+---
+
+## FIX-179 — Protest flow: market evidence empty, sold date deed fallback, saveCadEvidenceComps param mismatch, appraisal notice 404 UX (2026-06-10)
+
+Five bug fixes:
+
+1. **Market Value Evidence table empty after DCAD backfill**: `marketComps` filtered to `source === 'redfin' || 'manual'` only. When Step D merges a Redfin comp into an existing `dcad_search` row, the merged row keeps `source='dcad_search'`, causing it to be invisible in market evidence. Per the original plan design ("no strategy flags — all comps show in both views"), changed both `marketComps` and `equityComps` to use the same filter: all non-excluded comps. Added DCAD source badge (blue) to market evidence table rows.
+
+2. **Sold date falls back to DCAD deed date**: When Step D enriches a Redfin comp and `sold_date` is null (common in TX non-disclosure), now sets `sold_date = COALESCE(sold_date, deedDate)`. For merge path (Redfin → existing dcad_search), uses `COALESCE(sold_date, redfin_sold_date, cad_deed_date)`. Market evidence table also shows `soldDate ?? cadDeedDate` in the Sold Date column.
+
+3. **`saveCadEvidenceComps` param count mismatch**: Sales comp INSERT had 10 `?` placeholders but 11 params were passed — `perSqft` (always null for PDF comps) was included in params but not in the column list. Removed the extra param; `cad_per_sqft_assessed` will be set later by Step D DCAD enrichment.
+
+4. **Appraisal Notice "not available" UX**: DCAD `shownoticelink` returns 400 when no notice is published for a property (expected, especially early in the season). Our server returns 404. Frontend now shows a yellow informational toast ("Appraisal notice not yet available for this property") instead of a red error for 404 responses.
+
+5. **`cadDeedDate` missing from frontend `UnifiedComp` type**: Added `cadDeedDate: string | null` so the deed-date fallback in the Sold Date column compiles.
+
+Files: `frontend/src/pages/TaxProtestPage.tsx`, `backend/src/modules/protest/protest-worksheet.service.ts`
+
+GitHub: closes #103
+
+---
+
+## FIX-178 — Protest flow: appraisal notice modal, land/improvement display, $/sqft and sold date fixes (2026-06-10)
+
+Four bug fixes in the protest worksheet and property detail pages:
+
+1. **Appraisal Notice PDF — auth error**: The "View Appraisal Notice" button was a plain `<a target="_blank">` link which cannot send Bearer tokens, causing a 401. Changed to a click handler that `fetch()`es the PDF with `Authorization: Bearer`, wraps the bytes in a blob URL, and opens it in a Mantine `<Modal>` with an `<iframe>`. No new tab; no auth leak.
+
+2. **$/sqft missing in Market Value Evidence**: `pricePerSqft` is pre-computed server-side and stored in `protest_comp.price_per_sqft`. If parsing yielded null (e.g., close-price index miss), the column showed "—" even when `soldPriceUsd` and `sqft` were visible. Added frontend inline fallback: `comp.pricePerSqft ?? round(comp.soldPriceUsd / comp.sqft)`.
+
+3. **Sold Date clobbered on upsert**: `saveRedfinComps` ON CONFLICT set `sold_date = EXCLUDED.sold_date` unconditionally, overwriting a previously-stored date with null if the sash block failed to parse on a subsequent refresh. Fixed to `COALESCE(EXCLUDED.sold_date, protest_comp.sold_date)`. Same fix for `price_per_sqft`.
+
+4. **Land + Improvement values not surfacing**: `property` table gained `cad_land_value_usd` and `cad_improvement_value_usd` in migration 0068 (populated by `runDcadBackfill`), but `property.service.ts` never read them back and they weren't exposed in any API response. Added all 6 DCAD value columns (`cadLandValueUsd`, `cadImprovementValueUsd`, `cadMarketValueUsd`, `cadAppraisedValueUsd`, `cadNetAppraisedValueUsd`, `cadTaxLimitationValueUsd`) to `PropertyRecord`, `PropertyRow`, `toPropertyRecord()`, and the `PropertyRecord` types in both `TaxProtestPage.tsx` and `PropertyDetailPage.tsx`. Subject property card now shows Land Value and Improvement Value columns. Property detail CAD Assessed section shows land/improvement breakdown inline.
+
+Also fixed pre-existing TS errors from PT-18 migration: `ProtestComp`/`ManualSoldComp` imports removed from `arb-script.service.ts`, `protest-evidence.service.ts`, `protest-evidence-docx.service.ts`; `arb-script.service.ts` now uses `UnifiedComp` with correct field names (`cadAssessedValueUsd`, `cadPerSqftAssessed`); `ArbScriptInput.soldCompsNotes` removed; missing `CadProperty` import added to `protest.routes.ts`; `audience` field fixed in `notification.service.ts`.
+
+Files: `backend/src/modules/household/property.service.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/arb-script.service.ts`, `backend/src/modules/protest/protest-evidence.service.ts`, `backend/src/modules/protest/protest-evidence-docx.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/notifications/notification.service.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`
+
+---
+
+## UX-177 — Recurring Payments card: replace inline expand with modal (2026-06-09)
+
+Clicking "+ N more" on the Recurring Payments dashboard card now opens a Mantine Modal listing all recurring charges instead of expanding the card inline. The card always shows the top 5 items; the modal shows all items with the same dismiss buttons. Fixes the visual issue where inline expansion caused all peer cards in the same `SimpleGrid` row to stretch to the same height.
+
+**GitHub:** closes #100
+
+Files: `frontend/src/pages/DashboardPageV2.tsx`
+
+---
+
+## FIX-176 — Notifications: add audience RBAC; fix large-transaction debit-only (2026-06-09)
+
+Added `audience: "owner" | "triggering_user" | "all"` to every `NotificationType` default. `createNotification` now resolves recipients by audience when no `userId` is provided: `owner` queries `app_user WHERE role = 'owner'`; `triggering_user` without a `userId` logs a warning and skips (no fan-out); `all` preserves existing fan-out behaviour. Audience assignments: `backup_complete`, `backup_failed`, `restore_complete`, `property_valuation_updated`, `protest_filing_deadline_approaching`, `protest_hearing_approaching` → `owner`; `import_complete`, `export_ready` → `triggering_user`; budget and large-transaction types → `all`. Settings UI now shows a "Tax Protest" group with both protest deadline types; owner-only notification rows are hidden for non-owner members. `large_transaction` alert now fires only for debits (money leaving the account).
+
+**GitHub:** closes #99
+
+Files: `notification.service.ts`, `canonical-ingest.service.ts`, `frontend/src/pages/SettingsPage.tsx`
+
+---
+
+## FIX-175 — GDrive backup: failed jobs no longer cause perpetual nightly retries (2026-06-09)
+
+`checkAndQueueDueBackups` previously queried only `status = 'complete'` to compute the last-backup timestamp. After any failure, `lastCompleteMs = 0`, making `due` always `true` — the scheduler re-queued a new backup job on every subsequent nightly cron tick. Fixed by changing the query to `status IN ('complete', 'failed')` so a failed attempt resets the 24h due-window the same way a success does.
+
+**GitHub:** closes #98
+
+Files: `gdrive-scheduler.service.ts`
+
+---
+
+## FIX-174 — Tax Protest: Redfin sqft=1 survives DCAD enrichment for sold comps (2026-06-08)
+
+Three-layer bug caused Redfin's sqft=1 for sold comps to persist through DCAD enrichment: (1) `enrichSoldCompsCad` skipped `getDCADImprovementFeatures` when DCAD initial search result already had a non-null sqft (e.g., pool row returning sqft=1); (2) even if improvement features ran, `cache[addr].sqft ??` kept the bad value; (3) `buildSoldComps` preferred Redfin's `r.sqft` over DCAD cache sqft; (4) cache skip filter `!(a in existingCache)` prevented re-fetching once bad sqft was cached.
+
+Fix: `enrichSoldCompsCad` now always calls `getDCADImprovementFeatures` when `cadAccountId` is available, and always uses `features.sqft` as the authoritative value (not a fallback). Cache filter re-fetches any address with cached sqft ≤ 1. `buildSoldComps` now prefers `cached?.sqft` over Redfin sqft. Trigger a "Refresh Comps" on existing properties to clear bad cached sqft values.
+
+**GitHub:** closes #97
+
+Files: `protest-worksheet.service.ts`, `protest.routes.ts`
+
+---
+
+## FIX-173 — Tax Protest: protest-brief crash + stale DCAD assessed value (2026-06-08)
+
+**protest-brief: UNDEFINED_VALUE crash fixed (critical)**
+`GET /:propertyId/protest-brief` called `getExcludedSoldComps(worksheet.id, householdId)` — two bugs in one line: (a) `worksheet.id` is the worksheet UUID not the property ID, and (b) the required `taxYear` third argument was missing, passing `undefined` to postgres. The postgres driver throws `UNDEFINED_VALUE` which then corrupts the connection pool, causing every subsequent DB call to fail with 500 until the process restarts. Fix: corrected to `getExcludedSoldComps(property.id, householdId, year)`. File: `protest.routes.ts`.
+
+**property.cad_assessed_value_usd — new column (migration 0067)**
+`saveCadSubjectIds` previously stored only `cad_property_id`, `cad_account_id`, and `cad_provider` on the `property` row, discarding the DCAD-sourced `assessedValue`. This meant the ARB script, evidence packet, and protest brief all fell back to Redfin's `taxCurrent.assessedValue` (which lags by one year) when no CAD evidence PDF was uploaded. Fix: added `cad_assessed_value_usd BIGINT` to the `property` table; `saveCadSubjectIds` now stores `subject.assessedValue` there on every refresh-comps / backfill run. The fallback chain in all three consumers is now: `cadEv.assessedValueUsd ?? property.cadAssessedValueUsd ?? taxCurrent.assessedValue`. Trigger a refresh-comps to populate the value for existing properties. Files: `migrations/0067_property_cad_assessed_value.sql`, `protest-worksheet.service.ts`, `property.service.ts`, `protest.routes.ts`.
+
+**GitHub:** none
+
+---
+
+## CR-172 — Tax Protest: "Copy Protest Brief" button + accountId persistence fix (2026-06-07)
+
+**accountId gap fixed (POST /comps path)**
+When a comp was added via the CAD search UI (cad-search → POST /comps), the DCAD `accountId` was available in memory but not persisted — `addCADComp` wrote `raw_json = {}`. Any subsequent re-enrichment (e.g., pool notes backfill) would skip that comp because `accountId` was missing. Fix: `CadSearchResult` now includes `accountId`; POST /comps schema accepts it; `addCADComp` stores it in `raw_json: { accountId }` when provided. Files: `protest.routes.ts`, `protest-worksheet.service.ts`, `TaxProtestPage.tsx`.
+
+**cad-search: always enrich sqft from improvement features**
+Removed the conditional `(sqft == null || sqft <= 1)` guard. Now always calls `getDCADImprovementFeatures` for every comp with a known `accountId`, regardless of whether the raw search result already has an sqft value. Fixes properties where DCAD search returns a non-zero but wrong sqft (e.g., pool row returned first). File: `protest.routes.ts`.
+
+**"Try property ID" hint on zero cad-search results**
+When cad-search returns no results, the UI now shows an explanatory hint: DCAD address search can fail when street suffix differs (Rd vs Dr), and suggests trying the DCAD Property ID directly. File: `TaxProtestPage.tsx`.
+
+**"Copy Protest Brief" button + backend formatter**
+New `GET /protest/:propertyId/protest-brief?year=YYYY` endpoint. Deterministically formats all protest data (subject property, YoY valuations, CAD equity comps with $/sqft analysis, Redfin + manual sold comps, strategy notes, prior-year cycle summary) into a structured plain-text brief. Every number is read directly from the database — no LLM generation. Excluded sold comps are omitted. Includes opinionated analysis instructions that work with any AI assistant (Claude, ChatGPT, Gemini). Frontend: violet "Copy Protest Brief" button with Tooltip explanation; copies text to clipboard on click. Files: `protest.routes.ts`, `TaxProtestPage.tsx`.
+
+## FIX-171 — Tax Protest: extend backfill to enrich comp sqft + pool notes via improvement API (2026-06-06)
+
+`triggerCadBackfill` in `protest-worksheet.service.ts` now calls `getDCADImprovementFeatures` for every comp after the bulk DCAD address search. New function `enrichAndUpdateCadCompsImprovement` iterates non-subject comps, fetches improvement features, and UPDATEs `protest_comp_cad` with: corrected sqft (always prefer improvement-features over raw search result), beds/baths (fill-in if null), and pool/spa notes in the `notes` column when Misc Imp entries are found. Previously this enrichment only happened in the real-time manual search UI path — historically stored comps with sqft=1 required the user to manually re-add them. DCAD is a free public API; 20–30 calls per property creation is not a concern. File: `protest-worksheet.service.ts`. GitHub: https://github.com/mangatrai/grove/issues/92
+
+## FIX-170 — Tax Protest: 6 bug fixes + pool detection feature (2026-06-05)
+
+**Bug 1 — CRITICAL: Property ID overwrite in `saveCadSubjectIds`**
+Removed `?? comps[0]` fallback. When subject not found by house-number match in DCAD search results, function now logs a warning and exits cleanly — never overwrites `property.cad_property_id` with a random comp's CAD ID. File: `protest-worksheet.service.ts`.
+
+**Bug 2 — Stale 2025 assessed value in evidence packet**
+`cadAssessed` in the evidence-packet route now prefers `cadEv?.assessedValueUsd` (from uploaded CAD evidence PDF, always current year) over `property.valuationDetail.taxCurrent.assessedValue` (Redfin data, can lag a year). File: `protest.routes.ts`.
+
+**Bug 3 — ARB script JSON parse failure**
+Model occasionally returns JS numeric literal syntax (`1_077_571`) which is valid JS but invalid JSON. Added `replace(/(\d)_(\d)/g, "$1$2")` to the raw-cleanup step before `JSON.parse`. File: `arb-script.service.ts`.
+
+**Bug 4 — sqft = 1 for comps with pools**
+`getDCADImprovementFeatures` now sums sqft only from Residential improvements (excludes Misc Imp entries like pools). `mapProperty` treats sqft ≤ 0 as null. The comp-search enrichment triggers when sqft is null or ≤ 1 (DCAD placeholder), and now always overwrites sqft with improvement-features value when available. Files: `dcad.service.ts`, `protest.routes.ts`.
+
+**Bug 5 — Research notes leaking into ARB hearing packet (Document B)**
+Removed `soldCompsNotes` rendering from Document B's Section 4B (Recent Market Sales table). Research notes are private and belong in Document A only. File: `protest-evidence-docx.service.ts`.
+
+**Bug 6 — Account creation date default shows UTC date (wrong day after ~6pm CST)**
+`SettingsPage.tsx` was using `new Date().toISOString().slice(0, 10)` (UTC) for `initialBalanceDate` default. Replaced with `localDateStr()` (uses local timezone `getFullYear/getMonth/getDate`) — pattern already used in `TransactionsPage.tsx`. File: `frontend/src/pages/SettingsPage.tsx`.
+
+**Feature 7 — Pool / Misc Imp detection from DCAD improvements**
+`getDCADImprovementFeatures` now collects Misc Imp entries (pools, spas, outbuildings) into a `miscImprovements: MiscImprovement[]` array. Returned in `GET /:propertyId/cad-search` results as `miscImprovements` per comp so the UI can display pool/spa presence. Files: `dcad.service.ts`, `protest.routes.ts`.
+
+---
+
+## CR-169 — Tax Protest: Evidence packet restructured into two purpose-built documents (2026-06-05)
+
+**Evidence packet DOCX now generates two documents in one file:**
+
+**Document A: Protest Filing Letter** — Formal letter to the ARB stating grounds (§41.41 market value, §41.43 unequal appraisal) with the requested value and $/sqft. Auto-selects which ground paragraphs to include based on available evidence. Ends with signature block.
+
+**Document B: ARB Hearing Packet** — Modeled on real-world ARB packet structure:
+- Section 1: Subject property detail table (DCAD ID, sqft, beds, baths, lot, condition %, assessed value, $/sqft, improvements, land, purchase price)
+- Section 2: Taxpayer's Requested Value + supporting evidence data points table
+- Section 3: Problems with DCAD's Evidence (3A: sales comp table with upward adjustment, sale age ≥ 18 months, distance ≥ 1 mi automatically flagged; 3B: equity analysis showing subject is the highest-assessed)
+- Section 4: Taxpayer's Supporting Evidence (4A: DCAD equity comps table; 4B: market sales with notes)
+- Section 5: Assessment Comparison Summary — all comps sorted by $/sqft with subject row highlighted (★)
+- Negotiation Tracker — blank table for use during hearing
+
+**Technical changes:**
+- `protest-evidence-docx.service.ts` — complete rewrite (~390 lines); new helpers: `buildFilingLetter`, `buildSubjectDetailTable`, `buildRequestedValueSection`, `buildDcadProblemsSection`, `identifySalesCompIssues`, `buildTaxpayerEvidenceSection`, `buildAssessmentSummary`
+- `protest-evidence.service.ts` — `EvidencePacketInput` expanded with 13 new fields: `city`, `state`, `cadPropertyId`, `avm`, `equityMedianUsd`, `sqft`, `beds`, `baths`, `yearBuilt`, `lotSqft`, `percentGood`, `improvementsUsd`, `landValueUsd`, `purchasePrice`, `purchaseDate`, `hearingDate`; also added `city` to `SoldComp` type
+- `protest.routes.ts` — evidence-packet route updated to spread all new fields from worksheet into `packetInput`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/89
+
+---
+
+## FIX-168 — Tax Protest: Multiple data quality and UX fixes from E2E testing (2026-06-05)
+
+**Issues fixed (from E2E testing session):**
+
+1. **DCAD enrichment missing on initial load** — Redfin sold comps (Market Value Evidence / Unequal Appraisal) showed no sqft/beds/baths/assessed values until user manually clicked "Refresh Comps". Root cause: `triggerCadBackfill` (fire-and-forget at property creation) only fetched DCAD equity comps, not sold comp enrichment. Fix: added `enrichSoldCompsCad()` service function (extracted from `refresh-comps` route) and called it from `triggerCadBackfill` if `valuationDetailJson` is present. `household.routes.ts` now passes `valuationDetailJson` to `triggerCadBackfill`.
+
+2. **Sqft decimal display** — DCAD returns sqft as a float (e.g., "4523.9"). All sqft values from `saveCADComps`, `matchCadAssessedValue`, `enrichSoldCompsCad`, and improvement features lookups now go through `Math.round()` before storage.
+
+3. **Manual sold comp city field missing** — "Add Comparable Sale" modal had no city input; the full address including city went into the address field and city column showed "—". Fix: added city TextInput to modal, `city` field to `ManualSoldComp` type (both backend and frontend), wired through API schema and `addManualSoldComp` call.
+
+4. **Notes missing for Redfin comps in Unequal Appraisal table** — Redfin comp rows in the Unequal Appraisal evidence section had an empty notes cell. Fix: added `CompNotePopover` using the shared `soldCompsNotes` state (same as Market Value Evidence notes).
+
+5. **Agent chat: yes-man behavior and "I am limited" language** — System prompt rewritten to act as a property tax advisor, not a cheerleader. Agent now commits to positions, pushes back when evidence doesn't support user's target, and is instructed to try alternative DCAD search terms before giving up.
+
+6. **`matchCadAssessedValue` moved to service** — Extracted from `protest.routes.ts` local scope to `protest-worksheet.service.ts` as an exported function, enabling reuse in `enrichSoldCompsCad` and eliminating duplication.
+
+**Files changed:** `protest-worksheet.service.ts` (new: `matchCadAssessedValue`, `enrichSoldCompsCad`, `asRecord` helper; updated: `triggerCadBackfill`, `saveCADComps`, `ManualSoldComp`), `protest.routes.ts` (system prompt, schema, sqft rounding, removed local `matchCadAssessedValue`), `household.routes.ts` (`triggerCadBackfill` call site), `TaxProtestPage.tsx` (city field, notes for Redfin comps)
+
+---
+
+## FIX-162 — Tax Protest: Subject property appearing twice in Unequal Appraisal table (2026-06-05)
+
+**Root cause:** `saveCADComps` saved every result from `cadAdapter.searchByAddress()` to `protest_comp_cad`, including the subject property itself. `listWorksheetComps` then returned all rows — so the subject appeared once as a regular DCAD comp row and again as the dedicated subject row shown separately in the UI. Because the CAD API returns different assessed values across tax years, a property that had been refreshed for both 2025 and 2026 would accumulate two subject rows with different valuations.
+
+**Fix — prevention:** Added `searchAddress?: string` param to `saveCADComps`. When provided, the subject is identified by house-number prefix (same logic as `saveCadSubjectIds`) and excluded before the INSERT loop. All three call sites updated to pass the search address.
+
+**Fix — existing data:** `listWorksheetComps` query now JOINs `property` and filters `pcc.cad_property_id != p.cad_property_id`, so any subject rows already persisted in `protest_comp_cad` are silently excluded from results without requiring a migration.
+
+**Files changed:** `protest-worksheet.service.ts` (`saveCADComps`, `listWorksheetComps`, `triggerCadBackfill`), `protest.routes.ts` (two call sites)
+
+---
+
+## FIX-161 — Tax Protest: CAD evidence PDF parser broken for Denton CAD column-order extraction + sqft from improvement API (2026-06-05)
+
+**Parser column-order bug:** Denton CAD evidence PDFs extract text column-by-column, meaning comp data appears *before* each section heading (not after). The original `parseCadEvidencePdf` used `findSection(header)` which slices from the heading forward — capturing only the median summary, missing all comp rows. Added `findSectionBefore(text, header, prevMarker)` and restructured parsing: `findSectionBefore` for comp data, `findSection` retained for medians (which correctly follow their heading).
+
+**sqft from improvement API:** `getDCADImprovementFeatures` only returned `{ beds, baths }`. Extended to also return `sqft` aggregated from `livingArea` on the improvement list response (step 1). Updated cad-search enrichment and both refresh-comps callers in `protest.routes.ts` to populate `sqft` from the features result.
+
+**Test fixtures updated:** Both `protest-service.test.ts` and `protest.test.ts` synthetic CAD evidence fixtures were rewritten to match real Denton CAD extraction order (comp data before headings).
+
+**Files changed:** `cad-evidence-parser.service.ts`, `dcad.service.ts`, `protest.routes.ts`, `tests/protest-service.test.ts`, `tests/protest.test.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/87
+
+**Parser addendum (same commit):** Added `extractAddress()` helper to stop comp address extraction at Denton CAD section boundaries ("Situs Address", "Subject", "PROPERTY ID") — prevents last comp's address from bleeding into the public card section. Also corrected `equityMapText` source to use `findSection("EQUITY COMPARABLES MAP", "PUBLIC CARD WITH SKETCH")` (rows are after the heading, not before). Regex for both map parsers updated to handle Denton CAD's concatenated format with proper grouping.
+
+---
+
+## FIX-160 — Tax Protest: ARB script crash + sqft fallback + CAD search enrichment + evidence packet AVM removal (2026-06-05)
+
+**ARB script crash:** `generateArbScript` (arb-script.service.ts) threw "invalid JSON" because GPT-4o wraps JSON responses in ```json…``` markdown fences even when the prompt says not to. Fixed by stripping leading/trailing fences before JSON.parse. Added log.error with response preview for future debugging.
+
+**sqft/yearBuilt from CAD evidence:** When Redfin valuation detail is missing sqft or yearBuilt (common), the evidence packet, ARB script, and chat agent prompt all showed "—". Added fallback to `worksheet.cadEvidenceJson.livingAreaSqft` and `.yearBuilt` in the three places in protest.routes.ts that assemble these fields.
+
+**CAD search beds/baths enrichment:** The cad-search endpoint returned beds/baths as null for DCAD results because the search API doesn't include improvement details. Now calls `getDCADImprovementFeatures()` for any result where beds or baths are null (same pattern already used in sold-comps refresh). Results are fetched in parallel.
+
+**Evidence packet — removed AVM:** The valuation summary showed "AVM Estimate" (Redfin automated value) which is not valid Texas ARB evidence. Replaced with: CAD Assessed Value, Requested Value, Reduction Requested, DCAD Equity Median, Overassessment vs Equity. DCAD equity median comes from `cadEvidenceJson.equityAnalysis.medianIndValueUsd`. Bar chart retitled "§41.43 Unequal Appraisal — Assessed Value Comparison" and now plots assessed values (not market values) to support the unequal appraisal argument. Both PDF and DOCX updated.
+
+**Files changed:** `arb-script.service.ts`, `protest.routes.ts`, `protest-evidence.service.ts`, `protest-evidence-docx.service.ts`
+
+---
+
+## FIX-159 — Tax Protest: JSONB double-encode bug + data repair migration + test coverage (2026-06-05)
+
+**Bug:** Five write functions in `protest-worksheet.service.ts` passed `JSON.stringify(value)` into JSONB columns. The postgres driver re-serialized the string as a JSONB text value, causing reads to return `null` / `[]` instead of the real data. Silent data loss — no errors logged.
+
+**Affected columns (all JSONB):** `cad_evidence_json`, `manual_sold_comps_json`, `sold_comps_cad_json`, `arb_script_json`. (`excluded_sold_comps_json` is TEXT — `JSON.stringify` is correct there.)
+
+**Impact:** CAD evidence uploads and manual sold comps were stored but unreadable, so evidence packets silently omitted those sections.
+
+**Fix:** `protest-worksheet.service.ts` — removed `JSON.stringify()` wrapper from `saveCadEvidence`, `saveManualSoldComps`, `saveSoldCompsCadCache`, `saveArbScript`. No data repair migration needed: all affected columns were introduced in v5 migrations (0063, 0066) and never reached production.
+
+**Tests added:** `backend/tests/protest-service.test.ts` (24 new tests) covering worksheet state machine, manual comp CRUD, conversation persistence, deadline notifications, and CAD parser. `backend/tests/protest.test.ts` extended with 13 HTTP route integration tests (CAD comps, worksheet PATCH, CAD evidence upload/delete). Total backend: 551 tests.
+
+## FIX-158 — E2E: ESPP import modal test updated for topbar button ambiguity (2026-06-04)
+
+**GitHub:** closes #84
+
+After the topbar "New import" button was added (I-2 async import), `getByRole('button', { name: 'Import' })` resolved to two elements. Updated selector to `{ exact: true }`, scoped `Purchase PDF` / `Allocation CSV` assertions to the dialog, and updated submit button label to its actual value `Import Files`.
+
+**File:** `e2e/espp.spec.ts`
+
+## FIX-156 — Net Worth: Trend and Balance Sheet refresh buttons decoupled (2026-06-04)
+
+**GitHub:** closes #81
+
+Pressing either refresh button on the Net Worth page triggered both the Trend chart and Balance Sheet to reload because both `useLocalStorageCache` hooks shared the `"networth"` scope.
+
+- `frontend/src/cache.ts`: Added `"networth-history"` to `CacheScope`; updated property value/valuation CACHE_INVALIDATION_MAP entries to invalidate both `"networth"` and `"networth-history"` (property changes affect both sections).
+- `frontend/src/pages/NetWorthPage.tsx`: History/Trend hook changed to `"networth-history"` scope; Balance Sheet refresh icon changed to call `refreshSheetCache()` only instead of `reloadAll()`. Error "Retry load" button intentionally retains `reloadAll()` since it appears when both sections are in error.
+
+## FIX-157 — Payslip import: non-IBM employer profile no longer defaults to IBM (2026-06-04)
+
+**GitHub:** closes #82
+
+When importing a payslip PDF via an account of type `payslip`, the backend always returned the IBM profile (`ibm_pay_contributions_pdf`) regardless of which employer was configured. The `inferParserProfile` function returned IBM unconditionally for `payslip`+`.pdf` (line 81-83), bypassing the employer `parserProfileId` lookup that existed for PDF files matched by filename heuristic only.
+
+The fix mirrors the frontend logic:
+- Single employer → use `employer.parserProfileId ?? IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID`
+- Multiple employers → return `null` (user selects manually)
+- No employers → fall back to IBM
+
+**File:** `backend/src/modules/imports/infer-parser-profile.ts`
+
+---
+
+## SEC-155 — Member RBAC read isolation: payslips, export download, account list (2026-06-04)
+
+**GitHub:** closes #78
+
+Members could previously read financial data belonging to other household members because read paths were unscoped — write-path enforcement existed but read paths relied on optional client-driven query params.
+
+**Payslips (`backend/src/modules/payslip/payslip.routes.ts`):**
+- `GET /payslips` — member requests are now forced to `ownerScope=person, ownerPersonProfileId=authUser.personProfileId`; client-supplied scope params are ignored.
+- `GET /payslips/:id` — returns 404 if member is not the payslip owner.
+- `PATCH /payslips/:id` — returns 403 if member is not the payslip owner.
+- `POST /payslips/manual` — member cannot set `ownerPersonProfileId` to another profile; it is silently overridden to their own.
+
+**Export jobs (`backend/src/modules/export/exports.routes.ts`):**
+- `GET /exports/:jobId` — member gets 403 for jobs they did not create (`requested_by_user_id`).
+- `GET /exports/:jobId/download` — same gate. Full household `.hfb` exports created by owner/admin are inaccessible to members.
+- Restore remains owner-only (unchanged).
+
+**Accounts (`backend/src/modules/imports/imports.routes.ts`, `import-file-binding.service.ts`):**
+- `GET /imports/accounts` — members see only `household`-scoped accounts plus their own `person`-scoped accounts. Added `memberPersonProfileId` option to `listHouseholdFinancialAccounts`.
+
+**Docs:** `docs/PRD_AND_CRS.md` §3.11 data visibility expanded with explicit per-resource rules. `docs/API_REFERENCE.md` updated for `GET /exports/{jobId}`, `GET /exports/{jobId}/download`, `GET /imports/accounts`.
+
+---
+
+## FIX-228 — DCAD improvement two-step fix + manual sold comps + Redfin TTL 7d (2026-06-04)
+
+**What:**
+1. DCAD improvement features call was hitting `/improvement/{pAccountId}/features` (wrong — pAccountId used where imprvID expected → 204 No Content). Now does two steps: `GET /propertyaccount/{pAccountId}/improvement` to get imprvID, then `GET /propertyaccount/improvement/{imprvID}/features`.
+2. Manual sold comp add/delete for Market Value Evidence — `POST/DELETE /api/protest/:propertyId/sold-comps`. Persisted in new `manual_sold_comps_json` column on `protest_worksheet`. On Refresh, DCAD fills in assessed value and improvement features for any manual comps missing them.
+3. Redfin refresh TTL extended from 24 hours to 7 days — Redfin sold comp data does not change daily.
+4. Consolidated two duplicate Refresh buttons (Market Value + Unequal Appraisal) into one — both sections share the same underlying data.
+
+**Changes:**
+- `backend/db/migrations/0066_pt_manual_sold_comps.sql` — add `manual_sold_comps_json JSONB` to `protest_worksheet`.
+- `backend/src/modules/protest/dcad.service.ts` — `getDCADImprovementFeatures`: two-step flow, proper imprvID resolution, 204 handling.
+- `backend/src/modules/protest/protest-worksheet.service.ts` — `ManualSoldComp` type; `addManualSoldComp`, `removeManualSoldComp`, `saveManualSoldComps` functions; `manualSoldComps` in `ProtestWorksheetRecord`.
+- `backend/src/modules/protest/protest.routes.ts` — `POST/DELETE /:propertyId/sold-comps`; `GET /sold-comps` returns `manualSoldComps`; `refresh-comps` processes manual comps through DCAD.
+- `backend/src/modules/household/property.service.ts` — Redfin TTL 7 days.
+- `frontend/src/pages/TaxProtestPage.tsx` — `ManualSoldComp` type; state + callbacks; Add button + modal in Market Value Evidence; manual comp rows in table; remove duplicate Refresh from Unequal Appraisal.
+
+**GitHub:** closes #80
+
+---
+
+## FIX-227 — Redfin comp parser regression + DCAD improvement features for beds/baths (2026-06-03)
+
+**What:**
+1. Redfin comp parser regression from commit 36cda59: sash date index changed from `[2]` to `[3]`, but the actual Redfin API response has it at `[2]`. All comp sold dates were null.
+2. Redfin comp sqft index wrong: parser read `facts[22]` but actual JSON shows sqft at `facts[21]`. All comp sqft values were null from Redfin.
+3. DCAD has authoritative beds/baths via `GET /propertyaccount/improvement/{pAccountId}/features` (features array with "Bedrooms: X", "Plumbing: X"). Added `getDCADImprovementFeatures` to fetch these during comp refresh.
+4. `SoldCompCadEntry` extended with `cadAccountId`, `beds`, `baths`, `sqft` — populated from DCAD search and improvement features. `buildSoldComps` now falls back to cached DCAD data when Redfin values are null.
+
+**Changes:**
+- `backend/src/modules/household/realty-api.service.ts` — fix sash index `[3]`→`[2]`; fix sqft index `facts[22]`→`facts[21]`; update comments.
+- `backend/src/modules/protest/dcad.service.ts` — add `getDCADImprovementFeatures(pAccountId)` parsing "Bedrooms:" / "Plumbing:" feature strings.
+- `backend/src/modules/protest/protest-worksheet.service.ts` — extend `SoldCompCadEntry` with `cadAccountId`, `beds`, `baths`, `sqft`.
+- `backend/src/modules/protest/protest.routes.ts` — import `getDCADImprovementFeatures`; `matchCadAssessedValue` now captures `accountId`, `beds`, `baths`, `sqft`; refresh loop calls improvement features for comps with null beds/baths; `buildSoldComps` resolves beds/baths/sqft as `Redfin ?? DCAD`. Fixed `office` parameter: was passing `property.state` ("TX") to `getDCADImprovementFeatures` which caused `countyToOffice` to return "TX" instead of "Denton", resulting in auth failure — now passes `property.cadProvider === "dcad" ? "Denton" : null`.
+
+**GitHub:** closes #78
+
+## FIX-226 — DCAD appeal wiring + Unequal Appraisal pre-load + evidence section redesign (2026-06-03)
+
+**What:**
+1. DCAD appeal API endpoint existed but was never called by the frontend — appeal hearing date/status never shown.
+2. `getDCADAppeal` mapped wrong field names: used `r.hearingDate` but actual API returns `docketDt`; used `r.filedDate` but API returns `informalDt`. `appealType` was not extracted at all.
+3. Unequal Appraisal Evidence section only showed manually added DCAD comps, not the Redfin comps already present in Market Value Evidence.
+4. CAD Evidence section had confusing layout: one card called "CAD Evidence Packet" with two unrelated upload actions sharing the same visual level — redesigned into "Evidence Documents" with two clearly separated sub-sections.
+5. After evidence PDF upload with 0 extracted comps, UI showed nothing with no feedback.
+6. Pre-existing TS error: `LlmUsage.total_tokens` should be `totalTokens` in `payslip-async-import-reconcile.service.ts`.
+
+**Changes:**
+- `backend/src/modules/protest/dcad.service.ts` — `DCADAppealEntry`: add `appealType` field. `getDCADAppeal`: fix field mapping (`docketDt` → `hearingDate`, `informalDt` → `filedDate`, `appealType`/`appealStatus` correct precedence).
+- `backend/src/modules/protest/cad-adapters/cad-adapter.types.ts` — add `appealType` to `CadAppealEntry`.
+- `backend/src/modules/imports/payslip-async-import-reconcile.service.ts` — fix `total_tokens` → `totalTokens` (TS error from LLM refactor).
+- `frontend/src/pages/TaxProtestPage.tsx` — add `DcadAppeal` type; add `dcadAppeals` state; add `loadDcadAppeals` callback; wire into main useEffect; display DCAD appeal record (status badge, docket date, type, "Sync hearing date" button) in Protest Status card. Unequal Appraisal Evidence: pre-populate with Redfin sold comps (Redfin badge, violet), remove button excludes via `removeSoldComp`, CAD assessed ppsf for equity comparison. Evidence Documents: renamed from "CAD Evidence Packet"; split into two vertical sub-sections with matching header+description+action layout; zero-comps warning after upload.
+
+**GitHub:** closes #77
+
+## FIX-225 — DCAD value history field mapping + taxable parsing (2026-06-03)
+
+**What:**
+1. DCAD value history chart showed null/zero for all years because the code read `r.appraisedValue`, `r.marketValue`, etc., but the TrueProdigy API actually returns `owner*`-prefixed fields (`ownerAppraisedValue`, `ownerMarketValue`, `ownerLandValue`, `ownerImprovementValue`). All mapped values were null.
+2. `getDCADTaxable` returned an empty array because it called `extractRows(body)` against a response where `body.results` is an **object** (not array). `extractRows` couldn't handle this shape, returning `[]`. The taxable breakdown — including the current-year `estimatedTaxes` total — was never returned.
+3. Added debug logging (`log.debug`) on all DCAD request/response paths (valuehistory, taxable, appeal) for diagnosability.
+
+**Changes:**
+- `backend/src/modules/protest/dcad.service.ts` — `getDCADValueHistory`: add `owner*` prefix fallbacks first in all field reads. `getDCADTaxable`: remove `extractRows`, directly parse `body.results.taxingUnits` + `body.results.estimatedTaxes`; change return type from `Record<string, unknown>[]` to `DCADTaxableResult | null`; add `DCADTaxableUnit` and `DCADTaxableResult` types. Add `log.debug` throughout all DCAD API calls.
+- `backend/src/modules/protest/cad-adapters/cad-adapter.types.ts` — add `CadTaxableUnit` + `CadTaxableResult` types; update `CadAdapter.getTaxable` signature to `Promise<CadTaxableResult | null>`.
+- `backend/src/modules/protest/cad-adapters/dcad.adapter.ts` — import `CadTaxableResult`; update `getTaxable` return type.
+- `frontend/src/pages/PropertyDetailPage.tsx` — add `dcadEstimatedTaxes` state; add `loadDcadTaxable` callback calling `/dcad/taxable`; trigger in the CAD account `useEffect`; use `estimatedTaxes` to fill `taxesDue` for the most recent DCAD year in `chartData`.
+- `openapi/openapi.yaml` — update `/dcad/taxable` response schema to structured object.
+
+**GitHub:** Closes #76
+
+---
+
+## FIX-224 — Payslip async scheduler + line item add refresh (2026-06-03)
+
+**What:**
+1. IBM (and Deloitte) payslips uploaded via import were stuck in "processing" indefinitely after I-2 unified both profiles to the async queue. There was no background scheduler to drive the queue — `PAYSLIP_ASYNC_POLL_INTERVAL_MS` existed in env.ts but was wired to nothing.
+2. Adding a new line item to an existing payslip on the detail page (+ Add row → Add) saved correctly to the DB but the new row did not appear in the UI until the page was refreshed. Root cause: incremental state update in `handleAddLineItem` did not reliably reflect the server's grouped response in all rendering paths. Fixed by replacing the optimistic state merge with an `await load()` call that fetches the authoritative server state after a successful POST.
+
+**Changes:**
+- `backend/src/modules/imports/payslip-async-scheduler.service.ts` — new scheduler that queries all pending `openai_llm_payslip` import files across all households and calls `reconcilePayslipAsyncImportSession` for each unique session. Runs at `PAYSLIP_ASYNC_POLL_INTERVAL_MS` (default 120 s), fires once on startup.
+- `backend/src/server.ts` — import and call `startPayslipAsyncScheduler()` in the non-TEST branch (alongside existing schedulers).
+- `frontend/src/pages/PayslipDetailPage.tsx` — `handleAddLineItem`: replaced `applyLineItemMutation(data) + manual state merge` with `await load()` for guaranteed server-authoritative refresh after POST.
+
+**GitHub:** Closes #75
+
+---
+
+## FIX-222 — Net worth cache no longer wiped on logout (2026-06-03)
+
+**What:** `setToken(null)` called `clearAllCaches()` on logout, deleting all `hfa:*` localStorage keys including the `networth` and `dashboard` cached payloads. For a single-household app this is wrong — all members share the same household data, so there is no isolation reason to clear caches on session end. Every re-login hit the network cold, negating the 7-day / 24-hour TTL design. Also corrected ADMIN_GUIDE: balance-sheet snapshot TTL was documented as 1 hour but the code has used 24 hours since FIX-221.
+
+**Changes:**
+- `frontend/src/api.ts` — removed `clearAllCaches()` call and import from `setToken(null)` logout path; JWT removal remains the security boundary
+- `frontend/src/cache.ts` — updated JSDoc on `clearAllCaches` (function kept, used in tests)
+- `docs/ADMIN_GUIDE.md` — §7.2 snapshot TTL corrected 1h → 24h; §7.4 Logout updated to reflect new behaviour
+
+**GitHub:** Closes #74
+
+---
+
+## I-2 — IBM payslip imports unified to async queue in Import flow (2026-06-03)
+
+**What:** IBM payslip PDFs now go through the same async queue as Deloitte when imported via `POST /imports/sessions/:id/parse`. Previously IBM called OpenAI inline (synchronously during the HTTP request); Deloitte was already queued. The unification makes all LLM-based payslip profiles behave identically in the Import flow.
+
+**Changes:**
+- `payslip.types.ts` — added `LLM_PAYSLIP_PROFILE_IDS = [IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID, DELOITTE_PAYSLIP_PDF_PROFILE_ID]` as the single source of truth for which profiles are async
+- `import-parser.service.ts` — widened `if (profileId === DELOITTE_PAYSLIP_PDF_PROFILE_ID)` to `if (LLM_PAYSLIP_PROFILE_IDS.includes(profileId))`. Log message de-branded from "Deloitte" to generic "LLM payslip"
+- `payslip-async-import-reconcile.service.ts` — SQL queries use `IN (?, ?)` for both IBM and Deloitte profile IDs (was single-value `= ?` hardcoded to Deloitte). Hardcoded `DELOITTE_PAYSLIP_PDF_PROFILE_ID` in JSON confidence_summary fields replaced with `file.parser_profile_id`
+- `ImportWorkspacePage.tsx` — 4 banner/help strings de-branded from "Deloitte PDF(s)" to "payslip PDF(s)"
+- `tests/payslip-upload.test.ts` — IBM import session test updated to expect `asyncPayslipPending: 1`, call `reconcile-payslip-async?force=true`, then check payslip list
+
+**Scope:** Direct `POST /payslips/upload` for IBM is unchanged — it still calls OpenAI inline (acceptable; not a timeout risk in practice). Only the Import session path is affected.
+
+**Why:** Root cause of the drift: IBM was originally parsed by a local PDF library (synchronous, no LLM) so inline processing was correct. When IBM was switched to LLM, the async queue path was never extended to cover it. The design intent was always to treat all payslips the same.
+
+**GitHub:** Closes #26
+
+---
+
+## LLM-1 followup — Payslip vision uses chatModel(); OPENAI_MODEL default → gpt-4.1-mini (2026-06-02)
+
+**What:** Reverted payslip PDF extraction (`extract-payslip-llm.ts`) from `strongModel()` back to `chatModel()`. Also updated `OPENAI_MODEL` default from `gpt-4o-mini` to `gpt-4.1-mini` (newer, confirmed working on both IBM and Deloitte stubs). `strongModel()` is now exclusively for the protest tool-use loop and ARB script.
+
+**Why:** The LLM-1 refactor inadvertently moved payslip from `OPENAI_MODEL` (what it was using before, i.e. `gpt-4.1-mini`) to `OPENAI_STRONG_MODEL` (`gpt-4o`), a ~6× cost increase with no observed quality benefit for IBM stubs. Deloitte stubs were also working on mini in testing. Backlog item LLM-2 tracks: if Deloitte extraction errors appear in prod, revisit.
+
+**Files:** `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts`, `backend/src/config/env.ts`, `.env.example`, `docs/BACKLOG.md`
+
+---
+
+## LLM-1 — Provider-agnostic LLM adapter layer; no hardcoded model names (2026-06-02)
+
+**What changed:**
+- Introduced `backend/src/llm/` module: four typed adapters (`ChatCompletionAdapter`, `ToolUseAdapter`, `VisionAdapter`, `EmbeddingAdapter`) with OpenAI and Anthropic implementations.
+- All six LLM call sites refactored to use adapters — no raw SDK imports remain outside the `llm/providers/` directory.
+- Two model tiers surfaced via `chatModel()` (fast/cheap: `OPENAI_MODEL` / `ANTHROPIC_MODEL`) and `strongModel()` (capable: `OPENAI_STRONG_MODEL` / `ANTHROPIC_STRONG_MODEL`).
+- New env vars: `OPENAI_STRONG_MODEL` (default `gpt-4o`), `ANTHROPIC_STRONG_MODEL` (default `claude-sonnet-4-6`), `EMBEDDING_PROVIDER` (default `openai`). `ANTHROPIC_MODEL` default changed to `claude-haiku-4-5-20251001`.
+- `isLlmConfigured()` is now provider-aware (checks correct key for active `LLM_PROVIDER`).
+- All `OPENAI_NOT_CONFIGURED` error codes → `LLM_NOT_CONFIGURED`.
+- Payslip `LlmUsage.total_tokens` renamed to camelCase `totalTokens` throughout.
+
+**Why:** Every LLM call site previously hard-coded `"gpt-4o"` or `"gpt-4o-mini"` strings and imported the OpenAI SDK directly. Switching provider or model required touching six separate files. The adapter layer lets `LLM_PROVIDER=anthropic` work end-to-end with only env changes.
+
+**Files:** `backend/src/llm/types.ts`, `backend/src/llm/chat.ts`, `backend/src/llm/tool-use.ts`, `backend/src/llm/vision.ts`, `backend/src/llm/embeddings.ts`, `backend/src/llm/index.ts`, `backend/src/llm/providers/openai.ts`, `backend/src/llm/providers/anthropic.ts`, `backend/src/config/env.ts`, `backend/src/modules/insights/llm-provider.service.ts`, `backend/src/modules/protest/arb-script.service.ts`, `backend/src/modules/protest/embedding.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/payslip/llm-extract/extract-payslip-llm.ts`, `backend/src/modules/payslip/payslip-parse.service.ts`, `.env.example`, `docs/ADMIN_GUIDE.md`
+
+**GitHub:** closes #73
+
+---
+
+## OPS-1/2/3/4 — Convert all schedulers to node-cron; add import file purge (2026-06-02)
+
+**What changed:**
+- **OPS-1 (GDrive backup):** Replaced 30-minute `setInterval` heartbeat with `node-cron` firing nightly at 11 PM CT (`"0 23 * * *"`, `America/Chicago`). `checkAndQueueDueBackups()` logic unchanged — still guards per-household `backup_frequency_hours`.
+- **OPS-2 (Realty valuation):** Replaced 6-hour `setInterval` heartbeat with `node-cron` firing on the 1st of every month at 10 PM CT (`"0 22 1 * *"`). 28-day SQL guard in `checkAndRefreshProperties()` unchanged.
+- **OPS-3 (Export cleanup):** Replaced `setInterval` hourly with `node-cron` `"0 * * * *"`. No timezone dependency; purely TTL-based cleanup.
+- **OPS-4 (Import file purge — new):** Nightly at 2 AM CT (`"0 2 * * *"`), `purgeStaleImportFiles()` deletes on-disk staged import files for sessions older than 30 days and sets `stored_path = NULL`. DB rows (import_session, import_file) are never deleted — audit trail preserved.
+
+**Why:** All schedulers now use deterministic wall-clock firing via IANA timezones rather than elapsed-time heartbeats that could drift or be skipped on cold start. OPS-4 prevents unbounded disk growth from abandoned import sessions.
+
+**Files:** `backend/src/modules/gdrive/gdrive-scheduler.service.ts`, `backend/src/modules/household/realty-scheduler.service.ts`, `backend/src/modules/export/export-job.service.ts`, `backend/src/modules/imports/import-session.service.ts`, `backend/src/server.ts`
+
+**GitHub:** closes #68, closes #69, closes #70, closes #71
+
+---
+
+## OPS — Env-drive embedding/RAG config; remove hardcoded model strings (2026-06-02)
+
+**What:** Moved all hardcoded embedding/RAG values out of source code and into env vars:
+- `EMBEDDING_MODEL` (default `text-embedding-3-small`) — controls OpenAI embedding model; changing it requires a DB migration + re-embed
+- `EMBEDDING_MAX_INPUT_CHARS` (default `8000`) — truncation limit per chunk before embedding API call
+- `RAG_TOP_K` (default `5`) — number of nearest-neighbour chunks returned by similarity query
+- `RAG_MIN_SIMILARITY` (default `0.65`) — cosine similarity floor; chunks below filtered from context
+- Added `optionalFloatEnv()` helper to `env.ts` for bounded float env vars (no prior helper existed)
+
+**Why:** Model names and RAG tuning values change frequently; hardcoding forces code edits for operational changes. All values now configurable without a redeploy for tuning, and switchable to another embedding provider with only env changes.
+
+**Files:** `backend/src/config/env.ts`, `backend/src/modules/protest/embedding.service.ts`, `backend/src/modules/protest/document-store.service.ts`, `.env.example`, `docs/ADMIN_GUIDE.md`, `docs/PRD_AND_CRS.md` (D-019 updated)
+
+---
+
+## PT-18 — Protest flow architectural redesign: unified protest_comp, DcadEnrichmentService, 5-step backfill (2026-06-09)
+
+- **Migration 0068** (`0068_protest_comp_unified.sql`): new `protest_comp` table replaces `protest_comp_cad` + 4 JSONB blobs (`sold_comps_cad_json`, `sold_comps_notes_json`, `excluded_sold_comps_json`, `manual_sold_comps_json`); adds `appeal_json JSONB` to `protest_worksheet`; adds 14 CAD value columns to `property` (land, improvement, market, appraised, SU exclusion, homestead cap, net appraised, full value history JSON, taxable JSON, sqft/beds/baths/pool, enriched_at, appraisal notice S3 id + fetched_at)
+- **New `dcad-enrichment.service.ts`**: `DcadCanonicalProperty` unified output type; `fetchDcadCanonical()` (search → improvement → optional value history + taxable); `fetchDcadCanonicalBatch()`; `fetchDcadAppeal()`; `fetchDcadAppraisalNoticeS3Id()` (appraisal notice PDF link via shownoticelink endpoint)
+- **Rewritten `protest-worksheet.service.ts`**: `UnifiedComp` type mapping `protest_comp` columns; `listWorksheetComps()` reads from `protest_comp`; `addManualComp()`, `excludeComp()`, `deleteComp()`, `updateCompNote()` all by UUID; `saveCadEvidenceComps()` inserts PDF comps; `saveRedfinComps()` saves Redfin comps at valuation fetch; `runDcadBackfill()` 5-step pipeline (subject enrichment, DCAD comps insert, improvement enrichment with 150ms throttle, Redfin/cad_evidence merge with deduplication, appeal sync); `syncAppealStatus()` persists appeal data + hearing_date to worksheet
+- **Updated `property.service.ts`**: `refreshPropertyValuation` saves Redfin comps to `protest_comp` via `saveRedfinComps()` (fire-and-forget)
+- **Updated `protest.routes.ts`**: removed `/sold-comps` endpoints (GET/POST/DELETE); removed `/sold-comps/exclusions` and `/sold-comps/notes`; comp endpoints use UUID `id` instead of `cadPropertyId`; new `PATCH /comps/:compId/exclude`; `POST /refresh-comps` simplified to `refreshPropertyValuation` + fire-and-forget `runDcadBackfill`; evidence-packet and protest-brief read from `protest_comp` directly
+- **Updated `household.routes.ts`**: property creation fires `runDcadBackfill` instead of old `triggerCadBackfill`
+- **Updated `export-registry.ts`**: `protest_comp` registered (replaced `protest_comp_cad`)
+- **Updated `TaxProtestPage.tsx`** (2026-06-10): migrated from multi-endpoint sold-comps approach to unified `protest_comp` API; removed `soldComps`/`manualSoldComps`/`excludedSoldComps`/`soldCompsNotes` state; added `marketComps` + `equityComps` memos; Market Evidence table reads from `marketComps` (source filter: redfin/manual/cad_evidence); Equity Evidence table reads from all non-excluded `equityComps`; source badges (DCAD/Redfin/Manual/CAD Evidence) on every comp row; comp notes and removal use UUID; "View Appraisal Notice" button in property header (opens `/api/protest/:id/appraisal-notice-pdf` in new tab when `cadAccountId` is set)
+- **Bug fixes (2026-06-10)**: `runDcadBackfill` was missing `cad_provider = 'dcad'` in the UPDATE, causing DCAD display routes to return 404; DCAD display routes now use `inferCadProvider(property.state)` as fallback when `cadProvider` is null; `getDCADAppeal` crashed on 204 No Content (no-appeal response) with "Unexpected end of JSON input" — fixed by short-circuiting before `res.json()`; `RATE_LIMITED` error code from Redfin refresh was mapping to HTTP 500 instead of 429
+- **GitHub:** closes #101
+
+**Files:** `backend/db/migrations/0068_protest_comp_unified.sql`, `backend/src/modules/protest/dcad-enrichment.service.ts` (new), `backend/src/modules/protest/dcad.service.ts`, `protest-worksheet.service.ts`, `protest.routes.ts`, `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `backend/src/modules/export/export-registry.ts`, `backend/db/seeds/dev/dev_0008_seed_properties.sql`, `frontend/src/pages/TaxProtestPage.tsx`
+
+---
+
+## PT-17 — AI oral ARB script generation (2026-06-02)
+
+- New `POST /api/protest/:propertyId/generate-arb-script?year=N` endpoint generates a 6-step oral hearing script via GPT-4o
+- Script includes: negotiation thresholds (open ask / ideal settle / walk-away min), §41.41 and §41.43 arguments with IF/THEN appraiser rebuttals, closing ask, panel Q&A
+- Script persisted to `protest_worksheet.arb_script_json` (migration 0065); survives page reload
+- Frontend: ARB Oral Script card visible when `status === 'arb'`; Accordion sections, negotiation table, Copy Script and Regenerate buttons
+- Uses all available evidence: CAD evidence packet, equity comps with notes, Redfin sold comp research notes, AI strategy
+- **GitHub:** closes #66
+
+**Files:** `backend/db/migrations/0065_pt17_arb_script.sql`, `backend/src/modules/protest/arb-script.service.ts` (new), `protest-worksheet.service.ts`, `protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `docs/USER_GUIDE.md`, `openapi/openapi.yaml`
+
+---
+
+## PT-12 — RAG document store + conversation summarization (2026-06-02)
+
+- New `protest_document_chunks` table with pgvector 1536-dim embeddings (migration 0064)
+- CAD evidence PDF and arbitrary uploaded files (PDF + image) chunked + embedded at upload time
+- Chat route retrieves top-5 similar chunks per query and injects into system prompt
+- Rolling summarization: conversation history > 30 turns triggers async gpt-4o-mini compression
+- Cycle summary generated on protest close; injected as prior-year context next cycle
+- New endpoints: POST/GET/DELETE `/api/protest/:propertyId/documents`, updated POST `/api/protest/:propertyId/chat`
+- `docker-compose.yml` switched to `pgvector/pgvector:pg18`
+- **GitHub:** closes #62
+
+**Files:** `backend/db/migrations/0064_pt12_document_chunks.sql`, `embedding.service.ts`, `chunking.service.ts`, `document-store.service.ts`, `protest-worksheet.service.ts`, `protest.routes.ts`, `export-registry.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+
+---
+
+## PT-9 (2026-06-02): CAD evidence PDF upload + parse + comp annotations — closes #59
+
+**What changed:**
+- New upload endpoint `POST /api/protest/:id/cad-evidence` (multer memoryStorage, 20 MB limit). Parses the official DCAD evidence packet PDF using `extractPdfText` + regex section detection. Extracts both comp tables (sales + equity), medians, and subject property details from the public card page.
+- New `DELETE /api/protest/:id/cad-evidence` to clear stored evidence.
+- Migration 0063: `cad_evidence_json JSONB`, `cad_evidence_filename TEXT`, `sold_comps_notes_json JSONB` added to `protest_worksheet`; `notes TEXT` added to `protest_comp_cad`.
+- New `PATCH /api/protest/:id/sold-comps/notes` — saves a free-text annotation on any Redfin sold comp (keyed by address in `sold_comps_notes_json` via `jsonb_set`).
+- New `PATCH /api/protest/:id/comps/:cadPropertyId/notes` — saves a free-text annotation on any equity comp (`protest_comp_cad.notes`).
+- `GET /api/protest/:id/worksheet` now returns `cadEvidenceJson`, `cadEvidenceFilename`, `soldCompsNotesJson`.
+- `GET /api/protest/:id/comps` now returns `notes` on each comp row.
+- `buildSystemPrompt` updated: injects parsed CAD evidence (both comp tables, medians, §41.43 delta) and all comp annotations into the AI system prompt context.
+- New parser service `cad-evidence-parser.service.ts`: section-detection + regex extraction for DCAD evidence packet format.
+- **UI — CAD Evidence card**: Upload button, §41.43 signal badge (green if CAD equity median < assessed value), DCAD Sales comps table (§41.41), DCAD Equity comps table (§41.43).
+- **UI — Comp annotations**: Notebook icon on every row in Market Value + Unequal Appraisal tables. Clicking opens a Popover Textarea; saves on blur with optimistic UI update.
+
+**Files:** `backend/db/migrations/0063_pt9_cad_evidence.sql`, `backend/src/modules/protest/cad-evidence-parser.service.ts` (new), `protest-worksheet.service.ts`, `protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+
+---
+
+## PT-11 (2026-06-01): Auto-fetch CAD assessed values for Redfin sold comps (§41.43 support)
+
+- **Type:** Feature — closes #61
+- **What changed:**
+  - `POST /api/protest/:propertyId/refresh-comps` now auto-fetches CAD-assessed values for Redfin sold comp addresses (TX properties only) using the registered CAD adapter. Lookups are sequential with a 200 ms delay; up to 6 new addresses per refresh.
+  - CAD assessed values are cached in a new `sold_comps_cad_json JSONB` column on `protest_worksheet` (migration 0062). Already-cached addresses are skipped on subsequent refreshes.
+  - `GET /api/protest/:propertyId/sold-comps` now returns `cadAssessedValueUsd` on each comp, sourced from the cache.
+  - `SoldComp` type gains `cadAssessedValueUsd: number | null` in both backend (`protest-evidence.service.ts`) and frontend.
+  - Market Value Evidence table gains two new columns for TX properties: **CAD Assessed** and **§41.43 Ratio** (CAD ÷ Sold Price). Comps with a lower ratio than the subject are highlighted green.
+  - Subject row shows its own CAD assessed value and ratio in the new columns.
+  - Evidence PDF (`drawSoldCompsTable`) gains CAD Assessed and §41.43 Ratio columns when any comp has data.
+  - Toast updated: shows "N §41.43 values" when new CAD values are fetched.
+  - `POST /refresh-comps` response now includes `soldCompsCadFetched: number`.
+- **Migration:** `0062_pt11_sold_comps_cad.sql` — adds `sold_comps_cad_json JSONB DEFAULT '{}'::jsonb` to `protest_worksheet`.
+- **New service function:** `saveSoldCompsCadCache(propertyId, householdId, taxYear, cache)` in `protest-worksheet.service.ts`.
+- **Files changed:** `backend/db/migrations/0062_pt11_sold_comps_cad.sql`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest-evidence.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+- **GitHub:** https://github.com/mangatrai/grove/issues/61
+
+---
+
+## PT-13 (2026-06-01): On-demand comps refresh button
+
+- **Type:** Feature — closes #63
+- **What changed:**
+  - "Refresh" button added to both the Market Value Evidence card header and the Unequal Appraisal Evidence card header on TaxProtestPage.
+  - Single click refreshes both Redfin sold comps (via RealtyAPI) and CAD comps (via the registered adapter) in one round-trip. UI state (`comps`, `soldComps`) updates immediately from the response — no page reload needed.
+  - Stale comps alert text updated to reference the Refresh button rather than asking the AI.
+  - Empty sold-comps state replaced "Ask AI" button with a direct "Refresh Comps" button.
+  - 24-hour Redfin cooldown respected: `RATE_LIMITED` surfaces as a yellow toast, not an error.
+- **New backend route:** `POST /api/protest/:propertyId/refresh-comps` — calls adapter `searchByAddress` + `saveCADComps` + `refreshPropertyValuation`; returns `{ cad, redfin, comps, soldComps }`.
+- **Files changed:** `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+- **GitHub:** https://github.com/mangatrai/grove/issues/63
+
+---
+
+## PT-15 (2026-06-01): Fix Add Comp modal — address-only CAD search with real IDs
+
+- **Type:** Feature — closes #65
+- **What changed:**
+  - Add Comp modal is now a 3-step flow: **search → results → (manual fallback)**
+  - Step 1: user types an address and clicks "Search CAD". Backend calls the registered CAD adapter (`searchByAddress`) and returns stripped `CadSearchResult[]` plus `hasAdapter` flag.
+  - Step 2 (CAD results): shows selectable result cards (address, sqft/bd/ba/year, assessed/market values). "Add Selected" submits with the real `cadPropertyId` from the adapter — no more `manual-<uuid>` for CAD-sourced comps.
+  - Auto-advance to manual step when `hasAdapter: false` (county not supported) with an explanatory alert.
+  - Step 3 (manual): all original fields preserved; "Back" returns to search.
+- **New backend route:** `GET /api/protest/:propertyId/cad-search?address=&year=` — adapter lookup, `raw` field stripped before response.
+- **Backend service:** `addCADComp` now accepts optional `existingCadPropertyId`; if supplied, uses it directly and sets `raw_json: {}` instead of `{ manual: true }`.
+- **Files changed:**
+  - `backend/src/modules/protest/protest.routes.ts` — new route + `cadPropertyId` in `addCompBodySchema`
+  - `backend/src/modules/protest/protest-worksheet.service.ts` — `addCADComp` signature
+  - `frontend/src/pages/TaxProtestPage.tsx` — new state, `searchCad`/`resetAddCompModal` callbacks, modal JSX
+- **GitHub:** closes #65
+
+---
+
+## PT-14 (2026-06-01): CAD adapter pattern — generic county support
+
+- **Type:** Architecture refactor — closes #64
+- **Migration:** `0061_pt14_cad_adapter_columns.sql`
+  - `property.dcad_property_id` → `property.cad_property_id`
+  - `property.dcad_p_account_id` → `property.cad_account_id`
+  - `property.cad_provider TEXT` (new) — stores adapter key e.g. `"dcad"`
+  - `protest_comp_cad.dcad_property_id` → `protest_comp_cad.cad_property_id`
+  - Unique index renamed `uq_protest_comp_property_year_cadid`
+- **New files:** `backend/src/modules/protest/cad-adapters/`
+  - `cad-adapter.types.ts` — `CadProperty`, `CadValueHistoryEntry`, `CadAppealEntry`, `CadAdapter` interface
+  - `dcad.adapter.ts` — `DcadAdapter` implements `CadAdapter`; wraps existing `dcad.service.ts` API calls
+  - `registry.ts` — `getCadAdapter(provider)`, `inferCadProvider(state)` (TX → `"dcad"`)
+- **Updated services/routes:**
+  - `protest-worksheet.service.ts` — `triggerDCADBackfill` → `triggerCadBackfill` (uses registry, supports any state); `saveDCADSubjectIds` → `saveCadSubjectIds` (sets `cad_provider` column); `saveCADComps`/`deleteCADComp`/`addCADComp`/`listWorksheetComps` use `cad_property_id` column; `ProtestComp.dcadPropertyId` → `cadPropertyId`
+  - `protest.routes.ts` — all DCAD data routes (`/dcad/value-history`, `/dcad/taxable`, `/dcad/appeal`) now use registry + adapter; `fetch_dcad_comps` AI tool uses adapter; no direct `dcad.service.ts` imports remain in routes
+  - `household.routes.ts` — `triggerDCADBackfill` → `triggerCadBackfill`; state guard removed (adapter handles unsupported states gracefully)
+  - `property.service.ts` — `PropertyRecord.dcadPropertyId`/`dcadPAccountId` → `cadPropertyId`/`cadAccountId`/`cadProvider`
+  - `frontend/src/pages/PropertyDetailPage.tsx` + `TaxProtestPage.tsx` — field renames to match
+- **Adding Shelby County TN:** create `shelby.adapter.ts` implementing `CadAdapter`, register as `{ "shelby-tn": new ShelbyAdapter() }` in `registry.ts`, add `inferCadProvider("TN")` → `"shelby-tn"`.
+
+---
+
+## PT-10 (2026-06-01): Comp management UI — Add/Remove on evidence tables
+
+- **Type:** Feature — closes #60
+- **Backend:**
+  - Migration `0060_pt10_excluded_sold_comps.sql` — adds `excluded_sold_comps_json TEXT DEFAULT '[]'` to `protest_worksheet`.
+  - `protest-worksheet.service.ts` — added `deleteCADComp`, `addCADComp`, `setExcludedSoldComps`, `getExcludedSoldComps` (plus `ManualComp` type).
+  - `protest.routes.ts`:
+    - `DELETE /api/protest/:propertyId/comps/:dcadPropertyId?year=` — hard-deletes a CAD comp from `protest_comp_cad`.
+    - `POST /api/protest/:propertyId/comps` — manually adds a CAD comp (body: `year`, `addressLine1`, optional `city/sqft/beds/baths/yearBuilt/assessedValueUsd/marketValueUsd`). Returns updated `comps` array.
+    - `PATCH /api/protest/:propertyId/sold-comps/exclusions` — saves an exclusion list of Redfin sold-comp addresses per worksheet year.
+    - `GET /api/protest/:propertyId/sold-comps` — now accepts `?year=` and returns `excluded: string[]` alongside `comps`.
+    - Evidence packet (`GET /api/protest/:propertyId/evidence-packet`) — now filters sold comps by `excluded_sold_comps_json` so the PDF/DOCX respects removals.
+- **Frontend:** `TaxProtestPage.tsx`
+  - Market Value Evidence table — trash icon per row (optimistically updates `excludedSoldComps`, PATCHes exclusions). Header count shows `(N hidden)` when comps are removed.
+  - Unequal Appraisal Evidence table — trash icon per row (DELETEs comp), "Add Comp" button opens a modal form (address, city, sqft, beds, baths, year built, assessed value). Backend returns updated comp list on success.
+- **Files:** `backend/db/migrations/0060_pt10_excluded_sold_comps.sql`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `openapi/openapi.yaml`, `docs/API_REFERENCE.md`
+- **GitHub:** closes #60
+
+---
+
+## FIX-RE-8 (2026-06-01): Equity chart empty with single snapshot; Assessment History missing DCAD years
+
+- **Type:** Bug fix + feature integration — refs #45
+- **Issues fixed:**
+  1. **Equity chart**: Frontend required `equityHistory.length >= 2` before showing chart. First-time property always has exactly 1 snapshot. Changed threshold to `>= 1`. Added `dot={{ r: 4 }}` to lines so single-point data is visible. Updated empty state message.
+  2. **Assessment History**: Chart only consumed `valuationDetail.taxHistory` (Redfin public records). 2023/2024 data missing because Redfin didn't have it. Now fetches `GET /api/protest/:propertyId/dcad/value-history` after property loads (if `dcadPAccountId` is set). **DCAD is the authority for tax assessed values** — for every year DCAD has data, it overrides Redfin's assessedValue. DCAD also adds years Redfin didn't return. Slice extended from 5 to 7 years.
+- **Frontend:** `PropertyDetailPage.tsx` — added `dcadPAccountId` to type, `dcadValueHistory` state, `loadDcadValueHistory` callback, secondary useEffect, DCAD merge in `chartData` useMemo.
+- **Files:** `frontend/src/pages/PropertyDetailPage.tsx`
+
+---
+
+## PT-8 (2026-06-01): DCAD account APIs — value history, taxable breakdown, appeal status
+
+- **Type:** Feature — closes #56
+- **What:** Three new protest routes backed by TrueProdigy account-specific endpoints:
+  - `GET /api/protest/:propertyId/dcad/value-history` → year-by-year CAD tax assessed value history
+  - `GET /api/protest/:propertyId/dcad/taxable` → current taxable value breakdown after exemptions
+  - `GET /api/protest/:propertyId/dcad/appeal` → live protest/appeal status from DCAD
+- **How subject is identified:** `triggerDCADBackfill` (and the `fetch_dcad_comps` AI tool call) now extract `dcadPropertyId` and `dcadPAccountId` from DCAD search results and store them on the `property` row. Subject is matched by house number prefix in the search address; falls back to the first result.
+- **Migration:** `0059_pt8_dcad_property_ids.sql` — adds `dcad_property_id TEXT` and `dcad_p_account_id BIGINT` to `property` table.
+- **Files:** `backend/db/migrations/0059_pt8_dcad_property_ids.sql`, `backend/src/modules/household/property.service.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/modules/protest/dcad.service.ts` (unchanged — functions already written), `openapi/openapi.yaml`
+- **GitHub:** https://github.com/mangatrai/grove/issues/56
+
+---
+
+## FIX-RE-6 (2026-06-01): Add diagnostic logging for empty Redfin comps on protest page
+
+- **Type:** Observability improvement — refs #45
+- **What:** `GET /:propertyId/sold-comps` returns an empty array when `property.valuation_detail_json.comps` is empty, but nothing surfaced why. Root cause unknown (API may omit `avmRoot.comparables` in `/detailsbyid` responses; or `parseComps` structure may no longer match).
+- **Fix:** Added two warn-level logs in `parseRedfinResponse()` (`realty-api.service.ts`):
+  1. Logs `avmRoot` keys when `comparables` is missing or empty — distinguishes "API didn't return it" from "it's there but parse fails".
+  2. Logs first-entry keys when `parseComps` discards all entries from a non-empty array — surfaces structure mismatch.
+  Also added `compsCount` to `refreshPropertyValuation: done` log in `property.service.ts`.
+- **FIX-RE-7 note:** 24h cooldown on `refreshPropertyValuation()` was already implemented at `property.service.ts:366-371`. Issue #46 closed as already-fixed.
+- **Files:** `backend/src/modules/household/realty-api.service.ts`, `backend/src/modules/household/property.service.ts`
+- **GitHub:** https://github.com/mangatrai/grove/issues/45
+
+---
+
+## FIX-ESPP-12 (2026-05-31): ESPP salary/other deduction not summed across dual payslips — test gap + stale data fix
+
+- **Type:** Test coverage gap + data-repair endpoint — closes #55
+- **What:** FIX-ESPP-11 (`c4cd463`) removed `GROUP BY ps.id LIMIT 1` from `findPayslipLink`, which correctly aggregates `espp_discount_payslip`, `espp_salary_deduction`, and `espp_other_deduction` across all payslips on the purchase date. However:
+  1. The ESPP-11 test only asserted `esppDiscountPayslip` — salary/other were never verified and could silently regress.
+  2. Batches imported before FIX-ESPP-11 still had single-payslip values in the DB. No repair path existed without full PDF re-import.
+- **Fix:**
+  - Extended ESPP-11 test: seeds "ESPP (Stock Salary)" ($500 + $400) and "ESPP (Stock Other)" ($10 + $5) on both payslips; asserts totals $900 and $15 respectively alongside the $120 discount.
+  - Added `recalculatePayslipLinks(householdId)` service function that re-runs `findPayslipLink` for every batch and updates `payslip_id`, `espp_discount_payslip`, `espp_salary_deduction`, `espp_other_deduction`.
+  - Exposed as `POST /espp/recalculate-payslip-links` (auth-gated, returns `{ ok: true, updated: N }`). Call once to repair existing batch rows without re-importing PDFs.
+- **Files:** `backend/tests/espp.test.ts` (test extension retained); recalculate endpoint reverted — use the one-time SQL below instead.
+- **One-time data repair SQL** (run in psql, single date first to verify, then full):
+  ```sql
+  -- Single date (verify first):
+  BEGIN;
+  UPDATE espp_batch b SET ... WHERE b.purchase_date = '2026-MM-DD';
+  SELECT purchase_date, espp_salary_deduction, espp_other_deduction FROM espp_batch;
+  ROLLBACK; -- or COMMIT once satisfied
+  ```
+  See CHANGE_HISTORY for full SQL.
+- **GitHub:** https://github.com/mangatrai/grove/issues/55
+
+---
+
+## FIX-ESPP-2c (2026-05-31): `/espp/stock-quote` missing from Vite dev proxy — chip never loads in dev
+
+- **Type:** Bug fix — closes #54
+- **What:** `frontend/vite.config.ts` listed specific ESPP sub-routes in the Vite proxy (`/espp/batches`, `/espp/summary`, etc.) but omitted `/espp/stock-quote`. In dev mode, Vite forwards proxied paths to the Express backend (port 4000). Without the entry, the browser resolved `/espp/stock-quote` to the Vite dev server (port 3000), got no response, and `stockQuote` state stayed null — the IBM price chip never appeared.
+- **Fix:** Added `"/espp/stock-quote": api` to the proxy list.
+- **Files:** `frontend/vite.config.ts`, `docs/CHANGE_HISTORY.md`
+- **GitHub:** https://github.com/mangatrai/grove/issues/54
+
+---
+
+## FIX-ESPP-2b (2026-05-31): Stock quote scheduler mode + API path prefix bugs
+
+- **Type:** Bug fixes — closes #52, closes #53
+- **What:**
+  - `startStockQuoteScheduler()` was inside the `MODE !== TEST` guard in `server.ts`. Since `MODE` defaults to `"TEST"`, the scheduler never started in dev and the IBM price chip showed nothing. Yahoo Finance is free and keyless — no reason to gate it. Moved above the guard so it runs in all modes. (GH #53)
+  - `/espp` was missing from `API_PATH_PREFIXES` in `app.ts`. In PROD, the SPA middleware intercepts any unregistered path and serves `index.html`. All ESPP endpoints returned the SPA shell instead of JSON in production. (GH #52)
+  - Removed 1-hour TTL from `getStockQuote()`. Cache is now served as-is until the scheduler updates it — on-demand Yahoo Finance calls at arbitrary hours made no sense. First request after server start fetches once if cache is empty.
+- **Files:** `backend/src/server.ts`, `backend/src/app.ts`, `backend/src/modules/espp/espp-stock.service.ts`, `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md`
+
+---
+
+## CR-ESPP-2 (2026-05-31): IBM last close price chip on ESPP screen
+
+- **Type:** Feature — closes #36
+- **What:** Adds a compact IBM stock quote chip to the ESPP page header row ("IBM · $XXX.XX · close YYYY-MM-DD").
+  - **New service** (`espp-stock.service.ts`): Fetches IBM quote via `yahoo-finance2` v3 (`new YahooFinance()`). 1-hour in-memory TTL. Scheduled refresh at ~4:15 PM ET weekdays (checked on 5-min interval; both EDT=20:15 UTC and EST=21:15 UTC windows covered). Initial fetch on server startup.
+  - **New route** (`GET /espp/stock-quote`): Returns `{ symbol, price, previousClose, asOf }`. 503 if no quote cached yet.
+  - **Frontend** (`EsppPage.tsx`): `Badge` chip added to page header Group, next to the ESPP title. Fetched once on mount; silently absent if endpoint returns an error or is still loading.
+  - **Scheduler wired** in `server.ts` via `startStockQuoteScheduler()`.
+  - **Dep:** `yahoo-finance2@^3.15.2` added to `backend/package.json`.
+  - **Bug fix (incidental):** `searchDCADByAddress` call in `protest-worksheet.service.ts` was missing the required `county` arg — fixed (passes `null`).
+- **Files:** `backend/src/modules/espp/espp-stock.service.ts` (new), `backend/src/modules/espp/espp.routes.ts`, `backend/src/server.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `frontend/src/pages/EsppPage.tsx`, `backend/package.json`
+
+---
+
+## CR-PT-7 (2026-05-31): Protest status — branching flow + outcome tracking
+
+- **Type:** Feature — closes #51
+- **What:** Replaces the flat `Select` dropdown for protest status with a branching, context-sensitive action panel. The horizontal stepper remains as a progress indicator.
+  - **New DB columns** (`0058_pt7_protest_outcome.sql`): `outcome TEXT CHECK (outcome IN ('settled_informal','won_arb','lost_arb','withdrawn'))` and `informal_offer_usd INTEGER` on `protest_worksheet`.
+  - **Backend service** (`protest-worksheet.service.ts`): Added `ProtestOutcome` type. `updateWorksheetStatus()` refactored to accept `opts: { hearingDate?, outcome?, informalOfferUsd? }` instead of positional `hearingDate` arg. `getWorksheet()` SELECT and `rowToRecord()` updated to include both new fields.
+  - **Backend route** (`protest.routes.ts`): `patchWorksheetBodySchema` extended with `outcome` (enum nullable) and `informalOfferUsd` (int nullable). PATCH handler passes both to `updateWorksheetStatus()`.
+  - **Frontend** (`TaxProtestPage.tsx`): Status flow shows contextual action buttons per stage — `not_filed` → "Mark as Filed"; `filed` → offer amount input + "Informal Offer Received"; `informal` → "Accept Offer — Settle" (green, sets `resolved/settled_informal`) or "Reject — Escalate to ARB" (orange, sets `arb`); `arb` → "Won at ARB" / "Lost at ARB" / "Withdrew Protest"; `resolved` → outcome badge + optional settlement value + "Reset protest status" button. `statusIndex()` positions stepper at step 3 (not 4) when settled at informal. Removed dead `statusDraft` state.
+- **Deferred:** PT-5b (Web Push, GH #49) and PT-6 (non-TX CAD, GH #50) moved to Deferred in backlog.
+- **Files:** `backend/db/migrations/0058_pt7_protest_outcome.sql` (new), `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/BACKLOG.md`
+- **GitHub:** https://github.com/mangatrai/grove/issues/51
+
+## FIX-RE-7 + FIX-RE-6 (2026-05-31): Redfin cooldown guard + stale comps banner
+
+- **Type:** Bug fix — closes #46, closes #45
+- **What:**
+  - **FIX-RE-7:** `refreshPropertyValuation()` now checks `valuation_fetched_at` before calling Redfin. If the valuation is less than 24 hours old, returns `{ ok: false, code: "RATE_LIMITED", message: "..." }` immediately — no external API call. Prevents the protest AI's `refresh_redfin_comps` tool from hammering RealtyAPI on every chat turn.
+  - **FIX-RE-6:** `protest.routes.ts` handles the new `RATE_LIMITED` code in the tool handler (tells the LLM comps are still fresh) and includes `valuationAgeHours: number | null` in the chat response. `TaxProtestPage.tsx` shows a dismissible yellow `Alert` banner when `property.valuationFetchedAt` is >24 h old, prompting the user to ask the AI to refresh. Banner auto-dismisses when `soldCompsRefreshed` is true and resets on property switch.
+- **Files:** `backend/src/modules/household/property.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`
+- **GitHub:** https://github.com/mangatrai/grove/issues/46, https://github.com/mangatrai/grove/issues/45
+
+## FIX-PT-6 (2026-05-30): DCAD comparable search — county-derived office, street-name fallback, debug logging
+
+- **Type:** Bug fix — closes #47
+- **What:**
+  - `getToken(office)` now accepts the office name as a parameter. `searchDCADByAddress()` and `getDCADPropertyById()` accept `county: string | null | undefined` and derive the TrueProdigy office via `countyToOffice()` — strips " County" suffix so "Denton County" → "Denton". Token cache is keyed by office name so multi-county households work correctly.
+  - Call site in `protest.routes.ts` passes `property.valuationDetail?.county` — the county Redfin already stored in the DB — eliminating any hardcoded or config-based assumption about which CAD to query.
+  - `searchDCADByAddress()` refactored around private `doSearch()`. If the full address returns 0 results, automatically retries with street-name-only (house number stripped, city/state/zip stripped at first comma).
+  - When `doSearch()` extracts 0 rows, logs `responseSnippet` (first 500 chars of raw API body) at `debug` level.
+- **Files:** `backend/src/modules/protest/dcad.service.ts`, `backend/src/modules/protest/protest.routes.ts`
+- **GitHub:** https://github.com/mangatrai/grove/issues/47
+
+## UX-PT-7 (2026-05-29): TaxProtestPage — chat drawer Mantine theming + dark/light mode fix
+
+- **Type:** UX / bug fix — closes #48
+- **What:**
+  - User message bubbles were `bg="dark.8" c="white"` — invisible in dark mode. Changed to `bg="forest.6" c="white"` (app primary color, renders correctly in both modes).
+  - Assistant and "thinking" bubble `bg="gray.1"` → `gray.1` in light / `dark.5` in dark using `useComputedColorScheme`.
+  - Table subject-row highlight on both evidence tables: replaced `style={{ background: "var(--mantine-color-blue-light)" }}` (not dark-mode aware) with `bg={colorScheme === "dark" ? "blue.9" : "blue.0"}` prop.
+  - Replaced manual `<Box style={{ overflowY: "auto" }}>` scroll container with Mantine `<ScrollArea>`.
+  - Added `disabled={sending}` to `Textarea` and the attach `ActionIcon` so the input is visually locked while a request is in flight.
+  - Fixed keyboard shortcut hint from hardcoded `⌘↵` to platform-aware `Ctrl/⌘+↵` using `navigator.platform`.
+  - Cleaned up `Drawer` body styles: `flex: 1; overflow: hidden` instead of fragile `height: calc(100% - 60px)`.
+- **Files:** `frontend/src/pages/TaxProtestPage.tsx`
+- **GitHub:** closes #48
+
+---
+
+## DOC-PT-5-1 (2026-05-29): User Guide and Admin Guide updates for PT-4b and PT-5
+
+- **Type:** Documentation
+- **What:** Updated `docs/USER_GUIDE.md` and `docs/ADMIN_GUIDE.md` to cover PT-4b (DOCX format option) and PT-5 (filing deadline, CAD portal URL, deadline notifications) which shipped in earlier commits this session.
+- **USER_GUIDE changes:** Expanded "Generating the ARB Evidence Packet" section — now covers both PDF and Word formats with two-section DOCX structure described. Added new "Filing Deadline and CAD Portal" section documenting the DateInput, CAD portal URL field, external-link icon, red alert banner, and notification cadence (30/7/1 days before deadline and hearing).
+- **ADMIN_GUIDE changes:** Updated §4.5 to reference both `pdfkit` and `docx` npm packages; added note on deadline notification types, email SMTP requirement, fire-and-forget trigger pattern, and 2-day dedup window.
+- **Files:** `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md`, `docs/CHANGE_HISTORY.md`
+
+---
+
+## CR-PT-5 (2026-05-29): Tax Protest — filing deadline tracking and notifications
+
+- **Type:** Feature
+- **What:** Adds `filing_deadline` (DATE) and `cad_portal_url` (TEXT) columns to `protest_worksheet`. Users can record the CAD filing deadline and a link to the CAD portal (e.g. DCAD online protest URL) directly on the protest page.
+- **Notifications:** Two new notification types — `protest_filing_deadline_approaching` and `protest_hearing_approaching`. Both default to in-app + email delivery. `checkProtestDeadlines()` fires on every worksheet load (fire-and-forget); it checks all non-resolved worksheets in the household and emits notifications at 30/7/1 days before `filing_deadline` or `hearing_date`. Deduped — skips if a matching notification was created within the last 2 days.
+- **Frontend:** Filing Deadline DateInput and CAD Portal URL TextInput added to the Protest Status card. CAD Portal URL shows an open-in-new-tab ActionIcon. Red Alert shown if filing deadline is within 7 days and status is not resolved.
+- **Migration:** `0057_pt5_protest_deadlines.sql` — `ALTER TABLE protest_worksheet ADD COLUMN IF NOT EXISTS filing_deadline DATE, ADD COLUMN IF NOT EXISTS cad_portal_url TEXT`
+- **Files:** `backend/db/migrations/0057_pt5_protest_deadlines.sql` · `backend/src/modules/notifications/notification.service.ts` · `backend/src/modules/protest/protest-worksheet.service.ts` · `backend/src/modules/protest/protest.routes.ts` · `frontend/src/pages/TaxProtestPage.tsx`
+
+---
+
+## CR-PT-4b (2026-05-29): Tax Protest — DOCX evidence packet format
+
+- **Type:** Feature
+- **What:** The existing `GET /api/protest/:propertyId/evidence-packet` endpoint now accepts `?format=pdf|docx` (default `pdf`). `format=docx` generates a Word document using the `docx` npm package (v9). No new route.
+- **DOCX structure:** Two sections in one file — (1) **ARB Board Packet**: valuation summary table, property facts table, DCAD comps table, recent sales table, key arguments; (2) **Protestor Reference Sheet** (after a page break): numbered oral script, blank negotiation table, quick-reference card.
+- **Frontend:** A `SegmentedControl` (PDF / Word) added next to the "Generate Document" button in `TaxProtestPage.tsx`. Download filename matches selected format.
+- **Test:** New assertion in `backend/tests/protest.test.ts` verifying `Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document` and `.docx` filename for `format=docx`.
+- **Files:** `backend/src/modules/protest/protest-evidence-docx.service.ts` (new) · `backend/src/modules/protest/protest.routes.ts` · `frontend/src/pages/TaxProtestPage.tsx` · `backend/tests/protest.test.ts` · `backend/package.json`
+
+---
+
+## FIX-PWA-1 (2026-05-29): PWA stale after new release — cache-control fix
+
+- **Type:** Bug fix
+- **What:** Installed PWA (iOS / macOS) showed stale content or broke after every new deployment because `index.html` was served with no `Cache-Control` header — browsers and iOS cached it indefinitely. On a new deploy, Vite's hashed JS/CSS filenames change, but the cached shell still referenced the old names, causing load failures.
+- **Fix (Option A from GH #43):** Two changes in `backend/src/app.ts`:
+  1. `index.html` catch-all now sets `Cache-Control: no-cache` before `res.sendFile()` — forces the browser to revalidate the HTML shell on every load without blocking (ETag/304 still works).
+  2. `express.static()` now sets `Cache-Control: public, max-age=31536000, immutable` for files under `assets/` (Vite's content-hashed output directory) so JS/CSS chunks are cached aggressively and do not cause unnecessary network round-trips.
+- **Non-hashed assets** (manifest.json, icons, favicon) continue with browser-default caching.
+- **Not included:** service worker / offline support (Option B from issue). Can be added later with `vite-plugin-pwa` if needed.
+- **Files:** `backend/src/app.ts`
+- **GitHub:** closes #43
+
+## FIX-ESPP-11 (2026-05-29): ESPP dual-payslip discount sum
+
+- **Type:** Bug fix
+- **What:** `findPayslipLink()` in `espp.service.ts` used `GROUP BY ps.id LIMIT 1`, picking only the first payslip found on the purchase date. When month-end has two payslips (salary + commissions) each carrying an ESPP deduction line, the second payslip's deduction was silently discarded, causing an understated `espp_discount_payslip` on the batch.
+- **Fix:** Removed `GROUP BY ps.id LIMIT 1`; query now aggregates all ESPP line items across all payslips for the given date via a single `MIN(ps.id) AS id` + bare `SUM(...)`. The `id` column used as `payslip_id` FK now records the earliest matching payslip (acceptable — exact FK linkage is cosmetic when multiple payslips share the date).
+- **Test:** Added ESPP-11 case to `backend/tests/espp.test.ts` — seeds two payslips on the same pay_date with $80 and $40 ESPP Discount line items, imports a batch, asserts `espp_discount_payslip` = $120. 513 tests passing.
+- **Files:** `backend/src/modules/espp/espp.service.ts`, `backend/tests/espp.test.ts`
+- **GitHub:** closes #42
+
+## DOC-PT4-1 (2026-05-29): PT-4 docs, tests, and PT-4b backlog
+
+- **Type:** Documentation + Test
+- **What:**
+  - Added **Tax Protest** section to `docs/USER_GUIDE.md` — covers property/year selection, chat assistant capabilities, strategy panel, DCAD/Redfin comps tabs, PDF export contents, and protest status reference table.
+  - Added §4.5 Tax Protest AI to `docs/ADMIN_GUIDE.md` — documents `OPENAI_API_KEY`, `OPENAI_MODEL`, `TAVILY_API_KEY` env vars and `pdfkit` PDF generation (no system font dependency).
+  - Added `backend/tests/protest.test.ts` — 4 integration tests for `GET /api/protest/:propertyId/evidence-packet`: 200+`application/pdf` for seeded property, 200 with year omitted (defaults to current year), 404 for unknown property, 401 without token. All 512 tests passing.
+  - Added **PT-4b** backlog entry (`docs/BACKLOG.md`) — Word (.docx) format for ARB evidence packet using `docx` npm library. Full spec captured (5-page ARB Board section + Protestor section with oral script + negotiation table). GH #41.
+- **Files:** `docs/USER_GUIDE.md`, `docs/ADMIN_GUIDE.md`, `docs/BACKLOG.md`, `backend/tests/protest.test.ts`
+- **GitHub:** #41 opened for PT-4b
+
+## CR-PT4-1 (2026-05-29): ARB Evidence Packet PDF export
+
+- **Type:** Feature — Generate Document button, pdfkit PDF
+- **What:**
+  - New `GET /api/protest/:propertyId/evidence-packet?year=N` endpoint streams a multi-page PDF ARB hearing packet.
+  - PDF pages: (1) cover with valuation summary boxes + property facts + strategy panel, (2) DCAD comps table with vs-subject colour coding + subject row highlighted yellow, (3) Redfin sold comps table, (4) horizontal bar chart comparing AVM vs DCAD comp market values.
+  - New `protest-evidence.service.ts` encapsulates all pdfkit drawing logic; no new DB table or migration.
+  - Added `pdfkit` + `@types/pdfkit` to backend dependencies.
+  - Frontend: enabled "Generate Document" button on `TaxProtestPage` — triggers fetch → blob → anchor download; shows `loading` spinner while generating.
+- **Files:** `backend/src/modules/protest/protest-evidence.service.ts` (new), `backend/src/modules/protest/protest.routes.ts`, `backend/package.json`, `frontend/src/pages/TaxProtestPage.tsx`, `docs/CHANGE_HISTORY.md`, `docs/API_REFERENCE.md`
+- **GitHub:** closes #40
+
+## CR-PT3-1 (2026-05-29): Protest AI — Tavily web search tool (`search_web`)
+
+- **Type:** Feature — AI autonomous web search for comparable sales and market data
+- **What:**
+  - Added `search_web` AI tool to the protest chat handler. The AI can now call Tavily's search API to find recent comparable sales, market trends, ARB outcomes, and county assessor data for any query.
+  - Added `TAVILY_API_KEY` optional env var to `backend/src/config/env.ts`. Tool gracefully disabled when key is absent.
+  - No new DB table, no migration, no frontend change.
+- **Files:** `backend/src/config/env.ts`, `backend/src/modules/protest/protest.routes.ts`, `docs/CHANGE_HISTORY.md`, `docs/API_REFERENCE.md`
+- **GitHub:** https://github.com/mangatrai/grove/issues/39
+
+---
+
+## UX-PT2-1 (2026-05-29): TaxProtestPage — Redfin comparable sold prices in Market Value Evidence table
+
+- **Type:** Feature — market value evidence from real sold comps
+- **What:**
+  - **Market Value Evidence table** now shows actual Redfin comparable sold prices (`soldPrice`, `pricePerSqft`, `soldDate`) instead of DCAD estimated market values. Data is read from `property.valuation_detail.comps` (already stored as part of the Redfin property fetch — no new DB table or migration).
+  - **TX non-disclosure note:** When `soldPrice` is null (common in TX), shows `listPrice` in dimmed text as a fallback and displays a note explaining the limitation.
+  - **New endpoint `GET /api/protest/:propertyId/sold-comps`:** Returns shaped Redfin comp data (address, sqft, beds, baths, soldPrice, soldDate, pricePerSqft, listPrice). No `year` param — comps are property-level not year-specific.
+  - **New AI tool `refresh_redfin_comps`** in protest chat handler: calls `refreshPropertyValuation()` to re-fetch Redfin data. Returns `soldCompsRefreshed: true` in chat response; frontend re-fetches and updates Market Value table.
+  - **Files:** `backend/src/modules/protest/protest.routes.ts`, `frontend/src/pages/TaxProtestPage.tsx`
+
+---
+
+## FIX-PT1-1 (2026-05-29): TaxProtestPage — FAB overlap + OPENAI_MODEL env wire-up
+
+- **Type:** UI bug fix + config fix
+- **What:**
+  - **FAB overlap:** Chat FAB (floating ActionIcon) was visible behind/over the open Drawer. Fixed by conditionally rendering FAB only when `!chatOpen`. (`frontend/src/pages/TaxProtestPage.tsx`)
+  - **OPENAI_MODEL env:** Protest chat route hardcoded `model: "gpt-4.1"`. Switched to `model: env.OPENAI_MODEL` so the `OPENAI_MODEL` env var (already defined in `env.ts` with default `"gpt-4o-mini"`) controls the model. (`backend/src/modules/protest/protest.routes.ts`)
+
+---
+
+## UX-PT1-1 (2026-05-29): TaxProtestPage — prototype-faithful redesign with floating chat FAB
+
+- **Type:** UX redesign + backend endpoint addition
+- **What:**
+  - **Page layout:** Complete rewrite from chat-centric skeleton to prototype-faithful single-column layout (View A — Evidence File). Page now shows: signal card (CAD / AVM / over% / est. savings / sqft / beds / year built), Market Value Evidence table, Unequal Appraisal Evidence table, AI Strategy panel (conditionally rendered), Protest Tracker with horizontal stepper.
+  - **Floating chat FAB:** Chat demoted from a 58vh pane to a fixed bottom-right ActionIcon that opens a 400px right-side Mantine Drawer. Removed the separate "Attach URL" button (URLs can be pasted directly in the chat input). Fixed the flex-layout height bug that was clipping the textarea below the visible region.
+  - **Evidence tables:** Both Market Value and Unequal Appraisal tables show DCAD comparable properties fetched via new GET `/api/protest/:propertyId/comps` endpoint. Each table shows subject row at bottom (highlighted), $/sqft, and color-coded "vs Subject" column (green if comp is lower, helps the case).
+  - **DB migration `0056_pt1_market_value.sql`:** Adds `market_value_usd NUMERIC` column to `protest_comp_cad`. `saveCADComps()` now stores `comp.marketValue` in this column; `listWorksheetComps()` returns full comp data (dcadPropertyId, city, sqft, beds, baths, yearBuilt, marketValueUsd).
+  - **New endpoint `GET /api/protest/:propertyId/comps?year=N`:** Returns saved DCAD comps for a property/year. Added to `protest.routes.ts`; backed by the updated `listWorksheetComps()` service function.
+  - **Strategy panel:** Rendered only when AI has generated a `strategyJson`. Shows case strength Progress bar, target value, primary strategy, draft arguments, and red flags Alert.
+  - **Deadline banner:** Amber/red Alert appears when hearing date is ≤ 30 days away.
+  - **Chat refresh:** After AI fetches comps (`compsAdded > 0`), the comps endpoint is re-fetched and evidence tables update automatically.
+- **Files:** `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/db/migrations/0056_pt1_market_value.sql`, `frontend/src/pages/TaxProtestPage.tsx`
+- **Not in scope (Phase 2):** Redfin comparable sales search (actual sold prices), MLS data, PDF export.
+
+---
+
+## FIX-RE5 (2026-05-28): Property page — mortgage display, edit modal pre-fill, dropdown filter, Add form persistence
+
+- **Type:** Bug fix (5 issues)
+- **What:**
+  - **Mortgage in detail table (issue 1):** `getProperty()` now LEFT JOINs `financial_account` on `property_id` + `type='loan'` to fetch the linked mortgage. `PropertyRecord` gains `linkedMortgageId`, `linkedMortgageInstitution`, `linkedMortgageMask`. PropertyDetailPage shows "Linked Mortgage" and "Mortgage Balance" rows in the details table (balance sourced from the latest equity history point, no extra API call).
+  - **Edit modal pre-fill (issue 2):** AddPropertyModal now reads `linkedMortgageId` from the property response and sets `linkedAccountId` in state, so the dropdown shows the already-linked mortgage selected on open.
+  - **Dropdown filter (issue 3):** Mortgage dropdown filters out accounts where `property_id` is non-null and not this property. Prevents already-linked mortgages from appearing selectable in Add/Edit modal.
+  - **Purchase price/date persist on Add (issue 4):** POST `/properties` Zod schema was missing `purchasePrice` and `purchaseDate`. Added both fields; `createProperty()` now INSERTs them into the `property` table.
+  - **Market value persists on Add (issue 5):** `initialValueUsd`/`initialValueAsOf` were already in the schema and service — this was the same root cause as issue 4 (the field names matched but purchasePrice/purchaseDate were stripped). With issue 4 fixed, all fields now reach the DB correctly.
+- **Files:** `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/components/AddPropertyModal.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`
+
+## UX-RE4 (2026-05-28): PropertyDetailPage — layout refinements, AVM fallback, charts side-by-side, seed fix
+
+- **Type:** UX polish + bug fix
+- **What:**
+  - **Dev seed fix:** Mortgage account ID `40000000-0000-0000-0000-000000000006` collided with Marcus savings account in `dev_0003`; `ON CONFLICT DO NOTHING` silently swallowed the insert. Changed to `40000000-0000-0000-0000-000000000011`. Added 8 months of `account_balance_snapshot` rows for the mortgage so the equity chart renders with real data after `npm run db:reset:dev`.
+  - **AVM fallback:** Valuation card now shows purchase price with label "Purchase Price (no AVM yet)" when `latestValueUsd` is null. Estimate range hidden in that case.
+  - **Protest Readiness moved to right column:** Card is now stacked below Valuation in the span-4 right column. Left column is now image + Property Details only (less crowded).
+  - **Charts side-by-side:** Value · Mortgage · Equity chart and Assessment History chart now sit in a 2-column `Grid` (each `span={{ base: 12, md: 6 }}`) instead of two stacked full-width cards. Both chart heights normalized to 240px; Y-axis width tightened to 48px to reclaim horizontal space at half-width.
+- **Files:** `backend/db/seeds/dev/dev_0008_seed_properties.sql`, `frontend/src/pages/PropertyDetailPage.tsx`
+
+## UX-RE3 (2026-05-28): PropertyDetailPage — equity/mortgage/AVM chart + layout redesign
+
+- **Type:** Feature + UX redesign
+- **What:**
+  - New backend endpoint `GET /household/properties/:propertyId/equity-history` — lateral join across `property_value_snapshot` and `account_balance_snapshot` (linked mortgage); returns `{ date, avm, mortgageBalance, equity }[]` per snapshot date. Equity is `avm - mortgageBalance` (simple subtraction; no new complexity).
+  - New full-width **Value · Mortgage · Equity** line chart (3 lines: AVM green, Mortgage red, Equity blue). Mortgage line only shown when a linked loan account has balance snapshots. Legend included.
+  - Assessment History chart moved to full-width below the equity chart (was in left span-8 column).
+  - Layout restructured: left col (span 8) now holds image + Property Details + Protest Readiness. Right col (span 4) holds Valuation numbers + compact Data Sources row. Charts are full-width below the grid.
+  - AVM-only sparkline removed from Valuation card — equity chart fully replaces it.
+  - Data Sources card shrunk to a single compact row (text + Refresh button inline, no padding waste).
+  - `snapshots` state + `loadSnapshots` callback removed (now redundant).
+- **Files:** `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `frontend/src/pages/PropertyDetailPage.tsx`
+
+## UX-RE2 (2026-05-28): Property detail page polish — edit button wired, purchase fields, theme colors fixed
+
+- **Type:** UX polish + feature gap fill
+- **What:**
+  - `PropertyDetailPage.tsx`: Edit button (Property Details card) was greyed/disabled placeholder — now wired to `<AddPropertyModal existingPropertyId={property.id} />`. Clicking Edit opens the full edit modal inline.
+  - `AddPropertyModal.tsx`: Added purchase price (USD) and purchase date fields. Both are loaded from the API in edit mode and sent in the PATCH body on save. Create mode includes them in the POST body. Fields sit between "Property use" and "Market value".
+  - `PropertyDetailPage.tsx`: Replaced hardcoded hex colors (`#4dabf7` on tax line chart, `#2d6a4f` on AVM sparkline) with Mantine CSS variables (`var(--mantine-color-blue-5)`, `var(--mantine-color-green-7)`) so both charts respect light/dark theme.
+- **Files:** `frontend/src/pages/PropertyDetailPage.tsx`, `frontend/src/components/AddPropertyModal.tsx`
+
+## CR-RE1-ADD-MODAL (2026-05-28): AddPropertyModal extracted + dev seeds for real estate
+
+- **Type:** Change request — modal extraction + test data
+- **What:**
+  - Extracted `frontend/src/components/AddPropertyModal.tsx` from the inline modal in `SettingsPage.tsx`. Props: `opened`, `onClose`, `onSaved`, optional `accountId` (hides mortgage picker when set), optional `existingPropertyId` (edit mode).
+  - When `accountId` is not provided (opened from RE list), the modal fetches and shows a "Link to mortgage account (optional)" Select.
+  - `SettingsPage.tsx`: replaced 27-field `propertyModal` state + `openPropertyModal` / `retrieveValuation` / `savePropertyDetails` functions with a 3-field state + `<AddPropertyModal>` component. SettingsPage auto-open after mortgage creation still works via `accountId` prop.
+  - `RealEstatePage.tsx`: "Add Property" button now opens `AddPropertyModal` directly; no longer redirects to `/settings?tab=accounts`.
+  - Added `backend/db/seeds/dev/dev_0008_seed_properties.sql` — 2 fictional properties (TX primary + TN rental), 8-month value snapshots each, mortgage account, protest worksheet + 3 DCAD comps.
+- **Files:** `frontend/src/components/AddPropertyModal.tsx` (new), `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/RealEstatePage.tsx`, `backend/db/seeds/dev/dev_0008_seed_properties.sql` (new)
+- **GitHub:** https://github.com/mangatrai/grove/issues/37
+
+## CR-RE1-DETAIL (2026-05-28): PropertyDetailPage full redesign per prototype + hybrid assessment chart + AVM sparkline
+
+- **Type:** Change request — real estate detail page UX
+- **What:** Full rewrite of `PropertyDetailPage.tsx` to match prototype spec:
+  - **Property Details card** — Property Type, Address, Beds/Baths, Above-Grade Sqft, Lot Size, Year Built, Stories, APN, County/CAD, Appeal Process, Monthly Rent (rental only), Notes (if set). Label/value grid layout, no editable fields.
+  - **Assessment History chart** — Hybrid `ComposedChart`: Bar (assessed value, left Y-axis) + Line (taxes due, right Y-axis). Dual Y-axis both labelled in `$XXXk`. Year-over-year label on bars.
+  - **Valuation card** — AVM sparkline using `property_value_snapshot` timeseries from `GET /household/properties/:id/values`. Shows trajectory month-over-month.
+  - **`cadInfo()` helper** — derives CAD name and appeal process from `state` + `county`: TX (Denton→DCAD/ARB, Harris→HCAD, Travis→TCAD, Collin→CCAD, generic TX), TN (Shelby→Shelby Assessor/Board of Equalization, generic TN).
+  - Removed purchase price / purchase date editable inputs (one-time at add time; not on detail page).
+- **Files:** `frontend/src/pages/PropertyDetailPage.tsx`
+
+---
+
+## CR-RE1-REDFIN-PARSE (2026-05-28): Parse photo URL, county, stories, property type from Redfin response
+
+- **Type:** Change request — Redfin data enrichment
+- **What:**
+  - `ValuationDetail` extended with `county`, `photoUrl`, `thumbnailUrl`, `subject.stories`, `subject.propertyType`.
+  - `parseRedfinResponse()` in `realty-api.service.ts` extracts:
+    - **County** — `details.aboveTheFold.mainHouseInfo.selectedAmenities` entry where `header === "County"`
+    - **Exterior photo** — `details.aboveTheFold.photoTags.tagsByPhotoId` — first entry tagged "Exterior" (falls back to first entry); `photoUrl` (bigphoto) + `thumbnailphotoUrl` (midphoto)
+    - **Stories** — `details.aboveTheFold.basicInfo.numStories`
+    - **Property type** — `details.aboveTheFold.basicInfo.propertyTypeName`
+  - `refreshPropertyValuation()` in `property.service.ts` persists `photo_url` from `result.detail.photoUrl ?? null`.
+  - Property cards on `RealEstatePage.tsx` show the photo as a 120px thumbnail; diagonal-stripe placeholder when no photo.
+- **Files:** `backend/src/modules/household/realty-api.service.ts`, `backend/src/modules/household/property.service.ts`, `frontend/src/pages/RealEstatePage.tsx`
+
+---
+
+## DB-RE1-PHOTO (2026-05-28): Add photo_url column to property table (migration 0055)
+
+- **Type:** DB migration
+- **What:** `ALTER TABLE property ADD COLUMN IF NOT EXISTS photo_url TEXT;`
+- **Files:** `backend/db/migrations/0055_re1_photo_url.sql`
+
+---
+
+## CR-RE1-DCAD-BACKFILL (2026-05-28): Async DCAD backfill at property add time (TX only)
+
+- **Type:** Change request — DCAD data enrichment
+- **What:** When a TX property is created with a sufficiently complete address (street + city + state), a fire-and-forget `triggerDCADBackfill()` call runs after the 201 response. It calls `searchDCADByAddress()`, creates the protest worksheet if needed, and saves CAD comps. Errors are caught and logged; they do not affect the creation response.
+- **Why:** DCAD assessment data is more reliable than Redfin for tax values and is needed before the protest flow begins. Pre-populating at add time means the protest worksheet starts with comps already loaded.
+- **Files:** `backend/src/modules/protest/protest-worksheet.service.ts` (`triggerDCADBackfill` function), `backend/src/modules/household/household.routes.ts` (property creation POST handler)
+
+---
+
+## FIX-RE1-JSONB (2026-05-28): Fix valuation_detail_json always storing NULL
+
+- **Type:** Bug fix — critical data persistence
+- **Root cause:** All JSONB writes used `qExec` with `?::jsonb` SQL cast and `JSON.stringify(obj)` as the string param. The `postgres` npm library's `sql.unsafe()` sends JavaScript strings as the `text` OID; PostgreSQL's `::jsonb` cast on a typed-text parameter silently produces NULL rather than coercing it. The fix is to pass the plain JavaScript object/array — the driver then sends it with the JSONB OID, no cast needed.
+- **Files fixed:**
+  - `backend/src/modules/household/property.service.ts` — `refreshPropertyValuation`: `valuation_detail_json = ?::jsonb` + `JSON.stringify(result.detail)` → `valuation_detail_json = ?` + `result.detail`
+  - `backend/src/modules/protest/protest-worksheet.service.ts` — `appendConversationTurn`: `conversation_json || ?::jsonb` + `JSON.stringify([turn])` → `conversation_json || ?` + `[turn]`; `updateStrategy`: `strategy_json = ?::jsonb` + `JSON.stringify(strategy)` → `strategy_json = ?` + `strategy`; `saveCADComps`: `?::jsonb` + `JSON.stringify(comp.raw)` → `?` + `comp.raw`
+  - `backend/src/modules/household/household.routes.ts` — property creation path: same pattern fixed
+- **Impact:** Subject facts (beds/baths/sqFt/yearBuilt), CAD assessment value, tax history, and comps were all invisible on Real Estate and Tax Protest pages because the JSONB column was always NULL.
+
+---
+
+## FIX-RE1-FIELDS (2026-05-28): Fix field-name mismatches across RE-1/PT-1 pages and API
+
+- **Type:** Bug fix — data display
+- **Fixes:**
+  - `subject.sqFt` (capital F) was referenced as `sqft` (lowercase) in RealEstatePage, PropertyDetailPage, TaxProtestPage, and protest.routes.ts system prompt — caused sqft/beds/baths/yearBuilt to always show "—"
+  - `.assessment.assessedValue` → `.taxCurrent.assessedValue` in RealEstatePage, PropertyDetailPage, TaxProtestPage, protest.routes.ts — CAD assessed value was always null
+  - `.taxesPaid` → `.taxesDue` in RealEstatePage; added fallback chain `taxCurrent.taxesDue` first, then `taxHistory[0].taxesDue` — Annual Property Tax KPI always showed "—"
+  - `detail.estimate.value` (wrong — `estimate` is a plain number) → `typeof detail.estimate === "number" ? detail.estimate : null` in protest.routes.ts system prompt
+  - Image placeholder in PropertyDetailPage hardcoded "123 Example St" → `property.addressLine1 ?? "Property image"`
+  - Vite dev proxy: added `"/api": api` so `/api/protest/...` calls reach Express instead of 404-ing
+  - TaxProtestPage property switcher: `navigate()` + `setSearchParams` were both called on selection → double history entry; removed redundant `navigate()` call
+- **Files:** `frontend/src/pages/RealEstatePage.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`, `frontend/src/pages/TaxProtestPage.tsx`, `backend/src/modules/protest/protest.routes.ts`, `frontend/vite.config.ts`
+
+---
+
+## PT-1d (2026-05-27): TaxProtestPage frontend — chat + strategy + status tracker
+
+- **Type:** Change request — protest assistant UI
+- **What:** Added `TaxProtestPage` at `/tax-protest` with two-column layout: left-side worksheet chat (year selector, attachment helpers, optimistic send, assistant thread) and right-side context panel (property switcher, valuation/overassessment context, strategy panel, protest status stepper with hearing-date/status updates).
+- **Files:** `frontend/src/pages/TaxProtestPage.tsx`, `frontend/src/App.tsx`
+- **GitHub:** closes #23
+
+---
+
+## PT-1b (2026-05-27): DCAD service, worksheet service, and protest chat API
+
+- **Type:** Change request — protest assistant backend
+- **What:** Added `dcad.service.ts` with TrueProdigy public token auto-refresh + search helpers; added worksheet/comps persistence service; added `/api/protest/:propertyId/worksheet` (GET/PATCH) and `/api/protest/:propertyId/chat` with GPT-4.1 tool-use loop (`fetch_dcad_comps`, `update_strategy`) and conversation persistence.
+- **Files:** `backend/src/modules/protest/dcad.service.ts`, `backend/src/modules/protest/protest-worksheet.service.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/src/app.ts`, `docs/API_REFERENCE.md`
+- **GitHub:** closes #23
+
+---
+
+## PT-1a (2026-05-27): protest_worksheet and protest_comp_cad tables
+
+- **Type:** DB migration — property tax protest worksheet + CAD comps cache
+- **What:** Added migration `0054_pt1_protest_worksheets.sql` creating `protest_worksheet` and `protest_comp_cad` with household/property scoping, uniqueness indexes, and supporting indexes. Registered both tables in export coverage to prevent backup omissions.
+- **Files:** `backend/db/migrations/0054_pt1_protest_worksheets.sql`, `backend/src/modules/export/export-registry.ts`
+- **GitHub:** closes #23
+
+---
+
+## RE-1c/RE-1d/RE-1e (2026-05-27): Real Estate list/detail pages + sidebar nav
+
+- **Type:** Change request — real estate UX delivery
+- **What:** Added `RealEstatePage` (`/real-estate`) with KPI strip, property card grid, hearing/protest signals, and actions (`Add Property`, `Refresh All`). Added `PropertyDetailPage` (`/real-estate/:propertyId`) with two-column facts/valuation/protest/source layout, editable property metadata form, and assessment-history chart. Added sidebar group **Property & Tax** with links to Real Estate and Tax Protest. Wired protected routes in `App.tsx`.
+- **Files:** `frontend/src/pages/RealEstatePage.tsx`, `frontend/src/pages/PropertyDetailPage.tsx`, `frontend/src/layout/AppSidebar.tsx`, `frontend/src/App.tsx`
+
+---
+
+## RE-1a/RE-1b (2026-05-27): Property metadata columns + PATCH fields
+
+- **Type:** Change request — real estate property user metadata
+- **What:** Added `purchase_price`, `purchase_date`, `monthly_rent`, and `property_notes` to the `property` table (migration `0053_re1_property_metadata.sql`). Extended `PropertyRecord` and `PATCH /household/properties/:propertyId` to read/write `purchasePrice`, `purchaseDate`, `monthlyRent`, and `propertyNotes`. `updateProperty` now sets only columns present in the patch body (undefined keys are not overwritten).
+- **Files:** `backend/db/migrations/0053_re1_property_metadata.sql`, `backend/src/modules/household/property.service.ts`, `backend/src/modules/household/household.routes.ts`, `docs/API_REFERENCE.md`, `openapi/openapi.yaml`
+- **GitHub:** closes #37
+
+---
+
+## FIX-237 (2026-05-27): Dashboard "Other" link — categoryIds multi-filter now expands parent categories to children
+
+- **Type:** Bug fix — multi-category filter missing parent expansion
+- **What:** Clicking "Other" on the "Where Money Went" dashboard strip navigated to the Transactions page with multiple `categoryIds` in the URL. The filter showed "5 categories" selected but returned 0 transactions. Root cause: the `ledgerFilterClause` single-ID path expands parent category IDs to include child transactions (`WHERE parent_id = ?`), but the multi-ID path (`= ANY(?)`) did a flat match only — no parent expansion. Dashboard category IDs can be parent IDs; transactions are stored with leaf/child IDs.
+- **Fix:** Multi-ID path in `ledgerFilterClause` now also matches children: `tc.category_id = ANY(?) OR tc.category_id IN (SELECT id FROM category WHERE parent_id = ANY(?) ...)`.
+- **Files:** `backend/src/modules/ledger/ledger.service.ts`
+
+---
+
+## FIX-ESPP-10 (2026-05-27): ESPP batch status — "Fully Sold" threshold raised to match display precision
+
+- **Type:** Bug fix — floating-point epsilon mismatch
+- **What:** Batches where `shares_transferred == shares_sold` (visually 0 held shares) could show "Partially Sold" instead of "Fully Sold". Root cause: `held` was compared against a `0.000001` epsilon, but Postgres NUMERIC → `parseFloat` floating-point residuals can produce `held ≈ 0.00003` — above the old threshold but below display precision (4dp). The batch would display held=0 yet show "Partially Sold".
+- **Fix:** Raised the epsilon in `listBatchesWithSales` from `0.000001` to `0.00005` (half a unit at 4dp, matching `formatShares` display precision). Any held value that rounds to 0 at 4dp is now treated as "Fully Sold".
+- **Files:** `backend/src/modules/espp/espp.service.ts`
+
+---
+
 ## FIX-ESPP-9 (2026-05-27): ESPP Record Sale — allow 4-decimal sale price input
 
 - **Type:** Bug fix — frontend precision truncation

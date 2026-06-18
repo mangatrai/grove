@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSPr
 import {
   ActionIcon,
   Alert,
+  Badge,
   Button,
   Group,
   Modal,
@@ -82,6 +83,13 @@ type EsppSummary = {
   realizedGainLoss: number;
   ordinaryIncomeYtd: number;
   capGainLossYtd: number;
+};
+
+type StockQuote = {
+  symbol: string;
+  price: number;
+  previousClose: number;
+  asOf: string;
 };
 
 type SaleRow = { id: number; batchId: string; qty: string; price: string };
@@ -777,6 +785,14 @@ export function EsppPage() {
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [importOpen, setImportOpen] = useState(false);
   const [saleOpen, setSaleOpen] = useState(false);
+  const [stockQuote, setStockQuote] = useState<StockQuote | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    apiJson<StockQuote>("/espp/stock-quote")
+      .then(setStockQuote)
+      .catch(() => {});
+  }, [token]);
 
   const loadData = useCallback(() => {
     if (!token) {
@@ -827,7 +843,14 @@ export function EsppPage() {
   return (
     <Stack gap="lg" p="lg" style={{ background: T.pageBg, minHeight: "100%" }}>
       <Group justify="space-between" align="center">
-        <Title order={2}>ESPP</Title>
+        <Group gap="sm" align="center">
+          <Title order={2}>ESPP</Title>
+          {stockQuote ? (
+            <Badge variant="light" color="blue" size="md" radius="sm" style={mono}>
+              {stockQuote.symbol} · ${formatUsd(stockQuote.price)} · close {stockQuote.asOf}
+            </Badge>
+          ) : null}
+        </Group>
         <Group gap="sm">
           <Button variant="light" leftSection={<IconUpload size={16} />} onClick={() => setImportOpen(true)}>
             Import
