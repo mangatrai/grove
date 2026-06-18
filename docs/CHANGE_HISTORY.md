@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-186 — Payslip import: wrong parser inferred when owner uploads for spouse/member with different employer (2026-06-18)
+
+**Problem:** When the household owner uploaded a payslip for a spouse whose payslip account is linked to a different employer (e.g., Deloitte), the Import Workspace showed the owner's employer (IBM) in the "Ready:" label, and the wrong `parser_profile_id` was written to the DB on binding. Root cause: `ImportWorkspacePage` built the `incomeInference` employer context from `GET /household/settings`, which returns the **currently logged-in user's** employers only — not the selected account's owner's employers.
+
+**Fix (backend):** `listHouseholdFinancialAccounts` now does a secondary `person_profile` lookup for each unique `owner_person_profile_id` referenced by payslip accounts, and includes the parsed `owner_employers` list inline in the `GET /imports/accounts` response.
+
+**Fix (frontend):** Added `accountIncomeCtx()` helper that substitutes `account.owner_employers` when the account is of type `payslip` and the backend has provided a non-null employer list. Applied at all four `inferParserProfile` call sites (render-loop label, `onAccountChange`, `onEmployerChange` reset, new-account creation path). Also corrected `accountEmps` used for `showEmployerSelect` and auto-employerId selection so they reference the account owner's employers rather than the current user's.
+
+**Files:** `backend/src/modules/imports/import-file-binding.service.ts`, `frontend/src/pages/ImportWorkspacePage.tsx`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/115
+
+---
+
 ## CR-187 — RAG chunk size: 300 → 150 words; make configurable via RAG_CHUNK_WORDS; tighten EMBEDDING_MAX_INPUT_CHARS (2026-06-17)
 
 **Problem:** `EMBEDDING_MAX_INPUT_CHARS=8000` was a misleading env var — it was only a safety truncation applied before the OpenAI API call, not the actual chunk size. The real chunk size was `CHUNK_WORDS=300` (hardcoded), equivalent to ~1,500–2,000 characters. For structured tax documents (CAD evidence PDFs with tables, dollar amounts, comp addresses), 300-word chunks are too coarse — the embedding vector has to represent too many distinct facts, degrading nearest-neighbour precision.

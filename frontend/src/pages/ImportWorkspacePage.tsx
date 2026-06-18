@@ -79,6 +79,8 @@ type FinancialAccount = {
   owner_person_profile_id: string | null;
   last_uploaded_at?: string | null;
   last_statement_end_date?: string | null;
+  /** Employer list for the account's owner — populated for payslip accounts from the backend. */
+  owner_employers?: Array<{ id: string; parserProfileId?: string; salaryDepositFinancialAccountId?: string | null }>;
 };
 
 type BelongsToChoice = "household" | `person:${string}`;
@@ -139,6 +141,14 @@ function formatProfileLabel(id: string): string {
 
 function accountById(accounts: FinancialAccount[], id: string): FinancialAccount | undefined {
   return accounts.find((a) => a.id === id);
+}
+
+/** For payslip accounts, substitute the account owner's employer list so parser inference is scoped to that person, not the currently-logged-in user. */
+function accountIncomeCtx(account: FinancialAccount | undefined, fallback: IncomeInferenceContext): IncomeInferenceContext {
+  if (account?.type === "payslip" && account.owner_employers != null) {
+    return { ...fallback, employers: account.owner_employers };
+  }
+  return fallback;
 }
 
 /** Parses JSON error bodies from `apiJson` failures (e.g. 409 INVALID_TRANSITION). */
@@ -770,13 +780,16 @@ export function ImportWorkspacePage() {
         return;
       }
 
-      const inferred = inferParserProfile(account as FinancialAccountLike, file?.file_name, incomeInference);
+      const inferred = inferParserProfile(account as FinancialAccountLike, file?.file_name, accountIncomeCtx(account, incomeInference));
       if (inferred) {
         const nextOwnerScope = account?.owner_scope ?? drafts[fileId]?.ownerScope ?? "household";
         const nextOwnerPersonProfileId = account?.owner_person_profile_id ?? drafts[fileId]?.ownerPersonProfileId ?? "";
         let employerId = "";
-        if (PAYSLIP_PARSER_IDS.has(inferred) && householdEmployers.length === 1) {
-          employerId = householdEmployers[0]!.id;
+        const accountEmployers = (account?.type === "payslip" && account?.owner_employers?.length)
+          ? account.owner_employers
+          : householdEmployers;
+        if (PAYSLIP_PARSER_IDS.has(inferred) && accountEmployers.length === 1) {
+          employerId = accountEmployers[0]!.id;
         }
         setDrafts((d) => ({
           ...d,
@@ -891,7 +904,7 @@ export function ImportWorkspacePage() {
           : null;
 
       if (!employerId) {
-        const inferred = inferParserProfile(acc as FinancialAccountLike | undefined, file?.file_name, incomeInference);
+        const inferred = inferParserProfile(acc as FinancialAccountLike | undefined, file?.file_name, accountIncomeCtx(acc, incomeInference));
         setDrafts((d) => ({
           ...d,
           [fileId]: {
@@ -1221,7 +1234,7 @@ export function ImportWorkspacePage() {
       // closure and cannot find the just-created account, leaving the binding unset.
       const freshAccount = accRes.accounts.find((a) => a.id === result.id);
       const fileForBinding = files.find((f) => f.id === fileId);
-      const inferred = inferParserProfile(freshAccount as FinancialAccountLike | undefined, fileForBinding?.file_name, incomeInference);
+      const inferred = inferParserProfile(freshAccount as FinancialAccountLike | undefined, fileForBinding?.file_name, accountIncomeCtx(freshAccount, incomeInference));
       const ownerScope = freshAccount?.owner_scope ?? drafts[fileId]?.ownerScope ?? "household";
       const ownerPersonProfileId = freshAccount?.owner_person_profile_id ?? drafts[fileId]?.ownerPersonProfileId ?? "";
       if (inferred) {
@@ -1492,13 +1505,16 @@ export function ImportWorkspacePage() {
                   const inferred = inferParserProfile(
                     acc as FinancialAccountLike | undefined,
                     f.file_name,
-                    incomeInference
+                    accountIncomeCtx(acc, incomeInference)
                   );
                   const savedProfile = f.parser_profile_id ?? drafts[f.id]?.profileId ?? "";
                   const profileForRow = drafts[f.id]?.profileId || f.parser_profile_id || "";
                   const isPayslipAccount = (acc?.type ?? "").toLowerCase() === "payslip";
+                  const accountEmps = (isPayslipAccount && acc?.owner_employers != null)
+                    ? acc.owner_employers
+                    : householdEmployers;
                   const showEmployerSelect =
-                    householdEmployers.length > 1 &&
+                    accountEmps.length > 1 &&
                     (PAYSLIP_PARSER_IDS.has(profileForRow) || isPayslipAccount);
                   const disabledProfileReason = profileForRow ? DISABLED_PROFILES[profileForRow] : undefined;
                   const autoLine = disabledProfileReason ? (

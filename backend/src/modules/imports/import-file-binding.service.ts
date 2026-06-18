@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { employersPayloadSchema } from "../household/household.types.js";
 
 import {
   findEmployerById,
@@ -199,6 +200,8 @@ export async function listHouseholdFinancialAccounts(
     closed_at: string | null;
     last_uploaded_at: string | null;
     last_statement_end_date: string | null;
+    /** Employer list for the account owner's person_profile — populated for payslip accounts so the UI can infer the correct parser profile without relying on the current user's settings. */
+    owner_employers: Array<{ id: string; parserProfileId?: string; salaryDepositFinancialAccountId?: string | null }>;
   }>
 > {
   const includeClosedAccounts = options?.includeClosedAccounts ?? false;
@@ -279,9 +282,35 @@ export async function listHouseholdFinancialAccounts(
     }
   }
 
+  // Fetch employer lists for payslip account owners so the UI can infer the correct parser
+  // profile for each household member, rather than falling back to the current user's settings.
+  const payslipOwnerIds = [
+    ...new Set(accounts.filter(a => a.type === "payslip" && a.owner_person_profile_id).map(a => a.owner_person_profile_id!))
+  ];
+  const ownerEmployersMap = new Map<string, Array<{ id: string; parserProfileId?: string; salaryDepositFinancialAccountId?: string | null }>>();
+  for (const profileId of payslipOwnerIds) {
+    const row = await qGet<{ employers_json: string | null }>(
+      `SELECT employers_json FROM person_profile WHERE id = ? AND household_id = ?`,
+      profileId,
+      householdId
+    );
+    if (row?.employers_json?.trim()) {
+      try {
+        const parsed = employersPayloadSchema.safeParse(JSON.parse(row.employers_json));
+        if (parsed.success) {
+          ownerEmployersMap.set(
+            profileId,
+            parsed.data.map(e => ({ id: e.id, parserProfileId: e.parserProfileId, salaryDepositFinancialAccountId: e.salaryDepositFinancialAccountId ?? null }))
+          );
+        }
+      } catch { /* ignore malformed JSON */ }
+    }
+  }
+
   return accounts.map((account) => ({
     ...account,
-    last_statement_end_date: lastStatementEndByAccount.get(account.id) ?? null
+    last_statement_end_date: lastStatementEndByAccount.get(account.id) ?? null,
+    owner_employers: (account.owner_person_profile_id ? ownerEmployersMap.get(account.owner_person_profile_id) : undefined) ?? []
   }));
 }
 
