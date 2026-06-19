@@ -136,9 +136,7 @@ householdRouter.patch("/profile", async (req: AuthenticatedRequest, res) => {
     res.status(400).json({ errors: parsed.error.issues });
     return;
   }
-  const householdId = req.authUser!.householdId;
-  const userId = req.authUser!.userId;
-  const role = req.authUser!.role;
+  const { householdId, userId, role, personProfileId } = req.authUser!;
   const out = await patchCurrentUserProfile(householdId, userId, role, parsed.data);
   if (!out.ok) {
     if (out.code === "EMAIL_CONFLICT") {
@@ -149,7 +147,7 @@ householdRouter.patch("/profile", async (req: AuthenticatedRequest, res) => {
     return;
   }
   if (parsed.data.employers !== undefined) {
-    await ensurePayslipImportBucketAccount(householdId, userId);
+    await ensurePayslipImportBucketAccount(householdId, userId, personProfileId);
   }
   res.status(200).json({ profile: out.profile });
 });

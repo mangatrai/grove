@@ -1,5 +1,6 @@
 import { Link, NavLink } from "react-router-dom";
 import { GroveMark } from "../components/GroveMark";
+import { useCurrentUser } from "../UserContext";
 import {
   IconHome,
   IconChartBar,
@@ -75,7 +76,11 @@ export function AppSidebar({
   mobileOpen,
   onCloseMobile,
 }: AppSidebarProps) {
+  const { role } = useCurrentUser();
   const isCollapsed = collapsed && !mobileOpen;
+  const visibleGroups = role === "member"
+    ? NAV_GROUPS.filter(g => g.label !== "Property & Tax")
+    : NAV_GROUPS;
 
   return (
     <>
@@ -114,7 +119,7 @@ export function AppSidebar({
 
         {/* Main nav */}
         <nav className="app-sidebar__nav" aria-label="Main">
-          {NAV_GROUPS.map((group, groupIndex) => (
+          {visibleGroups.map((group, groupIndex) => (
             <div key={group.label}>
               {isCollapsed && groupIndex > 0 ? (
                 <div

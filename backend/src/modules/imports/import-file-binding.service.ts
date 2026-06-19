@@ -39,7 +39,11 @@ function parseStatementEndDate(confidenceSummary: string | null): string | null 
  * Updates the label when employers change (e.g. after PATCH /household/profile or GET /imports/accounts).
  */
 /** Creates or updates the single `payslip`-type account used to bind payslip PDF imports (not a bank account). */
-export async function ensurePayslipImportBucketAccount(householdId: string, ownerUserId: string): Promise<void> {
+export async function ensurePayslipImportBucketAccount(
+  householdId: string,
+  ownerUserId: string,
+  ownerPersonProfileId: string | null
+): Promise<void> {
   const employers = await listHouseholdEmployers(householdId, ownerUserId);
   const institution = payslipBucketInstitutionFromEmployers(employers);
   const existing = await qGet<{ id: string }>(
@@ -49,17 +53,26 @@ export async function ensurePayslipImportBucketAccount(householdId: string, owne
     ownerUserId
   );
   if (existing) {
-    await qExec(`UPDATE financial_account SET institution = ? WHERE id = ? AND household_id = ?`, institution, existing.id, householdId);
+    await qExec(
+      `UPDATE financial_account
+          SET institution = ?, owner_person_profile_id = COALESCE(owner_person_profile_id, ?)
+        WHERE id = ? AND household_id = ?`,
+      institution,
+      ownerPersonProfileId,
+      existing.id,
+      householdId
+    );
     return;
   }
   const id = randomUUID();
   await qExec(
-    `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at)
-     VALUES (?, ?, ?, 'payslip', ?, NULL, 'USD', CURRENT_TIMESTAMP)`,
+    `INSERT INTO financial_account (id, household_id, owner_user_id, type, institution, account_mask, currency, created_at, owner_person_profile_id)
+     VALUES (?, ?, ?, 'payslip', ?, NULL, 'USD', CURRENT_TIMESTAMP, ?)`,
     id,
     householdId,
     ownerUserId,
-    institution
+    institution,
+    ownerPersonProfileId
   );
 }
 

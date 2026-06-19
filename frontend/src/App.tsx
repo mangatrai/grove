@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { RequireAuth } from "./auth/RequireAuth";
+import { useCurrentUser } from "./UserContext";
 import { ShellLayout } from "./layout/ShellLayout";
 import { BudgetPage } from "./pages/BudgetPage";
 import { CategoriesPage } from "./pages/CategoriesPage";
@@ -18,6 +20,12 @@ import { PropertyDetailPage } from "./pages/PropertyDetailPage";
 import { TaxProtestPage } from "./pages/TaxProtestPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
+
+function RequireOwnerOrAdmin({ children }: { children: ReactNode }) {
+  const { role } = useCurrentUser();
+  if (role === "member") return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
 
 export function App() {
   return (
@@ -37,9 +45,9 @@ export function App() {
           <Route path="/payslips/:payslipId" element={<PayslipDetailPage />} />
           <Route path="/payslips" element={<PayslipsPage />} />
           <Route path="/espp" element={<EsppPage />} />
-          <Route path="/real-estate" element={<RealEstatePage />} />
-          <Route path="/real-estate/:propertyId" element={<PropertyDetailPage />} />
-          <Route path="/tax-protest" element={<TaxProtestPage />} />
+          <Route path="/real-estate" element={<RequireOwnerOrAdmin><RealEstatePage /></RequireOwnerOrAdmin>} />
+          <Route path="/real-estate/:propertyId" element={<RequireOwnerOrAdmin><PropertyDetailPage /></RequireOwnerOrAdmin>} />
+          <Route path="/tax-protest" element={<RequireOwnerOrAdmin><TaxProtestPage /></RequireOwnerOrAdmin>} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
           <Route path="/import" element={<Navigate to="/imports/workspace" replace />} />

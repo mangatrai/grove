@@ -348,7 +348,7 @@ importsRouter.patch("/sessions/:sessionId/status", async (req: AuthenticatedRequ
 
 importsRouter.get("/accounts", async (req: AuthenticatedRequest, res) => {
   const { householdId, userId, role, personProfileId } = req.authUser!;
-  await ensurePayslipImportBucketAccount(householdId, userId);
+  await ensurePayslipImportBucketAccount(householdId, userId, personProfileId);
   const includeClosedAccounts = req.query.includeClosedAccounts === "true";
   const memberPersonProfileId = role === "member" ? personProfileId : null;
   const accounts = await listHouseholdFinancialAccounts(householdId, { includeClosedAccounts, memberPersonProfileId });
