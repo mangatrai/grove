@@ -11,6 +11,7 @@ export type NotificationType =
   | "backup_complete"
   | "backup_failed"
   | "property_valuation_updated"
+  | "property_valuation_failed"
   | "budget_threshold_80"
   | "budget_threshold_100"
   | "large_transaction"
@@ -30,6 +31,7 @@ const NOTIFICATION_DEFAULTS: Record<NotificationType, NotificationDefault> = {
   backup_complete:                     { enabledEmail: false, enabledInapp: true,  audience: "owner"            },
   backup_failed:                       { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
   property_valuation_updated:          { enabledEmail: false, enabledInapp: true,  audience: "owner"            },
+  property_valuation_failed:           { enabledEmail: true,  enabledInapp: true,  audience: "owner"            },
   budget_threshold_80:                 { enabledEmail: false, enabledInapp: true,  audience: "all"              },
   budget_threshold_100:                { enabledEmail: true,  enabledInapp: true,  audience: "all"              },
   large_transaction:                   { enabledEmail: false, enabledInapp: true,  audience: "all"              },

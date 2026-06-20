@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-190 — Register property_valuation_failed notification type (2026-06-20)
+
+**Problem:** FIX-188 added `createNotification({ type: "property_valuation_failed" })` calls to `realty-scheduler.service.ts` but never registered the type in `NotificationType` or `NOTIFICATION_DEFAULTS`. TypeScript compiled locally (tsc was not run in strict mode at commit time) but Heroku's production build failed with `TS2820: Type '"property_valuation_failed"' is not assignable to type 'NotificationType'`.
+
+**Fix:** Added `"property_valuation_failed"` to the `NotificationType` union and to `NOTIFICATION_DEFAULTS` with `enabledEmail: true, enabledInapp: true, audience: "owner"` — matching the pattern of `backup_failed`.
+
+**Files:** `backend/src/modules/notifications/notification.service.ts`
+
+---
+
 ## CR-193 — Mantine AppShell migration Phase 4: dead CSS purge (2026-06-20)
 
 Removed all CSS rules whose selectors no longer match any element in the DOM after Phases 1–3.
