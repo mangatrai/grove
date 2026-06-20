@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { AppShell, useMantineColorScheme } from "@mantine/core";
+import { ActionIcon, AppShell, useMantineColorScheme } from "@mantine/core";
 import {
   IconSun,
   IconMoon,
@@ -111,14 +111,15 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
     >
       <div className="app-topbar__inner">
         {/* Mobile hamburger */}
-        <button
-          type="button"
-          className="app-topbar__menu-btn"
+        <ActionIcon
+          hiddenFrom="sm"
+          variant="subtle"
+          size="lg"
           aria-label="Open navigation menu"
           onClick={onOpenMobileNav}
         >
           <IconMenu2 size={20} color="#94a3b8" />
-        </button>
+        </ActionIcon>
 
         <div className="app-topbar__spacer" aria-hidden />
 

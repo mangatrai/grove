@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-192 — Mantine AppShell migration Phase 3: hamburger → ActionIcon (2026-06-20)
+
+Replaced the raw `<button class="app-topbar__menu-btn">` hamburger with Mantine `<ActionIcon hiddenFrom="sm">`. Same `IconMenu2` icon — zero visual change. `hiddenFrom="sm"` replaces the CSS show/hide pattern; `.app-topbar__menu-btn` rules are now dead code (Phase 4 cleanup).
+
+Nav links, collapse button, import button, theme switcher, and user menu deferred — migrating nav links to Mantine `NavLink` would require new CSS overrides to match the left-border active design, which contradicts the standing rule against new custom CSS.
+
+**Files:** `frontend/src/layout/AppTopBar.tsx`
+
+**GitHub:** relates to #35
+
+---
+
 ## CR-191 — Mantine AppShell migration Phase 2: mobile drawer cleanup (2026-06-20)
 
 Removed dead CSS that Mantine AppShell now owns, and replaced the manual `useState` mobile-open setter with `useDisclosure`.
