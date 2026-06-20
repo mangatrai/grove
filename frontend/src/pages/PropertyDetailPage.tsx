@@ -179,15 +179,12 @@ export function PropertyDetailPage() {
   }, [token, property?.cadAccountId, loadDcadValueHistory, loadDcadTaxable]);
 
   const refreshValuation = useCallback(async () => {
-    if (!propertyId) return;
+    if (!propertyId || refreshing) return;
     setRefreshing(true);
     setError(null);
     setNotice(null);
     try {
-      let res = await apiFetch(`/household/properties/${encodeURIComponent(propertyId)}/refresh`, { method: "POST" });
-      if (!res.ok) {
-        res = await apiFetch(`/household/properties/${encodeURIComponent(propertyId)}/refresh-valuation`, { method: "POST" });
-      }
+      const res = await apiFetch(`/household/properties/${encodeURIComponent(propertyId)}/refresh-valuation`, { method: "POST" });
       if (!res.ok) {
         const msg = await res.text().catch(() => "");
         throw new Error(msg || "Could not refresh valuation");
@@ -200,7 +197,7 @@ export function PropertyDetailPage() {
     } finally {
       setRefreshing(false);
     }
-  }, [propertyId, load, loadEquityHistory]);
+  }, [propertyId, refreshing, load, loadEquityHistory]);
 
   const chartData = useMemo(() => {
     const d = getDetail(property?.valuationDetail);

@@ -31,8 +31,8 @@ export function startRealtyScheduler(): void {
 async function checkAndRefreshProperties(): Promise<void> {
   if (!isRealtyApiConfigured()) return;
 
-  const rows = await qAll<{ id: string; household_id: string }>(
-    `SELECT id, household_id FROM property
+  const rows = await qAll<{ id: string; household_id: string; address_line1: string | null }>(
+    `SELECT id, household_id, address_line1 FROM property
       WHERE api_property_id IS NOT NULL
         AND (
           valuation_fetched_at IS NULL
@@ -44,6 +44,7 @@ async function checkAndRefreshProperties(): Promise<void> {
   log.info(`Realty scheduler: ${rows.length} propert${rows.length === 1 ? "y" : "ies"} due for refresh`);
 
   for (const row of rows) {
+    const label = row.address_line1 ?? row.id;
     try {
       const result = await refreshPropertyValuation(row.id, row.household_id);
       if (result.ok) {
@@ -57,11 +58,26 @@ async function checkAndRefreshProperties(): Promise<void> {
         });
       } else {
         log.warn(`Realty scheduler: skipped ${row.id} — ${result.message}`);
+        void createNotification({
+          householdId: row.household_id,
+          type: "property_valuation_failed",
+          title: "Property valuation refresh failed",
+          body: `Could not refresh estimate for ${label}: ${result.message}`,
+          actionUrl: `/real-estate/${row.id}`
+        });
       }
       // 2-second pause between calls to stay well under rate limits
       await new Promise((r) => setTimeout(r, 2000));
     } catch (err) {
-      log.error(`Realty scheduler: ${row.id} — ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`Realty scheduler: ${row.id} — ${msg}`);
+      void createNotification({
+        householdId: row.household_id,
+        type: "property_valuation_failed",
+        title: "Property valuation refresh failed",
+        body: `An error occurred refreshing estimate for ${label}.`,
+        actionUrl: `/real-estate/${row.id}`
+      });
     }
   }
 }

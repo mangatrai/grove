@@ -18,6 +18,22 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-188 — Property refresh: eliminate duplicate API calls; emit failure notification from scheduler (2026-06-20)
+
+**Problem (duplicate calls):** `PropertyDetailPage.refreshValuation()` tried `/household/properties/:id/refresh` first, got a 404 (endpoint never existed), then fell back to `/refresh-valuation` — resulting in 2 API calls per button click. Additionally, rapid double-clicks could fire a second call before the `refreshing` guard had updated.
+
+**Fix (frontend):** Removed the dead fallback; now calls `/refresh-valuation` directly. Added `if (!propertyId || refreshing) return;` in-flight guard so double-clicks and re-renders during a pending refresh are harmless.
+
+**Problem (silent scheduler failures):** When the monthly realty scheduler's `refreshPropertyValuation()` returned `ok: false` or threw an exception, the error was only logged — no in-app notification was created, leaving users unaware.
+
+**Fix (backend):** `realty-scheduler.service.ts` now calls `createNotification` with `type: property_valuation_failed` in both failure paths (soft failure and exception). Added `address_line1` to the scheduler property query so the notification body includes the property address.
+
+**Files:** `frontend/src/pages/PropertyDetailPage.tsx`, `backend/src/modules/household/realty-scheduler.service.ts`
+
+**GitHub:** closes #118
+
+---
+
 ## FIX-189 — Non-DCAD properties no longer trigger DCAD enrichment calls (2026-06-20)
 
 **Problem:** Properties outside Denton County (e.g. Memphis TN) incorrectly triggered DCAD API calls at three sites in `protest.routes.ts`: manual comp addition (`POST /comps`), comp refresh (`POST /refresh-comps`), and the AI chat `fetch_dcad_comps` tool. The check `cadProvider === "dcad" ? "Denton" : null` computed a null county but still passed it through to `fetchDcadCanonical` / `runDcadBackfill`, causing unnecessary API calls and potential failures.
