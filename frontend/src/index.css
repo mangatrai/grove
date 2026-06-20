@@ -192,42 +192,8 @@ a {
   margin: 0;
 }
 
-.app-shell {
-  display: flex;
-  min-height: 100vh;
-  width: 100%;
-}
-
-.app-shell-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Cap authed main column content — was .app-shell-main > main.app-main (dead after AppShell migration) */
-
 .app-sidebar-backdrop {
   display: none;
-}
-
-.app-sidebar {
-  width: 15rem;
-  flex-shrink: 0;
-  background: var(--color-sidebar-bg);
-  border-right: 1px solid var(--color-sidebar-border);
-  height: 100vh;
-  position: sticky;
-  top: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  transition: width 0.2s ease;
-  z-index: 40;
-}
-
-.app-sidebar--collapsed {
-  width: 3.5rem;
 }
 
 .app-sidebar__top {
@@ -295,15 +261,6 @@ a {
   padding-left: calc(0.65rem - 2px);
 }
 
-.app-sidebar__link-abbr {
-  display: none;
-  width: 1.5rem;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 0.8rem;
-  color: var(--color-sidebar-text-muted);
-}
-
 .app-sidebar--collapsed .app-sidebar__link {
   justify-content: center;
   padding: 0.5rem 0;
@@ -313,10 +270,6 @@ a {
   border-left: none;
   padding-left: 0;
   border-bottom: 2px solid var(--color-sidebar-active);
-}
-
-.app-sidebar--collapsed .app-sidebar__link-abbr {
-  display: flex;
 }
 
 .app-sidebar--collapsed .app-sidebar__link-text {
@@ -363,37 +316,12 @@ a {
   display: none;
 }
 
-.app-topbar {
-  background: var(--color-sidebar-bg);
-  border-bottom: 1px solid var(--color-sidebar-border);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
-  position: sticky;
-  top: 0;
-  z-index: 25;
-  flex-shrink: 0;
-}
-
 .app-topbar__inner {
   display: flex;
   align-items: center;
   gap: 0.75rem;
   padding: 0.55rem 1rem 0.55rem 0.75rem;
   min-height: 3rem;
-}
-
-.app-topbar__menu-btn {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  cursor: pointer;
-  box-shadow: none;
-  color: #94a3b8;
 }
 
 .app-topbar__spacer {
@@ -405,28 +333,6 @@ a {
   flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
-}
-
-/* Topbar icon button (dark mode toggle, etc.) */
-.app-topbar__icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: #94a3b8;
-  cursor: pointer;
-  box-shadow: none;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.app-topbar__icon-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #f8fafc;
 }
 
 /* 3-way theme switcher: Light | Auto | Dark */
@@ -707,10 +613,6 @@ a {
 
   .app-sidebar__footer {
     display: none;
-  }
-
-  .app-topbar__menu-btn {
-    display: inline-flex;
   }
 
   /* Prevent page content from causing horizontal scroll (table uses inner overflow-x) */

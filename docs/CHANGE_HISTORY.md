@@ -18,6 +18,29 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-193 — Mantine AppShell migration Phase 4: dead CSS purge (2026-06-20)
+
+Removed all CSS rules whose selectors no longer match any element in the DOM after Phases 1–3.
+
+**Removed:**
+- `.app-shell` and `.app-shell-main` — replaced by Mantine `<AppShell>` and `<AppShell.Main>`
+- `.app-sidebar` (root geometry: `width`, `position: sticky`, `height: 100vh`, `z-index`, `transition`) — replaced by `<AppShell.Navbar>`
+- `.app-sidebar--collapsed { width: 3.5rem }` — AppShell now controls width via CSS vars (240/56px via props)
+- `.app-sidebar__link-abbr` and `.app-sidebar--collapsed .app-sidebar__link-abbr` — class never rendered in TSX
+- `.app-topbar` (root geometry: `position: sticky`, `z-index`, `flex-shrink`) — replaced by `<AppShell.Header>`
+- `.app-topbar__menu-btn` (base + mobile `display: inline-flex`) — replaced by `<ActionIcon hiddenFrom="sm">` in Phase 3
+- `.app-topbar__icon-btn` and `.app-topbar__icon-btn:hover` — class never rendered in TSX
+
+**Kept intact:** all `app-sidebar__*` internal rules, `app-topbar__inner/spacer/actions/import-btn`, `app-sidebar-backdrop`, `app-sidebar--collapsed .app-sidebar__*` descendant rules, `app-frame*`, `app-main`.
+
+CSS bundle: 253KB → 252KB (−1.35KB minified).
+
+**Files:** `frontend/src/index.css`
+
+**GitHub:** closes #35
+
+---
+
 ## CR-192 — Mantine AppShell migration Phase 3: hamburger → ActionIcon (2026-06-20)
 
 Replaced the raw `<button class="app-topbar__menu-btn">` hamburger with Mantine `<ActionIcon hiddenFrom="sm">`. Same `IconMenu2` icon — zero visual change. `hiddenFrom="sm"` replaces the CSS show/hide pattern; `.app-topbar__menu-btn` rules are now dead code (Phase 4 cleanup).
