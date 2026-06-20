@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-189 — Non-DCAD properties no longer trigger DCAD enrichment calls (2026-06-20)
+
+**Problem:** Properties outside Denton County (e.g. Memphis TN) incorrectly triggered DCAD API calls at three sites in `protest.routes.ts`: manual comp addition (`POST /comps`), comp refresh (`POST /refresh-comps`), and the AI chat `fetch_dcad_comps` tool. The check `cadProvider === "dcad" ? "Denton" : null` computed a null county but still passed it through to `fetchDcadCanonical` / `runDcadBackfill`, causing unnecessary API calls and potential failures.
+
+**Fix:** Added explicit `if (property.cadProvider === "dcad")` guards at all three call sites. Non-DCAD properties now skip the enrichment entirely. Hardcoded `county: "Denton"` (no longer nullable) within the guarded blocks. The AI chat tool returns an informative message when `fetch_dcad_comps` is invoked for a non-DCAD property. `dcadStarted` in the `refresh-comps` response is now accurately `false` for non-DCAD properties.
+
+**Files:** `backend/src/modules/protest/protest.routes.ts`
+
+**GitHub:** closes #117
+
+---
+
 ## FIX-186 — Payslip import: wrong parser inferred when owner uploads for spouse/member with different employer (2026-06-18)
 
 **Problem:** When the household owner uploaded a payslip for a spouse whose payslip account is linked to a different employer (e.g., Deloitte), the Import Workspace showed the owner's employer (IBM) in the "Ready:" label, and the wrong `parser_profile_id` was written to the DB on binding. Root cause: `ImportWorkspacePage` built the `incomeInference` employer context from `GET /household/settings`, which returns the **currently logged-in user's** employers only — not the selected account's owner's employers.

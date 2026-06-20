@@ -736,20 +736,21 @@ protestRouter.post("/:propertyId/comps", async (req: AuthenticatedRequest, res) 
       soldDate: parsed.data.soldDate ?? null,
     });
 
-    // Fire-and-forget DCAD enrichment so manual comps get CAD data without waiting for Refresh
-    const county = property.cadProvider === "dcad" ? "Denton" : null;
-    void fetchDcadCanonical({
-      address: parsed.data.addressLine1,
-      taxYear: parsed.data.year,
-      county: county ?? undefined,
-    }).then((canonical) => {
-      if (canonical) return applyCanonicalToComp(comp.id, canonical);
-    }).catch((err: unknown) => {
-      log.warn("manual comp DCAD enrichment failed", {
-        compId: comp.id,
-        err: err instanceof Error ? err.message : String(err),
+    // Fire-and-forget DCAD enrichment — only for DCAD-jurisdiction properties
+    if (property.cadProvider === "dcad") {
+      void fetchDcadCanonical({
+        address: parsed.data.addressLine1,
+        taxYear: parsed.data.year,
+        county: "Denton",
+      }).then((canonical) => {
+        if (canonical) return applyCanonicalToComp(comp.id, canonical);
+      }).catch((err: unknown) => {
+        log.warn("manual comp DCAD enrichment failed", {
+          compId: comp.id,
+          err: err instanceof Error ? err.message : String(err),
+        });
       });
-    });
+    }
 
     const comps = await listWorksheetComps(property.id, householdId, parsed.data.year);
     log.info("protest comp added", { propertyId: property.id, year: parsed.data.year, compId: comp.id, source: parsed.data.source });
@@ -803,18 +804,20 @@ protestRouter.post("/:propertyId/refresh-comps", async (req: AuthenticatedReques
     ? { ok: true, estimate: rr.estimate }
     : { ok: false, code: rr.code, message: rr.message };
 
-  // 2. Fire-and-forget DCAD backfill
+  // 2. Fire-and-forget DCAD backfill — only for DCAD-jurisdiction properties
   const address = [property.addressLine1, property.city, property.state].filter(Boolean).join(", ");
-  const county = property.cadProvider === "dcad" ? "Denton" : null;
-  void runDcadBackfill(property.id, householdId, address, year, county).catch((err: unknown) => {
-    log.warn("runDcadBackfill: uncaught error", { propertyId: property.id, err: err instanceof Error ? err.message : String(err) });
-  });
+  const dcadStarted = property.cadProvider === "dcad";
+  if (dcadStarted) {
+    void runDcadBackfill(property.id, householdId, address, year, "Denton").catch((err: unknown) => {
+      log.warn("runDcadBackfill: uncaught error", { propertyId: property.id, err: err instanceof Error ? err.message : String(err) });
+    });
+  }
 
   // 3. Return fresh comps
   const freshComps = await listWorksheetComps(property.id, householdId, year);
 
-  log.info("refresh-comps", { propertyId: property.id, year, redfin: redfinResult.ok, dcadStarted: true });
-  res.status(200).json({ redfin: redfinResult, dcadStarted: true, comps: freshComps });
+  log.info("refresh-comps", { propertyId: property.id, year, redfin: redfinResult.ok, dcadStarted });
+  res.status(200).json({ redfin: redfinResult, dcadStarted, comps: freshComps });
 });
 
 protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) => {
@@ -993,11 +996,13 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
       }
 
       if (toolName === "fetch_dcad_comps") {
+        if (property.cadProvider !== "dcad") {
+          return "DCAD is not available for this property — it is outside Denton County jurisdiction.";
+        }
         const queryAddress = typeof args.address === "string" && args.address.trim().length > 0
           ? args.address.trim()
           : address;
-        const county = property.cadProvider === "dcad" ? "Denton" : null;
-        void runDcadBackfill(property.id, householdId, queryAddress, year, county);
+        void runDcadBackfill(property.id, householdId, queryAddress, year, "Denton");
         compsAdded = 1; // signal that backfill was started
         return `DCAD search started for ${queryAddress}. Comps will be enriched and saved to the database.`;
       }
