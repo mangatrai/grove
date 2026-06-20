@@ -18,6 +18,39 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-191 — Mantine AppShell migration Phase 2: mobile drawer cleanup (2026-06-20)
+
+Removed dead CSS that Mantine AppShell now owns, and replaced the manual `useState` mobile-open setter with `useDisclosure`.
+
+**What changed:**
+- `ShellLayout.tsx`: Replaced `const [mobileNavOpen, setMobileNavOpen] = useState(false)` with `useDisclosure(false)`. Route-change close effect uses stable `closeMobileNav`. Both render paths pass `onCloseMobile={closeMobileNav}` and `onOpenMobileNav={openMobileNav}` directly instead of inline arrow wrappers.
+- `index.css` (mobile `@media max-width: 768px`): Removed `.app-sidebar { position: fixed; transform: translateX(-100%) }`, `.app-sidebar--mobile-open { transform: translateX(0) }`, `.app-sidebar--collapsed:not(.app-sidebar--mobile-open) { width: 15rem }`, and `.app-shell-main { overflow-x: hidden }` — all dead since Phase 1. Comment updated on `.app-main { overflow-x: hidden }` (still live).
+- `index.css`: Removed entire `@media (min-width: 769px)` block — it only contained `.app-sidebar--mobile-open { transform: none }` which is now dead.
+
+**What stays:** `app-sidebar-backdrop` CSS and component render (Mantine AppShell has no built-in overlay; we keep the custom backdrop for click-outside-to-close UX). Desktop dead-code CSS (`.app-shell`, `.app-sidebar`, `.app-topbar` geometry) deferred to Phase 4 cleanup.
+
+**Files:** `frontend/src/layout/ShellLayout.tsx`, `frontend/src/index.css`
+
+---
+
+## CR-190 — Mantine AppShell migration Phase 1: structural swap (2026-06-20)
+
+Replaced the hand-rolled shell wrappers with Mantine v7 `AppShell` primitives. All internal content (nav links, topbar buttons, hamburger, theme switcher, notifications, user menu) is unchanged — Phase 1 is structural only.
+
+**What changed:**
+- `ShellLayout.tsx`: `<div class="app-shell">` + `<div class="app-shell-main">` → `<AppShell layout="alt" navbar=... header=...>` + `<AppShell.Main>`. Both authed render paths updated. Sidebar collapse drives `width: 240|56`. Mobile open state drives `collapsed: { mobile: !mobileNavOpen }`. `transitionDuration={200}` preserves the width animation.
+- `AppTopBar.tsx`: `<header class="app-topbar">` → `<AppShell.Header style={{...}}>`. Visual styles (bg, border, shadow) moved inline.
+- `AppSidebar.tsx`: `<aside class="app-sidebar [...]">` → `<AppShell.Navbar className={collapsed ? "app-sidebar--collapsed" : undefined} style={{...}}>`. `app-sidebar` and `app-sidebar--mobile-open` removed from element (Mantine manages those). `app-sidebar--collapsed` kept for descendant CSS effects (link layout, text hiding).
+- `index.css`: Merged `max-width: 1500px; margin: 0 auto; box-sizing: border-box` into `.app-main` directly — the `.app-shell-main > main.app-main` selector is dead after the DOM change. Other shell CSS left as dead code for Phase 4 cleanup.
+
+**Why `layout="alt"`:** Current design has sidebar spanning full viewport height and header only spanning the main column (not above the sidebar). Mantine default `layout="default"` makes the header full-width — wrong for this design.
+
+**Files:** `frontend/src/layout/ShellLayout.tsx`, `frontend/src/layout/AppTopBar.tsx`, `frontend/src/layout/AppSidebar.tsx`, `frontend/src/index.css`
+
+**GitHub:** relates to #35
+
+---
+
 ## FIX-188 — Property refresh: eliminate duplicate API calls; emit failure notification from scheduler (2026-06-20)
 
 **Problem (duplicate calls):** `PropertyDetailPage.refreshValuation()` tried `/household/properties/:id/refresh` first, got a 404 (endpoint never existed), then fell back to `/refresh-valuation` — resulting in 2 API calls per button click. Additionally, rapid double-clicks could fire a second call before the `refreshing` guard had updated.

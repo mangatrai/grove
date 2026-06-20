@@ -1,4 +1,5 @@
 import { Link, NavLink } from "react-router-dom";
+import { AppShell } from "@mantine/core";
 import { GroveMark } from "../components/GroveMark";
 import { useCurrentUser } from "../UserContext";
 import {
@@ -92,14 +93,15 @@ export function AppSidebar({
           onClick={onCloseMobile}
         />
       ) : null}
-      <aside
-        className={[
-          "app-sidebar",
-          isCollapsed ? "app-sidebar--collapsed" : "",
-          mobileOpen ? "app-sidebar--mobile-open" : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
+      <AppShell.Navbar
+        className={isCollapsed ? "app-sidebar--collapsed" : undefined}
+        style={{
+          background: "var(--color-sidebar-bg)",
+          borderRight: "1px solid var(--color-sidebar-border)",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+        }}
         aria-label="Main navigation"
       >
         {/* Brand — hidden when collapsed (icons only) */}
@@ -186,7 +188,7 @@ export function AppSidebar({
             </span>
           </button>
         </div>
-      </aside>
+      </AppShell.Navbar>
     </>
   );
 }

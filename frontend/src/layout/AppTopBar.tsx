@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMantineColorScheme } from "@mantine/core";
+import { AppShell, useMantineColorScheme } from "@mantine/core";
 import {
   IconSun,
   IconMoon,
@@ -102,7 +102,13 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
   }
 
   return (
-    <header className="app-topbar">
+    <AppShell.Header
+      style={{
+        background: "var(--color-sidebar-bg)",
+        borderBottom: "1px solid var(--color-sidebar-border)",
+        boxShadow: "0 1px 0 rgba(0, 0, 0, 0.12)",
+      }}
+    >
       <div className="app-topbar__inner">
         {/* Mobile hamburger */}
         <button
@@ -206,6 +212,6 @@ export function AppTopBar({ onOpenMobileNav }: AppTopBarProps) {
           </div>
         </div>
       </div>
-    </header>
+    </AppShell.Header>
   );
 }

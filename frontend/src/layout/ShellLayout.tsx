@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
+import { AppShell } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
 
 import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { UserContext } from "../UserContext";
@@ -28,7 +30,7 @@ export function ShellLayout() {
       return false;
     }
   });
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileNavOpen, { open: openMobileNav, close: closeMobileNav }] = useDisclosure(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [personProfileId, setPersonProfileId] = useState<string | null | undefined>(undefined);
@@ -75,8 +77,8 @@ export function ShellLayout() {
   }, [collapsed]);
 
   useEffect(() => {
-    setMobileNavOpen(false);
-  }, [pathname]);
+    closeMobileNav();
+  }, [pathname, closeMobileNav]);
 
   useEffect(() => {
     const handler = () => {
@@ -134,15 +136,22 @@ export function ShellLayout() {
   if (userRole === "member" && personProfileId === null) {
     return (
       <div className="app-frame app-frame--authed">
-        <div className="app-shell">
+        <AppShell
+          layout="alt"
+          navbar={{ width: collapsed ? 56 : 240, breakpoint: "sm", collapsed: { mobile: !mobileNavOpen } }}
+          header={{ height: 48 }}
+          padding={0}
+          transitionDuration={200}
+          transitionTimingFunction="ease"
+        >
           <AppSidebar
             collapsed={collapsed}
             onToggleCollapse={() => setCollapsed((c) => !c)}
             mobileOpen={mobileNavOpen}
-            onCloseMobile={() => setMobileNavOpen(false)}
+            onCloseMobile={closeMobileNav}
           />
-          <div className="app-shell-main">
-            <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
+          <AppTopBar onOpenMobileNav={openMobileNav} />
+          <AppShell.Main>
             <main className="app-main" style={{ display: "flex", justifyContent: "center", alignItems: "center", minHeight: "60vh" }}>
               <div style={{ maxWidth: 480, textAlign: "center", padding: "2rem" }}>
                 <h2 style={{ marginBottom: "0.75rem" }}>Not part of a household</h2>
@@ -152,8 +161,8 @@ export function ShellLayout() {
                 </p>
               </div>
             </main>
-          </div>
-        </div>
+          </AppShell.Main>
+        </AppShell>
       </div>
     );
   }
@@ -165,22 +174,29 @@ export function ShellLayout() {
 
   return (
     <UserContext.Provider value={{ role: userRole, personProfileId: personProfileId ?? null }}>
-    <div className="app-frame app-frame--authed">
-      <div className="app-shell">
-        <AppSidebar
-          collapsed={collapsed}
-          onToggleCollapse={() => setCollapsed((c) => !c)}
-          mobileOpen={mobileNavOpen}
-          onCloseMobile={() => setMobileNavOpen(false)}
-        />
-        <div className="app-shell-main">
-          <AppTopBar onOpenMobileNav={() => setMobileNavOpen(true)} />
-          <main className="app-main">
-            <Outlet />
-          </main>
-        </div>
+      <div className="app-frame app-frame--authed">
+        <AppShell
+          layout="alt"
+          navbar={{ width: collapsed ? 56 : 240, breakpoint: "sm", collapsed: { mobile: !mobileNavOpen } }}
+          header={{ height: 48 }}
+          padding={0}
+          transitionDuration={200}
+          transitionTimingFunction="ease"
+        >
+          <AppSidebar
+            collapsed={collapsed}
+            onToggleCollapse={() => setCollapsed((c) => !c)}
+            mobileOpen={mobileNavOpen}
+            onCloseMobile={closeMobileNav}
+          />
+          <AppTopBar onOpenMobileNav={openMobileNav} />
+          <AppShell.Main>
+            <main className="app-main">
+              <Outlet />
+            </main>
+          </AppShell.Main>
+        </AppShell>
       </div>
-    </div>
     </UserContext.Provider>
   );
 }
