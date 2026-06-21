@@ -20,11 +20,15 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ## FIX-191 — Payslip employer lookup scoped to session user, not account owner (2026-06-21)
 
-When Head imports a member's payslip (e.g. spouse with Deloitte), `findEmployerById` queried the session user's `person_profile` via `linked_user_id`. The employer lives on the *owner's* profile (keyed by `person_profile.id` = `ownerPersonProfileId`), so the lookup always returned empty → `INVALID_EMPLOYER`.
+When Head imports a member's payslip (e.g. spouse with Deloitte), two callsites queried the session user's profile instead of the file owner's profile → `INVALID_EMPLOYER`.
 
-Added `getEmployersByPersonProfileId` (queries by `person_profile.id` directly) and `findEmployerByPersonProfileId`. Threaded `ownerPersonProfileId` into `resolvePayslipUploadContext` and all three callsites in `import-file-binding.service.ts` and `payslip.routes.ts`.
+**Bind step** (`import-file-binding.service.ts`): Added `findEmployerByPersonProfileId` (profile-scoped) and `findEmployerAcrossHousehold` (household-wide). When `ownerPersonProfileId` is set, validates against that profile; otherwise falls back to household-wide search.
 
-**Files:** `backend/src/modules/household/household.service.ts`, `payslip-employer-resolve.service.ts`, `import-file-binding.service.ts`, `payslip.routes.ts`
+**Parse step** (`import-parser.service.ts`): `requireEmployerForPayslipImport` and `findEmployerById` both used session `userId` (Head's IBM profile). Fixed: employer count now reads from `file.owner_person_profile_id` when set (via `getEmployersByPersonProfileId`), and the employer ID lookup uses `findEmployerAcrossHousehold` — finds the employer regardless of which household member owns it.
+
+Added `getEmployersByPersonProfileId` and `findEmployerByPersonProfileId` to `household.service.ts` / `payslip-employer-resolve.service.ts`.
+
+**Files:** `backend/src/modules/household/household.service.ts`, `payslip-employer-resolve.service.ts`, `import-file-binding.service.ts`, `payslip.routes.ts`, `import-parser.service.ts`
 
 **GitHub:** closes #126
 

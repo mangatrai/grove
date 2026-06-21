@@ -27,10 +27,11 @@ import type { NormalizedRawPayload } from "./profiles/types.js";
 import { parseAmount } from "./profiles/tabular-helpers.js";
 import type { ParserProfileId } from "./profiles/profile-ids.js";
 import {
-  findEmployerById,
+  findEmployerAcrossHousehold,
   employerParserProfileId,
-  requireEmployerForPayslipImport
+  listHouseholdEmployers
 } from "../payslip/payslip-employer-resolve.service.js";
+import { getEmployersByPersonProfileId } from "../household/household.service.js";
 import { parsePayslipPdfByProfile } from "../payslip/payslip-parse.service.js";
 import { upsertImportBalanceSnapshotFromStatement } from "../reports/balance-sheet.service.js";
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
@@ -286,7 +287,11 @@ export async function parseSessionImportFiles(
 
     try {
       if (profileId === "ibm_pay_contributions_pdf" || profileId === "adp_payslip_pdf" || profileId === "deloitte_payslip_pdf") {
-        if (!(await requireEmployerForPayslipImport(householdId, userId, file.employer_id))) {
+        const ownerEmployers = file.owner_person_profile_id
+          ? await getEmployersByPersonProfileId(householdId, file.owner_person_profile_id)
+          : await listHouseholdEmployers(householdId, userId);
+        const employerRequired = ownerEmployers.length > 1 && !file.employer_id?.trim();
+        if (employerRequired) {
           await qExec(
             `UPDATE import_file
      SET status = ?, confidence_summary = ?
@@ -303,7 +308,7 @@ export async function parseSessionImportFiles(
           continue;
         }
         if (file.employer_id) {
-          const emp = await findEmployerById(householdId, file.employer_id, userId);
+          const emp = await findEmployerAcrossHousehold(householdId, file.employer_id);
           if (!emp) {
             await qExec(
               `UPDATE import_file
