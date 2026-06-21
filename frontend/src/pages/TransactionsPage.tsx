@@ -20,6 +20,7 @@ import {
   MultiSelect
 } from "@mantine/core";
 import { IconArrowBackUp, IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
+import { useMediaQuery } from "@mantine/hooks";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
@@ -420,6 +421,7 @@ export function TransactionsPage() {
   const [patternPreviewLoading, setPatternPreviewLoading] = useState(false);
   const [patternResolving, setPatternResolving] = useState(false);
   const [recurringModalTxn, setRecurringModalTxn] = useState<TxRow | null>(null);
+  const isMobile = useMediaQuery("(max-width: 640px)");
 
   useEffect(() => {
     setSearchDraft(searchFromUrl);
@@ -1965,6 +1967,464 @@ export function TransactionsPage() {
                         ? "Nothing needs review right now."
                         : "No transactions yet. Use New import in the header, then run import from the workspace, or add a row with + Add transaction."}
               </Text>
+            ) : isMobile ? (
+              <Stack gap="xs">
+                {visibleTransactions.map((t) => {
+                  const desc = t.merchant || t.memo || "—";
+                  const reasons = t.reviewReasons?.length ? t.reviewReasons.join(" · ") : "—";
+                  const expanded = expandedTxnIds.has(t.id);
+                  const detailItems = reviewDetailByTxn[t.id];
+                  const detailLoading = reviewDetailLoadingIds.has(t.id);
+                  const detailError = reviewDetailErr[t.id];
+                  const confirmedRecurringOverride = findConfirmedOverride(t.merchant, recurringOverrides);
+                  const isSelected = needsReviewTab
+                    ? selectedTxnIds.has(t.id)
+                    : trashTab
+                      ? selectedTrashIds.has(t.id)
+                      : selectedAllIds.has(t.id);
+                  const onToggleSelect = needsReviewTab
+                    ? () => toggleTxnSelected(t.id)
+                    : trashTab
+                      ? () =>
+                          setSelectedTrashIds((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(t.id)) n.delete(t.id);
+                            else n.add(t.id);
+                            return n;
+                          })
+                      : () =>
+                          setSelectedAllIds((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(t.id)) n.delete(t.id);
+                            else n.add(t.id);
+                            return n;
+                          });
+                  return (
+                    <Paper key={t.id} withBorder p="sm" radius="sm">
+                      <Group justify="space-between" mb={6} wrap="nowrap">
+                        <Group gap="xs" wrap="nowrap">
+                          <Checkbox
+                            checked={isSelected}
+                            onChange={onToggleSelect}
+                            disabled={trashTab ? savingTrash : savingBulk}
+                            aria-label={`Select ${desc}`}
+                          />
+                          <Text size="sm" c="dimmed">
+                            {t.txnDate}
+                          </Text>
+                        </Group>
+                        <Group gap={5} wrap="nowrap">
+                          <Text fw={600}>{formatMoney(t.amount, t.direction)}</Text>
+                          {t.status !== "posted" ? <StatusBadge status={t.status} /> : null}
+                          {t.transferGroupId ? (
+                            <Badge size="xs" variant="light" color="blue" title={`Transfer pair: ${t.transferGroupId}`}>
+                              ↔
+                            </Badge>
+                          ) : null}
+                        </Group>
+                      </Group>
+                      <Text fw={500} mb={2}>
+                        {t.merchant || "—"}
+                      </Text>
+                      {trashTab ? (
+                        t.memo ? (
+                          <Text fs="italic" size="sm" c="dimmed" mb={4}>
+                            {t.memo}
+                          </Text>
+                        ) : null
+                      ) : editingMemoId === t.id ? (
+                        <Group
+                          gap="xs"
+                          mb={4}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void saveMemo(t.id);
+                            if (e.key === "Escape") cancelMemoEdit();
+                          }}
+                        >
+                          <TextInput
+                            value={memoDraft}
+                            onChange={(e) => setMemoDraft(e.target.value)}
+                            placeholder="Add memo…"
+                            autoFocus
+                            maxLength={500}
+                            style={{ flex: 1 }}
+                          />
+                          <ActionIcon type="button" onClick={() => void saveMemo(t.id)} title="Save" variant="default">
+                            ✓
+                          </ActionIcon>
+                          <ActionIcon type="button" onClick={cancelMemoEdit} title="Cancel" variant="default">
+                            ✕
+                          </ActionIcon>
+                        </Group>
+                      ) : (
+                        <Group gap="xs" mb={4} wrap="nowrap">
+                          <Text
+                            fs={t.memo ? "italic" : "normal"}
+                            size="sm"
+                            c={t.memo ? undefined : "dimmed"}
+                            style={{ flex: 1 }}
+                          >
+                            {t.memo ?? "Add memo…"}
+                          </Text>
+                          <ActionIcon
+                            type="button"
+                            onClick={() => startMemoEdit(t.id, t.memo)}
+                            title={t.memo ? "Edit memo" : "Add memo"}
+                            variant="subtle"
+                            size="sm"
+                          >
+                            <IconPencil size={11} />
+                          </ActionIcon>
+                        </Group>
+                      )}
+                      {needsReviewTab && reasons !== "—" ? (
+                        <Text size="xs" c="dimmed" mb={4}>
+                          {reasons}
+                        </Text>
+                      ) : null}
+                      <Box mb="xs">
+                        {trashTab ? (
+                          <Text c="dimmed" size="sm">
+                            {t.categoryName ?? "—"}
+                          </Text>
+                        ) : (
+                          <>
+                            <LedgerCategoryPicker
+                              categories={categories}
+                              value={t.categoryId}
+                              disabled={savingId === t.id || savingBulk}
+                              onChange={(v) =>
+                                void (async () => {
+                                  const ok = await updateCategory(t.id, v, t.ownerScope, t.ownerPersonProfileId);
+                                  if (ok && v && v !== t.categoryId && (currentRole === "owner" || currentRole === "admin")) {
+                                    setRuleFromLedgerConfirm({ txnId: t.id, categoryId: v });
+                                  }
+                                })()
+                              }
+                              ariaLabel={`Category for ${desc}`}
+                            />
+                            {needsReviewTab ? <CategoryClassificationHint meta={t.classificationMeta ?? null} /> : null}
+                          </>
+                        )}
+                      </Box>
+                      <Group justify="space-between" wrap="nowrap">
+                        <Group gap="xs">
+                          {t.status === "posted" && t.direction === "debit" ? (
+                            <Button
+                              type="button"
+                              size="compact-xs"
+                              variant="subtle"
+                              color={confirmedRecurringOverride ? "blue" : "gray"}
+                              onClick={() => setRecurringModalTxn(t)}
+                              title={
+                                confirmedRecurringOverride
+                                  ? `Recurring: ${confirmedRecurringOverride.merchantKey}`
+                                  : "Mark as recurring"
+                              }
+                              aria-label={
+                                confirmedRecurringOverride
+                                  ? `Edit recurring override for ${t.merchant ?? ""}`
+                                  : `Mark ${t.merchant ?? ""} as recurring`
+                              }
+                            >
+                              {confirmedRecurringOverride ? "●" : "○"}
+                            </Button>
+                          ) : null}
+                          {needsReviewTab ? (
+                            <Button
+                              type="button"
+                              variant="subtle"
+                              size="compact-sm"
+                              aria-expanded={expanded}
+                              onClick={() => toggleTxnExpand(t.id)}
+                            >
+                              {expanded ? "Hide" : "Context"}
+                            </Button>
+                          ) : null}
+                        </Group>
+                        {trashTab ? (
+                          <Group gap={4} wrap="nowrap">
+                            <ActionIcon
+                              type="button"
+                              disabled={savingTrash}
+                              onClick={() => void restoreSingle(t.id)}
+                              title="Restore"
+                              variant="default"
+                              color="fsForest"
+                            >
+                              <IconArrowBackUp size={14} />
+                            </ActionIcon>
+                            <ActionIcon
+                              type="button"
+                              disabled={savingTrash}
+                              onClick={() => void hardDeleteSingle(t.id)}
+                              title="Permanently delete — cannot be undone"
+                              variant="default"
+                              color="red"
+                            >
+                              <IconTrash size={14} />
+                            </ActionIcon>
+                          </Group>
+                        ) : (
+                          <ActionIcon
+                            type="button"
+                            disabled={savingId === t.id || savingBulk}
+                            onClick={() => void trashSingle(t.id)}
+                            title="Move to Trash"
+                            variant="default"
+                          >
+                            <IconTrash size={14} />
+                          </ActionIcon>
+                        )}
+                      </Group>
+                      {needsReviewTab && expanded ? (
+                        <Stack gap="xs" mt="sm">
+                          {detailLoading ? <Text c="dimmed">Loading review context…</Text> : null}
+                          {detailError ? <Alert color="red">{detailError}</Alert> : null}
+                          {!detailLoading && !detailError && detailItems && detailItems.length === 0 ? (
+                            <Text c="dimmed" size="sm">
+                              This row is here because it has no category. Assign one using the picker above to move it out
+                              of Needs review.
+                            </Text>
+                          ) : null}
+                          {!detailLoading && !detailError && detailItems && detailItems.length > 0
+                            ? detailItems.map((it) => {
+                                const summary =
+                                  it.type === "transfer_ambiguity"
+                                    ? null
+                                    : it.reasonDetail?.message ??
+                                      (it.reasonDetail?.kind === "near_duplicate"
+                                        ? "Possible duplicate of an existing transaction."
+                                        : it.reason.slice(0, 200));
+                                const explainSource = prettyClassificationSource(it.context.classification?.source);
+                                const explainConf = formatConfidencePct(it.context.classification?.confidence);
+                                const explainRule = it.context.classification?.ruleId ?? null;
+                                const explainReason = it.context.classification?.reason ?? null;
+                                const busy = savingBulk || Boolean(savingResolutionItemId) || savingId === t.id;
+                                return (
+                                  <Paper key={it.id} withBorder radius="sm" p="sm">
+                                    <Group gap="xs">
+                                      <Text fw={700}>{formatResolutionTypeLabel(it.type)}</Text>
+                                      <Text c="dimmed">{it.status}</Text>
+                                      <Text c="dimmed">· {it.createdAt}</Text>
+                                    </Group>
+                                    {it.type !== "transfer_ambiguity" ? (
+                                      <>
+                                        <Text c="dimmed" mt={4} mb={2}>
+                                          <Text span c="dimmed">
+                                            File:
+                                          </Text>{" "}
+                                          {it.context.fileName ?? "—"}{" "}
+                                          {it.context.sessionId ? (
+                                            <>
+                                              ·{" "}
+                                              <Link
+                                                to={`/transactions?needsReview=true&sessionId=${it.context.sessionId}`}
+                                              >
+                                                Session rows
+                                              </Link>
+                                            </>
+                                          ) : null}
+                                        </Text>
+                                        <Text c="dimmed" mb={4}>
+                                          <Text span c="dimmed">
+                                            Raw preview:
+                                          </Text>{" "}
+                                          {it.context.raw ? (
+                                            <>
+                                              {it.context.raw.txnDate ?? "—"} ·{" "}
+                                              {formatSignedMoneyRaw(it.context.raw.amount)} ·{" "}
+                                              {it.context.raw.description ?? "—"}
+                                            </>
+                                          ) : (
+                                            "—"
+                                          )}
+                                        </Text>
+                                        {summary ? (
+                                          <Text size="sm" mb={4}>
+                                            {summary}
+                                          </Text>
+                                        ) : null}
+                                        {explainSource || explainConf || explainRule || explainReason ? (
+                                          <Group gap="xs" wrap="wrap">
+                                            {explainSource ? <Badge variant="light">{explainSource}</Badge> : null}
+                                            {explainConf ? <Badge variant="light">{explainConf}</Badge> : null}
+                                            {explainRule ? (
+                                              <Badge variant="light">ID {explainRule.slice(0, 8)}</Badge>
+                                            ) : null}
+                                            {explainReason ? (
+                                              <Text c="dimmed" size="sm">
+                                                {explainReason}
+                                              </Text>
+                                            ) : null}
+                                          </Group>
+                                        ) : null}
+                                        {it.context.classification?.ai ? (
+                                          <Text c="dimmed" mt="xs" size="xs" lh={1.4}>
+                                            Legacy AI suggestion metadata is present on this ticket (older canonicalize).
+                                            New imports use rules-only classification.
+                                          </Text>
+                                        ) : null}
+                                      </>
+                                    ) : null}
+                                    <Group mt="sm" wrap="wrap" align="flex-start">
+                                      {it.type === "unknown_category" ? (
+                                        <Box miw="12rem" maw="16rem">
+                                          <Text c="dimmed" size="xs">
+                                            Set category
+                                          </Text>
+                                          <LedgerCategoryPicker
+                                            categories={categories}
+                                            value={null}
+                                            disabled={busy}
+                                            onChange={async (categoryId) => {
+                                              if (!categoryId) return;
+                                              setSavingId(t.id);
+                                              setError(null);
+                                              try {
+                                                await apiJson(`/transactions/${t.id}`, {
+                                                  method: "PATCH",
+                                                  body: JSON.stringify({ categoryId }),
+                                                });
+                                                forgetReviewDetail(t.id);
+                                                await load();
+                                                if (currentRole === "owner" || currentRole === "admin") {
+                                                  const merchantKey = (t.merchant || t.memo || "")
+                                                    .toLowerCase()
+                                                    .trim();
+                                                  if (merchantKey && !ruleOfferedMerchants.has(merchantKey)) {
+                                                    setRuleOfferedMerchants((prev) => new Set(prev).add(merchantKey));
+                                                    setRuleFromLedgerConfirm({ txnId: t.id, categoryId });
+                                                  }
+                                                }
+                                              } catch (e: unknown) {
+                                                setError(e instanceof Error ? e.message : "Failed to set category");
+                                              } finally {
+                                                setSavingId(null);
+                                              }
+                                            }}
+                                            ariaLabel={`Set category for transaction ${t.id}`}
+                                          />
+                                        </Box>
+                                      ) : null}
+                                      {it.type === "transfer_ambiguity" ? (
+                                        <Stack gap="xs" w="100%" mt={4}>
+                                          {it.transferCandidates != null && it.transferCandidates.length > 0 ? (
+                                            <>
+                                              <Text size="xs" c="dimmed">
+                                                Select the matching credit to pair with this debit:
+                                              </Text>
+                                              <Radio.Group
+                                                value={selectedTransferCandidates[it.id] ?? ""}
+                                                onChange={(val) =>
+                                                  setSelectedTransferCandidates((prev) => ({ ...prev, [it.id]: val }))
+                                                }
+                                              >
+                                                <Stack gap={6}>
+                                                  {it.transferCandidates.map((c) => {
+                                                    const rawDesc = c.description ?? "";
+                                                    const descShort =
+                                                      rawDesc.length > 48 ? `${rawDesc.slice(0, 48)}…` : rawDesc;
+                                                    const amt = `+$${Number(c.amount).toLocaleString(undefined, {
+                                                      minimumFractionDigits: 2,
+                                                      maximumFractionDigits: 2,
+                                                    })}`;
+                                                    return (
+                                                      <Radio
+                                                        key={c.id}
+                                                        value={c.id}
+                                                        disabled={busy}
+                                                        label={
+                                                          <Group gap={8} wrap="nowrap">
+                                                            <Text
+                                                              size="xs"
+                                                              fw={600}
+                                                              style={{ fontVariantNumeric: "tabular-nums" }}
+                                                            >
+                                                              {amt}
+                                                            </Text>
+                                                            <Text size="xs" c="dimmed">
+                                                              {c.txnDate}
+                                                            </Text>
+                                                            <Text size="xs">{c.accountName}</Text>
+                                                            <Text size="xs" c="dimmed" title={rawDesc || undefined}>
+                                                              {descShort}
+                                                            </Text>
+                                                          </Group>
+                                                        }
+                                                      />
+                                                    );
+                                                  })}
+                                                </Stack>
+                                              </Radio.Group>
+                                              <Button
+                                                type="button"
+                                                size="xs"
+                                                variant="filled"
+                                                disabled={busy || !selectedTransferCandidates[it.id]}
+                                                loading={savingResolutionItemId === it.id}
+                                                onClick={() => {
+                                                  const creditId = selectedTransferCandidates[it.id];
+                                                  if (creditId) void confirmTransferItem(t.id, it.id, creditId);
+                                                }}
+                                                style={{ alignSelf: "flex-start" }}
+                                              >
+                                                Confirm transfer pair
+                                              </Button>
+                                            </>
+                                          ) : it.transferCandidates != null ? (
+                                            <Text c="dimmed" size="xs">
+                                              No matching candidates — may resolve on next import.
+                                            </Text>
+                                          ) : null}
+                                        </Stack>
+                                      ) : null}
+                                      <Group gap="xs" wrap="wrap">
+                                        {it.status !== "resolved" ? (
+                                          <Button
+                                            type="button"
+                                            variant="default"
+                                            disabled={busy || savingResolutionItemId === it.id}
+                                            title={
+                                              it.type === "transfer_ambiguity"
+                                                ? "Dismiss without pairing — use when this is NOT a real transfer"
+                                                : undefined
+                                            }
+                                            onClick={() => void patchResolutionItemStatus(t.id, it.id, "resolved")}
+                                          >
+                                            {it.type === "transfer_ambiguity" ? "Not a transfer" : "Resolve flag"}
+                                          </Button>
+                                        ) : (
+                                          <Button
+                                            type="button"
+                                            variant="default"
+                                            disabled={busy || savingResolutionItemId === it.id}
+                                            onClick={() => void patchResolutionItemStatus(t.id, it.id, "open")}
+                                          >
+                                            Reopen
+                                          </Button>
+                                        )}
+                                        <Button
+                                          type="button"
+                                          variant="default"
+                                          disabled={busy}
+                                          onClick={() => void trashSingle(t.id)}
+                                          title="Move this transaction to Trash"
+                                        >
+                                          Move to trash
+                                        </Button>
+                                      </Group>
+                                    </Group>
+                                  </Paper>
+                                );
+                              })
+                            : null}
+                        </Stack>
+                      ) : null}
+                    </Paper>
+                  );
+                })}
+              </Stack>
             ) : (
               <div
                 style={{

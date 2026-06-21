@@ -382,7 +382,7 @@ async function generateNarrative(data: YearSummaryData): Promise<string[]> {
   try {
     const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 60_000 });
     const completion = await client.chat.completions.create({
-      model: "gpt-4o",
+      model: env.OPENAI_STRONG_MODEL,
       max_tokens: 800,
       temperature: 0.7,
       messages: [

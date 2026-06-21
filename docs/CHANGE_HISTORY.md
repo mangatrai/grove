@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-R03 — Mobile ledger card layout + FIX model hardcoding in year-summary (2026-06-20)
+
+**UX-R03:** Transactions ledger now renders a card-per-row layout below 640 px instead of the horizontal-scroll table. Uses `useMediaQuery("(max-width: 640px)")` from `@mantine/hooks`; table is unchanged on wider viewports. Cards include all functionality: checkbox selection, date/amount/status/transfer badges, merchant, memo inline edit, category picker with classification hint, recurring toggle, trash/restore/delete actions. Needs-review tab: "Why" reasons inline + collapsible "Context" button that expands the full resolution-item panel (unknown category picker, transfer ambiguity radio + confirm, near-duplicate details, resolve/reopen/trash actions). Bulk action bar above the list is unchanged and works on mobile.
+
+**Model hardcoding fix:** `year-summary.service.ts` was passing the literal string `"gpt-4o"` to `client.chat.completions.create()` instead of `env.OPENAI_STRONG_MODEL`. Fixed to use the env var so the "Wrapped" summary follows the same model config as the rest of the strong-model paths.
+
+**Files:** `frontend/src/pages/TransactionsPage.tsx`, `backend/src/modules/reports/year-summary.service.ts`
+
+**GitHub:** closes #29
+
+---
+
 ## FIX-190 — Register property_valuation_failed notification type (2026-06-20)
 
 **Problem:** FIX-188 added `createNotification({ type: "property_valuation_failed" })` calls to `realty-scheduler.service.ts` but never registered the type in `NotificationType` or `NOTIFICATION_DEFAULTS`. TypeScript compiled locally (tsc was not run in strict mode at commit time) but Heroku's production build failed with `TS2820: Type '"property_valuation_failed"' is not assignable to type 'NotificationType'`.
