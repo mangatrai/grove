@@ -1,4 +1,5 @@
-import { getHouseholdSettings } from "../household/household.service.js";
+import { getHouseholdSettings, getEmployersByPersonProfileId, findEmployerAcrossHousehold } from "../household/household.service.js";
+export { findEmployerAcrossHousehold };
 import type { EmployerStub } from "../household/household.types.js";
 import { IBM_PAY_CONTRIBUTIONS_PDF_PROFILE_ID } from "./payslip.types.js";
 
@@ -14,6 +15,16 @@ export async function findEmployerById(
   userId: string
 ): Promise<EmployerStub | null> {
   const employers = await listHouseholdEmployers(householdId, userId);
+  return employers.find((e) => e.id === employerId) ?? null;
+}
+
+/** Look up an employer by the owner’s person_profile.id — used when Head imports on behalf of a member. */
+export async function findEmployerByPersonProfileId(
+  householdId: string,
+  employerId: string,
+  personProfileId: string
+): Promise<EmployerStub | null> {
+  const employers = await getEmployersByPersonProfileId(householdId, personProfileId);
   return employers.find((e) => e.id === employerId) ?? null;
 }
 
@@ -38,16 +49,22 @@ export function payslipBucketInstitutionFromEmployers(employers: EmployerStub[])
  * - 0 employers → IBM, no employer_id
  * - 1 employer → that employer’s parser + id (no dropdown required)
  * - 2+ employers → `employerId` body field required
+ *
+ * When `ownerPersonProfileId` is provided (Head importing on behalf of a member), employers are
+ * read from that profile’s `employers_json` rather than from the session user’s profile.
  */
 export async function resolvePayslipUploadContext(
   householdId: string,
   userId: string,
-  employerIdRaw: string | undefined
+  employerIdRaw: string | undefined,
+  ownerPersonProfileId?: string | null
 ): Promise<
   | { ok: true; parserProfileId: string; employerId: string | null }
   | { ok: false; code: "EMPLOYER_REQUIRED" | "INVALID_EMPLOYER"; message: string }
 > {
-  const employers = await listHouseholdEmployers(householdId, userId);
+  const employers = ownerPersonProfileId
+    ? await getEmployersByPersonProfileId(householdId, ownerPersonProfileId)
+    : await listHouseholdEmployers(householdId, userId);
   const trimmed = employerIdRaw?.trim();
 
   if (employers.length === 0) {
@@ -66,7 +83,9 @@ export async function resolvePayslipUploadContext(
     };
   }
 
-  const employer = await findEmployerById(householdId, trimmed, userId);
+  const employer = ownerPersonProfileId
+    ? await findEmployerByPersonProfileId(householdId, trimmed, ownerPersonProfileId)
+    : await findEmployerById(householdId, trimmed, userId);
   if (!employer) {
     return { ok: false, code: "INVALID_EMPLOYER", message: "Employer not found in household settings" };
   }

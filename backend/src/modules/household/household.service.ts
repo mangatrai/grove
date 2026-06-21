@@ -1011,3 +1011,58 @@ export async function resetMemberPassword(
   );
   return { ok: true, emailSent: false, tempPassword };
 }
+
+/**
+ * Search every person_profile in the household for the given employer ID.
+ * Used during import bind validation — employer IDs are household-unique UUIDs,
+ * so searching across all profiles is both correct and safe.
+ */
+export async function findEmployerAcrossHousehold(
+  householdId: string,
+  employerId: string
+): Promise<EmployerStub | null> {
+  const rows = await qAll<{ employersJson: string | null }>(
+    `SELECT employers_json AS "employersJson"
+     FROM person_profile
+     WHERE household_id = ? AND employers_json IS NOT NULL`,
+    householdId
+  );
+  for (const row of rows) {
+    if (!row.employersJson?.trim()) continue;
+    try {
+      const parsed = employersPayloadSchema.safeParse(JSON.parse(row.employersJson) as unknown);
+      if (!parsed.success) continue;
+      const emp = parsed.data.find((e) => e.id === employerId);
+      if (emp) return emp;
+    } catch {
+      /* skip malformed json */
+    }
+  }
+  return null;
+}
+
+/**
+ * Read employers_json from a person_profile by its ID (not by linked_user_id).
+ * Used when Head imports on behalf of a member — the session userId is Head's but the
+ * employer belongs to the member's person_profile.
+ */
+export async function getEmployersByPersonProfileId(
+  householdId: string,
+  personProfileId: string
+): Promise<EmployerStub[]> {
+  const row = await qGet<{ employersJson: string | null }>(
+    `SELECT employers_json AS "employersJson"
+     FROM person_profile
+     WHERE id = ? AND household_id = ?
+     LIMIT 1`,
+    personProfileId,
+    householdId
+  );
+  if (!row?.employersJson?.trim()) return [];
+  try {
+    const parsed = employersPayloadSchema.safeParse(JSON.parse(row.employersJson) as unknown);
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}

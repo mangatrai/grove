@@ -5,6 +5,8 @@ import { employersPayloadSchema } from "../household/household.types.js";
 
 import {
   findEmployerById,
+  findEmployerByPersonProfileId,
+  findEmployerAcrossHousehold,
   employerParserProfileId,
   listHouseholdEmployers,
   payslipBucketInstitutionFromEmployers
@@ -160,7 +162,9 @@ export async function updateImportFileBinding(
   }
 
   if (employerId) {
-    const emp = await findEmployerById(householdId, employerId, userId);
+    const emp = ownerPersonProfileId
+      ? await findEmployerByPersonProfileId(householdId, employerId, ownerPersonProfileId)
+      : await findEmployerAcrossHousehold(householdId, employerId);
     if (!emp) {
       return { ok: false, code: "INVALID_EMPLOYER", message: "Employer not found in household settings" };
     }

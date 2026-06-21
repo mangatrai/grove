@@ -9,6 +9,7 @@ import { requireAuth } from "../auth/auth.middleware.js";
 import {
   employerParserProfileId,
   findEmployerById,
+  findEmployerByPersonProfileId,
   resolvePayslipUploadContext
 } from "./payslip-employer-resolve.service.js";
 import { parsePayslipPdfByProfile } from "./payslip-parse.service.js";
@@ -236,7 +237,7 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
   const employerIdRaw =
     body.employerId === undefined || body.employerId === null ? undefined : body.employerId;
 
-  const resolved = await resolvePayslipUploadContext(householdId, userId, employerIdRaw);
+  const resolved = await resolvePayslipUploadContext(householdId, userId, employerIdRaw, ownerPersonProfileId);
   if (!resolved.ok) {
     res.status(400).json({
       message: resolved.message,
@@ -252,7 +253,9 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
       return;
     }
     if (resolved.employerId) {
-      const emp = await findEmployerById(householdId, resolved.employerId, userId);
+      const emp = ownerPersonProfileId
+        ? await findEmployerByPersonProfileId(householdId, resolved.employerId, ownerPersonProfileId)
+        : await findEmployerById(householdId, resolved.employerId, userId);
       if (!emp) {
         res.status(400).json({ message: "Employer not found in household settings", code: "INVALID_EMPLOYER" });
         return;
@@ -272,7 +275,9 @@ payslipRouter.post("/manual", async (req: AuthenticatedRequest, res) => {
 
   let employerDisplayName: string | null = null;
   if (resolved.employerId) {
-    const emp = await findEmployerById(householdId, resolved.employerId, userId);
+    const emp = ownerPersonProfileId
+      ? await findEmployerByPersonProfileId(householdId, resolved.employerId, ownerPersonProfileId)
+      : await findEmployerById(householdId, resolved.employerId, userId);
     employerDisplayName = emp?.displayName?.trim() ? String(emp.displayName).trim() : null;
   }
 

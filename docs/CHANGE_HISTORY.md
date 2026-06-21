@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-191 — Payslip employer lookup scoped to session user, not account owner (2026-06-21)
+
+When Head imports a member's payslip (e.g. spouse with Deloitte), `findEmployerById` queried the session user's `person_profile` via `linked_user_id`. The employer lives on the *owner's* profile (keyed by `person_profile.id` = `ownerPersonProfileId`), so the lookup always returned empty → `INVALID_EMPLOYER`.
+
+Added `getEmployersByPersonProfileId` (queries by `person_profile.id` directly) and `findEmployerByPersonProfileId`. Threaded `ownerPersonProfileId` into `resolvePayslipUploadContext` and all three callsites in `import-file-binding.service.ts` and `payslip.routes.ts`.
+
+**Files:** `backend/src/modules/household/household.service.ts`, `payslip-employer-resolve.service.ts`, `import-file-binding.service.ts`, `payslip.routes.ts`
+
+**GitHub:** closes #126
+
 ## UX-R04 — ESPP stat grid responsive breakpoints (2026-06-21)
 
 ESPP year-summary stat grid was `SimpleGrid cols={5}` with no responsive breakpoints — on a ~390 px phone each card was ~78 px wide causing label truncation and right-edge overflow. Changed to `cols={{ base: 2, xs: 3, sm: 5 }}`: 2-column grid on mobile, 3 on tablet, 5 on desktop.
