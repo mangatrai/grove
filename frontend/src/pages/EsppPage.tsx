@@ -885,7 +885,7 @@ export function EsppPage() {
           </Text>
         </Group>
 
-        <SimpleGrid cols={5} spacing="sm">
+        <SimpleGrid cols={{ base: 2, xs: 3, sm: 5 }} spacing="sm">
           <StatCard label="Shares Purchased YTD" value={formatShares(summaryData.sharesPurchased)} />
           <StatCard label="Transferred to Broker" value={formatShares(summaryData.sharesTransferred)} />
           <StatCard

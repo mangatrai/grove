@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-R04 — ESPP stat grid responsive breakpoints (2026-06-21)
+
+ESPP year-summary stat grid was `SimpleGrid cols={5}` with no responsive breakpoints — on a ~390 px phone each card was ~78 px wide causing label truncation and right-edge overflow. Changed to `cols={{ base: 2, xs: 3, sm: 5 }}`: 2-column grid on mobile, 3 on tablet, 5 on desktop.
+
+**Files:** `frontend/src/pages/EsppPage.tsx`
+
+**GitHub:** closes #125
+
+---
+
 ## UX-R03 — Mobile ledger card layout + FIX model hardcoding in year-summary (2026-06-20)
 
 **UX-R03:** Transactions ledger now renders a card-per-row layout below 640 px instead of the horizontal-scroll table. Uses `useMediaQuery("(max-width: 640px)")` from `@mantine/hooks`; table is unchanged on wider viewports. Cards include all functionality: checkbox selection, date/amount/status/transfer badges, merchant, memo inline edit, category picker with classification hint, recurring toggle, trash/restore/delete actions. Needs-review tab: "Why" reasons inline + collapsible "Context" button that expands the full resolution-item panel (unknown category picker, transfer ambiguity radio + confirm, near-duplicate details, resolve/reopen/trash actions). Bulk action bar above the list is unchanged and works on mobile.
