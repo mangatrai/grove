@@ -22,12 +22,12 @@ export function startBackupScheduler(): void {
 }
 
 /**
- * Scans `household_gdrive_config` for households with automatic backups enabled
+ * Scans `oauth_integrations` for households with automatic Drive backups enabled
  * and queues a job when the last successful backup is older than the configured interval.
  */
 export async function checkAndQueueDueBackups(): Promise<void> {
   const rows = await qAll<SchedulerHouseholdRow>(
-    `SELECT household_id, backup_frequency_hours FROM household_gdrive_config WHERE backup_frequency_hours > 0`
+    `SELECT household_id, backup_frequency_hours FROM oauth_integrations WHERE provider = 'google_drive' AND user_id IS NULL AND backup_frequency_hours > 0`
   );
 
   for (const row of rows) {
@@ -67,7 +67,7 @@ export async function checkAndQueueDueBackups(): Promise<void> {
       if (due) {
         const { jobId } = await queueBackupJob(householdId, null);
         await qExec(
-          `UPDATE household_gdrive_config SET last_scheduled_backup_at = NOW() WHERE household_id = ?`,
+          `UPDATE oauth_integrations SET last_scheduled_backup_at = NOW() WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL`,
           householdId
         );
         scheduleBackupJobProcessing(jobId, householdId);

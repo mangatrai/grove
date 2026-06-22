@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DB-002 — Unified oauth_integrations table replaces household_gdrive_config (2026-06-22)
+
+Replaced the narrow `household_gdrive_config` table with a new `oauth_integrations` table that handles both Google Drive (household-scoped, `user_id IS NULL`) and Google Calendar (user-scoped, one row per parent). Partial unique indexes enforce uniqueness per scope since standard UNIQUE constraints treat NULLs as distinct. Drive-specific columns (`folder_id`, `folder_name`, `backup_frequency_hours`, `backup_retention_count`, `last_scheduled_backup_at`) live in the same table and are NULL for Calendar rows. Added `access_token`/`access_token_expiry` columns for Calendar token caching. `oauth_integrations` is in `EXPORT_EPHEMERAL_TABLES` — OAuth credentials must never appear in `.hfb` backups; users re-connect after restore.
+
+**Files:** `backend/db/migrations/0069_oauth_integrations.sql` (create + migrate + drop), `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive-scheduler.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/tests/gdrive*.test.ts` (4 files)
+
+**GitHub:** #127 (FP-1 Google Calendar integration)
+
+---
+
 ## DOC-002 — Family Planner: iOS Shortcut setup documented in ADMIN_GUIDE (2026-06-22)
 
 Work calendar mirroring via iOS Shortcuts → Google Calendar confirmed working during FP-5 spike. Key finding: "Show Compose Sheet" toggle must be OFF on the "Add New Event" action to suppress per-event confirmation dialogs — without this, automated runs stall waiting for user input. Full setup instructions added to ADMIN_GUIDE §10 covering Google Cloud project setup, OAuth consent screen (must publish to Production to avoid 7-day token expiry), per-parent Google Calendar connect, and Shortcut build steps with automation scheduling.

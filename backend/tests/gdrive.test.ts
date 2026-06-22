@@ -119,12 +119,12 @@ describe("gdrive API", () => {
   });
 
   afterAll(async () => {
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
     await sqlStmt("DELETE FROM app_user WHERE id IN (?, ?)").run(ADMIN_ID, MEMBER_ID);
   });
 
   beforeEach(async () => {
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
     filesGetMock.mockReset();
     filesGetMock.mockResolvedValue({
       data: {
@@ -321,14 +321,14 @@ describe("gdrive API", () => {
     expect(String(res.text)).toContain("gdrive=connected");
     expect(String(res.text)).toMatch(/localhost:3000\/settings/);
 
-    const row = await sqlStmt("SELECT oauth2_refresh_token, folder_id FROM household_gdrive_config WHERE household_id = ?").get(
+    const row = await sqlStmt("SELECT refresh_token, folder_id FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").get(
       HOUSEHOLD_ID
     );
     // Token is encrypted at rest — the stored value must not be the raw plaintext.
-    expect(row?.oauth2_refresh_token).not.toBe("mock-refresh-token");
-    expect(row?.oauth2_refresh_token).toBeTruthy(); // non-empty / non-null
+    expect(row?.refresh_token).not.toBe("mock-refresh-token");
+    expect(row?.refresh_token).toBeTruthy(); // non-empty / non-null
     expect(row?.folder_id).toBe("folder-callback-ok");
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
   });
 
   it("admin can GET /gdrive/status after owner connects", async () => {

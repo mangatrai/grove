@@ -127,7 +127,7 @@ describe("gdrive restore API (CR-131)", () => {
   afterAll(async () => {
     await sqlStmt("DELETE FROM import_job WHERE household_id = ?").run(HOUSEHOLD_ID);
     await sqlStmt("DELETE FROM backup_job WHERE household_id = ?").run(HOUSEHOLD_ID);
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
     await sqlStmt("DELETE FROM app_user WHERE id IN (?, ?)").run(ADMIN_ID, MEMBER_ID);
     try {
       for (const dir of [STAGING_DIR, IMPORTS_RESTORE_DIR]) {
@@ -147,7 +147,7 @@ describe("gdrive restore API (CR-131)", () => {
   beforeEach(async () => {
     await sqlStmt("DELETE FROM import_job WHERE household_id = ?").run(HOUSEHOLD_ID);
     await sqlStmt("DELETE FROM backup_job WHERE household_id = ?").run(HOUSEHOLD_ID);
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
     filesGetMock.mockReset();
     filesListMock.mockReset();
     filesCreateMock.mockReset();
