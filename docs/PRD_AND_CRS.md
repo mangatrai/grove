@@ -951,6 +951,126 @@ Grove does **not** target parity with commercial cloud PFM products (Quicken Sim
 
 ---
 
+## 12. Family Planner Module (PRD-F)
+
+### Problem Statement
+
+Two full-time WFH professionals with two children (elementary school + infant) manage household coordination — school schedules, kid activities, work travel, and nanny logistics — entirely in their heads. When one parent has a heavy day or travels, the other parent often doesn't know far enough in advance. Coverage arrangements (nanny extended hours, neighbor pickup, class cancellations) are reactive and ad-hoc. The app needs a household coordination layer: a personal assistant that watches calendars, surfaces conflicts, suggests coverage actions, and delivers timely notifications.
+
+### User Personas
+
+| Role | Access | Notification Stream |
+|------|--------|---------------------|
+| Parent A (Owner) | Full app access; approves agent suggestions | Weekly digest + urgent day-of alerts |
+| Parent B (spouse, Member) | Own login; her own digest and approval queue | Weekly digest + urgent day-of alerts |
+| Nanny (Staff) | Phase 1: none. Phase 2: Staff login, in-app requests, SMS | Phase 1: email drafted by parent, relayed manually. Phase 2: SMS/WhatsApp + in-app |
+
+Each person gets a **tailored view** — not a single shared feed. The weekly digest for Parent A shows what *she* is responsible for; Parent B's digest shows what *he* is responsible for.
+
+### Calendar Sources
+
+| Source | Who | Access Method | Status |
+|--------|-----|---------------|--------|
+| Personal Google Calendar | Both parents | Google Calendar API (OAuth2 per user account) | V1 |
+| School calendar | Family | Already subscribed as ICS feed in parent's Google Cal | V1 (via Google Cal) |
+| Kid activities (swimming, karate, etc.) | Family | Recurring events in personal Google Cal | V1 (via Google Cal) |
+| Travel confirmations | Both parents | Flight/hotel emails forwarded to Gmail → auto-parsed into Google Cal by Google | V1 (via Google Cal) |
+| Work calendar (meetings) | Both parents | **BLOCKED** — O365 passkey-auth tenant, no external sharing | Discovery spike V1.x |
+| Nanny schedule | Nanny | App Staff module (existing timesheet/schedule system) | V1 (manual) |
+
+#### Work Calendar Access — Open Discovery Item
+
+Both parents are on the same corporate Exchange/O365 tenant with IT-locked calendars (passkey-based auth, no ICS export, no external sharing). This is the most significant gap. Options to investigate in a dedicated spike before V1.x:
+
+1. **Microsoft Graph API (user-delegated)** — requires OAuth with work Microsoft account. May be blocked by tenant IT policy or passkey auth constraints. Investigate tenant `allowedOAuthFlows` and conditional access policies.
+2. **Power Automate trigger** — if org permits, a flow can fire on calendar CRUD and POST to an external HTTP webhook (the app's API). No admin consent required for simple personal automations in some tenants.
+3. **macOS Calendar app sync** — if Exchange syncs to macOS Calendar (`~/Library/Calendars`), a lightweight local bridge daemon (Swift / Python / AppleScript) could read the SQLite store and push diffs to the app API.
+4. **iOS Shortcuts automation** — if work calendar syncs to iPhone, a Shortcut triggered on calendar event can POST to the app API.
+5. **Meeting invite email parsing** — every invite and update arrives as an email with an ICS attachment in the body. Parsing a forwarded-invite inbox reconstructs the calendar dynamically.
+
+**V1 decision: ship with Google Calendar only.** Work calendar is a tracked discovery item. V1 workaround: parents can manually enter "busy day" blocks for known heavy weeks via a simple form.
+
+### Agent Architecture
+
+The household assistant runs as a background agent (cron-triggered + webhook-triggered) using the existing LLM adapter abstraction (`backend/src/modules/llm/`).
+
+- **Model**: LLM reasoning over merged household calendar snapshot (suggest + approve; no auto-action on V1)
+- **Tool use**: Tavily web search for public deadlines (school enrollment windows, tax filing dates, camp registration, local holiday schedules)
+- **Triggers**: Nightly planning run (generates next-day/next-week summary) + webhook on calendar change events (surfaces urgent conflicts in real time)
+- **Output**: Suggestions stored in DB; surfaced in UI for parent approval; approved suggestions generate notification tasks
+- **Pattern**: Mirrors Property Tax Protest agent — LLM with tool use, structured output, human-in-the-loop approval gate
+
+### Notification Strategy
+
+| Digest | Timing | Channel | Content |
+|--------|--------|---------|---------|
+| Light weekly preview | Sunday ~7pm | Email (per parent) | Flag anything urgent for the week ahead; compact, mobile-first layout |
+| Full weekly digest | Monday ~7am | Email (per parent) | Coverage map, travel alerts, nanny schedule, kid activities by day, deadlines in next 7–14 days |
+| Urgent day-of alert | When triggered | Email (Phase 1) / SMS/WhatsApp (Phase 2) | Coverage gap detected, new travel confirmed, meeting conflict with school pickup |
+| Nanny weekly schedule | Monday ~7am | Email to nanny (Phase 2) | Their schedule for the week, any extended-hours requests pending |
+
+**Layout constraint:** Weekly digest must be readable on a phone with minimal scroll. No newsletter-style formatting.
+
+### Deadlines Tracked (Priority Order)
+
+1. **School enrollment / registration** — open enrollment windows, camp registration opens, activity sign-ups, school form deadlines
+2. **Financial deadlines** — tax filing, estimated payments, property tax protest windows (cross-reference existing finance module events)
+3. **Medical / annual appointments** — physicals, vaccines, dentist (recurring annual reminders)
+4. **Bill payment** — lowest priority; autopay is on; only surface if auto-pay flag is uncertain
+
+Agent Tavily-searches for public deadline dates when needed (e.g. "FBISD open enrollment 2027 deadline", "IRS Q3 estimated tax deadline 2026").
+
+### Coverage Logic
+
+- **Weekdays**: Nanny is the safety net for both kids. Agent reasons: if both parents are heavy, is nanny confirmed?
+- **Weekends**: Parent-only (no nanny). Agent only flags conflicts between parent schedules.
+- **Travel**: Multi-day impact. Agent plans coverage for all affected days; drafts extended-hours request to nanny and/or suggests class cancellations.
+- **School pickup window**: Elementary school dismissal is a fixed constraint. Any heavy meeting block that overlaps pickup triggers a coverage suggestion.
+
+### UI Placement
+
+New top-level sidebar item: **Family**
+
+Sub-pages:
+- **Planner** — weekly calendar view, day-by-day coverage map, conflict alerts, agent suggestion cards (approve/dismiss)
+- **Activities** — manage kid activity schedule (recurring events, class details, who's responsible)
+- **Deadlines** — tracked deadlines with 30/7/1-day countdown reminders; manual entry + agent-discovered
+- **Agent** — chat interface for ad-hoc questions ("who's handling pickup Thursday?", "what's coming up next week?") — same pattern as Property Tax Protest chat page
+
+**Dashboard addition:** "This Week" summary widget showing conflict count, next activity, next deadline.
+
+### Feature Phasing
+
+#### V1 (Google Calendar + Digest + Suggestions)
+- Google Calendar OAuth integration for both parent accounts
+- Read personal calendar, subscribed school ICS, travel blocks
+- Manual "busy block" entry form (work calendar workaround)
+- Nightly planning agent run; weekly digest email (Sunday preview + Monday full)
+- Conflict detection and suggestion cards in Planner UI
+- Deadline tracker with manual entry + Tavily search
+- Dashboard "This Week" widget
+- Family sidebar section with Planner, Activities, Deadlines, Agent sub-pages
+
+#### V1.x (Work Calendar Discovery)
+- Technical spike: Graph API / Power Automate / macOS Calendar bridge / iOS Shortcuts
+- Ship whichever approach works given tenant IT constraints
+
+#### V2 (Nanny Integration + SMS)
+- Nanny Staff login with weekly schedule view
+- SMS/WhatsApp integration (Twilio or equivalent) for urgent day-of notifications
+- Nanny PTO submission → agent alerts about backup care need
+- Direct nanny coverage request via app (approve to send SMS)
+
+### Open Questions
+
+1. **Work calendar access**: Which of the 5 discovery options will tenant IT permit? Blocks full value prop.
+2. **Google Calendar webhook vs. polling**: Google Calendar push notifications require a public HTTPS endpoint. On self-hosted (local dev), polling fallback needed. Determine sync interval for polling mode.
+3. **SMS provider**: Twilio (US focus) vs. Vonage vs. AWS SNS. WhatsApp Business API requires a registered business number.
+4. **Semver**: V1 Family Planner is a significant new product dimension. Ship as 5.2.0 (no breaking changes) or 6.0.0? Decide at ship time.
+5. **Spouse Google Calendar**: Each parent connects their own Google account via OAuth. Need per-user credential storage (encrypted token per user record).
+
+---
+
 ## Glossary
 
 | Term | Definition |

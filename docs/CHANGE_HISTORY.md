@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DOC-001 — Family Planner Module: requirements captured, PRD-F added (2026-06-22)
+
+Requirements gathered via structured PM session for a new household coordination assistant. Covers both parents (same O365 locked-down calendars), two kids (elementary school + infant), nanny (to be hired). Key decisions: V1 ships with Google Calendar integration only; work calendar is a tracked discovery item (O365 passkey-auth blocks external sharing); weekly digest is per-person (Sunday preview + Monday full); agent uses existing LLM adapter with Tavily tool use in suggest+approve mode; new Family sidebar section with Planner / Activities / Deadlines / Agent sub-pages.
+
+**Files:** `docs/PRD_AND_CRS.md` (§12 added)
+
+**GitHub:** See V6 milestone — Family Planner issues (Google Calendar integration, weekly digest, household agent, deadline tracker, work-cal discovery spike).
+
+---
+
 ## FIX-191 — Payslip employer lookup scoped to session user, not account owner (2026-06-21)
 
 When Head imports a member's payslip (e.g. spouse with Deloitte), two callsites queried the session user's profile instead of the file owner's profile → `INVALID_EMPLOYER`.
