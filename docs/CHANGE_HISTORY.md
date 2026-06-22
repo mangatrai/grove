@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DOC-002 — Family Planner: iOS Shortcut setup documented in ADMIN_GUIDE (2026-06-22)
+
+Work calendar mirroring via iOS Shortcuts → Google Calendar confirmed working during FP-5 spike. Key finding: "Show Compose Sheet" toggle must be OFF on the "Add New Event" action to suppress per-event confirmation dialogs — without this, automated runs stall waiting for user input. Full setup instructions added to ADMIN_GUIDE §10 covering Google Cloud project setup, OAuth consent screen (must publish to Production to avoid 7-day token expiry), per-parent Google Calendar connect, and Shortcut build steps with automation scheduling.
+
+**Files:** `docs/ADMIN_GUIDE.md` (§10 added)
+
+**GitHub:** #131 (FP-5 work calendar discovery spike)
+
+---
+
 ## DOC-001 — Family Planner Module: requirements captured, PRD-F added (2026-06-22)
 
 Requirements gathered via structured PM session for a new household coordination assistant. Covers both parents (same O365 locked-down calendars), two kids (elementary school + infant), nanny (to be hired). Key decisions: V1 ships with Google Calendar integration only; work calendar is a tracked discovery item (O365 passkey-auth blocks external sharing); weekly digest is per-person (Sunday preview + Monday full); agent uses existing LLM adapter with Tavily tool use in suggest+approve mode; new Family sidebar section with Planner / Activities / Deadlines / Agent sub-pages.
