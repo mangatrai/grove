@@ -978,17 +978,32 @@ Each person gets a **tailored view** — not a single shared feed. The weekly di
 | Work calendar (meetings) | Both parents | **BLOCKED** — O365 passkey-auth tenant, no external sharing | Discovery spike V1.x |
 | Nanny schedule | Nanny | App Staff module (existing timesheet/schedule system) | V1 (manual) |
 
-#### Work Calendar Access — Open Discovery Item
+#### Work Calendar Access — Recommended Approach
 
-Both parents are on the same corporate Exchange/O365 tenant with IT-locked calendars (passkey-based auth, no ICS export, no external sharing). This is the most significant gap. Options to investigate in a dedicated spike before V1.x:
+Both parents are on the same corporate Exchange/O365 tenant with IT-locked calendars (passkey-based auth, no ICS export, no external sharing). Both parents have corporate iPhones where the work calendar syncs natively — this is the key enabler.
 
-1. **Microsoft Graph API (user-delegated)** — requires OAuth with work Microsoft account. May be blocked by tenant IT policy or passkey auth constraints. Investigate tenant `allowedOAuthFlows` and conditional access policies.
-2. **Power Automate trigger** — if org permits, a flow can fire on calendar CRUD and POST to an external HTTP webhook (the app's API). No admin consent required for simple personal automations in some tenants.
-3. **macOS Calendar app sync** — if Exchange syncs to macOS Calendar (`~/Library/Calendars`), a lightweight local bridge daemon (Swift / Python / AppleScript) could read the SQLite store and push diffs to the app API.
-4. **iOS Shortcuts automation** — if work calendar syncs to iPhone, a Shortcut triggered on calendar event can POST to the app API.
-5. **Meeting invite email parsing** — every invite and update arrives as an email with an ICS attachment in the body. Parsing a forwarded-invite inbox reconstructs the calendar dynamically.
+**Recommended: iOS Shortcuts → Google Calendar mirroring**
 
-**V1 decision: ship with Google Calendar only.** Work calendar is a tracked discovery item. V1 workaround: parents can manually enter "busy day" blocks for known heavy weeks via a simple form.
+A Shortcut on each parent's iPhone fires when a work calendar event is added, updated, or deleted. The Shortcut writes a mirrored copy of that event into a dedicated "Work — Mirrored" Google Calendar via the Google Calendar API. The Family Planner app then reads all calendars (personal + school + travel + mirrored-work) through a single Google Calendar API integration — one unified data source, no separate app-side webhook needed.
+
+Architecture:
+- Work calendar syncs to iPhone (Exchange native sync — already working)
+- iOS Shortcut fires on calendar event CRUD → calls Google Calendar API → writes/updates mirrored event in "Work — Mirrored" calendar
+- App reads Google Calendar API; "Work — Mirrored" calendar appears alongside personal and school calendars
+- Local Postgres caches a snapshot of calendar events for agent queries (performance, offline); Google Calendar remains source of truth
+
+Why this over alternatives:
+- **No IT involvement** — works with passkey auth; purely on-device
+- **Single integration** — app only needs Google Calendar API, not a separate work-cal webhook endpoint
+- **Unified agent view** — agent reasons over one merged calendar feed, not two separate pipelines
+- **Confirmed viable** — both parents have corporate iPhones with work calendar syncing
+
+Fallback options (only if Shortcuts approach is unreliable):
+1. Power Automate personal flow (check if HTTP connector is available in org's M365 license)
+2. Meeting invite email parsing (ICS attachments in every invite email)
+3. Microsoft Graph API (likely blocked by passkey/conditional-access policy — lowest priority to try)
+
+**V1 decision: ship with Google Calendar only.** Work calendar mirroring via Shortcuts is V1.x — testable in under an hour on one iPhone before committing to build. V1 workaround: parents can manually enter "busy day" blocks for known heavy weeks.
 
 ### Agent Architecture
 
@@ -1052,7 +1067,7 @@ Sub-pages:
 - Family sidebar section with Planner, Activities, Deadlines, Agent sub-pages
 
 #### V1.x (Work Calendar Discovery)
-- Technical spike: Graph API / Power Automate / macOS Calendar bridge / iOS Shortcuts
+- Technical spike: iOS Shortcuts → Google Calendar mirroring (recommended); fallbacks: Power Automate, email parsing, Graph API
 - Ship whichever approach works given tenant IT constraints
 
 #### V2 (Nanny Integration + SMS)
@@ -1063,7 +1078,7 @@ Sub-pages:
 
 ### Open Questions
 
-1. **Work calendar access**: Which of the 5 discovery options will tenant IT permit? Blocks full value prop.
+1. **Work calendar access**: Recommended path is iOS Shortcuts → Google Calendar mirroring (both parents confirmed to have corporate iPhones with work cal synced). Needs a 30-min feasibility test on one device before V1.x build begins. See #131.
 2. **Google Calendar webhook vs. polling**: Google Calendar push notifications require a public HTTPS endpoint. On self-hosted (local dev), polling fallback needed. Determine sync interval for polling mode.
 3. **SMS provider**: Twilio (US focus) vs. Vonage vs. AWS SNS. WhatsApp Business API requires a registered business number.
 4. **Semver**: V1 Family Planner is a significant new product dimension. Ship as 5.2.0 (no breaking changes) or 6.0.0? Decide at ship time.
