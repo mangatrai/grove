@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-R05 — Family sidebar section + GCal connect UI in Settings [FP-1c] (2026-06-23)
+
+Added the "Family" navigation group to the sidebar (hidden for `member` role) with four stub pages — Planner, Activities, Deadlines, Agent — all guarded by `RequireOwnerOrAdmin`. Added a "Family" tab to Settings (visible to owner/admin) containing `GCalSection`: per-user Google Calendar connect/disconnect UI that shows connection status, handles `?gcal=connected|error` callback params, and calls `GET /gcal/oauth/url` → redirect on connect.
+
+**Files:** `frontend/src/layout/AppSidebar.tsx`, `frontend/src/App.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/settings/GCalSection.tsx` (new), `frontend/src/pages/FamilyPlannerPage.tsx` (new), `frontend/src/pages/FamilyActivitiesPage.tsx` (new), `frontend/src/pages/FamilyDeadlinesPage.tsx` (new), `frontend/src/pages/FamilyAgentPage.tsx` (new). GH: refs #127.
+
+---
+
 ## CR-135 — Google Calendar OAuth backend: connect/status/events [FP-1b] (2026-06-22)
 
 Added `backend/src/modules/gcal/` module implementing per-user Google Calendar OAuth2 (`calendar.readonly` scope). Both parents (owner + admin roles) connect their own Google accounts independently; tokens stored in the existing `oauth_integrations` table with `provider = 'google_calendar'`, `user_id = userId` (user-scoped). The same Google Cloud project (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is reused; a separate redirect URI (`GOOGLE_CALENDAR_REDIRECT_URI`) is added to `env.ts`.

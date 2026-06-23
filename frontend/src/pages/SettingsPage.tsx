@@ -37,6 +37,7 @@ import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
+import { GCalSection } from "./settings/GCalSection";
 import { GroveLoader } from "../components/GroveLoader";
 import { AddPropertyModal } from "../components/AddPropertyModal";
 
@@ -47,7 +48,7 @@ function localDateStr(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications"] as const;
+const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications", "family"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -1106,7 +1107,9 @@ export function SettingsPage() {
   );
 
   const visibleTabs = useMemo(
-    () => TABS.filter((id) => id !== "household" || canManageHousehold),
+    () => TABS.filter(
+      (id) => (id !== "household" || canManageHousehold) && (id !== "family" || canManageHousehold)
+    ),
     [canManageHousehold]
   );
 
@@ -1143,7 +1146,9 @@ export function SettingsPage() {
                         ? "Recurring"
                         : id === "data"
                           ? "Data & Backup"
-                          : "Notifications"}
+                          : id === "notifications"
+                            ? "Notifications"
+                            : "Family"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -2291,6 +2296,8 @@ export function SettingsPage() {
             })()}
           </Stack>
         ) : null}
+
+        <GCalSection active={tab === "family"} />
 
         </Tabs>
       </Paper>

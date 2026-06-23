@@ -20,6 +20,10 @@ import { PropertyDetailPage } from "./pages/PropertyDetailPage";
 import { TaxProtestPage } from "./pages/TaxProtestPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
+import { FamilyPlannerPage } from "./pages/FamilyPlannerPage";
+import { FamilyActivitiesPage } from "./pages/FamilyActivitiesPage";
+import { FamilyDeadlinesPage } from "./pages/FamilyDeadlinesPage";
+import { FamilyAgentPage } from "./pages/FamilyAgentPage";
 
 function RequireOwnerOrAdmin({ children }: { children: ReactNode }) {
   const { role } = useCurrentUser();
@@ -48,6 +52,10 @@ export function App() {
           <Route path="/real-estate" element={<RequireOwnerOrAdmin><RealEstatePage /></RequireOwnerOrAdmin>} />
           <Route path="/real-estate/:propertyId" element={<RequireOwnerOrAdmin><PropertyDetailPage /></RequireOwnerOrAdmin>} />
           <Route path="/tax-protest" element={<RequireOwnerOrAdmin><TaxProtestPage /></RequireOwnerOrAdmin>} />
+          <Route path="/family" element={<RequireOwnerOrAdmin><FamilyPlannerPage /></RequireOwnerOrAdmin>} />
+          <Route path="/family/activities" element={<RequireOwnerOrAdmin><FamilyActivitiesPage /></RequireOwnerOrAdmin>} />
+          <Route path="/family/deadlines" element={<RequireOwnerOrAdmin><FamilyDeadlinesPage /></RequireOwnerOrAdmin>} />
+          <Route path="/family/agent" element={<RequireOwnerOrAdmin><FamilyAgentPage /></RequireOwnerOrAdmin>} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/resolution" element={<Navigate to="/transactions?needsReview=true" replace />} />
           <Route path="/import" element={<Navigate to="/imports/workspace" replace />} />
