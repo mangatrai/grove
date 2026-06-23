@@ -23,6 +23,7 @@ tags:
   - name: recurring
   - name: insights
   - name: gdrive
+  - name: gcal
   - name: protest
   - name: espp
 paths:
@@ -2282,6 +2283,205 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DriveDownloadFailedResponse'
+  /gcal/oauth/callback:
+    get:
+      tags: [gcal]
+      summary: Google Calendar OAuth2 callback
+      description: >
+        Public. Google redirects here after the user grants Calendar consent.
+        Exchanges the authorization code for tokens, stores in `oauth_integrations`
+        (user-scoped, `provider = 'google_calendar'`), then performs a JS redirect
+        to the SPA (`/settings?tab=family&gcal=connected` or `gcal=error&message=…`).
+      parameters:
+        - in: query
+          name: code
+          schema: { type: string }
+          required: true
+        - in: query
+          name: state
+          schema: { type: string }
+          required: true
+      responses:
+        "200":
+          description: HTML page with meta-refresh redirect to SPA
+
+  /gcal/oauth/url:
+    get:
+      tags: [gcal]
+      summary: Get Google Calendar OAuth consent URL
+      description: Returns the Google OAuth consent URL for `calendar.readonly` scope. Owner and admin only.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Consent URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+        "400":
+          description: Google OAuth not configured on server
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: OAUTH_NOT_CONFIGURED }
+                  message: { type: string }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /gcal/connect:
+    post:
+      tags: [gcal]
+      summary: Exchange OAuth code and save Calendar tokens (direct SPA flow)
+      description: >
+        Owner and admin only. Accepts the OAuth authorization code returned by Google
+        and exchanges it for tokens, which are stored per-user in `oauth_integrations`.
+        Rate-limited outside TEST mode.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: "OAuth2 authorization code from Google" }
+      responses:
+        "200":
+          description: Calendar connected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected: { type: boolean, example: true }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "422":
+          description: Token exchange failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_CONNECTION_FAILED }
+                  message: { type: string }
+
+  /gcal/status:
+    get:
+      tags: [gcal]
+      summary: Get Calendar connection status for the requesting user
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Connection status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected: { type: boolean }
+                  connectedAt: { type: string, format: date-time, nullable: true }
+                  needsReauth: { type: boolean }
+                  lastError: { type: string, nullable: true }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /gcal/disconnect:
+    delete:
+      tags: [gcal]
+      summary: Disconnect Calendar for the requesting user
+      description: Removes only the requesting user's Calendar tokens. Does not affect other users in the household.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  connected: { type: boolean, example: false }
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /gcal/events:
+    get:
+      tags: [gcal]
+      summary: List upcoming calendar events for the requesting user
+      description: >
+        Returns events across all calendars accessible to the connected Google account,
+        sorted by start time. `days` defaults to 14; max 90.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, minimum: 1, maximum: 90, default: 14 }
+          description: Number of days ahead to fetch events
+      responses:
+        "200":
+          description: Event list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        summary: { type: string, nullable: true }
+                        start: { type: string, nullable: true, description: "ISO datetime or YYYY-MM-DD for all-day events" }
+                        end: { type: string, nullable: true }
+                        allDay: { type: boolean }
+                        location: { type: string, nullable: true }
+                        description: { type: string, nullable: true }
+                        calendarId: { type: string }
+                  count: { type: integer }
+        "401":
+          description: Not authenticated or Calendar requires re-authorization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_NEEDS_REAUTH }
+                  message: { type: string }
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          description: Google Calendar not connected for this user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_NOT_CONNECTED }
+                  message: { type: string }
+        "502":
+          description: Google Calendar API error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_API_ERROR }
+                  message: { type: string }
+
   /notifications:
     get:
       tags: [notifications]

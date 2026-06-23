@@ -18,6 +18,26 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-135 — Google Calendar OAuth backend: connect/status/events [FP-1b] (2026-06-22)
+
+Added `backend/src/modules/gcal/` module implementing per-user Google Calendar OAuth2 (`calendar.readonly` scope). Both parents (owner + admin roles) connect their own Google accounts independently; tokens stored in the existing `oauth_integrations` table with `provider = 'google_calendar'`, `user_id = userId` (user-scoped). The same Google Cloud project (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is reused; a separate redirect URI (`GOOGLE_CALENDAR_REDIRECT_URI`) is added to `env.ts`.
+
+**Routes added (base `/gcal`):**
+- `GET /gcal/oauth/url` — returns Google consent URL (owner, admin)
+- `GET /gcal/oauth/callback` — OAuth redirect handler (public; state HMAC-signed)
+- `POST /gcal/connect` — direct code exchange used by SPA flow (owner, admin)
+- `GET /gcal/status` — per-user connection state; exposes `needsReauth` flag (owner, admin)
+- `DELETE /gcal/disconnect` — removes requesting user's tokens only (owner, admin)
+- `GET /gcal/events?days=N` — lists upcoming events across all user's calendars; defaults 14d, max 90d (owner, admin)
+
+Token encryption uses AES-256-GCM with a separate key purpose string (`household-finance:gcal-token:…`) distinct from Drive tokens. On Google 401/403, the service marks `needs_reauth = TRUE` and returns `401 GCAL_NEEDS_REAUTH`. `oauth_integrations` is in `EXPORT_EPHEMERAL_TABLES` — tokens never appear in `.hfb` backups.
+
+**Files:** `backend/src/modules/gcal/gcal.service.ts` (new), `backend/src/modules/gcal/gcal.routes.ts` (new), `backend/src/app.ts` (register `/gcal`), `backend/src/config/env.ts` (`GOOGLE_CALENDAR_REDIRECT_URI`), `backend/tests/gcal.test.ts` (new, 15 tests), `docs/API_REFERENCE.md` (Google Calendar section added)
+
+**GitHub:** closes #134 (FP-1b Calendar OAuth backend)
+
+---
+
 ## DB-002 — Unified oauth_integrations table replaces household_gdrive_config (2026-06-22)
 
 Replaced the narrow `household_gdrive_config` table with a new `oauth_integrations` table that handles both Google Drive (household-scoped, `user_id IS NULL`) and Google Calendar (user-scoped, one row per parent). Partial unique indexes enforce uniqueness per scope since standard UNIQUE constraints treat NULLs as distinct. Drive-specific columns (`folder_id`, `folder_name`, `backup_frequency_hours`, `backup_retention_count`, `last_scheduled_backup_at`) live in the same table and are NULL for Calendar rows. Added `access_token`/`access_token_expiry` columns for Calendar token caching. `oauth_integrations` is in `EXPORT_EPHEMERAL_TABLES` — OAuth credentials must never appear in `.hfb` backups; users re-connect after restore.
