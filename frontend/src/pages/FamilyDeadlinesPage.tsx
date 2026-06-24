@@ -221,7 +221,7 @@ export function FamilyDeadlinesPage() {
 
   return (
     <>
-      <Stack p="xl" gap="lg" style={{ maxWidth: 800 }}>
+      <Stack p="xl" gap="lg">
         <Group justify="space-between" align="center">
           <div>
             <Title order={2}>Deadlines</Title>

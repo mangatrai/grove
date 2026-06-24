@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import {
   ActionIcon,
@@ -54,6 +54,7 @@ type DigestEntry = {
   errorMessage: string | null;
   subjectLine: string | null;
   summaryText: string | null;
+  recipients: string[] | null;
 };
 
 const ALERT_TYPE_LABELS: Record<string, string> = {
@@ -220,6 +221,7 @@ export function FamilyAgentPage() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
+  const [expandedDigest, setExpandedDigest] = useState<string | null>(null);
 
   const loadAlerts = useCallback(async () => {
     setAlertsLoading(true);
@@ -289,7 +291,7 @@ export function FamilyAgentPage() {
   const resolvedAlerts = alerts.filter(a => a.isResolved);
 
   return (
-    <Stack p="xl" gap="lg" style={{ maxWidth: 820 }}>
+    <Stack p="xl" gap="lg">
       {/* Header */}
       <Group justify="space-between" align="center">
         <div>
@@ -393,37 +395,67 @@ export function FamilyAgentPage() {
                   <Table.Th>Type</Table.Th>
                   <Table.Th>Status</Table.Th>
                   <Table.Th>Alerts</Table.Th>
-                  <Table.Th>Emails</Table.Th>
+                  <Table.Th>Recipients</Table.Th>
                   <Table.Th>Summary</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
-                {digests.map(d => (
-                  <Table.Tr key={d.id}>
-                    <Table.Td>
-                      <Text size="xs">
-                        {new Date(d.runAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
-                      </Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs">{RUN_TYPE_LABELS[d.runType] ?? d.runType}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Badge size="xs" color={STATUS_COLORS[d.status]} variant="light">{d.status}</Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs" c={d.alertsCreated > 0 ? "red" : "dimmed"}>{d.alertsCreated}</Text>
-                    </Table.Td>
-                    <Table.Td>
-                      <Text size="xs" c="dimmed">{d.emailsSent}</Text>
-                    </Table.Td>
-                    <Table.Td style={{ maxWidth: 260 }}>
-                      <Text size="xs" c="dimmed" lineClamp={2}>
-                        {d.summaryText ?? d.skipReason ?? d.errorMessage ?? "—"}
-                      </Text>
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
+                {digests.map(d => {
+                  const isExpanded = expandedDigest === d.id;
+                  const summaryFull = d.summaryText ?? d.skipReason ?? d.errorMessage ?? null;
+                  return (
+                    <Fragment key={d.id}>
+                      <Table.Tr style={{ cursor: summaryFull ? "pointer" : "default" }} onClick={() => summaryFull && setExpandedDigest(isExpanded ? null : d.id)}>
+                        <Table.Td>
+                          <Text size="xs">
+                            {new Date(d.runAt).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" })}
+                          </Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs">{RUN_TYPE_LABELS[d.runType] ?? d.runType}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Badge size="xs" color={STATUS_COLORS[d.status]} variant="light">{d.status}</Badge>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="xs" c={d.alertsCreated > 0 ? "red" : "dimmed"}>{d.alertsCreated}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          {d.recipients && d.recipients.length > 0 ? (
+                            <Stack gap={2}>
+                              {d.recipients.map(r => (
+                                <Text key={r} size="xs" c="dimmed">{r}</Text>
+                              ))}
+                            </Stack>
+                          ) : (
+                            <Text size="xs" c="dimmed">—</Text>
+                          )}
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap={4} wrap="nowrap">
+                            <Text size="xs" c="dimmed" lineClamp={isExpanded ? undefined : 1} style={{ flex: 1 }}>
+                              {summaryFull ?? "—"}
+                            </Text>
+                            {summaryFull && summaryFull.length > 60 ? (
+                              <ActionIcon size="xs" variant="subtle" color="gray" aria-label={isExpanded ? "Collapse" : "Expand"}>
+                                {isExpanded ? <IconCheck size={12} /> : <IconChevronDown size={12} />}
+                              </ActionIcon>
+                            ) : null}
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                      {isExpanded && summaryFull ? (
+                        <Table.Tr>
+                          <Table.Td colSpan={6}>
+                            <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
+                              <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
+                            </Paper>
+                          </Table.Td>
+                        </Table.Tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
               </Table.Tbody>
             </Table>
           </Paper>

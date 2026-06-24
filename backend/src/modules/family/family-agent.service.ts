@@ -312,10 +312,16 @@ Respond with ONLY valid JSON in this exact shape:
 }
 
 Rules:
+- A CONFLICT exists ONLY when children need care, transport, pickup, or dropoff and no parent or nanny can provide it. Parents both having meetings or appointments at the same time is NOT a conflict unless a child needs care at that exact window.
+- The Nanny manages CHILDCARE ONLY — pickup, dropoff, and home care for children. She is not a parent's personal assistant or work scheduler. Only set recipientHint = "Nanny" when she specifically needs to: extend hours, arrive early, handle a pickup/dropoff, or change the childcare schedule.
+- DO NOT generate alerts for: parents' overlapping work meetings, medical appointments that don't affect childcare windows, or generally busy days. Only flag when a child-care gap results.
+- VALID conflict examples: school pickup at 3pm and both parents in meetings; nanny not scheduled but both parents have evening commitments; parent traveling on a day the other parent has a full-day conflict and kids need care.
+- NOT conflicts: Parent A has a doctor appointment and also has a work meeting; both parents have morning meetings that overlap; one parent has a busy day; any adult scheduling issue that doesn't involve unmet childcare.
+- recipientHint values: "Nanny" (she must change her childcare schedule), "Spouse" (spouse needs to know about a childcare decision), "Self" (owner needs to arrange something), "Both" (both parents need to see it).
 - conflicts array must be empty [] if hasConflicts is false
 - parentADigest and parentBDigest must be null if this is a daily_delta run with no conflicts
 - Keep email bodies readable on mobile — short paragraphs, bullet points for activities
-- copyPasteText should be a direct, ready-to-send message (e.g. "Hi [Nanny], we both have meetings on Tuesday at 3pm — can you handle pickup?")
+- copyPasteText must be about a childcare need only (e.g. "Hi [Nanny], we both have back-to-back meetings Tuesday 2–5pm — can you stay for school pickup at 3pm?")
 - Do not include any text outside the JSON object`;
 }
 
@@ -331,7 +337,7 @@ async function analyzeWithLlm(
     [
       {
         role: "system",
-        content: "You are a household coordination assistant. You analyze family calendars and produce scheduling digests and conflict alerts. You always respond with valid JSON only — no prose, no markdown, no explanation outside the JSON.",
+        content: "You are a household coordination assistant for a family with young children and a nanny. Your sole focus is identifying CHILD-CARE coverage gaps — situations where children need care, pickup, dropoff, or supervision and no parent or nanny can provide it. You do NOT flag general adult scheduling conflicts. You always respond with valid JSON only — no prose, no markdown, no explanation outside the JSON.",
       },
       { role: "user", content: prompt },
     ],
@@ -421,6 +427,7 @@ export async function runFamilyAgent(
 
     // Send digest emails
     let emailsSent = 0;
+    const recipientEmails: string[] = [];
     const digests: Array<{ parent: ConnectedParent; digest: { subject: string; body: string } }> = [];
 
     if (analysis.parentADigest && parentEvents[0]) {
@@ -439,15 +446,17 @@ export async function runFamilyAgent(
       });
       if (result.ok) {
         emailsSent++;
+        recipientEmails.push(parent.email);
       } else {
         log.warn("family-agent: email send failed", { userId: parent.userId, reason: result.reason });
       }
     }
 
-    // Update emails_sent in the log
+    // Update emails_sent and recipients in the log
     await qExec(
-      `UPDATE family_digest_log SET emails_sent = ? WHERE id = ?`,
+      `UPDATE family_digest_log SET emails_sent = ?, recipients_json = ? WHERE id = ?`,
       emailsSent,
+      recipientEmails.length > 0 ? JSON.stringify(recipientEmails) : null,
       digestId
     );
 
@@ -557,6 +566,7 @@ export type DigestLogEntry = {
   errorMessage: string | null;
   subjectLine: string | null;
   summaryText: string | null;
+  recipients: string[] | null;
 };
 
 type DigestLogRow = {
@@ -571,6 +581,7 @@ type DigestLogRow = {
   error_message: string | null;
   subject_line: string | null;
   summary_text: string | null;
+  recipients_json: string | null;
 };
 
 export async function listDigestLog(householdId: string): Promise<DigestLogEntry[]> {
@@ -578,19 +589,26 @@ export async function listDigestLog(householdId: string): Promise<DigestLogEntry
     `SELECT * FROM family_digest_log WHERE household_id = ? ORDER BY run_at DESC LIMIT 30`,
     householdId
   );
-  return rows.map(r => ({
-    id: r.id,
-    householdId: r.household_id,
-    runType: r.run_type,
-    runAt: r.run_at,
-    status: r.status,
-    skipReason: r.skip_reason,
-    alertsCreated: r.alerts_created,
-    emailsSent: r.emails_sent,
-    errorMessage: r.error_message,
-    subjectLine: r.subject_line,
-    summaryText: r.summary_text,
-  }));
+  return rows.map(r => {
+    let recipients: string[] | null = null;
+    if (r.recipients_json) {
+      try { recipients = JSON.parse(r.recipients_json) as string[]; } catch { /* ignore */ }
+    }
+    return {
+      id: r.id,
+      householdId: r.household_id,
+      runType: r.run_type,
+      runAt: r.run_at,
+      status: r.status,
+      skipReason: r.skip_reason,
+      alertsCreated: r.alerts_created,
+      emailsSent: r.emails_sent,
+      errorMessage: r.error_message,
+      subjectLine: r.subject_line,
+      summaryText: r.summary_text,
+      recipients,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

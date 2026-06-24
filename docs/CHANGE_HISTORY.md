@@ -18,6 +18,27 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-194 — Family Planner: agent prompt, digest recipients, layout polish (2026-06-24)
+
+**What changed:** Three post-testing fixes to the V6 Family Planner module.
+
+1. **Agent prompt tightened** — the LLM was flagging parent-vs-parent scheduling conflicts (overlapping work meetings, medical appointments) and suggesting nanny involvement. Rewrote the system prompt and rules to make clear: a conflict is ONLY a child-care coverage gap (unmet pickup, dropoff, or supervised care window). Added explicit "NOT conflicts" examples. Nanny recipient hint now restricted to childcare schedule changes only.
+
+2. **Digest log recipients** — added `recipients_json TEXT` column to `family_digest_log` (migration `0073_family_digest_recipients.sql`). Agent now records which parent emails were successfully sent in each run. `GET /api/family/digests` returns the `recipients` array. Agent page digest history table now shows recipient emails per run and supports click-to-expand full summary text (replaces `lineClamp={2}`).
+
+3. **Page layout** — removed hardcoded `maxWidth: 800/820` from `FamilyEventsPage`, `FamilyDeadlinesPage`, and `FamilyAgentPage` root Stack wrappers so content fills the available content area.
+
+**Files changed:**
+- `backend/db/migrations/0073_family_digest_recipients.sql` (new)
+- `backend/src/modules/family/family-agent.service.ts` — prompt rewrite, recipients tracking in email loop + UPDATE query, `DigestLogEntry` + `listDigestLog` updated
+- `frontend/src/pages/FamilyAgentPage.tsx` — `DigestEntry.recipients`, expandable summary row, recipients column, removed maxWidth
+- `frontend/src/pages/FamilyEventsPage.tsx` — removed maxWidth
+- `frontend/src/pages/FamilyDeadlinesPage.tsx` — removed maxWidth
+
+**GitHub:** refs #129 (agent), #128 (digest)
+
+---
+
 ## CR-193 — V6 Family Planner: phase 2 — Agent page, scheduled cron worker, alert system (2026-06-23)
 
 **What changed:** Completed the Family Planner module with the background agent, alert system, digest log, and Agent page UI.
