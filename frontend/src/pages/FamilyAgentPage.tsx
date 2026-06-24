@@ -34,7 +34,7 @@ import { useCurrentUser } from "../UserContext";
 type AgentAlert = {
   id: string;
   detectedAt: string;
-  alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching";
+  alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion";
   reason: string;
   affectedDate: string | null;
   copyPasteText: string | null;
@@ -58,17 +58,19 @@ type DigestEntry = {
 };
 
 const ALERT_TYPE_LABELS: Record<string, string> = {
-  conflict: "Schedule conflict",
-  travel: "Travel detected",
+  conflict: "Schedule pressure",
+  travel: "Travel",
   coverage_gap: "Coverage gap",
   deadline_approaching: "Deadline",
+  suggestion: "Planning",
 };
 
 const ALERT_TYPE_COLORS: Record<string, string> = {
-  conflict: "red",
+  conflict: "orange",
   travel: "blue",
-  coverage_gap: "orange",
+  coverage_gap: "red",
   deadline_approaching: "yellow",
+  suggestion: "teal",
 };
 
 const RUN_TYPE_LABELS: Record<string, string> = {

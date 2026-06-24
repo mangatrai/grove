@@ -18,6 +18,25 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-195 — Family Planner: restore full PA scope, add kid context, fix recipient routing (2026-06-24)
+
+**What changed:** The FIX-194 agent prompt fix overcorrected — restricting the agent to childcare-gap detection only, which broke the intended household executive assistant scope.
+
+1. **Agent scope restored to full PA**: System prompt rewritten from "sole focus is CHILD-CARE coverage gaps" to household executive assistant managing calendars, logistics, and planning. Agent now surfaces schedule pressure, heavy days, travel implications, approaching deadlines, and seasonal planning opportunities — not just childcare gaps.
+
+2. **Recipient routing fixed**: The root cause of the original bad alert (nanny asked to "manage scheduling conflicts") was wrong recipient assignment, not wrong scope. Rules now explicitly map each `recipientHint` to its correct `copyPasteText` shape: Nanny gets childcare requests, Spouse gets coordination asks, Self gets calendar action suggestions.
+
+3. **Kid context injected**: `getHouseholdChildren()` queries `person_profile JOIN household_membership WHERE relationship='child'`. Ages are passed into the analysis prompt so the agent can make age-appropriate planning suggestions (e.g., summer camp types, activity ideas).
+
+4. **New alert type `suggestion`**: Added `"suggestion"` alertType for proactive planning opportunities (seasonal activities, enrollment windows, annual appointments due). Displayed as "Planning" badge (teal) in the agent page.
+
+5. **`conflict` alert renamed to "Schedule pressure"** in the UI (orange) to distinguish it from `coverage_gap` (red — children need care, nobody available).
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `frontend/src/pages/FamilyAgentPage.tsx`
+**GitHub:** closes #128
+
+---
+
 ## FIX-194 — Family Planner: agent prompt, digest recipients, layout polish (2026-06-24)
 
 **What changed:** Three post-testing fixes to the V6 Family Planner module.

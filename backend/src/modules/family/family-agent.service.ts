@@ -31,7 +31,7 @@ type CalendarEvent = {
 
 type AgentAnalysis = {
   conflicts: Array<{
-    alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching";
+    alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion";
     reason: string;
     affectedDate: string | null;
     copyPasteText: string;
@@ -237,11 +237,26 @@ async function fetchCalendarEvents(
 // LLM analysis
 // ---------------------------------------------------------------------------
 
+type HouseholdChild = { name: string; age: number | null };
+
+async function getHouseholdChildren(householdId: string): Promise<HouseholdChild[]> {
+  type Row = { full_name: string; age: number | null };
+  const rows = await qAll<Row>(
+    `SELECT pp.full_name, pp.age
+     FROM person_profile pp
+     JOIN household_membership hm ON hm.person_profile_id = pp.id
+     WHERE hm.household_id = ? AND hm.relationship = 'child'`,
+    householdId
+  );
+  return rows.map(r => ({ name: r.full_name, age: r.age }));
+}
+
 function buildAnalysisPrompt(
   runType: AgentRunType,
   parents: Array<{ email: string; events: CalendarEvent[] }>,
   dbEvents: FamilyEvent[],
-  openAlerts: AgentAlert[]
+  openAlerts: AgentAlert[],
+  children: HouseholdChild[]
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const isDelta = runType === "daily_delta";
@@ -263,6 +278,10 @@ function buildAnalysisPrompt(
         `[${e.recordType.toUpperCase()}] ${e.title} | ${e.startAt ?? e.dueDate ?? "no date"} | ${e.location ?? ""}`
       ).join("\n");
 
+  const childrenLines = children.length === 0
+    ? "No children registered."
+    : children.map(c => `- ${c.name}${c.age !== null ? `, age ${c.age}` : ""}`).join("\n");
+
   // For daily delta: inject open unresolved alerts so the LLM doesn't re-flag
   // conflicts that have already been surfaced and are awaiting owner action.
   const openAlertsSection = isDelta && openAlerts.length > 0
@@ -273,15 +292,18 @@ function buildAnalysisPrompt(
     : "";
 
   const taskDescription = isDelta
-    ? "Check for NEW conflicts not already covered by the open alerts listed above. A conflict is 'new' if it involves a different date, different event, or a genuinely different situation from what is already flagged. If everything conflicted is already in the open alerts list, return hasConflicts: false."
+    ? "Check for NEW items not already covered by the open alerts listed above. An item is 'new' if it involves a different date, different event, or a genuinely different situation from what is already flagged."
     : isPreview
-    ? "Provide a light Sunday evening preview: flag anything obviously conflicted for the week ahead. Keep it short."
-    : "Provide the full Monday weekly digest: map out each day, assign coverage duties (who handles pickup/dropoff), flag travel, list activities and appointments per parent, note what Nanny should know.";
+    ? "Provide a Sunday evening preview: surface anything that needs attention for the week ahead — coverage needs, heavy days, travel, upcoming deadlines, or planning opportunities."
+    : "Provide the full weekly digest: map out each day, note coverage duties, flag travel and schedule pressure, list activities and appointments per parent, highlight what Nanny needs to know, and surface any upcoming planning needs (seasonal activities, enrollment deadlines, appointments to book).";
 
   return `Today is ${today}. Run type: ${runType}.
 
 Task: ${taskDescription}
 ${openAlertsSection}
+=== Household Children ===
+${childrenLines}
+
 === Calendar Events (next 14 days) ===
 ${parentLines}
 
@@ -291,13 +313,13 @@ ${dbLines}
 Respond with ONLY valid JSON in this exact shape:
 {
   "hasConflicts": boolean,
-  "summaryText": "1-2 sentence plain text summary of the week",
+  "summaryText": "1-3 sentence plain text summary of the week and any key items",
   "conflicts": [
     {
-      "alertType": "conflict" | "travel" | "coverage_gap" | "deadline_approaching",
-      "reason": "short description of the conflict",
+      "alertType": "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion",
+      "reason": "clear description of what needs attention and why",
       "affectedDate": "YYYY-MM-DD or null",
-      "copyPasteText": "pre-written message owner can copy and send to Nanny/Spouse",
+      "copyPasteText": "pre-written message the owner can copy — see recipient rules below",
       "recipientHint": "Nanny" | "Spouse" | "Both" | "Self"
     }
   ],
@@ -312,16 +334,24 @@ Respond with ONLY valid JSON in this exact shape:
 }
 
 Rules:
-- A CONFLICT exists ONLY when children need care, transport, pickup, or dropoff and no parent or nanny can provide it. Parents both having meetings or appointments at the same time is NOT a conflict unless a child needs care at that exact window.
-- The Nanny manages CHILDCARE ONLY — pickup, dropoff, and home care for children. She is not a parent's personal assistant or work scheduler. Only set recipientHint = "Nanny" when she specifically needs to: extend hours, arrive early, handle a pickup/dropoff, or change the childcare schedule.
-- DO NOT generate alerts for: parents' overlapping work meetings, medical appointments that don't affect childcare windows, or generally busy days. Only flag when a child-care gap results.
-- VALID conflict examples: school pickup at 3pm and both parents in meetings; nanny not scheduled but both parents have evening commitments; parent traveling on a day the other parent has a full-day conflict and kids need care.
-- NOT conflicts: Parent A has a doctor appointment and also has a work meeting; both parents have morning meetings that overlap; one parent has a busy day; any adult scheduling issue that doesn't involve unmet childcare.
-- recipientHint values: "Nanny" (she must change her childcare schedule), "Spouse" (spouse needs to know about a childcare decision), "Self" (owner needs to arrange something), "Both" (both parents need to see it).
+- Surface anything actionable: childcare coverage gaps, schedule pressure (heavy day, double-booking, tight connections), travel with coverage implications, approaching deadlines, or seasonal planning opportunities (summer camps, enrollment windows, annual appointments).
+- Alert types:
+  - "coverage_gap": children need care and nobody available (both parents in meetings, nanny not scheduled, etc.)
+  - "conflict": schedule pressure — one parent has a heavy/stacked day, double-booking, a day that needs coordination
+  - "travel": parent travel detected; flag what it means for coverage that week
+  - "deadline_approaching": registration cutoff, enrollment window, tax deadline, camp sign-up, medical appointment due
+  - "suggestion": proactive planning opportunity — summer approaching, age-appropriate activity ideas, annual appointment reminder, enrollment period opening soon
+- Recipient rules — this is critical:
+  - "Nanny": ONLY when her childcare schedule needs to change (extend hours, arrive early, handle a pickup/dropoff, cover a day she wasn't scheduled). copyPasteText must be a childcare request: "Hi [Nanny], can you extend to 6pm Wednesday? We both have back-to-back meetings and school pickup is at 3pm."
+  - "Spouse": spouse needs to know or decide something. copyPasteText is a message to spouse: "Hey, I have a doctor appointment + 3 back-to-back meetings Wednesday — can you handle school pickup?"
+  - "Both": both parents need to coordinate. copyPasteText is a joint note or action item.
+  - "Self": owner should act alone. copyPasteText is a suggested self-action: "Block 90 min before and after your appointment. Consider moving the 3pm meeting."
+- Use children's ages for planning suggestions. Age 5-8: STEM camps, coding, art, sports. Infant/toddler: music classes, sensory play, swim lessons. Adjust suggestions to what is developmentally appropriate.
+- Do NOT suggest that the Nanny manage adult scheduling conflicts. She manages children's care only.
+- A busy day with meetings AND an appointment is NOT a childcare gap — it is a "conflict" for the parent, directed at "Self" or "Spouse", with a suggestion to reschedule or block buffer time.
 - conflicts array must be empty [] if hasConflicts is false
 - parentADigest and parentBDigest must be null if this is a daily_delta run with no conflicts
 - Keep email bodies readable on mobile — short paragraphs, bullet points for activities
-- copyPasteText must be about a childcare need only (e.g. "Hi [Nanny], we both have back-to-back meetings Tuesday 2–5pm — can you stay for school pickup at 3pm?")
 - Do not include any text outside the JSON object`;
 }
 
@@ -329,15 +359,16 @@ async function analyzeWithLlm(
   runType: AgentRunType,
   parents: Array<{ email: string; events: CalendarEvent[] }>,
   dbEvents: FamilyEvent[],
-  openAlerts: AgentAlert[]
+  openAlerts: AgentAlert[],
+  children: HouseholdChild[]
 ): Promise<AgentAnalysis> {
-  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts);
+  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, children);
 
   const { content } = await getChatAdapter().complete(
     [
       {
         role: "system",
-        content: "You are a household coordination assistant for a family with young children and a nanny. Your sole focus is identifying CHILD-CARE coverage gaps — situations where children need care, pickup, dropoff, or supervision and no parent or nanny can provide it. You do NOT flag general adult scheduling conflicts. You always respond with valid JSON only — no prose, no markdown, no explanation outside the JSON.",
+        content: "You are a household executive assistant — a personal assistant managing calendars, childcare logistics, and family planning for a dual-income household with young children. You coordinate schedules, flag conflicts, suggest actions, and surface planning opportunities. You always respond with valid JSON only — no prose, no markdown, no explanation outside the JSON.",
       },
       { role: "user", content: prompt },
     ],
@@ -402,7 +433,9 @@ export async function runFamilyAgent(
     // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
     const openAlerts = runType === "daily_delta" ? await listAlerts(householdId, false) : [];
 
-    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts);
+    const children = await getHouseholdChildren(householdId);
+
+    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts, children);
 
     // Daily delta: skip if no conflicts found
     if (runType === "daily_delta" && !analysis.hasConflicts) {
