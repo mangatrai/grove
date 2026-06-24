@@ -184,7 +184,7 @@ async function writeDigestLog(
 
 async function fetchCalendarEvents(
   parent: ConnectedParent,
-  opts: { fullFetch: boolean }
+  _opts: { fullFetch: boolean }
 ): Promise<CalendarEvent[]> {
   const GCAL_CLIENT_ID = process.env.GCAL_CLIENT_ID ?? "";
   const GCAL_CLIENT_SECRET = process.env.GCAL_CLIENT_SECRET ?? "";
@@ -206,7 +206,10 @@ async function fetchCalendarEvents(
   const events: CalendarEvent[] = [];
 
   for (const calId of calendarIds) {
-    const updatedMin = (!opts.fullFetch && parent.lastSyncedAt) ? parent.lastSyncedAt : undefined;
+    // Always do a full fetch — the LLM needs the complete picture to detect
+    // conflicts between any events in the window, not just recently-changed ones.
+    // "Delta" for daily runs is determined by the LLM output (hasConflicts),
+    // not by filtering the input.
     const res = await calendar.events.list({
       calendarId: calId,
       timeMin,
@@ -214,7 +217,6 @@ async function fetchCalendarEvents(
       singleEvents: true,
       orderBy: "startTime",
       maxResults: 100,
-      ...(updatedMin ? { updatedMin } : {}),
     });
     for (const ev of res.data.items ?? []) {
       if (ev.status === "cancelled") continue;
@@ -370,13 +372,11 @@ export async function runFamilyAgent(
     return { status: "skipped", alertsCreated: 0, emailsSent: 0, message: "No connected calendars" };
   }
 
-  const isFullFetch = runType === "sunday_preview" || runType === "monday_digest" || runType === "manual";
-
   try {
     const parentEvents = await Promise.all(
       parents.map(async p => ({
         email: p.email,
-        events: await fetchCalendarEvents(p, { fullFetch: isFullFetch }),
+        events: await fetchCalendarEvents(p, { fullFetch: true }),
         userId: p.userId,
       }))
     );
