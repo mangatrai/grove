@@ -241,12 +241,12 @@ async function fetchCalendarEvents(
 function buildAnalysisPrompt(
   runType: AgentRunType,
   parents: Array<{ email: string; events: CalendarEvent[] }>,
-  dbEvents: FamilyEvent[]
+  dbEvents: FamilyEvent[],
+  openAlerts: AgentAlert[]
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const isFullDigest = runType === "monday_digest";
-  const isPreview = runType === "sunday_preview";
   const isDelta = runType === "daily_delta";
+  const isPreview = runType === "sunday_preview";
 
   const parentLines = parents.map((p, i) =>
     `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
@@ -264,8 +264,17 @@ function buildAnalysisPrompt(
         `[${e.recordType.toUpperCase()}] ${e.title} | ${e.startAt ?? e.dueDate ?? "no date"} | ${e.location ?? ""}`
       ).join("\n");
 
+  // For daily delta: inject open unresolved alerts so the LLM doesn't re-flag
+  // conflicts that have already been surfaced and are awaiting owner action.
+  const openAlertsSection = isDelta && openAlerts.length > 0
+    ? `\n=== Already open alerts this week (DO NOT re-flag these) ===\n` +
+      openAlerts.map(a =>
+        `- [${a.alertType}] ${a.affectedDate ?? "no date"}: ${a.reason}`
+      ).join("\n") + "\n"
+    : "";
+
   const taskDescription = isDelta
-    ? "Check ONLY for new conflicts or changes since the last digest. If nothing significant changed, say so."
+    ? "Check for NEW conflicts not already covered by the open alerts listed above. A conflict is 'new' if it involves a different date, different event, or a genuinely different situation from what is already flagged. If everything conflicted is already in the open alerts list, return hasConflicts: false."
     : isPreview
     ? "Provide a light Sunday evening preview: flag anything obviously conflicted for the week ahead. Keep it short."
     : "Provide the full Monday weekly digest: map out each day, assign coverage duties (who handles pickup/dropoff), flag travel, list activities and appointments per parent, note what Nanny should know.";
@@ -273,7 +282,7 @@ function buildAnalysisPrompt(
   return `Today is ${today}. Run type: ${runType}.
 
 Task: ${taskDescription}
-
+${openAlertsSection}
 === Calendar Events (next 14 days) ===
 ${parentLines}
 
@@ -314,9 +323,10 @@ Rules:
 async function analyzeWithLlm(
   runType: AgentRunType,
   parents: Array<{ email: string; events: CalendarEvent[] }>,
-  dbEvents: FamilyEvent[]
+  dbEvents: FamilyEvent[],
+  openAlerts: AgentAlert[]
 ): Promise<AgentAnalysis> {
-  const prompt = buildAnalysisPrompt(runType, parents, dbEvents);
+  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts);
 
   const { content } = await getChatAdapter().complete(
     [
@@ -383,7 +393,11 @@ export async function runFamilyAgent(
 
     const dbEvents = await getFamilyEventsForWeek(householdId);
 
-    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents);
+    // For daily delta: fetch open alerts so the LLM can skip conflicts already surfaced.
+    // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
+    const openAlerts = runType === "daily_delta" ? await listAlerts(householdId, false) : [];
+
+    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts);
 
     // Daily delta: skip if no conflicts found
     if (runType === "daily_delta" && !analysis.hasConflicts) {
