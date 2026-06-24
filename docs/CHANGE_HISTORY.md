@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-137 — V6 Family Planner: FamilySection settings tab — member profiles + help schedule UI (2026-06-24)
+
+**What changed:** Settings → Family tab replaced bare GCalSection with a full `FamilySection` component containing three subsections.
+
+1. **Household Members** — cards per member showing interests (TagsInput, ≤30 tags), notes (Textarea, ≤2000 chars), age (TextInput); each saves independently via `PATCH /api/family/members/:profileId`.
+2. **Care & Help Schedule** — table of active help availability slots with add/edit/delete; add form covers person, service type (nanny/babysitter/cleaner/activity_teacher/tutor/other), slot type (regular/one_off/unavailable), day-of-week or specific date, start/end times, label.
+3. **Google Calendar** — existing GCalSection rendered at the bottom.
+
+**Files:**
+- `frontend/src/pages/settings/FamilySection.tsx` (new)
+- `frontend/src/pages/SettingsPage.tsx` — import swapped GCalSection → FamilySection
+- `docs/USER_GUIDE.md` — Family tab section added
+
+**GitHub:** closes #137
+
+---
+
 ## CR-136 — V6 Family Planner: member profile API + household help availability CRUD (2026-06-24)
 
 **What changed:** Backend service and routes for household member profile editing and help schedule management.

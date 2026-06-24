@@ -37,7 +37,7 @@ import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
-import { GCalSection } from "./settings/GCalSection";
+import { FamilySection } from "./settings/FamilySection";
 import { GroveLoader } from "../components/GroveLoader";
 import { AddPropertyModal } from "../components/AddPropertyModal";
 
@@ -2297,7 +2297,7 @@ export function SettingsPage() {
           </Stack>
         ) : null}
 
-        <GCalSection active={tab === "family"} />
+        <FamilySection active={tab === "family"} />
 
         </Tabs>
       </Paper>

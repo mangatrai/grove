@@ -743,6 +743,35 @@ Configure how and when the app alerts you:
 - **In-app alerts** — badges and notifications in the app UI.
 - **Frequency** — daily, weekly, or monthly.
 
+### Family Tab
+
+Available to owners and admins. Three subsections:
+
+**Household Members**
+
+Edit profile metadata for each member in the household:
+
+- **Age** — update age manually (or leave blank if set via Date of Birth on the Profile tab).
+- **Interests** — free-form tags (hobbies, activities, subjects). Used by the Family Planner agent for scheduling context. Up to 30 tags.
+- **Notes** — free-form text (allergies, school details, preferences, anything useful for the agent). Up to 2,000 characters.
+- Click **Save** on each card to persist changes.
+
+**Care & Help Schedule**
+
+Track regular and one-off care arrangements for any household member:
+
+- **Person** — which household member this slot is for.
+- **Service** — Nanny, Babysitter, Cleaner, Activity Teacher, Tutor, or Other.
+- **Type** — Regular (weekly recurring), One-off (specific date), or Unavailable (block-out).
+- **Day of week** (for Regular/Unavailable) or **Date** (for One-off).
+- **Start / End time** — optional time window.
+- **Label** — optional short description (e.g. "Regular hours").
+- Click **Add entry** to save. Use the pencil icon to edit or the trash icon to delete an entry.
+
+**Google Calendar**
+
+Connect or disconnect your Google Calendar account. See § Google Calendar below for details.
+
 ### Data Tab
 
 **AI Insights history:** View historical analyses generated on the Dashboard. Useful for trend checks and comparing old advice vs. new recommendations.
