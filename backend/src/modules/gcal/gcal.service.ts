@@ -203,7 +203,7 @@ export async function getGCalStatus(userId: string): Promise<GCalStatus> {
 // Calendar client
 // ---------------------------------------------------------------------------
 
-async function getDecryptedRefreshToken(userId: string): Promise<string | null> {
+export async function getDecryptedRefreshToken(userId: string): Promise<string | null> {
   const row = await qGet<{ refresh_token: string | null }>(
     `SELECT refresh_token FROM oauth_integrations WHERE provider = 'google_calendar' AND user_id = ?`,
     userId
@@ -212,7 +212,7 @@ async function getDecryptedRefreshToken(userId: string): Promise<string | null> 
   return decryptToken(row.refresh_token);
 }
 
-function buildOAuth2Client(refreshToken: string): InstanceType<typeof google.auth.OAuth2> {
+export function buildOAuth2Client(refreshToken: string): InstanceType<typeof google.auth.OAuth2> {
   const client = new google.auth.OAuth2(
     env.GOOGLE_CLIENT_ID,
     env.GOOGLE_CLIENT_SECRET,

@@ -4,6 +4,7 @@ import { getChatAdapter, isLlmConfigured, strongModel } from "../../llm/index.js
 import { log } from "../../logger.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
+import { buildOAuth2Client, getDecryptedRefreshToken } from "../gcal/gcal.service.js";
 import type { FamilyEvent, FamilyEventRow } from "./family.types.js";
 
 // ---------------------------------------------------------------------------
@@ -15,7 +16,6 @@ export type AgentRunType = "sunday_preview" | "monday_digest" | "daily_delta" | 
 type ConnectedParent = {
   userId: string;
   email: string;
-  refreshToken: string;
   selectedCalendarIds: string[] | null;
   lastSyncedAt: string | null;
 };
@@ -51,12 +51,11 @@ async function getConnectedParents(householdId: string): Promise<ConnectedParent
   type Row = {
     user_id: string;
     provider_email: string;
-    refresh_token: string;
     selected_calendar_ids: string | null;
     gcal_last_synced_at: string | null;
   };
   const rows = await qAll<Row>(
-    `SELECT user_id, provider_email, refresh_token, selected_calendar_ids, gcal_last_synced_at
+    `SELECT user_id, provider_email, selected_calendar_ids, gcal_last_synced_at
      FROM oauth_integrations
      WHERE provider = 'google_calendar'
        AND household_id = ?
@@ -75,7 +74,6 @@ async function getConnectedParents(householdId: string): Promise<ConnectedParent
     return {
       userId: r.user_id,
       email: r.provider_email,
-      refreshToken: r.refresh_token,
       selectedCalendarIds,
       lastSyncedAt: r.gcal_last_synced_at,
     };
@@ -186,11 +184,12 @@ async function fetchCalendarEvents(
   parent: ConnectedParent,
   _opts: { fullFetch: boolean }
 ): Promise<CalendarEvent[]> {
-  const GCAL_CLIENT_ID = process.env.GCAL_CLIENT_ID ?? "";
-  const GCAL_CLIENT_SECRET = process.env.GCAL_CLIENT_SECRET ?? "";
-  const auth = new google.auth.OAuth2(GCAL_CLIENT_ID, GCAL_CLIENT_SECRET);
-  auth.setCredentials({ refresh_token: parent.refreshToken });
-
+  const refreshToken = await getDecryptedRefreshToken(parent.userId);
+  if (!refreshToken) {
+    log.warn("family-agent: refresh token missing or failed to decrypt", { userId: parent.userId });
+    return [];
+  }
+  const auth = buildOAuth2Client(refreshToken);
   const calendar = google.calendar({ version: "v3", auth });
 
   const timeMin = new Date().toISOString();
