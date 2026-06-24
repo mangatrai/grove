@@ -18,6 +18,66 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-192 — V6 Family Planner: phase 1 — Events, Deadlines, GCal settings (2026-06-23)
+
+**What changed:** Built the first functional phase of the Family Planner module.
+
+**Bug fix:**
+- `frontend/vite.config.ts`: added `/gcal` and `/api/family` to Vite proxy list — GCal Settings page was getting back `index.html` instead of JSON, causing "Unexpected token '<'" parse error.
+
+**GCal settings improvements:**
+- Migration `0070_gcal_calendar_selection.sql`: added `selected_calendar_ids` (TEXT) and `calendars_fetched_at` (TIMESTAMPTZ) to `oauth_integrations`.
+- New `GET /gcal/calendars` — lists user's accessible Google Calendars with color dots.
+- New `PATCH /gcal/calendars` — saves selected calendar IDs for the agent to filter on.
+- `gcal.service.ts`: `listUserCalendars`, `saveCalendarSelection`, `getCalendarSelection` functions added. `listUpcomingEvents` updated to use selected calendars only (falls back to all if nothing selected).
+- `GCalSection.tsx`: full Mantine redesign — connection status card with connect/reconnect/disconnect, calendar picker (checkbox list with color dots) shown post-connection.
+
+**V6 family_events backend:**
+- Migration `0071_family_events.sql`: unified `family_events` table with `record_type` (event/deadline), `source` (gcal/tavily/manual), `gcal_event_id`, `gcal_calendar_id`, `assignee_ids` (JSON), soft delete.
+- `family_events.service.ts`: `listFamilyEvents`, `getFamilyEvent`, `createFamilyEvent`, `updateFamilyEvent`, `deleteFamilyEvent`, `upsertGcalEvent` (used by agent sync later).
+- `family-events.routes.ts`: CRUD at `GET/POST /api/family/events` and `GET/PATCH/DELETE /api/family/events/:id`. GET allows member role (nanny-accessible); write operations owner/admin only.
+- `export-registry.ts`: `family_events` registered at restoreOrder 25.
+- `app.ts`: router mounted at `/api/family`.
+
+**V6 routing + UI:**
+- Planner sub-page removed — `FamilyPlannerPage.tsx` and `FamilyActivitiesPage.tsx` deleted.
+- Sidebar: "Planner" and "Activities" removed; "Events" added at `/family/events`.
+- App.tsx: `/family` and `/family/activities` redirect to `/family/events`.
+- `FamilyEventsPage.tsx`: list view with source + recurring badges, add drawer (title, start/end, location, recurring select, all-day, notes), per-row delete.
+- `FamilyDeadlinesPage.tsx`: list with urgency countdown badges (overdue/today/Nd), add drawer (title, due date, notes), per-row delete.
+
+**Files changed:**
+`frontend/vite.config.ts`, `frontend/src/App.tsx`, `frontend/src/layout/AppSidebar.tsx`,
+`frontend/src/pages/FamilyEventsPage.tsx` (new), `frontend/src/pages/FamilyDeadlinesPage.tsx` (rewritten),
+`frontend/src/pages/settings/GCalSection.tsx` (rewritten),
+`backend/db/migrations/0070_gcal_calendar_selection.sql` (new),
+`backend/db/migrations/0071_family_events.sql` (new),
+`backend/src/modules/gcal/gcal.service.ts`, `backend/src/modules/gcal/gcal.routes.ts`,
+`backend/src/modules/family/` (new module: types, service, routes),
+`backend/src/modules/export/export-registry.ts`, `backend/src/app.ts`
+
+---
+
+## DOC-003 — Family Planner PRD-F: architecture revision after design session (2026-06-23)
+
+**What changed:** Major decisions from design review session — updated `docs/PRD_AND_CRS.md` section 12 (PRD-F) and commented on GH issues #127–#130.
+
+**Key decisions recorded:**
+- **Planner sub-page dropped** — native Google Calendar handles side-by-side calendar views better; not worth building
+- **Events + Deadlines = one table** (`family_events`) with `record_type` (event/deadline) and `source` (gcal/tavily/manual)
+- **Activities renamed to Events** — broader scope: recurring kid activities AND one-off appointments; agent extracts both from GCal
+- **Agent is a scheduled background worker, not a chat interface** — no suggestion-card approval flow
+- **Revised digest cadence:** Sunday always, Monday always (with duty assignments), Tue–Sat only if conflict found (delta via GCal `updatedMin`)
+- **GCal delta mechanism:** store `gcal_last_synced_at` per user; use `updatedMin` param — no event content stored in DB
+- **Alert model simplified:** agent writes alert record with conflict reason + pre-written copy-paste text; owner acts manually; no in-app send infrastructure in V6
+- **Agent tab UI:** top = active alerts, bottom = digest history; RBAC-scoped
+- **Nanny schedule V6:** simple fields on staff profile; full employment module is V7
+
+**Files:** `docs/PRD_AND_CRS.md` (section 12 — UI Placement, Agent Architecture, Notification Strategy, Feature Phasing all updated)
+**GitHub:** comments added to https://github.com/mangatrai/grove/issues/127, /128, /129, /130
+
+---
+
 ## UX-R05 — Family sidebar section + GCal connect UI in Settings [FP-1c] (2026-06-23)
 
 Added the "Family" navigation group to the sidebar (hidden for `member` role) with four stub pages — Planner, Activities, Deadlines, Agent — all guarded by `RequireOwnerOrAdmin`. Added a "Family" tab to Settings (visible to owner/admin) containing `GCalSection`: per-user Google Calendar connect/disconnect UI that shows connection status, handles `?gcal=connected|error` callback params, and calls `GET /gcal/oauth/url` → redirect on connect.

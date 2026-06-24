@@ -13,7 +13,6 @@ import {
   IconTrendingUp,
   IconTag,
   IconSettings,
-  IconCalendar,
   IconRun,
   IconBell,
   IconRobot,
@@ -56,8 +55,7 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
   {
     label: "Family",
     items: [
-      { to: "/family", end: true, label: "Planner", Icon: IconCalendar },
-      { to: "/family/activities", end: false, label: "Activities", Icon: IconRun },
+      { to: "/family/events", end: false, label: "Events", Icon: IconRun },
       { to: "/family/deadlines", end: false, label: "Deadlines", Icon: IconBell },
       { to: "/family/agent", end: false, label: "Agent", Icon: IconRobot },
     ],

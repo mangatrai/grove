@@ -20,8 +20,7 @@ import { PropertyDetailPage } from "./pages/PropertyDetailPage";
 import { TaxProtestPage } from "./pages/TaxProtestPage";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
-import { FamilyPlannerPage } from "./pages/FamilyPlannerPage";
-import { FamilyActivitiesPage } from "./pages/FamilyActivitiesPage";
+import { FamilyEventsPage } from "./pages/FamilyEventsPage";
 import { FamilyDeadlinesPage } from "./pages/FamilyDeadlinesPage";
 import { FamilyAgentPage } from "./pages/FamilyAgentPage";
 
@@ -52,8 +51,9 @@ export function App() {
           <Route path="/real-estate" element={<RequireOwnerOrAdmin><RealEstatePage /></RequireOwnerOrAdmin>} />
           <Route path="/real-estate/:propertyId" element={<RequireOwnerOrAdmin><PropertyDetailPage /></RequireOwnerOrAdmin>} />
           <Route path="/tax-protest" element={<RequireOwnerOrAdmin><TaxProtestPage /></RequireOwnerOrAdmin>} />
-          <Route path="/family" element={<RequireOwnerOrAdmin><FamilyPlannerPage /></RequireOwnerOrAdmin>} />
-          <Route path="/family/activities" element={<RequireOwnerOrAdmin><FamilyActivitiesPage /></RequireOwnerOrAdmin>} />
+          <Route path="/family" element={<Navigate to="/family/events" replace />} />
+          <Route path="/family/activities" element={<Navigate to="/family/events" replace />} />
+          <Route path="/family/events" element={<RequireOwnerOrAdmin><FamilyEventsPage /></RequireOwnerOrAdmin>} />
           <Route path="/family/deadlines" element={<RequireOwnerOrAdmin><FamilyDeadlinesPage /></RequireOwnerOrAdmin>} />
           <Route path="/family/agent" element={<RequireOwnerOrAdmin><FamilyAgentPage /></RequireOwnerOrAdmin>} />
           <Route path="/settings" element={<SettingsPage />} />

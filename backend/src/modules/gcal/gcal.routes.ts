@@ -14,8 +14,11 @@ import {
   decodeGCalOAuthState,
   disconnectGCal,
   exchangeAndSaveCalendar,
+  getCalendarSelection,
   getGCalStatus,
-  listUpcomingEvents
+  listUpcomingEvents,
+  listUserCalendars,
+  saveCalendarSelection
 } from "./gcal.service.js";
 
 export const gcalRouter = Router();
@@ -144,6 +147,33 @@ gcalRouter.delete("/disconnect", requireRole(["owner", "admin"]), async (req: Au
   await disconnectGCal(req.authUser!.userId);
   res.json({ connected: false });
 });
+
+/** GET /gcal/calendars — list the user's accessible Google Calendars */
+gcalRouter.get("/calendars", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const result = await listUserCalendars(req.authUser!.userId);
+  if (!result.ok) {
+    const httpStatus = result.code === "GCAL_NOT_CONNECTED" ? 409 : result.code === "GCAL_NEEDS_REAUTH" ? 401 : 502;
+    res.status(httpStatus).json({ code: result.code, message: result.message });
+    return;
+  }
+  const selection = await getCalendarSelection(req.authUser!.userId);
+  res.json({ calendars: result.calendars, selectedIds: selection ?? [] });
+});
+
+/** PATCH /gcal/calendars — save the user's calendar selection */
+gcalRouter.patch(
+  "/calendars",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z.object({ selectedIds: z.array(z.string().min(1)).min(1) }).safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ message: "selectedIds must be a non-empty array of strings", issues: parsed.error.issues });
+      return;
+    }
+    await saveCalendarSelection(req.authUser!.userId, parsed.data.selectedIds);
+    res.json({ ok: true });
+  }
+);
 
 /** GET /gcal/events?days=N — list upcoming events for the requesting user */
 gcalRouter.get("/events", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {

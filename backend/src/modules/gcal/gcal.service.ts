@@ -253,15 +253,21 @@ export async function listUpcomingEvents(
   const timeMax = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
 
   try {
-    const res = await calendar.calendarList.list({ minAccessRole: "reader" });
-    const calendars = res.data.items ?? [];
+    const selectedIds = await getCalendarSelection(userId);
+
+    let calendarIds: string[];
+    if (selectedIds && selectedIds.length > 0) {
+      calendarIds = selectedIds;
+    } else {
+      const res = await calendar.calendarList.list({ minAccessRole: "reader" });
+      calendarIds = (res.data.items ?? []).map(c => c.id).filter((id): id is string => !!id);
+    }
 
     const allEvents: GCalEvent[] = [];
 
-    for (const cal of calendars) {
-      if (!cal.id) continue;
+    for (const calId of calendarIds) {
       const evRes = await calendar.events.list({
-        calendarId: cal.id,
+        calendarId: calId,
         timeMin,
         timeMax,
         singleEvents: true,
@@ -279,7 +285,7 @@ export async function listUpcomingEvents(
           allDay: !ev.start?.dateTime,
           location: ev.location ?? null,
           description: ev.description ?? null,
-          calendarId: cal.id
+          calendarId: calId
         });
       }
     }
@@ -307,6 +313,81 @@ export async function listUpcomingEvents(
     }
 
     return { ok: false, code: "GCAL_API_ERROR", message: `Calendar API error: ${msg}` };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Calendar list + selection
+// ---------------------------------------------------------------------------
+
+export type GCalCalendarItem = {
+  id: string;
+  summary: string;
+  primary: boolean;
+  backgroundColor: string | null;
+};
+
+export async function listUserCalendars(
+  userId: string
+): Promise<{ ok: true; calendars: GCalCalendarItem[] } | { ok: false; code: string; message: string }> {
+  const rt = await getDecryptedRefreshToken(userId);
+  if (!rt) {
+    return { ok: false, code: "GCAL_NOT_CONNECTED", message: "Google Calendar is not connected." };
+  }
+
+  const auth = buildOAuth2Client(rt);
+  const calendar = google.calendar({ version: "v3", auth });
+
+  try {
+    const res = await calendar.calendarList.list({ minAccessRole: "reader" });
+    const items = (res.data.items ?? []).map(cal => ({
+      id: cal.id ?? "",
+      summary: cal.summary ?? cal.id ?? "",
+      primary: cal.primary === true,
+      backgroundColor: cal.backgroundColor ?? null
+    })).filter(c => c.id);
+    return { ok: true, calendars: items };
+  } catch (err: unknown) {
+    const httpStatus = err instanceof GaxiosError ? err.response?.status : undefined;
+    const msg = err instanceof Error ? err.message : String(err);
+    log.warn("gcal listUserCalendars failed", { userId, httpStatus, msg });
+    if (httpStatus === 401 || httpStatus === 403) {
+      await qExec(
+        `UPDATE oauth_integrations SET needs_reauth = TRUE, last_error = ?
+         WHERE provider = 'google_calendar' AND user_id = ?`,
+        msg.slice(0, 500),
+        userId
+      );
+      return { ok: false, code: "GCAL_NEEDS_REAUTH", message: "Calendar access requires re-authorization." };
+    }
+    return { ok: false, code: "GCAL_API_ERROR", message: `Calendar API error: ${msg}` };
+  }
+}
+
+export async function saveCalendarSelection(userId: string, calendarIds: string[]): Promise<void> {
+  await qExec(
+    `UPDATE oauth_integrations
+     SET selected_calendar_ids = ?, calendars_fetched_at = NOW()
+     WHERE provider = 'google_calendar' AND user_id = ?`,
+    JSON.stringify(calendarIds),
+    userId
+  );
+}
+
+export async function getCalendarSelection(
+  userId: string
+): Promise<string[] | null> {
+  const row = await qGet<{ selected_calendar_ids: string | null }>(
+    `SELECT selected_calendar_ids FROM oauth_integrations
+     WHERE provider = 'google_calendar' AND user_id = ?`,
+    userId
+  );
+  if (!row?.selected_calendar_ids) return null;
+  try {
+    const parsed = JSON.parse(row.selected_calendar_ids) as unknown;
+    return Array.isArray(parsed) ? (parsed as string[]) : null;
+  } catch {
+    return null;
   }
 }
 

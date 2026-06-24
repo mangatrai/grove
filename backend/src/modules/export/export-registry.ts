@@ -229,6 +229,13 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 24,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "family_events",
+    tableName: "family_events",
+    restoreOrder: 25,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true
   }
 ];
 

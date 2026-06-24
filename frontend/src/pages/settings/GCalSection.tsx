@@ -1,7 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { Alert, Badge, Button, Divider, Group, Paper, Skeleton, Stack, Text, Title } from "@mantine/core";
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  Divider,
+  Group,
+  Loader,
+  Paper,
+  Skeleton,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import { IconBrandGoogle, IconCalendar, IconCheck, IconX } from "@tabler/icons-react";
 
 import { apiFetch, apiJson } from "../../api";
@@ -10,6 +23,18 @@ type GCalStatus = {
   connected: boolean;
   needsReauth: boolean;
   connectedAt: string | null;
+};
+
+type CalendarItem = {
+  id: string;
+  summary: string;
+  primary: boolean;
+  backgroundColor: string | null;
+};
+
+type GCalCalendarsResponse = {
+  calendars: CalendarItem[];
+  selectedIds: string[];
 };
 
 type GCalSectionProps = {
@@ -23,6 +48,13 @@ export function GCalSection({ active }: GCalSectionProps) {
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [calendars, setCalendars] = useState<CalendarItem[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [calLoading, setCalLoading] = useState(false);
+  const [calSaving, setCalSaving] = useState(false);
+  const [calError, setCalError] = useState<string | null>(null);
+  const [calSaved, setCalSaved] = useState(false);
 
   const gcalParam = searchParams.get("gcal");
   const gcalMessage = searchParams.get("message");
@@ -40,10 +72,29 @@ export function GCalSection({ active }: GCalSectionProps) {
     }
   }, []);
 
+  const loadCalendars = useCallback(async () => {
+    setCalLoading(true);
+    setCalError(null);
+    try {
+      const res = await apiJson<GCalCalendarsResponse>("/gcal/calendars");
+      setCalendars(res.calendars);
+      setSelectedIds(res.selectedIds);
+    } catch (e) {
+      setCalError(e instanceof Error ? e.message : "Could not load calendar list.");
+    } finally {
+      setCalLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!active) return;
     void loadStatus();
   }, [active, loadStatus]);
+
+  useEffect(() => {
+    if (!active || !status?.connected || status.needsReauth) return;
+    void loadCalendars();
+  }, [active, status?.connected, status?.needsReauth, loadCalendars]);
 
   // Clear gcal callback params after reading on mount
   useEffect(() => {
@@ -72,12 +123,40 @@ export function GCalSection({ active }: GCalSectionProps) {
     setError(null);
     try {
       await apiFetch("/gcal/disconnect", { method: "DELETE" });
+      setCalendars([]);
+      setSelectedIds([]);
       await loadStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not disconnect.");
     } finally {
       setDisconnecting(false);
     }
+  }
+
+  async function saveSelection() {
+    if (selectedIds.length === 0) return;
+    setCalSaving(true);
+    setCalError(null);
+    setCalSaved(false);
+    try {
+      await apiFetch("/gcal/calendars", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selectedIds }),
+      });
+      setCalSaved(true);
+      setTimeout(() => setCalSaved(false), 3000);
+    } catch (e) {
+      setCalError(e instanceof Error ? e.message : "Could not save calendar selection.");
+    } finally {
+      setCalSaving(false);
+    }
+  }
+
+  function toggleCalendar(id: string) {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
   }
 
   function formatDate(iso: string | null): string {
@@ -166,6 +245,82 @@ export function GCalSection({ active }: GCalSectionProps) {
           </Stack>
         )}
       </Paper>
+
+      {/* Calendar picker — shown only when connected and not needing reauth */}
+      {status?.connected && !status.needsReauth ? (
+        <Paper withBorder p="lg" radius="md">
+          <Stack gap="sm">
+            <Group gap="sm">
+              <IconCalendar size={18} stroke={1.5} />
+              <Text fw={500}>Calendars to sync</Text>
+              {calSaved ? (
+                <Badge color="green" variant="light" leftSection={<IconCheck size={12} />}>Saved</Badge>
+              ) : null}
+            </Group>
+            <Text size="sm" c="dimmed">
+              Choose which of your Google Calendars the family planner agent should read.
+              If you select none, the agent reads all accessible calendars.
+            </Text>
+
+            {calError ? <Alert color="red">{calError}</Alert> : null}
+
+            {calLoading ? (
+              <Group gap="xs">
+                <Loader size="xs" />
+                <Text size="sm" c="dimmed">Loading calendars…</Text>
+              </Group>
+            ) : calendars.length === 0 ? (
+              <Text size="sm" c="dimmed">No calendars found on this Google account.</Text>
+            ) : (
+              <Stack gap="xs">
+                {calendars.map(cal => (
+                  <Group key={cal.id} gap="sm">
+                    {cal.backgroundColor ? (
+                      <div
+                        style={{
+                          width: 12,
+                          height: 12,
+                          borderRadius: "50%",
+                          backgroundColor: cal.backgroundColor,
+                          flexShrink: 0,
+                        }}
+                      />
+                    ) : null}
+                    <Checkbox
+                      label={
+                        <Text size="sm">
+                          {cal.summary}
+                          {cal.primary ? <Text component="span" size="xs" c="dimmed"> (primary)</Text> : null}
+                        </Text>
+                      }
+                      checked={selectedIds.includes(cal.id)}
+                      onChange={() => toggleCalendar(cal.id)}
+                    />
+                  </Group>
+                ))}
+              </Stack>
+            )}
+
+            {calendars.length > 0 ? (
+              <Group mt="xs">
+                <Button
+                  size="sm"
+                  loading={calSaving}
+                  disabled={selectedIds.length === 0}
+                  onClick={() => void saveSelection()}
+                >
+                  Save selection
+                </Button>
+                {selectedIds.length === 0 ? (
+                  <Text size="xs" c="dimmed">Select at least one calendar</Text>
+                ) : (
+                  <Text size="xs" c="dimmed">{selectedIds.length} calendar{selectedIds.length !== 1 ? "s" : ""} selected</Text>
+                )}
+              </Group>
+            ) : null}
+          </Stack>
+        </Paper>
+      ) : null}
     </Stack>
   );
 }
