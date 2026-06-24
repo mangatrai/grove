@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DB-074 — V6 Family Planner: person_profile extensions + household_help_availability (2026-06-24)
+
+**What changed:** DB foundation for V6 Family Planner data model.
+
+1. **`person_profile` extended** — two new columns: `interests_json TEXT NOT NULL DEFAULT '[]'` (hobbies, food preferences, activity interests — feeds agent context for all household members including spouse) and `notes TEXT` (freeform sticky note per person, same UX as property notes).
+2. **`household_help_availability` table** — unified schedule roster for ALL household help (nanny regular hours, babysitter one-offs, house cleaner, activity teachers, tutors). Two orthogonal dimensions: `slot_type` (regular / one_off / unavailable — the schedule pattern) and `service_type` (nanny / babysitter / cleaner / activity_teacher / tutor / other — what they do). Indexed on household_id, person_profile_id, and (household_id, is_active, slot_type).
+3. **Export registry updated** — `household_help_availability` added to EXPORT_REGISTRY at restoreOrder 28.
+
+**Files:** `backend/db/migrations/0074_family_planner_profiles.sql`, `backend/src/modules/export/export-registry.ts`
+**GitHub:** https://github.com/mangatrai/grove/issues/135
+
+---
+
 ## FIX-195 — Family Planner: restore full PA scope, add kid context, fix recipient routing (2026-06-24)
 
 **What changed:** The FIX-194 agent prompt fix overcorrected — restricting the agent to childcare-gap detection only, which broke the intended household executive assistant scope.
