@@ -18,6 +18,52 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-193 — V6 Family Planner: phase 2 — Agent page, scheduled cron worker, alert system (2026-06-23)
+
+**What changed:** Completed the Family Planner module with the background agent, alert system, digest log, and Agent page UI.
+
+**DB migrations:**
+- Migration `0072_family_agent_tables.sql`:
+  - `gcal_last_synced_at` column on `oauth_integrations` — stores per-user GCal fetch timestamp for delta sync
+  - `family_agent_alerts` table — agent writes one row per detected conflict (reason, copy_paste_text, recipient_hint, alert_type, resolved tracking)
+  - `family_digest_log` table — one row per agent run (run_type, status, alerts_created, emails_sent, summary_text)
+- `export-registry.ts`: `family_agent_alerts` at restoreOrder 26, `family_digest_log` at 27
+
+**Backend — family-agent.service.ts:**
+- `runFamilyAgent(householdId, runType)` — main entry point; fetches GCal events for all connected parents, fetches DB family_events, calls LLM for conflict analysis + digest generation, writes alerts, sends per-parent emails, updates gcal_last_synced_at, writes digest log
+- GCal delta: daily_delta runs pass `updatedMin=gcal_last_synced_at`; sunday/monday/manual runs do full 14-day fetch
+- LLM: `getChatAdapter().complete()` with strongModel(); JSON-only response — conflicts array + per-parent digest email content
+- `listAlerts`, `resolveAlert`, `listDigestLog` — read/update helpers for the Agent tab
+- `runFamilyAgentForAllHouseholds(runType)` — iterates all households with connected calendars
+
+**Backend — family-events.routes.ts (extended):**
+- `GET /api/family/alerts?includeResolved=true` — list active (or all) alerts
+- `PATCH /api/family/alerts/:id/resolve` — dismiss an alert
+- `GET /api/family/digests` — digest run history
+- `POST /api/family/agent/run` — manual trigger (owner only)
+
+**Backend — family-agent.scheduler.ts + server.ts:**
+- Cron: Sunday 7:00pm (sunday_preview), Monday 7:03am (monday_digest), Tue–Sat 6:32am (daily_delta)
+- All use `env.TZ` for timezone; registered in server.ts startup block
+
+**Frontend — FamilyAgentPage.tsx (full implementation):**
+- Alert cards: reason text, colored left border by type, pre-written copy-paste message in a Code block with clipboard button, dismiss button
+- "Show resolved" toggle reveals dismissed alerts grayed out
+- Digest history table: run type, timestamp, status badge, alerts_created, emails_sent, summary_text
+- "Run now" menu (owner only) — manual trigger with run type selection
+- Refreshes alert + history panels after manual runs
+
+**Files changed:**
+`backend/db/migrations/0072_family_agent_tables.sql` (new),
+`backend/src/modules/family/family-agent.service.ts` (new),
+`backend/src/modules/family/family-agent.scheduler.ts` (new),
+`backend/src/modules/family/family-events.routes.ts` (extended),
+`backend/src/modules/export/export-registry.ts`,
+`backend/src/server.ts`,
+`frontend/src/pages/FamilyAgentPage.tsx` (full rewrite)
+
+---
+
 ## CR-192 — V6 Family Planner: phase 1 — Events, Deadlines, GCal settings (2026-06-23)
 
 **What changed:** Built the first functional phase of the Family Planner module.

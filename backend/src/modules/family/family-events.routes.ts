@@ -11,6 +11,12 @@ import {
   listFamilyEvents,
   updateFamilyEvent,
 } from "./family-events.service.js";
+import {
+  listAlerts,
+  listDigestLog,
+  resolveAlert,
+  runFamilyAgent,
+} from "./family-agent.service.js";
 
 export const familyEventsRouter = Router();
 familyEventsRouter.use(requireAuth);
@@ -72,3 +78,45 @@ familyEventsRouter.delete("/events/:id", requireRole(["owner", "admin"]), async 
   if (!deleted) { res.status(404).json({ message: "Event not found." }); return; }
   res.status(204).send();
 });
+
+// ---------------------------------------------------------------------------
+// Agent alerts + digest log
+// ---------------------------------------------------------------------------
+
+/** GET /family/alerts?includeResolved=true */
+familyEventsRouter.get("/alerts", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const includeResolved = req.query.includeResolved === "true";
+  const alerts = await listAlerts(req.authUser!.householdId, includeResolved);
+  res.json({ alerts });
+});
+
+/** PATCH /family/alerts/:id/resolve */
+familyEventsRouter.patch(
+  "/alerts/:id/resolve",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const ok = await resolveAlert(req.params.id, req.authUser!.householdId, req.authUser!.userId);
+    if (!ok) { res.status(404).json({ message: "Alert not found or already resolved." }); return; }
+    res.json({ ok: true });
+  }
+);
+
+/** GET /family/digests */
+familyEventsRouter.get("/digests", requireRole(["owner", "admin"]), async (req: AuthenticatedRequest, res) => {
+  const entries = await listDigestLog(req.authUser!.householdId);
+  res.json({ entries });
+});
+
+/** POST /family/agent/run — manual trigger (owner only) */
+familyEventsRouter.post(
+  "/agent/run",
+  requireRole(["owner"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z.object({ runType: z.enum(["sunday_preview", "monday_digest", "daily_delta", "manual"]).optional() })
+      .safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+    const runType = parsed.data.runType ?? "manual";
+    const result = await runFamilyAgent(req.authUser!.householdId, runType);
+    res.json(result);
+  }
+);

@@ -12,6 +12,7 @@ import { startStockQuoteScheduler } from "./modules/espp/espp-stock.service.js";
 import { startRealtyScheduler } from "./modules/household/realty-scheduler.service.js";
 import { startImportCleanupScheduler } from "./modules/imports/import-session.service.js";
 import { startPayslipAsyncScheduler } from "./modules/imports/payslip-async-scheduler.service.js";
+import { startFamilyAgentScheduler } from "./modules/family/family-agent.scheduler.js";
 import { purgeOldNotifications } from "./modules/notifications/notification.service.js";
 
 const frontendDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../frontend/dist");
@@ -50,6 +51,7 @@ void (async () => {
       startRealtyScheduler();
       startImportCleanupScheduler();
       startPayslipAsyncScheduler();
+      startFamilyAgentScheduler();
       void purgeOldNotifications();
     }
     const server = app.listen(port, () => {
