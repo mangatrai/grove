@@ -18,6 +18,23 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-136 — V6 Family Planner: member profile API + household help availability CRUD (2026-06-24)
+
+**What changed:** Backend service and routes for household member profile editing and help schedule management.
+
+1. **`family-profiles.service.ts`** (new) — `listHouseholdMembers`, `updateMemberProfile`, `listAvailability`, `createAvailability`, `updateAvailability`, `deleteAvailability`.
+2. **`family-profiles.routes.ts`** (new) — `GET /api/family/members`, `PATCH /api/family/members/:profileId`, `GET /api/family/availability`, `POST /api/family/availability`, `PATCH /api/family/availability/:id`, `DELETE /api/family/availability/:id`.
+3. **`family.types.ts`** extended — `HouseholdMember`, `HelpAvailabilitySlot`, `UpdateMemberProfileInput`, `CreateAvailabilityInput`, `UpdateAvailabilityInput`, `SlotType`, `ServiceType`.
+4. **`app.ts`** — mounts `familyProfilesRouter` at `/api/family`.
+5. **`openapi/openapi.yaml`** — 6 new endpoint entries + `HouseholdMember` and `HelpAvailabilitySlot` schemas.
+6. **`docs/API_REFERENCE.md`** — new "Family Planner — Member Profiles & Help Availability" section.
+7. **`backend/tests/family-profiles.test.ts`** — 12 tests covering list, update, and availability CRUD.
+
+**Files:** `backend/src/modules/family/family-profiles.service.ts`, `backend/src/modules/family/family-profiles.routes.ts`, `backend/src/modules/family/family.types.ts`, `backend/src/app.ts`, `openapi/openapi.yaml`, `docs/API_REFERENCE.md`, `backend/tests/family-profiles.test.ts`
+**GitHub:** https://github.com/mangatrai/grove/issues/136
+
+---
+
 ## DB-074 — V6 Family Planner: person_profile extensions + household_help_availability (2026-06-24)
 
 **What changed:** DB foundation for V6 Family Planner data model.

@@ -44,3 +44,67 @@ export type FamilyEventRow = {
   created_at: string;
   updated_at: string;
 };
+
+// ── Household members ──────────────────────────────────────────────────────
+
+export type HouseholdMember = {
+  profileId: string;
+  fullName: string;
+  relationship: string;
+  age: number | null;
+  linkedUserId: string | null;
+  interestsJson: string[];
+  notes: string | null;
+};
+
+export type UpdateMemberProfileInput = {
+  interestsJson?: string[];
+  notes?: string | null;
+  age?: number | null;
+};
+
+// ── Household help availability ────────────────────────────────────────────
+
+export type SlotType = "regular" | "one_off" | "unavailable";
+export type ServiceType = "nanny" | "babysitter" | "cleaner" | "activity_teacher" | "tutor" | "other";
+
+export type HelpAvailabilitySlot = {
+  id: string;
+  householdId: string;
+  personProfileId: string;
+  personName: string;
+  slotType: SlotType;
+  serviceType: ServiceType;
+  dayOfWeek: number | null;
+  specificDate: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  label: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+};
+
+export type CreateAvailabilityInput = {
+  personProfileId: string;
+  slotType: SlotType;
+  serviceType: ServiceType;
+  dayOfWeek?: number | null;
+  specificDate?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  label?: string | null;
+  notes?: string | null;
+};
+
+export type UpdateAvailabilityInput = {
+  slotType?: SlotType;
+  serviceType?: ServiceType;
+  dayOfWeek?: number | null;
+  specificDate?: string | null;
+  startTime?: string | null;
+  endTime?: string | null;
+  label?: string | null;
+  notes?: string | null;
+  isActive?: boolean;
+};

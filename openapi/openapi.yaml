@@ -4235,6 +4235,176 @@ paths:
           description: Unauthorized
         "404":
           description: Override not found
+
+  /api/family/members:
+    get:
+      tags: [family]
+      summary: List all household members with profile data
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/HouseholdMember'
+        "401": { description: Unauthorized }
+
+  /api/family/members/{profileId}:
+    patch:
+      tags: [family]
+      summary: Update interests, notes, or age on a household member profile
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: profileId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                interestsJson:
+                  type: array
+                  items: { type: string, maxLength: 80 }
+                  maxItems: 30
+                notes:
+                  type: string
+                  nullable: true
+                  maxLength: 2000
+                age:
+                  type: integer
+                  nullable: true
+                  minimum: 0
+                  maximum: 150
+      responses:
+        "200":
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member: { $ref: '#/components/schemas/HouseholdMember' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "404": { description: Member not found }
+
+  /api/family/availability:
+    get:
+      tags: [family]
+      summary: List household help availability slots
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: includeInactive
+          in: query
+          schema: { type: boolean }
+          description: Include deactivated slots (default false)
+      responses:
+        "200":
+          description: Slot list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slots:
+                    type: array
+                    items: { $ref: '#/components/schemas/HelpAvailabilitySlot' }
+        "401": { description: Unauthorized }
+    post:
+      tags: [family]
+      summary: Create a household help availability slot
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [personProfileId, slotType, serviceType]
+              properties:
+                personProfileId: { type: string }
+                slotType: { type: string, enum: [regular, one_off, unavailable] }
+                serviceType: { type: string, enum: [nanny, babysitter, cleaner, activity_teacher, tutor, other] }
+                dayOfWeek: { type: integer, minimum: 0, maximum: 6, nullable: true }
+                specificDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$', nullable: true }
+                startTime: { type: string, pattern: '^\d{2}:\d{2}$', nullable: true }
+                endTime: { type: string, pattern: '^\d{2}:\d{2}$', nullable: true }
+                label: { type: string, maxLength: 200, nullable: true }
+                notes: { type: string, maxLength: 2000, nullable: true }
+      responses:
+        "201":
+          description: Created slot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slot: { $ref: '#/components/schemas/HelpAvailabilitySlot' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+
+  /api/family/availability/{id}:
+    patch:
+      tags: [family]
+      summary: Update a household help availability slot
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                slotType: { type: string, enum: [regular, one_off, unavailable] }
+                serviceType: { type: string, enum: [nanny, babysitter, cleaner, activity_teacher, tutor, other] }
+                dayOfWeek: { type: integer, minimum: 0, maximum: 6, nullable: true }
+                specificDate: { type: string, pattern: '^\d{4}-\d{2}-\d{2}$', nullable: true }
+                startTime: { type: string, pattern: '^\d{2}:\d{2}$', nullable: true }
+                endTime: { type: string, pattern: '^\d{2}:\d{2}$', nullable: true }
+                label: { type: string, maxLength: 200, nullable: true }
+                notes: { type: string, maxLength: 2000, nullable: true }
+                isActive: { type: boolean }
+      responses:
+        "200":
+          description: Updated slot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slot: { $ref: '#/components/schemas/HelpAvailabilitySlot' }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "404": { description: Slot not found }
+    delete:
+      tags: [family]
+      summary: Delete a household help availability slot
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "401": { description: Unauthorized }
+        "404": { description: Slot not found }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -5183,3 +5353,34 @@ components:
         ok: { type: boolean, enum: [false] }
         code: { type: string }
         message: { type: string }
+
+    HouseholdMember:
+      type: object
+      properties:
+        profileId: { type: string }
+        fullName: { type: string }
+        relationship: { type: string, enum: [self, spouse, child, dependent, other] }
+        age: { type: integer, nullable: true }
+        linkedUserId: { type: string, nullable: true }
+        interestsJson:
+          type: array
+          items: { type: string }
+        notes: { type: string, nullable: true }
+
+    HelpAvailabilitySlot:
+      type: object
+      properties:
+        id: { type: string }
+        householdId: { type: string }
+        personProfileId: { type: string }
+        personName: { type: string }
+        slotType: { type: string, enum: [regular, one_off, unavailable] }
+        serviceType: { type: string, enum: [nanny, babysitter, cleaner, activity_teacher, tutor, other] }
+        dayOfWeek: { type: integer, minimum: 0, maximum: 6, nullable: true }
+        specificDate: { type: string, nullable: true }
+        startTime: { type: string, nullable: true }
+        endTime: { type: string, nullable: true }
+        label: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }

@@ -3817,3 +3817,133 @@ Lists upcoming calendar events across all calendars the user has access to. `day
 **Error `409 GCAL_NOT_CONNECTED`** — user has not connected Calendar.
 **Error `401 GCAL_NEEDS_REAUTH`** — Google returned 401/403; user must reconnect. `needs_reauth` flag set in DB.
 **Error `502 GCAL_API_ERROR`** — other Google API failure.
+
+## Family Planner — Member Profiles & Help Availability
+
+All endpoints require `Authorization: Bearer <token>`. All paths are prefixed `/api/family`.
+
+---
+
+### `GET /api/family/members`
+
+Returns all household members with their profile data. Requires `owner | admin | member`.
+
+**Response `200`**
+```json
+{
+  "members": [
+    {
+      "profileId": "70000000-0000-0000-0000-000000000001",
+      "fullName": "Alex Owner",
+      "relationship": "self",
+      "age": 35,
+      "linkedUserId": "20000000-0000-0000-0000-000000000001",
+      "interestsJson": ["cycling", "cooking"],
+      "notes": null
+    }
+  ]
+}
+```
+
+`relationship` — one of `self | spouse | child | dependent | other`.
+`interestsJson` — parsed JSON array of interest tags.
+`linkedUserId` — present if the member has an app login; `null` for external helpers (nanny, cleaner, etc.).
+
+---
+
+### `PATCH /api/family/members/:profileId`
+
+Updates `interestsJson`, `notes`, and/or `age` on a person profile. Requires `owner | admin`.
+
+**Body** (all fields optional)
+```json
+{
+  "interestsJson": ["piano", "swimming"],
+  "notes": "Lincoln Elementary, 1st grade",
+  "age": 7
+}
+```
+
+**Response `200`** — `{ "member": HouseholdMember }`
+**Error `404`** — profile not in caller's household.
+
+---
+
+### `GET /api/family/availability`
+
+Lists household help availability slots. Requires `owner | admin | member`.
+
+**Query params**
+- `includeInactive=true` — include deactivated slots (default: active only).
+
+**Response `200`**
+```json
+{
+  "slots": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "personProfileId": "uuid",
+      "personName": "Example Nanny",
+      "slotType": "regular",
+      "serviceType": "nanny",
+      "dayOfWeek": 1,
+      "specificDate": null,
+      "startTime": "08:00",
+      "endTime": "18:00",
+      "label": "Monday regular hours",
+      "notes": null,
+      "isActive": true,
+      "createdAt": "2026-06-24T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+`slotType` — `regular` (recurring weekly, use `dayOfWeek`), `one_off` (single date, use `specificDate`), `unavailable` (override, use `specificDate`).
+`serviceType` — `nanny | babysitter | cleaner | activity_teacher | tutor | other`.
+`dayOfWeek` — 0 = Sunday … 6 = Saturday. `null` for `one_off` / `unavailable` slots.
+
+---
+
+### `POST /api/family/availability`
+
+Creates a new availability slot. Requires `owner | admin`.
+
+**Body**
+```json
+{
+  "personProfileId": "uuid",
+  "slotType": "one_off",
+  "serviceType": "babysitter",
+  "specificDate": "2026-07-04",
+  "startTime": "09:00",
+  "endTime": "20:00",
+  "label": "Holiday coverage"
+}
+```
+
+**Response `201`** — `{ "slot": HelpAvailabilitySlot }`
+
+---
+
+### `PATCH /api/family/availability/:id`
+
+Updates any field on an existing slot. Use `isActive: false` to deactivate without deleting. Requires `owner | admin`.
+
+**Body** (all fields optional)
+```json
+{ "endTime": "17:00", "isActive": false }
+```
+
+**Response `200`** — `{ "slot": HelpAvailabilitySlot }`
+**Error `404`** — slot not in caller's household.
+
+---
+
+### `DELETE /api/family/availability/:id`
+
+Permanently removes an availability slot. Requires `owner | admin`.
+
+**Response `204`** — no body.
+**Error `404`** — slot not in caller's household.
