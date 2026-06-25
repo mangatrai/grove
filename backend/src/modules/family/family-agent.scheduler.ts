@@ -3,6 +3,7 @@ import cron from "node-cron";
 import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { runFamilyAgentForAllHouseholds } from "./family-agent.service.js";
+import { sendDeadlineReminders } from "./deadline-reminder.service.js";
 
 export function startFamilyAgentScheduler(): void {
   // Sunday ~7pm — light weekly preview (always sends)
@@ -25,8 +26,15 @@ export function startFamilyAgentScheduler(): void {
     void runFamilyAgentForAllHouseholds("daily_delta");
   }, { timezone: env.TZ });
 
+  // Daily 8:07am — deadline reminder emails (30/7/1-day before due_date).
+  // Idempotent: each horizon is marked sent after the first successful email; subsequent runs skip it.
+  cron.schedule("7 8 * * *", () => {
+    log.info("deadline-reminders: daily scan triggered");
+    void sendDeadlineReminders();
+  }, { timezone: env.TZ });
+
   log.info("family-agent scheduler started", {
     timezone: env.TZ,
-    jobs: ["Sunday 7:00pm preview", "Monday 7:03am digest", "Tue-Sat 6:32am delta"],
+    jobs: ["Sunday 7:00pm preview", "Monday 7:03am digest", "Tue-Sat 6:32am delta", "Daily 8:07am deadline reminders"],
   });
 }

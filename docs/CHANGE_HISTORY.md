@@ -18,6 +18,17 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-139 — V6 Family Planner FP-4: deadline reminder cron job — 30/7/1-day email alerts (2026-06-24)
+
+Implements proactive email reminders for deadlines tracked in the Family → Deadlines page.
+A daily cron job at 8:07am (`env.TZ`) scans all active upcoming deadlines within a 30-day window.
+For each deadline, up to three reminder horizons fire: 30 days before (low urgency), 7 days (approaching), 1 day (urgent).
+Each horizon is idempotent — a `reminder_*d_sent_at` column on `family_events` is stamped after the first successful send; subsequent daily runs skip already-sent horizons.
+Reminders are sent to all household members with linked app accounts.
+Email is a consolidated digest per household per run (not one email per deadline).
+Files: `backend/db/migrations/0075_deadline_reminders.sql`, `backend/src/modules/mailer/templates/deadline-reminder.ts` (new), `backend/src/modules/family/deadline-reminder.service.ts` (new), `backend/src/modules/family/family-agent.scheduler.ts`.
+GitHub: closes #130
+
 ## CR-138 — V6 Family Planner Phase 2C: agent enriched with full member profiles + caregiver roster (2026-06-24)
 Replace `getHouseholdChildren()` (name + age only) with `listHouseholdMembers()` + `listAvailability()` from `family-profiles.service.ts`.
 Agent prompt now includes all member relationships, ages, interests, and notes; plus the full `household_help_availability` schedule (service type, slot type, day/time per caregiver).
