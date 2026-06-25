@@ -18,6 +18,13 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## CR-138 — V6 Family Planner Phase 2C: agent enriched with full member profiles + caregiver roster (2026-06-24)
+Replace `getHouseholdChildren()` (name + age only) with `listHouseholdMembers()` + `listAvailability()` from `family-profiles.service.ts`.
+Agent prompt now includes all member relationships, ages, interests, and notes; plus the full `household_help_availability` schedule (service type, slot type, day/time per caregiver).
+Coverage gap detection now checks actual caregiver schedule before flagging a conflict; activity suggestions match each child's registered interests.
+Files: `family-agent.service.ts`.
+GitHub: closes #138
+
 ## UX-137 — V6 Family Planner: FamilySection settings tab — member profiles + help schedule UI (2026-06-24)
 
 **What changed:** Settings → Family tab replaced bare GCalSection with a full `FamilySection` component containing three subsections.

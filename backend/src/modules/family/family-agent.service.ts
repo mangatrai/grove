@@ -5,7 +5,8 @@ import { log } from "../../logger.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { buildOAuth2Client, getDecryptedRefreshToken } from "../gcal/gcal.service.js";
-import type { FamilyEvent, FamilyEventRow } from "./family.types.js";
+import type { FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
+import { listAvailability, listHouseholdMembers } from "./family-profiles.service.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -237,26 +238,13 @@ async function fetchCalendarEvents(
 // LLM analysis
 // ---------------------------------------------------------------------------
 
-type HouseholdChild = { name: string; age: number | null };
-
-async function getHouseholdChildren(householdId: string): Promise<HouseholdChild[]> {
-  type Row = { full_name: string; age: number | null };
-  const rows = await qAll<Row>(
-    `SELECT pp.full_name, pp.age
-     FROM person_profile pp
-     JOIN household_membership hm ON hm.person_profile_id = pp.id
-     WHERE hm.household_id = ? AND hm.relationship = 'child'`,
-    householdId
-  );
-  return rows.map(r => ({ name: r.full_name, age: r.age }));
-}
-
 function buildAnalysisPrompt(
   runType: AgentRunType,
   parents: Array<{ email: string; events: CalendarEvent[] }>,
   dbEvents: FamilyEvent[],
   openAlerts: AgentAlert[],
-  children: HouseholdChild[]
+  members: HouseholdMember[],
+  caregiverSlots: HelpAvailabilitySlot[]
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const isDelta = runType === "daily_delta";
@@ -278,9 +266,29 @@ function buildAnalysisPrompt(
         `[${e.recordType.toUpperCase()}] ${e.title} | ${e.startAt ?? e.dueDate ?? "no date"} | ${e.location ?? ""}`
       ).join("\n");
 
-  const childrenLines = children.length === 0
-    ? "No children registered."
-    : children.map(c => `- ${c.name}${c.age !== null ? `, age ${c.age}` : ""}`).join("\n");
+  const memberLines = members.length === 0
+    ? "No household members registered."
+    : members.map(m => {
+        const age = m.age !== null ? `, age ${m.age}` : "";
+        const interests = m.interestsJson.length > 0 ? ` | interests: ${m.interestsJson.join(", ")}` : "";
+        const notes = m.notes ? ` | notes: ${m.notes}` : "";
+        return `- ${m.fullName} (${m.relationship}${age})${interests}${notes}`;
+      }).join("\n");
+
+  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const caregiverLines = caregiverSlots.length === 0
+    ? "No caregiver schedule configured."
+    : caregiverSlots.map(s => {
+        const when = s.slotType === "one_off" && s.specificDate
+          ? `one-off ${s.specificDate}`
+          : s.dayOfWeek !== null
+          ? `every ${DAY_NAMES[s.dayOfWeek] ?? s.dayOfWeek}`
+          : "schedule TBD";
+        const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
+        const label = s.label ? ` (${s.label})` : "";
+        const slotNotes = s.notes ? ` — ${s.notes}` : "";
+        return `- ${s.personName} [${s.serviceType}]: ${s.slotType}, ${when}${time}${label}${slotNotes}`;
+      }).join("\n");
 
   // For daily delta: inject open unresolved alerts so the LLM doesn't re-flag
   // conflicts that have already been surfaced and are awaiting owner action.
@@ -301,8 +309,11 @@ function buildAnalysisPrompt(
 
 Task: ${taskDescription}
 ${openAlertsSection}
-=== Household Children ===
-${childrenLines}
+=== Household Members ===
+${memberLines}
+
+=== Care & Help Schedule ===
+${caregiverLines}
 
 === Calendar Events (next 14 days) ===
 ${parentLines}
@@ -336,7 +347,7 @@ Respond with ONLY valid JSON in this exact shape:
 Rules:
 - Surface anything actionable: childcare coverage gaps, schedule pressure (heavy day, double-booking, tight connections), travel with coverage implications, approaching deadlines, or seasonal planning opportunities (summer camps, enrollment windows, annual appointments).
 - Alert types:
-  - "coverage_gap": children need care and nobody available (both parents in meetings, nanny not scheduled, etc.)
+  - "coverage_gap": children need care and nobody available (both parents in meetings, caregiver not scheduled, etc.)
   - "conflict": schedule pressure — one parent has a heavy/stacked day, double-booking, a day that needs coordination
   - "travel": parent travel detected; flag what it means for coverage that week
   - "deadline_approaching": registration cutoff, enrollment window, tax deadline, camp sign-up, medical appointment due
@@ -346,8 +357,9 @@ Rules:
   - "Spouse": spouse needs to know or decide something. copyPasteText is a message to spouse: "Hey, I have a doctor appointment + 3 back-to-back meetings Wednesday — can you handle school pickup?"
   - "Both": both parents need to coordinate. copyPasteText is a joint note or action item.
   - "Self": owner should act alone. copyPasteText is a suggested self-action: "Block 90 min before and after your appointment. Consider moving the 3pm meeting."
-- Use children's ages for planning suggestions. Age 5-8: STEM camps, coding, art, sports. Infant/toddler: music classes, sensory play, swim lessons. Adjust suggestions to what is developmentally appropriate.
-- Do NOT suggest that the Nanny manage adult scheduling conflicts. She manages children's care only.
+- Use members' ages and interests for planning suggestions. Match activity suggestions to each child's listed interests where possible. Age 5-8: STEM camps, coding, art, sports. Infant/toddler: music classes, sensory play, swim lessons.
+- Use the Care & Help Schedule to determine caregiver availability before flagging a coverage gap. Check scheduled days/times against conflicting calendar events.
+- Do NOT suggest that caregivers manage adult scheduling conflicts. Caregivers manage children's care only.
 - A busy day with meetings AND an appointment is NOT a childcare gap — it is a "conflict" for the parent, directed at "Self" or "Spouse", with a suggestion to reschedule or block buffer time.
 - conflicts array must be empty [] if hasConflicts is false
 - parentADigest and parentBDigest must be null if this is a daily_delta run with no conflicts
@@ -360,9 +372,10 @@ async function analyzeWithLlm(
   parents: Array<{ email: string; events: CalendarEvent[] }>,
   dbEvents: FamilyEvent[],
   openAlerts: AgentAlert[],
-  children: HouseholdChild[]
+  members: HouseholdMember[],
+  caregiverSlots: HelpAvailabilitySlot[]
 ): Promise<AgentAnalysis> {
-  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, children);
+  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, members, caregiverSlots);
 
   const { content } = await getChatAdapter().complete(
     [
@@ -433,9 +446,12 @@ export async function runFamilyAgent(
     // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
     const openAlerts = runType === "daily_delta" ? await listAlerts(householdId, false) : [];
 
-    const children = await getHouseholdChildren(householdId);
+    const [members, caregiverSlots] = await Promise.all([
+      listHouseholdMembers(householdId),
+      listAvailability(householdId),
+    ]);
 
-    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts, children);
+    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts, members, caregiverSlots);
 
     // Daily delta: skip if no conflicts found
     if (runType === "daily_delta" && !analysis.hasConflicts) {
