@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-193 — V6 Family Planner: PATCH /members missing relationship field (2026-06-25)
+
+`PATCH /api/family/members/:id` returned 400 when saving `notes` + `relationship: "employee"` together. Root cause: the Zod schema for the endpoint did not include `relationship`, and the service only updated `person_profile` — not `household_membership` where `relationship` lives. Fixed all three layers:
+
+- `family.types.ts` — added `relationship` to `UpdateMemberProfileInput`
+- `family-profiles.service.ts` — added a separate `UPDATE household_membership SET relationship = ?` when `input.relationship` is present
+- `family-profiles.routes.ts` — added `relationship: z.enum([...])` to `updateMemberSchema`
+
+**GitHub:** closes #139
+
+---
+
 ## FIX-192 — V6 Family Planner: five UX/schema fixes (2026-06-24)
 
 Five bugs and design issues reported after initial V6 testing:

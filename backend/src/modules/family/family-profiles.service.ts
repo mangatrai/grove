@@ -77,18 +77,32 @@ export async function updateMemberProfile(
     params.push(input.age);
   }
 
-  if (setClauses.length === 0) return getMember(profileId, householdId);
+  const hasProfileChanges = setClauses.length > 0;
 
-  params.push(profileId, householdId);
-  await qExec(
-    `UPDATE person_profile pp
-     SET ${setClauses.join(", ")}
-     FROM household_membership hm
-     WHERE hm.person_profile_id = pp.id
-       AND pp.id = ?
-       AND hm.household_id = ?`,
-    ...params
-  );
+  if (hasProfileChanges) {
+    params.push(profileId, householdId);
+    await qExec(
+      `UPDATE person_profile pp
+       SET ${setClauses.join(", ")}
+       FROM household_membership hm
+       WHERE hm.person_profile_id = pp.id
+         AND pp.id = ?
+         AND hm.household_id = ?`,
+      ...params
+    );
+  }
+
+  if (input.relationship !== undefined) {
+    await qExec(
+      `UPDATE household_membership SET relationship = ?
+       WHERE person_profile_id = ? AND household_id = ?`,
+      input.relationship, profileId, householdId
+    );
+  }
+
+  if (!hasProfileChanges && input.relationship === undefined) {
+    return getMember(profileId, householdId);
+  }
 
   return getMember(profileId, householdId);
 }

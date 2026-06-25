@@ -31,6 +31,7 @@ const updateMemberSchema = z.object({
   interestsJson: z.array(z.string().max(80)).max(30).optional(),
   notes: z.string().max(2000).nullable().optional(),
   age: z.number().int().min(0).max(150).nullable().optional(),
+  relationship: z.enum(["self", "spouse", "child", "dependent", "employee", "other"]).optional(),
 });
 
 familyProfilesRouter.patch(

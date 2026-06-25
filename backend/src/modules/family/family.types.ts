@@ -61,6 +61,7 @@ export type UpdateMemberProfileInput = {
   interestsJson?: string[];
   notes?: string | null;
   age?: number | null;
+  relationship?: "self" | "spouse" | "child" | "dependent" | "employee" | "other";
 };
 
 // ── Household help availability ────────────────────────────────────────────
