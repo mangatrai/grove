@@ -281,8 +281,8 @@ function buildAnalysisPrompt(
     : caregiverSlots.map(s => {
         const when = s.slotType === "one_off" && s.specificDate
           ? `one-off ${s.specificDate}`
-          : s.dayOfWeek !== null
-          ? `every ${DAY_NAMES[s.dayOfWeek] ?? s.dayOfWeek}`
+          : s.daysOfWeek.length > 0
+          ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}`
           : "schedule TBD";
         const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
         const label = s.label ? ` (${s.label})` : "";

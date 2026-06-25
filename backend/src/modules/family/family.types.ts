@@ -75,7 +75,7 @@ export type HelpAvailabilitySlot = {
   personName: string;
   slotType: SlotType;
   serviceType: ServiceType;
-  dayOfWeek: number | null;
+  daysOfWeek: number[];
   specificDate: string | null;
   startTime: string | null;
   endTime: string | null;
@@ -89,7 +89,7 @@ export type CreateAvailabilityInput = {
   personProfileId: string;
   slotType: SlotType;
   serviceType: ServiceType;
-  dayOfWeek?: number | null;
+  daysOfWeek?: number[] | null;
   specificDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;
@@ -100,7 +100,7 @@ export type CreateAvailabilityInput = {
 export type UpdateAvailabilityInput = {
   slotType?: SlotType;
   serviceType?: ServiceType;
-  dayOfWeek?: number | null;
+  daysOfWeek?: number[] | null;
   specificDate?: string | null;
   startTime?: string | null;
   endTime?: string | null;

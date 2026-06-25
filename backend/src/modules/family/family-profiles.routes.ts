@@ -74,7 +74,7 @@ const createSlotSchema = z.object({
   personProfileId: z.string().min(1),
   slotType: slotTypeEnum,
   serviceType: serviceTypeEnum,
-  dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
   specificDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
   endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
@@ -99,7 +99,7 @@ familyProfilesRouter.post(
 const updateSlotSchema = z.object({
   slotType: slotTypeEnum.optional(),
   serviceType: serviceTypeEnum.optional(),
-  dayOfWeek: z.number().int().min(0).max(6).nullable().optional(),
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).nullable().optional(),
   specificDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),
   endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional(),

@@ -97,7 +97,7 @@ describe("availability CRUD", () => {
       personProfileId: TEST_PROFILE_ID,
       slotType: "regular",
       serviceType: "nanny",
-      dayOfWeek: 1,
+      daysOfWeek: [1],
       startTime: "08:00",
       endTime: "18:00",
       label: "Monday regular hours",
@@ -105,7 +105,7 @@ describe("availability CRUD", () => {
     expect(slot.id).toBeTruthy();
     expect(slot.slotType).toBe("regular");
     expect(slot.serviceType).toBe("nanny");
-    expect(slot.dayOfWeek).toBe(1);
+    expect(slot.daysOfWeek).toEqual([1]);
     expect(slot.startTime).toBe("08:00");
     expect(slot.personName).toBe("Test Nanny");
     expect(slot.isActive).toBe(true);
@@ -158,7 +158,7 @@ describe("availability CRUD", () => {
     });
     expect(slot.slotType).toBe("one_off");
     expect(slot.specificDate).toBe("2026-07-04");
-    expect(slot.dayOfWeek).toBeNull();
+    expect(slot.daysOfWeek).toEqual([]);
     await deleteAvailability(slot.id, HOUSEHOLD_ID);
   });
 });

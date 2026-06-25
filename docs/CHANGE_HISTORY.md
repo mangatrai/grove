@@ -18,6 +18,20 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-192 — V6 Family Planner: five UX/schema fixes (2026-06-24)
+
+Five bugs and design issues reported after initial V6 testing:
+
+1. **DB: age=0 constraint** (`person_profile_age_check`) — infants couldn't be saved because CHECK required `age > 0`. Migration 0076 widens to `age >= 0`. `backend/db/migrations/0076_family_fixes.sql`
+2. **DB/API/UI: day_of_week → days_of_week** — single-day `INTEGER` column replaced with `TEXT` (comma-separated, e.g. "1,3,5"). Nanny schedule can now cover Mon–Fri in one row instead of five. Migration 0076 migrates existing data. `family-profiles.service.ts`, `family-profiles.routes.ts`, `family.types.ts`
+3. **DB: employee relationship** — `household_membership.relationship` CHECK expanded to include `'employee'`. Migration 0076. Dropdown now shows "Employee / Nanny" option in Settings → Household. `SettingsPage.tsx`
+4. **UI: recurring event form** — Replaced six hardcoded combo options with two independent fields: Frequency (Weekly/Biweekly/Monthly) + Days-of-week MultiSelect. Format stored: `"weekly:1,3,5"`. `FamilyEventsPage.tsx`
+5. **UI: Family section layout + notes icon** — Member cards now in 2-col `SimpleGrid`. Day-of-week in schedule entry is now `MultiSelect`. Notes icon (`IconNotes`) added next to each household member in Settings → Household, opens a modal to edit `person_profile.notes`. `FamilySection.tsx`, `SettingsPage.tsx`
+
+Migration: 0076. Tests: 573 pass (1 pre-existing backup test failure unchanged).
+
+---
+
 ## CR-139 — V6 Family Planner FP-4: deadline reminder cron job — 30/7/1-day email alerts (2026-06-24)
 
 Implements proactive email reminders for deadlines tracked in the Family → Deadlines page.

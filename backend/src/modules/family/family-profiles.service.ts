@@ -120,7 +120,7 @@ type SlotRow = {
   person_name: string;
   slot_type: string;
   service_type: string;
-  day_of_week: number | null;
+  days_of_week: string | null;
   specific_date: string | null;
   start_time: string | null;
   end_time: string | null;
@@ -130,6 +130,16 @@ type SlotRow = {
   created_at: string;
 };
 
+function parseDaysOfWeek(raw: string | null): number[] {
+  if (!raw) return [];
+  return raw.split(",").map(Number).filter(n => !isNaN(n));
+}
+
+function serializeDaysOfWeek(days: number[] | null | undefined): string | null {
+  if (!days || days.length === 0) return null;
+  return [...new Set(days)].sort((a, b) => a - b).join(",");
+}
+
 function slotFromRow(row: SlotRow): HelpAvailabilitySlot {
   return {
     id: row.id,
@@ -138,7 +148,7 @@ function slotFromRow(row: SlotRow): HelpAvailabilitySlot {
     personName: row.person_name,
     slotType: row.slot_type as HelpAvailabilitySlot["slotType"],
     serviceType: row.service_type as HelpAvailabilitySlot["serviceType"],
-    dayOfWeek: row.day_of_week,
+    daysOfWeek: parseDaysOfWeek(row.days_of_week),
     specificDate: row.specific_date,
     startTime: row.start_time,
     endTime: row.end_time,
@@ -156,7 +166,7 @@ const SLOT_SELECT = `
          pp.full_name AS person_name,
          hha.slot_type,
          hha.service_type,
-         hha.day_of_week,
+         hha.days_of_week,
          hha.specific_date,
          hha.start_time,
          hha.end_time,
@@ -176,7 +186,7 @@ export async function listAvailability(
     `${SLOT_SELECT}
      WHERE hha.household_id = ?
        ${includeInactive ? "" : "AND hha.is_active = TRUE"}
-     ORDER BY hha.service_type, hha.slot_type, hha.day_of_week NULLS LAST, hha.specific_date NULLS LAST`,
+     ORDER BY hha.service_type, hha.slot_type, hha.specific_date NULLS LAST`,
     householdId
   );
   return rows.map(slotFromRow);
@@ -190,14 +200,14 @@ export async function createAvailability(
   await qExec(
     `INSERT INTO household_help_availability
        (id, household_id, person_profile_id, slot_type, service_type,
-        day_of_week, specific_date, start_time, end_time, label, notes)
+        days_of_week, specific_date, start_time, end_time, label, notes)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     id,
     householdId,
     input.personProfileId,
     input.slotType,
     input.serviceType,
-    input.dayOfWeek ?? null,
+    serializeDaysOfWeek(input.daysOfWeek ?? null),
     input.specificDate ?? null,
     input.startTime ?? null,
     input.endTime ?? null,
@@ -223,7 +233,6 @@ export async function updateAvailability(
   const fieldMap: [keyof UpdateAvailabilityInput, string][] = [
     ["slotType", "slot_type"],
     ["serviceType", "service_type"],
-    ["dayOfWeek", "day_of_week"],
     ["specificDate", "specific_date"],
     ["startTime", "start_time"],
     ["endTime", "end_time"],
@@ -231,6 +240,11 @@ export async function updateAvailability(
     ["notes", "notes"],
     ["isActive", "is_active"],
   ];
+
+  if ("daysOfWeek" in input) {
+    setClauses.push("days_of_week = ?");
+    params.push(serializeDaysOfWeek(input.daysOfWeek ?? null));
+  }
 
   for (const [key, col] of fieldMap) {
     if (key in input) {

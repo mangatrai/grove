@@ -8,8 +8,10 @@ import {
   Divider,
   Group,
   Modal,
+  MultiSelect,
   Paper,
   Select,
+  SimpleGrid,
   Stack,
   Table,
   TagsInput,
@@ -44,7 +46,7 @@ type HelpAvailabilitySlot = {
   personName: string;
   slotType: SlotType;
   serviceType: ServiceType;
-  dayOfWeek: number | null;
+  daysOfWeek: number[];
   specificDate: string | null;
   startTime: string | null;
   endTime: string | null;
@@ -67,7 +69,7 @@ type SlotFormDraft = {
   personProfileId: string;
   slotType: string;
   serviceType: string;
-  dayOfWeek: string;
+  daysOfWeek: string[];
   specificDate: string;
   startTime: string;
   endTime: string;
@@ -79,7 +81,7 @@ const EMPTY_SLOT_DRAFT: SlotFormDraft = {
   personProfileId: "",
   slotType: "regular",
   serviceType: "nanny",
-  dayOfWeek: "1",
+  daysOfWeek: [],
   specificDate: "",
   startTime: "",
   endTime: "",
@@ -112,14 +114,16 @@ const DAY_SELECT_DATA = [
   { value: "6", label: "Saturday" },
 ];
 
+const DAY_ABBR = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 function dayLabel(day: number | null): string {
   if (day == null) return "—";
-  return DAY_SELECT_DATA[day]?.label ?? String(day);
+  return DAY_ABBR[day] ?? String(day);
 }
 
 function slotWhenLabel(slot: HelpAvailabilitySlot): string {
   const parts: string[] = [];
-  if (slot.dayOfWeek != null) parts.push(dayLabel(slot.dayOfWeek));
+  if (slot.daysOfWeek.length > 0) parts.push(slot.daysOfWeek.map(dayLabel).join("/"));
   if (slot.specificDate) parts.push(slot.specificDate);
   if (slot.startTime || slot.endTime) {
     parts.push([slot.startTime, slot.endTime].filter(Boolean).join("–"));
@@ -146,7 +150,7 @@ function toSlotBody(f: SlotFormDraft, includePersonId: boolean): Record<string, 
   const body: Record<string, unknown> = {
     slotType: f.slotType,
     serviceType: f.serviceType,
-    dayOfWeek: f.slotType !== "one_off" && f.dayOfWeek !== "" ? Number(f.dayOfWeek) : null,
+    daysOfWeek: f.slotType !== "one_off" && f.daysOfWeek.length > 0 ? f.daysOfWeek.map(Number) : [],
     specificDate: f.slotType === "one_off" && f.specificDate ? f.specificDate : null,
     startTime: f.startTime.trim() || null,
     endTime: f.endTime.trim() || null,
@@ -299,7 +303,7 @@ export function FamilySection({ active }: FamilySectionProps) {
       personProfileId: slot.personProfileId,
       slotType: slot.slotType,
       serviceType: slot.serviceType,
-      dayOfWeek: slot.dayOfWeek != null ? String(slot.dayOfWeek) : "",
+      daysOfWeek: slot.daysOfWeek.map(String),
       specificDate: slot.specificDate ?? "",
       startTime: slot.startTime ?? "",
       endTime: slot.endTime ?? "",
@@ -372,59 +376,63 @@ export function FamilySection({ active }: FamilySectionProps) {
           No household members found. Add members under the Household tab first.
         </Text>
       ) : null}
-      {members.map((m) => {
-        const d = drafts[m.profileId];
-        if (!d) return null;
-        return (
-          <Paper key={m.profileId} withBorder p="md" radius="md">
-            <Stack gap="sm">
-              <Group gap="xs" align="center">
-                <Text fw={600}>{m.fullName}</Text>
-                <Badge variant="light" color="gray" size="sm" tt="capitalize">
-                  {m.relationship}
-                </Badge>
-              </Group>
-              <TextInput
-                label="Age"
-                inputMode="numeric"
-                placeholder="e.g. 7"
-                value={d.age}
-                onChange={(e) => setDraftField(m.profileId, "age", e.currentTarget.value)}
-                disabled={d.saving}
-                style={{ maxWidth: 100 }}
-              />
-              <TagsInput
-                label="Interests"
-                description="Hobbies, activities, subjects — up to 30 tags"
-                placeholder="Type and press Enter"
-                value={d.interestsJson}
-                onChange={(val) => setDraftField(m.profileId, "interestsJson", val.slice(0, 30))}
-                maxTags={30}
-                disabled={d.saving}
-                clearable
-              />
-              <Textarea
-                label="Notes"
-                placeholder="Allergies, preferences, school details, anything useful for the agent…"
-                value={d.notes}
-                onChange={(e) => setDraftField(m.profileId, "notes", e.currentTarget.value)}
-                disabled={d.saving}
-                maxLength={2000}
-                autosize
-                minRows={2}
-                maxRows={5}
-              />
-              {d.error ? <Alert color="red" p="xs">{d.error}</Alert> : null}
-              {d.success ? <Alert color="green" p="xs">Saved.</Alert> : null}
-              <Group>
-                <Button size="sm" loading={d.saving} onClick={() => void saveMember(m.profileId)}>
-                  {d.saving ? "Saving…" : "Save"}
-                </Button>
-              </Group>
-            </Stack>
-          </Paper>
-        );
-      })}
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md">
+        {members.map((m) => {
+          const d = drafts[m.profileId];
+          if (!d) return null;
+          return (
+            <Paper key={m.profileId} withBorder p="md" radius="md">
+              <Stack gap="sm">
+                <Group gap="xs" align="center">
+                  <Text fw={600}>{m.fullName}</Text>
+                  <Badge variant="light" color="gray" size="sm" tt="capitalize">
+                    {m.relationship}
+                  </Badge>
+                </Group>
+                <Group gap="sm" align="flex-end">
+                  <TextInput
+                    label="Age"
+                    inputMode="numeric"
+                    placeholder="e.g. 0"
+                    value={d.age}
+                    onChange={(e) => setDraftField(m.profileId, "age", e.currentTarget.value)}
+                    disabled={d.saving}
+                    style={{ width: 80 }}
+                  />
+                </Group>
+                <TagsInput
+                  label="Interests"
+                  description="Hobbies, activities, subjects — up to 30 tags"
+                  placeholder="Type and press Enter"
+                  value={d.interestsJson}
+                  onChange={(val) => setDraftField(m.profileId, "interestsJson", val.slice(0, 30))}
+                  maxTags={30}
+                  disabled={d.saving}
+                  clearable
+                />
+                <Textarea
+                  label="Notes"
+                  placeholder="Allergies, preferences, school details, anything useful for the agent…"
+                  value={d.notes}
+                  onChange={(e) => setDraftField(m.profileId, "notes", e.currentTarget.value)}
+                  disabled={d.saving}
+                  maxLength={2000}
+                  autosize
+                  minRows={2}
+                  maxRows={5}
+                />
+                {d.error ? <Alert color="red" p="xs">{d.error}</Alert> : null}
+                {d.success ? <Alert color="green" p="xs">Saved.</Alert> : null}
+                <Group>
+                  <Button size="sm" loading={d.saving} onClick={() => void saveMember(m.profileId)}>
+                    {d.saving ? "Saving…" : "Save"}
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+          );
+        })}
+      </SimpleGrid>
 
       <Divider my="lg" />
 
@@ -526,13 +534,13 @@ export function FamilySection({ active }: FamilySectionProps) {
           </Group>
           <Group align="end" grow>
             {newSlot.slotType !== "one_off" ? (
-              <Select
-                label="Day of week"
+              <MultiSelect
+                label="Days of week"
                 data={DAY_SELECT_DATA}
-                value={newSlot.dayOfWeek || null}
-                onChange={(v) => setNewSlot((p) => ({ ...p, dayOfWeek: v ?? "" }))}
+                value={newSlot.daysOfWeek}
+                onChange={(v) => setNewSlot((p) => ({ ...p, daysOfWeek: v }))}
                 disabled={addingSlot}
-                placeholder="Any day"
+                placeholder="Select days…"
                 clearable
               />
             ) : (
@@ -610,13 +618,13 @@ export function FamilySection({ active }: FamilySectionProps) {
             </Group>
             <Group align="end" grow>
               {editSlot.slotType !== "one_off" ? (
-                <Select
-                  label="Day of week"
+                <MultiSelect
+                  label="Days of week"
                   data={DAY_SELECT_DATA}
-                  value={editSlot.dayOfWeek || null}
-                  onChange={(v) => setEditSlot((p) => p ? { ...p, dayOfWeek: v ?? "" } : null)}
+                  value={editSlot.daysOfWeek}
+                  onChange={(v) => setEditSlot((p) => p ? { ...p, daysOfWeek: v } : null)}
                   disabled={editSaving}
-                  placeholder="Any day"
+                  placeholder="Select days…"
                   clearable
                 />
               ) : (

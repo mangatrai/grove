@@ -9,6 +9,7 @@ import {
   Drawer,
   Group,
   Loader,
+  MultiSelect,
   Paper,
   Select,
   Stack,
@@ -50,6 +51,18 @@ const SOURCE_COLORS: Record<string, string> = {
   tavily: "violet",
   manual: "gray",
 };
+
+const RECURRENCE_DAY_NAMES: Record<string, string> = {
+  "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat",
+};
+
+function formatRecurrenceRule(rule: string): string {
+  const [freq, daysPart] = rule.split(":");
+  const freqLabel = freq === "biweekly" ? "Biweekly" : freq === "monthly" ? "Monthly" : "Weekly";
+  if (!daysPart) return freqLabel;
+  const dayLabels = daysPart.split(",").map(d => RECURRENCE_DAY_NAMES[d] ?? d).join(", ");
+  return `${freqLabel} · ${dayLabels}`;
+}
 
 function formatDateTime(iso: string | null, allDay: boolean): string {
   if (!iso) return "—";
@@ -105,7 +118,7 @@ function EventRow({ event, onDelete }: EventRowProps) {
             ) : null}
           </Group>
           {event.isRecurring && event.recurrenceRule ? (
-            <Text size="xs" c="dimmed">{event.recurrenceRule}</Text>
+            <Text size="xs" c="dimmed">{formatRecurrenceRule(event.recurrenceRule)}</Text>
           ) : null}
           {event.description ? (
             <Text size="sm" c="dimmed" lineClamp={2}>{event.description}</Text>
@@ -138,7 +151,8 @@ function AddEventForm({ onAdd, onClose }: AddEventFormProps) {
   const [endAt, setEndAt] = useState("");
   const [location, setLocation] = useState("");
   const [isRecurring, setIsRecurring] = useState(false);
-  const [recurrenceRule, setRecurrenceRule] = useState("");
+  const [recurrenceFreq, setRecurrenceFreq] = useState<string | null>(null);
+  const [recurrenceDays, setRecurrenceDays] = useState<string[]>([]);
   const [allDay, setAllDay] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -160,7 +174,11 @@ function AddEventForm({ onAdd, onClose }: AddEventFormProps) {
           endAt: endAt ? new Date(endAt).toISOString() : null,
           location: location.trim() || null,
           isRecurring,
-          recurrenceRule: isRecurring && recurrenceRule.trim() ? recurrenceRule.trim() : null,
+          recurrenceRule: isRecurring && recurrenceFreq
+            ? recurrenceDays.length > 0
+              ? `${recurrenceFreq}:${recurrenceDays.join(",")}`
+              : recurrenceFreq
+            : null,
           allDay,
         }),
       });
@@ -216,20 +234,37 @@ function AddEventForm({ onAdd, onClose }: AddEventFormProps) {
         onChange={e => setIsRecurring(e.currentTarget.checked)}
       />
       {isRecurring ? (
-        <Select
-          label="Recurrence"
-          placeholder="Select pattern"
-          value={recurrenceRule || null}
-          onChange={val => setRecurrenceRule(val ?? "")}
-          data={[
-            { value: "Weekly", label: "Weekly" },
-            { value: "Mon/Wed/Fri", label: "Mon / Wed / Fri" },
-            { value: "Tue/Thu", label: "Tue / Thu" },
-            { value: "Mon/Wed", label: "Mon / Wed" },
-            { value: "Weekdays", label: "Weekdays" },
-            { value: "Daily", label: "Daily" },
-          ]}
-        />
+        <Group grow align="flex-start">
+          <Select
+            label="Frequency"
+            placeholder="Pick frequency"
+            value={recurrenceFreq}
+            onChange={val => { setRecurrenceFreq(val); setRecurrenceDays([]); }}
+            data={[
+              { value: "weekly", label: "Weekly" },
+              { value: "biweekly", label: "Biweekly" },
+              { value: "monthly", label: "Monthly" },
+            ]}
+            allowDeselect={false}
+          />
+          {recurrenceFreq !== "monthly" ? (
+            <MultiSelect
+              label="Days of week"
+              placeholder="Select days…"
+              value={recurrenceDays}
+              onChange={setRecurrenceDays}
+              data={[
+                { value: "1", label: "Mon" },
+                { value: "2", label: "Tue" },
+                { value: "3", label: "Wed" },
+                { value: "4", label: "Thu" },
+                { value: "5", label: "Fri" },
+                { value: "6", label: "Sat" },
+                { value: "0", label: "Sun" },
+              ]}
+            />
+          ) : null}
+        </Group>
       ) : null}
       <Textarea
         label="Notes"
