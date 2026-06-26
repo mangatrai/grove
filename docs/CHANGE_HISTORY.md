@@ -18,6 +18,14 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## v6.0.0 — Family Planner, GCal integration, payslip fixes (2026-06-25)
+
+Includes all Family Planner work (FP-1 through FP-4): Google Calendar OAuth, Events/Deadlines pages, household assistant agent, proactive deadline reminders, member profile UI, help availability CRUD. Plus FIX-193 and FIX-194 (payslip detail regressions).
+
+New env var required in production: `GOOGLE_CALENDAR_REDIRECT_URI` (GCal OAuth callback). DB migrations (oauth_integrations, person_profile extensions, household_help_availability) apply automatically on startup.
+
+---
+
 ## FIX-194 — Payslip detail: added line items not rendering; Gross Pay not editable (2026-06-25)
 
 **Issue 1 — newly added earnings rows invisible:** `PayslipDetailPage.tsx` had a `mergedLineItems` filter that removed earnings items whose names appeared in `other_deductions`. The filter was intended to prevent duplicate display when the LLM places the same item in two sections, but that is structurally impossible (each `payslip_line_item` row has exactly one `section` in the DB). In practice the filter was silently dropping user-added earnings rows whose names happened to match any `other_deductions` item. DB arithmetic changed (backend `applyDerivedSummary` ran correctly) but the rows never appeared on screen. Removed the earnings filter; `other_deductions` items are still merged into `post_tax_deductions` for display.
