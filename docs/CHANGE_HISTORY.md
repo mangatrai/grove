@@ -18,6 +18,19 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-194 — Payslip detail: added line items not rendering; Gross Pay not editable (2026-06-25)
+
+**Issue 1 — newly added earnings rows invisible:** `PayslipDetailPage.tsx` had a `mergedLineItems` filter that removed earnings items whose names appeared in `other_deductions`. The filter was intended to prevent duplicate display when the LLM places the same item in two sections, but that is structurally impossible (each `payslip_line_item` row has exactly one `section` in the DB). In practice the filter was silently dropping user-added earnings rows whose names happened to match any `other_deductions` item. DB arithmetic changed (backend `applyDerivedSummary` ran correctly) but the rows never appeared on screen. Removed the earnings filter; `other_deductions` items are still merged into `post_tax_deductions` for display.
+
+**Issue 2 — Gross Pay total not editable:** The "Gross Pay" row at the bottom of the Earnings section is a `LITotalRow` (read-only summary) backed by `payslip_snapshot.gross_pay_current`. At import time this value comes from the LLM PDF extraction; `applyDerivedSummary` (which recalculates from line item sums) only runs on subsequent line item mutations. Extended `LITotalRow` with optional edit props and wired a pencil icon on the Gross Pay row that opens inline NumberInput fields for current + YTD. Save calls `PATCH /payslips/:id` directly. Value will be recalculated from earnings line items on next line item mutation.
+
+**Files changed:**
+- `frontend/src/pages/PayslipDetailPage.tsx` — removed bad earnings filter; extended `LITotalRow`; added gross pay override state + `handleGrossPaySave`; added `IconCheck`, `IconX` to icon imports
+
+**GitHub:** closes #140
+
+---
+
 ## FIX-193 — V6 Family Planner: PATCH /members missing relationship field (2026-06-25)
 
 `PATCH /api/family/members/:id` returned 400 when saving `notes` + `relationship: "employee"` together. Root cause: the Zod schema for the endpoint did not include `relationship`, and the service only updated `person_profile` — not `household_membership` where `relationship` lives. Fixed all three layers:
