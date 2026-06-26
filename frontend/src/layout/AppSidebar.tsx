@@ -13,6 +13,9 @@ import {
   IconTrendingUp,
   IconTag,
   IconSettings,
+  IconRun,
+  IconBell,
+  IconRobot,
   IconChevronLeft,
   IconChevronRight,
   type Icon as TablerIcon,
@@ -50,6 +53,14 @@ const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     ],
   },
   {
+    label: "Family",
+    items: [
+      { to: "/family/events", end: false, label: "Events", Icon: IconRun },
+      { to: "/family/deadlines", end: false, label: "Deadlines", Icon: IconBell },
+      { to: "/family/agent", end: false, label: "Agent", Icon: IconRobot },
+    ],
+  },
+  {
     label: "Setup",
     items: [
       { to: "/categories", end: false, label: "Categories", Icon: IconTag },
@@ -80,7 +91,7 @@ export function AppSidebar({
   const { role } = useCurrentUser();
   const isCollapsed = collapsed && !mobileOpen;
   const visibleGroups = role === "member"
-    ? NAV_GROUPS.filter(g => g.label !== "Property & Tax")
+    ? NAV_GROUPS.filter(g => g.label !== "Property & Tax" && g.label !== "Family")
     : NAV_GROUPS;
 
   return (

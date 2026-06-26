@@ -11,12 +11,12 @@ const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
 
 async function insertGdriveConfig(freq: number): Promise<void> {
   await sqlStmt(
-    `INSERT INTO household_gdrive_config
-      (household_id, oauth2_refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error,
+    `INSERT INTO oauth_integrations
+      (provider, household_id, user_id, refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error,
        backup_frequency_hours, backup_retention_count, last_scheduled_backup_at)
-     VALUES (?, ?, 'fld', 'F', ?, NOW(), NULL, ?, 7, NULL)
-     ON CONFLICT (household_id) DO UPDATE SET
-       oauth2_refresh_token = EXCLUDED.oauth2_refresh_token,
+     VALUES ('google_drive', ?, NULL, ?, 'fld', 'F', ?, NOW(), NULL, ?, 7, NULL)
+     ON CONFLICT (household_id, provider) WHERE user_id IS NULL DO UPDATE SET
+       refresh_token = EXCLUDED.refresh_token,
        folder_id = EXCLUDED.folder_id,
        folder_name = EXCLUDED.folder_name,
        connected_by_user_id = EXCLUDED.connected_by_user_id,
@@ -31,18 +31,18 @@ describe("gdrive backup scheduler", () => {
 
   beforeAll(async () => {
     await sqlStmt("DELETE FROM backup_job WHERE household_id = ?").run(HOUSEHOLD_ID);
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
   });
 
   afterAll(async () => {
     scheduleSpy.mockRestore();
     await sqlStmt("DELETE FROM backup_job WHERE household_id = ?").run(HOUSEHOLD_ID);
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
   });
 
   beforeEach(async () => {
     await sqlStmt("DELETE FROM backup_job WHERE household_id = ?").run(HOUSEHOLD_ID);
-    await sqlStmt("DELETE FROM household_gdrive_config WHERE household_id = ?").run(HOUSEHOLD_ID);
+    await sqlStmt("DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").run(HOUSEHOLD_ID);
   });
 
   afterEach(() => {
@@ -83,7 +83,7 @@ describe("gdrive backup scheduler", () => {
     ).get(HOUSEHOLD_ID, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbb001");
     expect(row?.triggered_by_user_id).toBeNull();
 
-    const cfg = await sqlStmt("SELECT last_scheduled_backup_at FROM household_gdrive_config WHERE household_id = ?").get(
+    const cfg = await sqlStmt("SELECT last_scheduled_backup_at FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL").get(
       HOUSEHOLD_ID
     );
     expect(cfg?.last_scheduled_backup_at).toBeTruthy();

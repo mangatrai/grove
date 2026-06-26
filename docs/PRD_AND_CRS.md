@@ -978,36 +978,55 @@ Each person gets a **tailored view** — not a single shared feed. The weekly di
 | Work calendar (meetings) | Both parents | **BLOCKED** — O365 passkey-auth tenant, no external sharing | Discovery spike V1.x |
 | Nanny schedule | Nanny | App Staff module (existing timesheet/schedule system) | V1 (manual) |
 
-#### Work Calendar Access — Open Discovery Item
+#### Work Calendar Access — Recommended Approach
 
-Both parents are on the same corporate Exchange/O365 tenant with IT-locked calendars (passkey-based auth, no ICS export, no external sharing). This is the most significant gap. Options to investigate in a dedicated spike before V1.x:
+Both parents are on the same corporate Exchange/O365 tenant with IT-locked calendars (passkey-based auth, no ICS export, no external sharing). Both parents have corporate iPhones where the work calendar syncs natively — this is the key enabler.
 
-1. **Microsoft Graph API (user-delegated)** — requires OAuth with work Microsoft account. May be blocked by tenant IT policy or passkey auth constraints. Investigate tenant `allowedOAuthFlows` and conditional access policies.
-2. **Power Automate trigger** — if org permits, a flow can fire on calendar CRUD and POST to an external HTTP webhook (the app's API). No admin consent required for simple personal automations in some tenants.
-3. **macOS Calendar app sync** — if Exchange syncs to macOS Calendar (`~/Library/Calendars`), a lightweight local bridge daemon (Swift / Python / AppleScript) could read the SQLite store and push diffs to the app API.
-4. **iOS Shortcuts automation** — if work calendar syncs to iPhone, a Shortcut triggered on calendar event can POST to the app API.
-5. **Meeting invite email parsing** — every invite and update arrives as an email with an ICS attachment in the body. Parsing a forwarded-invite inbox reconstructs the calendar dynamically.
+**Recommended: iOS Shortcuts → Google Calendar mirroring**
 
-**V1 decision: ship with Google Calendar only.** Work calendar is a tracked discovery item. V1 workaround: parents can manually enter "busy day" blocks for known heavy weeks via a simple form.
+A Shortcut on each parent's iPhone fires when a work calendar event is added, updated, or deleted. The Shortcut writes a mirrored copy of that event into a dedicated "Work — Mirrored" Google Calendar via the Google Calendar API. The Family Planner app then reads all calendars (personal + school + travel + mirrored-work) through a single Google Calendar API integration — one unified data source, no separate app-side webhook needed.
+
+Architecture:
+- Work calendar syncs to iPhone (Exchange native sync — already working)
+- iOS Shortcut fires on calendar event CRUD → calls Google Calendar API → writes/updates mirrored event in "Work — Mirrored" calendar
+- App reads Google Calendar API; "Work — Mirrored" calendar appears alongside personal and school calendars
+- Local Postgres caches a snapshot of calendar events for agent queries (performance, offline); Google Calendar remains source of truth
+
+Why this over alternatives:
+- **No IT involvement** — works with passkey auth; purely on-device
+- **Single integration** — app only needs Google Calendar API, not a separate work-cal webhook endpoint
+- **Unified agent view** — agent reasons over one merged calendar feed, not two separate pipelines
+- **Confirmed viable** — both parents have corporate iPhones with work calendar syncing
+
+Fallback options (only if Shortcuts approach is unreliable):
+1. Power Automate personal flow (check if HTTP connector is available in org's M365 license)
+2. Meeting invite email parsing (ICS attachments in every invite email)
+3. Microsoft Graph API (likely blocked by passkey/conditional-access policy — lowest priority to try)
+
+**V1 decision: ship with Google Calendar only.** Work calendar mirroring via Shortcuts is V1.x — testable in under an hour on one iPhone before committing to build. V1 workaround: parents can manually enter "busy day" blocks for known heavy weeks.
 
 ### Agent Architecture
 
-The household assistant runs as a background agent (cron-triggered + webhook-triggered) using the existing LLM adapter abstraction (`backend/src/modules/llm/`).
+The household assistant is a **scheduled background worker** — not a chat interface. It runs on a fixed schedule, analyzes the household's calendar state, and produces outputs (digest emails + alert records). No human triggers it; no chat loop.
 
-- **Model**: LLM reasoning over merged household calendar snapshot (suggest + approve; no auto-action on V1)
+- **LLM adapter**: Existing `backend/src/modules/llm/` abstraction (same pattern as Property Tax Protest agent)
 - **Tool use**: Tavily web search for public deadlines (school enrollment windows, tax filing dates, camp registration, local holiday schedules)
-- **Triggers**: Nightly planning run (generates next-day/next-week summary) + webhook on calendar change events (surfaces urgent conflicts in real time)
-- **Output**: Suggestions stored in DB; surfaced in UI for parent approval; approved suggestions generate notification tasks
-- **Pattern**: Mirrors Property Tax Protest agent — LLM with tool use, structured output, human-in-the-loop approval gate
+- **Triggers**: Scheduled cron runs only (see Notification Strategy below). No webhook-triggered re-runs in V1.
+- **GCal delta mechanism**: Store one `gcal_last_synced_at` timestamp per user. Daily runs call Google Calendar API with `updatedMin=last_synced_at` to fetch only changed events — no event content stored in app DB. Full fresh fetch (no `updatedMin`) only on Sunday/Monday digest runs.
+- **Output**: Digest emails sent to each parent (per-person tailored view) + alert records written to DB when conflict detected
+- **No suggestion-card approval flow**: Agent acts and logs. Parents observe via Agent tab audit log.
 
 ### Notification Strategy
 
-| Digest | Timing | Channel | Content |
-|--------|--------|---------|---------|
-| Light weekly preview | Sunday ~7pm | Email (per parent) | Flag anything urgent for the week ahead; compact, mobile-first layout |
-| Full weekly digest | Monday ~7am | Email (per parent) | Coverage map, travel alerts, nanny schedule, kid activities by day, deadlines in next 7–14 days |
-| Urgent day-of alert | When triggered | Email (Phase 1) / SMS/WhatsApp (Phase 2) | Coverage gap detected, new travel confirmed, meeting conflict with school pickup |
-| Nanny weekly schedule | Monday ~7am | Email to nanny (Phase 2) | Their schedule for the week, any extended-hours requests pending |
+| Run | Timing | Always sends? | Content |
+|-----|---------|---------------|---------|
+| Sunday preview | Sunday ~7pm | Yes | Light weekly preview — flag anything obviously conflicted or urgent for the week ahead |
+| Monday digest | Monday ~7am | Yes | Full weekly plan: duty assignments (who covers each day), travel alerts, kid activities, appointment reminders, each person's duties for the week |
+| Daily delta | Tue–Sat after 6am GCal sync (~6:30am) | Only if conflict found | "Something changed since last digest" — new coverage gap, urgent meeting added, travel confirmed |
+
+- Each person receives a **tailored** email — not a shared view. Parent A's digest covers their responsibilities; Parent B's covers hers; Nanny's covers her duties.
+- **Alert model (in-app only, V6)**: When the daily delta detects a conflict, the agent writes an alert record to DB. The alert surfaces in the Agent tab with (a) the reason and (b) a pre-written copy-paste message the owner can send manually to Nanny or spouse via text/WhatsApp. No in-app send infrastructure in V6. Owner acts manually.
+- SMS/WhatsApp direct sending is V7 scope.
 
 **Layout constraint:** Weekly digest must be readable on a phone with minimal scroll. No newsletter-style formatting.
 
@@ -1029,41 +1048,48 @@ Agent Tavily-searches for public deadline dates when needed (e.g. "FBISD open en
 
 ### UI Placement
 
-New top-level sidebar item: **Family**
+**Decision (2026-06-23):** Planner sub-page dropped. Native Google Calendar already provides a better side-by-side view. Building a calendar UI here is wasted effort.
+
+New top-level sidebar item: **Family** (owner/admin only — hidden from `member` role)
 
 Sub-pages:
-- **Planner** — weekly calendar view, day-by-day coverage map, conflict alerts, agent suggestion cards (approve/dismiss)
-- **Activities** — manage kid activity schedule (recurring events, class details, who's responsible)
-- **Deadlines** — tracked deadlines with 30/7/1-day countdown reminders; manual entry + agent-discovered
-- **Agent** — chat interface for ad-hoc questions ("who's handling pickup Thursday?", "what's coming up next week?") — same pattern as Property Tax Protest chat page
+- **Events** — structured family events: recurring kid activities (swimming, karate) AND one-off appointments (doctor, dentist). Agent populates from GCal during sync; manual add available. Nanny (staff role) can add and view.
+- **Deadlines** — tracked important dates: school enrollment cutoffs, financial deadlines, medical reminders. Agent + Tavily + manual. Nanny read-only.
+- **Agent** — audit log for the scheduled agent. Top section: active alert cards (conflict reason + pre-written copy-paste message owner can send manually). Bottom section: digest history. RBAC-scoped: owner sees all; spouse sees her messages + Nanny's; Nanny sees only hers.
 
-**Dashboard addition:** "This Week" summary widget showing conflict count, next activity, next deadline.
+**Events and Deadlines share one DB table** (`family_events`) with `record_type` (event / deadline) and `source` (gcal / tavily / manual). The two sub-pages are filtered views of the same data.
+
+**Dashboard widget:** Deferred. Revisit after core agent and digest are shipped.
 
 ### Feature Phasing
 
-#### V1 (Google Calendar + Digest + Suggestions)
-- Google Calendar OAuth integration for both parent accounts
-- Read personal calendar, subscribed school ICS, travel blocks
-- Manual "busy block" entry form (work calendar workaround)
-- Nightly planning agent run; weekly digest email (Sunday preview + Monday full)
-- Conflict detection and suggestion cards in Planner UI
-- Deadline tracker with manual entry + Tavily search
-- Dashboard "This Week" widget
-- Family sidebar section with Planner, Activities, Deadlines, Agent sub-pages
+#### V6 (Google Calendar + Digest + Alerts)
+- Google Calendar OAuth integration for both parent accounts (connect/disconnect in Settings → Family tab)
+- GCal sync: store `gcal_last_synced_at` per user; use `updatedMin` param for delta checks — no event content stored in DB
+- `family_events` table: unified events + deadlines, source-tagged, agent-populated or manual
+- Scheduled background agent (cron):
+  - Sunday ~7pm: light weekly preview email (always sends)
+  - Monday ~7am: full weekly digest with duty assignments per person (always sends)
+  - Tue–Sat ~6:30am: delta check — email only if conflict found
+- In-app alerts: conflict detected → alert record with reason + copy-paste message text. No send infrastructure. Owner acts manually.
+- Tavily search for local/state deadlines relevant to kids and household
+- Family sidebar: Events, Deadlines, Agent sub-pages
 
-#### V1.x (Work Calendar Discovery)
-- Technical spike: Graph API / Power Automate / macOS Calendar bridge / iOS Shortcuts
+#### V6.x (Work Calendar Discovery — Spike #131)
+- Technical spike: iOS Shortcuts → Google Calendar mirroring (recommended path)
+- Fallbacks: Power Automate, meeting invite email parsing, Microsoft Graph API
 - Ship whichever approach works given tenant IT constraints
 
-#### V2 (Nanny Integration + SMS)
-- Nanny Staff login with weekly schedule view
-- SMS/WhatsApp integration (Twilio or equivalent) for urgent day-of notifications
-- Nanny PTO submission → agent alerts about backup care need
-- Direct nanny coverage request via app (approve to send SMS)
+#### V7 (Nanny Integration + SMS)
+- Nanny Staff login with weekly schedule view in Events tab
+- SMS/WhatsApp direct sending for urgent coverage requests (Twilio or equivalent)
+- Nanny PTO submission → agent alerts parents about backup care need
+- Full employment module: timesheets, expenses, PTO tracking
+- In-app send infrastructure for agent-drafted messages to Nanny
 
 ### Open Questions
 
-1. **Work calendar access**: Which of the 5 discovery options will tenant IT permit? Blocks full value prop.
+1. **Work calendar access**: Recommended path is iOS Shortcuts → Google Calendar mirroring (both parents confirmed to have corporate iPhones with work cal synced). Needs a 30-min feasibility test on one device before V1.x build begins. See #131.
 2. **Google Calendar webhook vs. polling**: Google Calendar push notifications require a public HTTPS endpoint. On self-hosted (local dev), polling fallback needed. Determine sync interval for polling mode.
 3. **SMS provider**: Twilio (US focus) vs. Vonage vs. AWS SNS. WhatsApp Business API requires a registered business number.
 4. **Semver**: V1 Family Planner is a significant new product dimension. Ship as 5.2.0 (no breaking changes) or 6.0.0? Decide at ship time.

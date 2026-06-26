@@ -17,7 +17,7 @@ import {
   TextInput,
   Title
 } from "@mantine/core";
-import { IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconPencil, IconTrash, IconX } from "@tabler/icons-react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
@@ -346,30 +346,97 @@ function LITotalRow({
   label,
   current,
   ytd,
+  editable,
+  isEditing,
+  editCurrentValue,
+  editYtdValue,
+  onChangeEditCurrent,
+  onChangeEditYtd,
+  onEdit,
+  onSave,
+  onCancel,
+  saving,
+  errorMessage,
 }: {
   label: string;
   current: number | null | undefined;
   ytd: number | null | undefined;
+  editable?: boolean;
+  isEditing?: boolean;
+  editCurrentValue?: number | string;
+  editYtdValue?: number | string;
+  onChangeEditCurrent?: (v: number | string) => void;
+  onChangeEditYtd?: (v: number | string) => void;
+  onEdit?: () => void;
+  onSave?: () => void;
+  onCancel?: () => void;
+  saving?: boolean;
+  errorMessage?: string | null;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        padding: "5px 0 3px",
-        borderTop: "1px solid var(--color-border)",
-        fontSize: 12.5,
-        fontWeight: 600,
-        color: "var(--color-text)",
-      }}
-    >
-      <span style={{ flex: 1 }}>{label}</span>
-      <span style={{ ...mono, minWidth: 80, textAlign: "right" }}>{formatMoney(current)}</span>
-      <span style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}>
-        {formatMoney(ytd)}
-      </span>
-      <div style={{ width: 52, flexShrink: 0 }} />
-    </div>
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          padding: "5px 0 3px",
+          borderTop: "1px solid var(--color-border)",
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: "var(--color-text)",
+          gap: 4,
+        }}
+      >
+        <span style={{ flex: 1 }}>{label}</span>
+        {isEditing ? (
+          <>
+            <NumberInput
+              value={editCurrentValue ?? ""}
+              onChange={(v) => onChangeEditCurrent?.(v)}
+              size="xs"
+              style={{ width: 90 }}
+              decimalScale={2}
+              fixedDecimalScale
+              hideControls
+              placeholder="Current"
+            />
+            <NumberInput
+              value={editYtdValue ?? ""}
+              onChange={(v) => onChangeEditYtd?.(v)}
+              size="xs"
+              style={{ width: 90 }}
+              decimalScale={2}
+              fixedDecimalScale
+              hideControls
+              placeholder="YTD"
+            />
+            <ActionIcon size="xs" color="green" variant="subtle" onClick={onSave} loading={saving}>
+              <IconCheck size={14} />
+            </ActionIcon>
+            <ActionIcon size="xs" color="gray" variant="subtle" onClick={onCancel} disabled={saving}>
+              <IconX size={14} />
+            </ActionIcon>
+          </>
+        ) : (
+          <>
+            <span style={{ ...mono, minWidth: 80, textAlign: "right" }}>{formatMoney(current)}</span>
+            <span style={{ ...mono, fontSize: 12, color: "var(--color-text-muted)", minWidth: 80, textAlign: "right" }}>
+              {formatMoney(ytd)}
+            </span>
+            {editable ? (
+              <ActionIcon size="xs" variant="subtle" color="gray" onClick={onEdit} title="Override gross pay">
+                <IconPencil size={12} />
+              </ActionIcon>
+            ) : (
+              <div style={{ width: 52, flexShrink: 0 }} />
+            )}
+          </>
+        )}
+      </div>
+      {isEditing && errorMessage && (
+        <Text size="xs" c="red" style={{ marginBottom: 4 }}>{errorMessage}</Text>
+      )}
+    </>
   );
 }
 
@@ -401,6 +468,13 @@ export function PayslipDetailPage() {
   const [addAmountYtd, setAddAmountYtd] = useState("");
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+
+  // Gross pay override state
+  const [grossPayEditing, setGrossPayEditing] = useState(false);
+  const [grossPayCurrent, setGrossPayCurrent] = useState<number | string>("");
+  const [grossPayYtd, setGrossPayYtd] = useState<number | string>("");
+  const [grossPaySaving, setGrossPaySaving] = useState(false);
+  const [grossPayError, setGrossPayError] = useState<string | null>(null);
 
   // Deposit confirm/unlink state
   const [depositSaving, setDepositSaving] = useState(false);
@@ -597,6 +671,43 @@ export function PayslipDetailPage() {
     }
   }, [payslipId, load]);
 
+  const handleGrossPaySave = useCallback(async () => {
+    if (!payslipId || !detail) return;
+    const current = typeof grossPayCurrent === "string" ? parseAmountInput(grossPayCurrent) : grossPayCurrent;
+    const ytd = typeof grossPayYtd === "string" ? parseAmountInput(grossPayYtd) : grossPayYtd;
+    if (current == null || ytd == null) {
+      setGrossPayError("Enter valid numbers for both current and YTD");
+      return;
+    }
+    setGrossPaySaving(true);
+    setGrossPayError(null);
+    try {
+      const res = await apiFetch(`/payslips/${encodeURIComponent(payslipId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grossPayCurrent: current, grossPayYtd: ytd }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { message?: string };
+        setGrossPayError(j.message ?? "Failed to save");
+        return;
+      }
+      const data = (await res.json()) as { snapshot: PayslipSnapshotDetail; validationWarnings: ValidationWarning[] };
+      setDetail((prev) => prev ? ({
+        ...data.snapshot,
+        lineItems: prev.lineItems,
+        confirmedDeposits: prev.confirmedDeposits,
+        suggestedDeposits: prev.suggestedDeposits,
+        validationWarnings: data.validationWarnings,
+      } as PayslipSnapshotDetail) : null);
+      setGrossPayEditing(false);
+    } catch (e) {
+      setGrossPayError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setGrossPaySaving(false);
+    }
+  }, [payslipId, detail, grossPayCurrent, grossPayYtd]);
+
   const handleAddLineItem = useCallback(async () => {
     if (!payslipId) return;
     setAddSaving(true);
@@ -701,24 +812,14 @@ export function PayslipDetailPage() {
   // ── Derived computations ──────────────────────────────────────────────────
 
   const mergedLineItems = detail?.lineItems
-    ? (() => {
-        const otherDeductionNames = new Set<string>(
-          (detail.lineItems!.other_deductions ?? [])
-            .map((r) => r.name)
-            .filter((n): n is string => n != null)
-        );
-        return {
-          ...detail.lineItems!,
-          earnings: (detail.lineItems!.earnings ?? []).filter(
-            (r) => r.name == null || !otherDeductionNames.has(r.name)
-          ),
-          post_tax_deductions: [
-            ...(detail.lineItems!.post_tax_deductions ?? []),
-            ...(detail.lineItems!.other_deductions ?? [])
-          ],
-          other_deductions: [] as typeof detail.lineItems.other_deductions
-        };
-      })()
+    ? {
+        ...detail.lineItems,
+        post_tax_deductions: [
+          ...(detail.lineItems.post_tax_deductions ?? []),
+          ...(detail.lineItems.other_deductions ?? [])
+        ],
+        other_deductions: [] as typeof detail.lineItems.other_deductions
+      }
     : detail?.lineItems;
 
   const validationWarnings = detail?.validationWarnings ?? [];
@@ -928,7 +1029,27 @@ export function PayslipDetailPage() {
                       showAuthority={false}
                       ctx={liCtx} />
                   ))}
-                  <LITotalRow label="Gross Pay" current={detail.grossPayCurrent} ytd={detail.grossPayYtd} />
+                  <LITotalRow
+                    label="Gross Pay"
+                    current={detail.grossPayCurrent}
+                    ytd={detail.grossPayYtd}
+                    editable
+                    isEditing={grossPayEditing}
+                    editCurrentValue={grossPayCurrent}
+                    editYtdValue={grossPayYtd}
+                    onChangeEditCurrent={setGrossPayCurrent}
+                    onChangeEditYtd={setGrossPayYtd}
+                    onEdit={() => {
+                      setGrossPayCurrent(detail.grossPayCurrent ?? "");
+                      setGrossPayYtd(detail.grossPayYtd ?? "");
+                      setGrossPayError(null);
+                      setGrossPayEditing(true);
+                    }}
+                    onSave={() => void handleGrossPaySave()}
+                    onCancel={() => setGrossPayEditing(false)}
+                    saving={grossPaySaving}
+                    errorMessage={grossPayError}
+                  />
                 </>
               ) : null}
 

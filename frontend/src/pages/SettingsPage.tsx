@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 
 import {
+  ActionIcon,
   Alert,
   Anchor,
   Box,
@@ -24,9 +25,10 @@ import {
   Text,
   Textarea,
   TextInput,
-  Title
+  Title,
+  Tooltip,
 } from "@mantine/core";
-import { IconTrash } from "@tabler/icons-react";
+import { IconNotes, IconTrash } from "@tabler/icons-react";
 
 import { apiFetch, apiJson, useAuthToken } from "../api";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -37,6 +39,7 @@ import { US_INSTITUTION_LABELS } from "../import/institutionCatalog";
 import { CurrencyInput } from "../components/CurrencyInput";
 import { formatUsd } from "../utils/format";
 import { BackupRestoreSection } from "./settings/BackupRestoreSection";
+import { FamilySection } from "./settings/FamilySection";
 import { GroveLoader } from "../components/GroveLoader";
 import { AddPropertyModal } from "../components/AddPropertyModal";
 
@@ -47,7 +50,7 @@ function localDateStr(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications"] as const;
+const TABS = ["profile", "household", "accounts", "recurring", "data", "notifications", "family"] as const;
 type SettingsTab = (typeof TABS)[number];
 
 function isTab(s: string | null): s is SettingsTab {
@@ -235,7 +238,7 @@ type HouseholdProfileResponse = {
     phoneNumber: string | null;
     avatarKey: string | null;
     role: "head" | "member";
-    relationship: "self" | "spouse" | "child" | "dependent" | "other";
+    relationship: "self" | "spouse" | "child" | "dependent" | "employee" | "other";
     age: number | null;
     dateOfBirth: string | null;
     hasDob: boolean;
@@ -257,7 +260,7 @@ type HouseholdMemberResponse = {
   phoneNumber: string | null;
   avatarKey: string | null;
   role: "head" | "member";
-  relationship: "self" | "spouse" | "child" | "dependent" | "other";
+  relationship: "self" | "spouse" | "child" | "dependent" | "employee" | "other";
 };
 
 type HouseholdMembersPayload = {
@@ -300,6 +303,7 @@ type HouseholdMemberDraft = {
   relationship: string;
   linkedUserId?: string | null;
   createLogin?: boolean;
+  notes?: string | null;
 };
 
 type MeResponse = { user: { role: "owner" | "admin" | "member" } };
@@ -420,6 +424,10 @@ export function SettingsPage() {
   const [resetPasswordForId, setResetPasswordForId] = useState<string | null>(null);
   const [resetPasswordBusy, setResetPasswordBusy] = useState(false);
   const [resetPasswordResult, setResetPasswordResult] = useState<{ memberId: string; tempPassword: string } | null>(null);
+  const [notesTarget, setNotesTarget] = useState<{ memberId: string; name: string } | null>(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
   const [passwordDraft, setPasswordDraft] = useState({
     currentPassword: "",
     newPassword: "",
@@ -1039,7 +1047,7 @@ export function SettingsPage() {
           lastName: row.lastName.trim(),
           email: row.email.trim() || null,
           role: row.role as "head" | "member",
-          relationship: row.relationship as "self" | "spouse" | "child" | "dependent" | "other",
+          relationship: row.relationship as "self" | "spouse" | "child" | "dependent" | "employee" | "other",
           ...(row.id ? {} : { createLogin: Boolean(row.createLogin) })
         };
         const path = row.id ? `/household/members/${encodeURIComponent(row.id)}` : "/household/members";
@@ -1106,7 +1114,9 @@ export function SettingsPage() {
   );
 
   const visibleTabs = useMemo(
-    () => TABS.filter((id) => id !== "household" || canManageHousehold),
+    () => TABS.filter(
+      (id) => (id !== "household" || canManageHousehold) && (id !== "family" || canManageHousehold)
+    ),
     [canManageHousehold]
   );
 
@@ -1143,7 +1153,9 @@ export function SettingsPage() {
                         ? "Recurring"
                         : id === "data"
                           ? "Data & Backup"
-                          : "Notifications"}
+                          : id === "notifications"
+                            ? "Notifications"
+                            : "Family"}
               </Tabs.Tab>
             ))}
           </Tabs.List>
@@ -1575,9 +1587,26 @@ export function SettingsPage() {
                             { value: "spouse", label: "Spouse" },
                             { value: "child", label: "Child" },
                             { value: "dependent", label: "Dependent" },
+                            { value: "employee", label: "Employee / Nanny" },
                             { value: "other", label: "Other" }
                           ]}
                         />
+                        {member.id ? (
+                          <Tooltip label="Notes" withArrow>
+                            <ActionIcon
+                              variant="default"
+                              color="gray"
+                              onClick={() => {
+                                const fullName = [member.firstName, member.lastName].filter(Boolean).join(" ") || member.email || (member.id ?? "");
+                                setNotesTarget({ memberId: member.id!, name: fullName });
+                                setNotesDraft(member.notes ?? "");
+                                setNotesError(null);
+                              }}
+                            >
+                              <IconNotes size={14} />
+                            </ActionIcon>
+                          </Tooltip>
+                        ) : null}
                         <Button
                           type="button"
                           title={member.id ? "Remove this household member" : "Discard unsaved row"}
@@ -2292,6 +2321,8 @@ export function SettingsPage() {
           </Stack>
         ) : null}
 
+        <FamilySection active={tab === "family"} />
+
         </Tabs>
       </Paper>
       <ConfirmDialog
@@ -2360,6 +2391,55 @@ export function SettingsPage() {
           </Text>
         </Paper>
         <Button fullWidth onClick={() => setResetPasswordResult(null)}>Done</Button>
+      </Modal>
+
+      {/* Member notes modal */}
+      <Modal
+        opened={notesTarget !== null}
+        onClose={() => setNotesTarget(null)}
+        title={notesTarget ? `Notes — ${notesTarget.name}` : "Notes"}
+      >
+        <Stack gap="sm">
+          <Textarea
+            label="Notes"
+            placeholder="Allergies, preferences, schedule details, anything useful…"
+            value={notesDraft}
+            onChange={(e) => setNotesDraft(e.currentTarget.value)}
+            autosize
+            minRows={3}
+            maxRows={8}
+            maxLength={2000}
+            disabled={notesSaving}
+          />
+          {notesError ? <Alert color="red" p="xs">{notesError}</Alert> : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setNotesTarget(null)} disabled={notesSaving}>Cancel</Button>
+            <Button
+              loading={notesSaving}
+              onClick={async () => {
+                if (!notesTarget) return;
+                setNotesSaving(true);
+                setNotesError(null);
+                try {
+                  await apiJson(`/api/family/members/${encodeURIComponent(notesTarget.memberId)}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ notes: notesDraft || null }),
+                  });
+                  setMemberDrafts(prev => prev.map(m =>
+                    m.id === notesTarget.memberId ? { ...m, notes: notesDraft || null } : m
+                  ));
+                  setNotesTarget(null);
+                } catch (err) {
+                  setNotesError(err instanceof Error ? err.message : "Failed to save notes.");
+                } finally {
+                  setNotesSaving(false);
+                }
+              }}
+            >
+              Save
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
     </Stack>
   );

@@ -18,6 +18,312 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## v6.0.0 — Family Planner, GCal integration, payslip fixes (2026-06-25)
+
+Includes all Family Planner work (FP-1 through FP-4): Google Calendar OAuth, Events/Deadlines pages, household assistant agent, proactive deadline reminders, member profile UI, help availability CRUD. Plus FIX-193 and FIX-194 (payslip detail regressions).
+
+New env var required in production: `GOOGLE_CALENDAR_REDIRECT_URI` (GCal OAuth callback). DB migrations (oauth_integrations, person_profile extensions, household_help_availability) apply automatically on startup.
+
+---
+
+## FIX-194 — Payslip detail: added line items not rendering; Gross Pay not editable (2026-06-25)
+
+**Issue 1 — newly added earnings rows invisible:** `PayslipDetailPage.tsx` had a `mergedLineItems` filter that removed earnings items whose names appeared in `other_deductions`. The filter was intended to prevent duplicate display when the LLM places the same item in two sections, but that is structurally impossible (each `payslip_line_item` row has exactly one `section` in the DB). In practice the filter was silently dropping user-added earnings rows whose names happened to match any `other_deductions` item. DB arithmetic changed (backend `applyDerivedSummary` ran correctly) but the rows never appeared on screen. Removed the earnings filter; `other_deductions` items are still merged into `post_tax_deductions` for display.
+
+**Issue 2 — Gross Pay total not editable:** The "Gross Pay" row at the bottom of the Earnings section is a `LITotalRow` (read-only summary) backed by `payslip_snapshot.gross_pay_current`. At import time this value comes from the LLM PDF extraction; `applyDerivedSummary` (which recalculates from line item sums) only runs on subsequent line item mutations. Extended `LITotalRow` with optional edit props and wired a pencil icon on the Gross Pay row that opens inline NumberInput fields for current + YTD. Save calls `PATCH /payslips/:id` directly. Value will be recalculated from earnings line items on next line item mutation.
+
+**Files changed:**
+- `frontend/src/pages/PayslipDetailPage.tsx` — removed bad earnings filter; extended `LITotalRow`; added gross pay override state + `handleGrossPaySave`; added `IconCheck`, `IconX` to icon imports
+
+**GitHub:** closes #140
+
+---
+
+## FIX-193 — V6 Family Planner: PATCH /members missing relationship field (2026-06-25)
+
+`PATCH /api/family/members/:id` returned 400 when saving `notes` + `relationship: "employee"` together. Root cause: the Zod schema for the endpoint did not include `relationship`, and the service only updated `person_profile` — not `household_membership` where `relationship` lives. Fixed all three layers:
+
+- `family.types.ts` — added `relationship` to `UpdateMemberProfileInput`
+- `family-profiles.service.ts` — added a separate `UPDATE household_membership SET relationship = ?` when `input.relationship` is present
+- `family-profiles.routes.ts` — added `relationship: z.enum([...])` to `updateMemberSchema`
+
+**GitHub:** closes #139
+
+---
+
+## FIX-192 — V6 Family Planner: five UX/schema fixes (2026-06-24)
+
+Five bugs and design issues reported after initial V6 testing:
+
+1. **DB: age=0 constraint** (`person_profile_age_check`) — infants couldn't be saved because CHECK required `age > 0`. Migration 0076 widens to `age >= 0`. `backend/db/migrations/0076_family_fixes.sql`
+2. **DB/API/UI: day_of_week → days_of_week** — single-day `INTEGER` column replaced with `TEXT` (comma-separated, e.g. "1,3,5"). Nanny schedule can now cover Mon–Fri in one row instead of five. Migration 0076 migrates existing data. `family-profiles.service.ts`, `family-profiles.routes.ts`, `family.types.ts`
+3. **DB: employee relationship** — `household_membership.relationship` CHECK expanded to include `'employee'`. Migration 0076. Dropdown now shows "Employee / Nanny" option in Settings → Household. `SettingsPage.tsx`
+4. **UI: recurring event form** — Replaced six hardcoded combo options with two independent fields: Frequency (Weekly/Biweekly/Monthly) + Days-of-week MultiSelect. Format stored: `"weekly:1,3,5"`. `FamilyEventsPage.tsx`
+5. **UI: Family section layout + notes icon** — Member cards now in 2-col `SimpleGrid`. Day-of-week in schedule entry is now `MultiSelect`. Notes icon (`IconNotes`) added next to each household member in Settings → Household, opens a modal to edit `person_profile.notes`. `FamilySection.tsx`, `SettingsPage.tsx`
+
+Migration: 0076. Tests: 573 pass (1 pre-existing backup test failure unchanged).
+
+---
+
+## CR-139 — V6 Family Planner FP-4: deadline reminder cron job — 30/7/1-day email alerts (2026-06-24)
+
+Implements proactive email reminders for deadlines tracked in the Family → Deadlines page.
+A daily cron job at 8:07am (`env.TZ`) scans all active upcoming deadlines within a 30-day window.
+For each deadline, up to three reminder horizons fire: 30 days before (low urgency), 7 days (approaching), 1 day (urgent).
+Each horizon is idempotent — a `reminder_*d_sent_at` column on `family_events` is stamped after the first successful send; subsequent daily runs skip already-sent horizons.
+Reminders are sent to all household members with linked app accounts.
+Email is a consolidated digest per household per run (not one email per deadline).
+Files: `backend/db/migrations/0075_deadline_reminders.sql`, `backend/src/modules/mailer/templates/deadline-reminder.ts` (new), `backend/src/modules/family/deadline-reminder.service.ts` (new), `backend/src/modules/family/family-agent.scheduler.ts`.
+GitHub: closes #130
+
+## CR-138 — V6 Family Planner Phase 2C: agent enriched with full member profiles + caregiver roster (2026-06-24)
+Replace `getHouseholdChildren()` (name + age only) with `listHouseholdMembers()` + `listAvailability()` from `family-profiles.service.ts`.
+Agent prompt now includes all member relationships, ages, interests, and notes; plus the full `household_help_availability` schedule (service type, slot type, day/time per caregiver).
+Coverage gap detection now checks actual caregiver schedule before flagging a conflict; activity suggestions match each child's registered interests.
+Files: `family-agent.service.ts`.
+GitHub: closes #138
+
+## UX-137 — V6 Family Planner: FamilySection settings tab — member profiles + help schedule UI (2026-06-24)
+
+**What changed:** Settings → Family tab replaced bare GCalSection with a full `FamilySection` component containing three subsections.
+
+1. **Household Members** — cards per member showing interests (TagsInput, ≤30 tags), notes (Textarea, ≤2000 chars), age (TextInput); each saves independently via `PATCH /api/family/members/:profileId`.
+2. **Care & Help Schedule** — table of active help availability slots with add/edit/delete; add form covers person, service type (nanny/babysitter/cleaner/activity_teacher/tutor/other), slot type (regular/one_off/unavailable), day-of-week or specific date, start/end times, label.
+3. **Google Calendar** — existing GCalSection rendered at the bottom.
+
+**Files:**
+- `frontend/src/pages/settings/FamilySection.tsx` (new)
+- `frontend/src/pages/SettingsPage.tsx` — import swapped GCalSection → FamilySection
+- `docs/USER_GUIDE.md` — Family tab section added
+
+**GitHub:** closes #137
+
+---
+
+## CR-136 — V6 Family Planner: member profile API + household help availability CRUD (2026-06-24)
+
+**What changed:** Backend service and routes for household member profile editing and help schedule management.
+
+1. **`family-profiles.service.ts`** (new) — `listHouseholdMembers`, `updateMemberProfile`, `listAvailability`, `createAvailability`, `updateAvailability`, `deleteAvailability`.
+2. **`family-profiles.routes.ts`** (new) — `GET /api/family/members`, `PATCH /api/family/members/:profileId`, `GET /api/family/availability`, `POST /api/family/availability`, `PATCH /api/family/availability/:id`, `DELETE /api/family/availability/:id`.
+3. **`family.types.ts`** extended — `HouseholdMember`, `HelpAvailabilitySlot`, `UpdateMemberProfileInput`, `CreateAvailabilityInput`, `UpdateAvailabilityInput`, `SlotType`, `ServiceType`.
+4. **`app.ts`** — mounts `familyProfilesRouter` at `/api/family`.
+5. **`openapi/openapi.yaml`** — 6 new endpoint entries + `HouseholdMember` and `HelpAvailabilitySlot` schemas.
+6. **`docs/API_REFERENCE.md`** — new "Family Planner — Member Profiles & Help Availability" section.
+7. **`backend/tests/family-profiles.test.ts`** — 12 tests covering list, update, and availability CRUD.
+
+**Files:** `backend/src/modules/family/family-profiles.service.ts`, `backend/src/modules/family/family-profiles.routes.ts`, `backend/src/modules/family/family.types.ts`, `backend/src/app.ts`, `openapi/openapi.yaml`, `docs/API_REFERENCE.md`, `backend/tests/family-profiles.test.ts`
+**GitHub:** https://github.com/mangatrai/grove/issues/136
+
+---
+
+## DB-074 — V6 Family Planner: person_profile extensions + household_help_availability (2026-06-24)
+
+**What changed:** DB foundation for V6 Family Planner data model.
+
+1. **`person_profile` extended** — two new columns: `interests_json TEXT NOT NULL DEFAULT '[]'` (hobbies, food preferences, activity interests — feeds agent context for all household members including spouse) and `notes TEXT` (freeform sticky note per person, same UX as property notes).
+2. **`household_help_availability` table** — unified schedule roster for ALL household help (nanny regular hours, babysitter one-offs, house cleaner, activity teachers, tutors). Two orthogonal dimensions: `slot_type` (regular / one_off / unavailable — the schedule pattern) and `service_type` (nanny / babysitter / cleaner / activity_teacher / tutor / other — what they do). Indexed on household_id, person_profile_id, and (household_id, is_active, slot_type).
+3. **Export registry updated** — `household_help_availability` added to EXPORT_REGISTRY at restoreOrder 28.
+
+**Files:** `backend/db/migrations/0074_family_planner_profiles.sql`, `backend/src/modules/export/export-registry.ts`
+**GitHub:** https://github.com/mangatrai/grove/issues/135
+
+---
+
+## FIX-195 — Family Planner: restore full PA scope, add kid context, fix recipient routing (2026-06-24)
+
+**What changed:** The FIX-194 agent prompt fix overcorrected — restricting the agent to childcare-gap detection only, which broke the intended household executive assistant scope.
+
+1. **Agent scope restored to full PA**: System prompt rewritten from "sole focus is CHILD-CARE coverage gaps" to household executive assistant managing calendars, logistics, and planning. Agent now surfaces schedule pressure, heavy days, travel implications, approaching deadlines, and seasonal planning opportunities — not just childcare gaps.
+
+2. **Recipient routing fixed**: The root cause of the original bad alert (nanny asked to "manage scheduling conflicts") was wrong recipient assignment, not wrong scope. Rules now explicitly map each `recipientHint` to its correct `copyPasteText` shape: Nanny gets childcare requests, Spouse gets coordination asks, Self gets calendar action suggestions.
+
+3. **Kid context injected**: `getHouseholdChildren()` queries `person_profile JOIN household_membership WHERE relationship='child'`. Ages are passed into the analysis prompt so the agent can make age-appropriate planning suggestions (e.g., summer camp types, activity ideas).
+
+4. **New alert type `suggestion`**: Added `"suggestion"` alertType for proactive planning opportunities (seasonal activities, enrollment windows, annual appointments due). Displayed as "Planning" badge (teal) in the agent page.
+
+5. **`conflict` alert renamed to "Schedule pressure"** in the UI (orange) to distinguish it from `coverage_gap` (red — children need care, nobody available).
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `frontend/src/pages/FamilyAgentPage.tsx`
+**GitHub:** closes #128
+
+---
+
+## FIX-194 — Family Planner: agent prompt, digest recipients, layout polish (2026-06-24)
+
+**What changed:** Three post-testing fixes to the V6 Family Planner module.
+
+1. **Agent prompt tightened** — the LLM was flagging parent-vs-parent scheduling conflicts (overlapping work meetings, medical appointments) and suggesting nanny involvement. Rewrote the system prompt and rules to make clear: a conflict is ONLY a child-care coverage gap (unmet pickup, dropoff, or supervised care window). Added explicit "NOT conflicts" examples. Nanny recipient hint now restricted to childcare schedule changes only.
+
+2. **Digest log recipients** — added `recipients_json TEXT` column to `family_digest_log` (migration `0073_family_digest_recipients.sql`). Agent now records which parent emails were successfully sent in each run. `GET /api/family/digests` returns the `recipients` array. Agent page digest history table now shows recipient emails per run and supports click-to-expand full summary text (replaces `lineClamp={2}`).
+
+3. **Page layout** — removed hardcoded `maxWidth: 800/820` from `FamilyEventsPage`, `FamilyDeadlinesPage`, and `FamilyAgentPage` root Stack wrappers so content fills the available content area.
+
+**Files changed:**
+- `backend/db/migrations/0073_family_digest_recipients.sql` (new)
+- `backend/src/modules/family/family-agent.service.ts` — prompt rewrite, recipients tracking in email loop + UPDATE query, `DigestLogEntry` + `listDigestLog` updated
+- `frontend/src/pages/FamilyAgentPage.tsx` — `DigestEntry.recipients`, expandable summary row, recipients column, removed maxWidth
+- `frontend/src/pages/FamilyEventsPage.tsx` — removed maxWidth
+- `frontend/src/pages/FamilyDeadlinesPage.tsx` — removed maxWidth
+
+**GitHub:** refs #129 (agent), #128 (digest)
+
+---
+
+## CR-193 — V6 Family Planner: phase 2 — Agent page, scheduled cron worker, alert system (2026-06-23)
+
+**What changed:** Completed the Family Planner module with the background agent, alert system, digest log, and Agent page UI.
+
+**DB migrations:**
+- Migration `0072_family_agent_tables.sql`:
+  - `gcal_last_synced_at` column on `oauth_integrations` — stores per-user GCal fetch timestamp for delta sync
+  - `family_agent_alerts` table — agent writes one row per detected conflict (reason, copy_paste_text, recipient_hint, alert_type, resolved tracking)
+  - `family_digest_log` table — one row per agent run (run_type, status, alerts_created, emails_sent, summary_text)
+- `export-registry.ts`: `family_agent_alerts` at restoreOrder 26, `family_digest_log` at 27
+
+**Backend — family-agent.service.ts:**
+- `runFamilyAgent(householdId, runType)` — main entry point; fetches GCal events for all connected parents, fetches DB family_events, calls LLM for conflict analysis + digest generation, writes alerts, sends per-parent emails, updates gcal_last_synced_at, writes digest log
+- GCal delta: daily_delta runs pass `updatedMin=gcal_last_synced_at`; sunday/monday/manual runs do full 14-day fetch
+- LLM: `getChatAdapter().complete()` with strongModel(); JSON-only response — conflicts array + per-parent digest email content
+- `listAlerts`, `resolveAlert`, `listDigestLog` — read/update helpers for the Agent tab
+- `runFamilyAgentForAllHouseholds(runType)` — iterates all households with connected calendars
+
+**Backend — family-events.routes.ts (extended):**
+- `GET /api/family/alerts?includeResolved=true` — list active (or all) alerts
+- `PATCH /api/family/alerts/:id/resolve` — dismiss an alert
+- `GET /api/family/digests` — digest run history
+- `POST /api/family/agent/run` — manual trigger (owner only)
+
+**Backend — family-agent.scheduler.ts + server.ts:**
+- Cron: Sunday 7:00pm (sunday_preview), Monday 7:03am (monday_digest), Tue–Sat 6:32am (daily_delta)
+- All use `env.TZ` for timezone; registered in server.ts startup block
+
+**Frontend — FamilyAgentPage.tsx (full implementation):**
+- Alert cards: reason text, colored left border by type, pre-written copy-paste message in a Code block with clipboard button, dismiss button
+- "Show resolved" toggle reveals dismissed alerts grayed out
+- Digest history table: run type, timestamp, status badge, alerts_created, emails_sent, summary_text
+- "Run now" menu (owner only) — manual trigger with run type selection
+- Refreshes alert + history panels after manual runs
+
+**Files changed:**
+`backend/db/migrations/0072_family_agent_tables.sql` (new),
+`backend/src/modules/family/family-agent.service.ts` (new),
+`backend/src/modules/family/family-agent.scheduler.ts` (new),
+`backend/src/modules/family/family-events.routes.ts` (extended),
+`backend/src/modules/export/export-registry.ts`,
+`backend/src/server.ts`,
+`frontend/src/pages/FamilyAgentPage.tsx` (full rewrite)
+
+---
+
+## CR-192 — V6 Family Planner: phase 1 — Events, Deadlines, GCal settings (2026-06-23)
+
+**What changed:** Built the first functional phase of the Family Planner module.
+
+**Bug fix:**
+- `frontend/vite.config.ts`: added `/gcal` and `/api/family` to Vite proxy list — GCal Settings page was getting back `index.html` instead of JSON, causing "Unexpected token '<'" parse error.
+
+**GCal settings improvements:**
+- Migration `0070_gcal_calendar_selection.sql`: added `selected_calendar_ids` (TEXT) and `calendars_fetched_at` (TIMESTAMPTZ) to `oauth_integrations`.
+- New `GET /gcal/calendars` — lists user's accessible Google Calendars with color dots.
+- New `PATCH /gcal/calendars` — saves selected calendar IDs for the agent to filter on.
+- `gcal.service.ts`: `listUserCalendars`, `saveCalendarSelection`, `getCalendarSelection` functions added. `listUpcomingEvents` updated to use selected calendars only (falls back to all if nothing selected).
+- `GCalSection.tsx`: full Mantine redesign — connection status card with connect/reconnect/disconnect, calendar picker (checkbox list with color dots) shown post-connection.
+
+**V6 family_events backend:**
+- Migration `0071_family_events.sql`: unified `family_events` table with `record_type` (event/deadline), `source` (gcal/tavily/manual), `gcal_event_id`, `gcal_calendar_id`, `assignee_ids` (JSON), soft delete.
+- `family_events.service.ts`: `listFamilyEvents`, `getFamilyEvent`, `createFamilyEvent`, `updateFamilyEvent`, `deleteFamilyEvent`, `upsertGcalEvent` (used by agent sync later).
+- `family-events.routes.ts`: CRUD at `GET/POST /api/family/events` and `GET/PATCH/DELETE /api/family/events/:id`. GET allows member role (nanny-accessible); write operations owner/admin only.
+- `export-registry.ts`: `family_events` registered at restoreOrder 25.
+- `app.ts`: router mounted at `/api/family`.
+
+**V6 routing + UI:**
+- Planner sub-page removed — `FamilyPlannerPage.tsx` and `FamilyActivitiesPage.tsx` deleted.
+- Sidebar: "Planner" and "Activities" removed; "Events" added at `/family/events`.
+- App.tsx: `/family` and `/family/activities` redirect to `/family/events`.
+- `FamilyEventsPage.tsx`: list view with source + recurring badges, add drawer (title, start/end, location, recurring select, all-day, notes), per-row delete.
+- `FamilyDeadlinesPage.tsx`: list with urgency countdown badges (overdue/today/Nd), add drawer (title, due date, notes), per-row delete.
+
+**Files changed:**
+`frontend/vite.config.ts`, `frontend/src/App.tsx`, `frontend/src/layout/AppSidebar.tsx`,
+`frontend/src/pages/FamilyEventsPage.tsx` (new), `frontend/src/pages/FamilyDeadlinesPage.tsx` (rewritten),
+`frontend/src/pages/settings/GCalSection.tsx` (rewritten),
+`backend/db/migrations/0070_gcal_calendar_selection.sql` (new),
+`backend/db/migrations/0071_family_events.sql` (new),
+`backend/src/modules/gcal/gcal.service.ts`, `backend/src/modules/gcal/gcal.routes.ts`,
+`backend/src/modules/family/` (new module: types, service, routes),
+`backend/src/modules/export/export-registry.ts`, `backend/src/app.ts`
+
+---
+
+## DOC-003 — Family Planner PRD-F: architecture revision after design session (2026-06-23)
+
+**What changed:** Major decisions from design review session — updated `docs/PRD_AND_CRS.md` section 12 (PRD-F) and commented on GH issues #127–#130.
+
+**Key decisions recorded:**
+- **Planner sub-page dropped** — native Google Calendar handles side-by-side calendar views better; not worth building
+- **Events + Deadlines = one table** (`family_events`) with `record_type` (event/deadline) and `source` (gcal/tavily/manual)
+- **Activities renamed to Events** — broader scope: recurring kid activities AND one-off appointments; agent extracts both from GCal
+- **Agent is a scheduled background worker, not a chat interface** — no suggestion-card approval flow
+- **Revised digest cadence:** Sunday always, Monday always (with duty assignments), Tue–Sat only if conflict found (delta via GCal `updatedMin`)
+- **GCal delta mechanism:** store `gcal_last_synced_at` per user; use `updatedMin` param — no event content stored in DB
+- **Alert model simplified:** agent writes alert record with conflict reason + pre-written copy-paste text; owner acts manually; no in-app send infrastructure in V6
+- **Agent tab UI:** top = active alerts, bottom = digest history; RBAC-scoped
+- **Nanny schedule V6:** simple fields on staff profile; full employment module is V7
+
+**Files:** `docs/PRD_AND_CRS.md` (section 12 — UI Placement, Agent Architecture, Notification Strategy, Feature Phasing all updated)
+**GitHub:** comments added to https://github.com/mangatrai/grove/issues/127, /128, /129, /130
+
+---
+
+## UX-R05 — Family sidebar section + GCal connect UI in Settings [FP-1c] (2026-06-23)
+
+Added the "Family" navigation group to the sidebar (hidden for `member` role) with four stub pages — Planner, Activities, Deadlines, Agent — all guarded by `RequireOwnerOrAdmin`. Added a "Family" tab to Settings (visible to owner/admin) containing `GCalSection`: per-user Google Calendar connect/disconnect UI that shows connection status, handles `?gcal=connected|error` callback params, and calls `GET /gcal/oauth/url` → redirect on connect.
+
+**Files:** `frontend/src/layout/AppSidebar.tsx`, `frontend/src/App.tsx`, `frontend/src/pages/SettingsPage.tsx`, `frontend/src/pages/settings/GCalSection.tsx` (new), `frontend/src/pages/FamilyPlannerPage.tsx` (new), `frontend/src/pages/FamilyActivitiesPage.tsx` (new), `frontend/src/pages/FamilyDeadlinesPage.tsx` (new), `frontend/src/pages/FamilyAgentPage.tsx` (new). GH: refs #127.
+
+---
+
+## CR-135 — Google Calendar OAuth backend: connect/status/events [FP-1b] (2026-06-22)
+
+Added `backend/src/modules/gcal/` module implementing per-user Google Calendar OAuth2 (`calendar.readonly` scope). Both parents (owner + admin roles) connect their own Google accounts independently; tokens stored in the existing `oauth_integrations` table with `provider = 'google_calendar'`, `user_id = userId` (user-scoped). The same Google Cloud project (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is reused; a separate redirect URI (`GOOGLE_CALENDAR_REDIRECT_URI`) is added to `env.ts`.
+
+**Routes added (base `/gcal`):**
+- `GET /gcal/oauth/url` — returns Google consent URL (owner, admin)
+- `GET /gcal/oauth/callback` — OAuth redirect handler (public; state HMAC-signed)
+- `POST /gcal/connect` — direct code exchange used by SPA flow (owner, admin)
+- `GET /gcal/status` — per-user connection state; exposes `needsReauth` flag (owner, admin)
+- `DELETE /gcal/disconnect` — removes requesting user's tokens only (owner, admin)
+- `GET /gcal/events?days=N` — lists upcoming events across all user's calendars; defaults 14d, max 90d (owner, admin)
+
+Token encryption uses AES-256-GCM with a separate key purpose string (`household-finance:gcal-token:…`) distinct from Drive tokens. On Google 401/403, the service marks `needs_reauth = TRUE` and returns `401 GCAL_NEEDS_REAUTH`. `oauth_integrations` is in `EXPORT_EPHEMERAL_TABLES` — tokens never appear in `.hfb` backups.
+
+**Files:** `backend/src/modules/gcal/gcal.service.ts` (new), `backend/src/modules/gcal/gcal.routes.ts` (new), `backend/src/app.ts` (register `/gcal`), `backend/src/config/env.ts` (`GOOGLE_CALENDAR_REDIRECT_URI`), `backend/tests/gcal.test.ts` (new, 15 tests), `docs/API_REFERENCE.md` (Google Calendar section added)
+
+**GitHub:** closes #134 (FP-1b Calendar OAuth backend)
+
+---
+
+## DB-002 — Unified oauth_integrations table replaces household_gdrive_config (2026-06-22)
+
+Replaced the narrow `household_gdrive_config` table with a new `oauth_integrations` table that handles both Google Drive (household-scoped, `user_id IS NULL`) and Google Calendar (user-scoped, one row per parent). Partial unique indexes enforce uniqueness per scope since standard UNIQUE constraints treat NULLs as distinct. Drive-specific columns (`folder_id`, `folder_name`, `backup_frequency_hours`, `backup_retention_count`, `last_scheduled_backup_at`) live in the same table and are NULL for Calendar rows. Added `access_token`/`access_token_expiry` columns for Calendar token caching. `oauth_integrations` is in `EXPORT_EPHEMERAL_TABLES` — OAuth credentials must never appear in `.hfb` backups; users re-connect after restore.
+
+**Files:** `backend/db/migrations/0069_oauth_integrations.sql` (create + migrate + drop), `backend/src/modules/gdrive/gdrive.service.ts`, `backend/src/modules/gdrive/gdrive-scheduler.service.ts`, `backend/src/modules/export/export-registry.ts`, `backend/tests/gdrive*.test.ts` (4 files)
+
+**GitHub:** #127 (FP-1 Google Calendar integration)
+
+---
+
+## DOC-002 — Family Planner: iOS Shortcut setup documented in ADMIN_GUIDE (2026-06-22)
+
+Work calendar mirroring via iOS Shortcuts → Google Calendar confirmed working during FP-5 spike. Key finding: "Show Compose Sheet" toggle must be OFF on the "Add New Event" action to suppress per-event confirmation dialogs — without this, automated runs stall waiting for user input. Full setup instructions added to ADMIN_GUIDE §10 covering Google Cloud project setup, OAuth consent screen (must publish to Production to avoid 7-day token expiry), per-parent Google Calendar connect, and Shortcut build steps with automation scheduling.
+
+**Files:** `docs/ADMIN_GUIDE.md` (§10 added)
+
+**GitHub:** #131 (FP-5 work calendar discovery spike)
+
+---
+
 ## DOC-001 — Family Planner Module: requirements captured, PRD-F added (2026-06-22)
 
 Requirements gathered via structured PM session for a new household coordination assistant. Covers both parents (same O365 locked-down calendars), two kids (elementary school + infant), nanny (to be hired). Key decisions: V1 ships with Google Calendar integration only; work calendar is a tracked discovery item (O365 passkey-auth blocks external sharing); weekly digest is per-person (Sunday preview + Monday full); agent uses existing LLM adapter with Tavily tool use in suggest+approve mode; new Family sidebar section with Planner / Activities / Deadlines / Agent sub-pages.

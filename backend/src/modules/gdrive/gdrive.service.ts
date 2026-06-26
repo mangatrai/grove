@@ -230,11 +230,12 @@ export async function connectGDrive(
   folderName: string
 ): Promise<void> {
   await qExec(
-    `INSERT INTO household_gdrive_config
-       (household_id, oauth2_refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error, needs_reauth)
-     VALUES (?, ?, ?, ?, ?, NOW(), NULL, FALSE)
-     ON CONFLICT (household_id) DO UPDATE SET
-       oauth2_refresh_token              = EXCLUDED.oauth2_refresh_token,
+    `INSERT INTO oauth_integrations
+       (provider, household_id, user_id, refresh_token, folder_id, folder_name, connected_by_user_id, last_verified_at, last_error, needs_reauth,
+        backup_frequency_hours, backup_retention_count)
+     VALUES ('google_drive', ?, NULL, ?, ?, ?, ?, NOW(), NULL, FALSE, 24, 7)
+     ON CONFLICT (household_id, provider) WHERE user_id IS NULL DO UPDATE SET
+       refresh_token                     = EXCLUDED.refresh_token,
        folder_id                         = EXCLUDED.folder_id,
        folder_name                       = EXCLUDED.folder_name,
        connected_at                      = NOW(),
@@ -252,20 +253,20 @@ export async function connectGDrive(
 
 export async function markGDriveNeedsReauth(householdId: string): Promise<void> {
   await qExec(
-    `UPDATE household_gdrive_config SET needs_reauth = TRUE WHERE household_id = ?`,
+    `UPDATE oauth_integrations SET needs_reauth = TRUE WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL`,
     householdId
   );
 }
 
 export async function disconnectGDrive(householdId: string): Promise<void> {
-  await qExec(`DELETE FROM household_gdrive_config WHERE household_id = ?`, householdId);
+  await qExec(`DELETE FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL`, householdId);
 }
 
 export async function getGDriveStatus(householdId: string): Promise<GDriveStatus | null> {
   const r = await qGet<GDriveRow>(
     `SELECT household_id, folder_id, folder_name, connected_at, connected_by_user_id, last_verified_at, last_error,
             backup_frequency_hours, backup_retention_count, last_scheduled_backup_at, needs_reauth
-       FROM household_gdrive_config WHERE household_id = ?`,
+       FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL`,
     householdId
   );
   return r ? mapRow(r) : null;
@@ -286,18 +287,18 @@ export type GDriveCredentials = {
  */
 export async function getGDriveCredentials(householdId: string): Promise<GDriveCredentials | null> {
   const r = await qGet<{
-    oauth2_refresh_token: string | null;
+    refresh_token: string | null;
     folder_id: string;
     backup_frequency_hours: number;
     backup_retention_count: number;
     last_scheduled_backup_at: string | null;
   }>(
-    `SELECT oauth2_refresh_token, folder_id, backup_frequency_hours, backup_retention_count, last_scheduled_backup_at
-       FROM household_gdrive_config WHERE household_id = ?`,
+    `SELECT refresh_token, folder_id, backup_frequency_hours, backup_retention_count, last_scheduled_backup_at
+       FROM oauth_integrations WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL`,
     householdId
   );
   if (!r) return null;
-  const stored = typeof r.oauth2_refresh_token === "string" ? r.oauth2_refresh_token.trim() : "";
+  const stored = typeof r.refresh_token === "string" ? r.refresh_token.trim() : "";
   if (!stored) return null;
   const rt = decryptToken(stored);
   // null means the stored value failed decryption (plaintext from a pre-encryption deployment
@@ -317,9 +318,9 @@ export async function updateGDriveSchedulerSettings(
   settings: { backupFrequencyHours: number; backupRetentionCount: number }
 ): Promise<void> {
   await qExec(
-    `UPDATE household_gdrive_config
+    `UPDATE oauth_integrations
        SET backup_frequency_hours = ?, backup_retention_count = ?
-     WHERE household_id = ?`,
+     WHERE household_id = ? AND provider = 'google_drive' AND user_id IS NULL`,
     settings.backupFrequencyHours,
     settings.backupRetentionCount,
     householdId

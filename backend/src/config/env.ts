@@ -116,11 +116,13 @@ const envSchema = z.object({
   PAYSLIP_ASYNC_POLL_INTERVAL_MS: optionalIntEnv(120_000, 10_000, 3_600_000),
   /** Max inclusive span (days) for `GET /reports/cash-summary` when `dateFrom`+`dateTo` are set. Default ~3 years. */
   CASH_SUMMARY_MAX_CUSTOM_RANGE_DAYS: optionalIntEnv(1096, 31, 4000),
-  /** Google OAuth2 (Drive) — optional; required for GDrive connect / backup when using user-delegated auth. */
+  /** Google OAuth2 (Drive + Calendar) — optional; required for GDrive connect / backup / Calendar OAuth. */
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),
-  /** Full redirect URI registered in Google Cloud Console, e.g. http://127.0.0.1:4000/gdrive/oauth/callback */
+  /** Full redirect URI registered in Google Cloud Console for Drive, e.g. http://localhost:4000/gdrive/oauth/callback */
   GOOGLE_REDIRECT_URI: z.string().default(""),
+  /** Full redirect URI registered in Google Cloud Console for Calendar, e.g. http://localhost:4000/gcal/oauth/callback */
+  GOOGLE_CALENDAR_REDIRECT_URI: z.string().default(""),
   /**
    * SPA origin for Google Drive OAuth return redirects when the API and UI differ (e.g. http://localhost:3000).
    * If unset: uses `PUBLIC_BASE_URL` when set; in `MODE=TEST` defaults to `http://localhost:3000`; in `MODE=PROD`

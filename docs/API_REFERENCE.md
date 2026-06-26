@@ -3689,3 +3689,261 @@ Server errors: `5xx` with shape:
 ```json
 { "code": "SERVER_ERROR", "message": "…" }
 ```
+
+---
+
+## Google Calendar Integration
+
+Base path: `/gcal`
+
+Per-user link to a Google Calendar via **OAuth2** (`calendar.readonly` scope). Each parent connects their own account independently — tokens stored per `user_id` in `oauth_integrations`. **`Authorization: Bearer <JWT>`** required on all routes except **`GET /gcal/oauth/callback`** (browser redirect from Google).
+
+Same Google Cloud project as Drive (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`). Separate redirect URI: `GOOGLE_CALENDAR_REDIRECT_URI`.
+
+### Role Access
+
+| Endpoint | Owner | Admin | Member |
+|----------|-------|-------|--------|
+| `GET /gcal/oauth/callback` | Public | Public | Public |
+| `GET /gcal/oauth/url` | Yes | Yes | **403** |
+| `POST /gcal/connect` | Yes | Yes | **403** |
+| `GET /gcal/status` | Yes | Yes | **403** |
+| `DELETE /gcal/disconnect` | Yes | Yes | **403** |
+| `GET /gcal/events` | Yes | Yes | **403** |
+
+### `GET /gcal/oauth/url`
+
+Returns the Google OAuth consent URL for Calendar.
+
+**Response `200`:**
+```json
+{ "url": "https://accounts.google.com/o/oauth2/auth?..." }
+```
+
+**Error `400 OAUTH_NOT_CONFIGURED`** — `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, or `GOOGLE_CALENDAR_REDIRECT_URI` not set on server.
+
+---
+
+### `GET /gcal/oauth/callback`
+
+Google redirects here after user grants consent. Exchanges code, stores tokens, performs JS redirect back to the SPA (`/settings?tab=family&gcal=connected`). On failure, redirects with `gcal=error&message=…`.
+
+Not called directly by clients.
+
+---
+
+### `POST /gcal/connect`
+
+Direct code exchange (SPA flow). Accepts an OAuth authorization code and stores tokens.
+
+**Request body:**
+```json
+{ "code": "4/0Adeu5BV…" }
+```
+
+**Response `200`:**
+```json
+{ "connected": true }
+```
+
+**Error `422 GCAL_CONNECTION_FAILED`** — token exchange failed (code expired, already used, etc.).
+
+---
+
+### `GET /gcal/status`
+
+Returns the requesting user's Calendar connection state.
+
+**Response `200`:**
+```json
+{
+  "connected": true,
+  "connectedAt": "2026-06-22T18:00:00.000Z",
+  "needsReauth": false,
+  "lastError": null
+}
+```
+
+`connected: false` when no token stored. `needsReauth: true` when Google returned 401/403 on the last API call — user must reconnect.
+
+---
+
+### `DELETE /gcal/disconnect`
+
+Removes the requesting user's Calendar tokens. Does not affect other users in the household.
+
+**Response `200`:**
+```json
+{ "connected": false }
+```
+
+---
+
+### `GET /gcal/events?days=N`
+
+Lists upcoming calendar events across all calendars the user has access to. `days` defaults to 14; max 90.
+
+**Response `200`:**
+```json
+{
+  "events": [
+    {
+      "id": "abc123",
+      "summary": "School pickup",
+      "start": "2026-06-25T15:00:00-05:00",
+      "end": "2026-06-25T15:30:00-05:00",
+      "allDay": false,
+      "location": null,
+      "description": null,
+      "calendarId": "primary"
+    },
+    {
+      "id": "def456",
+      "summary": "Kid's field trip",
+      "start": "2026-06-26",
+      "end": "2026-06-27",
+      "allDay": true,
+      "location": null,
+      "description": null,
+      "calendarId": "primary"
+    }
+  ],
+  "count": 2
+}
+```
+
+`allDay: true` — event has only a date (`start.date`), no time component.
+
+**Error `409 GCAL_NOT_CONNECTED`** — user has not connected Calendar.
+**Error `401 GCAL_NEEDS_REAUTH`** — Google returned 401/403; user must reconnect. `needs_reauth` flag set in DB.
+**Error `502 GCAL_API_ERROR`** — other Google API failure.
+
+## Family Planner — Member Profiles & Help Availability
+
+All endpoints require `Authorization: Bearer <token>`. All paths are prefixed `/api/family`.
+
+---
+
+### `GET /api/family/members`
+
+Returns all household members with their profile data. Requires `owner | admin | member`.
+
+**Response `200`**
+```json
+{
+  "members": [
+    {
+      "profileId": "70000000-0000-0000-0000-000000000001",
+      "fullName": "Alex Owner",
+      "relationship": "self",
+      "age": 35,
+      "linkedUserId": "20000000-0000-0000-0000-000000000001",
+      "interestsJson": ["cycling", "cooking"],
+      "notes": null
+    }
+  ]
+}
+```
+
+`relationship` — one of `self | spouse | child | dependent | other`.
+`interestsJson` — parsed JSON array of interest tags.
+`linkedUserId` — present if the member has an app login; `null` for external helpers (nanny, cleaner, etc.).
+
+---
+
+### `PATCH /api/family/members/:profileId`
+
+Updates `interestsJson`, `notes`, and/or `age` on a person profile. Requires `owner | admin`.
+
+**Body** (all fields optional)
+```json
+{
+  "interestsJson": ["piano", "swimming"],
+  "notes": "Lincoln Elementary, 1st grade",
+  "age": 7
+}
+```
+
+**Response `200`** — `{ "member": HouseholdMember }`
+**Error `404`** — profile not in caller's household.
+
+---
+
+### `GET /api/family/availability`
+
+Lists household help availability slots. Requires `owner | admin | member`.
+
+**Query params**
+- `includeInactive=true` — include deactivated slots (default: active only).
+
+**Response `200`**
+```json
+{
+  "slots": [
+    {
+      "id": "uuid",
+      "householdId": "uuid",
+      "personProfileId": "uuid",
+      "personName": "Example Nanny",
+      "slotType": "regular",
+      "serviceType": "nanny",
+      "dayOfWeek": 1,
+      "specificDate": null,
+      "startTime": "08:00",
+      "endTime": "18:00",
+      "label": "Monday regular hours",
+      "notes": null,
+      "isActive": true,
+      "createdAt": "2026-06-24T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+`slotType` — `regular` (recurring weekly, use `dayOfWeek`), `one_off` (single date, use `specificDate`), `unavailable` (override, use `specificDate`).
+`serviceType` — `nanny | babysitter | cleaner | activity_teacher | tutor | other`.
+`dayOfWeek` — 0 = Sunday … 6 = Saturday. `null` for `one_off` / `unavailable` slots.
+
+---
+
+### `POST /api/family/availability`
+
+Creates a new availability slot. Requires `owner | admin`.
+
+**Body**
+```json
+{
+  "personProfileId": "uuid",
+  "slotType": "one_off",
+  "serviceType": "babysitter",
+  "specificDate": "2026-07-04",
+  "startTime": "09:00",
+  "endTime": "20:00",
+  "label": "Holiday coverage"
+}
+```
+
+**Response `201`** — `{ "slot": HelpAvailabilitySlot }`
+
+---
+
+### `PATCH /api/family/availability/:id`
+
+Updates any field on an existing slot. Use `isActive: false` to deactivate without deleting. Requires `owner | admin`.
+
+**Body** (all fields optional)
+```json
+{ "endTime": "17:00", "isActive": false }
+```
+
+**Response `200`** — `{ "slot": HelpAvailabilitySlot }`
+**Error `404`** — slot not in caller's household.
+
+---
+
+### `DELETE /api/family/availability/:id`
+
+Permanently removes an availability slot. Requires `owner | admin`.
+
+**Response `204`** — no body.
+**Error `404`** — slot not in caller's household.

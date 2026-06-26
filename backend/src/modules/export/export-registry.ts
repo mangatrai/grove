@@ -229,6 +229,34 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 24,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "family_events",
+    tableName: "family_events",
+    restoreOrder: 25,
+    householdIdColumn: "household_id",
+    memberScopeInclude: true
+  },
+  {
+    tableKey: "family_agent_alerts",
+    tableName: "family_agent_alerts",
+    restoreOrder: 26,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
+  },
+  {
+    tableKey: "family_digest_log",
+    tableName: "family_digest_log",
+    restoreOrder: 27,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
+  },
+  {
+    tableKey: "household_help_availability",
+    tableName: "household_help_availability",
+    restoreOrder: 28,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
   }
 ];
 
@@ -245,8 +273,8 @@ export const EXPORT_EPHEMERAL_TABLES: string[] = [
   "schema_migrations",
   // Seeded global data — restored from seeds, not from backups
   "category_rule_global",
-  // GCP service account private key — never include in .hfb backups
-  "household_gdrive_config",
+  // OAuth tokens — credentials that must never appear in .hfb backups; users re-connect after restore
+  "oauth_integrations",
   // Notification rows are transient UI state — not restored from backups
   "notification",
   "notification_preference",

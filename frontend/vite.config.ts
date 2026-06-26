@@ -29,6 +29,8 @@ export default defineConfig({
       "/household": api,
       "/exports": api,
       "/gdrive": api,
+      "/gcal": api,
+      "/api/family": api,
       "/budget": api,
       "/recurring-overrides": api,
       "/insights": api,

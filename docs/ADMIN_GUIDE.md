@@ -916,6 +916,99 @@ npm run import:purge -- --help
 
 ---
 
+## 10. Family Planner — Google Calendar Integration
+
+The Family Planner module (V6) reads all calendar data from Google Calendar via the Google Calendar API. Work calendar events are mirrored into Google Calendar via an iOS Shortcut on each parent's corporate iPhone.
+
+### 10.1 Google Cloud Project Setup
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) — reuse the existing Grove project if one exists from Google Drive setup.
+2. **Enable API:** APIs & Services → Library → search "Google Calendar API" → Enable.
+3. **OAuth consent screen:** APIs & Services → OAuth consent screen
+   - User type: External
+   - Fill in app name ("Grove"), support email, developer email
+   - Scopes: add `https://www.googleapis.com/auth/calendar.readonly` (read calendars + events)
+   - **Publish the app** (click "Publish App" → confirm). Both parents will see an "unverified app" warning on first sign-in — click Advanced → Continue. After that, tokens persist indefinitely.
+   - Keeping the app in Testing status causes refresh tokens to expire after 7 days — always publish.
+4. **OAuth credentials:** APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID
+   - Application type: Web application
+   - Authorized redirect URIs: `http://localhost:4000/auth/google/callback` (dev) + your Koyeb URL `/auth/google/callback` (prod)
+   - Download the client JSON; note the Client ID and Client Secret for env vars.
+
+**Environment variables to add:**
+```
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://your-koyeb-app.koyeb.app/auth/google/callback
+```
+
+### 10.2 Per-Parent Google Calendar Connect
+
+Each parent connects their personal Google account once via the Grove app (Family → Settings → Connect Google Calendar). The OAuth refresh token is stored per-user in the DB. The agent uses the stored token to query Google Calendar at runtime — no re-auth required after initial connect as long as the Google Cloud project is in Production status.
+
+### 10.3 Work Calendar Mirroring — iOS Shortcut Setup
+
+Both parents have corporate iPhones with the Exchange/O365 work calendar syncing natively. Work events are mirrored to a personal Google Calendar via an iOS Shortcut that runs twice daily.
+
+**One-time setup per parent:**
+
+**Step 1 — Add Google Account to iPhone Calendar**
+
+Settings → Calendar → Accounts → Add Account → Google → sign in with personal Google account → ensure Calendars toggle is ON.
+
+**Step 2 — Create "Work — Mirrored" calendar in Google Calendar**
+
+On desktop at calendar.google.com: Other calendars (+) → Create new calendar → Name: `Work — Mirrored`. Do this separately for each parent's Google account.
+
+**Step 3 — Build the Shortcut**
+
+Open Shortcuts app → tap + → add these actions in order:
+
+1. **Find Calendar Events**
+   - Calendar: your work/Exchange calendar (e.g. "Work" or corporate email)
+   - Date: is in the next 14 days
+
+2. **Remove Events** (input: result from step 1)
+
+3. **Find Calendar Events**
+   - Calendar: your actual work/Exchange calendar (same as step 1)
+   - Date: is in the next 14 days
+
+4. **Repeat with Each** (input: result from step 3)
+
+   Inside the loop:
+
+   5. **Add New Event**
+      - Title: `Repeat Item → Title`
+      - Calendar: `Work — Mirrored` (your Google calendar)
+      - Start Date: `Repeat Item → Start Date`
+      - End Date: `Repeat Item → End Date`
+      - All Day: `Repeat Item → Is All Day`
+      - **Show Compose Sheet: OFF** ← critical; without this, iOS prompts confirmation for every event
+
+   **End Repeat**
+
+6. **Show Notification** — e.g. "Work calendar synced"
+
+Rename the shortcut to **"Sync Work Calendar"**.
+
+**Step 4 — Set Up Daily Automations**
+
+Shortcuts → Automation tab → + → Personal Automation → Time of Day
+
+- Create two automations: 6:00 AM and 6:00 PM, Daily
+- Action: run "Sync Work Calendar"
+- **Ask Before Running: OFF** on each automation
+
+The 6am run ensures work events are in Google Calendar before the agent's morning planning pass. The 6pm run picks up same-day adds and next-day changes.
+
+**Notes:**
+- Each parent has their own `Work — Mirrored` calendar in their own Google account — the Shortcut only writes to the signed-in account, no cross-contamination.
+- The Shortcut clears all future events in `Work — Mirrored` and recreates them on every run. This is intentional — clean dedup without needing API-level upsert logic.
+- The agent reads `Work — Mirrored` as a regular Google Calendar — no special handling needed.
+
+---
+
 ## Related Documentation
 
 | Document | Topic |

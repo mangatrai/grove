@@ -12,6 +12,7 @@ import { budgetRouter } from "./modules/budget/budget.routes.js";
 import { categoriesRouter } from "./modules/category/categories.routes.js";
 import { categoryRulesRouter } from "./modules/category/category-rules.routes.js";
 import { exportsRouter } from "./modules/export/exports.routes.js";
+import { gcalRouter } from "./modules/gcal/gcal.routes.js";
 import { gdriveRouter } from "./modules/gdrive/gdrive.routes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { householdRouter } from "./modules/household/household.routes.js";
@@ -25,6 +26,8 @@ import { notificationsRouter } from "./modules/notifications/notifications.route
 import { recurringRouter } from "./modules/recurring/recurring.routes.js";
 import { esppRouter } from "./modules/espp/espp.routes.js";
 import { protestRouter } from "./modules/protest/protest.routes.js";
+import { familyEventsRouter } from "./modules/family/family-events.routes.js";
+import { familyProfilesRouter } from "./modules/family/family-profiles.routes.js";
 
 /**
  * CORS: allow the configured origin (or all origins in TEST mode).
@@ -122,6 +125,7 @@ export function buildApp() {
   app.use("/reports", reportsRouter);
   app.use("/payslips", payslipRouter);
   app.use("/exports", exportsRouter);
+  app.use("/gcal", gcalRouter);
   app.use("/gdrive", gdriveRouter);
   app.use("/budget", budgetRouter);
   app.use("/recurring-overrides", recurringRouter);
@@ -129,6 +133,8 @@ export function buildApp() {
   app.use("/notifications", notificationsRouter);
   app.use("/espp", esppRouter);
   app.use("/api/protest", protestRouter);
+  app.use("/api/family", familyEventsRouter);
+  app.use("/api/family", familyProfilesRouter);
 
   if (env.MODE === "PROD" && fs.existsSync(frontendDist)) {
     // Vite hashes all files under assets/ — serve them with a 1-year immutable cache.
