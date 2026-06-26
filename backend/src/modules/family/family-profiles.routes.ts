@@ -20,7 +20,7 @@ familyProfilesRouter.use(requireAuth);
 
 familyProfilesRouter.get(
   "/members",
-  requireRole("owner", "admin", "member"),
+  requireRole(["owner", "admin", "member"]),
   async (req: AuthenticatedRequest, res) => {
     const members = await listHouseholdMembers(req.authUser!.householdId);
     res.json({ members });
@@ -36,7 +36,7 @@ const updateMemberSchema = z.object({
 
 familyProfilesRouter.patch(
   "/members/:profileId",
-  requireRole("owner", "admin"),
+  requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
     const parsed = updateMemberSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -60,7 +60,7 @@ familyProfilesRouter.patch(
 
 familyProfilesRouter.get(
   "/availability",
-  requireRole("owner", "admin", "member"),
+  requireRole(["owner", "admin", "member"]),
   async (req: AuthenticatedRequest, res) => {
     const includeInactive = req.query.includeInactive === "true";
     const slots = await listAvailability(req.authUser!.householdId, includeInactive);
@@ -85,7 +85,7 @@ const createSlotSchema = z.object({
 
 familyProfilesRouter.post(
   "/availability",
-  requireRole("owner", "admin"),
+  requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
     const parsed = createSlotSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -111,7 +111,7 @@ const updateSlotSchema = z.object({
 
 familyProfilesRouter.patch(
   "/availability/:id",
-  requireRole("owner", "admin"),
+  requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
     const parsed = updateSlotSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -129,7 +129,7 @@ familyProfilesRouter.patch(
 
 familyProfilesRouter.delete(
   "/availability/:id",
-  requireRole("owner", "admin"),
+  requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
     const deleted = await deleteAvailability(req.params.id, req.authUser!.householdId);
     if (!deleted) {
