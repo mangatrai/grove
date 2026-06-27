@@ -316,30 +316,7 @@ async function buildMemberSummary(
     }
   }
 
-  const unassignedAccounts = await qAll<Record<string, unknown>>(
-    `SELECT fa.id, fa.type
-       FROM financial_account fa
-      WHERE fa.household_id = ?
-        AND fa.type <> 'payslip'
-        AND fa.owner_person_profile_id IS NULL`,
-    householdId
-  );
-
-  let unassignedAssets = 0;
-  let unassignedLiabilities = 0;
-  for (const a of unassignedAccounts) {
-    const side = accountSide(String(a.type));
-    if (!side) continue;
-    const balance = await resolveAccountBalance(householdId, String(a.id), asOf);
-    if (balance == null) continue;
-    if (side === "asset") {
-      unassignedAssets += balance;
-    } else {
-      unassignedLiabilities += balance;
-    }
-  }
-
-  const rows = members.map((m) => {
+  return members.map((m) => {
     const t = totalsByPerson.get(m.id)!;
     return {
       personProfileId: m.id,
@@ -349,18 +326,6 @@ async function buildMemberSummary(
       netWorth: t.assets - t.liabilities
     };
   });
-
-  if (unassignedAssets !== 0 || unassignedLiabilities !== 0) {
-    rows.push({
-      personProfileId: "__household__",
-      name: "Shared / Unassigned",
-      totalAssets: unassignedAssets,
-      totalLiabilities: unassignedLiabilities,
-      netWorth: unassignedAssets - unassignedLiabilities
-    });
-  }
-
-  return rows;
 }
 
 export async function getBalanceSheet(
