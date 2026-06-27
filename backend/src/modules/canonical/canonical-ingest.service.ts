@@ -492,7 +492,8 @@ export async function canonicalizeImportSession(
     fingerprint: string,
     diag: CanonicalFileDiagnostics,
     existingCanonicalId: string | null,
-    overrideMessage?: string
+    overrideMessage?: string,
+    skipResolutionItem?: boolean
   ): Promise<void> {
     const desc = parsed.description.trim();
     const merchant = desc.length > 120 ? desc.slice(0, 120) : desc;
@@ -533,22 +534,24 @@ export async function canonicalizeImportSession(
       row.owner_scope ?? "household",
       row.owner_scope === "person" ? row.owner_person_profile_id : null
     );
-    await qExec(
-      `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
-       VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
-      crypto.randomUUID(),
-      householdId,
-      row.raw_id,
-      JSON.stringify({
-        kind: "exact_duplicate",
-        existingCanonicalId,
-        rawId: row.raw_id,
-        message:
-          overrideMessage ??
-          "Exact duplicate: same account, date, amount, and fingerprint (or FITID) as an existing posted ledger row. Resolve to keep or trash to discard."
-      })
-    );
-    diag.duplicateFingerprint += 1;
+    if (!skipResolutionItem) {
+      await qExec(
+        `INSERT INTO resolution_item (id, household_id, type, target_id, reason, status)
+         VALUES (?, ?, 'duplicate_ambiguity', ?, ?, 'open')`,
+        crypto.randomUUID(),
+        householdId,
+        row.raw_id,
+        JSON.stringify({
+          kind: "exact_duplicate",
+          existingCanonicalId,
+          rawId: row.raw_id,
+          message:
+            overrideMessage ??
+            "Exact duplicate: same account, date, amount, and fingerprint (or FITID) as an existing posted ledger row. Resolve to keep or trash to discard."
+        })
+      );
+      diag.duplicateFingerprint += 1;
+    }
   }
 
   for (const row of rawRows) {
@@ -770,6 +773,7 @@ export async function canonicalizeImportSession(
     }
 
     if (isNear) {
+      await insertExactDuplicateForReview(row, parsed, normDate, rounded, fingerprint, diag, null, undefined, true);
       nearDuplicates += 1;
       diag.nearDuplicate += 1;
       continue;

@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-192 — Near-duplicate rows now inserted as status='duplicate' and flow through standard resolution (2026-06-27)
+
+**What changed:** Near-duplicate canonical rows (same account/date/amount, different fingerprint) were previously skipped entirely — a `resolution_item` was created but no `transaction_canonical` row was inserted, so "Resolve" did nothing and the raw transaction was permanently buried. Now they are inserted with `status='duplicate'` (same as exact duplicates) so the existing resolution pipeline handles them: Needs Review shows them, "Resolve" promotes to posted, "Trash" moves to trashed.
+
+**Fix:** Added `skipResolutionItem?: boolean` to `insertExactDuplicateForReview()`. In the `isNear` block the function is called with `skipResolutionItem=true` (the resolution_item was already created by the near-dup detection code above), inserting the canonical row without creating a second flag. Two test assertions updated to reflect that near-dup rows now count toward `canonicalRowCount` and `deletedCanonicalRows` on undo.
+
+**Files:** `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/tests/app.test.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/148
+
 Entries are **newest-first** within each calendar period. IDs are stable; do not renumber.
 
 ---

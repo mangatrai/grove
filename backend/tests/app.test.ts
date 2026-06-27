@@ -1208,7 +1208,7 @@ describe("import sessions and file intake", () => {
     expect(canRes2.body.nearDuplicates).toBe(0);
   });
 
-  it("routes near-duplicate rows to resolution_item and skips second ledger insert", async () => {
+  it("routes near-duplicate rows to resolution_item and inserts canonical row with status=duplicate", async () => {
     const token = await loginAndGetToken();
     const sessionResponse = await request(app)
       .post("/imports/sessions")
@@ -1258,15 +1258,88 @@ describe("import sessions and file intake", () => {
     ).get(sessionId)) as { c: number };
     expect(openResolution.c).toBeGreaterThanOrEqual(1);
 
+    // Near-dup canonical row must exist with status='duplicate' (not silently dropped).
+    const nearDupCanon = await sqlStmt(
+      `SELECT tc.status FROM resolution_item ri
+         INNER JOIN transaction_raw tr ON ri.target_id = tr.id
+         INNER JOIN transaction_canonical tc ON tc.source_ref = ('raw:' || tr.id)
+         WHERE ri.household_id = (SELECT household_id FROM import_session WHERE id = ?)
+           AND ri.type = 'duplicate_ambiguity'
+           AND tc.status = 'duplicate'
+         LIMIT 1`
+    ).get<{ status: string }>(sessionId);
+    expect(nearDupCanon?.status).toBe("duplicate");
+
     const fileSum = await request(app)
       .get(`/imports/sessions/${sessionId}/summary`)
       .set("authorization", `Bearer ${token}`);
     expect(fileSum.status).toBe(200);
     expect(fileSum.body.files[0].rawRowCount).toBe(2);
-    expect(fileSum.body.files[0].canonicalRowCount).toBe(1);
+    expect(fileSum.body.files[0].canonicalRowCount).toBe(2);
     expect(fileSum.body.files[0].nearDuplicatesFlagged).toBe(1);
     expect(fileSum.body.files[0].notPostedExactDuplicateOrSkipped).toBe(0);
     expect(fileSum.body.files[0].openItemsNeedingReview).toBeGreaterThanOrEqual(1);
+  });
+
+  it("FIX-192: resolving a near-duplicate flag promotes canonical row to posted", async () => {
+    const token = await loginAndGetToken();
+    const sessionId = (
+      await request(app).post("/imports/sessions").set("authorization", `Bearer ${token}`).send({ sourceType: "upload" })
+    ).body.session.id as string;
+
+    const txnDate = new Date(Date.UTC(2025, 0, 1 + crypto.randomInt(0, 8000))).toISOString().slice(0, 10);
+    const tag = crypto.randomUUID().slice(0, 8);
+    const csv = [
+      "Date,Description,Amount,Reference",
+      `${txnDate},NEAR DUP COFFEE ${tag},-12.00,ref-nd1`,
+      `${txnDate},NEAR DUP COFFEE SHOP ${tag},-12.00,ref-nd2`
+    ].join("\n");
+
+    const fileId = (
+      await request(app)
+        .post(`/imports/sessions/${sessionId}/files`)
+        .set("authorization", `Bearer ${token}`)
+        .attach("files", Buffer.from(csv), "near-resolve.csv")
+    ).body.files[0].id as string;
+    await bindImportFile(token, sessionId, fileId, SEED_BOA_CHECKING, "generic_tabular");
+
+    await request(app)
+      .post(`/imports/sessions/${sessionId}/parse`)
+      .set("authorization", `Bearer ${token}`)
+      .send({ mapping: { date: "Date", description: "Description", amount: "Amount", referenceId: "Reference" } });
+
+    const canRes = await request(app)
+      .post(`/imports/sessions/${sessionId}/canonicalize`)
+      .set("authorization", `Bearer ${token}`)
+      .send({});
+    expect(canRes.status).toBe(200);
+    expect(canRes.body.nearDuplicates).toBe(1);
+
+    // Find the resolution_item for the near-dup.
+    const riRow = await sqlStmt(
+      `SELECT ri.id FROM resolution_item ri
+         INNER JOIN transaction_raw tr ON ri.target_id = tr.id
+         WHERE ri.household_id = (SELECT household_id FROM import_session WHERE id = ?)
+           AND ri.type = 'duplicate_ambiguity'
+           AND ri.status = 'open'
+         LIMIT 1`
+    ).get<{ id: string }>(sessionId);
+    expect(riRow).toBeTruthy();
+
+    // Resolve — canonical row should be promoted to posted.
+    const resolveRes = await request(app)
+      .post("/resolution/bulk")
+      .set("authorization", `Bearer ${token}`)
+      .send({ ids: [riRow!.id], status: "resolved" });
+    expect(resolveRes.status).toBe(200);
+
+    const afterResolve = await sqlStmt(
+      `SELECT tc.status FROM resolution_item ri
+         INNER JOIN transaction_raw tr ON ri.target_id = tr.id
+         INNER JOIN transaction_canonical tc ON tc.source_ref = ('raw:' || tr.id)
+         WHERE ri.id = ?`
+    ).get<{ status: string }>(riRow!.id);
+    expect(afterResolve?.status).toBe("posted");
   });
 
   it("TM-4: routes masked ACH (CSV) vs real reference (PDF) as near-duplicate despite description difference", async () => {
@@ -1601,7 +1674,7 @@ describe("import sessions and file intake", () => {
       .set("authorization", `Bearer ${token}`)
       .send({});
     expect(undoRes.status).toBe(200);
-    expect(undoRes.body.deletedCanonicalRows).toBe(1);
+    expect(undoRes.body.deletedCanonicalRows).toBe(2);
     expect(undoRes.body.deletedResolutionItems).toBeGreaterThanOrEqual(1);
 
     const fileSum = await request(app)
