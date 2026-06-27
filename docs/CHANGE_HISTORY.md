@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-198 — Net Worth: household-scoped accounts missing from member breakdown table (2026-06-27)
+
+**What changed:** The Household Breakdown table showed a Household Total that didn't match the sum of per-member rows — a ~$1.69M gap. Root cause: `buildMemberSummary` used an INNER JOIN on `owner_person_profile_id`, silently dropping financial accounts with `owner_person_profile_id IS NULL` (household-scoped / shared accounts) from all member rows, while the Household Total query included them. Fix: query unassigned accounts separately and append a "Shared / Unassigned" row when they carry non-zero balances. Individual rows now sum to the Household Total.
+
+**Files:** `backend/src/modules/reports/balance-sheet.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/147
+
+---
+
 ## DOC-011 — ADMIN_GUIDE §10.1 wrong env var for Google Calendar OAuth redirect URI (2026-06-26)
 
 **What changed:** Section 10.1 listed `GOOGLE_REDIRECT_URI` as the env var to set for Google Calendar OAuth, but the GCal backend (`gcal.routes.ts`, `gcal.service.ts`) reads `GOOGLE_CALENDAR_REDIRECT_URI`. The Drive module uses `GOOGLE_REDIRECT_URI` — they are distinct variables. Corrected the env block to show `GOOGLE_CALENDAR_REDIRECT_URI` with the correct callback path (`/gcal/oauth/callback`) and added a note distinguishing it from the Drive var.
