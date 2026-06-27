@@ -358,6 +358,8 @@ export function FamilySection({ active }: FamilySectionProps) {
   const memberSelectData = members.map((m) => ({ value: m.profileId, label: m.fullName }));
   const loading = membersLoading || slotsLoading;
 
+  if (!active) return null;
+
   return (
     <Stack mt="md">
 

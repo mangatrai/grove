@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-197 — Settings: Family tab content duplicated under Data & Backup tab (2026-06-26)
+
+**What changed:** `FamilySection` component was rendering unconditionally, ignoring its `active` prop. This caused the Family section to appear inside both the Family tab and the Data & Backup tab simultaneously.
+
+**Fix:** Added `if (!active) return null;` guard in `FamilySection.tsx` before the return statement, matching the pattern already used by `BackupRestoreSection`.
+
+**Files:** `frontend/src/pages/settings/FamilySection.tsx`
+
+---
+
 ## FIX-196 — Family agent: add 'suggestion' to alert_type check constraint (2026-06-26)
 
 **What changed:** `family_agent_alerts.alert_type` CHECK constraint was missing `'suggestion'`, causing a DB constraint violation when the LLM agent emitted suggestions alongside conflict/coverage alerts.
