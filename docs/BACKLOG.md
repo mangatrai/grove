@@ -130,6 +130,7 @@ V5 sprint: Real Estate first-class pages (RE-1) → Property Tax Protest assista
 | **I-7** | Recurring payments — phases 4+ | Deferred | Annual subscription detection (CV + 2-month gate misses annuals). Upcoming bill prediction. Per-transaction exclusion from recurring pattern. Enhancement to shipped phases 1–3. | P3 |
 | **T-1** | Documentation consolidation | ✅ SHIPPED (DOC-217, 2026-05-25) | Reduced 40+ markdown files to 5 canonical docs: `USER_GUIDE.md` (enhanced), `ADMIN_GUIDE.md` (new — consolidates RUNBOOK, PRODUCTION_SETUP, HOSTING_OPTIONS, DATABASE_ARCHITECTURE, ENVIRONMENT_VARIABLES, ARCHITECTURE, CACHING, IMPORT_CLASSIFICATION, EMAIL_INFRASTRUCTURE, OCI_DEPLOYMENT), `BACKLOG.md` (new Jira-style board — consolidates all backlog files, V3/V4 history), `PRD_AND_CRS.md` (new — consolidates all archive docs), `CHANGE_HISTORY.md` (unchanged). API docs and openapi.yaml untouched. README and CLAUDE.md updated. | P3 |
 | **ESPP-2** | IBM last close price strip on ESPP screen | Planned | Fetch IBM stock last closing price via `yahoo-finance2` npm package (no API key, no signup required). Scheduled backend job at 4:15 pm ET Mon–Fri caches the quote in memory (1-hour TTL); outside market hours, returns last-fetched value. New endpoint `GET /espp/stock-quote` returns `{ symbol, price, previousClose, asOf }`. Frontend: compact stat chip at top of EsppPage — "IBM · $XXX.XX · close YYYY-MM-DD". Files: `espp-stock.service.ts` (new), `espp.routes.ts` (+1 route), `EsppPage.tsx` (+chip), `package.json` (+yahoo-finance2). GitHub issue #36. | P2 |
+| **PERF-1** | Route-level code splitting to reduce initial JS bundle | Planned | Vite build produces a single 1,528 kB chunk (422 kB gzip) because all 16+ page components are statically imported in `App.tsx`. Fix: convert page imports to `React.lazy()` + `Suspense`; add `manualChunks` in `vite.config.ts` to split vendor libs (Mantine, Recharts) into a stable cached chunk. Expected: initial bundle drops to ~300–400 kB; pages lazy-load on first visit. Not a current pain point for household use — P3. GitHub issue #146. | P3 |
 
 ---
 
@@ -334,6 +335,7 @@ Full design notes for major systems from source files.
 - UX-P02: `index.html` meta tags (apple-mobile-web-app-*, manifest link)
 - UX-P03: 192×512 app icons in `frontend/public/icons/`
 - UX-R01/R04–R06: Viewport audit completed; Recharts ResponsiveContainer verified; form Grid→Stack on mobile; payslip touch affordances
+- UX-R06 (2026-06-27): Net Worth breakdown footnote — Household Total includes real estate market values (household-level, no owner); dimmed note quantifies the gap and links to Properties section. GH #147.
 
 **Remaining (deferred post-V4):**
 - UX-R02: AppShell hamburger + drawer nav on `<md` viewports (Mantine `navbar.collapsed.mobile`)

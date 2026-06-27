@@ -980,6 +980,17 @@ export function NetWorthPage() {
                 ))}
               </Table.Tbody>
             </Table>
+            {(() => {
+              const propTotal = (data?.properties ?? []).reduce(
+                (sum, p) => sum + (p.marketValue ?? 0),
+                0
+              );
+              return propTotal > 0 ? (
+                <Text fz={12} c="dimmed" mt={6}>
+                  * Household Total includes {formatMoney(propTotal)} in real estate market value. See Properties section below.
+                </Text>
+              ) : null;
+            })()}
           </Paper>
         ) : null;
 

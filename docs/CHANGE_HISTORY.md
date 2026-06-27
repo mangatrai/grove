@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## UX-R06 — Net Worth: footnote on Household Total explaining real estate inclusion (2026-06-27)
+
+**What changed:** The Household Breakdown table total includes property market values (from `property_value_snapshot`) but member rows only cover financial accounts — properties have no individual owner in the data model, so the gap was unexplained. Added a dimmed footnote below the table: "* Household Total includes $X in real estate market value. See Properties section below." Only shown when at least one property has a market value on record.
+
+**Files:** `frontend/src/pages/NetWorthPage.tsx`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/147
+
+---
+
 ## DOC-011 — ADMIN_GUIDE §10.1 wrong env var for Google Calendar OAuth redirect URI (2026-06-26)
 
 **What changed:** Section 10.1 listed `GOOGLE_REDIRECT_URI` as the env var to set for Google Calendar OAuth, but the GCal backend (`gcal.routes.ts`, `gcal.service.ts`) reads `GOOGLE_CALENDAR_REDIRECT_URI`. The Drive module uses `GOOGLE_REDIRECT_URI` — they are distinct variables. Corrected the env block to show `GOOGLE_CALENDAR_REDIRECT_URI` with the correct callback path (`/gcal/oauth/callback`) and added a note distinguishing it from the Drive var.
