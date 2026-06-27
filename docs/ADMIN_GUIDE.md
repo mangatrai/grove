@@ -939,8 +939,10 @@ The Family Planner module (V6) reads all calendar data from Google Calendar via 
 ```
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
-GOOGLE_REDIRECT_URI=https://your-koyeb-app.koyeb.app/auth/google/callback
+GOOGLE_CALENDAR_REDIRECT_URI=https://your-koyeb-app.koyeb.app/gcal/oauth/callback
 ```
+
+> **Note:** `GOOGLE_CALENDAR_REDIRECT_URI` is distinct from `GOOGLE_REDIRECT_URI` (used by Google Drive backup). Calendar OAuth uses the `/gcal/oauth/callback` path; Drive uses `/gdrive/oauth/callback`. Both share the same `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. If you use both features, register both redirect URIs in the Google Cloud console and set both env vars.
 
 ### 10.2 Per-Parent Google Calendar Connect
 

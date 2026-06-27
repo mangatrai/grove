@@ -18,6 +18,16 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## DOC-011 — ADMIN_GUIDE §10.1 wrong env var for Google Calendar OAuth redirect URI (2026-06-26)
+
+**What changed:** Section 10.1 listed `GOOGLE_REDIRECT_URI` as the env var to set for Google Calendar OAuth, but the GCal backend (`gcal.routes.ts`, `gcal.service.ts`) reads `GOOGLE_CALENDAR_REDIRECT_URI`. The Drive module uses `GOOGLE_REDIRECT_URI` — they are distinct variables. Corrected the env block to show `GOOGLE_CALENDAR_REDIRECT_URI` with the correct callback path (`/gcal/oauth/callback`) and added a note distinguishing it from the Drive var.
+
+**Files:** `docs/ADMIN_GUIDE.md`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/145
+
+---
+
 ## FIX-197 — Settings: Family tab content duplicated under Data & Backup tab (2026-06-26)
 
 **What changed:** `FamilySection` component was rendering unconditionally, ignoring its `active` prop. This caused the Family section to appear inside both the Family tab and the Data & Backup tab simultaneously.
