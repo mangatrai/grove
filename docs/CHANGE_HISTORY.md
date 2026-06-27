@@ -18,6 +18,18 @@ Entries are **newest-first** within each calendar period. IDs are stable; do not
 
 ---
 
+## FIX-196 — Family agent: add 'suggestion' to alert_type check constraint (2026-06-26)
+
+**What changed:** `family_agent_alerts.alert_type` CHECK constraint was missing `'suggestion'`, causing a DB constraint violation when the LLM agent emitted suggestions alongside conflict/coverage alerts.
+
+**Root cause:** Migration 0072 defined the constraint with only 4 values (`conflict`, `travel`, `coverage_gap`, `deadline_approaching`). The TypeScript type already included `"suggestion"` — the constraint was never updated to match.
+
+**Fix:** Migration 0077 (`0077_family_alert_type_suggestion.sql`) drops and recreates the constraint to include all 5 values.
+
+**Files:** `backend/db/migrations/0077_family_alert_type_suggestion.sql`
+
+---
+
 ## v6.0.0 — Family Planner, GCal integration, payslip fixes (2026-06-25)
 
 Includes all Family Planner work (FP-1 through FP-4): Google Calendar OAuth, Events/Deadlines pages, household assistant agent, proactive deadline reminders, member profile UI, help availability CRUD. Plus FIX-193 and FIX-194 (payslip detail regressions).
