@@ -179,7 +179,7 @@ familyEventsRouter.post(
 
     if (action.type === "create_event") {
       const d = action.details;
-      const gcalResult = await createCalendarEvent(userId, {
+      const gcalResult = await createCalendarEvent(userId, householdId, {
         title: action.title,
         date: typeof d.date === "string" ? d.date : new Date().toISOString().slice(0, 10),
         time: typeof d.time === "string" ? d.time : undefined,

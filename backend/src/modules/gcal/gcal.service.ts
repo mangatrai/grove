@@ -4,7 +4,7 @@ import { GaxiosError } from "gaxios";
 import { google } from "googleapis";
 
 import { env } from "../../config/env.js";
-import { qExec, qGet } from "../../db/query.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
@@ -129,28 +129,47 @@ export async function exchangeAndSaveCalendar(
     env.GOOGLE_CALENDAR_REDIRECT_URI
   );
   let refreshToken: string;
+  let accessToken: string | null = null;
   try {
     const { tokens } = await client.getToken(code);
     if (!tokens.refresh_token) {
       return { ok: false, message: "No refresh token returned — ensure prompt=consent was set." };
     }
     refreshToken = tokens.refresh_token;
+    accessToken = tokens.access_token ?? null;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn("gcal OAuth code exchange failed", { userId, householdId, msg });
     return { ok: false, message: `OAuth code exchange failed: ${msg}` };
   }
-  await connectGCal(householdId, userId, refreshToken);
+
+  let providerEmail: string | null = null;
+  try {
+    client.setCredentials({ access_token: accessToken });
+    const oauth2 = google.oauth2({ version: "v2", auth: client });
+    const userinfoRes = await oauth2.userinfo.get();
+    providerEmail = userinfoRes.data.email ?? null;
+  } catch (err) {
+    log.warn("gcal: could not fetch userinfo email", { userId, err: err instanceof Error ? err.message : String(err) });
+  }
+
+  await connectGCal(householdId, userId, refreshToken, providerEmail);
   return { ok: true };
 }
 
-export async function connectGCal(householdId: string, userId: string, refreshToken: string): Promise<void> {
+export async function connectGCal(
+  householdId: string,
+  userId: string,
+  refreshToken: string,
+  providerEmail: string | null = null
+): Promise<void> {
   await qExec(
     `INSERT INTO oauth_integrations
-     (provider, household_id, user_id, refresh_token, connected_by_user_id, last_verified_at, last_error, needs_reauth)
-     VALUES ('google_calendar', ?, ?, ?, ?, NOW(), NULL, FALSE)
+     (provider, household_id, user_id, refresh_token, provider_email, connected_by_user_id, last_verified_at, last_error, needs_reauth)
+     VALUES ('google_calendar', ?, ?, ?, ?, ?, NOW(), NULL, FALSE)
      ON CONFLICT (user_id, provider) WHERE user_id IS NOT NULL DO UPDATE SET
        refresh_token = EXCLUDED.refresh_token,
+       provider_email = EXCLUDED.provider_email,
        connected_at = NOW(),
        connected_by_user_id = EXCLUDED.connected_by_user_id,
        last_verified_at = NOW(),
@@ -159,6 +178,7 @@ export async function connectGCal(householdId: string, userId: string, refreshTo
     householdId,
     userId,
     encryptToken(refreshToken),
+    providerEmail,
     userId
   );
 }
@@ -428,6 +448,7 @@ export type CreateCalendarEventResult =
 
 export async function createCalendarEvent(
   userId: string,
+  householdId: string,
   event: NewCalendarEvent
 ): Promise<CreateCalendarEventResult> {
   const refreshToken = await getDecryptedRefreshToken(userId);
@@ -452,6 +473,21 @@ export async function createCalendarEvent(
     end = { date: nextDay.toISOString().slice(0, 10) };
   }
 
+  // Add all other connected parents in the household as attendees so the event
+  // lands on their primary Google Calendar via invite.
+  const coParentRows = await qAll<{ provider_email: string }>(
+    `SELECT provider_email FROM oauth_integrations
+     WHERE provider = 'google_calendar'
+       AND household_id = ?
+       AND user_id != ?
+       AND needs_reauth = FALSE
+       AND provider_email IS NOT NULL`,
+    householdId,
+    userId
+  );
+  const coParentEmails = coParentRows.map(r => r.provider_email);
+  const allAttendees = [...(event.attendees ?? []), ...coParentEmails];
+
   try {
     const res = await calendar.events.insert({
       calendarId: "primary",
@@ -460,7 +496,7 @@ export async function createCalendarEvent(
         description: event.description,
         start,
         end,
-        attendees: event.attendees?.map((email) => ({ email })),
+        attendees: allAttendees.length > 0 ? allAttendees.map((email) => ({ email })) : undefined,
       },
     });
     return {

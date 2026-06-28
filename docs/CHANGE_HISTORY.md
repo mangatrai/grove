@@ -14,6 +14,19 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-14 — GCal event creation: store provider_email at OAuth time, auto-invite co-parents (2026-06-28)
+
+**What changed:**
+- `exchangeAndSaveCalendar` now calls Google's `userinfo.get()` after the OAuth token exchange to fetch the authenticated account's email, and stores it in the `provider_email` column of `oauth_integrations`. Non-fatal: if the userinfo call fails, connection still succeeds and `provider_email` stays null.
+- `connectGCal` updated to accept and persist `providerEmail` (written on both INSERT and the ON CONFLICT UPDATE path, so reconnects refresh the value).
+- `createCalendarEvent` now takes `householdId` and queries `oauth_integrations` for all other connected parents in the same household with a non-null `provider_email`. Those emails are appended to the GCal `attendees` list so the event lands on every parent's primary calendar via Google invite. The approving user's own write still goes to their `primary` calendar.
+
+**Why:** Previously, approving a quick-capture `create_event` only wrote to the approving user's calendar. If the event was relevant to both parents (school pickup, kid activity), the other parent had no visibility unless manually added. Adding household co-parents as attendees ensures both see the invite without any extra UX.
+
+**Files:** `backend/src/modules/gcal/gcal.service.ts`, `backend/src/modules/family/family-events.routes.ts`
+
+---
+
 ## FP-13 — Alert card Compose button + CAPTURE_SYSTEM prompt improvements (2026-06-28)
 
 **What changed:**
