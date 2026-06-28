@@ -26,6 +26,8 @@ export interface CompletionOptions {
   model: string;
   maxTokens?: number;
   temperature?: number;
+  /** Request JSON-only output. OpenAI uses json_object mode; Anthropic gets a system instruction. */
+  responseFormat?: "json";
 }
 
 export interface LlmUsage {

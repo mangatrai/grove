@@ -385,7 +385,7 @@ async function analyzeWithLlm(
       },
       { role: "user", content: prompt },
     ],
-    { model: strongModel(), maxTokens: 2000 }
+    { model: strongModel(), maxTokens: 2000, responseFormat: "json" }
   );
 
   const jsonStr = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");

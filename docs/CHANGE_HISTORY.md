@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-197 — JSON enforcement wired through shared LLM adapter (2026-06-27)
+
+**What changed:** Added `responseFormat?: "json"` to the shared `CompletionOptions` interface. OpenAI chat path now passes `response_format: { type: "json_object" }` when set (hard enforcement). Anthropic chat path appends a "Return ONLY valid JSON" instruction to the system prompt. Family agent now passes `responseFormat: "json"` at its call site, replacing prompt-only JSON enforcement.
+
+**Files:** `backend/src/llm/types.ts`, `backend/src/llm/providers/openai.ts`, `backend/src/llm/providers/anthropic.ts`, `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/149
+
+---
+
 ## FIX-192 — Near-duplicate rows now inserted as status='duplicate' and flow through standard resolution (2026-06-27)
 
 **What changed:** Near-duplicate canonical rows (same account/date/amount, different fingerprint) were previously skipped entirely — a `resolution_item` was created but no `transaction_canonical` row was inserted, so "Resolve" did nothing and the raw transaction was permanently buried. Now they are inserted with `status='duplicate'` (same as exact duplicates) so the existing resolution pipeline handles them: Needs Review shows them, "Resolve" promotes to posted, "Trash" moves to trashed.

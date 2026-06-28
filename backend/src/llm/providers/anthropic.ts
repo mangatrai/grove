@@ -78,10 +78,14 @@ export async function anthropicChat(
 ): Promise<{ content: string; usage: LlmUsage }> {
   const client = buildClient();
   const { system, rest } = splitSystem(messages);
+  const systemFull =
+    options.responseFormat === "json"
+      ? [system, "Return ONLY valid JSON. No prose outside the JSON."].filter(Boolean).join("\n\n")
+      : system;
   const res = await client.messages.create({
     model: options.model,
     max_tokens: options.maxTokens ?? 1024,
-    ...(system ? { system } : {}),
+    ...(systemFull ? { system: systemFull } : {}),
     messages: toAnthropicMessages(rest),
   });
   const text = res.content
