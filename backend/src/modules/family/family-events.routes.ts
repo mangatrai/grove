@@ -18,6 +18,8 @@ import {
   resolveAlert,
   runFamilyAgent,
 } from "./family-agent.service.js";
+import { createCalendarEvent } from "../gcal/gcal.service.js";
+import { qExec } from "../../db/query.js";
 
 export const familyEventsRouter = Router();
 familyEventsRouter.use(requireAuth);
@@ -135,5 +137,63 @@ familyEventsRouter.post(
     } catch (err) {
       res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
     }
+  }
+);
+
+const approveActionSchema = z.object({
+  action: z.object({
+    type: z.enum(["create_event", "set_reminder", "draft_message", "note"]),
+    title: z.string().min(1).max(200),
+    summary: z.string(),
+    details: z.record(z.unknown()).default({}),
+  }),
+});
+
+/** POST /family/actions/approve — approve a suggested action (store alert + optional GCal write-back) */
+familyEventsRouter.post(
+  "/actions/approve",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = approveActionSchema.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+
+    const { action } = parsed.data;
+    const { householdId, userId } = req.authUser!;
+
+    const alertId = crypto.randomUUID();
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, detected_at, alert_type, reason, affected_date, copy_paste_text, recipient_hint, is_resolved, source_digest_id)
+       VALUES (?, ?, NOW(), 'suggestion', ?, ?, ?, ?, FALSE, NULL)`,
+      alertId,
+      householdId,
+      action.summary,
+      typeof action.details.date === "string" ? action.details.date : null,
+      action.title,
+      null
+    );
+
+    let calEventId: string | null = null;
+    let calEventLink: string | null = null;
+    let calError: string | null = null;
+
+    if (action.type === "create_event") {
+      const d = action.details;
+      const gcalResult = await createCalendarEvent(userId, {
+        title: action.title,
+        date: typeof d.date === "string" ? d.date : new Date().toISOString().slice(0, 10),
+        time: typeof d.time === "string" ? d.time : undefined,
+        durationMins: typeof d.duration_mins === "number" ? d.duration_mins : undefined,
+        description: typeof d.description === "string" ? d.description : undefined,
+        attendees: Array.isArray(d.participants) ? (d.participants as string[]) : undefined,
+      });
+      if (gcalResult.ok) {
+        calEventId = gcalResult.eventId;
+        calEventLink = gcalResult.eventLink;
+      } else {
+        calError = gcalResult.message;
+      }
+    }
+
+    res.json({ ok: true, alertId, calEventId, calEventLink, calError });
   }
 );

@@ -9,7 +9,9 @@ import { log } from "../../logger.js";
 
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
 
-const GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"];
+// calendar scope enables both read and write (events.insert); existing tokens with
+// readonly scope will get a 403 on write and we surface a NEEDS_REAUTH error.
+const GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"];
 
 // ---------------------------------------------------------------------------
 // Refresh token encryption at rest — separate key purpose from Drive tokens
@@ -405,4 +407,77 @@ export async function assertCanConnectCalendar(userId: string, householdId: stri
       row.household_id === householdId &&
       (row.role === "owner" || row.role === "admin")
   );
+}
+
+// ---------------------------------------------------------------------------
+// Calendar write-back — create an event on the user's primary calendar
+// ---------------------------------------------------------------------------
+
+export type NewCalendarEvent = {
+  title: string;
+  date: string;        // ISO date YYYY-MM-DD
+  time?: string;       // HH:MM (24h); omit for all-day
+  durationMins?: number;
+  description?: string;
+  attendees?: string[];
+};
+
+export type CreateCalendarEventResult =
+  | { ok: true; eventId: string; eventLink: string | null }
+  | { ok: false; code: "GCAL_NOT_CONNECTED" | "GCAL_NEEDS_REAUTH" | "GCAL_WRITE_ERROR"; message: string };
+
+export async function createCalendarEvent(
+  userId: string,
+  event: NewCalendarEvent
+): Promise<CreateCalendarEventResult> {
+  const refreshToken = await getDecryptedRefreshToken(userId);
+  if (!refreshToken) return { ok: false, code: "GCAL_NOT_CONNECTED", message: "Google Calendar is not connected for this user." };
+
+  const auth = buildOAuth2Client(refreshToken);
+  const calendar = google.calendar({ version: "v3", auth });
+
+  let start: { date: string } | { dateTime: string; timeZone: string };
+  let end: { date: string } | { dateTime: string; timeZone: string };
+
+  if (event.time) {
+    const startDt = new Date(`${event.date}T${event.time}:00`);
+    const endDt = new Date(startDt.getTime() + (event.durationMins ?? 60) * 60_000);
+    start = { dateTime: startDt.toISOString(), timeZone: "UTC" };
+    end = { dateTime: endDt.toISOString(), timeZone: "UTC" };
+  } else {
+    // All-day event
+    const nextDay = new Date(event.date);
+    nextDay.setDate(nextDay.getDate() + 1);
+    start = { date: event.date };
+    end = { date: nextDay.toISOString().slice(0, 10) };
+  }
+
+  try {
+    const res = await calendar.events.insert({
+      calendarId: "primary",
+      requestBody: {
+        summary: event.title,
+        description: event.description,
+        start,
+        end,
+        attendees: event.attendees?.map((email) => ({ email })),
+      },
+    });
+    return {
+      ok: true,
+      eventId: res.data.id ?? "",
+      eventLink: res.data.htmlLink ?? null,
+    };
+  } catch (err: unknown) {
+    const status = (err as { code?: number }).code;
+    if (status === 401 || status === 403) {
+      // Token lacks write scope — mark needs_reauth so user gets prompted to reconnect
+      await qExec(
+        `UPDATE oauth_integrations SET needs_reauth = TRUE WHERE provider = 'google_calendar' AND user_id = ?`,
+        userId
+      );
+      return { ok: false, code: "GCAL_NEEDS_REAUTH", message: "Google Calendar needs to be reconnected to enable write access." };
+    }
+    return { ok: false, code: "GCAL_WRITE_ERROR", message: err instanceof Error ? err.message : "Calendar event creation failed." };
+  }
 }

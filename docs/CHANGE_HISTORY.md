@@ -14,6 +14,18 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-9 — Action approval + Google Calendar write-back (2026-06-27)
+
+**What changed:** New `POST /family/actions/approve` endpoint receives a `CaptureAction` (from the capture inbox), stores it as a `family_agent_alerts` suggestion row, and for `create_event` actions calls Google Calendar API to create the event on the user's primary calendar. GCal OAuth scope upgraded from `calendar.readonly` → `calendar` to enable event creation. Existing users with the old scope get `GCAL_NEEDS_REAUTH` response — reconnecting GCal grants write access. Added `createCalendarEvent()` + `NewCalendarEvent` / `CreateCalendarEventResult` types to `gcal.service.ts`.
+
+**Files:** `backend/src/modules/gcal/gcal.service.ts`, `backend/src/modules/family/family-events.routes.ts`
+
+**Migration note:** Existing GCal connections use `readonly` scope. On the first `create_event` approval, `needs_reauth` is set to `true` and the user is prompted to reconnect GCal to get write permission.
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/152
+
+---
+
 ## FP-8 — PA quick-capture inbox (POST /family/agent/capture) (2026-06-27)
 
 **What changed:** New `POST /family/agent/capture` endpoint accepts `{ note: string }` and returns `{ responseText, actions[] }` inline (synchronous, no email, no DB write). Agent parses freeform notes into suggested actions (`create_event`, `set_reminder`, `draft_message`, `note`). Uses shared tool loop with `search_web` available (Tavily, max 3 iterations). Added `CaptureAction` / `CaptureResult` types to `family.types.ts`.
