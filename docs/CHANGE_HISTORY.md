@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-12 — Stale suggestion follow-up: re-surface in weekly runs (2026-06-27)
+
+**What changed:** Full agent runs (sunday_preview, monday_digest, manual) now fetch suggestion-type alerts older than 5 days via new `listStaleSuggestions()`. These are injected as a `=== Stale suggestions ===` section in the prompt so the agent can explicitly follow up, update, or dismiss them. Delta runs continue to use all open alerts (unchanged — to avoid re-flagging).
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/155
+
+---
+
 ## FP-11 — Cross-module finance context in agent prompt (2026-06-27)
 
 **What changed:** Family agent now fetches and injects a compact finance summary into its analysis prompt: top 5 spending categories (last 30 days) + last 2 payslips. Added `buildFinanceContext(householdId)` in `family-agent.service.ts` using `transaction_canonical` + `payslip_snapshot` tables. Finance context fetched in parallel with household members and care schedule. Prompt includes a `=== Finance Context ===` section so the agent can surface pay-timing conflicts, spending anomalies related to household events, or activity/enrollment cost context.

@@ -338,6 +338,14 @@ function buildAnalysisPrompt(
       ).join("\n") + "\n"
     : "";
 
+  const staleSuggestions = openAlerts.filter(a => a.alertType === "suggestion" && !isDelta);
+  const staleSuggestionsSection = staleSuggestions.length > 0
+    ? `\n=== Stale suggestions (unresolved for 5+ days — follow up or dismiss) ===\n` +
+      staleSuggestions.map(a =>
+        `- [suggested ${a.detectedAt.slice(0, 10)}] ${a.reason}`
+      ).join("\n") + "\n"
+    : "";
+
   const taskDescription = isDelta
     ? "Check for NEW items not already covered by the open alerts listed above. An item is 'new' if it involves a different date, different event, or a genuinely different situation from what is already flagged."
     : isPreview
@@ -347,7 +355,7 @@ function buildAnalysisPrompt(
   return `Today is ${today}. Run type: ${runType}.
 
 Task: ${taskDescription}
-${openAlertsSection}
+${openAlertsSection}${staleSuggestionsSection}
 === Household Members ===
 ${memberLines}
 
@@ -495,7 +503,10 @@ export async function runFamilyAgent(
 
     // For daily delta: fetch open alerts so the LLM can skip conflicts already surfaced.
     // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
-    const openAlerts = runType === "daily_delta" ? await listAlerts(householdId, false) : [];
+    // delta: all open alerts (to avoid re-flagging); full runs: stale suggestions only (5+ days old)
+    const openAlerts = runType === "daily_delta"
+      ? await listAlerts(householdId, false)
+      : await listStaleSuggestions(householdId, 5);
 
     const [members, caregiverSlots, financeContext] = await Promise.all([
       listHouseholdMembers(householdId),
@@ -639,6 +650,20 @@ export async function listAlerts(householdId: string, includeResolved = false): 
         `SELECT * FROM family_agent_alerts WHERE household_id = ? AND is_resolved = FALSE ORDER BY detected_at DESC`,
         householdId
       );
+  return rows.map(rowToAlert);
+}
+
+export async function listStaleSuggestions(householdId: string, olderThanDays: number): Promise<AgentAlert[]> {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - olderThanDays);
+  const rows = await qAll<AlertRow>(
+    `SELECT * FROM family_agent_alerts
+     WHERE household_id = ? AND alert_type = 'suggestion' AND is_resolved = FALSE
+       AND detected_at < ?
+     ORDER BY detected_at ASC`,
+    householdId,
+    cutoff.toISOString()
+  );
   return rows.map(rowToAlert);
 }
 
