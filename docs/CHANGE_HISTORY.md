@@ -14,6 +14,18 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-13 — Alert card Compose button + CAPTURE_SYSTEM prompt improvements (2026-06-28)
+
+**What changed:**
+- `AlertCard` now shows a "Compose" button (alongside "Dismiss") whenever `copyPasteText` is set. Clicking it opens `ComposeModal` pre-filled with `body = copyPasteText` and `subject` derived from alert type + affected date. User fills in the `to` field (`recipientHint` is a role name, not an email). This is the primary compose path: agent detects a conflict, drafts the message, user taps Compose to send it directly.
+- Quick-capture textarea placeholder updated to showcase the right use cases (research, drafting, reminders) and drop the pure-relay example ("ask nanny to come in early").
+- `CAPTURE_SYSTEM` prompt rewritten with explicit guidance on: when to call `search_web` first, multi-step task handling, full polished `body_draft` for draft_message (not stubs), and tone differentiation (school/medical = formal, nanny/coach = conversational).
+- Added `handleAlertCompose(alert)` in `FamilyAgentPage` — builds compose subject/body from alert fields and opens modal.
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`, `backend/src/modules/family/family-agent.service.ts`
+
+---
+
 ## FP-12 — Stale suggestion follow-up: re-surface in weekly runs (2026-06-27)
 
 **What changed:** Full agent runs (sunday_preview, monday_digest, manual) now fetch suggestion-type alerts older than 5 days via new `listStaleSuggestions()`. These are injected as a `=== Stale suggestions ===` section in the prompt so the agent can explicitly follow up, update, or dismiss them. Delta runs continue to use all open alerts (unchanged — to avoid re-flagging).

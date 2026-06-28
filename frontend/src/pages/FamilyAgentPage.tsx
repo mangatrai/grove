@@ -125,9 +125,10 @@ const ACTION_LABELS: Record<CaptureActionType, string> = {
 type AlertCardProps = {
   alert: AgentAlert;
   onResolve: (id: string) => void;
+  onCompose: (alert: AgentAlert) => void;
 };
 
-function AlertCard({ alert, onResolve }: AlertCardProps) {
+function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
   const [resolving, setResolving] = useState(false);
   const [copied, setCopied] = useState(false);
   const textRef = useRef<HTMLPreElement>(null);
@@ -202,6 +203,17 @@ function AlertCard({ alert, onResolve }: AlertCardProps) {
         ) : null}
 
         <Group justify="flex-end">
+          {alert.copyPasteText ? (
+            <Button
+              size="xs"
+              variant="subtle"
+              color="blue"
+              leftSection={<IconMail size={13} />}
+              onClick={() => onCompose(alert)}
+            >
+              Compose
+            </Button>
+          ) : null}
           <Button
             size="xs"
             variant="subtle"
@@ -490,6 +502,19 @@ export function FamilyAgentPage() {
     setComposeOpen(true);
   }
 
+  function handleAlertCompose(alert: AgentAlert) {
+    const label = ALERT_TYPE_LABELS[alert.alertType] ?? alert.alertType;
+    const datePart = alert.affectedDate
+      ? ` — ${new Date(alert.affectedDate).toLocaleDateString(undefined, { dateStyle: "medium" })}`
+      : "";
+    setComposeInitial({
+      to: "",
+      subject: `${label}${datePart}`,
+      body: alert.copyPasteText ?? "",
+    });
+    setComposeOpen(true);
+  }
+
   const activeAlerts = alerts.filter(a => !a.isResolved);
   const resolvedAlerts = alerts.filter(a => a.isResolved);
 
@@ -532,7 +557,7 @@ export function FamilyAgentPage() {
           </Group>
           <Text size="xs" c="dimmed">Send a note — the agent will parse it and suggest actions (create event, set reminder, draft message).</Text>
           <Textarea
-            placeholder="e.g. Remind me to check swim lesson schedule next Tuesday, or ask nanny to come in early on Friday…"
+            placeholder="e.g. Find swim camps with summer openings, draft an absence note for Jake's school, remind me to follow up on Mia's referral next Monday…"
             value={captureNote}
             onChange={e => setCaptureNote(e.currentTarget.value)}
             autosize
@@ -601,7 +626,7 @@ export function FamilyAgentPage() {
         ) : (
           <Stack gap="sm">
             {activeAlerts.map(a => (
-              <AlertCard key={a.id} alert={a} onResolve={handleResolve} />
+              <AlertCard key={a.id} alert={a} onResolve={handleResolve} onCompose={handleAlertCompose} />
             ))}
             {showResolved && resolvedAlerts.length > 0 ? (
               <>
