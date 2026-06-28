@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-7 — Tool calling + Tavily search wired into family agent (2026-06-27)
+
+**What changed:** Extracted Tavily web search into `backend/src/llm/tools/tavily.ts` (`tavilySearch()` + `SEARCH_WEB_TOOL` constant). Family agent now uses `getToolUseAdapter().runToolLoop()` with `search_web` as an available tool (max 4 iterations) — the model can search for public deadlines, school enrollment windows, camp sign-up dates etc. before producing its JSON analysis. Protest module updated to use shared `tavilySearch()` (removed inline fetch duplication).
+
+**Files:** `backend/src/llm/tools/tavily.ts` (new), `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/protest/protest.routes.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/150
+
+---
+
 ## FIX-197 — JSON enforcement wired through shared LLM adapter (2026-06-27)
 
 **What changed:** Added `responseFormat?: "json"` to the shared `CompletionOptions` interface. OpenAI chat path now passes `response_format: { type: "json_object" }` when set (hard enforcement). Anthropic chat path appends a "Return ONLY valid JSON" instruction to the system prompt. Family agent now passes `responseFormat: "json"` at its call site, replacing prompt-only JSON enforcement.

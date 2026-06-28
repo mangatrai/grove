@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 
-import { getChatAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
+import { getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
+import { SEARCH_WEB_TOOL, tavilySearch } from "../../llm/tools/tavily.js";
 import { log } from "../../logger.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
@@ -377,18 +378,26 @@ async function analyzeWithLlm(
 ): Promise<AgentAnalysis> {
   const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, members, caregiverSlots);
 
-  const { content } = await getChatAdapter().complete(
+  const { finalResponse } = await getToolUseAdapter().runToolLoop(
     [
       {
         role: "system",
-        content: "You are a household executive assistant — a personal assistant managing calendars, childcare logistics, and family planning for a dual-income household with young children. You coordinate schedules, flag conflicts, suggest actions, and surface planning opportunities. You always respond with valid JSON only — no prose, no markdown, no explanation outside the JSON.",
+        content: "You are a household executive assistant — a personal assistant managing calendars, childcare logistics, and family planning for a dual-income household with young children. You coordinate schedules, flag conflicts, suggest actions, and surface planning opportunities. Use the search_web tool when you need to look up public deadlines, school enrollment windows, camp registration dates, or local activity schedules. You always respond with valid JSON only as your final answer — no prose, no markdown, no explanation outside the JSON.",
       },
       { role: "user", content: prompt },
     ],
-    { model: strongModel(), maxTokens: 2000, responseFormat: "json" }
+    [SEARCH_WEB_TOOL],
+    async (name, args) => {
+      if (name === "search_web") {
+        const query = typeof args.query === "string" ? args.query : "";
+        return tavilySearch(query);
+      }
+      return `Unknown tool: ${name}`;
+    },
+    { model: strongModel(), maxTokens: 2000, maxIterations: 4 }
   );
 
-  const jsonStr = content.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const jsonStr = finalResponse.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
   const parsed = JSON.parse(jsonStr) as AgentAnalysis;
   return parsed;
 }
