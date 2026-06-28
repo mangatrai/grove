@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-8 — PA quick-capture inbox (POST /family/agent/capture) (2026-06-27)
+
+**What changed:** New `POST /family/agent/capture` endpoint accepts `{ note: string }` and returns `{ responseText, actions[] }` inline (synchronous, no email, no DB write). Agent parses freeform notes into suggested actions (`create_event`, `set_reminder`, `draft_message`, `note`). Uses shared tool loop with `search_web` available (Tavily, max 3 iterations). Added `CaptureAction` / `CaptureResult` types to `family.types.ts`.
+
+**Files:** `backend/src/modules/family/family.types.ts`, `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/family/family-events.routes.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/151
+
+---
+
 ## FP-7 — Tool calling + Tavily search wired into family agent (2026-06-27)
 
 **What changed:** Extracted Tavily web search into `backend/src/llm/tools/tavily.ts` (`tavilySearch()` + `SEARCH_WEB_TOOL` constant). Family agent now uses `getToolUseAdapter().runToolLoop()` with `search_web` as an available tool (max 4 iterations) — the model can search for public deadlines, school enrollment windows, camp sign-up dates etc. before producing its JSON analysis. Protest module updated to use shared `tavilySearch()` (removed inline fetch duplication).

@@ -14,6 +14,7 @@ import {
 import {
   listAlerts,
   listDigestLog,
+  processCaptureNote,
   resolveAlert,
   runFamilyAgent,
 } from "./family-agent.service.js";
@@ -118,5 +119,21 @@ familyEventsRouter.post(
     const runType = parsed.data.runType ?? "manual";
     const result = await runFamilyAgent(req.authUser!.householdId, runType);
     res.json(result);
+  }
+);
+
+/** POST /family/agent/capture — quick-capture inbox: parse freeform note into action suggestions */
+familyEventsRouter.post(
+  "/agent/capture",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z.object({ note: z.string().min(1).max(2000) }).safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+    try {
+      const result = await processCaptureNote(parsed.data.note);
+      res.json(result);
+    } catch (err) {
+      res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });
+    }
   }
 );

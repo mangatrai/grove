@@ -6,7 +6,7 @@ import { log } from "../../logger.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
 import { buildOAuth2Client, getDecryptedRefreshToken } from "../gcal/gcal.service.js";
-import type { FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
+import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
 import { listAvailability, listHouseholdMembers } from "./family-profiles.service.js";
 
 // ---------------------------------------------------------------------------
@@ -681,4 +681,46 @@ export async function runFamilyAgentForAllHouseholds(runType: AgentRunType): Pro
   for (const row of rows) {
     await runFamilyAgent(row.household_id, runType);
   }
+}
+
+// ---------------------------------------------------------------------------
+// PA quick-capture — parse freeform note into suggested actions
+// ---------------------------------------------------------------------------
+
+const CAPTURE_SYSTEM = `You are a household executive assistant (PA). The user has sent you a quick capture note — a brief message, reminder, or request. Parse it and return a JSON object with:
+- "responseText": a short friendly acknowledgement (1–2 sentences)
+- "actions": array of suggested actions
+
+Each action has:
+- "type": one of "create_event", "set_reminder", "draft_message", "note"
+- "title": short label (max 60 chars)
+- "summary": one sentence describing what will happen
+- "details": object with type-specific fields:
+  - create_event: { date, time, duration_mins, title, description, participants }
+  - set_reminder: { date, time, message }
+  - draft_message: { recipient, subject, body_draft }
+  - note: { content }
+
+Respond with valid JSON only. No prose outside the JSON. If you need to look up a date or external information, use the search_web tool first.`;
+
+export async function processCaptureNote(note: string): Promise<CaptureResult> {
+  const { finalResponse } = await getToolUseAdapter().runToolLoop(
+    [
+      { role: "system", content: CAPTURE_SYSTEM },
+      { role: "user", content: note },
+    ],
+    [SEARCH_WEB_TOOL],
+    async (name, args) => {
+      if (name === "search_web") {
+        const query = typeof args.query === "string" ? args.query : "";
+        return tavilySearch(query);
+      }
+      return `Unknown tool: ${name}`;
+    },
+    { model: strongModel(), maxTokens: 1000, maxIterations: 3 }
+  );
+
+  const jsonStr = finalResponse.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const parsed = JSON.parse(jsonStr) as CaptureResult;
+  return parsed;
 }
