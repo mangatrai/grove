@@ -19,6 +19,7 @@ import {
   runFamilyAgent,
 } from "./family-agent.service.js";
 import { createCalendarEvent } from "../gcal/gcal.service.js";
+import { sendMail } from "../mailer/mailer.service.js";
 import { qExec } from "../../db/query.js";
 
 export const familyEventsRouter = Router();
@@ -195,5 +196,28 @@ familyEventsRouter.post(
     }
 
     res.json({ ok: true, alertId, calEventId, calEventLink, calError });
+  }
+);
+
+/** POST /family/compose/send — send a pre-composed email from the agent compose panel */
+familyEventsRouter.post(
+  "/compose/send",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const parsed = z.object({
+      to: z.string().email(),
+      subject: z.string().min(1).max(500),
+      body: z.string().min(1).max(10_000),
+    }).safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+
+    const { to, subject, body } = parsed.data;
+    const html = `<div style="font-family:sans-serif;white-space:pre-wrap">${body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>`;
+    const result = await sendMail({ to, subject, html, text: body });
+    if (!result.ok) {
+      res.status(502).json({ error: "SEND_FAILED", message: result.reason });
+      return;
+    }
+    res.json({ ok: true });
   }
 );

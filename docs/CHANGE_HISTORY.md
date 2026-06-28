@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-10 — In-app compose panel + quick-capture UI (2026-06-27)
+
+**What changed:** FamilyAgentPage rebuilt with quick-capture section (textarea → `POST /family/agent/capture` → action cards with Approve/Compose buttons), a compose modal (pre-fills To/Subject/Body from `draft_message` action, sends via `POST /family/compose/send`), and the existing alerts/digest sections migrated to Mantine. New backend endpoint `POST /family/compose/send` validates `{to, subject, body}` and calls `sendMail()` via existing SMTP infrastructure.
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`, `backend/src/modules/family/family-events.routes.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/153
+
+---
+
 ## FP-9 — Action approval + Google Calendar write-back (2026-06-27)
 
 **What changed:** New `POST /family/actions/approve` endpoint receives a `CaptureAction` (from the capture inbox), stores it as a `family_agent_alerts` suggestion row, and for `create_event` actions calls Google Calendar API to create the event on the user's primary calendar. GCal OAuth scope upgraded from `calendar.readonly` → `calendar` to enable event creation. Existing users with the old scope get `GCAL_NEEDS_REAUTH` response — reconnecting GCal grants write access. Added `createCalendarEvent()` + `NewCalendarEvent` / `CreateCalendarEventResult` types to `gcal.service.ts`.

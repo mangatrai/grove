@@ -10,22 +10,30 @@ import {
   Group,
   Loader,
   Menu,
+  Modal,
   Paper,
   Stack,
   Table,
   Text,
+  Textarea,
+  TextInput,
   Title,
   Tooltip,
 } from "@mantine/core";
 import {
   IconAlertTriangle,
   IconBell,
+  IconCalendarPlus,
   IconCheck,
   IconChevronDown,
   IconClipboard,
+  IconMail,
+  IconMessageCircle,
+  IconNotes,
   IconPlayerPlay,
   IconRefresh,
   IconRobot,
+  IconSend,
 } from "@tabler/icons-react";
 
 import { apiFetch, apiJson } from "../api";
@@ -57,6 +65,20 @@ type DigestEntry = {
   recipients: string[] | null;
 };
 
+type CaptureActionType = "create_event" | "set_reminder" | "draft_message" | "note";
+
+type CaptureAction = {
+  type: CaptureActionType;
+  title: string;
+  summary: string;
+  details: Record<string, unknown>;
+};
+
+type CaptureResult = {
+  responseText: string;
+  actions: CaptureAction[];
+};
+
 const ALERT_TYPE_LABELS: Record<string, string> = {
   conflict: "Schedule pressure",
   travel: "Travel",
@@ -84,6 +106,20 @@ const STATUS_COLORS: Record<string, string> = {
   sent: "green",
   skipped: "gray",
   error: "red",
+};
+
+const ACTION_ICONS: Record<CaptureActionType, React.ReactNode> = {
+  create_event: <IconCalendarPlus size={16} stroke={1.5} />,
+  set_reminder: <IconBell size={16} stroke={1.5} />,
+  draft_message: <IconMail size={16} stroke={1.5} />,
+  note: <IconNotes size={16} stroke={1.5} />,
+};
+
+const ACTION_LABELS: Record<CaptureActionType, string> = {
+  create_event: "Create event",
+  set_reminder: "Set reminder",
+  draft_message: "Draft message",
+  note: "Note",
 };
 
 type AlertCardProps = {
@@ -211,6 +247,119 @@ function RunButton({ onRun, running }: RunButtonProps) {
   );
 }
 
+type ComposeModalProps = {
+  opened: boolean;
+  onClose: () => void;
+  initial: { to: string; subject: string; body: string };
+};
+
+function ComposeModal({ opened, onClose, initial }: ComposeModalProps) {
+  const [to, setTo] = useState(initial.to);
+  const [subject, setSubject] = useState(initial.subject);
+  const [body, setBody] = useState(initial.body);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    if (opened) { setTo(initial.to); setSubject(initial.subject); setBody(initial.body); setResult(null); }
+  }, [opened, initial.to, initial.subject, initial.body]);
+
+  async function handleSend() {
+    setSending(true);
+    setResult(null);
+    try {
+      await apiJson("/api/family/compose/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to, subject, body }),
+      });
+      setResult({ ok: true, message: "Email sent." });
+      setTimeout(onClose, 1500);
+    } catch (e) {
+      setResult({ ok: false, message: e instanceof Error ? e.message : "Send failed." });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <Modal opened={opened} onClose={onClose} title="Compose" size="lg">
+      <Stack gap="sm">
+        <TextInput label="To" value={to} onChange={e => setTo(e.currentTarget.value)} />
+        <TextInput label="Subject" value={subject} onChange={e => setSubject(e.currentTarget.value)} />
+        <Textarea label="Body" value={body} onChange={e => setBody(e.currentTarget.value)} autosize minRows={6} maxRows={18} />
+        {result ? (
+          <Text size="sm" c={result.ok ? "green" : "red"}>{result.message}</Text>
+        ) : null}
+        <Group justify="flex-end">
+          <Button variant="subtle" color="gray" onClick={onClose}>Cancel</Button>
+          <Button leftSection={<IconSend size={15} />} onClick={() => void handleSend()} loading={sending} disabled={!to || !subject || !body}>
+            Send
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}
+
+type CaptureActionCardProps = {
+  action: CaptureAction;
+  onApprove: (action: CaptureAction) => void;
+  onCompose: (action: CaptureAction) => void;
+};
+
+function CaptureActionCard({ action, onApprove, onCompose }: CaptureActionCardProps) {
+  const [approving, setApproving] = useState(false);
+  const [approved, setApproved] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+
+  async function handleApprove() {
+    if (action.type === "draft_message") { onCompose(action); return; }
+    setApproving(true);
+    setApproveError(null);
+    try {
+      await onApprove(action);
+      setApproved(true);
+    } catch (e) {
+      setApproveError(e instanceof Error ? e.message : "Approval failed.");
+    } finally {
+      setApproving(false);
+    }
+  }
+
+  return (
+    <Paper withBorder p="md" radius="md">
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Group gap="xs" align="flex-start">
+          <Box mt={2} c="dimmed">{ACTION_ICONS[action.type]}</Box>
+          <Stack gap={4}>
+            <Group gap="xs">
+              <Badge size="xs" variant="light" color="grape">{ACTION_LABELS[action.type]}</Badge>
+              <Text size="sm" fw={500}>{action.title}</Text>
+            </Group>
+            <Text size="xs" c="dimmed">{action.summary}</Text>
+            {approveError ? <Text size="xs" c="red">{approveError}</Text> : null}
+          </Stack>
+        </Group>
+        {approved ? (
+          <Badge size="sm" color="green" variant="filled" leftSection={<IconCheck size={11} />}>Done</Badge>
+        ) : (
+          <Button
+            size="xs"
+            variant="light"
+            color="indigo"
+            loading={approving}
+            leftSection={action.type === "draft_message" ? <IconMail size={13} /> : <IconCheck size={13} />}
+            onClick={() => void handleApprove()}
+          >
+            {action.type === "draft_message" ? "Compose" : "Approve"}
+          </Button>
+        )}
+      </Group>
+    </Paper>
+  );
+}
+
 export function FamilyAgentPage() {
   const { role } = useCurrentUser();
   const isOwner = role === "owner";
@@ -224,6 +373,16 @@ export function FamilyAgentPage() {
   const [runResult, setRunResult] = useState<string | null>(null);
   const [showResolved, setShowResolved] = useState(false);
   const [expandedDigest, setExpandedDigest] = useState<string | null>(null);
+
+  // Quick capture
+  const [captureNote, setCaptureNote] = useState("");
+  const [captureLoading, setCaptureLoading] = useState(false);
+  const [captureResult, setCaptureResult] = useState<CaptureResult | null>(null);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+
+  // Compose modal
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeInitial, setComposeInitial] = useState({ to: "", subject: "", body: "" });
 
   const loadAlerts = useCallback(async () => {
     setAlertsLoading(true);
@@ -289,6 +448,48 @@ export function FamilyAgentPage() {
     }
   }
 
+  async function handleCapture() {
+    if (!captureNote.trim()) return;
+    setCaptureLoading(true);
+    setCaptureResult(null);
+    setCaptureError(null);
+    try {
+      const res = await apiJson<CaptureResult>("/api/family/agent/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: captureNote }),
+      });
+      setCaptureResult(res);
+      setCaptureNote("");
+    } catch (e) {
+      setCaptureError(e instanceof Error ? e.message : "Capture failed.");
+    } finally {
+      setCaptureLoading(false);
+    }
+  }
+
+  async function handleActionApprove(action: CaptureAction) {
+    await apiJson<{ ok: boolean; alertId: string; calEventId: string | null; calEventLink: string | null; calError: string | null }>(
+      "/api/family/actions/approve",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      }
+    );
+    void loadAlerts();
+  }
+
+  function handleActionCompose(action: CaptureAction) {
+    const d = action.details;
+    setComposeInitial({
+      to: typeof d.recipient === "string" ? d.recipient : "",
+      subject: typeof d.subject === "string" ? d.subject : action.title,
+      body: typeof d.body_draft === "string" ? d.body_draft : action.summary,
+    });
+    setComposeOpen(true);
+  }
+
   const activeAlerts = alerts.filter(a => !a.isResolved);
   const resolvedAlerts = alerts.filter(a => a.isResolved);
 
@@ -321,6 +522,52 @@ export function FamilyAgentPage() {
           <Text size="sm">{runResult}</Text>
         </Paper>
       ) : null}
+
+      {/* Quick Capture */}
+      <Paper withBorder p="md" radius="md">
+        <Stack gap="sm">
+          <Group gap="xs">
+            <IconMessageCircle size={18} stroke={1.5} />
+            <Title order={5}>Quick capture</Title>
+          </Group>
+          <Text size="xs" c="dimmed">Send a note — the agent will parse it and suggest actions (create event, set reminder, draft message).</Text>
+          <Textarea
+            placeholder="e.g. Remind me to check swim lesson schedule next Tuesday, or ask nanny to come in early on Friday…"
+            value={captureNote}
+            onChange={e => setCaptureNote(e.currentTarget.value)}
+            autosize
+            minRows={2}
+            maxRows={6}
+            disabled={captureLoading}
+          />
+          {captureError ? <Text size="xs" c="red">{captureError}</Text> : null}
+          <Group justify="flex-end">
+            <Button
+              size="sm"
+              leftSection={<IconSend size={14} />}
+              loading={captureLoading}
+              disabled={!captureNote.trim()}
+              onClick={() => void handleCapture()}
+            >
+              Send to agent
+            </Button>
+          </Group>
+
+          {captureResult ? (
+            <Stack gap="sm" mt="xs">
+              <Text size="sm" c="dimmed">{captureResult.responseText}</Text>
+              {captureResult.actions.map((action, i) => (
+                <CaptureActionCard
+                  key={i}
+                  action={action}
+                  onApprove={handleActionApprove}
+                  onCompose={handleActionCompose}
+                />
+              ))}
+            </Stack>
+          ) : null}
+        </Stack>
+      </Paper>
 
       {/* Active alerts */}
       <Stack gap="sm">
@@ -463,6 +710,12 @@ export function FamilyAgentPage() {
           </Paper>
         )}
       </Stack>
+
+      <ComposeModal
+        opened={composeOpen}
+        onClose={() => setComposeOpen(false)}
+        initial={composeInitial}
+      />
     </Stack>
   );
 }
