@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FP-11 — Cross-module finance context in agent prompt (2026-06-27)
+
+**What changed:** Family agent now fetches and injects a compact finance summary into its analysis prompt: top 5 spending categories (last 30 days) + last 2 payslips. Added `buildFinanceContext(householdId)` in `family-agent.service.ts` using `transaction_canonical` + `payslip_snapshot` tables. Finance context fetched in parallel with household members and care schedule. Prompt includes a `=== Finance Context ===` section so the agent can surface pay-timing conflicts, spending anomalies related to household events, or activity/enrollment cost context.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/154
+
+---
+
 ## FP-10 — In-app compose panel + quick-capture UI (2026-06-27)
 
 **What changed:** FamilyAgentPage rebuilt with quick-capture section (textarea → `POST /family/agent/capture` → action cards with Approve/Compose buttons), a compose modal (pre-fills To/Subject/Body from `draft_message` action, sends via `POST /family/compose/send`), and the existing alerts/digest sections migrated to Mantine. New backend endpoint `POST /family/compose/send` validates `{to, subject, body}` and calls `sendMail()` via existing SMTP infrastructure.

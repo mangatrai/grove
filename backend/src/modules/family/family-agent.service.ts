@@ -239,13 +239,51 @@ async function fetchCalendarEvents(
 // LLM analysis
 // ---------------------------------------------------------------------------
 
+async function buildFinanceContext(householdId: string): Promise<string> {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const since = thirtyDaysAgo.toISOString().slice(0, 10);
+
+  const [spendRows, payslipRows] = await Promise.all([
+    qAll<{ category: string; total: number }>(
+      `SELECT COALESCE(c.name, 'Uncategorized') AS category, SUM(tc.amount) AS total
+       FROM transaction_canonical tc
+       LEFT JOIN category c ON c.id = tc.category_id
+       WHERE tc.household_id = ? AND tc.direction = 'debit' AND tc.status = 'posted' AND tc.txn_date >= ?
+       GROUP BY COALESCE(c.name, 'Uncategorized')
+       ORDER BY total DESC
+       LIMIT 5`,
+      householdId, since
+    ),
+    qAll<{ pay_date: string; net_pay_current: number; employer_display_name: string | null }>(
+      `SELECT pay_date, net_pay_current, employer_display_name
+       FROM payslip_snapshot
+       WHERE household_id = ?
+       ORDER BY pay_date DESC
+       LIMIT 2`,
+      householdId
+    ),
+  ]);
+
+  const spendLines = spendRows.length === 0
+    ? "No spending data available (last 30 days)."
+    : spendRows.map(r => `  ${r.category}: $${Number(r.total).toFixed(0)}`).join("\n");
+
+  const payslipLines = payslipRows.length === 0
+    ? "No payslips on file."
+    : payslipRows.map(r => `  ${r.pay_date}: net $${Number(r.net_pay_current).toFixed(0)}${r.employer_display_name ? ` (${r.employer_display_name})` : ""}`).join("\n");
+
+  return `Top spending categories (last 30 days):\n${spendLines}\n\nRecent payslips:\n${payslipLines}`;
+}
+
 function buildAnalysisPrompt(
   runType: AgentRunType,
   parents: Array<{ email: string; events: CalendarEvent[] }>,
   dbEvents: FamilyEvent[],
   openAlerts: AgentAlert[],
   members: HouseholdMember[],
-  caregiverSlots: HelpAvailabilitySlot[]
+  caregiverSlots: HelpAvailabilitySlot[],
+  financeContext: string
 ): string {
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
   const isDelta = runType === "daily_delta";
@@ -322,6 +360,9 @@ ${parentLines}
 === Family Events & Deadlines (from app) ===
 ${dbLines}
 
+=== Finance Context (for household planning) ===
+${financeContext}
+
 Respond with ONLY valid JSON in this exact shape:
 {
   "hasConflicts": boolean,
@@ -374,9 +415,10 @@ async function analyzeWithLlm(
   dbEvents: FamilyEvent[],
   openAlerts: AgentAlert[],
   members: HouseholdMember[],
-  caregiverSlots: HelpAvailabilitySlot[]
+  caregiverSlots: HelpAvailabilitySlot[],
+  financeContext: string
 ): Promise<AgentAnalysis> {
-  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, members, caregiverSlots);
+  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, members, caregiverSlots, financeContext);
 
   const { finalResponse } = await getToolUseAdapter().runToolLoop(
     [
@@ -455,12 +497,13 @@ export async function runFamilyAgent(
     // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
     const openAlerts = runType === "daily_delta" ? await listAlerts(householdId, false) : [];
 
-    const [members, caregiverSlots] = await Promise.all([
+    const [members, caregiverSlots, financeContext] = await Promise.all([
       listHouseholdMembers(householdId),
       listAvailability(householdId),
+      buildFinanceContext(householdId),
     ]);
 
-    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts, members, caregiverSlots);
+    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts, members, caregiverSlots, financeContext);
 
     // Daily delta: skip if no conflicts found
     if (runType === "daily_delta" && !analysis.hasConflicts) {
