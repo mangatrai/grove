@@ -1,6 +1,6 @@
 import { google } from "googleapis";
 
-import { getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
+import { getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
 import { SEARCH_WEB_TOOL, tavilySearch } from "../../llm/tools/tavily.js";
 import { log } from "../../logger.js";
 import { sendMail } from "../mailer/mailer.service.js";
@@ -31,18 +31,43 @@ type CalendarEvent = {
   calendarId: string;
 };
 
+type AlertItem = {
+  alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion";
+  reason: string;
+  affectedDate: string | null;
+  copyPasteText: string;
+  recipientHint: string;
+};
+
 type AgentAnalysis = {
-  conflicts: Array<{
-    alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion";
-    reason: string;
-    affectedDate: string | null;
-    copyPasteText: string;
-    recipientHint: string;
-  }>;
+  conflicts: AlertItem[];
   parentADigest: { subject: string; body: string } | null;
   parentBDigest: { subject: string; body: string } | null;
   summaryText: string;
-  hasConflicts: boolean;
+  hasOutput: boolean;
+};
+
+type CoverageGapResult = { hasOutput: boolean; gaps: AlertItem[] };
+type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
+type ResearchItem      = { title: string; summary: string; category: string };
+type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
+type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
+
+type PipelineOutputs = {
+  coverageGaps: CoverageGapResult;
+  nannyCoord: NannyCoordResult;
+  research: ResearchResult;
+  deadlines: DeadlineResult;
+};
+
+type FamilyContext = {
+  location: string;
+  today: string;
+  members: HouseholdMember[];
+  caregiverSlots: HelpAvailabilitySlot[];
+  parentEvents: Array<{ email: string; events: CalendarEvent[] }>;
+  dbEvents: FamilyEvent[];
+  openAlerts: AgentAlert[];
 };
 
 // ---------------------------------------------------------------------------
@@ -276,180 +301,356 @@ async function buildFinanceContext(householdId: string): Promise<string> {
   return `Top spending categories (last 30 days):\n${spendLines}\n\nRecent payslips:\n${payslipLines}`;
 }
 
-function buildAnalysisPrompt(
-  runType: AgentRunType,
-  parents: Array<{ email: string; events: CalendarEvent[] }>,
-  dbEvents: FamilyEvent[],
-  openAlerts: AgentAlert[],
-  members: HouseholdMember[],
-  caregiverSlots: HelpAvailabilitySlot[],
-  financeContext: string
-): string {
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-  const isDelta = runType === "daily_delta";
-  const isPreview = runType === "sunday_preview";
+// ---------------------------------------------------------------------------
+// Household location helper
+// ---------------------------------------------------------------------------
 
-  const parentLines = parents.map((p, i) =>
-    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
-    (p.events.length === 0
-      ? "  No calendar events in the next 14 days.\n"
-      : p.events.map(ev =>
-          `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : ""} | ${ev.location ?? ""}`
-        ).join("\n") + "\n"
-    )
-  ).join("\n");
+async function getHouseholdLocation(householdId: string): Promise<string> {
+  const row = await qGet<{ city: string | null; state: string | null }>(
+    `SELECT city, state FROM household WHERE id = ?`,
+    householdId
+  );
+  if (!row?.city && !row?.state) return "";
+  return [row.city, row.state].filter(Boolean).join(", ");
+}
 
-  const dbLines = dbEvents.length === 0
-    ? "No family events or deadlines tracked in app."
-    : dbEvents.map(e =>
-        `[${e.recordType.toUpperCase()}] ${e.title} | ${e.startAt ?? e.dueDate ?? "no date"} | ${e.location ?? ""}`
-      ).join("\n");
+function getSeason(month: number): string {
+  if (month >= 2 && month <= 4) return "Spring";
+  if (month >= 5 && month <= 7) return "Summer";
+  if (month >= 8 && month <= 10) return "Fall";
+  return "Winter";
+}
 
-  const memberLines = members.length === 0
-    ? "No household members registered."
-    : members.map(m => {
-        const age = m.age !== null ? `, age ${m.age}` : "";
-        const interests = m.interestsJson.length > 0 ? ` | interests: ${m.interestsJson.join(", ")}` : "";
-        const notes = m.notes ? ` | notes: ${m.notes}` : "";
-        return `- ${m.fullName} (${m.relationship}${age})${interests}${notes}`;
-      }).join("\n");
+function parseJsonResponse<T>(raw: string): T {
+  const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  return JSON.parse(cleaned) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Domain 1 — Coverage gap detection
+// ---------------------------------------------------------------------------
+
+async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): Promise<CoverageGapResult> {
+  const children = ctx.members.filter(m => m.relationship === "child" || m.relationship === "dependent");
+  if (children.length === 0) return { hasOutput: false, gaps: [] };
 
   const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const caregiverLines = caregiverSlots.length === 0
-    ? "No caregiver schedule configured."
-    : caregiverSlots.map(s => {
+  const parentLines = ctx.parentEvents.map((p, i) =>
+    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
+    (p.events.length === 0 ? "  No events." :
+      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"}`).join("\n"))
+  ).join("\n\n");
+
+  const caregiverLines = ctx.caregiverSlots.length === 0
+    ? "No caregiver configured."
+    : ctx.caregiverSlots.map(s => {
         const when = s.slotType === "one_off" && s.specificDate
           ? `one-off ${s.specificDate}`
-          : s.daysOfWeek.length > 0
-          ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}`
-          : "schedule TBD";
+          : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
         const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
-        const label = s.label ? ` (${s.label})` : "";
-        const slotNotes = s.notes ? ` — ${s.notes}` : "";
-        return `- ${s.personName} [${s.serviceType}]: ${s.slotType}, ${when}${time}${label}${slotNotes}`;
+        return `- ${s.personName} [${s.serviceType}]: ${when}${time}`;
       }).join("\n");
 
-  // For daily delta: inject open unresolved alerts so the LLM doesn't re-flag
-  // conflicts that have already been surfaced and are awaiting owner action.
-  const openAlertsSection = isDelta && openAlerts.length > 0
-    ? `\n=== Already open alerts this week (DO NOT re-flag these) ===\n` +
-      openAlerts.map(a =>
-        `- [${a.alertType}] ${a.affectedDate ?? "no date"}: ${a.reason}`
-      ).join("\n") + "\n"
-    : "";
+  const childLines = children.map(m => `- ${m.fullName}${m.age !== null ? ` (age ${m.age})` : ""}`).join("\n");
+  const openGapAlerts = ctx.openAlerts
+    .filter(a => a.alertType === "coverage_gap")
+    .map(a => `- ${a.affectedDate ?? "no date"}: ${a.reason}`)
+    .join("\n");
 
-  const staleSuggestions = openAlerts.filter(a => a.alertType === "suggestion" && !isDelta);
-  const staleSuggestionsSection = staleSuggestions.length > 0
-    ? `\n=== Stale suggestions (unresolved for 5+ days — follow up or dismiss) ===\n` +
-      staleSuggestions.map(a =>
-        `- [suggested ${a.detectedAt.slice(0, 10)}] ${a.reason}`
-      ).join("\n") + "\n"
-    : "";
+  const prompt = `Today: ${ctx.today}. Run: ${runType}.
+Children needing care:
+${childLines}
 
-  const taskDescription = isDelta
-    ? "Check for NEW items not already covered by the open alerts listed above. An item is 'new' if it involves a different date, different event, or a genuinely different situation from what is already flagged."
-    : isPreview
-    ? "Provide a Sunday evening preview: surface anything that needs attention for the week ahead — coverage needs, heavy days, travel, upcoming deadlines, or planning opportunities."
-    : "Provide the full weekly digest: map out each day, note coverage duties, flag travel and schedule pressure, list activities and appointments per parent, highlight what Nanny needs to know, and surface any upcoming planning needs (seasonal activities, enrollment deadlines, appointments to book).";
-
-  return `Today is ${today}. Run type: ${runType}.
-
-Task: ${taskDescription}
-${openAlertsSection}${staleSuggestionsSection}
-=== Household Members ===
-${memberLines}
-
-=== Care & Help Schedule ===
+Caregiver schedule:
 ${caregiverLines}
 
-=== Calendar Events (next 14 days) ===
+Parent calendars (next 14 days):
 ${parentLines}
 
-=== Family Events & Deadlines (from app) ===
-${dbLines}
+${openGapAlerts ? `Already flagged coverage gaps (DO NOT re-flag):\n${openGapAlerts}\n` : ""}
+Find windows where BOTH parents have overlapping commitments AND the caregiver is not scheduled. Only flag genuine childcare gaps — not adult schedule pressure.
 
-=== Finance Context (for household planning) ===
-${financeContext}
+Respond with ONLY valid JSON: { "gaps": [ { "alertType": "coverage_gap", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "ready-to-send message", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
+If no gaps, return { "gaps": [] }.`;
 
-Respond with ONLY valid JSON in this exact shape:
-{
-  "hasConflicts": boolean,
-  "summaryText": "1-3 sentence plain text summary of the week and any key items",
-  "conflicts": [
-    {
-      "alertType": "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion",
-      "reason": "clear description of what needs attention and why",
-      "affectedDate": "YYYY-MM-DD or null",
-      "copyPasteText": "pre-written message the owner can copy — see recipient rules below",
-      "recipientHint": "Nanny" | "Spouse" | "Both" | "Self"
-    }
-  ],
-  "parentADigest": {
-    "subject": "email subject line",
-    "body": "plain text email body for Parent A"
-  },
-  "parentBDigest": {
-    "subject": "email subject line",
-    "body": "plain text email body for Parent B"
-  }
-}
-
-Rules:
-- Surface anything actionable: childcare coverage gaps, schedule pressure (heavy day, double-booking, tight connections), travel with coverage implications, approaching deadlines, or seasonal planning opportunities (summer camps, enrollment windows, annual appointments).
-- Alert types:
-  - "coverage_gap": children need care and nobody available (both parents in meetings, caregiver not scheduled, etc.)
-  - "conflict": schedule pressure — one parent has a heavy/stacked day, double-booking, a day that needs coordination
-  - "travel": parent travel detected; flag what it means for coverage that week
-  - "deadline_approaching": registration cutoff, enrollment window, tax deadline, camp sign-up, medical appointment due
-  - "suggestion": proactive planning opportunity — summer approaching, age-appropriate activity ideas, annual appointment reminder, enrollment period opening soon
-- Recipient rules — this is critical:
-  - "Nanny": ONLY when her childcare schedule needs to change (extend hours, arrive early, handle a pickup/dropoff, cover a day she wasn't scheduled). copyPasteText must be a childcare request: "Hi [Nanny], can you extend to 6pm Wednesday? We both have back-to-back meetings and school pickup is at 3pm."
-  - "Spouse": spouse needs to know or decide something. copyPasteText is a message to spouse: "Hey, I have a doctor appointment + 3 back-to-back meetings Wednesday — can you handle school pickup?"
-  - "Both": both parents need to coordinate. copyPasteText is a joint note or action item.
-  - "Self": owner should act alone. copyPasteText is a suggested self-action: "Block 90 min before and after your appointment. Consider moving the 3pm meeting."
-- Use members' ages and interests for planning suggestions. Match activity suggestions to each child's listed interests where possible. Age 5-8: STEM camps, coding, art, sports. Infant/toddler: music classes, sensory play, swim lessons.
-- Use the Care & Help Schedule to determine caregiver availability before flagging a coverage gap. Check scheduled days/times against conflicting calendar events.
-- Do NOT suggest that caregivers manage adult scheduling conflicts. Caregivers manage children's care only.
-- A busy day with meetings AND an appointment is NOT a childcare gap — it is a "conflict" for the parent, directed at "Self" or "Spouse", with a suggestion to reschedule or block buffer time.
-- conflicts array must be empty [] if hasConflicts is false
-- parentADigest and parentBDigest must be null if this is a daily_delta run with no conflicts
-- Keep email bodies readable on mobile — short paragraphs, bullet points for activities
-- Do not include any text outside the JSON object`;
-}
-
-async function analyzeWithLlm(
-  runType: AgentRunType,
-  parents: Array<{ email: string; events: CalendarEvent[] }>,
-  dbEvents: FamilyEvent[],
-  openAlerts: AgentAlert[],
-  members: HouseholdMember[],
-  caregiverSlots: HelpAvailabilitySlot[],
-  financeContext: string
-): Promise<AgentAnalysis> {
-  const prompt = buildAnalysisPrompt(runType, parents, dbEvents, openAlerts, members, caregiverSlots, financeContext);
-
-  const { finalResponse } = await getToolUseAdapter().runToolLoop(
+  const { content } = await getChatAdapter().complete(
     [
-      {
-        role: "system",
-        content: "You are a household executive assistant — a personal assistant managing calendars, childcare logistics, and family planning for a dual-income household with young children. You coordinate schedules, flag conflicts, suggest actions, and surface planning opportunities. Use the search_web tool when you need to look up public deadlines, school enrollment windows, camp registration dates, or local activity schedules. You always respond with valid JSON only as your final answer — no prose, no markdown, no explanation outside the JSON.",
-      },
+      { role: "system", content: "You detect childcare coverage gaps for a dual-income household. Only flag gaps where children have no care. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
-    [SEARCH_WEB_TOOL],
-    async (name, args) => {
-      if (name === "search_web") {
-        const query = typeof args.query === "string" ? args.query : "";
-        return tavilySearch(query);
-      }
-      return `Unknown tool: ${name}`;
-    },
-    { model: strongModel(), maxTokens: 2000, maxIterations: 4 }
+    { model: strongModel(), maxTokens: 800 }
   );
 
-  const jsonStr = finalResponse.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const parsed = JSON.parse(jsonStr) as AgentAnalysis;
-  return parsed;
+  const parsed = parseJsonResponse<{ gaps: AlertItem[] }>(content);
+  return { hasOutput: parsed.gaps.length > 0, gaps: parsed.gaps };
+}
+
+// ---------------------------------------------------------------------------
+// Domain 2 — Nanny coordination
+// ---------------------------------------------------------------------------
+
+async function assessNannyCoordination(ctx: FamilyContext, runType: AgentRunType): Promise<NannyCoordResult> {
+  if (ctx.caregiverSlots.length === 0) return { hasOutput: false, items: [] };
+
+  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const parentLines = ctx.parentEvents.map((p, i) =>
+    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
+    (p.events.length === 0 ? "  No events." :
+      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"} | ${ev.location ?? ""}`).join("\n"))
+  ).join("\n\n");
+
+  const caregiverLines = ctx.caregiverSlots.map(s => {
+    const when = s.slotType === "one_off" && s.specificDate
+      ? `one-off ${s.specificDate}`
+      : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
+    const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
+    return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
+  }).join("\n");
+
+  const prompt = `Today: ${ctx.today}. Run: ${runType}.
+Caregiver schedule:
+${caregiverLines}
+
+Parent calendars (next 14 days):
+${parentLines}
+
+Surface caregiver coordination needs: parent travel requiring extended hours, WFH-but-fully-booked days where caregiver availability should be confirmed, upcoming heavy weeks to flag in advance. Do NOT flag normal days.
+
+Respond with ONLY valid JSON: { "items": [ { "alertType": "coverage_gap"|"conflict"|"suggestion", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "...", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
+If nothing actionable, return { "items": [] }.`;
+
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: "You surface caregiver coordination needs for a household. Flag only actionable items. Return valid JSON only." },
+      { role: "user", content: prompt },
+    ],
+    { model: strongModel(), maxTokens: 700 }
+  );
+
+  const parsed = parseJsonResponse<{ items: AlertItem[] }>(content);
+  return { hasOutput: parsed.items.length > 0, items: parsed.items };
+}
+
+// ---------------------------------------------------------------------------
+// Domain 3 — Proactive research
+// ---------------------------------------------------------------------------
+
+async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): Promise<ResearchResult> {
+  const queryCount = runType === "daily_delta" ? 2 : runType === "sunday_preview" ? 3 : 5;
+  const now = new Date();
+  const month = now.toLocaleString("en-US", { month: "long" });
+  const season = getSeason(now.getMonth());
+
+  const memberProfile = ctx.members.map(m => {
+    const interests = m.interestsJson.length > 0 ? `: ${m.interestsJson.join(", ")}` : "";
+    const notes = m.notes ? `; ${m.notes}` : "";
+    return `- ${m.relationship}${m.age !== null ? ` (age ${m.age})` : ""}${interests}${notes}`;
+  }).join("\n");
+
+  const activityLocations = ctx.parentEvents
+    .flatMap(p => p.events)
+    .filter(e => e.location)
+    .map(e => `${e.summary} @ ${e.location}`)
+    .slice(0, 8)
+    .join("\n");
+
+  const { content: queryJson } = await getChatAdapter().complete(
+    [
+      { role: "system", content: "You generate targeted search queries for a household PA. Return only a JSON array of query strings, nothing else." },
+      { role: "user", content: `Family location: ${ctx.location}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
+
+Household members:
+${memberProfile}
+
+Calendar activity locations (for context):
+${activityLocations || "None noted."}
+
+Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know. Think proactively: local events, registration deadlines, new restaurants, weekend plans, weather impacts on outdoor activities.
+
+Return ONLY a JSON array: ["query 1", "query 2", ...]` },
+    ],
+    { model: strongModel(), maxTokens: 250 }
+  );
+
+  let queries: string[] = [];
+  try {
+    queries = parseJsonResponse<string[]>(queryJson);
+  } catch {
+    log.warn("family-agent: proactive research query parse failed");
+    return { hasOutput: false, items: [] };
+  }
+
+  const searchResults: Array<{ query: string; result: string }> = [];
+  for (const query of queries.slice(0, queryCount)) {
+    try {
+      const result = await tavilySearch(query);
+      searchResults.push({ query, result: (typeof result === "string" ? result : JSON.stringify(result)).slice(0, 600) });
+    } catch (err) {
+      log.warn("family-agent: tavily search failed", { query, err: String(err) });
+    }
+  }
+
+  if (searchResults.length === 0) return { hasOutput: false, items: [] };
+
+  const searchContext = searchResults
+    .map((r, i) => `Search ${i + 1}: "${r.query}"\n${r.result}`)
+    .join("\n\n---\n");
+
+  const { content: synthJson } = await getChatAdapter().complete(
+    [
+      { role: "system", content: "You synthesize web search results for a household PA. Extract only specific, actionable findings. Return valid JSON only." },
+      { role: "user", content: `Family: ${ctx.location}. Today: ${ctx.today}.
+
+Search results:
+${searchContext}
+
+Extract 2-4 specific, useful findings for this family. Skip vague or stale results. Prioritize items with specific dates, locations, or deadlines.
+
+Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences with specifics", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
+If nothing useful found, return { "items": [] }.` },
+    ],
+    { model: strongModel(), maxTokens: 600 }
+  );
+
+  const parsed = parseJsonResponse<{ items: ResearchItem[] }>(synthJson);
+  return { hasOutput: parsed.items.length > 0, items: parsed.items };
+}
+
+// ---------------------------------------------------------------------------
+// Domain 4 — Deadline sweep
+// ---------------------------------------------------------------------------
+
+async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promise<DeadlineResult> {
+  const cutoffDays = runType === "daily_delta" ? 7 : 30;
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() + cutoffDays);
+  const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+
+  const upcomingDeadlines = ctx.dbEvents.filter(e => {
+    if (e.recordType !== "deadline") return false;
+    const date = e.dueDate ?? e.startAt?.slice(0, 10) ?? null;
+    return date !== null && date <= cutoffStr;
+  });
+
+  const dbLines = upcomingDeadlines.length === 0
+    ? "None in app."
+    : upcomingDeadlines.map(e => `- ${e.title} | due: ${e.dueDate ?? e.startAt?.slice(0, 10)}`).join("\n");
+
+  const openDeadlineAlerts = ctx.openAlerts
+    .filter(a => a.alertType === "deadline_approaching")
+    .map(a => `- ${a.affectedDate}: ${a.reason}`)
+    .join("\n");
+
+  let tavilyContext = "";
+  if (runType !== "daily_delta" && ctx.location) {
+    const city = ctx.location.split(",")[0].trim();
+    const year = new Date().getFullYear();
+    const queries = [
+      `${city} ISD school enrollment deadline ${year}`,
+      `summer camp registration deadline ${ctx.location} ${year}`,
+    ];
+    const results: string[] = [];
+    for (const q of queries) {
+      try {
+        const r = await tavilySearch(q);
+        results.push(`"${q}": ${(typeof r === "string" ? r : JSON.stringify(r)).slice(0, 400)}`);
+      } catch { /* ignore individual search failures */ }
+    }
+    if (results.length > 0) tavilyContext = results.join("\n\n");
+  }
+
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: "You triage family deadlines. Flag only new items not already open. Return valid JSON only." },
+      { role: "user", content: `Today: ${ctx.today}. Location: ${ctx.location}.
+
+Deadlines in app (next ${cutoffDays} days):
+${dbLines}
+
+${tavilyContext ? `Public deadlines from web:\n${tavilyContext}\n` : ""}
+${openDeadlineAlerts ? `Already flagged (DO NOT re-flag):\n${openDeadlineAlerts}\n` : ""}
+Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤${cutoffDays} days). Surface only new items.
+
+Respond with ONLY valid JSON: { "alerts": [ { "alertType": "deadline_approaching", "reason": "what/when/why", "affectedDate": "YYYY-MM-DD", "copyPasteText": "action to take", "recipientHint": "Self"|"Both"|"Spouse" } ] }
+If nothing new, return { "alerts": [] }.` },
+    ],
+    { model: strongModel(), maxTokens: 600 }
+  );
+
+  const parsed = parseJsonResponse<{ alerts: AlertItem[] }>(content);
+  return { hasOutput: parsed.alerts.length > 0, alerts: parsed.alerts };
+}
+
+// ---------------------------------------------------------------------------
+// Domain 5 — Synthesis (per-parent digest)
+// ---------------------------------------------------------------------------
+
+async function synthesizeDigest(
+  ctx: FamilyContext,
+  domain: PipelineOutputs,
+  runType: AgentRunType,
+  parents: ConnectedParent[],
+  financeContext: string
+): Promise<AgentAnalysis> {
+  const allAlerts: AlertItem[] = [
+    ...domain.coverageGaps.gaps,
+    ...domain.nannyCoord.items,
+    ...domain.deadlines.alerts,
+  ];
+  const hasOutput = allAlerts.length > 0 || domain.research.hasOutput;
+
+  if (!hasOutput) {
+    return { conflicts: [], parentADigest: null, parentBDigest: null, summaryText: "Nothing new to surface today.", hasOutput: false };
+  }
+
+  const alertSection = allAlerts.length === 0
+    ? "No reactive alerts this run."
+    : allAlerts.map(a => `[${a.alertType.toUpperCase()}] ${a.affectedDate ?? "no date"}: ${a.reason} → ${a.recipientHint}`).join("\n");
+
+  const researchSection = domain.research.hasOutput
+    ? "Proactive finds:\n" + domain.research.items.map(i => `- [${i.category}] ${i.title}: ${i.summary}`).join("\n")
+    : "";
+
+  const parentNames = parents.map((p, i) => `Parent ${String.fromCharCode(65 + i)}: ${p.email}`).join("; ");
+
+  const { content } = await getChatAdapter().complete(
+    [
+      { role: "system", content: "You compose household digest emails. Concise, actionable per-parent content. Return valid JSON only." },
+      { role: "user", content: `Today: ${ctx.today}. Run: ${runType}. Parents: ${parentNames}.
+
+Reactive alerts:
+${alertSection}
+
+${researchSection}
+
+Finance context:
+${financeContext}
+
+Write digest emails per parent. Parent A = primary household manager. Parent B = co-parent/spouse. Each digest: items they're responsible for, coordination needs, proactive finds. Mobile-readable, bullet points, no filler.
+
+Respond with ONLY valid JSON:
+{
+  "summaryText": "1-2 sentence overall summary",
+  "parentADigest": { "subject": "...", "body": "..." },
+  "parentBDigest": { "subject": "...", "body": "..." }
+}` },
+    ],
+    { model: strongModel(), maxTokens: 1500 }
+  );
+
+  const parsed = parseJsonResponse<{
+    summaryText: string;
+    parentADigest: { subject: string; body: string };
+    parentBDigest: { subject: string; body: string };
+  }>(content);
+
+  return {
+    conflicts: allAlerts,
+    parentADigest: parsed.parentADigest,
+    parentBDigest: parsed.parentBDigest,
+    summaryText: parsed.summaryText,
+    hasOutput: true,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -508,18 +709,36 @@ export async function runFamilyAgent(
       ? await listAlerts(householdId, false)
       : await listStaleSuggestions(householdId, 5);
 
-    const [members, caregiverSlots, financeContext] = await Promise.all([
+    const [members, caregiverSlots, financeContext, location] = await Promise.all([
       listHouseholdMembers(householdId),
       listAvailability(householdId),
       buildFinanceContext(householdId),
+      getHouseholdLocation(householdId),
     ]);
 
-    const analysis = await analyzeWithLlm(runType, parentEvents, dbEvents, openAlerts, members, caregiverSlots, financeContext);
+    const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    const ctx: FamilyContext = { location, today, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
 
-    // Daily delta: skip if no conflicts found
-    if (runType === "daily_delta" && !analysis.hasConflicts) {
+    // Run domains 1–4 in parallel; domain 5 synthesizes their outputs
+    const [coverageGaps, nannyCoord, research, deadlines] = await Promise.all([
+      analyzeCoverageGaps(ctx, runType),
+      assessNannyCoordination(ctx, runType),
+      runProactiveResearch(ctx, runType),
+      sweepDeadlines(ctx, runType),
+    ]);
+
+    const analysis = await synthesizeDigest(
+      ctx,
+      { coverageGaps, nannyCoord, research, deadlines },
+      runType,
+      parents,
+      financeContext
+    );
+
+    // Daily delta: skip if no domain produced actionable output
+    if (runType === "daily_delta" && !analysis.hasOutput) {
       await writeDigestLog(householdId, runType, "skipped", {
-        skipReason: "No conflicts detected",
+        skipReason: "No actionable output from any domain",
         summaryText: analysis.summaryText,
       });
       for (const p of parents) await updateLastSyncedAt(p.userId);

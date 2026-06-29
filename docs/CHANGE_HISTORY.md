@@ -14,6 +14,29 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR-PA1 — PA Agent Phase 1: replace single-LLM analysis with 5-domain sequential pipeline (2026-06-29)
+
+**What changed:**
+- `backend/src/modules/family/family-agent.service.ts`: replaced `buildAnalysisPrompt()` + `analyzeWithLlm()` (single LLM call) with a 5-domain pipeline of focused functions:
+  1. `analyzeCoverageGaps()` — detects windows where both parents have overlapping commitments and the caregiver is not scheduled; generates structured coverage gap alerts with resolution options.
+  2. `assessNannyCoordination()` — flags weeks with parent travel or back-to-back WFH meeting days where caregiver hours need confirmation or extension; generates copy-paste messages per recipient.
+  3. `runProactiveResearch()` — fires on every run regardless of calendar conflicts; LLM generates Tavily queries based on family profile (location, interests, age, activity locations from GCal), runs them directly, then a second LLM call synthesizes 2–5 actionable finds (events, deadlines, restaurants, weather, entertainment). Query count scales by run type: 2 for `daily_delta`, 3 for `sunday_preview`, 5 for `monday_digest`/`manual`.
+  4. `sweepDeadlines()` — triages deadlines in the `family_events` table by urgency; for non-delta runs adds Tavily queries for public deadlines (school ISD enrollment, summer camp registration); deduplicates against already-open alerts.
+  5. `synthesizeDigest()` — takes all 4 domain outputs, composes per-parent email digests with reactive alerts and proactive research finds; only writes alerts/emails if any domain produced output.
+- Domains 1–4 run in **parallel** (`Promise.all`); domain 5 follows sequentially.
+- `runFamilyAgent` orchestrator updated: adds `getHouseholdLocation()` call (fetches `household.city`/`household.state` to construct location string for Tavily queries); builds `FamilyContext` object shared across all domains; replaces `analyzeWithLlm` call with pipeline; passes `location` into `FamilyContext`.
+- **Gate fix**: `daily_delta` no longer skips on `hasConflicts === false`; now skips only when `analysis.hasOutput === false` (i.e., all 5 domains produced nothing actionable). Previously, any day without a calendar conflict sent nothing — the PA did zero work. Now proactive research and deadline sweeps alone can trigger the daily email.
+- `AgentAnalysis` type: `hasConflicts: boolean` → `hasOutput: boolean`; inline alert tuple type extracted to named `AlertItem` type; added `CoverageGapResult`, `NannyCoordResult`, `ResearchItem`, `ResearchResult`, `DeadlineResult`, `PipelineOutputs`, `FamilyContext` types.
+- All domain LLM calls use `getChatAdapter().complete()` (no tool loop) for cost efficiency; only `runProactiveResearch` and `sweepDeadlines` call Tavily directly (controlled query count, not open-ended).
+
+**Why:** The original single-LLM call was optimized for calendar conflict detection and missed everything else. No conflicts → no email → the PA was silent 80% of the time. Phase 1 decouples the 5 concerns so each gets a focused prompt, adds proactive research that fires every run, and fixes the gate logic so useful output (restaurant find, deadline, weather advisory) reaches the household even on quiet calendar days.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes #158
+
+---
+
 ## FP-14 — GCal event creation: store provider_email at OAuth time, auto-invite co-parents (2026-06-28)
 
 **What changed:**
