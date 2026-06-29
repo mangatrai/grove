@@ -599,7 +599,7 @@ async function synthesizeDigest(
   ];
   const hasOutput = allAlerts.length > 0 || domain.research.hasOutput;
 
-  if (!hasOutput) {
+  if (!hasOutput && runType === "daily_delta") {
     return { conflicts: [], parentADigest: null, parentBDigest: null, summaryText: "Nothing new to surface today.", hasOutput: false };
   }
 

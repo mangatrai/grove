@@ -14,6 +14,22 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-192 — PA Agent: sunday/monday digest silently skipped when all domains empty (2026-06-29)
+
+**What changed:**
+- `synthesizeDigest()` in `family-agent.service.ts`: early-return gate changed from `if (!hasOutput)` → `if (!hasOutput && runType === "daily_delta")`.
+- Previously, if all 4 pipeline domains returned `hasOutput: false` (typical for a fresh production setup with no children in person_profiles, no caregiver slots, no DB deadlines), `synthesizeDigest` returned null digests for **every** run type — including `sunday_preview` and `monday_digest` which are supposed to always send.
+- Now `sunday_preview` and `monday_digest` always proceed to the LLM synthesis step. With no domain output, the prompt includes "No reactive alerts this run." and the LLM generates a minimal "all clear" digest rather than silently dropping the email.
+- Root cause: the run was being logged as `status: "sent"` with `emails_sent: 0`, making it invisible from the digest log.
+
+**Why:** First production deployment of the PA agent showed no emails on Sunday or Monday. Reported by user.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/160
+
+---
+
 ## CR-PA1 — PA Agent Phase 1: replace single-LLM analysis with 5-domain sequential pipeline (2026-06-29)
 
 **What changed:**
