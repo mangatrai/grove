@@ -722,7 +722,7 @@ export function FamilyAgentPage() {
                         <Table.Tr>
                           <Table.Td colSpan={6}>
                             <Paper p="sm" radius="sm" bg="var(--mantine-color-dark-7)" mb={4}>
-                              <Text size="xs" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
+                              <Text size="xs" c="var(--mantine-color-gray-0)" style={{ whiteSpace: "pre-wrap" }}>{summaryFull}</Text>
                             </Paper>
                           </Table.Td>
                         </Table.Tr>

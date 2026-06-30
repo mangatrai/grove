@@ -11,7 +11,10 @@ const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
 
 // calendar scope enables both read and write (events.insert); existing tokens with
 // readonly scope will get a 403 on write and we surface a NEEDS_REAUTH error.
-const GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar"];
+const GCAL_SCOPES = [
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/userinfo.email",
+];
 
 // ---------------------------------------------------------------------------
 // Refresh token encryption at rest — separate key purpose from Drive tokens
@@ -288,27 +291,33 @@ export async function listUpcomingEvents(
     const allEvents: GCalEvent[] = [];
 
     for (const calId of calendarIds) {
-      const evRes = await calendar.events.list({
-        calendarId: calId,
-        timeMin,
-        timeMax,
-        singleEvents: true,
-        orderBy: "startTime",
-        maxResults: 250
-      });
-      for (const ev of evRes.data.items ?? []) {
-        const startDateTime = ev.start?.dateTime ?? ev.start?.date ?? null;
-        const endDateTime = ev.end?.dateTime ?? ev.end?.date ?? null;
-        allEvents.push({
-          id: ev.id ?? "",
-          summary: ev.summary ?? null,
-          start: startDateTime,
-          end: endDateTime,
-          allDay: !ev.start?.dateTime,
-          location: ev.location ?? null,
-          description: ev.description ?? null,
-          calendarId: calId
+      try {
+        const evRes = await calendar.events.list({
+          calendarId: calId,
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: "startTime",
+          maxResults: 250
         });
+        for (const ev of evRes.data.items ?? []) {
+          const startDateTime = ev.start?.dateTime ?? ev.start?.date ?? null;
+          const endDateTime = ev.end?.dateTime ?? ev.end?.date ?? null;
+          allEvents.push({
+            id: ev.id ?? "",
+            summary: ev.summary ?? null,
+            start: startDateTime,
+            end: endDateTime,
+            allDay: !ev.start?.dateTime,
+            location: ev.location ?? null,
+            description: ev.description ?? null,
+            calendarId: calId
+          });
+        }
+      } catch (calErr: unknown) {
+        const calHttpStatus = calErr instanceof GaxiosError ? calErr.response?.status : undefined;
+        const calMsg = calErr instanceof Error ? calErr.message : String(calErr);
+        log.warn("gcal: skipping calendar due to fetch error", { userId, calendarId: calId, httpStatus: calHttpStatus, msg: calMsg });
       }
     }
 

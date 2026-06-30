@@ -232,28 +232,28 @@ async function fetchCalendarEvents(
   const events: CalendarEvent[] = [];
 
   for (const calId of calendarIds) {
-    // Always do a full fetch — the LLM needs the complete picture to detect
-    // conflicts between any events in the window, not just recently-changed ones.
-    // "Delta" for daily runs is determined by the LLM output (hasConflicts),
-    // not by filtering the input.
-    const res = await calendar.events.list({
-      calendarId: calId,
-      timeMin,
-      timeMax,
-      singleEvents: true,
-      orderBy: "startTime",
-      maxResults: 100,
-    });
-    for (const ev of res.data.items ?? []) {
-      if (ev.status === "cancelled") continue;
-      events.push({
-        summary: ev.summary ?? "(no title)",
-        start: ev.start?.dateTime ?? ev.start?.date ?? null,
-        end: ev.end?.dateTime ?? ev.end?.date ?? null,
-        allDay: !ev.start?.dateTime,
-        location: ev.location ?? null,
+    try {
+      const res = await calendar.events.list({
         calendarId: calId,
+        timeMin,
+        timeMax,
+        singleEvents: true,
+        orderBy: "startTime",
+        maxResults: 100,
       });
+      for (const ev of res.data.items ?? []) {
+        if (ev.status === "cancelled") continue;
+        events.push({
+          summary: ev.summary ?? "(no title)",
+          start: ev.start?.dateTime ?? ev.start?.date ?? null,
+          end: ev.end?.dateTime ?? ev.end?.date ?? null,
+          allDay: !ev.start?.dateTime,
+          location: ev.location ?? null,
+          calendarId: calId,
+        });
+      }
+    } catch (err) {
+      log.warn("family-agent: skipping calendar due to fetch error", { calId, err: String(err) });
     }
   }
 
@@ -338,7 +338,7 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
   const parentLines = ctx.parentEvents.map((p, i) =>
     `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
     (p.events.length === 0 ? "  No events." :
-      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"}`).join("\n"))
+      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"}${ev.location ? ` | ${ev.location}` : ""}`).join("\n"))
   ).join("\n\n");
 
   const caregiverLines = ctx.caregiverSlots.length === 0
@@ -361,14 +361,23 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
 Children needing care:
 ${childLines}
 
-Caregiver schedule:
+Caregiver schedule (CONFIRMED — these slots are already covered, do NOT ask to confirm them):
 ${caregiverLines}
 
 Parent calendars (next 14 days):
 ${parentLines}
 
 ${openGapAlerts ? `Already flagged coverage gaps (DO NOT re-flag):\n${openGapAlerts}\n` : ""}
-Find windows where BOTH parents have overlapping commitments AND the caregiver is not scheduled. Only flag genuine childcare gaps — not adult schedule pressure.
+Identify GENUINE childcare gaps only — windows where a child has no adult present because ALL of the following are true:
+1. BOTH parents are simultaneously unavailable (overlapping commitments on the SAME time window), AND
+2. The caregiver is NOT scheduled during that window.
+
+Rules you must follow:
+- If the caregiver is scheduled during an event's time, that time is COVERED. Do not flag it.
+- A parent taking a child to a doctor or dentist appointment is NOT a gap. The child is with the parent; other children remain with the caregiver as normal.
+- If only one parent's calendar is shown (the other shows "No events"), assume the other parent is AVAILABLE — absence of calendar data does not mean unavailability.
+- An event with a location far from home (e.g., a workshop or conference in another city) during a time when a child activity is scheduled IS worth flagging if it creates a pickup or dropoff gap outside caregiver hours.
+- Only flag situations where children would genuinely have NO adult present. Err strongly toward returning an empty gaps array.
 
 Respond with ONLY valid JSON: { "gaps": [ { "alertType": "coverage_gap", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "ready-to-send message", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
 If no gaps, return { "gaps": [] }.`;
@@ -381,8 +390,13 @@ If no gaps, return { "gaps": [] }.`;
     { model: strongModel(), maxTokens: 800 }
   );
 
-  const parsed = parseJsonResponse<{ gaps: AlertItem[] }>(content);
-  return { hasOutput: parsed.gaps.length > 0, gaps: parsed.gaps };
+  try {
+    const parsed = parseJsonResponse<{ gaps: AlertItem[] }>(content);
+    return { hasOutput: parsed.gaps.length > 0, gaps: parsed.gaps };
+  } catch {
+    log.warn("family-agent: Domain 1 coverage gap parse failed", { raw: content.slice(0, 200) });
+    return { hasOutput: false, gaps: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,27 +422,43 @@ async function assessNannyCoordination(ctx: FamilyContext, runType: AgentRunType
   }).join("\n");
 
   const prompt = `Today: ${ctx.today}. Run: ${runType}.
-Caregiver schedule:
+Caregiver schedule (CONFIRMED regular hours — already arranged, no need to reconfirm):
 ${caregiverLines}
 
 Parent calendars (next 14 days):
 ${parentLines}
 
-Surface caregiver coordination needs: parent travel requiring extended hours, WFH-but-fully-booked days where caregiver availability should be confirmed, upcoming heavy weeks to flag in advance. Do NOT flag normal days.
+Flag ONLY genuine caregiver coordination needs that require action BEYOND the regular schedule above.
+Flag these:
+- Parent traveling overnight or to a multi-day conference requiring care on days the caregiver is not scheduled.
+- Events that START before or END after the caregiver's scheduled hours on a given day, where a child needs to be present (e.g., early-morning school drop-off before caregiver arrives, or a late evening activity after caregiver leaves).
+- Both parents simultaneously away on a day the caregiver is not scheduled.
+
+Do NOT flag these:
+- ANY appointment, meeting, or activity that falls WITHIN the caregiver's already-scheduled hours. The caregiver is present — no coordination needed.
+- Parent working from home on a normal day.
+- Medical appointments or child appointments during caregiver hours.
+- "Busy" or "fully-booked" days where the caregiver is already on duty.
+- Anything speculative or not directly evidenced by the calendar data above.
 
 Respond with ONLY valid JSON: { "items": [ { "alertType": "coverage_gap"|"conflict"|"suggestion", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "...", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
 If nothing actionable, return { "items": [] }.`;
 
   const { content } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You surface caregiver coordination needs for a household. Flag only actionable items. Return valid JSON only." },
+      { role: "system", content: "You surface caregiver coordination needs for a household. Flag only genuine needs beyond the existing caregiver schedule. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
     { model: strongModel(), maxTokens: 700 }
   );
 
-  const parsed = parseJsonResponse<{ items: AlertItem[] }>(content);
-  return { hasOutput: parsed.items.length > 0, items: parsed.items };
+  try {
+    const parsed = parseJsonResponse<{ items: AlertItem[] }>(content);
+    return { hasOutput: parsed.items.length > 0, items: parsed.items };
+  } catch {
+    log.warn("family-agent: Domain 2 nanny coord parse failed", { raw: content.slice(0, 200) });
+    return { hasOutput: false, items: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -481,16 +511,49 @@ Return ONLY a JSON array: ["query 1", "query 2", ...]` },
   }
 
   const searchResults: Array<{ query: string; result: string }> = [];
+  let tavilyUnavailable = false;
   for (const query of queries.slice(0, queryCount)) {
     try {
       const result = await tavilySearch(query);
-      searchResults.push({ query, result: (typeof result === "string" ? result : JSON.stringify(result)).slice(0, 600) });
+      const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+      if (resultStr.includes("TAVILY_API_KEY")) {
+        log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.location });
+        tavilyUnavailable = true;
+        break;
+      }
+      searchResults.push({ query, result: resultStr.slice(0, 600) });
     } catch (err) {
       log.warn("family-agent: tavily search failed", { query, err: String(err) });
     }
   }
 
-  if (searchResults.length === 0) return { hasOutput: false, items: [] };
+  if (searchResults.length === 0) {
+    // No live search data — fall back to LLM-only general suggestions from household profile + season
+    const { content: fallbackJson } = await getChatAdapter().complete(
+      [
+        { role: "system", content: "You generate helpful general household suggestions. Return valid JSON only." },
+        { role: "user", content: `Family location: ${ctx.location || "DFW area, Texas"}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
+
+Household members:
+${memberProfile}
+
+${tavilyUnavailable ? "No live web search available. Use general knowledge only." : "All web searches failed."}
+Generate 2-3 genuinely useful suggestions for this household right now — seasonal activities for the kids, typical reminders for this time of year, or household tips relevant to their profile and location. Be specific to the season and location. Do NOT invent specific dates, prices, or event names you cannot verify.
+
+Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences", "category": "activity"|"suggestion" } ] }
+If nothing useful to say, return { "items": [] }.` },
+      ],
+      { model: strongModel(), maxTokens: 400 }
+    );
+    try {
+      const fb = parseJsonResponse<{ items: ResearchItem[] }>(fallbackJson);
+      log.info("family-agent: Domain 3 LLM-only fallback produced items", { count: fb.items.length });
+      return { hasOutput: fb.items.length > 0, items: fb.items };
+    } catch {
+      log.warn("family-agent: Domain 3 LLM fallback parse failed");
+      return { hasOutput: false, items: [] };
+    }
+  }
 
   const searchContext = searchResults
     .map((r, i) => `Search ${i + 1}: "${r.query}"\n${r.result}`)
@@ -512,8 +575,13 @@ If nothing useful found, return { "items": [] }.` },
     { model: strongModel(), maxTokens: 600 }
   );
 
-  const parsed = parseJsonResponse<{ items: ResearchItem[] }>(synthJson);
-  return { hasOutput: parsed.items.length > 0, items: parsed.items };
+  try {
+    const parsed = parseJsonResponse<{ items: ResearchItem[] }>(synthJson);
+    return { hasOutput: parsed.items.length > 0, items: parsed.items };
+  } catch {
+    log.warn("family-agent: Domain 3 synthesis parse failed", { raw: synthJson.slice(0, 200) });
+    return { hasOutput: false, items: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -543,17 +611,52 @@ async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promis
 
   let tavilyContext = "";
   if (runType !== "daily_delta" && ctx.location) {
-    const city = ctx.location.split(",")[0].trim();
+    const month = new Date().toLocaleString("en-US", { month: "long" });
     const year = new Date().getFullYear();
-    const queries = [
-      `${city} ISD school enrollment deadline ${year}`,
-      `summer camp registration deadline ${ctx.location} ${year}`,
-    ];
+    const memberProfile = ctx.members.length === 0
+      ? "No member profiles configured."
+      : ctx.members.map(m => {
+          const parts = [`${m.fullName} (${m.relationship}${m.age != null ? `, age ${m.age}` : ""})`];
+          if (m.interestsJson?.length) parts.push(`activities: ${m.interestsJson.join(", ")}`);
+          if (m.notes) parts.push(m.notes);
+          return parts.join(" — ");
+        }).join("\n");
+
+    const { content: queryJson } = await getChatAdapter().complete(
+      [
+        { role: "system", content: "You generate targeted web search queries to find upcoming deadlines relevant to a household. Return valid JSON only." },
+        { role: "user", content: `Today: ${ctx.today}. Month: ${month} ${year}. Location: ${ctx.location}.
+
+Household members:
+${memberProfile}
+
+Already tracked in app (do not re-search for these):
+${dbLines}
+
+Already flagged as open alerts (do not re-search for these):
+${openDeadlineAlerts || "None."}
+
+Generate 3-4 Tavily search queries to find PUBLIC deadlines this household might be missing — school enrollment windows, activity registration cutoffs, medical/vaccination reminders, camp deadlines, sports tryout dates — specific to their location, the kids' ages and activities, and what's relevant in ${month}. Skip anything already tracked above.
+
+Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
+      ],
+      { model: strongModel(), maxTokens: 200 }
+    );
+
+    let deadlineQueries: string[] = [];
+    try {
+      deadlineQueries = parseJsonResponse<{ queries: string[] }>(queryJson).queries ?? [];
+    } catch {
+      log.warn("family-agent: Domain 4 query generation parse failed");
+    }
+
     const results: string[] = [];
-    for (const q of queries) {
+    for (const q of deadlineQueries.slice(0, 4)) {
       try {
         const r = await tavilySearch(q);
-        results.push(`"${q}": ${(typeof r === "string" ? r : JSON.stringify(r)).slice(0, 400)}`);
+        const rStr = (typeof r === "string" ? r : JSON.stringify(r)).slice(0, 400);
+        if (rStr.includes("TAVILY_API_KEY")) break;
+        results.push(`"${q}": ${rStr}`);
       } catch { /* ignore individual search failures */ }
     }
     if (results.length > 0) tavilyContext = results.join("\n\n");
@@ -577,8 +680,13 @@ If nothing new, return { "alerts": [] }.` },
     { model: strongModel(), maxTokens: 600 }
   );
 
-  const parsed = parseJsonResponse<{ alerts: AlertItem[] }>(content);
-  return { hasOutput: parsed.alerts.length > 0, alerts: parsed.alerts };
+  try {
+    const parsed = parseJsonResponse<{ alerts: AlertItem[] }>(content);
+    return { hasOutput: parsed.alerts.length > 0, alerts: parsed.alerts };
+  } catch {
+    log.warn("family-agent: Domain 4 deadline parse failed", { raw: content.slice(0, 200) });
+    return { hasOutput: false, alerts: [] };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -592,10 +700,19 @@ async function synthesizeDigest(
   parents: ConnectedParent[],
   financeContext: string
 ): Promise<AgentAnalysis> {
+  // Research items stored as suggestion alerts so they appear in the UI, not just in email
+  const researchSuggestions: AlertItem[] = domain.research.items.map(item => ({
+    alertType: "suggestion" as const,
+    reason: `[${item.category.toUpperCase()}] ${item.title} — ${item.summary}`,
+    affectedDate: null,
+    copyPasteText: item.summary,
+    recipientHint: "Both",
+  }));
   const allAlerts: AlertItem[] = [
     ...domain.coverageGaps.gaps,
     ...domain.nannyCoord.items,
     ...domain.deadlines.alerts,
+    ...researchSuggestions,
   ];
   const hasOutput = allAlerts.length > 0 || domain.research.hasOutput;
 
@@ -630,7 +747,7 @@ Write digest emails per parent. Parent A = primary household manager. Parent B =
 
 Respond with ONLY valid JSON:
 {
-  "summaryText": "1-2 sentence overall summary",
+  "summaryText": "3-5 sentence summary covering ALL domains in order: (1) childcare/scheduling status this week, (2) nanny coordination needs if any, (3) deadline alerts if any, (4) proactive research findings if any. If a domain has nothing to report, say so in one clause (e.g. 'No coverage issues this week.'). Be specific — name actual events, dates, or findings where available.",
   "parentADigest": { "subject": "...", "body": "..." },
   "parentBDigest": { "subject": "...", "body": "..." }
 }` },
@@ -638,19 +755,30 @@ Respond with ONLY valid JSON:
     { model: strongModel(), maxTokens: 1500 }
   );
 
-  const parsed = parseJsonResponse<{
-    summaryText: string;
-    parentADigest: { subject: string; body: string };
-    parentBDigest: { subject: string; body: string };
-  }>(content);
+  try {
+    const parsed = parseJsonResponse<{
+      summaryText: string;
+      parentADigest: { subject: string; body: string };
+      parentBDigest: { subject: string; body: string };
+    }>(content);
 
-  return {
-    conflicts: allAlerts,
-    parentADigest: parsed.parentADigest,
-    parentBDigest: parsed.parentBDigest,
-    summaryText: parsed.summaryText,
-    hasOutput: true,
-  };
+    return {
+      conflicts: allAlerts,
+      parentADigest: parsed.parentADigest,
+      parentBDigest: parsed.parentBDigest,
+      summaryText: parsed.summaryText,
+      hasOutput: true,
+    };
+  } catch {
+    log.warn("family-agent: Domain 5 synthesis parse failed", { raw: content.slice(0, 200) });
+    return {
+      conflicts: allAlerts,
+      parentADigest: null,
+      parentBDigest: null,
+      summaryText: "Digest synthesis failed — alerts were still generated.",
+      hasOutput: allAlerts.length > 0,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

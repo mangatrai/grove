@@ -1,6 +1,6 @@
 {
   "name": "@grove/backend",
-  "version": "6.2.1",
+  "version": "6.2.3",
   "private": true,
   "type": "module",
   "engines": {
