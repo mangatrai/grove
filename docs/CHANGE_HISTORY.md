@@ -14,6 +14,18 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-196 — PA Agent: PA persona + reasoning provocation across all 4 domains (2026-06-30)
+
+**What changed:**
+- Extracted `buildMemberProfile(members: HouseholdMember[])` helper — consolidates member profile string construction (name, relationship, age, activities, notes) into one place; D3 and D4 inline versions removed, D1 and D2 now use it too.
+- D1 `analyzeCoverageGaps`: system prompt now frames the LLM as "a careful childcare coverage analyst for a household PA"; user prompt adds a Household members section with explicit guidance: "use ages, school schedules in notes, and activity times — a child at school or at an activity during a gap window is not at risk."
+- D2 `assessNannyCoordination`: same — PA analyst persona in system; member context added to user prompt with guidance on when school-age vs. infant care needs differ.
+- D3 `runProactiveResearch`: query gen system prompt elevated to PA persona ("reason about what matters for this family — life stages, seasonal transitions, interest-based opportunities"). User prompt restructured with bullet-point HOW-TO-USE guidance for each member profile field (age/stage, activities/interests, notes, season+location), ending with "Think as a PA who has worked with this family for a year." Synthesis and fallback system prompts updated to match PA framing. Synthesis user prompt now includes member context + month so the LLM can filter search results for family relevance.
+- D4 `sweepDeadlines` Call 1: same PA persona + HOW-TO-USE reasoning guidance added to user prompt. Call 2 triage system prompt updated to "household PA triaging deadline alerts — be specific to this family's context, not generic."
+
+**Why:** All 4 domain prompts were task-framed ("generate queries", "detect gaps") with no instruction on WHO the LLM should reason as or HOW to use the member profile data (age, interests, notes). The LLM was defaulting to generic category matching rather than reasoning about this specific household's life stage and context. Framing as a PA + explicit per-field reasoning guidance provokes the LLM to think first, then act — producing more contextually relevant queries, better gap assessment, and fewer false positives.
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
 ## FIX-195 — PA Agent: missing try/catch on parseJsonResponse in Domains 1, 2, 4, 5 + per-calendar fetch guard (2026-06-29)
 
 **What changed:**

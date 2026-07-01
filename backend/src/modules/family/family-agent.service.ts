@@ -326,6 +326,16 @@ function parseJsonResponse<T>(raw: string): T {
   return JSON.parse(cleaned) as T;
 }
 
+function buildMemberProfile(members: HouseholdMember[]): string {
+  if (members.length === 0) return "No household members configured.";
+  return members.map(m => {
+    const parts = [`${m.fullName} (${m.relationship}${m.age != null ? `, age ${m.age}` : ""})`];
+    if (m.interestsJson?.length) parts.push(`activities: ${m.interestsJson.join(", ")}`);
+    if (m.notes) parts.push(m.notes);
+    return parts.join(" — ");
+  }).join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Domain 1 — Coverage gap detection
 // ---------------------------------------------------------------------------
@@ -357,7 +367,14 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
     .map(a => `- ${a.affectedDate ?? "no date"}: ${a.reason}`)
     .join("\n");
 
+  const memberProfile = buildMemberProfile(ctx.members);
+
   const prompt = `Today: ${ctx.today}. Run: ${runType}.
+
+Household members:
+${memberProfile}
+↑ Use these profiles when assessing gaps: check ages, school schedules in notes, and activity times — a child at school or a confirmed activity during a gap window is not at risk and should not be flagged.
+
 Children needing care:
 ${childLines}
 
@@ -384,7 +401,7 @@ If no gaps, return { "gaps": [] }.`;
 
   const { content } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You detect childcare coverage gaps for a dual-income household. Only flag gaps where children have no care. Return valid JSON only." },
+      { role: "system", content: "You are a careful childcare coverage analyst for a household PA. Identify genuine gaps where children have no adult present — use member ages, school schedules, and activity context from their profiles to reason precisely. A school-age child at school or at an activity during the flagged window is not at risk. Err strongly toward empty results. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
     { model: strongModel(), maxTokens: 800 }
@@ -421,7 +438,14 @@ async function assessNannyCoordination(ctx: FamilyContext, runType: AgentRunType
     return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
   }).join("\n");
 
+  const memberProfile = buildMemberProfile(ctx.members);
+
   const prompt = `Today: ${ctx.today}. Run: ${runType}.
+
+Household members:
+${memberProfile}
+↑ Use these profiles to assess whether coordination is genuinely needed: a school-age child at school during a gap does not need home coverage; an infant home full-time does.
+
 Caregiver schedule (CONFIRMED regular hours — already arranged, no need to reconfirm):
 ${caregiverLines}
 
@@ -446,7 +470,7 @@ If nothing actionable, return { "items": [] }.`;
 
   const { content } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You surface caregiver coordination needs for a household. Flag only genuine needs beyond the existing caregiver schedule. Return valid JSON only." },
+      { role: "system", content: "You are a careful family coordination assistant for a household PA. Surface only genuine caregiver needs that require action beyond the confirmed schedule — use member ages, school hours from notes, and activity context to reason about whether a gap actually affects a child who needs supervision. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
     { model: strongModel(), maxTokens: 700 }
@@ -471,11 +495,7 @@ async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): 
   const month = now.toLocaleString("en-US", { month: "long" });
   const season = getSeason(now.getMonth());
 
-  const memberProfile = ctx.members.map(m => {
-    const interests = m.interestsJson.length > 0 ? `: ${m.interestsJson.join(", ")}` : "";
-    const notes = m.notes ? `; ${m.notes}` : "";
-    return `- ${m.relationship}${m.age !== null ? ` (age ${m.age})` : ""}${interests}${notes}`;
-  }).join("\n");
+  const memberProfile = buildMemberProfile(ctx.members);
 
   const activityLocations = ctx.parentEvents
     .flatMap(p => p.events)
@@ -486,16 +506,24 @@ async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): 
 
   const { content: queryJson } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You generate targeted search queries for a household PA. Return only a JSON array of query strings, nothing else." },
+      { role: "system", content: "You are a proactive personal assistant for a busy household. Before generating search queries, reason about what matters for this family — their kids' life stages, seasonal transitions, interest-based opportunities, and what a thoughtful PA who knows them well would proactively check. Return only a JSON array of query strings." },
       { role: "user", content: `Family location: ${ctx.location}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
 
 Household members:
 ${memberProfile}
 
-Calendar activity locations (for context):
+How to use these profiles — reason about each dimension before generating queries:
+• Age & stage → What developmental milestones, school transitions, or age-typical opportunities are relevant right now?
+• Activities/interests → Are there registration windows, competitive seasons, tryout cutoffs, or session starts coming up?
+• Notes → The family added these deliberately — treat notes as high-priority signals that should directly shape query topics.
+• Season + location → What does ${season} in ${ctx.location} mean for this family specifically?
+
+Think as a PA who has worked with this family for a year: What would you proactively surface this ${month} that they haven't thought to ask about?
+
+Calendar activity locations (for local context):
 ${activityLocations || "None noted."}
 
-Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know. Think proactively: local events, registration deadlines, new restaurants, weekend plans, weather impacts on outdoor activities.
+Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know — registrations, deadlines, local events, seasonal prep, or opportunities specific to their ages and interests.
 
 Return ONLY a JSON array: ["query 1", "query 2", ...]` },
     ],
@@ -531,7 +559,7 @@ Return ONLY a JSON array: ["query 1", "query 2", ...]` },
     // No live search data — fall back to LLM-only general suggestions from household profile + season
     const { content: fallbackJson } = await getChatAdapter().complete(
       [
-        { role: "system", content: "You generate helpful general household suggestions. Return valid JSON only." },
+        { role: "system", content: "You are a proactive household personal assistant. When live search is unavailable, draw on general knowledge to surface what matters for this family right now — based on their member profiles, location, and the season. Return valid JSON only." },
         { role: "user", content: `Family location: ${ctx.location || "DFW area, Texas"}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
 
 Household members:
@@ -561,13 +589,16 @@ If nothing useful to say, return { "items": [] }.` },
 
   const { content: synthJson } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You synthesize web search results for a household PA. Extract only specific, actionable findings. Return valid JSON only." },
-      { role: "user", content: `Family: ${ctx.location}. Today: ${ctx.today}.
+      { role: "system", content: "You are a household PA synthesizing search results. Extract only findings that are specific, actionable, and relevant to this family's ages, interests, and location. Discard generic or unrelated content. Return valid JSON only." },
+      { role: "user", content: `Family: ${ctx.location}. Today: ${ctx.today}. Month: ${month}.
+
+Household members:
+${memberProfile}
 
 Search results:
 ${searchContext}
 
-Extract 2-4 specific, useful findings for this family. Skip vague or stale results. Prioritize items with specific dates, locations, or deadlines.
+Extract 2-4 specific, useful findings relevant to this family. Skip vague or stale results. Prioritize items with specific dates, locations, or deadlines that connect to their ages, interests, or location.
 
 Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences with specifics", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
 If nothing useful found, return { "items": [] }.` },
@@ -613,30 +644,31 @@ async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promis
   if (runType !== "daily_delta" && ctx.location) {
     const month = new Date().toLocaleString("en-US", { month: "long" });
     const year = new Date().getFullYear();
-    const memberProfile = ctx.members.length === 0
-      ? "No member profiles configured."
-      : ctx.members.map(m => {
-          const parts = [`${m.fullName} (${m.relationship}${m.age != null ? `, age ${m.age}` : ""})`];
-          if (m.interestsJson?.length) parts.push(`activities: ${m.interestsJson.join(", ")}`);
-          if (m.notes) parts.push(m.notes);
-          return parts.join(" — ");
-        }).join("\n");
+    const memberProfile = buildMemberProfile(ctx.members);
 
     const { content: queryJson } = await getChatAdapter().complete(
       [
-        { role: "system", content: "You generate targeted web search queries to find upcoming deadlines relevant to a household. Return valid JSON only." },
+        { role: "system", content: "You are a proactive personal assistant generating deadline search queries for a household. Think from this family's specific life stage and context — not from a generic checklist. Return valid JSON only." },
         { role: "user", content: `Today: ${ctx.today}. Month: ${month} ${year}. Location: ${ctx.location}.
 
 Household members:
 ${memberProfile}
 
-Already tracked in app (do not re-search for these):
+How to use these profiles — reason about each child's deadline landscape before generating queries:
+• Age & stage → What enrollment windows, registration cutoffs, or age-milestone checkpoints are typical right now for a child this age?
+• Activities/interests → Are there session registration deadlines, tryout windows, or competitive season signups approaching for these specific activities?
+• Notes → Custom household context — treat as high-priority signals for what to search.
+• ${month} in ${ctx.location} → What deadlines are seasonally typical for families here right now?
+
+Think: What would a PA who knows this family proactively check — not just obvious school deadlines but activity cutoffs, medical milestones, financial windows, or local registration events they might miss?
+
+Already tracked in app — do NOT generate queries for these:
 ${dbLines}
 
-Already flagged as open alerts (do not re-search for these):
+Already open alerts — do NOT re-search these:
 ${openDeadlineAlerts || "None."}
 
-Generate 3-4 Tavily search queries to find PUBLIC deadlines this household might be missing — school enrollment windows, activity registration cutoffs, medical/vaccination reminders, camp deadlines, sports tryout dates — specific to their location, the kids' ages and activities, and what's relevant in ${month}. Skip anything already tracked above.
+Generate 3-4 targeted Tavily search queries to surface PUBLIC deadlines this household might miss.
 
 Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       ],
@@ -664,7 +696,7 @@ Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
 
   const { content } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You triage family deadlines. Flag only new items not already open. Return valid JSON only." },
+      { role: "system", content: "You are a household PA triaging deadline alerts. Flag only new items not already open — be specific to this family's context, not generic. Return valid JSON only." },
       { role: "user", content: `Today: ${ctx.today}. Location: ${ctx.location}.
 
 Deadlines in app (next ${cutoffDays} days):
