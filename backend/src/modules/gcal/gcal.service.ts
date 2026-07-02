@@ -476,6 +476,9 @@ export async function createCalendarEvent(
     end = { dateTime: endDt.toISOString(), timeZone: "UTC" };
   } else {
     // All-day event
+    if (!event.date || !/^\d{4}-\d{2}-\d{2}$/.test(event.date) || isNaN(new Date(event.date).getTime())) {
+      return { ok: false, code: "GCAL_WRITE_ERROR", message: `Invalid event date: "${event.date}"` };
+    }
     const nextDay = new Date(event.date);
     nextDay.setDate(nextDay.getDate() + 1);
     start = { date: event.date };

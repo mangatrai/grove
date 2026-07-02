@@ -575,7 +575,9 @@ Household members:
 ${memberProfile}
 
 ${tavilyUnavailable ? "No live web search available. Use general knowledge only." : "All web searches failed."}
-Generate 2-3 genuinely useful suggestions for this household right now — seasonal activities for the kids, typical reminders for this time of year, or household tips relevant to their profile and location. Be specific to the season and location. Do NOT invent specific dates, prices, or event names you cannot verify.
+Generate 2-3 genuinely useful suggestions for this household right now — seasonal activities for the kids, typical reminders for this time of year, or household tips relevant to their profile and location. Be specific to the season and location.
+For activities, name REAL well-known providers in ${ctx.location || "DFW area, Texas"} only if you are confident in the name and they genuinely serve the child's age and interest. Include their website if you know it. If you are unsure of a specific business, describe the type of provider and suggest how to find one (e.g., "Search for [X] in [city] on Google").
+Do NOT invent specific dates, prices, or event names you cannot verify.
 
 Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences", "category": "activity"|"suggestion" } ] }
 If nothing useful to say, return { "items": [] }.` },
@@ -598,7 +600,7 @@ If nothing useful to say, return { "items": [] }.` },
 
   const { content: synthJson } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You are a household PA synthesizing search results. Extract only findings that are specific, actionable, and relevant to this family's ages, interests, and location. Discard generic or unrelated content. Return valid JSON only." },
+      { role: "system", content: "You are a household PA synthesizing search results into actionable intelligence. Your job is NOT to summarize — it is to compile exactly what a busy parent needs to act without Googling: full business/program name, website URL, pricing, and how to register. Vague summaries like 'enroll in swim lessons' or 'great summer activity' are rejected. If search results lack specifics, surface what you can and skip the rest. Return valid JSON only." },
       { role: "user", content: `Family: ${ctx.location}. Today: ${ctx.today}. Month: ${month}.
 
 Household members:
@@ -609,10 +611,20 @@ ${searchContext}
 
 TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed.
 
-Extract 2-4 specific, useful findings relevant to this family. Skip vague or stale results. Prioritize items with specific dates, locations, or deadlines that connect to their ages, interests, or location.
+Extract 2-4 specific, useful findings relevant to this family. For EACH item the summary MUST include everything available from the search results:
+• Full official business/program name (not a generic category like "swim school")
+• Website URL — link directly to registration page if possible
+• Approximate cost or price range
+• How to register — specific steps or the registration URL
+• Why relevant to THIS family (reference the specific child's age, name, or activity interest)
 
-Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences with specifics", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
-If nothing useful found, return { "items": [] }.` },
+BAD: "Balance Dance Studios has summer camps for ages 3-5."
+GOOD: "Balance Dance Studios (balancedancestudios.com) — summer mini-camps for ages 3-5, ~$X/week; register at [URL] or call [number]. Matches Kid Two's dance interest."
+
+Skip any item where you cannot produce at least the official name plus one concrete actionable detail (URL, price, or phone number).
+
+Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars — include business name", "summary": "2-3 sentences: business name, website, pricing, registration steps, and why relevant to this specific child", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
+If nothing specific enough found, return { "items": [] }.` },
     ],
     { model: strongModel(), maxTokens: 600 }
   );
@@ -719,8 +731,8 @@ Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤
 
 TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed.
 
-Respond with ONLY valid JSON: { "alerts": [ { "alertType": "deadline_approaching", "reason": "what/when/why — include specific dates and action needed", "affectedDate": "YYYY-MM-DD", "copyPasteText": "action family should take", "recipientHint": "Self"|"Both"|"Spouse", "calendarEventPayload": { "title": "≤80 char calendar event title e.g. 'Fall Swim Registration Deadline'", "date": "YYYY-MM-DD — the deadline date or a timely reminder date", "description": "1-2 sentences of context for the calendar event body" } } ] }
-Include calendarEventPayload for any deadline that benefits from being on the calendar (registration cutoffs, enrollment windows, appointment reminders). Set it to null only for vague or unactionable items.
+Respond with ONLY valid JSON: { "alerts": [ { "alertType": "deadline_approaching", "reason": "Full context for the parent: the specific business/program full name and website (from search results if available), what the deadline is and when, what happens if missed, and the FIRST concrete step to take right now. Example: 'Fall karate enrollment at Mighty Tiger Martial Arts (mightytiger.com) closes July 12 — sign up online or call 512-555-0100. Missing this means waiting until January for the next session.'", "affectedDate": "YYYY-MM-DD", "copyPasteText": "A ready-to-act message with: full business/program name, their website or phone, the deadline date, and the exact enrollment step. Must be specific enough that the parent can act immediately without Googling.", "recipientHint": "Self"|"Both"|"Spouse", "calendarEventPayload": { "title": "≤80 char event title including business name e.g. 'Mighty Tiger Karate Fall Enrollment Deadline'", "date": "ISO date string ONLY — format: YYYY-MM-DD — example: 2026-07-12 — do NOT include any other text in this field", "description": "1-2 sentences of context for the calendar event body, including the website or phone if known" } } ] }
+Include calendarEventPayload for any deadline that benefits from being on the calendar (registration cutoffs, enrollment windows, appointment reminders). Set calendarEventPayload to null only for vague or unactionable items.
 If nothing new, return { "alerts": [] }.` },
     ],
     { model: strongModel(), maxTokens: 600 }

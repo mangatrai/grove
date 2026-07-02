@@ -14,6 +14,24 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-199 — Family Planner: PA agent alert quality + GCal date crash (2026-07-01)
+
+**What changed:**
+- `gcal.service.ts`: Added date validation guard in the all-day event branch before `new Date(event.date)`. If the LLM returns a malformed date (null, "YYYY-MM-DD" literal, free text), the function now returns `{ ok: false, code: "GCAL_WRITE_ERROR", message: "Invalid event date: ..." }` instead of crashing with `RangeError: Invalid time value`.
+- `family-agent.service.ts` D3 synthesis prompt: Replaced generic "extract actionable findings" instruction with explicit requirements: full official business/program name, website URL, price range, registration steps, and why relevant to the specific child. Added BAD/GOOD examples to anchor the model. Skip threshold raised — items without at least a name + one concrete detail are discarded.
+- `family-agent.service.ts` D3 fallback prompt (no Tavily): Updated to ask the model to use real well-known providers in the household location when confident, and to suggest "search for X in [city]" when not.
+- `family-agent.service.ts` D4 triage prompt: `reason` now requires full business/program name + website from search results, what happens if the deadline is missed, and the first concrete step. `copyPasteText` must be specific enough to act on without Googling. Calendar `date` field instruction changed to "ISO date string ONLY — format: YYYY-MM-DD — do NOT include any other text" to prevent LLM from injecting explanatory text into the date value.
+- `FamilyAgentPage.tsx` `handleAlertCompose`: Subject now uses the first sentence of `alert.reason` (trimmed to ≤100 chars) instead of the generic label. Body structured as: full reason → "Action needed: [copyPasteText]" → "Deadline: [date]".
+
+**Why:** (1) GCal "Add to Calendar" threw `RangeError: Invalid time value` when the LLM returned a human-readable date in the `calendarEventPayload.date` field. (2) D3/D4 alerts were too vague to act on — missing business names, websites, and enrollment steps. (3) Compose email subject "Planning" and bare body gave no context to the recipient.
+
+**Files:**
+- `backend/src/modules/gcal/gcal.service.ts` — all-day date guard
+- `backend/src/modules/family/family-agent.service.ts` — D3 synthesis, D3 fallback, D4 triage prompts
+- `frontend/src/pages/FamilyAgentPage.tsx` — `handleAlertCompose`
+
+---
+
 ## CR-198 — Family Planner: GCal write-back for deadline alerts (2026-07-01)
 
 **What changed:**

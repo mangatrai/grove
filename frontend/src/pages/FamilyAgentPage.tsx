@@ -557,14 +557,28 @@ export function FamilyAgentPage() {
   }
 
   function handleAlertCompose(alert: AgentAlert) {
-    const label = ALERT_TYPE_LABELS[alert.alertType] ?? alert.alertType;
-    const datePart = alert.affectedDate
-      ? ` — ${new Date(alert.affectedDate).toLocaleDateString(undefined, { dateStyle: "medium" })}`
-      : "";
+    // Build a contextual subject from the first sentence of reason
+    const firstSentence = (alert.reason ?? "").split(/(?<=[.!?])\s/)[0].trim();
+    const subjectBase = firstSentence.length > 0 && firstSentence.length <= 100
+      ? firstSentence
+      : (alert.reason ?? "").slice(0, 80).replace(/\s\S*$/, "…");
+    const subject = subjectBase || (ALERT_TYPE_LABELS[alert.alertType] ?? alert.alertType);
+
+    // Build structured body: full context, then action, then deadline callout
+    const bodyParts: string[] = [];
+    if (alert.reason) bodyParts.push(alert.reason);
+    if (alert.copyPasteText && alert.copyPasteText !== alert.reason) {
+      bodyParts.push(`Action needed:\n${alert.copyPasteText}`);
+    }
+    if (alert.affectedDate) {
+      const dateStr = new Date(alert.affectedDate).toLocaleDateString(undefined, { dateStyle: "long" });
+      bodyParts.push(`Deadline: ${dateStr}`);
+    }
+
     setComposeInitial({
       to: "",
-      subject: `${label}${datePart}`,
-      body: alert.copyPasteText ?? "",
+      subject,
+      body: bodyParts.join("\n\n"),
     });
     setComposeOpen(true);
   }
