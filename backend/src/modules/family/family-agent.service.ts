@@ -63,6 +63,7 @@ type PipelineOutputs = {
 type FamilyContext = {
   location: string;
   today: string;
+  todayIso: string;
   members: HouseholdMember[];
   caregiverSlots: HelpAvailabilitySlot[];
   parentEvents: Array<{ email: string; events: CalendarEvent[] }>;
@@ -598,6 +599,8 @@ ${memberProfile}
 Search results:
 ${searchContext}
 
+TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed.
+
 Extract 2-4 specific, useful findings relevant to this family. Skip vague or stale results. Prioritize items with specific dates, locations, or deadlines that connect to their ages, interests, or location.
 
 Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences with specifics", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment" } ] }
@@ -628,7 +631,7 @@ async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promis
   const upcomingDeadlines = ctx.dbEvents.filter(e => {
     if (e.recordType !== "deadline") return false;
     const date = e.dueDate ?? e.startAt?.slice(0, 10) ?? null;
-    return date !== null && date <= cutoffStr;
+    return date !== null && date >= ctx.todayIso && date <= cutoffStr;
   });
 
   const dbLines = upcomingDeadlines.length === 0
@@ -705,6 +708,8 @@ ${dbLines}
 ${tavilyContext ? `Public deadlines from web:\n${tavilyContext}\n` : ""}
 ${openDeadlineAlerts ? `Already flagged (DO NOT re-flag):\n${openDeadlineAlerts}\n` : ""}
 Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤${cutoffDays} days). Surface only new items.
+
+TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed.
 
 Respond with ONLY valid JSON: { "alerts": [ { "alertType": "deadline_approaching", "reason": "what/when/why", "affectedDate": "YYYY-MM-DD", "copyPasteText": "action to take", "recipientHint": "Self"|"Both"|"Spouse" } ] }
 If nothing new, return { "alerts": [] }.` },
@@ -877,7 +882,8 @@ export async function runFamilyAgent(
     ]);
 
     const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-    const ctx: FamilyContext = { location, today, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const ctx: FamilyContext = { location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
 
     // Run domains 1–4 in parallel; domain 5 synthesizes their outputs
     const [coverageGaps, nannyCoord, research, deadlines] = await Promise.all([

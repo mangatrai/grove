@@ -14,6 +14,24 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-197 — PA Agent: date-awareness fix + family planner dev seed (2026-07-01)
+
+**What changed:**
+- Added `todayIso: string` (ISO `YYYY-MM-DD`) to `FamilyContext` — previously only a human-readable date string existed in context.
+- Fixed `sweepDeadlines()` event filter: was only checking `date <= cutoffStr` (upper bound), now also checks `date >= ctx.todayIso` so past deadlines are excluded.
+- D3 synthesis prompt now opens with explicit "TODAY is ${ctx.todayIso} — only include items dated on or after today" instruction.
+- D4 Call 2 triage prompt now opens with "TODAY is ${ctx.todayIso} — only output alerts where affectedDate >= today" instruction.
+- Added `backend/db/seeds/dev/dev_0009_seed_family_planner.sql`: seeds household location (Dallas, TX), 5 member profiles (owner/spouse updated, Kid One / Kid Two / Nanny Helper added), household_membership rows, nanny Mon–Fri schedule in `household_help_availability`, 2 recurring activity events (swim lesson, karate), and 8 PA deadlines using `CURRENT_DATE + INTERVAL` offsets so they remain in the future on every re-seed.
+- All seed institution names anonymized (real school → "Northfield Academy", real swim school → "Frisco Aquatics Center").
+
+**Why:** Agent was surfacing stale alerts (May swim registration, June 27 BMX event) because the LLM had no instruction to filter past dates, and the filter in `sweepDeadlines` had no minimum date bound. Dev seed was manually re-entered after each `db:reset:dev`; this seeds the canonical PA test state automatically.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/db/seeds/dev/dev_0009_seed_family_planner.sql`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/170
+
+---
+
 ## FIX-196 — PA Agent: PA persona + reasoning provocation across all 4 domains (2026-06-30)
 
 **What changed:**
