@@ -119,9 +119,10 @@ familyEventsRouter.post(
       is_resolved: boolean;
       action_type: string | null;
       action_payload: unknown;
+      affected_date: string | null;
     };
     const alert = await qGet<AlertActionRow>(
-      `SELECT id, is_resolved, action_type, action_payload FROM family_agent_alerts WHERE id = ? AND household_id = ?`,
+      `SELECT id, is_resolved, action_type, action_payload, affected_date FROM family_agent_alerts WHERE id = ? AND household_id = ?`,
       alertId, householdId
     );
     if (!alert) { res.status(404).json({ error: "Alert not found" }); return; }
@@ -132,14 +133,32 @@ familyEventsRouter.post(
       return;
     }
 
-    const payload = alert.action_payload as { title: string; date: string; description: string };
-    log.debug("family-events: approving calendar alert", {
+    const rawPayload = alert.action_payload as Record<string, unknown>;
+    log.warn("family-events: approving calendar alert payload", {
       alertId,
-      payloadTitle: payload.title,
-      payloadDate: payload.date,
-      payloadDateType: typeof payload.date,
-      rawPayload: JSON.stringify(payload),
+      rawPayload: JSON.stringify(rawPayload),
+      affectedDate: alert.affected_date,
     });
+
+    // Defensively extract date — LLM field name varies across prompt versions;
+    // fall back to affected_date from the alerts row (always populated at alert creation).
+    const resolvedDate =
+      typeof rawPayload.date === "string" ? rawPayload.date :
+      typeof rawPayload.startDate === "string" ? rawPayload.startDate :
+      typeof rawPayload.dueDate === "string" ? rawPayload.dueDate :
+      alert.affected_date ?? null;
+
+    if (!resolvedDate) {
+      log.warn("family-events: no usable date in payload or alert row", { alertId, rawPayload: JSON.stringify(rawPayload) });
+      res.status(422).json({ code: "GCAL_INVALID_DATE", message: "No date found in alert payload — re-run the agent to regenerate this alert." });
+      return;
+    }
+
+    const payload = {
+      title: typeof rawPayload.title === "string" ? rawPayload.title : String(rawPayload.title ?? ""),
+      date: resolvedDate,
+      description: typeof rawPayload.description === "string" ? rawPayload.description : "",
+    };
     const gcalResult = await createCalendarEvent(userId, householdId, {
       title: payload.title,
       date: payload.date,
@@ -151,7 +170,7 @@ familyEventsRouter.post(
         alertId,
         code: gcalResult.code,
         message: gcalResult.message,
-        payloadDate: payload.date,
+        resolvedDate: payload.date,
       });
       const status = gcalResult.code === "GCAL_WRITE_ERROR" ? 500 : 422;
       res.status(status).json({ code: gcalResult.code, message: gcalResult.message });

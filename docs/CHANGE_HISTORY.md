@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-201 — GCal approve route: defensive date extraction + WARN-level payload logging (2026-07-02)
+
+**What changed:**
+- `family-events.routes.ts`: Approve route now fetches `affected_date` from the alerts row alongside `action_payload`. Date is extracted defensively — tries `payload.date`, then `payload.startDate`, then `payload.dueDate`, then `affected_date` as final fallback. Pre-FIX-199 alerts stored the LLM output before the date field was explicitly named, so `payload.date` was undefined but `affected_date` was always populated.
+- Elevated `rawPayload` log from `log.debug` to `log.warn` so the stored payload is always visible in production logs on the approve path (previously only emitted at debug level, invisible in prod).
+- Added explicit 422 guard when no date can be resolved from any source, with a clear message.
+
+**Why:** Alert `77bde026` (created before FIX-199 updated the prompt) had `action_payload.date = undefined` because the old prompt used a different LLM output shape. The fallback to `affected_date` handles all such pre-existing alerts. The WARN-level log is needed because `log.debug` is suppressed in prod; the raw payload was invisible.
+
+**Files:**
+- `backend/src/modules/family/family-events.routes.ts` — defensive date extraction, WARN log, affected_date fallback
+
+---
+
 ## FIX-200 — GCal approve route: 500 on invalid date + missing debug logging (2026-07-01)
 
 **What changed:**
