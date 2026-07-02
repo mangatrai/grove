@@ -20,7 +20,7 @@ import {
 } from "./family-agent.service.js";
 import { createCalendarEvent } from "../gcal/gcal.service.js";
 import { sendMail } from "../mailer/mailer.service.js";
-import { qExec } from "../../db/query.js";
+import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 
 export const familyEventsRouter = Router();
 familyEventsRouter.use(requireAuth);
@@ -102,6 +102,64 @@ familyEventsRouter.patch(
     const ok = await resolveAlert(req.params.id, req.authUser!.householdId, req.authUser!.userId);
     if (!ok) { res.status(404).json({ message: "Alert not found or already resolved." }); return; }
     res.json({ ok: true });
+  }
+);
+
+/** POST /family/alerts/:alertId/approve — execute the alert's action (currently only create_gcal_event) */
+familyEventsRouter.post(
+  "/alerts/:alertId/approve",
+  requireRole(["owner", "admin"]),
+  async (req: AuthenticatedRequest, res) => {
+    const { householdId, userId } = req.authUser!;
+    const { alertId } = req.params;
+
+    type AlertActionRow = {
+      id: string;
+      is_resolved: boolean;
+      action_type: string | null;
+      action_payload: unknown;
+    };
+    const alert = await qGet<AlertActionRow>(
+      `SELECT id, is_resolved, action_type, action_payload FROM family_agent_alerts WHERE id = ? AND household_id = ?`,
+      alertId, householdId
+    );
+    if (!alert) { res.status(404).json({ error: "Alert not found" }); return; }
+    if (alert.is_resolved) { res.status(400).json({ error: "Alert already resolved" }); return; }
+    if (!alert.action_type) { res.status(400).json({ error: "No action defined for alert" }); return; }
+    if (alert.action_type !== "create_gcal_event") {
+      res.status(422).json({ code: "UNSUPPORTED_ACTION_TYPE", message: `Action type '${alert.action_type}' is not supported yet.` });
+      return;
+    }
+
+    const payload = alert.action_payload as { title: string; date: string; description: string };
+    const gcalResult = await createCalendarEvent(userId, householdId, {
+      title: payload.title,
+      date: payload.date,
+      description: payload.description,
+    });
+
+    if (!gcalResult.ok) {
+      const status = gcalResult.code === "GCAL_WRITE_ERROR" ? 500 : 422;
+      res.status(status).json({ code: gcalResult.code, message: gcalResult.message });
+      return;
+    }
+
+    const newEventId = crypto.randomUUID();
+    const { text: insertText, values: insertValues } = sqlBind(
+      `INSERT INTO family_events (id, household_id, record_type, source, title, description, due_date, all_day, gcal_event_id, is_active, created_at, updated_at)
+       VALUES (?, ?, 'deadline', 'agent', ?, ?, ?, TRUE, ?, TRUE, NOW(), NOW())`,
+      newEventId, householdId, payload.title, payload.description, payload.date, gcalResult.eventId
+    );
+    await qBegin(async (tx) => {
+      await tx.unsafe(insertText, insertValues as never[]);
+      const { text: resolveText, values: resolveValues } = sqlBind(
+        `UPDATE family_agent_alerts SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ? WHERE id = ?`,
+        userId, alertId
+      );
+      await tx.unsafe(resolveText, resolveValues as never[]);
+    });
+
+    res.json({ ok: true, gcalEventId: gcalResult.eventId, gcalEventLink: gcalResult.eventLink, familyEventId: newEventId });
   }
 );
 

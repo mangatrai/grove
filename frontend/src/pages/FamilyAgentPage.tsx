@@ -49,6 +49,8 @@ type AgentAlert = {
   recipientHint: string | null;
   isResolved: boolean;
   resolvedAt: string | null;
+  actionType: string | null;
+  actionPayload: { title: string; date: string; description: string } | null;
 };
 
 type DigestEntry = {
@@ -131,6 +133,9 @@ type AlertCardProps = {
 function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
   const [resolving, setResolving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [calAdding, setCalAdding] = useState(false);
+  const [calError, setCalError] = useState<string | null>(null);
+  const [calLink, setCalLink] = useState<string | null>(null);
   const textRef = useRef<HTMLPreElement>(null);
 
   async function handleResolve() {
@@ -140,6 +145,32 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
       onResolve(alert.id);
     } finally {
       setResolving(false);
+    }
+  }
+
+  async function handleAddToCalendar() {
+    setCalAdding(true);
+    setCalError(null);
+    try {
+      const res = await apiFetch(`/api/family/alerts/${alert.id}/approve`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json() as { gcalEventLink?: string | null };
+        setCalLink(data.gcalEventLink ?? null);
+        onResolve(alert.id);
+      } else {
+        const err = await res.json().catch(() => ({})) as { code?: string; message?: string };
+        if (err.code === "GCAL_NEEDS_REAUTH") {
+          setCalError("Google Calendar needs to be reconnected. Go to Settings → Integrations.");
+        } else if (err.code === "GCAL_NOT_CONNECTED") {
+          setCalError("Google Calendar is not connected. Go to Settings → Integrations.");
+        } else {
+          setCalError(err.message ?? "Could not add to calendar. Try again.");
+        }
+      }
+    } catch {
+      setCalError("Could not add to calendar. Try again.");
+    } finally {
+      setCalAdding(false);
     }
   }
 
@@ -214,6 +245,18 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
               Compose
             </Button>
           ) : null}
+          {alert.actionType === "create_gcal_event" && !alert.isResolved ? (
+            <Button
+              size="xs"
+              variant="light"
+              color="blue"
+              loading={calAdding}
+              leftSection={<IconCalendarPlus size={13} />}
+              onClick={() => void handleAddToCalendar()}
+            >
+              Add to Calendar
+            </Button>
+          ) : null}
           <Button
             size="xs"
             variant="subtle"
@@ -225,6 +268,17 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
             Dismiss
           </Button>
         </Group>
+        {calError ? (
+          <Text size="xs" c="red" mt={4}>{calError}</Text>
+        ) : null}
+        {calLink ? (
+          <Text size="xs" c="dimmed" mt={4}>
+            Added.{" "}
+            <a href={calLink} target="_blank" rel="noreferrer" style={{ color: "var(--mantine-color-blue-6)" }}>
+              Open in Google Calendar
+            </a>
+          </Text>
+        ) : null}
       </Stack>
     </Paper>
   );

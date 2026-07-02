@@ -37,6 +37,11 @@ type AlertItem = {
   affectedDate: string | null;
   copyPasteText: string;
   recipientHint: string;
+  calendarEventPayload?: {
+    title: string;
+    date: string;
+    description: string;
+  } | null;
 };
 
 type AgentAnalysis = {
@@ -158,17 +163,20 @@ async function writeAlerts(
   conflicts: AgentAnalysis["conflicts"]
 ): Promise<void> {
   for (const c of conflicts) {
+    const hasCalPayload = c.calendarEventPayload != null;
     await qExec(
       `INSERT INTO family_agent_alerts
-         (household_id, alert_type, reason, affected_date, copy_paste_text, recipient_hint, source_digest_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         (household_id, alert_type, reason, affected_date, copy_paste_text, recipient_hint, source_digest_id, action_type, action_payload)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       householdId,
       c.alertType,
       c.reason,
       c.affectedDate ?? null,
       c.copyPasteText,
       c.recipientHint,
-      digestId
+      digestId,
+      hasCalPayload ? "create_gcal_event" : null,
+      hasCalPayload ? JSON.stringify(c.calendarEventPayload) : null
     );
   }
 }
@@ -711,7 +719,8 @@ Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤
 
 TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed.
 
-Respond with ONLY valid JSON: { "alerts": [ { "alertType": "deadline_approaching", "reason": "what/when/why", "affectedDate": "YYYY-MM-DD", "copyPasteText": "action to take", "recipientHint": "Self"|"Both"|"Spouse" } ] }
+Respond with ONLY valid JSON: { "alerts": [ { "alertType": "deadline_approaching", "reason": "what/when/why — include specific dates and action needed", "affectedDate": "YYYY-MM-DD", "copyPasteText": "action family should take", "recipientHint": "Self"|"Both"|"Spouse", "calendarEventPayload": { "title": "≤80 char calendar event title e.g. 'Fall Swim Registration Deadline'", "date": "YYYY-MM-DD — the deadline date or a timely reminder date", "description": "1-2 sentences of context for the calendar event body" } } ] }
+Include calendarEventPayload for any deadline that benefits from being on the calendar (registration cutoffs, enrollment windows, appointment reminders). Set it to null only for vague or unactionable items.
 If nothing new, return { "alerts": [] }.` },
     ],
     { model: strongModel(), maxTokens: 600 }
@@ -993,6 +1002,8 @@ export type AgentAlert = {
   isResolved: boolean;
   resolvedAt: string | null;
   sourceDigestId: string | null;
+  actionType: string | null;
+  actionPayload: { title: string; date: string; description: string } | null;
 };
 
 type AlertRow = {
@@ -1007,6 +1018,8 @@ type AlertRow = {
   is_resolved: boolean;
   resolved_at: string | null;
   source_digest_id: string | null;
+  action_type: string | null;
+  action_payload: unknown;
 };
 
 function rowToAlert(r: AlertRow): AgentAlert {
@@ -1022,6 +1035,8 @@ function rowToAlert(r: AlertRow): AgentAlert {
     isResolved: r.is_resolved,
     resolvedAt: r.resolved_at,
     sourceDigestId: r.source_digest_id,
+    actionType: r.action_type,
+    actionPayload: r.action_payload as AgentAlert["actionPayload"],
   };
 }
 

@@ -14,6 +14,28 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## CR-198 — Family Planner: GCal write-back for deadline alerts (2026-07-01)
+
+**What changed:**
+- Migration 0078: added `action_type TEXT CHECK ('create_gcal_event')` and `action_payload JSONB` to `family_agent_alerts`.
+- `sweepDeadlines` D4 Call 2 LLM prompt now requests a `calendarEventPayload: { title, date, description }` on each alert. The agent populates this for any deadline that benefits from being on the calendar (registration cutoffs, enrollment windows, appointment reminders).
+- `writeAlerts` in `family-agent.service.ts` persists `action_type = 'create_gcal_event'` and the serialised payload whenever the LLM returns a non-null `calendarEventPayload`.
+- `AgentAlert` exported type extended with `actionType` and `actionPayload` fields; `AlertRow` / `rowToAlert` updated accordingly.
+- New API route `POST /api/family/alerts/:alertId/approve`: validates the alert belongs to the user's household, calls the existing `createCalendarEvent()` (already fully implemented in `gcal.service.ts`), writes a `family_events` row with `record_type = 'deadline'` and `gcal_event_id`, then marks the alert resolved — all in a single transaction.
+- Frontend `AlertCard` in `FamilyAgentPage.tsx`: shows an **Add to Calendar** button on `deadline_approaching` alerts that have `actionType = 'create_gcal_event'` and are not yet resolved. On success, button disappears and an "Open in Google Calendar" link is shown. On `GCAL_NEEDS_REAUTH`, shows inline reconnect prompt.
+
+**Why:** Phase 1 PA Agent (shipped in 6.2.3) produced `deadline_approaching` alerts but users had to manually copy dates into their calendar. `createCalendarEvent()` was already wired in `gcal.service.ts` but never called from the agent flow. This closes that last mile.
+
+**Files:**
+- `backend/db/migrations/0078_alert_gcal_action.sql` — new
+- `backend/src/modules/family/family-agent.service.ts` — AlertItem type, D4 prompt, writeAlerts INSERT, AgentAlert/AlertRow/rowToAlert
+- `backend/src/modules/family/family-events.routes.ts` — new approve route
+- `frontend/src/pages/FamilyAgentPage.tsx` — AgentAlert type + AlertCard button
+
+**GitHub:** Closes https://github.com/mangatrai/grove/issues/168
+
+---
+
 ## FIX-197 — PA Agent: date-awareness fix + family planner dev seed (2026-07-01)
 
 **What changed:**
