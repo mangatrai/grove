@@ -14,6 +14,20 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-203 — GCal calendar event created with empty title/description (action_payload double-encoded) (2026-07-02)
+
+**What changed:**
+- `family-agent.service.ts`: Removed `JSON.stringify()` wrapper on `calendarEventPayload` before inserting into the JSONB column. Was storing a JSON string literal as the JSONB value; postgres driver returned it as a JS string, so all property accesses were `undefined`.
+- `family-events.routes.ts`: Added parse-if-string guard on `action_payload` to handle existing rows that were already double-encoded.
+
+**Why:** `action_payload` is `JSONB`. Wrapping the object in `JSON.stringify()` before the INSERT stores a JSON string as the JSONB value rather than an object. The postgres driver deserializes it back to a JS string, not an object, so `.title`, `.date`, `.description` all return `undefined`. The GCal event was created with empty fields. New rows will store the object directly; old rows are handled by the parse guard.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts` — removed JSON.stringify on calendarEventPayload
+- `backend/src/modules/family/family-events.routes.ts` — parse-if-string guard on action_payload read
+
+---
+
 ## FIX-202 — GCal approve route: fix `source = 'agent'` constraint violation on family_events INSERT (2026-07-02)
 
 **What changed:**

@@ -176,7 +176,7 @@ async function writeAlerts(
       c.recipientHint,
       digestId,
       hasCalPayload ? "create_gcal_event" : null,
-      hasCalPayload ? JSON.stringify(c.calendarEventPayload) : null
+      hasCalPayload ? c.calendarEventPayload : null
     );
   }
 }
