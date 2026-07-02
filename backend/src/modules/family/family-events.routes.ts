@@ -180,7 +180,7 @@ familyEventsRouter.post(
     const newEventId = crypto.randomUUID();
     const { text: insertText, values: insertValues } = sqlBind(
       `INSERT INTO family_events (id, household_id, record_type, source, title, description, due_date, all_day, gcal_event_id, is_active, created_at, updated_at)
-       VALUES (?, ?, 'deadline', 'agent', ?, ?, ?, TRUE, ?, TRUE, NOW(), NOW())`,
+       VALUES (?, ?, 'deadline', 'gcal', ?, ?, ?, TRUE, ?, TRUE, NOW(), NOW())`,
       [newEventId, householdId, payload.title, payload.description, payload.date, gcalResult.eventId]
     );
     await qBegin(async (tx) => {

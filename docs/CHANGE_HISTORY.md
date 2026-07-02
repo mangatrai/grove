@@ -14,6 +14,18 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-202 — GCal approve route: fix `source = 'agent'` constraint violation on family_events INSERT (2026-07-02)
+
+**What changed:**
+- `family-events.routes.ts`: Changed `source` value in the `family_events` INSERT from `'agent'` to `'gcal'`. The `family_events_source_check` constraint only allows `('gcal', 'tavily', 'manual')`.
+
+**Why:** The agent-approved calendar event is written directly to Google Calendar via the API, so `'gcal'` is the correct source. `'agent'` was never a valid enum value and caused a Postgres check constraint violation (SQLSTATE 23514) crashing the server process.
+
+**Files:**
+- `backend/src/modules/family/family-events.routes.ts`
+
+---
+
 ## FIX-201 — GCal approve route: defensive date extraction + WARN-level payload logging (2026-07-02)
 
 **What changed:**
