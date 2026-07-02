@@ -21,6 +21,7 @@ import {
 import { createCalendarEvent } from "../gcal/gcal.service.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
+import { log } from "../../logger.js";
 
 export const familyEventsRouter = Router();
 familyEventsRouter.use(requireAuth);
@@ -132,6 +133,13 @@ familyEventsRouter.post(
     }
 
     const payload = alert.action_payload as { title: string; date: string; description: string };
+    log.debug("family-events: approving calendar alert", {
+      alertId,
+      payloadTitle: payload.title,
+      payloadDate: payload.date,
+      payloadDateType: typeof payload.date,
+      rawPayload: JSON.stringify(payload),
+    });
     const gcalResult = await createCalendarEvent(userId, householdId, {
       title: payload.title,
       date: payload.date,
@@ -139,6 +147,12 @@ familyEventsRouter.post(
     });
 
     if (!gcalResult.ok) {
+      log.warn("family-events: calendar event creation failed", {
+        alertId,
+        code: gcalResult.code,
+        message: gcalResult.message,
+        payloadDate: payload.date,
+      });
       const status = gcalResult.code === "GCAL_WRITE_ERROR" ? 500 : 422;
       res.status(status).json({ code: gcalResult.code, message: gcalResult.message });
       return;
@@ -148,13 +162,13 @@ familyEventsRouter.post(
     const { text: insertText, values: insertValues } = sqlBind(
       `INSERT INTO family_events (id, household_id, record_type, source, title, description, due_date, all_day, gcal_event_id, is_active, created_at, updated_at)
        VALUES (?, ?, 'deadline', 'agent', ?, ?, ?, TRUE, ?, TRUE, NOW(), NOW())`,
-      newEventId, householdId, payload.title, payload.description, payload.date, gcalResult.eventId
+      [newEventId, householdId, payload.title, payload.description, payload.date, gcalResult.eventId]
     );
     await qBegin(async (tx) => {
       await tx.unsafe(insertText, insertValues as never[]);
       const { text: resolveText, values: resolveValues } = sqlBind(
         `UPDATE family_agent_alerts SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ? WHERE id = ?`,
-        userId, alertId
+        [userId, alertId]
       );
       await tx.unsafe(resolveText, resolveValues as never[]);
     });

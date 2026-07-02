@@ -453,7 +453,7 @@ export type NewCalendarEvent = {
 
 export type CreateCalendarEventResult =
   | { ok: true; eventId: string; eventLink: string | null }
-  | { ok: false; code: "GCAL_NOT_CONNECTED" | "GCAL_NEEDS_REAUTH" | "GCAL_WRITE_ERROR"; message: string };
+  | { ok: false; code: "GCAL_NOT_CONNECTED" | "GCAL_NEEDS_REAUTH" | "GCAL_WRITE_ERROR" | "GCAL_INVALID_DATE"; message: string };
 
 export async function createCalendarEvent(
   userId: string,
@@ -477,7 +477,7 @@ export async function createCalendarEvent(
   } else {
     // All-day event
     if (!event.date || !/^\d{4}-\d{2}-\d{2}$/.test(event.date) || isNaN(new Date(event.date).getTime())) {
-      return { ok: false, code: "GCAL_WRITE_ERROR", message: `Invalid event date: "${event.date}"` };
+      return { ok: false, code: "GCAL_INVALID_DATE", message: `Invalid event date: "${event.date}"` };
     }
     const nextDay = new Date(event.date);
     nextDay.setDate(nextDay.getDate() + 1);

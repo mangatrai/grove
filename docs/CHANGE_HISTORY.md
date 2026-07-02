@@ -14,6 +14,21 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-200 — GCal approve route: 500 on invalid date + missing debug logging (2026-07-01)
+
+**What changed:**
+- `gcal.service.ts`: Separated date validation into its own error code `GCAL_INVALID_DATE` (previously used `GCAL_WRITE_ERROR`, which mapped to HTTP 500).
+- `family-events.routes.ts`: Added `log.debug` of full `action_payload` before calling `createCalendarEvent` so the backend log shows exactly what the LLM stored. Added `log.warn` when the call fails with the error code and date value. Fixed pre-existing `sqlBind` calling convention bug (params were spread as individual args instead of passed as an array — TypeScript errors TS2554 on lines 165/171).
+- Error code `GCAL_INVALID_DATE` now routes to 422 (client data problem); `GCAL_WRITE_ERROR` (actual GCal API write failure) remains 500.
+
+**Why:** `POST /alerts/:id/approve` was returning 500 for what is actually a data quality issue — `action_payload.date` is `undefined` when the LLM omits or misformats the date. No backend log showed the payload, making it impossible to diagnose without adding instrumentation. The `sqlBind` args bug was a pre-existing TypeScript error surfaced during this edit pass.
+
+**Files:**
+- `backend/src/modules/gcal/gcal.service.ts` — error code change
+- `backend/src/modules/family/family-events.routes.ts` — logging + status code + sqlBind fix
+
+---
+
 ## FIX-199 — Family Planner: PA agent alert quality + GCal date crash (2026-07-01)
 
 **What changed:**
