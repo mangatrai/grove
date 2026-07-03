@@ -140,13 +140,9 @@ familyEventsRouter.post(
       affectedDate: alert.affected_date,
     });
 
-    // Defensively extract date — LLM field name varies across prompt versions;
-    // fall back to affected_date from the alerts row (always populated at alert creation).
+    // Fall back to affected_date if LLM omits date from calendarEventPayload.
     const resolvedDate =
-      typeof rawPayload.date === "string" ? rawPayload.date :
-      typeof rawPayload.startDate === "string" ? rawPayload.startDate :
-      typeof rawPayload.dueDate === "string" ? rawPayload.dueDate :
-      alert.affected_date ?? null;
+      typeof rawPayload.date === "string" ? rawPayload.date : alert.affected_date ?? null;
 
     if (!resolvedDate) {
       log.warn("family-events: no usable date in payload or alert row", { alertId, rawPayload: JSON.stringify(rawPayload) });
