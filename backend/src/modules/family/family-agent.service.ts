@@ -502,7 +502,6 @@ async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): 
   const queryCount = runType === "daily_delta" ? 2 : runType === "sunday_preview" ? 3 : 5;
   const now = new Date();
   const month = now.toLocaleString("en-US", { month: "long" });
-  const year = now.getFullYear();
   const season = getSeason(now.getMonth());
 
   const memberProfile = buildMemberProfile(ctx.members);
@@ -517,7 +516,7 @@ async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): 
   const { content: queryJson } = await getChatAdapter().complete(
     [
       { role: "system", content: "You are a proactive personal assistant for a busy household. Before generating search queries, reason about what matters for this family — their kids' life stages, seasonal transitions, interest-based opportunities, and what a thoughtful PA who knows them well would proactively check. Return only a JSON array of query strings." },
-      { role: "user", content: `Family location: ${ctx.location}. Today: ${ctx.today}. Month: ${month} ${year}. Season: ${season}. Current year: ${year}.
+      { role: "user", content: `Family location: ${ctx.location}. Today: ${ctx.today}. Month: ${month}. Season: ${season}.
 
 Household members:
 ${memberProfile}
@@ -528,14 +527,12 @@ How to use these profiles — reason about each dimension before generating quer
 • Notes → The family added these deliberately — treat notes as high-priority signals that should directly shape query topics.
 • Season + location → What does ${season} in ${ctx.location} mean for this family specifically?
 
-Think as a PA who has worked with this family for a year: What would you proactively surface this ${month} ${year} that they haven't thought to ask about?
+Think as a PA who has worked with this family for a year: What would you proactively surface this ${month} that they haven't thought to ask about?
 
 Calendar activity locations (for local context):
 ${activityLocations || "None noted."}
 
 Generate exactly ${queryCount} targeted web search queries to surface things this family would genuinely want to know — registrations, deadlines, local events, seasonal prep, or opportunities specific to their ages and interests.
-
-IMPORTANT: Embed "${year}" in every query (e.g., "dance camp ${ctx.location} ${year}", "swim lessons registration ${year}"). This ensures Tavily returns current ${year} content, not archived results from prior years.
 
 Return ONLY a JSON array: ["query 1", "query 2", ...]` },
     ],
@@ -551,19 +548,20 @@ Return ONLY a JSON array: ["query 1", "query 2", ...]` },
     return { hasOutput: false, items: [] };
   }
 
+  const sevenDaysAgo = new Date(new Date(ctx.todayIso).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const searchResults: Array<{ query: string; result: string }> = [];
   let tavilyUnavailable = false;
   for (const query of queries.slice(0, queryCount)) {
     try {
-      log.debug("family-agent: Domain 3 Tavily query", { query });
-      const result = await tavilySearch(query);
+      log.debug("family-agent: Domain 3 Tavily query", { query, startDate: sevenDaysAgo });
+      const result = await tavilySearch(query, { startDate: sevenDaysAgo });
       const resultStr = typeof result === "string" ? result : JSON.stringify(result);
       if (resultStr.includes("TAVILY_API_KEY")) {
         log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.location });
         tavilyUnavailable = true;
         break;
       }
-      searchResults.push({ query, result: resultStr.slice(0, 600) });
+      searchResults.push({ query, result: resultStr });
     } catch (err) {
       log.warn("family-agent: tavily search failed", { query, err: String(err) });
     }
@@ -614,7 +612,7 @@ ${memberProfile}
 Search results:
 ${searchContext}
 
-TODAY is ${ctx.todayIso} (year: ${year}). CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed. REJECT any result that explicitly references a prior year (e.g., "Summer 2023", "2024 registration", "Fall 2024") — these are archived and irrelevant. If a result mentions a registration window or deadline, include it only if it is still open or upcoming in ${year} or later.
+TODAY is ${ctx.todayIso}. CRITICAL: Only include items dated on or after today. Discard any past events, expired registration windows, or deadlines that have already passed. If a result mentions a registration window or deadline, include it only if it is still open or upcoming.
 
 Extract 2-4 specific, useful findings relevant to this family. For EACH item the summary MUST include everything available from the search results:
 • Full official business/program name (not a generic category like "swim school")
@@ -669,7 +667,6 @@ async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promis
     .map(a => `- ${a.affectedDate}: ${a.reason}`)
     .join("\n");
 
-  const year = new Date().getFullYear();
   let tavilyContext = "";
   if (runType !== "daily_delta" && ctx.location) {
     const month = new Date().toLocaleString("en-US", { month: "long" });
@@ -678,7 +675,7 @@ async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promis
     const { content: queryJson } = await getChatAdapter().complete(
       [
         { role: "system", content: "You are a proactive personal assistant generating deadline search queries for a household. Think from this family's specific life stage and context — not from a generic checklist. Return valid JSON only." },
-        { role: "user", content: `Today: ${ctx.today}. Month: ${month} ${year}. Location: ${ctx.location}.
+        { role: "user", content: `Today: ${ctx.today}. Month: ${month}. Location: ${ctx.location}.
 
 Household members:
 ${memberProfile}
@@ -699,8 +696,6 @@ ${openDeadlineAlerts || "None."}
 
 Generate 3-4 targeted Tavily search queries to surface PUBLIC deadlines this household might miss.
 
-IMPORTANT: Embed "${year}" in every query (e.g., "FBISD open enrollment ${year} deadline", "swim team tryouts ${ctx.location} ${year}"). This ensures Tavily returns ${year} deadlines, not archived results from prior years.
-
 Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       ],
       { model: strongModel(), maxTokens: 200 }
@@ -714,12 +709,13 @@ Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       log.warn("family-agent: Domain 4 query generation parse failed");
     }
 
+    const d4SevenDaysAgo = new Date(new Date(ctx.todayIso).getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     const results: string[] = [];
     for (const q of deadlineQueries.slice(0, 4)) {
       try {
-        log.debug("family-agent: Domain 4 Tavily query", { query: q });
-        const r = await tavilySearch(q);
-        const rStr = (typeof r === "string" ? r : JSON.stringify(r)).slice(0, 400);
+        log.debug("family-agent: Domain 4 Tavily query", { query: q, startDate: d4SevenDaysAgo });
+        const r = await tavilySearch(q, { startDate: d4SevenDaysAgo });
+        const rStr = typeof r === "string" ? r : JSON.stringify(r);
         if (rStr.includes("TAVILY_API_KEY")) break;
         results.push(`"${q}": ${rStr}`);
       } catch { /* ignore individual search failures */ }
@@ -739,7 +735,7 @@ ${tavilyContext ? `Public deadlines from web:\n${tavilyContext}\n` : ""}
 ${openDeadlineAlerts ? `Already flagged (DO NOT re-flag):\n${openDeadlineAlerts}\n` : ""}
 Triage: critical (<2 days), urgent (<7 days), reminder (<14 days), advisory (≤${cutoffDays} days). Surface only new items.
 
-TODAY is ${ctx.todayIso} (year: ${year}). CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed. REJECT any search result that explicitly references a prior year (e.g., "Summer 2023", "2024 enrollment", "Fall 2024") — these are archived and irrelevant. Only surface ${year} or later deadlines.
+TODAY is ${ctx.todayIso}. CRITICAL: Only output alerts where affectedDate is on or after today (${ctx.todayIso}). Never flag dates that have already passed.
 
 Each alert MUST include ALL THREE of these in the reason field:
 1. WHAT: the specific thing (school, program, business name, or document — not generic category)

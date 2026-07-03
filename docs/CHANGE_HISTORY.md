@@ -14,6 +14,19 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-207 — Family Planner: Tavily search quality — start_date, score filter, max_results 3, per-result truncation (2026-07-02)
+
+**What changed:**
+- `backend/src/llm/tools/tavily.ts`: Add `TavilySearchOpts { startDate? }` param passed as `start_date` to API. `max_results` 5→3. Filter results with `score < 0.7`. Truncate `r.content` to 250 chars per result (instead of slicing the concatenated blob, so all 3 results reach the LLM).
+- `family-agent.service.ts` Domain 3: Pass `startDate: today − 7 days` to each Tavily call. Remove flat-string `.slice(0, 600)`. Remove LLM year-embedding prompt and prior-year REJECT clause from synthesis — Tavily filters at the source now.
+- `family-agent.service.ts` Domain 4: Same — `startDate`, remove `.slice(0, 400)`, remove year-embedding and REJECT clauses.
+
+**Why:** Tavily's `start_date` param handles recency filtering natively and more reliably than prompt-based year injection. `max_results: 5` with blob truncation meant results [3]–[5] never reached the LLM. Per-result truncation at 250 chars lets all 3 results contribute to synthesis.
+
+**Files:**
+- `backend/src/llm/tools/tavily.ts`
+- `backend/src/modules/family/family-agent.service.ts`
+
 ## FIX-205 — Family Planner: Tavily returning stale prior-year activity results (2026-07-02)
 
 **What changed:**
