@@ -14,6 +14,33 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-205 — Family Planner: Tavily returning stale prior-year activity results (2026-07-02)
+
+**What changed:**
+- `family-agent.service.ts` (`runProactiveResearch`): Added `const year = now.getFullYear()` in scope. Updated query generation prompt to instruct the LLM to embed the current year (e.g., `"dance camp Dallas 2026"`) in every Tavily query. Strengthened synthesis date filter to explicitly reject results referencing prior years (e.g., "Summer 2023", "2024 registration").
+- `family-agent.service.ts` (`sweepDeadlines`): Hoisted `year` to function scope. Added same year-embedding instruction to deadline query generation prompt. Added same prior-year rejection rule to the deadline synthesis filter.
+
+**Why:** Tavily queries without an explicit year returned archived 2023/2024 results for camps and activities. The LLM synthesis filter only checked "date >= today" but couldn't catch snippets with no explicit date (e.g., "Summer 2023" text in the body) unless told to reject prior-year references explicitly.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts` — year in scope, year-embedding query instructions, prior-year rejection in synthesis
+
+## FIX-204 — Family Planner: deadline alerts vague + calendar events created as all-day (2026-07-02)
+
+**What changed:**
+- `gcal.service.ts`: Fixed timed calendar events using `UTC` timezone — now uses `env.TZ` (household local timezone). Removed JS Date arithmetic (which converted to UTC) in favour of wall-clock string construction, so "08:00" means 8 AM in the household timezone, not 8 AM UTC.
+- `family-events.routes.ts`: `/alerts/:alertId/approve` now passes `time` (from payload, defaulting to `"08:00"`) and `durationMins: 15` to `createCalendarEvent()`. Deadline alerts are no longer created as all-day events.
+- `family-agent.service.ts`: Strengthened `sweepDeadlines` LLM prompt with explicit BAD/GOOD format examples requiring WHAT + WHY IT MATTERS + HOW/WHERE in every alert reason. Added `time` field to `calendarEventPayload` output schema (default `"08:00"`). Increased `maxTokens` from 600 → 1500 (600 was forcing the LLM to truncate descriptions).
+
+**Why:** Two user-reported issues — alerts lacked context explaining why a deadline mattered and where to act on it; and all calendar events were being created as all-day because `time` was never passed to `createCalendarEvent()`.
+
+**Files:**
+- `backend/src/modules/gcal/gcal.service.ts` — env.TZ + wall-clock string for timed events
+- `backend/src/modules/family/family-events.routes.ts` — pass time + durationMins
+- `backend/src/modules/family/family-agent.service.ts` — stronger prompt, add time field, maxTokens 1500
+
+---
+
 ## FIX-203 — GCal calendar event created with empty title/description (action_payload double-encoded) (2026-07-02)
 
 **What changed:**
