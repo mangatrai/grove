@@ -133,13 +133,7 @@ familyEventsRouter.post(
       return;
     }
 
-    // action_payload is JSONB but was previously stored via JSON.stringify() (double-encoded).
-    // Parse if string to handle both old (string) and new (object) rows.
-    const rawPayload = (
-      typeof alert.action_payload === "string"
-        ? JSON.parse(alert.action_payload)
-        : alert.action_payload
-    ) as Record<string, unknown>;
+    const rawPayload = alert.action_payload as Record<string, unknown>;
     log.warn("family-events: approving calendar alert payload", {
       alertId,
       rawPayload: JSON.stringify(rawPayload),
