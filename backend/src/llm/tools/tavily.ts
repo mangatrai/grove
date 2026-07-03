@@ -26,7 +26,7 @@ export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): 
     });
     if (!res.ok) return `Tavily returned HTTP ${res.status}.`;
     const data = (await res.json()) as { results?: TavilyResult[] };
-    const results = (data.results ?? []).filter(r => (r.score ?? 1) >= 0.7);
+    const results = (data.results ?? []).filter(r => (r.score ?? 1) >= 0.5);
     return results.length === 0
       ? "No results found."
       : results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content.slice(0, 250)}`).join("\n\n");
