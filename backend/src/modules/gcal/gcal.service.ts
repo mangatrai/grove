@@ -470,10 +470,14 @@ export async function createCalendarEvent(
   let end: { date: string } | { dateTime: string; timeZone: string };
 
   if (event.time) {
-    const startDt = new Date(`${event.date}T${event.time}:00`);
-    const endDt = new Date(startDt.getTime() + (event.durationMins ?? 60) * 60_000);
-    start = { dateTime: startDt.toISOString(), timeZone: "UTC" };
-    end = { dateTime: endDt.toISOString(), timeZone: "UTC" };
+    // Treat date+time as local wall-clock in the household timezone (env.TZ).
+    const durationMins = event.durationMins ?? 15;
+    const [h, m] = event.time.split(":").map(Number);
+    const endTotalMins = h * 60 + m + durationMins;
+    const endH = String(Math.floor(endTotalMins / 60) % 24).padStart(2, "0");
+    const endM = String(endTotalMins % 60).padStart(2, "0");
+    start = { dateTime: `${event.date}T${event.time}:00`, timeZone: env.TZ };
+    end = { dateTime: `${event.date}T${endH}:${endM}:00`, timeZone: env.TZ };
   } else {
     // All-day event
     if (!event.date || !/^\d{4}-\d{2}-\d{2}$/.test(event.date) || isNaN(new Date(event.date).getTime())) {

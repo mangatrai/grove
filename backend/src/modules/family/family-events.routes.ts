@@ -159,6 +159,8 @@ familyEventsRouter.post(
       title: payload.title,
       date: payload.date,
       description: payload.description,
+      time: typeof rawPayload.time === "string" ? rawPayload.time : "08:00",
+      durationMins: 15,
     });
 
     if (!gcalResult.ok) {
