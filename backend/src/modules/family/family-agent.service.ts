@@ -545,6 +545,7 @@ Return ONLY a JSON array: ["query 1", "query 2", ...]` },
   let queries: string[] = [];
   try {
     queries = parseJsonResponse<string[]>(queryJson);
+    log.debug("family-agent: Domain 3 LLM query gen response", { raw: queryJson.slice(0, 500), queries });
   } catch {
     log.warn("family-agent: proactive research query parse failed");
     return { hasOutput: false, items: [] };
@@ -554,6 +555,7 @@ Return ONLY a JSON array: ["query 1", "query 2", ...]` },
   let tavilyUnavailable = false;
   for (const query of queries.slice(0, queryCount)) {
     try {
+      log.debug("family-agent: Domain 3 Tavily query", { query });
       const result = await tavilySearch(query);
       const resultStr = typeof result === "string" ? result : JSON.stringify(result);
       if (resultStr.includes("TAVILY_API_KEY")) {
@@ -632,6 +634,7 @@ If nothing specific enough found, return { "items": [] }.` },
     { model: strongModel(), maxTokens: 600 }
   );
 
+  log.debug("family-agent: Domain 3 LLM synthesis response", { raw: synthJson.slice(0, 1000) });
   try {
     const parsed = parseJsonResponse<{ items: ResearchItem[] }>(synthJson);
     return { hasOutput: parsed.items.length > 0, items: parsed.items };
@@ -706,6 +709,7 @@ Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
     let deadlineQueries: string[] = [];
     try {
       deadlineQueries = parseJsonResponse<{ queries: string[] }>(queryJson).queries ?? [];
+      log.debug("family-agent: Domain 4 LLM query gen response", { raw: queryJson.slice(0, 500), queries: deadlineQueries });
     } catch {
       log.warn("family-agent: Domain 4 query generation parse failed");
     }
@@ -713,6 +717,7 @@ Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
     const results: string[] = [];
     for (const q of deadlineQueries.slice(0, 4)) {
       try {
+        log.debug("family-agent: Domain 4 Tavily query", { query: q });
         const r = await tavilySearch(q);
         const rStr = (typeof r === "string" ? r : JSON.stringify(r)).slice(0, 400);
         if (rStr.includes("TAVILY_API_KEY")) break;
@@ -764,6 +769,7 @@ If nothing new, return { "alerts": [] }.` },
     { model: strongModel(), maxTokens: 1500 }
   );
 
+  log.debug("family-agent: Domain 4 LLM synthesis response", { raw: content.slice(0, 1000) });
   try {
     const parsed = parseJsonResponse<{ alerts: AlertItem[] }>(content);
     return { hasOutput: parsed.alerts.length > 0, alerts: parsed.alerts };

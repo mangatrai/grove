@@ -134,7 +134,7 @@ familyEventsRouter.post(
     }
 
     const rawPayload = alert.action_payload as Record<string, unknown>;
-    log.warn("family-events: approving calendar alert payload", {
+    log.debug("family-events: approving calendar alert payload", {
       alertId,
       rawPayload: JSON.stringify(rawPayload),
       affectedDate: alert.affected_date,
