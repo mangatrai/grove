@@ -839,7 +839,7 @@ Respond with ONLY valid JSON:
   "parentBDigest": { "subject": "...", "body": "..." }
 }` },
     ],
-    { model: strongModel(), maxTokens: 1500 }
+    { model: strongModel(), maxTokens: 3500 }
   );
 
   try {

@@ -14,6 +14,18 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-209 — Family Planner: Domain 5 synthesis truncated — maxTokens 1500 → 3500 (2026-07-04)
+
+**What changed:**
+- `synthesizeDigest()` LLM call raised from `maxTokens: 1500` to `maxTokens: 3500`.
+
+**Why:** Domain 5 synthesizes all 4 prior domain outputs into per-parent email digests. 1500 tokens was too low — the LLM response was cut off mid-JSON, causing `JSON.parse` to throw and per-parent emails to silently null out.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/181
+
 ## FIX-208 — Family Planner: digest email sent to provider_email instead of app_user.email (2026-07-04)
 
 **What changed:**
