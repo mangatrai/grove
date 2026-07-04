@@ -5,6 +5,7 @@ import { useDisclosure } from "@mantine/hooks";
 
 import { apiFetch, apiJson, setToken, useAuthToken } from "../api";
 import { UserContext } from "../UserContext";
+import { useIdleLogout } from "../hooks/useIdleLogout";
 import { AppSidebar } from "./AppSidebar";
 import { AppTopBar } from "./AppTopBar";
 
@@ -22,6 +23,7 @@ function readLoginForcePasswordHint(): boolean {
 
 export function ShellLayout() {
   const token = useAuthToken();
+  useIdleLogout();
   const { pathname } = useLocation();
   const [collapsed, setCollapsed] = useState(() => {
     try {

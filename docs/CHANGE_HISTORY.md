@@ -14,6 +14,36 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-211 — Visibility-aware notification polling — pause poll when tab is hidden (2026-07-04)
+
+**What changed:**
+- `NotificationPanel` now listens to `visibilitychange`; clears the 60s poll interval when the tab is hidden and restarts it (with an immediate fetch) when the tab becomes visible again.
+
+**Why:** The unconditional 60s poll was keeping Neon Postgres compute alive even when the user had switched away or minimised the browser. Tab hidden = zero DB queries until the user returns.
+
+**Files:**
+- `frontend/src/components/NotificationPanel.tsx`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/185 closes #185
+
+---
+
+## FIX-210 — Inactivity auto-logout after 15 min to prevent idle Neon compute usage (2026-07-04)
+
+**What changed:**
+- New hook `useIdleLogout` (`frontend/src/hooks/useIdleLogout.ts`) — listens to `mousemove`, `keydown`, `click`, `touchstart`; after 15 minutes of no activity calls `/auth/logout` (fire-and-forget) and clears the local JWT via `setToken(null)`.
+- Hook mounted in `ShellLayout` (authenticated path only).
+
+**Why:** Authenticated browser sessions with an idle user were polling the DB every 60s indefinitely, burning Neon compute hours. Auto-logout after 15 min stops all polling and releases the session.
+
+**Files:**
+- `frontend/src/hooks/useIdleLogout.ts` (new)
+- `frontend/src/layout/ShellLayout.tsx`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/184 closes #184
+
+---
+
 ## FIX-209 — Family Planner: Domain 5 synthesis truncated — maxTokens 1500 → 3500 (2026-07-04)
 
 **What changed:**

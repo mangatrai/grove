@@ -80,13 +80,36 @@ export function NotificationPanel() {
     }
   }, [token]);
 
-  // Start polling on mount
+  // Start polling on mount; pause when tab is hidden, resume when visible
   useEffect(() => {
     if (!token) return;
-    void fetchUnreadCount();
-    pollRef.current = setInterval(() => void fetchUnreadCount(), POLL_INTERVAL_MS);
+
+    function startPoll() {
+      void fetchUnreadCount();
+      pollRef.current = setInterval(() => void fetchUnreadCount(), POLL_INTERVAL_MS);
+    }
+
+    function stopPoll() {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        stopPoll();
+      } else {
+        startPoll();
+      }
+    }
+
+    startPoll();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      stopPoll();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [token, fetchUnreadCount]);
 
