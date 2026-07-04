@@ -3947,3 +3947,47 @@ Permanently removes an availability slot. Requires `owner | admin`.
 
 **Response `204`** — no body.
 **Error `404`** — slot not in caller's household.
+
+---
+
+### `POST /api/family/alerts/:alertId/approve`
+
+Execute the action associated with a family agent alert. Currently only supports `action_type = 'create_gcal_event'` — creates a Google Calendar event from the alert's structured payload, writes a `family_events` row, and marks the alert resolved. Requires `owner | admin`.
+
+**Request body:** none.
+
+**Response `200`:**
+```json
+{
+  "ok": true,
+  "gcalEventId": "google-calendar-event-id",
+  "gcalEventLink": "https://calendar.google.com/event?eid=...",
+  "familyEventId": "uuid"
+}
+```
+`gcalEventLink` may be `null` if Google does not return a link.
+
+**Response `400`:**
+```json
+{ "error": "Alert already resolved" }
+{ "error": "No action defined for alert" }
+```
+
+**Response `404`:**
+```json
+{ "error": "Alert not found" }
+```
+
+**Response `422`:**
+```json
+{ "code": "GCAL_NOT_CONNECTED", "message": "Google Calendar is not connected for this user." }
+{ "code": "GCAL_NEEDS_REAUTH", "message": "Reconnect Google Calendar in Settings." }
+{ "code": "UNSUPPORTED_ACTION_TYPE", "message": "..." }
+```
+
+**Response `500`:**
+```json
+{ "code": "GCAL_WRITE_ERROR", "message": "..." }
+```
+
+> **Note:** `GET /api/family/alerts` responses include `actionType` and `actionPayload` fields on each alert. The UI shows an **Add to Calendar** button only when `actionType === 'create_gcal_event'` and `isResolved === false`.

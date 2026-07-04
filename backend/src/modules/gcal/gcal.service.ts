@@ -4,12 +4,17 @@ import { GaxiosError } from "gaxios";
 import { google } from "googleapis";
 
 import { env } from "../../config/env.js";
-import { qExec, qGet } from "../../db/query.js";
+import { qAll, qExec, qGet } from "../../db/query.js";
 import { log } from "../../logger.js";
 
 const OAUTH_STATE_TTL_MS = 15 * 60 * 1000;
 
-const GCAL_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"];
+// calendar scope enables both read and write (events.insert); existing tokens with
+// readonly scope will get a 403 on write and we surface a NEEDS_REAUTH error.
+const GCAL_SCOPES = [
+  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/userinfo.email",
+];
 
 // ---------------------------------------------------------------------------
 // Refresh token encryption at rest — separate key purpose from Drive tokens
@@ -127,28 +132,47 @@ export async function exchangeAndSaveCalendar(
     env.GOOGLE_CALENDAR_REDIRECT_URI
   );
   let refreshToken: string;
+  let accessToken: string | null = null;
   try {
     const { tokens } = await client.getToken(code);
     if (!tokens.refresh_token) {
       return { ok: false, message: "No refresh token returned — ensure prompt=consent was set." };
     }
     refreshToken = tokens.refresh_token;
+    accessToken = tokens.access_token ?? null;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     log.warn("gcal OAuth code exchange failed", { userId, householdId, msg });
     return { ok: false, message: `OAuth code exchange failed: ${msg}` };
   }
-  await connectGCal(householdId, userId, refreshToken);
+
+  let providerEmail: string | null = null;
+  try {
+    client.setCredentials({ access_token: accessToken });
+    const oauth2 = google.oauth2({ version: "v2", auth: client });
+    const userinfoRes = await oauth2.userinfo.get();
+    providerEmail = userinfoRes.data.email ?? null;
+  } catch (err) {
+    log.warn("gcal: could not fetch userinfo email", { userId, err: err instanceof Error ? err.message : String(err) });
+  }
+
+  await connectGCal(householdId, userId, refreshToken, providerEmail);
   return { ok: true };
 }
 
-export async function connectGCal(householdId: string, userId: string, refreshToken: string): Promise<void> {
+export async function connectGCal(
+  householdId: string,
+  userId: string,
+  refreshToken: string,
+  providerEmail: string | null = null
+): Promise<void> {
   await qExec(
     `INSERT INTO oauth_integrations
-     (provider, household_id, user_id, refresh_token, connected_by_user_id, last_verified_at, last_error, needs_reauth)
-     VALUES ('google_calendar', ?, ?, ?, ?, NOW(), NULL, FALSE)
+     (provider, household_id, user_id, refresh_token, provider_email, connected_by_user_id, last_verified_at, last_error, needs_reauth)
+     VALUES ('google_calendar', ?, ?, ?, ?, ?, NOW(), NULL, FALSE)
      ON CONFLICT (user_id, provider) WHERE user_id IS NOT NULL DO UPDATE SET
        refresh_token = EXCLUDED.refresh_token,
+       provider_email = EXCLUDED.provider_email,
        connected_at = NOW(),
        connected_by_user_id = EXCLUDED.connected_by_user_id,
        last_verified_at = NOW(),
@@ -157,6 +181,7 @@ export async function connectGCal(householdId: string, userId: string, refreshTo
     householdId,
     userId,
     encryptToken(refreshToken),
+    providerEmail,
     userId
   );
 }
@@ -266,27 +291,33 @@ export async function listUpcomingEvents(
     const allEvents: GCalEvent[] = [];
 
     for (const calId of calendarIds) {
-      const evRes = await calendar.events.list({
-        calendarId: calId,
-        timeMin,
-        timeMax,
-        singleEvents: true,
-        orderBy: "startTime",
-        maxResults: 250
-      });
-      for (const ev of evRes.data.items ?? []) {
-        const startDateTime = ev.start?.dateTime ?? ev.start?.date ?? null;
-        const endDateTime = ev.end?.dateTime ?? ev.end?.date ?? null;
-        allEvents.push({
-          id: ev.id ?? "",
-          summary: ev.summary ?? null,
-          start: startDateTime,
-          end: endDateTime,
-          allDay: !ev.start?.dateTime,
-          location: ev.location ?? null,
-          description: ev.description ?? null,
-          calendarId: calId
+      try {
+        const evRes = await calendar.events.list({
+          calendarId: calId,
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: "startTime",
+          maxResults: 250
         });
+        for (const ev of evRes.data.items ?? []) {
+          const startDateTime = ev.start?.dateTime ?? ev.start?.date ?? null;
+          const endDateTime = ev.end?.dateTime ?? ev.end?.date ?? null;
+          allEvents.push({
+            id: ev.id ?? "",
+            summary: ev.summary ?? null,
+            start: startDateTime,
+            end: endDateTime,
+            allDay: !ev.start?.dateTime,
+            location: ev.location ?? null,
+            description: ev.description ?? null,
+            calendarId: calId
+          });
+        }
+      } catch (calErr: unknown) {
+        const calHttpStatus = calErr instanceof GaxiosError ? calErr.response?.status : undefined;
+        const calMsg = calErr instanceof Error ? calErr.message : String(calErr);
+        log.warn("gcal: skipping calendar due to fetch error", { userId, calendarId: calId, httpStatus: calHttpStatus, msg: calMsg });
       }
     }
 
@@ -405,4 +436,100 @@ export async function assertCanConnectCalendar(userId: string, householdId: stri
       row.household_id === householdId &&
       (row.role === "owner" || row.role === "admin")
   );
+}
+
+// ---------------------------------------------------------------------------
+// Calendar write-back — create an event on the user's primary calendar
+// ---------------------------------------------------------------------------
+
+export type NewCalendarEvent = {
+  title: string;
+  date: string;        // ISO date YYYY-MM-DD
+  time?: string;       // HH:MM (24h); omit for all-day
+  durationMins?: number;
+  description?: string;
+  attendees?: string[];
+};
+
+export type CreateCalendarEventResult =
+  | { ok: true; eventId: string; eventLink: string | null }
+  | { ok: false; code: "GCAL_NOT_CONNECTED" | "GCAL_NEEDS_REAUTH" | "GCAL_WRITE_ERROR" | "GCAL_INVALID_DATE"; message: string };
+
+export async function createCalendarEvent(
+  userId: string,
+  householdId: string,
+  event: NewCalendarEvent
+): Promise<CreateCalendarEventResult> {
+  const refreshToken = await getDecryptedRefreshToken(userId);
+  if (!refreshToken) return { ok: false, code: "GCAL_NOT_CONNECTED", message: "Google Calendar is not connected for this user." };
+
+  const auth = buildOAuth2Client(refreshToken);
+  const calendar = google.calendar({ version: "v3", auth });
+
+  let start: { date: string } | { dateTime: string; timeZone: string };
+  let end: { date: string } | { dateTime: string; timeZone: string };
+
+  if (event.time) {
+    // Treat date+time as local wall-clock in the household timezone (env.TZ).
+    const durationMins = event.durationMins ?? 15;
+    const [h, m] = event.time.split(":").map(Number);
+    const endTotalMins = h * 60 + m + durationMins;
+    const endH = String(Math.floor(endTotalMins / 60) % 24).padStart(2, "0");
+    const endM = String(endTotalMins % 60).padStart(2, "0");
+    start = { dateTime: `${event.date}T${event.time}:00`, timeZone: env.TZ };
+    end = { dateTime: `${event.date}T${endH}:${endM}:00`, timeZone: env.TZ };
+  } else {
+    // All-day event
+    if (!event.date || !/^\d{4}-\d{2}-\d{2}$/.test(event.date) || isNaN(new Date(event.date).getTime())) {
+      return { ok: false, code: "GCAL_INVALID_DATE", message: `Invalid event date: "${event.date}"` };
+    }
+    const nextDay = new Date(event.date);
+    nextDay.setDate(nextDay.getDate() + 1);
+    start = { date: event.date };
+    end = { date: nextDay.toISOString().slice(0, 10) };
+  }
+
+  // Add all other connected parents in the household as attendees so the event
+  // lands on their primary Google Calendar via invite.
+  const coParentRows = await qAll<{ provider_email: string }>(
+    `SELECT provider_email FROM oauth_integrations
+     WHERE provider = 'google_calendar'
+       AND household_id = ?
+       AND user_id != ?
+       AND needs_reauth = FALSE
+       AND provider_email IS NOT NULL`,
+    householdId,
+    userId
+  );
+  const coParentEmails = coParentRows.map(r => r.provider_email);
+  const allAttendees = [...(event.attendees ?? []), ...coParentEmails];
+
+  try {
+    const res = await calendar.events.insert({
+      calendarId: "primary",
+      requestBody: {
+        summary: event.title,
+        description: event.description,
+        start,
+        end,
+        attendees: allAttendees.length > 0 ? allAttendees.map((email) => ({ email })) : undefined,
+      },
+    });
+    return {
+      ok: true,
+      eventId: res.data.id ?? "",
+      eventLink: res.data.htmlLink ?? null,
+    };
+  } catch (err: unknown) {
+    const status = (err as { code?: number }).code;
+    if (status === 401 || status === 403) {
+      // Token lacks write scope — mark needs_reauth so user gets prompted to reconnect
+      await qExec(
+        `UPDATE oauth_integrations SET needs_reauth = TRUE WHERE provider = 'google_calendar' AND user_id = ?`,
+        userId
+      );
+      return { ok: false, code: "GCAL_NEEDS_REAUTH", message: "Google Calendar needs to be reconnected to enable write access." };
+    }
+    return { ok: false, code: "GCAL_WRITE_ERROR", message: err instanceof Error ? err.message : "Calendar event creation failed." };
+  }
 }

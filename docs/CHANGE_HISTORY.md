@@ -14,6 +14,372 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-209 — Family Planner: Domain 5 synthesis truncated — maxTokens 1500 → 3500 (2026-07-04)
+
+**What changed:**
+- `synthesizeDigest()` LLM call raised from `maxTokens: 1500` to `maxTokens: 3500`.
+
+**Why:** Domain 5 synthesizes all 4 prior domain outputs into per-parent email digests. 1500 tokens was too low — the LLM response was cut off mid-JSON, causing `JSON.parse` to throw and per-parent emails to silently null out.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/181
+
+## FIX-208 — Family Planner: digest email sent to provider_email instead of app_user.email (2026-07-04)
+
+**What changed:**
+- `getConnectedParents()` now JOINs `app_user u ON u.id = oi.user_id` and returns `u.email` (the onboarding email, always non-null) instead of `oi.provider_email`.
+- `provider_email` is the Google account email stored for Calendar invite use — nullable, not the correct digest recipient.
+
+**Why:** Production error `Email send failed (... -> null): No recipients defined`. `provider_email` can be null; `app_user.email` is required at onboarding and is the canonical address for all app notifications.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/180
+
+## FIX-207 — Family Planner: Tavily search quality — start_date, score filter, max_results 3, per-result truncation (2026-07-02)
+
+**What changed:**
+- `backend/src/llm/tools/tavily.ts`: Add `TavilySearchOpts { startDate? }` param passed as `start_date` to API. `max_results` 5→3. Filter results with `score < 0.7`. Truncate `r.content` to 250 chars per result (instead of slicing the concatenated blob, so all 3 results reach the LLM).
+- `family-agent.service.ts` Domain 3: Pass `startDate: today − 7 days` to each Tavily call. Remove flat-string `.slice(0, 600)`. Remove LLM year-embedding prompt and prior-year REJECT clause from synthesis — Tavily filters at the source now.
+- `family-agent.service.ts` Domain 4: Same — `startDate`, remove `.slice(0, 400)`, remove year-embedding and REJECT clauses.
+
+**Why:** Tavily's `start_date` param handles recency filtering natively and more reliably than prompt-based year injection. `max_results: 5` with blob truncation meant results [3]–[5] never reached the LLM. Per-result truncation at 250 chars lets all 3 results contribute to synthesis.
+
+**Files:**
+- `backend/src/llm/tools/tavily.ts`
+- `backend/src/modules/family/family-agent.service.ts`
+
+## FIX-205 — Family Planner: Tavily returning stale prior-year activity results (2026-07-02)
+
+**What changed:**
+- `family-agent.service.ts` (`runProactiveResearch`): Added `const year = now.getFullYear()` in scope. Updated query generation prompt to instruct the LLM to embed the current year (e.g., `"dance camp Dallas 2026"`) in every Tavily query. Strengthened synthesis date filter to explicitly reject results referencing prior years (e.g., "Summer 2023", "2024 registration").
+- `family-agent.service.ts` (`sweepDeadlines`): Hoisted `year` to function scope. Added same year-embedding instruction to deadline query generation prompt. Added same prior-year rejection rule to the deadline synthesis filter.
+
+**Why:** Tavily queries without an explicit year returned archived 2023/2024 results for camps and activities. The LLM synthesis filter only checked "date >= today" but couldn't catch snippets with no explicit date (e.g., "Summer 2023" text in the body) unless told to reject prior-year references explicitly.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts` — year in scope, year-embedding query instructions, prior-year rejection in synthesis
+
+## FIX-204 — Family Planner: deadline alerts vague + calendar events created as all-day (2026-07-02)
+
+**What changed:**
+- `gcal.service.ts`: Fixed timed calendar events using `UTC` timezone — now uses `env.TZ` (household local timezone). Removed JS Date arithmetic (which converted to UTC) in favour of wall-clock string construction, so "08:00" means 8 AM in the household timezone, not 8 AM UTC.
+- `family-events.routes.ts`: `/alerts/:alertId/approve` now passes `time` (from payload, defaulting to `"08:00"`) and `durationMins: 15` to `createCalendarEvent()`. Deadline alerts are no longer created as all-day events.
+- `family-agent.service.ts`: Strengthened `sweepDeadlines` LLM prompt with explicit BAD/GOOD format examples requiring WHAT + WHY IT MATTERS + HOW/WHERE in every alert reason. Added `time` field to `calendarEventPayload` output schema (default `"08:00"`). Increased `maxTokens` from 600 → 1500 (600 was forcing the LLM to truncate descriptions).
+
+**Why:** Two user-reported issues — alerts lacked context explaining why a deadline mattered and where to act on it; and all calendar events were being created as all-day because `time` was never passed to `createCalendarEvent()`.
+
+**Files:**
+- `backend/src/modules/gcal/gcal.service.ts` — env.TZ + wall-clock string for timed events
+- `backend/src/modules/family/family-events.routes.ts` — pass time + durationMins
+- `backend/src/modules/family/family-agent.service.ts` — stronger prompt, add time field, maxTokens 1500
+
+---
+
+## FIX-203 — GCal calendar event created with empty title/description (action_payload double-encoded) (2026-07-02)
+
+**What changed:**
+- `family-agent.service.ts`: Removed `JSON.stringify()` wrapper on `calendarEventPayload` before inserting into the JSONB column. Was storing a JSON string literal as the JSONB value; postgres driver returned it as a JS string, so all property accesses were `undefined`.
+- `family-events.routes.ts`: Added parse-if-string guard on `action_payload` to handle existing rows that were already double-encoded.
+
+**Why:** `action_payload` is `JSONB`. Wrapping the object in `JSON.stringify()` before the INSERT stores a JSON string as the JSONB value rather than an object. The postgres driver deserializes it back to a JS string, not an object, so `.title`, `.date`, `.description` all return `undefined`. The GCal event was created with empty fields. New rows will store the object directly; old rows are handled by the parse guard.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts` — removed JSON.stringify on calendarEventPayload
+- `backend/src/modules/family/family-events.routes.ts` — parse-if-string guard on action_payload read
+
+---
+
+## FIX-202 — GCal approve route: fix `source = 'agent'` constraint violation on family_events INSERT (2026-07-02)
+
+**What changed:**
+- `family-events.routes.ts`: Changed `source` value in the `family_events` INSERT from `'agent'` to `'gcal'`. The `family_events_source_check` constraint only allows `('gcal', 'tavily', 'manual')`.
+
+**Why:** The agent-approved calendar event is written directly to Google Calendar via the API, so `'gcal'` is the correct source. `'agent'` was never a valid enum value and caused a Postgres check constraint violation (SQLSTATE 23514) crashing the server process.
+
+**Files:**
+- `backend/src/modules/family/family-events.routes.ts`
+
+---
+
+## FIX-201 — GCal approve route: defensive date extraction + WARN-level payload logging (2026-07-02)
+
+**What changed:**
+- `family-events.routes.ts`: Approve route now fetches `affected_date` from the alerts row alongside `action_payload`. Date is extracted defensively — tries `payload.date`, then `payload.startDate`, then `payload.dueDate`, then `affected_date` as final fallback. Pre-FIX-199 alerts stored the LLM output before the date field was explicitly named, so `payload.date` was undefined but `affected_date` was always populated.
+- Elevated `rawPayload` log from `log.debug` to `log.warn` so the stored payload is always visible in production logs on the approve path (previously only emitted at debug level, invisible in prod).
+- Added explicit 422 guard when no date can be resolved from any source, with a clear message.
+
+**Why:** Alert `77bde026` (created before FIX-199 updated the prompt) had `action_payload.date = undefined` because the old prompt used a different LLM output shape. The fallback to `affected_date` handles all such pre-existing alerts. The WARN-level log is needed because `log.debug` is suppressed in prod; the raw payload was invisible.
+
+**Files:**
+- `backend/src/modules/family/family-events.routes.ts` — defensive date extraction, WARN log, affected_date fallback
+
+---
+
+## FIX-200 — GCal approve route: 500 on invalid date + missing debug logging (2026-07-01)
+
+**What changed:**
+- `gcal.service.ts`: Separated date validation into its own error code `GCAL_INVALID_DATE` (previously used `GCAL_WRITE_ERROR`, which mapped to HTTP 500).
+- `family-events.routes.ts`: Added `log.debug` of full `action_payload` before calling `createCalendarEvent` so the backend log shows exactly what the LLM stored. Added `log.warn` when the call fails with the error code and date value. Fixed pre-existing `sqlBind` calling convention bug (params were spread as individual args instead of passed as an array — TypeScript errors TS2554 on lines 165/171).
+- Error code `GCAL_INVALID_DATE` now routes to 422 (client data problem); `GCAL_WRITE_ERROR` (actual GCal API write failure) remains 500.
+
+**Why:** `POST /alerts/:id/approve` was returning 500 for what is actually a data quality issue — `action_payload.date` is `undefined` when the LLM omits or misformats the date. No backend log showed the payload, making it impossible to diagnose without adding instrumentation. The `sqlBind` args bug was a pre-existing TypeScript error surfaced during this edit pass.
+
+**Files:**
+- `backend/src/modules/gcal/gcal.service.ts` — error code change
+- `backend/src/modules/family/family-events.routes.ts` — logging + status code + sqlBind fix
+
+---
+
+## FIX-199 — Family Planner: PA agent alert quality + GCal date crash (2026-07-01)
+
+**What changed:**
+- `gcal.service.ts`: Added date validation guard in the all-day event branch before `new Date(event.date)`. If the LLM returns a malformed date (null, "YYYY-MM-DD" literal, free text), the function now returns `{ ok: false, code: "GCAL_WRITE_ERROR", message: "Invalid event date: ..." }` instead of crashing with `RangeError: Invalid time value`.
+- `family-agent.service.ts` D3 synthesis prompt: Replaced generic "extract actionable findings" instruction with explicit requirements: full official business/program name, website URL, price range, registration steps, and why relevant to the specific child. Added BAD/GOOD examples to anchor the model. Skip threshold raised — items without at least a name + one concrete detail are discarded.
+- `family-agent.service.ts` D3 fallback prompt (no Tavily): Updated to ask the model to use real well-known providers in the household location when confident, and to suggest "search for X in [city]" when not.
+- `family-agent.service.ts` D4 triage prompt: `reason` now requires full business/program name + website from search results, what happens if the deadline is missed, and the first concrete step. `copyPasteText` must be specific enough to act on without Googling. Calendar `date` field instruction changed to "ISO date string ONLY — format: YYYY-MM-DD — do NOT include any other text" to prevent LLM from injecting explanatory text into the date value.
+- `FamilyAgentPage.tsx` `handleAlertCompose`: Subject now uses the first sentence of `alert.reason` (trimmed to ≤100 chars) instead of the generic label. Body structured as: full reason → "Action needed: [copyPasteText]" → "Deadline: [date]".
+
+**Why:** (1) GCal "Add to Calendar" threw `RangeError: Invalid time value` when the LLM returned a human-readable date in the `calendarEventPayload.date` field. (2) D3/D4 alerts were too vague to act on — missing business names, websites, and enrollment steps. (3) Compose email subject "Planning" and bare body gave no context to the recipient.
+
+**Files:**
+- `backend/src/modules/gcal/gcal.service.ts` — all-day date guard
+- `backend/src/modules/family/family-agent.service.ts` — D3 synthesis, D3 fallback, D4 triage prompts
+- `frontend/src/pages/FamilyAgentPage.tsx` — `handleAlertCompose`
+
+---
+
+## CR-198 — Family Planner: GCal write-back for deadline alerts (2026-07-01)
+
+**What changed:**
+- Migration 0078: added `action_type TEXT CHECK ('create_gcal_event')` and `action_payload JSONB` to `family_agent_alerts`.
+- `sweepDeadlines` D4 Call 2 LLM prompt now requests a `calendarEventPayload: { title, date, description }` on each alert. The agent populates this for any deadline that benefits from being on the calendar (registration cutoffs, enrollment windows, appointment reminders).
+- `writeAlerts` in `family-agent.service.ts` persists `action_type = 'create_gcal_event'` and the serialised payload whenever the LLM returns a non-null `calendarEventPayload`.
+- `AgentAlert` exported type extended with `actionType` and `actionPayload` fields; `AlertRow` / `rowToAlert` updated accordingly.
+- New API route `POST /api/family/alerts/:alertId/approve`: validates the alert belongs to the user's household, calls the existing `createCalendarEvent()` (already fully implemented in `gcal.service.ts`), writes a `family_events` row with `record_type = 'deadline'` and `gcal_event_id`, then marks the alert resolved — all in a single transaction.
+- Frontend `AlertCard` in `FamilyAgentPage.tsx`: shows an **Add to Calendar** button on `deadline_approaching` alerts that have `actionType = 'create_gcal_event'` and are not yet resolved. On success, button disappears and an "Open in Google Calendar" link is shown. On `GCAL_NEEDS_REAUTH`, shows inline reconnect prompt.
+
+**Why:** Phase 1 PA Agent (shipped in 6.2.3) produced `deadline_approaching` alerts but users had to manually copy dates into their calendar. `createCalendarEvent()` was already wired in `gcal.service.ts` but never called from the agent flow. This closes that last mile.
+
+**Files:**
+- `backend/db/migrations/0078_alert_gcal_action.sql` — new
+- `backend/src/modules/family/family-agent.service.ts` — AlertItem type, D4 prompt, writeAlerts INSERT, AgentAlert/AlertRow/rowToAlert
+- `backend/src/modules/family/family-events.routes.ts` — new approve route
+- `frontend/src/pages/FamilyAgentPage.tsx` — AgentAlert type + AlertCard button
+
+**GitHub:** Closes https://github.com/mangatrai/grove/issues/168
+
+---
+
+## FIX-197 — PA Agent: date-awareness fix + family planner dev seed (2026-07-01)
+
+**What changed:**
+- Added `todayIso: string` (ISO `YYYY-MM-DD`) to `FamilyContext` — previously only a human-readable date string existed in context.
+- Fixed `sweepDeadlines()` event filter: was only checking `date <= cutoffStr` (upper bound), now also checks `date >= ctx.todayIso` so past deadlines are excluded.
+- D3 synthesis prompt now opens with explicit "TODAY is ${ctx.todayIso} — only include items dated on or after today" instruction.
+- D4 Call 2 triage prompt now opens with "TODAY is ${ctx.todayIso} — only output alerts where affectedDate >= today" instruction.
+- Added `backend/db/seeds/dev/dev_0009_seed_family_planner.sql`: seeds household location (Dallas, TX), 5 member profiles (owner/spouse updated, Kid One / Kid Two / Nanny Helper added), household_membership rows, nanny Mon–Fri schedule in `household_help_availability`, 2 recurring activity events (swim lesson, karate), and 8 PA deadlines using `CURRENT_DATE + INTERVAL` offsets so they remain in the future on every re-seed.
+- All seed institution names anonymized (real school → "Northfield Academy", real swim school → "Frisco Aquatics Center").
+
+**Why:** Agent was surfacing stale alerts (May swim registration, June 27 BMX event) because the LLM had no instruction to filter past dates, and the filter in `sweepDeadlines` had no minimum date bound. Dev seed was manually re-entered after each `db:reset:dev`; this seeds the canonical PA test state automatically.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/db/seeds/dev/dev_0009_seed_family_planner.sql`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/170
+
+---
+
+## FIX-196 — PA Agent: PA persona + reasoning provocation across all 4 domains (2026-06-30)
+
+**What changed:**
+- Extracted `buildMemberProfile(members: HouseholdMember[])` helper — consolidates member profile string construction (name, relationship, age, activities, notes) into one place; D3 and D4 inline versions removed, D1 and D2 now use it too.
+- D1 `analyzeCoverageGaps`: system prompt now frames the LLM as "a careful childcare coverage analyst for a household PA"; user prompt adds a Household members section with explicit guidance: "use ages, school schedules in notes, and activity times — a child at school or at an activity during a gap window is not at risk."
+- D2 `assessNannyCoordination`: same — PA analyst persona in system; member context added to user prompt with guidance on when school-age vs. infant care needs differ.
+- D3 `runProactiveResearch`: query gen system prompt elevated to PA persona ("reason about what matters for this family — life stages, seasonal transitions, interest-based opportunities"). User prompt restructured with bullet-point HOW-TO-USE guidance for each member profile field (age/stage, activities/interests, notes, season+location), ending with "Think as a PA who has worked with this family for a year." Synthesis and fallback system prompts updated to match PA framing. Synthesis user prompt now includes member context + month so the LLM can filter search results for family relevance.
+- D4 `sweepDeadlines` Call 1: same PA persona + HOW-TO-USE reasoning guidance added to user prompt. Call 2 triage system prompt updated to "household PA triaging deadline alerts — be specific to this family's context, not generic."
+
+**Why:** All 4 domain prompts were task-framed ("generate queries", "detect gaps") with no instruction on WHO the LLM should reason as or HOW to use the member profile data (age, interests, notes). The LLM was defaulting to generic category matching rather than reasoning about this specific household's life stage and context. Framing as a PA + explicit per-field reasoning guidance provokes the LLM to think first, then act — producing more contextually relevant queries, better gap assessment, and fewer false positives.
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+## FIX-195 — PA Agent: missing try/catch on parseJsonResponse in Domains 1, 2, 4, 5 + per-calendar fetch guard (2026-06-29)
+
+**What changed:**
+- `family-agent.service.ts`, `analyzeCoverageGaps` (D1): wrapped final `parseJsonResponse` in try/catch — returns `{ hasOutput: false, gaps: [] }` on malformed LLM JSON instead of crashing `Promise.all`.
+- `family-agent.service.ts`, `assessNannyCoordination` (D2): same — returns `{ hasOutput: false, items: [] }` on parse failure.
+- `family-agent.service.ts`, `sweepDeadlines` (D4): same — returns `{ hasOutput: false, alerts: [] }` on parse failure.
+- `family-agent.service.ts`, `synthesizeDigest` (D5): wrapped `parseJsonResponse` in try/catch — on failure, returns `allAlerts` with `parentADigest/parentBDigest: null` and `summaryText` noting the parse failure. Alerts generated by D1-D4 are still surfaced.
+- `family-agent.service.ts`, `fetchCalendarEvents`: wrapped each iteration of the per-calendar event list call in try/catch. A single bad calendar (permissions issue, ICS subscription gone stale) no longer kills the entire parent's event fetch — logs WARN with calendarId and continues to remaining calendars.
+
+**Why:** Domain 3 already had try/catch on both its parse points (the previous session's fix). Domains 1, 2, 4, and 5 did not. Any LLM response with a preamble, trailing text, or code-fenced JSON would throw `JSON.parse` and propagate uncaught through the `Promise.all`, failing the entire agent run with an `error` status. The calendar loop guard was similarly missing — discovered during self-review.
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+## FIX-194 — PA Agent: Domain 4 hardcoded Tavily queries replaced with LLM-generated dynamic queries (2026-06-29)
+
+**What changed:**
+- `family-agent.service.ts`, `sweepDeadlines` (Domain 4): Removed the two hardcoded Tavily queries (`"${city} ISD school enrollment deadline"` and `"summer camp registration deadline"`). Replaced with an LLM query-generation step identical in pattern to Domain 3 — the LLM receives the household member profiles, current date/month, location, already-tracked DB deadlines, and already-open alerts, then generates 3-4 targeted Tavily queries specific to this family's actual situation in the current month. Queries are not re-generated if the relevant items are already tracked or alerted.
+**Why:** Hardcoded queries violate the dynamic reasoning principle: they run the same two searches in every month regardless of season, the kids' actual activities, or what's already tracked. In November, "summer camp registration deadline" is useless noise. The LLM query step ensures Domain 4 searches for deadlines that actually matter to this household right now.
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+## FIX-193 — PA Agent: Domain 3 silent failure + research items missing from UI (2026-06-29)
+
+**What changed:**
+- `family-agent.service.ts`, Domain 3 (`runProactiveResearch`): `tavilySearch()` when `TAVILY_API_KEY` is unset returns the string `"Web search is not configured (TAVILY_API_KEY missing)."` rather than throwing — so the search results array was populated with garbage, `searchResults.length === 0` was never true, and the synthesis LLM received 5 useless entries. Fix: detect the "TAVILY_API_KEY" substring, log a warn, break out of the search loop. If `searchResults` is empty after detection, run an LLM-only fallback using household profile + current season to generate 2-3 general suggestions without live data.
+- `family-agent.service.ts`, Domain 4 (`sweepDeadlines`): same detection pattern applied — break on first "not configured" result so deadline Tavily enrichment fails fast and cleanly.
+- `family-agent.service.ts`, `synthesizeDigest`: `domain.research.items` now converted to `suggestion`-type `AlertItem[]` and added to `allAlerts`. These are now inserted into `family_agent_alerts` and visible in the UI run history. Previously they only appeared in the email body and were invisible in the app.
+- `synthesizeDigest` LLM prompt: `summaryText` changed from "1-2 sentence overall summary" to a 3-5 sentence domain-by-domain breakdown (scheduling status, nanny coordination, deadlines, proactive research). The summary now covers all 5 domains explicitly.
+
+**Also fixed in this session (same commit):**
+- `gcal.service.ts` — per-calendar error handling: fetch loop for selected calendars now wraps each iteration in try/catch. A failing ICS subscription (e.g. school calendar) no longer aborts the entire loop — remaining calendars (e.g. Work - IBM Mirror) are still fetched. Failures logged as WARN with calendar ID and HTTP status.
+- `gcal.service.ts` — added `https://www.googleapis.com/auth/userinfo.email` to `GCAL_SCOPES`. Existing users must reconnect Google Calendar in Settings to pick up the new scope.
+- `family-agent.service.ts`, `analyzeCoverageGaps`: added `ev.location` to parentLines so geographic conflicts (e.g. workshop in Dallas vs child activity in Frisco same day) are visible to the LLM.
+- `family-agent.service.ts`, `analyzeCoverageGaps` and `assessNannyCoordination` prompts: rewrote to eliminate false-positive nanny coordination alerts caused by the "WFH-but-fully-booked" trigger. New prompts have explicit rules: caregiver scheduled = gap covered; parent taking child to appointment is not a gap; missing Parent B calendar means Parent B is available.
+- `FamilyAgentPage.tsx`: run history expanded row had black-on-dark text; fixed by adding `c="var(--mantine-color-gray-0)"` to the Text component inside the dark Paper.
+
+**Why:** Live PA Agent pipeline produced output from Domain 1 only — Domains 3-5 findings were invisible. Root cause: Tavily "not configured" string polluted search results silently, and research items were never stored in the alerts table.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/gcal/gcal.service.ts`, `frontend/src/pages/FamilyAgentPage.tsx`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/161
+
+## FIX-192 — PA Agent: sunday/monday digest silently skipped when all domains empty (2026-06-29)
+
+**What changed:**
+- `synthesizeDigest()` in `family-agent.service.ts`: early-return gate changed from `if (!hasOutput)` → `if (!hasOutput && runType === "daily_delta")`.
+- Previously, if all 4 pipeline domains returned `hasOutput: false` (typical for a fresh production setup with no children in person_profiles, no caregiver slots, no DB deadlines), `synthesizeDigest` returned null digests for **every** run type — including `sunday_preview` and `monday_digest` which are supposed to always send.
+- Now `sunday_preview` and `monday_digest` always proceed to the LLM synthesis step. With no domain output, the prompt includes "No reactive alerts this run." and the LLM generates a minimal "all clear" digest rather than silently dropping the email.
+- Root cause: the run was being logged as `status: "sent"` with `emails_sent: 0`, making it invisible from the digest log.
+
+**Why:** First production deployment of the PA agent showed no emails on Sunday or Monday. Reported by user.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/160
+
+---
+
+## CR-PA1 — PA Agent Phase 1: replace single-LLM analysis with 5-domain sequential pipeline (2026-06-29)
+
+**What changed:**
+- `backend/src/modules/family/family-agent.service.ts`: replaced `buildAnalysisPrompt()` + `analyzeWithLlm()` (single LLM call) with a 5-domain pipeline of focused functions:
+  1. `analyzeCoverageGaps()` — detects windows where both parents have overlapping commitments and the caregiver is not scheduled; generates structured coverage gap alerts with resolution options.
+  2. `assessNannyCoordination()` — flags weeks with parent travel or back-to-back WFH meeting days where caregiver hours need confirmation or extension; generates copy-paste messages per recipient.
+  3. `runProactiveResearch()` — fires on every run regardless of calendar conflicts; LLM generates Tavily queries based on family profile (location, interests, age, activity locations from GCal), runs them directly, then a second LLM call synthesizes 2–5 actionable finds (events, deadlines, restaurants, weather, entertainment). Query count scales by run type: 2 for `daily_delta`, 3 for `sunday_preview`, 5 for `monday_digest`/`manual`.
+  4. `sweepDeadlines()` — triages deadlines in the `family_events` table by urgency; for non-delta runs adds Tavily queries for public deadlines (school ISD enrollment, summer camp registration); deduplicates against already-open alerts.
+  5. `synthesizeDigest()` — takes all 4 domain outputs, composes per-parent email digests with reactive alerts and proactive research finds; only writes alerts/emails if any domain produced output.
+- Domains 1–4 run in **parallel** (`Promise.all`); domain 5 follows sequentially.
+- `runFamilyAgent` orchestrator updated: adds `getHouseholdLocation()` call (fetches `household.city`/`household.state` to construct location string for Tavily queries); builds `FamilyContext` object shared across all domains; replaces `analyzeWithLlm` call with pipeline; passes `location` into `FamilyContext`.
+- **Gate fix**: `daily_delta` no longer skips on `hasConflicts === false`; now skips only when `analysis.hasOutput === false` (i.e., all 5 domains produced nothing actionable). Previously, any day without a calendar conflict sent nothing — the PA did zero work. Now proactive research and deadline sweeps alone can trigger the daily email.
+- `AgentAnalysis` type: `hasConflicts: boolean` → `hasOutput: boolean`; inline alert tuple type extracted to named `AlertItem` type; added `CoverageGapResult`, `NannyCoordResult`, `ResearchItem`, `ResearchResult`, `DeadlineResult`, `PipelineOutputs`, `FamilyContext` types.
+- All domain LLM calls use `getChatAdapter().complete()` (no tool loop) for cost efficiency; only `runProactiveResearch` and `sweepDeadlines` call Tavily directly (controlled query count, not open-ended).
+
+**Why:** The original single-LLM call was optimized for calendar conflict detection and missed everything else. No conflicts → no email → the PA was silent 80% of the time. Phase 1 decouples the 5 concerns so each gets a focused prompt, adds proactive research that fires every run, and fixes the gate logic so useful output (restaurant find, deadline, weather advisory) reaches the household even on quiet calendar days.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes #158
+
+---
+
+## FP-14 — GCal event creation: store provider_email at OAuth time, auto-invite co-parents (2026-06-28)
+
+**What changed:**
+- `exchangeAndSaveCalendar` now calls Google's `userinfo.get()` after the OAuth token exchange to fetch the authenticated account's email, and stores it in the `provider_email` column of `oauth_integrations`. Non-fatal: if the userinfo call fails, connection still succeeds and `provider_email` stays null.
+- `connectGCal` updated to accept and persist `providerEmail` (written on both INSERT and the ON CONFLICT UPDATE path, so reconnects refresh the value).
+- `createCalendarEvent` now takes `householdId` and queries `oauth_integrations` for all other connected parents in the same household with a non-null `provider_email`. Those emails are appended to the GCal `attendees` list so the event lands on every parent's primary calendar via Google invite. The approving user's own write still goes to their `primary` calendar.
+
+**Why:** Previously, approving a quick-capture `create_event` only wrote to the approving user's calendar. If the event was relevant to both parents (school pickup, kid activity), the other parent had no visibility unless manually added. Adding household co-parents as attendees ensures both see the invite without any extra UX.
+
+**Files:** `backend/src/modules/gcal/gcal.service.ts`, `backend/src/modules/family/family-events.routes.ts`
+
+---
+
+## FP-13 — Alert card Compose button + CAPTURE_SYSTEM prompt improvements (2026-06-28)
+
+**What changed:**
+- `AlertCard` now shows a "Compose" button (alongside "Dismiss") whenever `copyPasteText` is set. Clicking it opens `ComposeModal` pre-filled with `body = copyPasteText` and `subject` derived from alert type + affected date. User fills in the `to` field (`recipientHint` is a role name, not an email). This is the primary compose path: agent detects a conflict, drafts the message, user taps Compose to send it directly.
+- Quick-capture textarea placeholder updated to showcase the right use cases (research, drafting, reminders) and drop the pure-relay example ("ask nanny to come in early").
+- `CAPTURE_SYSTEM` prompt rewritten with explicit guidance on: when to call `search_web` first, multi-step task handling, full polished `body_draft` for draft_message (not stubs), and tone differentiation (school/medical = formal, nanny/coach = conversational).
+- Added `handleAlertCompose(alert)` in `FamilyAgentPage` — builds compose subject/body from alert fields and opens modal.
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`, `backend/src/modules/family/family-agent.service.ts`
+
+---
+
+## FP-12 — Stale suggestion follow-up: re-surface in weekly runs (2026-06-27)
+
+**What changed:** Full agent runs (sunday_preview, monday_digest, manual) now fetch suggestion-type alerts older than 5 days via new `listStaleSuggestions()`. These are injected as a `=== Stale suggestions ===` section in the prompt so the agent can explicitly follow up, update, or dismiss them. Delta runs continue to use all open alerts (unchanged — to avoid re-flagging).
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/155
+
+---
+
+## FP-11 — Cross-module finance context in agent prompt (2026-06-27)
+
+**What changed:** Family agent now fetches and injects a compact finance summary into its analysis prompt: top 5 spending categories (last 30 days) + last 2 payslips. Added `buildFinanceContext(householdId)` in `family-agent.service.ts` using `transaction_canonical` + `payslip_snapshot` tables. Finance context fetched in parallel with household members and care schedule. Prompt includes a `=== Finance Context ===` section so the agent can surface pay-timing conflicts, spending anomalies related to household events, or activity/enrollment cost context.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/154
+
+---
+
+## FP-10 — In-app compose panel + quick-capture UI (2026-06-27)
+
+**What changed:** FamilyAgentPage rebuilt with quick-capture section (textarea → `POST /family/agent/capture` → action cards with Approve/Compose buttons), a compose modal (pre-fills To/Subject/Body from `draft_message` action, sends via `POST /family/compose/send`), and the existing alerts/digest sections migrated to Mantine. New backend endpoint `POST /family/compose/send` validates `{to, subject, body}` and calls `sendMail()` via existing SMTP infrastructure.
+
+**Files:** `frontend/src/pages/FamilyAgentPage.tsx`, `backend/src/modules/family/family-events.routes.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/153
+
+---
+
+## FP-9 — Action approval + Google Calendar write-back (2026-06-27)
+
+**What changed:** New `POST /family/actions/approve` endpoint receives a `CaptureAction` (from the capture inbox), stores it as a `family_agent_alerts` suggestion row, and for `create_event` actions calls Google Calendar API to create the event on the user's primary calendar. GCal OAuth scope upgraded from `calendar.readonly` → `calendar` to enable event creation. Existing users with the old scope get `GCAL_NEEDS_REAUTH` response — reconnecting GCal grants write access. Added `createCalendarEvent()` + `NewCalendarEvent` / `CreateCalendarEventResult` types to `gcal.service.ts`.
+
+**Files:** `backend/src/modules/gcal/gcal.service.ts`, `backend/src/modules/family/family-events.routes.ts`
+
+**Migration note:** Existing GCal connections use `readonly` scope. On the first `create_event` approval, `needs_reauth` is set to `true` and the user is prompted to reconnect GCal to get write permission.
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/152
+
+---
+
+## FP-8 — PA quick-capture inbox (POST /family/agent/capture) (2026-06-27)
+
+**What changed:** New `POST /family/agent/capture` endpoint accepts `{ note: string }` and returns `{ responseText, actions[] }` inline (synchronous, no email, no DB write). Agent parses freeform notes into suggested actions (`create_event`, `set_reminder`, `draft_message`, `note`). Uses shared tool loop with `search_web` available (Tavily, max 3 iterations). Added `CaptureAction` / `CaptureResult` types to `family.types.ts`.
+
+**Files:** `backend/src/modules/family/family.types.ts`, `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/family/family-events.routes.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/151
+
+---
+
+## FP-7 — Tool calling + Tavily search wired into family agent (2026-06-27)
+
+**What changed:** Extracted Tavily web search into `backend/src/llm/tools/tavily.ts` (`tavilySearch()` + `SEARCH_WEB_TOOL` constant). Family agent now uses `getToolUseAdapter().runToolLoop()` with `search_web` as an available tool (max 4 iterations) — the model can search for public deadlines, school enrollment windows, camp sign-up dates etc. before producing its JSON analysis. Protest module updated to use shared `tavilySearch()` (removed inline fetch duplication).
+
+**Files:** `backend/src/llm/tools/tavily.ts` (new), `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/protest/protest.routes.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/150
+
+---
+
+## FIX-197 — JSON enforcement wired through shared LLM adapter (2026-06-27)
+
+**What changed:** Added `responseFormat?: "json"` to the shared `CompletionOptions` interface. OpenAI chat path now passes `response_format: { type: "json_object" }` when set (hard enforcement). Anthropic chat path appends a "Return ONLY valid JSON" instruction to the system prompt. Family agent now passes `responseFormat: "json"` at its call site, replacing prompt-only JSON enforcement.
+
+**Files:** `backend/src/llm/types.ts`, `backend/src/llm/providers/openai.ts`, `backend/src/llm/providers/anthropic.ts`, `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** closes https://github.com/mangatrai/grove/issues/149
+
+---
+
 ## FIX-192 — Near-duplicate rows now inserted as status='duplicate' and flow through standard resolution (2026-06-27)
 
 **What changed:** Near-duplicate canonical rows (same account/date/amount, different fingerprint) were previously skipped entirely — a `resolution_item` was created but no `transaction_canonical` row was inserted, so "Resolve" did nothing and the raw transaction was permanently buried. Now they are inserted with `status='duplicate'` (same as exact duplicates) so the existing resolution pipeline handles them: Needs Review shows them, "Resolve" promotes to posted, "Trash" moves to trashed.

@@ -98,6 +98,25 @@ export type CreateAvailabilityInput = {
   notes?: string | null;
 };
 
+// ── PA quick-capture ──────────────────────────────────────────────────────────
+
+export type CaptureActionType = "create_event" | "set_reminder" | "draft_message" | "note";
+
+export type CaptureAction = {
+  type: CaptureActionType;
+  title: string;
+  summary: string;
+  /** Type-specific payload — date/time for events, recipient for messages, etc. */
+  details: Record<string, unknown>;
+};
+
+export type CaptureResult = {
+  responseText: string;
+  actions: CaptureAction[];
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export type UpdateAvailabilityInput = {
   slotType?: SlotType;
   serviceType?: ServiceType;

@@ -51,6 +51,7 @@ import { checkProtestDeadlines } from "../notifications/notification.service.js"
 import { generateEvidencePDF, type SoldComp } from "./protest-evidence.service.js";
 import { generateEvidenceDOCX } from "./protest-evidence-docx.service.js";
 import { fetchDcadCanonical, fetchDcadAppraisalNoticeS3Id, fetchDcadAppraisalNoticePdf, getCompImprovementFeatures } from "./dcad-enrichment.service.js";
+import { tavilySearch } from "../../llm/tools/tavily.js";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -974,25 +975,8 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
       }
 
       if (toolName === "search_web") {
-        if (!env.TAVILY_API_KEY) return "Web search is not configured (TAVILY_API_KEY missing).";
-        const query = typeof args.query === "string" ? args.query.trim() : "";
-        if (!query) return "No query provided.";
-        try {
-          const tavilyRes = await fetch("https://api.tavily.com/search", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ api_key: env.TAVILY_API_KEY, query, search_depth: "basic", max_results: 5 }),
-            signal: AbortSignal.timeout(10_000),
-          });
-          if (!tavilyRes.ok) return `Tavily returned HTTP ${tavilyRes.status}.`;
-          const data = await tavilyRes.json() as { results?: Array<{ title: string; url: string; content: string }> };
-          const results = data.results ?? [];
-          return results.length === 0
-            ? "No results found."
-            : results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content}`).join("\n\n");
-        } catch (err) {
-          return `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.`;
-        }
+        const query = typeof args.query === "string" ? args.query : "";
+        return tavilySearch(query);
       }
 
       if (toolName === "fetch_dcad_comps") {

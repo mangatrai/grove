@@ -56,6 +56,7 @@ export async function openaiChat(
     messages: toOaiMessages(messages),
     max_tokens: options.maxTokens,
     temperature: options.temperature,
+    ...(options.responseFormat === "json" ? { response_format: { type: "json_object" as const } } : {}),
   });
   return {
     content: res.choices[0]?.message?.content ?? "",
