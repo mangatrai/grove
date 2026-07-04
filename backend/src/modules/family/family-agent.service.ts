@@ -83,17 +83,18 @@ type FamilyContext = {
 async function getConnectedParents(householdId: string): Promise<ConnectedParent[]> {
   type Row = {
     user_id: string;
-    provider_email: string;
+    app_email: string;
     selected_calendar_ids: string | null;
     gcal_last_synced_at: string | null;
   };
   const rows = await qAll<Row>(
-    `SELECT user_id, provider_email, selected_calendar_ids, gcal_last_synced_at
-     FROM oauth_integrations
-     WHERE provider = 'google_calendar'
-       AND household_id = ?
-       AND needs_reauth = FALSE
-       AND refresh_token IS NOT NULL`,
+    `SELECT oi.user_id, u.email AS app_email, oi.selected_calendar_ids, oi.gcal_last_synced_at
+     FROM oauth_integrations oi
+     JOIN app_user u ON u.id = oi.user_id
+     WHERE oi.provider = 'google_calendar'
+       AND oi.household_id = ?
+       AND oi.needs_reauth = FALSE
+       AND oi.refresh_token IS NOT NULL`,
     householdId
   );
   return rows.map(r => {
@@ -106,7 +107,7 @@ async function getConnectedParents(householdId: string): Promise<ConnectedParent
     }
     return {
       userId: r.user_id,
-      email: r.provider_email,
+      email: r.app_email,
       selectedCalendarIds,
       lastSyncedAt: r.gcal_last_synced_at,
     };

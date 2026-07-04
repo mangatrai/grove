@@ -14,6 +14,19 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX-208 — Family Planner: digest email sent to provider_email instead of app_user.email (2026-07-04)
+
+**What changed:**
+- `getConnectedParents()` now JOINs `app_user u ON u.id = oi.user_id` and returns `u.email` (the onboarding email, always non-null) instead of `oi.provider_email`.
+- `provider_email` is the Google account email stored for Calendar invite use — nullable, not the correct digest recipient.
+
+**Why:** Production error `Email send failed (... -> null): No recipients defined`. `provider_email` can be null; `app_user.email` is required at onboarding and is the canonical address for all app notifications.
+
+**Files:**
+- `backend/src/modules/family/family-agent.service.ts`
+
+**GitHub:** https://github.com/mangatrai/grove/issues/180
+
 ## FIX-207 — Family Planner: Tavily search quality — start_date, score filter, max_results 3, per-result truncation (2026-07-02)
 
 **What changed:**
