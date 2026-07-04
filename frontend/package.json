@@ -1,6 +1,6 @@
 {
   "name": "@grove/frontend",
-  "version": "6.3.4",
+  "version": "6.3.5",
   "private": true,
   "type": "module",
   "scripts": {

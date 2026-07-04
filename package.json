@@ -1,6 +1,6 @@
 {
   "name": "grove-app",
-  "version": "6.3.4",
+  "version": "6.3.5",
   "private": true,
   "engines": {
     "node": ">=20.0.0"
