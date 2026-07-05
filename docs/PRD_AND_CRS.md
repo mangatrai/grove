@@ -931,7 +931,7 @@ Grove does **not** target parity with commercial cloud PFM products (Quicken Sim
 ### Household and RBAC
 - Owner/Admin: full visibility and edit rights.
 - Member: own data by default.
-- Staff: "My Timesheet" and "My Expenses" tabs only.
+- `employee` relationship option on household membership (migration 0076). The staff RBAC role and portal are **not shipped** — they arrive with FR-15 v2 in V7 (§3.12.11).
 - Household settings: name, monthly savings target, mileage rate.
 - Household member assignment on accounts and transactions.
 
@@ -947,7 +947,6 @@ Grove does **not** target parity with commercial cloud PFM products (Quicken Sim
 - Household settings (`GET/PATCH /household/settings`): monthly savings target, mileage rate.
 - Backup & Restore tab: manual export/restore, Google Drive backup config.
 - Financial Insights sub-tab: AI provider config, personal profile (age, salary, risk tolerance, goals).
-- Staff sub-tab: add/edit/deactivate staff, review timesheets and expenses, record payments.
 
 ### API Completeness
 - OpenAPI 3.0 spec in `openapi/openapi.yaml` (machine-readable).

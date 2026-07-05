@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## PRD — §8 Shipped Features: remove staff role/sub-tab claims never shipped (2026-07-05)
+
+**What changed:** `docs/PRD_AND_CRS.md` §8 wrongly listed a shipped Staff RBAC role ("My Timesheet"/"My Expenses" tabs) and a shipped Settings > Staff sub-tab. Neither exists in code — only the `employee` relationship option on household membership shipped (migration 0076). Removed the Staff sub-tab line and corrected the RBAC line to state what actually shipped, pointing at FR-15 v2 (§3.12.11, V7) for the real staff role/portal.
+
+**Why:** User confirmed no staff UI was ever built; §8 must reflect shipped reality so future sessions don't assume a staff module exists.
+
+**Files:** `docs/PRD_AND_CRS.md`
+
+**GitHub:** context — epic [#121](https://github.com/mangatrai/grove/issues/121) (FR-15 v2, V7).
+
 ## PRD — FR-15 v2: staff module expanded to full household payroll, committed to V7 (2026-07-05)
 
 **What changed:**
