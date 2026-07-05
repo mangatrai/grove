@@ -14,6 +14,26 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## PRD — FR-15 v2: staff module expanded to full household payroll, committed to V7 (2026-07-05)
+
+**What changed:**
+- `docs/PRD_AND_CRS.md` §3.12 rewritten as **FR-15 v2 — Household Staff Payroll** (14 subsections): variable-rate tiers with FLSA weekly/blended-rate OT (29 CFR 778.115) and live-in exemption; taxable-vs-non-taxable split for reimbursements and pay items (overnight flat rate = wages; mileage @ IRS rate = accountable-plan reimbursement); gross-to-net engine (employee SS/Medicare/Addl Medicare + optional W-4 FIT via Pub 15-T; employer FICA match, FUTA w/ conditional 5.4% credit, TX SUTA); normative correctness rules (integer cents, cumulative YTD FICA method, mid-period wage-base caps, $3,000 FICA threshold retro catch-up, $1,000/quarter FUTA/TWC trigger, immutable runs w/ void+reissue); compliance calendar + remittance tracker (quarterly 1040-ES incl. withheld FIT — household employers never file Form 941; TWC C-3/annual C-20 mode; W-2/W-3 Jan 31; Schedule H Apr 15; TX new-hire 20 days); PDF pay stubs; year-end exports incl. **filled official Schedule H PDF** and W-2 box values; effective-dated `tax_year_config` seeded for 2026; testing bar with Pub 926 / Pub 15-T golden vectors.
+- §3.12.14 records IRS/TWC/SSA integration due diligence: no viable APIs (IRS MeF is transmitter-only, SSA EWRWS closed to new users, TWC portal-only) → V7 ships calculate + calendar + export; third-party e-file APIs (TaxBandits et al.) deferred to Phase 2.
+- §3.11 mileage-rate household setting superseded by the effective-dated `tax_year_config` value.
+- Staff Module Phase 2 list rewritten (pay stubs + mileage export moved into V7 core; added e-file API, direct deposit, PTO/sick accrual, QSEHRA, family-member exemption automation).
+- `docs/BACKLOG.md` FR-15 row → **FR-15 v2, V7 committed**, updated schema list (11 tables, all to be in `EXPORT_REGISTRY`), fixed stale §3.10 cross-ref → §3.12.
+
+**Why:** User direction — extend the staff module from time/expense tracking into a correct-to-the-cent payroll system (employment taxes, withholdings, Texas + federal compliance, deadline tracking) ahead of the V7 build. Docs + issues only; no code.
+
+**Files:**
+- `docs/PRD_AND_CRS.md`
+- `docs/BACKLOG.md`
+- `docs/CHANGE_HISTORY.md`
+
+**GitHub:** epic https://github.com/mangatrai/grove/issues/121 (retitled FR-15 v2, milestone V7); sub-issues #199–#207 (PY-1…PY-9) created on V7.
+
+---
+
 ## FIX-211 — Visibility-aware notification polling — pause poll when tab is hidden (2026-07-04)
 
 **What changed:**

@@ -325,58 +325,136 @@ Not in MVP scope. Future enhancement for alerts (unusual spending, bills due, re
 #### Household settings
 - **Household name and identity.**
 - **Monthly savings target (USD):** Used for safe-to-spend calculation (prorated to selected time window).
-- **Mileage reimbursement rate (USD/mile):** For staff timesheet processing.
+- **Mileage reimbursement rate (USD/mile):** Superseded by FR-15 v2 — the mileage rate is now an effective-dated value in `tax_year_config` (tracks the IRS standard rate per year), not a static household setting. See §3.12.
 
-### 3.12 Household Staff Module (FR-15, PRD §20)
+### 3.12 Household Staff Payroll (FR-15 v2, PRD §20) — V7
 
 #### Overview
-Time-and-expense reporting for household employees (nanny, cleaner, au pair). Staff is a restricted RBAC role; staff see only "My Timesheet" and "My Expenses" tabs. Owner/admin manages staff profiles, reviews and approves entries, records payments, and optionally posts to ledger.
+Full payroll for household employees (nanny, cleaner, au pair): variable-rate time tracking, expense reimbursement, gross-to-net payroll with employee withholdings and employer taxes, compliance-deadline tracking, and form-ready filing outputs. Supersedes the FR-15 v1 time-and-expense spec (2026-04-16); v1 concepts (staff RBAC role, timesheets, expense approvals, payment recording, ledger posting) are retained and extended below. **Payroll math must be correct to the cent** — see §3.12.6 Correctness Rules and §3.12.13 Testing Bar.
 
-#### Staff role capabilities
-- Permitted: `GET/POST /staff/timesheets/*`, `GET/POST /staff/expenses/*`, `GET /staff/profile` (own only).
+**Scope & compliance model.** The app **computes, tracks, reminds, and exports**; the owner performs registrations and payments outside the app (EIN via IRS, TWC unemployment tax account, tax payments via IRS Direct Pay / TWC UTS, W-2 filing via SSA BSO, Schedule H filed with the personal 1040). Explicit V7 non-goals: no e-filing integration, no money movement/direct deposit, no multi-state support (Texas + federal only), no Forms 941/940 (household employers report annually on Schedule H per IRS Pub 926), no PTO/sick accrual, no benefits (QSEHRA). Deferred items live in the Staff Module Phase 2 backlog (§6).
+
+#### 3.12.1 Staff profiles
+Builds on `person_profile` (FK `person_profile_id`; `household_membership.relationship = 'employee'` exists since migration 0076). New `staff_profile` adds employment data:
+- Employment start/end dates; deactivate/reactivate (preserves history; deactivated staff cannot log in).
+- **Live-in flag** — controls the FLSA overtime exemption (§3.12.3).
+- Pay schedule: weekly / biweekly / semi-monthly / monthly + anchor date.
+- **Workweek start day** (default Sunday). The FLSA workweek is a fixed recurring 7-day period, independent of the pay period; OT is always computed per workweek.
+- W-4 elections (2020+ form): filing status, Step 2 multiple-jobs checkbox, dependents credit, other income, deductions, extra withholding per period — **stored encrypted** (same AES-256-GCM pattern as `person_profile.date_of_birth_encrypted`).
+- FIT-withholding opt-in flag. Federal income tax withholding is voluntary for household employers — withhold only if the employee requests it via W-4.
+- "Expect to exceed FICA threshold" flag (§3.12.6 threshold behavior).
+- FICA/FUTA-exempt flag with reason (wages to a spouse, own child under 21, parent, or under-18 student are exempt per Pub 926). Default off; validation warns when `household_membership.relationship` suggests exemption.
+- Household expense category for wage payments; separate category for reimbursements.
+- SSN (encrypted; required for W-2) and home address (W-2 + Texas new-hire report).
+
+#### 3.12.2 Variable rate tiers
+- Per-employee **named rate tiers**, e.g. "1 child — $20.00/hr", "2 children — $25.00/hr", each with `hourly_rate_cents` and an effective-from/effective-to date range.
+- Every time entry selects exactly one tier; the rate is resolved as of the entry date.
+- Rate changes create a new effective-dated row — historical entries and finalized payroll runs are **never recalculated**.
+- Validation: every tier rate ≥ federal minimum wage ($7.25, config value).
+
+#### 3.12.3 Timesheets & overtime engine
+- **Time entry:** clock in/out or manual (date, start, end, break minutes, rate tier, optional note). Staff enters own; admin may enter/correct on behalf of staff (attributed in audit trail).
+- **Overtime (FLSA):** household employees are non-exempt. Live-out: 1.5× regular rate over 40 hours per workweek. **Live-in: OT-exempt in Texas** (federal exemption; Texas adds no protections) — straight time for all hours, minimum-wage floor still applies. No daily OT in Texas; the v1 daily >8h option is dropped.
+- **Blended-rate OT (29 CFR 778.115):** when multiple rate tiers occur in one workweek, regular rate = total straight-time earnings ÷ total hours; OT premium = 0.5 × regular rate × OT hours (straight time for all hours is already in earnings). Ship a worked example in USER_GUIDE at build time.
+- Pay period submission locks entries; admin approves or sends back with comment; approved periods feed payroll runs.
+- Edits after approval require admin unlock; entries inside a finalized payroll run are immutable (corrections via void + reissue, §3.12.6).
+
+#### 3.12.4 Expenses, reimbursements & pay items
+Three kinds with different tax treatment — the distinction is load-bearing for W-2 correctness:
+1. **Non-taxable reimbursements** (IRS accountable plan; excluded from wages, never on the W-2):
+   - **Mileage:** from, to, purpose, miles; amount = miles × IRS standard rate from `tax_year_config` (72.5¢/mi for 2026), resolved as of the trip date. Substantiation fields are required (accountable-plan rule).
+   - **Receipt-backed purchases:** date, category (groceries, supplies, activities, transportation, parking, other), amount, description, receipt attachment (image/PDF).
+2. **Taxable pay items** — compensation for work that is not hourly: flat overnight-stay payment (e.g. $100/night, per-employee configurable), bonuses, ad-hoc stipends. **These are wages**: included in gross pay, subject to FICA/FIT/FUTA/SUTA, reported on the W-2.
+3. **Mileage above the IRS rate:** if the household configures a higher rate, the app splits automatically — IRS-rate portion is reimbursement, excess is a taxable pay item.
+
+All three follow the approval workflow: pending → approved / rejected with note (individual or bulk). Only approved items enter a payroll run. Approved reimbursements are paid with the paycheck but listed separately on the stub and excluded from all tax math.
+
+#### 3.12.5 Payroll runs (gross-to-net)
+A payroll run consumes one approved pay period per employee and computes:
+- **Gross wages** = regular earnings + OT premium + taxable pay items.
+- **Employee withholdings:**
+  - Social Security 6.2% up to the annual wage base ($184,500 for 2026).
+  - Medicare 1.45% (no cap).
+  - Additional Medicare 0.9% on wages over $200,000/yr (withholding-side only; no employer match).
+  - Optional FIT per W-4 via the **Pub 15-T percentage method** (annual tables in config; supports 2020+ W-4 fields and extra withholding).
+- **Employer accruals** (not deducted from employee; tracked for remittance):
+  - Social Security match 6.2% / Medicare match 1.45% (same wage bases).
+  - FUTA: 6.0% on first $7,000/employee/yr with the 5.4% state credit → net 0.6%, **modeled as conditional on timely TWC payment** (a missed TWC deadline flags the credit at risk).
+  - Texas SUTA (TWC): employer-assigned rate from config (new-employer 2.70% for 2026; valid range 0.32%–6.32%) on first $9,000/employee/yr.
+- **Net pay** = gross − employee withholdings. **Payout amount** = net pay + approved reimbursements.
+
+#### 3.12.6 Correctness rules (normative)
+- **Integer cents everywhere.** All monetary columns are integer cents (BIGINT); hourly rates in cents; no floating-point money anywhere in the payroll path.
+- **Cumulative YTD method for FICA:** period withholding = round_half_up(YTD subject wages × rate) − YTD already withheld. Guarantees W-2 Box 4 = 6.2% of Box 3 and Box 6 = 1.45% of Box 5 **exactly**, with no drift across periods.
+- **Wage-base caps applied mid-period:** when a period straddles a cap ($184,500 SS / $7,000 FUTA / $9,000 SUTA), only the sub-cap portion is taxed.
+- **FICA threshold ($3,000/employee for 2026, Pub 926):** below the threshold no FICA is due. With "expect to exceed" set, withhold from dollar one. Otherwise the app tracks unwithheld liability and performs a **retroactive catch-up** on the run where the threshold is crossed (once crossed, FICA applies to *all* cash wages including pre-threshold). If the year ends under threshold with FICA withheld, the app flags the amount as repayable to the employee.
+- **FUTA/TWC liability trigger:** $1,000 total cash wages to all household employees in any calendar quarter (current or preceding year for FUTA). The app tracks quarter totals and raises a "now liable — register with TWC within 10 days" notification the first time the trigger fires.
+- **Immutable runs:** a finalized run snapshots every input (hours, rates, tier names, tax constants, YTD bases) into `payroll_run_line`. Corrections are **void + reissue**, never in-place edits. Full audit trail (who, when, why).
+- **Rounding:** round-half-up at defined boundaries only (per-line earnings; per-tax per-period via the cumulative method). Document in code and ADMIN_GUIDE at build time.
+
+#### 3.12.7 Payments, ledger posting & pay stubs
+- **Payment recording** against a run: date, method (cash, check, Venmo, bank transfer, Zelle, other), reference, notes. Money moves outside the app.
+- Checkbox "Post to household ledger" → `transaction_canonical` debits: wages (configured category, description "Staff wages – [Name] [period]") and reimbursements (separate category, individual rows per expense item). Employer tax accruals post optionally at remittance time (§3.12.8), not at payroll time.
+- **PDF pay stub** per run: employer/employee names, period, hours by rate tier, OT detail, gross, itemized withholdings, taxable pay items, reimbursements (separate section), net pay, payout amount, **YTD columns for every figure**, employer taxes as FYI footer. Texas does not mandate stubs; provided as standard practice (nanny needs them for loans/leases).
+- Payment history per staff member; YTD register (wages, withholdings, reimbursements, employer taxes).
+- Admin summary (Settings > Staff): per-staff card with hours owed, expenses awaiting payment, outstanding balance; YTD totals; open-items alert (timesheets awaiting review, pending expenses, upcoming tax deadlines).
+
+#### 3.12.8 Compliance calendar & remittance tracking
+The app generates deadline instances per tax year with **computed amounts**, notifies via the existing notification system (scheduler uses `env.TZ`), and records completion (paid date, confirmation number) in `tax_remittance`:
+
+| Obligation | When | Computed amount / notes |
+|---|---|---|
+| Federal 1040-ES estimated payment | Apr 15 / Jun 15 / Sep 15 / Jan 15 | Quarter's employee FICA withheld + FIT withheld + employer FICA match + FUTA accrual. **This is how withheld FIT reaches the IRS** — household employers remit via their own estimated taxes (or extra W-4 withholding at their day job), never Form 941. Skipping risks the §6654 underpayment penalty. |
+| TWC wage report + SUTA payment | Quarterly (C-3, due last day of month after quarter end) **or** annual mode | Taxable wages × assigned rate. **Annual election (Form C-20)** available to domestic-only employers — elect by Dec 31 for the following year; filing mode is a household config. Electronic filing mandatory (TWC UTS portal). |
+| W-2 to employee + W-2/W-3 to SSA | Jan 31 | Box values from §3.12.9. |
+| Schedule H with Form 1040 | Apr 15 | Filled PDF + worksheet from §3.12.9. |
+| Texas new-hire report (OAG) | Within 20 days of each staff activation | Employee name/address/SSN + employer FEIN; employer.oag.texas.gov ($25 penalty per missed report). |
+| Year-begin checklist | Jan | EIN on file, TWC account active, I-9 retained, W-4 refresh prompt, new tax-year config seeded, records-retention reminder (keep 4 years). |
+
+#### 3.12.9 Year-end & filing exports
+- **W-2 box-value sheet** per employee: Box 1 (gross incl. taxable pay items), Box 2 (FIT withheld), Boxes 3/4 (SS wages/tax), Boxes 5/6 (Medicare wages/tax) — reconciled to the cent against the payroll register. Owner keys values into SSA BSO W-2 Online (free, ≤50 W-2s). Copy A paper filing requires official scannable forms, so the app exports values, not a Copy A facsimile.
+- **Schedule H:** filled **official IRS fillable PDF** (AcroForm field-fill via a library such as pdf-lib) plus a plain worksheet with line-by-line values. The PDF field map is part of per-tax-year config (IRS revises the form annually). Output is for preparer handoff or paper filing — Schedule H is e-filed only as part of the 1040.
+- **TWC report figures:** per-quarter (or annual) gross wages, taxable wages, tax due — matching C-3 fields.
+- Annual payroll register (all runs, all employees); mileage log export (date, from/to, purpose, miles, rate, amount).
+
+#### 3.12.10 Tax-year configuration
+Admin-editable, effective-dated `tax_year_config`, seeded for 2026: SS rate + wage base, Medicare rate, Additional Medicare rate + threshold, FICA household threshold, FUTA rate + wage base + credit, TWC assigned rate + wage base + filing mode, IRS mileage rate, federal minimum wage, Pub 15-T percentage-method tables, Schedule H PDF field map. Every new tax year requires a config update (annual ritual to be documented in ADMIN_GUIDE at build time). The app warns when running payroll in a year with no config.
+
+#### 3.12.11 RBAC & staff portal
+Staff is a restricted role seeing only **My Timesheet**, **My Expenses**, and **My Pay Stubs**.
+- Permitted: `GET/POST /staff/timesheets/*`, `GET/POST /staff/expenses/*`, `GET /staff/profile`, `GET /staff/pay-stubs/*` (own only).
 - Blocked: Home, Transactions, Import, Reports, Budget, Categories, Settings.
+- Admin surfaces: staff profiles + rate tiers, timesheet approval queue, expense approval queue, run-payroll wizard (review → finalize → record payment → post to ledger), tax center (YTD liabilities, compliance calendar, remittance recording, year-end exports).
 
-#### Staff management (Settings > Staff sub-tab, owner/admin only)
+#### 3.12.12 Database tables (design sketch — final at build time)
+- `staff_profile`: person_profile FK, employment dates, live-in flag, pay schedule, workweek start, W-4 (encrypted), opt-in flags, categories, active status.
+- `staff_rate`: named tier, hourly_rate_cents, effective range.
+- `timesheet_entry`: date, start/end/breaks, rate tier FK, status (draft/submitted/approved/rejected).
+- `timesheet_period`: period metadata, approval status, sent-back notes, aggregated hours.
+- `staff_expense`: reimbursement or mileage entry; substantiation fields; receipt attachment; status with review notes.
+- `staff_pay_item`: taxable additions (overnight stipend, bonus); status.
+- `payroll_run` / `payroll_run_line`: immutable gross-to-net snapshot incl. tax constants and YTD bases; void/reissue linkage.
+- `staff_payment`: payment record, optional FK to `transaction_canonical`.
+- `tax_remittance`: obligation type, period, due date, computed amount, paid date, confirmation.
+- `tax_year_config`: per-year tax constants (§3.12.10).
+- **Every table must be registered in `EXPORT_REGISTRY`** at migration time (backup coverage).
 
-**Add/edit staff:**
-- Name, email, phone.
-- Hourly and overtime rates (USD).
-- OT threshold: daily (>8h/day) or weekly (>40h/week).
-- Pay period type: weekly / biweekly / semi-monthly / monthly.
-- Pay period anchor date.
-- Household expense category for wage payments.
-- Deactivate/reactivate (preserves history; deactivated staff cannot log in).
+#### 3.12.13 Testing bar (acceptance criteria for the build)
+- Golden vectors from IRS Pub 926 worked examples (FICA, FUTA, threshold cases).
+- Blended-rate OT: multiple tiers in one workweek, verified against a 29 CFR 778.115 hand calculation.
+- Mid-period wage-base cap crossings (SS, FUTA, SUTA).
+- FICA threshold: retroactive catch-up on crossing; year-end-under-threshold repayment flag.
+- Cumulative-method reconciliation: for a full simulated year, W-2 Box 4 ≡ 6.2% of Box 3 and Box 6 ≡ 1.45% of Box 5 to the cent.
+- Pub 15-T percentage-method FIT vectors (published IRS examples).
+- All test data uses fictional round numbers per the no-PII rule.
 
-#### Staff view — "My Timesheet"
-- **Time entry:** Clock in/out or manual entry (date, start, end, break minutes).
-- **Auto-calculation:** Regular vs. OT hours per configured threshold.
-- **Editable until:** Pay period submitted.
-- **Pay period submission:** Locks entries; staff views history of past submitted/approved/rejected periods.
-
-#### Staff view — "My Expenses"
-- **Expense entry:** Date, category (groceries, supplies, activities, transportation, parking, other), amount, description.
-- **Mileage entry:** From, to, purpose, distance (miles); auto-calculated at household mileage rate.
-- **Status tracking:** Pending / Approved / Rejected with notes.
-
-#### Admin review (Settings > Staff > [Staff Name])
-- **Timesheet review:** Submitted periods with hours preview; approve or send back with comment.
-- **Expense review:** Approve or reject with reason (individual or bulk).
-- **Payment recording:** Date, amount, method (cash, check, Venmo, bank transfer, Zelle, other), notes.
-  - Checkbox: "Post to household ledger" → creates `transaction_canonical` (debit, configured category, description: "Staff wages – [Name] [period]").
-  - Separate checkbox: "Post approved expenses to household ledger" → individual rows per expense item.
-- **Payment history:** Ledger per staff member (date, amount, method, notes, ledger-posted status).
-
-#### Admin summary page (Settings > Staff)
-- Per-staff card: hours owed, expenses awaiting payment, total outstanding balance.
-- YTD totals per staff: wages paid, expenses reimbursed.
-- Open items alert: count of submitted timesheets awaiting review, count of pending expenses.
-
-#### Database tables
-- `staff_profile`: User, rates, OT threshold, pay period config, expense category, active status.
-- `timesheet_entry`: Clock in/out or manual entry; draft/submitted/approved/rejected status.
-- `timesheet_period`: Period metadata (start, end), approval status, sent-back notes, aggregated hours and gross pay.
-- `staff_expense`: Expense or mileage entry; pending/approved/rejected status with review notes.
-- `staff_payment`: Payment record with optional FK to `transaction_canonical` if posted to ledger.
+#### 3.12.14 IRS/TWC integration due diligence (decision record, researched 2026-07)
+**Finding: no direct filing integration is feasible or necessary at household scale; V7 ships calculate + calendar + export.**
+- **IRS:** no public API for household employment taxes. Schedule H is a 1040 attachment; e-filing goes through the Modernized e-File (MeF) program, open only to authorized transmitters/software developers (IRS Pubs 3112/4163/4164) — not viable for a self-hosted app. Payments: IRS Direct Pay / EFTPS (manual).
+- **SSA (W-2):** the Electronic Wage Reporting Web Service (EWRWS) is **closed to new users**. BSO W-2 Online (Login.gov/ID.me auth) files up to 50 W-2s free — the intended path.
+- **TWC:** no public API. Unemployment Tax Services web portal (manual entry) or QuickFile (desktop file-upload tool, ICESA/MMREF-1 formats) — the portal is the intended path at 1–2 employees.
+- **Future option (Phase 2):** third-party e-file APIs (e.g. TaxBandits, BoomTax) can file W-2/W-3 with SSA for a per-form fee; revisit if manual BSO filing proves painful. Schedule H can never be e-filed separately from the 1040 regardless of vendor.
 
 ### 3.13 Real Estate and Property Tax Protest (RE-1, PT-1)
 
@@ -762,8 +840,8 @@ Grove does **not** target parity with commercial cloud PFM products (Quicken Sim
 **P3 Items:**
 - RBAC tightening.
 - Balance sheet subtotals (filtering shipped; subtotals deferred).
-- Staff PDF pay stub generation.
-- Mileage log export.
+- ~~Staff PDF pay stub generation~~ (moved into FR-15 v2 core scope, §3.12.7).
+- ~~Mileage log export~~ (moved into FR-15 v2 core scope, §3.12.9).
 
 ### V4 and Beyond
 
@@ -781,10 +859,13 @@ Grove does **not** target parity with commercial cloud PFM products (Quicken Sim
 **Cloud Backup Phase 2:**
 - OneDrive provider (Microsoft OAuth + Graph API, same job runner).
 
-**Staff Module Phase 2:**
-- PDF pay stub generation for staff.
-- Mileage log export.
+**Staff Module Phase 2** (post-V7; pay stubs and mileage export moved into FR-15 v2 core, §3.12):
 - Multi-household-member payroll summary.
+- Third-party W-2/W-3 e-file API integration (TaxBandits/BoomTax) if manual SSA BSO filing proves painful (§3.12.14).
+- Direct deposit / money movement.
+- PTO, sick-time, and holiday accrual tracking.
+- Benefits: QSEHRA / health stipend handling (tax-free if compliant).
+- FICA/FUTA family-member exemption automation (spouse/child/parent rules, Pub 926).
 
 **Advanced Search:**
 - Deeper investment analytics.
