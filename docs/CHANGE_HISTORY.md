@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DOC — Hyperscaler free-tier deployment guide: ADMIN_GUIDE §3.5 (2026-07-06)
+
+**What changed:** New `docs/ADMIN_GUIDE.md` §3.5 "Hyperscaler Free Tiers (AWS / GCP / Azure) — Comparison and Runbooks": verified 2026 free-tier landscape (AWS post-2025-07-15 accounts are credit-based, max 6 months free then account closure — no more always-free EC2/RDS; GCP e2-micro remains always-free 24/7; Azure is 12-months-then-paid), the 24/7-process constraint (in-process node-cron schedulers rule out scale-to-zero platforms), step-by-step runbooks for GCP e2-micro (recommended $0 path) and AWS EC2 t4g.micro/Lightsail, keep-Neon-for-Postgres guidance (RDS ~$13+/mo is the biggest avoidable cost), S3 backup plan pointer (storage adapter — gdrive currently hardcoded), SES SMTP drop-in config, SMS evaluated-and-skipped (no free SNS SMS tier), and a steady-state cost table. Also added a capacity caveat to §3.3 (OCI Always Free ARM unavailable in Chicago region, tested mid-2026) and softened its "recommended" claim.
+
+**Why:** App runs on Koyeb free + Neon free today; owner wants a documented migration path to a hyperscaler with an owned domain in a future sprint, with costs kept near $0. Docs-only — actual migration work (storage adapter, domain, SES cutover) is tracked as the V7 epic.
+
+**Files:** `docs/ADMIN_GUIDE.md`
+
+**GitHub:** closes [#218](https://github.com/mangatrai/grove/issues/218); epic [#219](https://github.com/mangatrai/grove/issues/219) (V7 migration work).
+
 ## PRD — §8 Shipped Features: remove staff role/sub-tab claims never shipped (2026-07-05)
 
 **What changed:** `docs/PRD_AND_CRS.md` §8 wrongly listed a shipped Staff RBAC role ("My Timesheet"/"My Expenses" tabs) and a shipped Settings > Staff sub-tab. Neither exists in code — only the `employee` relationship option on household membership shipped (migration 0076). Removed the Staff sub-tab line and corrected the RBAC line to state what actually shipped, pointing at FR-15 v2 (§3.12.11, V7) for the real staff role/portal.
