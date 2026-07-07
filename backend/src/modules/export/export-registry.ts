@@ -257,6 +257,13 @@ export const EXPORT_REGISTRY: ExportRegistryEntry[] = [
     restoreOrder: 28,
     householdIdColumn: "household_id",
     memberScopeInclude: false
+  },
+  {
+    tableKey: "email_ingest_log",
+    tableName: "email_ingest_log",
+    restoreOrder: 29,
+    householdIdColumn: "household_id",
+    memberScopeInclude: false
   }
 ];
 

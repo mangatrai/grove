@@ -815,6 +815,14 @@ The **Family** page's Alerts panel lists conflicts, coverage gaps, deadlines, an
 
 This feedback only changes which *categories* of alert the agent produces (e.g. it may stop suggesting restaurants if you've dismissed several as not relevant) — it never turns into spending or lifestyle advice.
 
+### Email suggestions (school/activity newsletters)
+
+If the household admin has configured a dedicated household Gmail account for inbox ingestion (see `ADMIN_GUIDE.md` §"Household inbox email ingestion"), the agent polls that inbox once a day and turns actionable school/activity emails — permission slips, picture day, registration deadlines — into suggestion alerts, tagged `[EMAIL]` in the alert text. Each one shows the verbatim line from the email it was extracted from ("From the email") so you can sanity-check it before acting.
+
+- Alerts with a date resolve to an **Add to Calendar** button, same as other agent suggestions — nothing is added to your calendar until you click it.
+- Use the same Resolve dropdown (Useful / Not relevant / Already knew / Dismiss) to give feedback — email-derived alerts feed into the same calibration described above.
+- The agent never acts on anything an email asks it to do — it only extracts facts (dates, titles, who's involved) for you to review.
+
 ## Year-in-Review
 
 In **February and March**, a **Year in Review** button appears on the Dashboard. Clicking it generates a personalized summary of the prior year:

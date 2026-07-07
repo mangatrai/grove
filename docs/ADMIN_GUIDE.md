@@ -630,6 +630,19 @@ No configuration is needed for the stock quote or export cleanup schedulers — 
 | **Global categories** | `backend/db/seeds/0001_bootstrap.sql` | Taxonomy seed (income, expenses, assets, liabilities, etc.) |
 | **Default global rules** | `backend/db/seeds/0001_bootstrap.sql` | Merchant pattern rules for categorization |
 
+### 4.12 Household Inbox Email Ingestion (Optional)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FAMILY_INBOX_IMAP_HOST` | (unset) | IMAP host, e.g. `imap.gmail.com` |
+| `FAMILY_INBOX_IMAP_PORT` | `993` | IMAP port |
+| `FAMILY_INBOX_IMAP_SECURE` | `true` | TLS on connect |
+| `FAMILY_INBOX_IMAP_USER` | (unset) | Dedicated household mailbox address |
+| `FAMILY_INBOX_IMAP_PASSWORD` | (unset) | App Password (not the account login password) |
+| `FAMILY_INBOX_IMAP_FOLDER` | `INBOX` | IMAP folder/label to poll |
+
+**If `FAMILY_INBOX_IMAP_HOST`/`_USER`/`_PASSWORD` are not all set, the daily inbox poll no-ops silently.** See §10.4 for full setup steps and the rationale for using a dedicated IMAP mailbox instead of the per-parent Google OAuth integration.
+
 ---
 
 ## 5. Database Architecture
@@ -1118,6 +1131,46 @@ The 6am run ensures work events are in Google Calendar before the agent's mornin
 - Each parent has their own `Work — Mirrored` calendar in their own Google account — the Shortcut only writes to the signed-in account, no cross-contamination.
 - The Shortcut clears all future events in `Work — Mirrored` and recreates them on every run. This is intentional — clean dedup without needing API-level upsert logic.
 - The agent reads `Work — Mirrored` as a regular Google Calendar — no special handling needed.
+
+### 10.4 Household Inbox Email Ingestion (FIX #215)
+
+The agent polls a **dedicated household Gmail account** daily (6:12am, `env.TZ`) over IMAP and turns actionable school/activity emails into review-first suggestion alerts (Family Planner → Alerts, tagged `[EMAIL]`). Nothing is written to `family_events` or Google Calendar without the user clicking **Add to Calendar** on the resulting alert.
+
+**Why IMAP + a dedicated account, not the existing Google OAuth integration:**
+
+`oauth_integrations` (used for Calendar in §10.1–10.2 and Drive backup in §4.8) is scoped **per-parent** — each parent connects their own personal Google account. Routing inbox ingestion through that same table would mean either (a) picking one parent's personal inbox to poll, which is semantically wrong (school emails aren't "owned" by one parent), or (b) adding a household-level entry into a table whose every other row is a per-user OAuth grant — blurring the "whose account is this" semantics the FIX #212/#217 calendar-provenance work depends on staying clean. A **separate dedicated household Gmail account** (e.g. `yourfamily.grove@gmail.com`), authenticated via IMAP + App Password, avoids both problems: it's not tied to any one parent, and it never touches `oauth_integrations` at all. The tradeoff is one more account to provision — a one-time, ~5 minute setup below.
+
+**One-time setup:**
+
+1. Create a new, dedicated Gmail account for the household (do not reuse either parent's personal account) — e.g. `yourfamily.grove@gmail.com`.
+2. Have school/activity newsletters forwarded or directly sent to this address (update sign-up forms, or set up mail forwarding rules from parents' existing inboxes).
+3. Enable IMAP: Gmail Settings → See all settings → Forwarding and POP/IMAP → Enable IMAP.
+4. Enable 2-Step Verification on the account (required for App Passwords): Google Account → Security → 2-Step Verification.
+5. Generate an App Password: Google Account → Security → App passwords → generate one for "Mail". Copy the 16-character password.
+6. Set the environment variables below and redeploy.
+
+**Environment variables:**
+
+| Variable | Default | Example |
+|----------|---------|---------|
+| `FAMILY_INBOX_IMAP_HOST` | (unset) | `imap.gmail.com` |
+| `FAMILY_INBOX_IMAP_PORT` | `993` | `993` |
+| `FAMILY_INBOX_IMAP_SECURE` | `true` | `true` (TLS) |
+| `FAMILY_INBOX_IMAP_USER` | (unset) | `yourfamily.grove@gmail.com` |
+| `FAMILY_INBOX_IMAP_PASSWORD` | (unset) | 16-char App Password (not the account's login password) |
+| `FAMILY_INBOX_IMAP_FOLDER` | `INBOX` | `INBOX` or a Gmail label mapped as an IMAP folder |
+
+The feature is **optional** — if `FAMILY_INBOX_IMAP_HOST`/`_USER`/`_PASSWORD` are not all set, the daily poll no-ops silently (`isEmailIngestConfigured()` returns false) and no other functionality is affected.
+
+**Cost:** negligible — one IMAP poll/day against a free Gmail account, plus one LLM extraction call per new message per household (same `chatModel()` as the rest of the family-agent module, capped at 10 items/email, 1200 max output tokens).
+
+**Security:**
+- The email body is treated as **untrusted third-party content** — the extraction prompt explicitly instructs the model to extract facts only, never follow instructions embedded in the email. Extraction runs on the tool-less chat completion path (`getChatAdapter().complete()`), never the tool-use/agentic path, so a malicious email cannot trigger tool calls.
+- Extraction output is zod-validated before touching the database; malformed/unparseable responses are logged and dropped (message is marked `error` in `email_ingest_log`, not retried until the next poll re-fetches it — see dedup below).
+- No suggestion auto-creates a calendar event or `family_events` row — every one requires the existing approve flow (`POST /alerts/:alertId/approve`).
+- Only the configured `FAMILY_INBOX_IMAP_FOLDER` (default `INBOX`) is ever queried.
+
+**Data model:** `email_ingest_log` (migration `0081_email_ingest_log.sql`) records one row per `(household_id, message_id)` — the `UNIQUE` constraint is the dedup mechanism (`ON CONFLICT DO NOTHING`), so a message still present in the mailbox on the next poll is skipped per household rather than re-processed. `status` is one of `pending`/`processed`/`ignored`/`error`. Extracted items that would duplicate an existing active `family_events` row (fuzzy title match + exact date) are silently skipped rather than creating a redundant alert. Registered in `EXPORT_REGISTRY` (`restoreOrder: 29`) for backup/restore.
 
 ---
 

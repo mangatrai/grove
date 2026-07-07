@@ -4084,3 +4084,15 @@ Marks an alert resolved. Requires `owner | admin`.
 **Response `404`:** `{ "message": "Alert not found or already resolved." }`
 
 > **Note:** `GET /api/family/alerts` responses also include `resolutionKind` (`"useful" | "not_relevant" | "already_knew" | null`) on each alert.
+
+---
+
+### Household inbox email ingestion (FIX #215)
+
+No new endpoints. A daily background poll (not an HTTP route) reads the dedicated household Gmail account over IMAP, extracts actionable items (deadlines/events/info) from school and activity emails via a tool-less LLM call, and writes `alert_type = 'suggestion'` rows into `family_agent_alerts` — reusing the existing `POST /api/family/alerts/:alertId/approve` and `PATCH /api/family/alerts/:id/resolve` endpoints documented above for the approve/dismiss review flow. No suggestion is ever auto-written to `family_events` or Google Calendar without explicit approval.
+
+> **Note:** `GET /api/family/alerts` responses also include `sourceQuote` (`string | null`) — for email-derived suggestions, a verbatim excerpt (≤200 chars) from the source email supporting the extracted item, rendered in the UI so the user can sanity-check the suggestion before approving it. `null` for non-email-derived alerts.
+
+Email-derived deadline/event items (with a resolved date) populate `actionType: 'create_gcal_event'` and `actionPayload`, so they go through the same approve flow as other calendar-writing suggestions. Info-only items (no date, or `kind: 'info'`) have `actionType: null` — the user can only resolve/dismiss them, no calendar action is offered.
+
+See `docs/ADMIN_GUIDE.md` for `FAMILY_INBOX_IMAP_*` env vars and IMAP App Password setup, and `docs/USER_GUIDE.md` for household-side Gmail label/filter setup.

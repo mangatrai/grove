@@ -539,7 +539,8 @@ function parseJsonResponse<T>(raw: string): T {
   return JSON.parse(cleaned) as T;
 }
 
-function buildMemberProfile(members: HouseholdMember[]): string {
+// FIX #215: exported for reuse by email-ingest.service.ts's extraction prompt.
+export function buildMemberProfile(members: HouseholdMember[]): string {
   if (members.length === 0) return "No household members configured.";
   return members.map(m => {
     const parts = [`${m.fullName} (${m.relationship}${m.age != null ? `, age ${m.age}` : ""})`];
@@ -1285,6 +1286,8 @@ export type AgentAlert = {
   sourceDigestId: string | null;
   actionType: string | null;
   actionPayload: { title: string; date: string; description: string } | null;
+  /** FIX #215: verbatim ≤200-char excerpt the extraction cited, for email-derived suggestions. */
+  sourceQuote: string | null;
 };
 
 type AlertRow = {
@@ -1303,6 +1306,7 @@ type AlertRow = {
   source_digest_id: string | null;
   action_type: string | null;
   action_payload: unknown;
+  source_quote: string | null;
 };
 
 function rowToAlert(r: AlertRow): AgentAlert {
@@ -1322,6 +1326,7 @@ function rowToAlert(r: AlertRow): AgentAlert {
     sourceDigestId: r.source_digest_id,
     actionType: r.action_type,
     actionPayload: r.action_payload as AgentAlert["actionPayload"],
+    sourceQuote: r.source_quote,
   };
 }
 

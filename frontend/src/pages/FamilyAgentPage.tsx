@@ -52,6 +52,8 @@ type AgentAlert = {
   resolutionKind: "useful" | "not_relevant" | "already_knew" | null;
   actionType: string | null;
   actionPayload: { title: string; date: string; description: string } | null;
+  /** FIX #215: verbatim excerpt the email-ingest extraction cited, for email-derived suggestions. */
+  sourceQuote: string | null;
 };
 
 type DigestEntry = {
@@ -233,6 +235,15 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
             </Group>
             <Code block ref={textRef} style={{ fontSize: 12, whiteSpace: "pre-wrap", cursor: "text" }}>
               {alert.copyPasteText}
+            </Code>
+          </Box>
+        ) : null}
+
+        {alert.sourceQuote ? (
+          <Box>
+            <Text size="xs" c="dimmed" fw={500} mb={4}>From the email</Text>
+            <Code block style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>
+              {alert.sourceQuote}
             </Code>
           </Box>
         ) : null}
