@@ -1,17 +1,61 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { qExec } from "../src/db/query.js";
+
+// FIX #211: mock the LLM adapter layer so Domain 1-5 functions can be unit-tested for
+// (a) correctness of the merged D1+2 split and (b) which model tier each call actually uses,
+// without hitting a real provider. Distinguishable sentinel model strings let assertions read
+// "this call used the cheap tier" instead of comparing against real env-configured model names.
+type CompleteFn = (
+  messages: unknown,
+  options: { model: string; maxTokens: number }
+) => Promise<{ content: string; usage: Record<string, never> }>;
+type TavilySearchFn = (
+  query: string,
+  opts?: { startDate?: string }
+) => Promise<
+  | { ok: true; text: string }
+  | { ok: false; code: "not_configured" | "empty_query" | "http_error" | "no_results" | "network_error"; message: string }
+>;
+
+const { mockComplete, mockTavilySearch } = vi.hoisted(() => ({
+  mockComplete: vi.fn<CompleteFn>(),
+  mockTavilySearch: vi.fn<TavilySearchFn>(),
+}));
+
+vi.mock("../src/llm/index.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/llm/index.js")>();
+  return {
+    ...actual,
+    chatModel: () => "TEST_CHEAP_MODEL",
+    strongModel: () => "TEST_STRONG_MODEL",
+    getChatAdapter: () => ({ complete: mockComplete }),
+  };
+});
+
+vi.mock("../src/llm/tools/tavily.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/llm/tools/tavily.js")>();
+  return { ...actual, tavilySearch: mockTavilySearch };
+});
+
 import {
   alertDedupKey,
+  analyzeCoverageAndCoordination,
   buildAlreadySuggestedText,
   buildDayGrid,
   escapeHtml,
   getConnectedParents,
   parseAlertItems,
+  runProactiveResearch,
   startDateForFreshness,
+  sweepDeadlines,
+  synthesizeDigest,
   type AgentAlert,
+  type AgentAnalysis,
   type CalendarEvent,
+  type ConnectedParent,
   type FamilyContext,
+  type PipelineOutputs,
 } from "../src/modules/family/family-agent.service.js";
 import { heuristicCalendarRole } from "../src/modules/gcal/gcal.service.js";
 import type { FamilyEvent, HelpAvailabilitySlot } from "../src/modules/family/family.types.js";
@@ -392,5 +436,120 @@ describe("getConnectedParents ordering (FIX #217 deterministic Parent A/B)", () 
       expect(parents[0].userId).toBe(OWNER_USER_ID);
       expect(parents[1].userId).toBe(COPARENT_USER_ID);
     }
+  });
+});
+
+describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
+  beforeEach(() => {
+    mockComplete.mockReset();
+    mockTavilySearch.mockReset();
+  });
+
+  const childCtx = () => baseCtx({
+    members: [
+      { profileId: "m1", fullName: "Kid One", relationship: "child", age: 7, linkedUserId: null, interestsJson: [], notes: null },
+    ],
+  });
+
+  it("analyzeCoverageAndCoordination: single strong-model call, splits gaps/coordinationNeeds", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        gaps: [{ alertType: "coverage_gap", reason: "r1", affectedDate: "2026-06-16", copyPasteText: "cp1", recipientHint: "Nanny" }],
+        coordinationNeeds: [{ alertType: "conflict", reason: "r2", affectedDate: "2026-06-17", copyPasteText: "cp2", recipientHint: "Spouse" }],
+      }),
+      usage: {},
+    });
+
+    const result = await analyzeCoverageAndCoordination(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockComplete.mock.calls[0][1].model).toBe("TEST_STRONG_MODEL");
+    expect(result.coverageGaps.hasOutput).toBe(true);
+    expect(result.coverageGaps.gaps).toHaveLength(1);
+    expect(result.nannyCoord.hasOutput).toBe(true);
+    expect(result.nannyCoord.items).toHaveLength(1);
+  });
+
+  it("analyzeCoverageAndCoordination: skips the LLM call entirely with no children and no caregiver", async () => {
+    const result = await analyzeCoverageAndCoordination(baseCtx(), "manual");
+
+    expect(mockComplete).not.toHaveBeenCalled();
+    expect(result.coverageGaps.hasOutput).toBe(false);
+    expect(result.nannyCoord.hasOutput).toBe(false);
+  });
+
+  it("runProactiveResearch: query-gen and LLM-only fallback both use the cheap model when Tavily is not configured", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: false, code: "not_configured", message: "not configured" });
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: [{ query: "q1", intent: "i1", freshness: "new" }] }), usage: {} })
+      .mockResolvedValueOnce({ content: JSON.stringify({ items: [] }), usage: {} });
+
+    await runProactiveResearch(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
+    expect(mockComplete.mock.calls[1][1].model).toBe("TEST_CHEAP_MODEL");
+  });
+
+  it("runProactiveResearch: query-gen cheap, synthesis strong when Tavily returns live results", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: true, text: "some search text" });
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: [{ query: "q1", intent: "i1", freshness: "new" }] }), usage: {} })
+      .mockResolvedValueOnce({ content: JSON.stringify({ items: [], discarded: [] }), usage: {} });
+
+    await runProactiveResearch(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
+    expect(mockComplete.mock.calls[1][1].model).toBe("TEST_STRONG_MODEL");
+  });
+
+  it("sweepDeadlines: query-gen cheap, triage strong on a non-daily_delta run", async () => {
+    mockTavilySearch.mockResolvedValue({ ok: false, code: "not_configured", message: "x" });
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: ["q1"] }), usage: {} })
+      .mockResolvedValueOnce({ content: JSON.stringify({ alerts: [] }), usage: {} });
+
+    await sweepDeadlines(childCtx(), "manual");
+
+    expect(mockComplete).toHaveBeenCalledTimes(2);
+    expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
+    expect(mockComplete.mock.calls[1][1].model).toBe("TEST_STRONG_MODEL");
+  });
+
+  it("sweepDeadlines: skips query-gen on daily_delta runs, triage still strong", async () => {
+    mockComplete.mockResolvedValueOnce({ content: JSON.stringify({ alerts: [] }), usage: {} });
+
+    await sweepDeadlines(childCtx(), "daily_delta");
+
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockComplete.mock.calls[0][1].model).toBe("TEST_STRONG_MODEL");
+  });
+
+  it("synthesizeDigest: digest composition uses the cheap model", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        summaryText: "summary",
+        parentADigest: { subject: "s", body: "b" },
+        parentBDigest: { subject: "s2", body: "b2" },
+      }),
+      usage: {},
+    });
+
+    const emptyDomain: PipelineOutputs = {
+      coverageGaps: { hasOutput: false, gaps: [] },
+      nannyCoord: { hasOutput: false, items: [] },
+      research: { hasOutput: false, items: [] },
+      deadlines: { hasOutput: false, alerts: [] },
+    };
+    const parents: ConnectedParent[] = [
+      { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
+    ];
+
+    const result: AgentAnalysis = await synthesizeDigest(childCtx(), emptyDomain, "manual", parents, "no finance context");
+
+    expect(mockComplete).toHaveBeenCalledTimes(1);
+    expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
+    expect(result.hasOutput).toBe(true);
   });
 });

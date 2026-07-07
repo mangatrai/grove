@@ -1,7 +1,7 @@
 import { google } from "googleapis";
 import { z } from "zod";
 
-import { getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
+import { chatModel, getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
 import { SEARCH_WEB_TOOL, tavilySearch } from "../../llm/tools/tavily.js";
 import { log } from "../../logger.js";
 import { env } from "../../config/env.js";
@@ -23,7 +23,7 @@ import { listAvailability, listHouseholdMembers } from "./family-profiles.servic
 
 export type AgentRunType = "sunday_preview" | "monday_digest" | "daily_delta" | "manual";
 
-type ConnectedParent = {
+export type ConnectedParent = {
   userId: string;
   email: string;
   selectedCalendarIds: string[] | null;
@@ -72,9 +72,9 @@ export function parseAlertItems(items: unknown): AlertItem[] {
   return result.data as AlertItem[];
 }
 
-type AlertItem = z.infer<typeof alertItemSchema>;
+export type AlertItem = z.infer<typeof alertItemSchema>;
 
-type AgentAnalysis = {
+export type AgentAnalysis = {
   conflicts: AlertItem[];
   parentADigest: { subject: string; body: string } | null;
   parentBDigest: { subject: string; body: string } | null;
@@ -82,13 +82,13 @@ type AgentAnalysis = {
   hasOutput: boolean;
 };
 
-type CoverageGapResult = { hasOutput: boolean; gaps: AlertItem[] };
-type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
+export type CoverageGapResult = { hasOutput: boolean; gaps: AlertItem[] };
+export type NannyCoordResult  = { hasOutput: boolean; items: AlertItem[] };
 type ResearchItem      = { title: string; summary: string; category: string; grade: "verified" | "lead" };
-type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
-type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
+export type ResearchResult    = { hasOutput: boolean; items: ResearchItem[] };
+export type DeadlineResult    = { hasOutput: boolean; alerts: AlertItem[] };
 
-type PipelineOutputs = {
+export type PipelineOutputs = {
   coverageGaps: CoverageGapResult;
   nannyCoord: NannyCoordResult;
   research: ResearchResult;
@@ -548,12 +548,22 @@ function buildMemberProfile(members: HouseholdMember[]): string {
 }
 
 // ---------------------------------------------------------------------------
-// Domain 1 — Coverage gap detection
+// Domain 1+2 — Coverage gap detection + nanny coordination (merged, FIX #211)
 // ---------------------------------------------------------------------------
 
-async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): Promise<CoverageGapResult> {
+// FIX #211: previously two separate strong-model calls over near-identical context (member
+// profiles + caregiver schedule + day grid), answering overlapping "does this window need adult
+// action?" questions — double context cost, and no shared view meant D1 could call a window
+// covered while D2 flagged the same window. Merged into one call producing both arrays; downstream
+// (PipelineOutputs, synthesizeDigest) is unchanged — only the call count and prompt changed.
+export async function analyzeCoverageAndCoordination(
+  ctx: FamilyContext,
+  runType: AgentRunType
+): Promise<{ coverageGaps: CoverageGapResult; nannyCoord: NannyCoordResult }> {
   const children = ctx.members.filter(m => m.relationship === "child" || m.relationship === "dependent");
-  if (children.length === 0) return { hasOutput: false, gaps: [] };
+  if (children.length === 0 && ctx.caregiverSlots.length === 0) {
+    return { coverageGaps: { hasOutput: false, gaps: [] }, nannyCoord: { hasOutput: false, items: [] } };
+  }
 
   const dayGrid = buildDayGrid(ctx, 14).join("\n\n");
 
@@ -564,10 +574,12 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
           ? `one-off ${s.specificDate}`
           : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
         const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
-        return `- ${s.personName} [${s.serviceType}]: ${when}${time}`;
+        return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
       }).join("\n");
 
-  const childLines = children.map(m => `- ${m.fullName}${m.age !== null ? ` (age ${m.age})` : ""}`).join("\n");
+  const childLines = children.length > 0
+    ? children.map(m => `- ${m.fullName}${m.age !== null ? ` (age ${m.age})` : ""}`).join("\n")
+    : "No children in household.";
   const openGapAlerts = ctx.openAlerts
     .filter(a => a.alertType === "coverage_gap")
     .map(a => `- ${a.affectedDate ?? "no date"}: ${a.reason}`)
@@ -579,12 +591,12 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
 
 Household members:
 ${memberProfile}
-↑ Use these profiles when assessing gaps: check ages, school schedules in notes, and activity times — a child at school or a confirmed activity during a gap window is not at risk and should not be flagged.
+↑ Use these profiles when assessing gaps and coordination needs: check ages, school schedules in notes, and activity times — a child at school or a confirmed activity during a gap window is not at risk and should not be flagged.
 
 Children needing care:
 ${childLines}
 
-Caregiver schedule (CONFIRMED — these slots are already covered, do NOT ask to confirm them):
+Caregiver schedule (CONFIRMED — these slots are already covered/arranged, do NOT ask to confirm them):
 ${caregiverLines}
 
 Day-by-day schedule (next 14 days) — merges parent commitments (with start/end times), school-calendar
@@ -592,101 +604,54 @@ status (informational only — never counts as parent unavailability), caregiver
 ${dayGrid}
 
 ${openGapAlerts ? `Already flagged coverage gaps (DO NOT re-flag):\n${openGapAlerts}\n` : ""}
-Identify GENUINE childcare gaps only — windows where a child has no adult present because ALL of the following are true:
-1. BOTH parents are simultaneously unavailable (overlapping commitments on the SAME time window), AND
-2. The caregiver is NOT scheduled during that window.
+You are assessing TWO separate but related things from the same schedule data above. A single window
+must be flagged in AT MOST ONE of the two categories, never both.
 
-Rules you must follow:
-- If the caregiver is scheduled during an event's time, that time is COVERED. Do not flag it.
-- A parent taking a child to a doctor or dentist appointment is NOT a gap. The child is with the parent; other children remain with the caregiver as normal.
-- If only one parent's calendar is shown (the other shows "No events"), assume the other parent is AVAILABLE — absence of calendar data does not mean unavailability.
-- An event with a location far from home (e.g., a workshop or conference in another city) during a time when a child activity is scheduled IS worth flagging if it creates a pickup or dropoff gap outside caregiver hours.
-- Only flag situations where children would genuinely have NO adult present. Err strongly toward returning an empty gaps array.
+1. COVERAGE GAPS — genuine childcare gaps where a child has no adult present, because ALL of the following are true:
+   - BOTH parents are simultaneously unavailable (overlapping commitments on the SAME time window), AND
+   - The caregiver is NOT scheduled during that window.
+   Rules:
+   - If the caregiver is scheduled during an event's time, that time is COVERED. Do not flag it.
+   - A parent taking a child to a doctor or dentist appointment is NOT a gap. The child is with the parent; other children remain with the caregiver as normal.
+   - If only one parent's calendar is shown (the other shows "No events"), assume the other parent is AVAILABLE — absence of calendar data does not mean unavailability.
+   - An event with a location far from home (e.g., a workshop or conference in another city) during a time when a child activity is scheduled IS worth flagging if it creates a pickup or dropoff gap outside caregiver hours.
+   - Only flag situations where children would genuinely have NO adult present. Err strongly toward returning an empty gaps array.
 
-Respond with ONLY valid JSON: { "gaps": [ { "alertType": "coverage_gap", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "ready-to-send message", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
-If no gaps, return { "gaps": [] }.`;
+2. CAREGIVER COORDINATION NEEDS — action needed BEYOND the regular caregiver schedule above (the caregiver IS present or arranged, but something about the schedule needs adjusting). Flag ONLY:
+   - Parent traveling overnight or to a multi-day conference requiring care on days the caregiver is not scheduled.
+   - Events that START before or END after the caregiver's scheduled hours on a given day, where a child needs to be present (e.g., early-morning school drop-off before caregiver arrives, or a late evening activity after caregiver leaves).
+   - Both parents simultaneously away on a day the caregiver is not scheduled.
+   Do NOT flag:
+   - ANY appointment, meeting, or activity that falls WITHIN the caregiver's already-scheduled hours. The caregiver is present — no coordination needed.
+   - Parent working from home on a normal day.
+   - Medical appointments or child appointments during caregiver hours.
+   - "Busy" or "fully-booked" days where the caregiver is already on duty.
+   - Anything speculative or not directly evidenced by the calendar data above.
+
+Respond with ONLY valid JSON:
+{ "gaps": [ { "alertType": "coverage_gap", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "ready-to-send message", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ],
+  "coordinationNeeds": [ { "alertType": "coverage_gap"|"conflict"|"suggestion", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "...", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
+If nothing in either category, return { "gaps": [], "coordinationNeeds": [] }.`;
 
   const { content } = await getChatAdapter().complete(
     [
-      { role: "system", content: "You are a careful childcare coverage analyst for a household PA. Identify genuine gaps where children have no adult present — use member ages, school schedules, and activity context from their profiles to reason precisely. A school-age child at school or at an activity during the flagged window is not at risk. Err strongly toward empty results. Return valid JSON only." },
+      { role: "system", content: "You are a careful childcare coverage and caregiver coordination analyst for a household PA. Identify genuine coverage gaps (no adult present) and genuine caregiver coordination needs (action beyond the confirmed schedule) — use member ages, school schedules, and activity context from their profiles to reason precisely. A school-age child at school or at a confirmed activity during a gap window is not at risk. Err strongly toward empty results in both categories, and never double-flag the same window. Return valid JSON only." },
       { role: "user", content: prompt },
     ],
-    { model: strongModel(), maxTokens: 800 }
+    { model: strongModel(), maxTokens: 1400 }
   );
 
   try {
-    const parsed = parseJsonResponse<{ gaps: unknown[] }>(content);
+    const parsed = parseJsonResponse<{ gaps: unknown[]; coordinationNeeds: unknown[] }>(content);
     const gaps = parseAlertItems(parsed.gaps);
-    return { hasOutput: gaps.length > 0, gaps };
+    const items = parseAlertItems(parsed.coordinationNeeds);
+    return {
+      coverageGaps: { hasOutput: gaps.length > 0, gaps },
+      nannyCoord: { hasOutput: items.length > 0, items },
+    };
   } catch (err) {
-    log.warn("family-agent: Domain 1 coverage gap parse failed", { raw: content.slice(0, 200), err: String(err) });
-    return { hasOutput: false, gaps: [] };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Domain 2 — Nanny coordination
-// ---------------------------------------------------------------------------
-
-async function assessNannyCoordination(ctx: FamilyContext, runType: AgentRunType): Promise<NannyCoordResult> {
-  if (ctx.caregiverSlots.length === 0) return { hasOutput: false, items: [] };
-
-  const dayGrid = buildDayGrid(ctx, 14).join("\n\n");
-
-  const caregiverLines = ctx.caregiverSlots.map(s => {
-    const when = s.slotType === "one_off" && s.specificDate
-      ? `one-off ${s.specificDate}`
-      : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
-    const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
-    return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
-  }).join("\n");
-
-  const memberProfile = buildMemberProfile(ctx.members);
-
-  const prompt = `Today: ${ctx.today}. Run: ${runType}.
-
-Household members:
-${memberProfile}
-↑ Use these profiles to assess whether coordination is genuinely needed: a school-age child at school during a gap does not need home coverage; an infant home full-time does.
-
-Caregiver schedule (CONFIRMED regular hours — already arranged, no need to reconfirm):
-${caregiverLines}
-
-Day-by-day schedule (next 14 days) — merges parent commitments (with start/end times), school-calendar
-status (informational only), caregiver coverage, and kid activities:
-${dayGrid}
-
-Flag ONLY genuine caregiver coordination needs that require action BEYOND the regular schedule above.
-Flag these:
-- Parent traveling overnight or to a multi-day conference requiring care on days the caregiver is not scheduled.
-- Events that START before or END after the caregiver's scheduled hours on a given day, where a child needs to be present (e.g., early-morning school drop-off before caregiver arrives, or a late evening activity after caregiver leaves).
-- Both parents simultaneously away on a day the caregiver is not scheduled.
-
-Do NOT flag these:
-- ANY appointment, meeting, or activity that falls WITHIN the caregiver's already-scheduled hours. The caregiver is present — no coordination needed.
-- Parent working from home on a normal day.
-- Medical appointments or child appointments during caregiver hours.
-- "Busy" or "fully-booked" days where the caregiver is already on duty.
-- Anything speculative or not directly evidenced by the calendar data above.
-
-Respond with ONLY valid JSON: { "items": [ { "alertType": "coverage_gap"|"conflict"|"suggestion", "reason": "...", "affectedDate": "YYYY-MM-DD or null", "copyPasteText": "...", "recipientHint": "Nanny"|"Spouse"|"Both"|"Self" } ] }
-If nothing actionable, return { "items": [] }.`;
-
-  const { content } = await getChatAdapter().complete(
-    [
-      { role: "system", content: "You are a careful family coordination assistant for a household PA. Surface only genuine caregiver needs that require action beyond the confirmed schedule — use member ages, school hours from notes, and activity context to reason about whether a gap actually affects a child who needs supervision. Return valid JSON only." },
-      { role: "user", content: prompt },
-    ],
-    { model: strongModel(), maxTokens: 700 }
-  );
-
-  try {
-    const parsed = parseJsonResponse<{ items: unknown[] }>(content);
-    const items = parseAlertItems(parsed.items);
-    return { hasOutput: items.length > 0, items };
-  } catch (err) {
-    log.warn("family-agent: Domain 2 nanny coord parse failed", { raw: content.slice(0, 200), err: String(err) });
-    return { hasOutput: false, items: [] };
+    log.warn("family-agent: Domain 1+2 coverage/coordination parse failed", { raw: content.slice(0, 200), err: String(err) });
+    return { coverageGaps: { hasOutput: false, gaps: [] }, nannyCoord: { hasOutput: false, items: [] } };
   }
 }
 
@@ -694,7 +659,7 @@ If nothing actionable, return { "items": [] }.`;
 // Domain 3 — Proactive research
 // ---------------------------------------------------------------------------
 
-async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): Promise<ResearchResult> {
+export async function runProactiveResearch(ctx: FamilyContext, runType: AgentRunType): Promise<ResearchResult> {
   const queryCount = runType === "daily_delta" ? 2 : runType === "sunday_preview" ? 3 : 5;
   const now = new Date();
   const month = now.toLocaleString("en-US", { month: "long" });
@@ -746,7 +711,8 @@ Generate exactly ${queryCount} targeted web search queries to surface things thi
 
 Return ONLY valid JSON: { "queries": [ { "query": "...", "intent": "short phrase", "freshness": "new" | "seasonal" } ] }` },
     ],
-    { model: strongModel(), maxTokens: 500 }
+    // FIX #211: brainstorm/format task, not judgment — cheap model tier.
+    { model: chatModel(), maxTokens: 500 }
   );
 
   type QueryPlan = { query: string; intent: string; freshness: "new" | "seasonal" };
@@ -804,7 +770,8 @@ ${alreadySuggestedLines}
 Respond with ONLY valid JSON: { "items": [ { "title": "≤60 chars", "summary": "1-2 sentences", "category": "activity"|"suggestion" } ] }
 If nothing useful to say, return { "items": [] }.` },
       ],
-      { model: strongModel(), maxTokens: 400 }
+      // FIX #211: generic seasonal suggestions with no live grounding — cheap model tier.
+      { model: chatModel(), maxTokens: 400 }
     );
     try {
       const fb = parseJsonResponse<{ items: Array<Omit<ResearchItem, "grade">> }>(fallbackJson);
@@ -886,7 +853,7 @@ If nothing specific enough found, return { "items": [], "discarded": [] }.` },
 // Domain 4 — Deadline sweep
 // ---------------------------------------------------------------------------
 
-async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promise<DeadlineResult> {
+export async function sweepDeadlines(ctx: FamilyContext, runType: AgentRunType): Promise<DeadlineResult> {
   const cutoffDays = runType === "daily_delta" ? 7 : 30;
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() + cutoffDays);
@@ -938,7 +905,8 @@ Generate 3-4 targeted Tavily search queries to surface PUBLIC deadlines this hou
 
 Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       ],
-      { model: strongModel(), maxTokens: 400 }
+      // FIX #211: brainstorm/format task, same as D3 query-gen — cheap model tier.
+      { model: chatModel(), maxTokens: 400 }
     );
 
     let deadlineQueries: string[] = [];
@@ -1025,7 +993,7 @@ If nothing new, return { "alerts": [] }.` },
 // Domain 5 — Synthesis (per-parent digest)
 // ---------------------------------------------------------------------------
 
-async function synthesizeDigest(
+export async function synthesizeDigest(
   ctx: FamilyContext,
   domain: PipelineOutputs,
   runType: AgentRunType,
@@ -1085,7 +1053,8 @@ Respond with ONLY valid JSON:
   "parentBDigest": { "subject": "...", "body": "..." }
 }` },
     ],
-    { model: strongModel(), maxTokens: 3500 }
+    // FIX #211: formatting/summarization of already-vetted upstream content — cheap model tier.
+    { model: chatModel(), maxTokens: 3500 }
   );
 
   try {
@@ -1192,10 +1161,9 @@ export async function runFamilyAgent(
     const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
     const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
 
-    // Run domains 1–4 in parallel; domain 5 synthesizes their outputs
-    const [coverageGaps, nannyCoord, research, deadlines] = await Promise.all([
-      analyzeCoverageGaps(ctx, runType),
-      assessNannyCoordination(ctx, runType),
+    // Run domains 1+2 (merged, FIX #211), 3, 4 in parallel; domain 5 synthesizes their outputs
+    const [{ coverageGaps, nannyCoord }, research, deadlines] = await Promise.all([
+      analyzeCoverageAndCoordination(ctx, runType),
       runProactiveResearch(ctx, runType),
       sweepDeadlines(ctx, runType),
     ]);

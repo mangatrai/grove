@@ -14,6 +14,24 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FEAT — Family agent: merge Domain 1+2, apply LLM cost-tier model selection (2026-07-07)
+
+**What changed:** Two related changes to the 5-domain PA agent pipeline in `family-agent.service.ts`:
+
+- **Merged Domain 1+2:** `analyzeCoverageGaps()` (coverage-gap detection) and `assessNannyCoordination()` (caregiver coordination) were two separate strong-model calls over near-identical context (member profiles, caregiver schedule, 14-day day grid) answering overlapping "does this window need adult action?" questions. Not only did this double the context cost of the pair, having no shared view meant D1 could call a window covered while D2 flagged the same window in the same run. Replaced both with a single `analyzeCoverageAndCoordination(ctx, runType)` that makes one strong-model call with a combined prompt (both rule blocks, both do-not-flag lists) and an explicit instruction that any given window may be flagged in **at most one** of the two categories, never both. Returns `{ coverageGaps, nannyCoord }` — `PipelineOutputs` and everything downstream (Domain 5 synthesis) is unchanged; only the call count and prompt changed. Same early-exit as before (no children and no caregiver slots → skip the LLM call entirely).
+- **Model cost-tiering:** the pipeline previously called `strongModel()` for every one of its 8 LLM calls, including brainstorm/formatting sub-tasks (search-query generation, digest prose composition) that don't need the stronger tier's judgment. Applied the existing `chatModel()`/`strongModel()` abstraction (`backend/src/llm/index.ts`) per a fixed table: **cheap tier** (`chatModel()`) for Domain 3 query-gen, Domain 3's LLM-only fallback (used when Tavily is unconfigured or all searches fail — no live grounding to reason over), Domain 4 query-gen, and Domain 5 digest composition (formatting already-vetted upstream content into per-parent prose); **strong tier** (`strongModel()`) kept for the merged Domain 1+2 call, Domain 3 synthesis (discard-gate judgment over live search results), and Domain 4 triage (deadline severity judgment). The quick-capture tool-loop (`processCaptureNote`) is a separate flow outside the 5-domain pipeline and was left on `strongModel()` — out of this issue's scope.
+- **Not changed:** `OPENAI_STRONG_MODEL`'s env default (currently `gpt-4o`) — the issue flagged that `gpt-4.1` generally matches or beats it at lower cost, but swapping the default is a model-selection decision for the owner to make explicitly, not something to change unilaterally alongside a tiering refactor. Left as-is pending owner sign-off.
+
+**Why:** Sequence A cost/quality pass on the PA agent pipeline — reduce redundant LLM calls and route each call to the cheapest tier that can do the job without degrading judgment-heavy calls.
+
+**Tests:** `backend/tests/family-agent.test.ts` — exported the 4 domain functions (`analyzeCoverageAndCoordination`, `runProactiveResearch`, `sweepDeadlines`, `synthesizeDigest`) purely for testability. Added a mocked-adapter suite (`vi.mock` on `../src/llm/index.js` and `../src/llm/tools/tavily.js`, with distinguishable sentinel model strings) asserting: the merged D1+2 call correctly splits a single JSON response into `gaps`/`coordinationNeeds`; the early-exit still skips the LLM call with no children/caregiver; and the model passed to `getChatAdapter().complete()` matches the tiering table for every call site in Domain 3, 4, and 5, across both the Tavily-unconfigured (fallback) and Tavily-available (synthesis) branches, and both `daily_delta` (query-gen skipped) and non-`daily_delta` runs.
+
+**Outstanding (owner action, not part of this fix):** the issue's acceptance criteria call for a manual before/after spot-check of digest output quality on one real run — this requires live LLM + Tavily access and is not something that can be verified in an automated test; still outstanding for the owner to do.
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/tests/family-agent.test.ts`
+
+**GitHub:** closes [#211](https://github.com/mangatrai/grove/issues/211).
+
 ## FIX — Family agent: hardening grab-bag — deterministic parent order, zod validation, typed Tavily errors, digest HTML escaping (2026-07-07)
 
 **What changed:** Code-review grab-bag on `family-agent.service.ts` / `tavily.ts`, seven items shipped together as one PR of hardening per the issue:
