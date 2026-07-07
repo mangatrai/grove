@@ -8,6 +8,13 @@
  *
  * The reconcile function applies its own per-file throttle (payslip_async_last_poll_at),
  * so rapid server restarts do not re-trigger recently-processed files.
+ *
+ * hasPendingWork gates the DB query itself (not just the log line): the steady
+ * state is "nothing pending" and must cost zero DB round-trips, since every
+ * query keeps the (serverless) Postgres compute awake. The flag starts armed
+ * so the very first tick after boot still runs once, to reconcile any file
+ * left mid-`processing` by a prior crash/restart; every tick after that skips
+ * the query entirely until armPayslipAsyncScheduler() is called again.
  */
 
 import { env } from "../../config/env.js";
@@ -18,6 +25,15 @@ import { reconcilePayslipAsyncImportSession } from "./payslip-async-import-recon
 
 const LOG_PREFIX = "[Payslip async scheduler]";
 let schedulerStarted = false;
+let hasPendingWork = true;
+
+/** Called by the import enqueue path when a file is queued for async LLM payslip extraction. */
+export function armPayslipAsyncScheduler(): void {
+  if (!hasPendingWork) {
+    log.info(`${LOG_PREFIX} armed — work enqueued`);
+  }
+  hasPendingWork = true;
+}
 
 export function startPayslipAsyncScheduler(): void {
   if (schedulerStarted) return;
@@ -26,12 +42,15 @@ export function startPayslipAsyncScheduler(): void {
   const intervalMs = env.PAYSLIP_ASYNC_POLL_INTERVAL_MS;
   log.info(`${LOG_PREFIX} started — polling every ${intervalMs / 1000}s`);
 
-  // Run once immediately on startup, then on interval.
+  // Run once immediately on startup (restart recovery), then on interval.
   void runPollCycle();
   setInterval(() => { void runPollCycle(); }, intervalMs);
 }
 
-async function runPollCycle(): Promise<void> {
+/** Exported for tests; production callers only reach this via the interval/startup calls above. */
+export async function runPollCycle(): Promise<void> {
+  if (!hasPendingWork) return;
+
   let pendingSessions: Array<{ session_id: string; household_id: string }>;
   try {
     pendingSessions = await qAll<{ session_id: string; household_id: string }>(
@@ -47,7 +66,11 @@ async function runPollCycle(): Promise<void> {
     return;
   }
 
-  if (pendingSessions.length === 0) return;
+  if (pendingSessions.length === 0) {
+    if (hasPendingWork) log.info(`${LOG_PREFIX} drained — no pending sessions, going idle`);
+    hasPendingWork = false;
+    return;
+  }
   log.info(`${LOG_PREFIX} ${pendingSessions.length} session(s) pending`);
 
   for (const { session_id, household_id } of pendingSessions) {

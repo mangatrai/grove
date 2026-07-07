@@ -37,6 +37,7 @@ import { upsertImportBalanceSnapshotFromStatement } from "../reports/balance-she
 import { insertPayslipSnapshot, sha256Hex } from "../payslip/payslip.service.js";
 import { LLM_PAYSLIP_PROFILE_IDS } from "../payslip/payslip.types.js";
 import { OPENAI_LLM_PAYSLIP_PROVIDER } from "../payslip/llm-extract/payslip-async.constants.js";
+import { armPayslipAsyncScheduler } from "./payslip-async-scheduler.service.js";
 
 export interface ParseColumnMapping {
   date: string;
@@ -374,6 +375,7 @@ export async function parseSessionImportFiles(
             OPENAI_LLM_PAYSLIP_PROVIDER,
             file.id
           );
+          armPayslipAsyncScheduler();
           continue;
         }
 

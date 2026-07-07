@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — Payslip async scheduler: gate DB polling on an in-memory hasPendingWork flag (2026-07-06)
+
+**What changed:** `payslip-async-scheduler.service.ts` ran its `qAll` pending-session query unconditionally on every tick (default 120s) and once on startup — the empty-result check happened *after* the query, so the DB was hit even when no async payslip import existed. Since Neon's serverless suspend timeout is 5 minutes and the tick interval was 120s, this kept Neon compute awake for the entire time the (Koyeb) app instance was awake, 1:1. Added a module-level `hasPendingWork` flag, `true` on boot (so the first tick still runs once for restart recovery), set by the new `armPayslipAsyncScheduler()` export — called from `import-parser.service.ts` when a file is queued for `openai_llm_payslip` extraction — and cleared back to `false` whenever a poll cycle finds zero pending sessions. While disarmed, `runPollCycle()` returns before issuing any query. Armed/drained transitions are logged.
+
+**Why:** Diagnosed as the backend amplifier behind the July Neon compute-burn incident (34.25 CU-hrs in 5 days against a ~100 CU-hr/mo free cap, ops log showing zero suspend events over a 7-day span). Async payslip imports are a rare, user-initiated event — steady state should cost zero DB round-trips. First fix in the owner-confirmed two-part remediation queue (#220 then #221).
+
+**Files:** `backend/src/modules/imports/payslip-async-scheduler.service.ts`, `backend/src/modules/imports/import-parser.service.ts`, `backend/tests/payslip-async-scheduler.test.ts` (new)
+
+**GitHub:** closes [#220](https://github.com/mangatrai/grove/issues/220).
+
 ## DOC — Hyperscaler free-tier deployment guide: ADMIN_GUIDE §3.5 (2026-07-06)
 
 **What changed:** New `docs/ADMIN_GUIDE.md` §3.5 "Hyperscaler Free Tiers (AWS / GCP / Azure) — Comparison and Runbooks": verified 2026 free-tier landscape (AWS post-2025-07-15 accounts are credit-based, max 6 months free then account closure — no more always-free EC2/RDS; GCP e2-micro remains always-free 24/7; Azure is 12-months-then-paid), the 24/7-process constraint (in-process node-cron schedulers rule out scale-to-zero platforms), step-by-step runbooks for GCP e2-micro (recommended $0 path) and AWS EC2 t4g.micro/Lightsail, keep-Neon-for-Postgres guidance (RDS ~$13+/mo is the biggest avoidable cost), S3 backup plan pointer (storage adapter — gdrive currently hardcoded), SES SMTP drop-in config, SMS evaluated-and-skipped (no free SNS SMS tier), and a steady-state cost table. Also added a capacity caveat to §3.3 (OCI Always Free ARM unavailable in Chicago region, tested mid-2026) and softened its "recommended" claim.
