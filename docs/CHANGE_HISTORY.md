@@ -14,6 +14,16 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## DEBT — Dead imports/functions + eslint caughtErrors config gap (2026-07-07)
+
+**What changed:** `npm run lint` (backend) was failing on 7 pre-existing `@typescript-eslint/no-unused-vars` errors, surfaced while verifying the #221 commit. Investigated each individually rather than assuming — all cosmetic, no functional bugs found: dead `existingDescriptionFingerprint` function in `canonical-ingest.service.ts` (never called, duplicates inline `normalizeDescriptionForFingerprint` usage elsewhere in the same file); dead `findEmployerById` import in `import-file-binding.service.ts` (function is alive and used elsewhere); dead `extractPdfText` imports in `boa-estatement-pdf.ts` and `ibm-payslip-pdf.ts` (confirmed NOT a functional gap — both files take an already-extracted `text: string` param, extraction correctly happens in the caller: `import-parser.service.ts` / `payslip-sniff.service.ts`); dead `log` import in `llm-provider.service.ts`; dead `env` import in `protest.routes.ts`. Removed all six. The seventh, `catch (_err) {}` in `protest.routes.ts`, was following the project's documented `_`-prefix convention correctly — the bug was in `backend/eslint.config.js`, which only set `argsIgnorePattern: "^_"` (unused function args) with no `caughtErrorsIgnorePattern`, so caught-exception bindings were never actually covered by the convention. Added `caughtErrorsIgnorePattern: "^_"`.
+
+**Why:** User flagged the lint failure and asked for real severity, not a "pre-existing, not my problem" dismissal. Confirmed via `git stash -u` baseline that none of it was introduced by #220/#221.
+
+**Files:** `backend/eslint.config.js`, `backend/src/modules/canonical/canonical-ingest.service.ts`, `backend/src/modules/imports/import-file-binding.service.ts`, `backend/src/modules/imports/profiles/boa-estatement-pdf.ts`, `backend/src/modules/insights/llm-provider.service.ts`, `backend/src/modules/payslip/profiles/ibm-payslip-pdf.ts`, `backend/src/modules/protest/protest.routes.ts`
+
+**GitHub:** closes [#222](https://github.com/mangatrai/grove/issues/222).
+
 ## FIX — Idle logout + notification polling: fail-closed, browser-independent design (2026-07-07)
 
 **What changed:** Both idle-logout and notification polling previously relied on browser event delivery that Safari doesn't honor the same way as Chrome — `visibilitychange` doesn't fire when a macOS window is merely occluded/backgrounded, and `useIdleLogout`'s single 15-min `setTimeout` gets throttled and reset by the first `mousemove` on return. Net effect: a Safari window left open (occluded or on another Space) polled `/notifications/unread-count` every 60s forever and never idle-logged-out, each poll hitting Postgres via `verifyToken`.

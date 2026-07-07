@@ -2,7 +2,6 @@ import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
 
-import { env } from "../../config/env.js";
 import { log } from "../../logger.js";
 import { getChatAdapter, getToolUseAdapter, getVisionAdapter, chatModel, strongModel, isLlmConfigured } from "../../llm/index.js";
 import type { Tool, ChatMessage } from "../../llm/index.js";

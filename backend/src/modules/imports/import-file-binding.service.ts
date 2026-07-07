@@ -4,7 +4,6 @@ import { qAll, qExec, qGet } from "../../db/query.js";
 import { employersPayloadSchema } from "../household/household.types.js";
 
 import {
-  findEmployerById,
   findEmployerByPersonProfileId,
   findEmployerAcrossHousehold,
   employerParserProfileId,

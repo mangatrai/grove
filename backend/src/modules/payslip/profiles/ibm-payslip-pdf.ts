@@ -3,7 +3,6 @@
  * Baseline: `tests/fixtures/ibm-payslip-sample.txt` (single-line labels + amounts).
  * Real `pdf-parse` output often splits labels and amounts onto separate lines; see tests for multiline extract.
  */
-import { extractPdfText } from "../../imports/profiles/pdf-text.js";
 import type { ParsedPayslipSummary } from "../payslip.types.js";
 
 const MONEY = /-?[\d,]+\.\d{2}/g;
