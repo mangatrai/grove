@@ -2417,6 +2417,132 @@ paths:
         "403":
           $ref: '#/components/responses/Forbidden'
 
+  /gcal/calendars:
+    get:
+      tags: [gcal]
+      summary: List the requesting user's accessible Google Calendars
+      description: >
+        Returns every calendar the connected Google account can read, the user's saved
+        selection (which calendars feed the family agent), and a role per calendar
+        ("work" | "school" | "activities" | "other"). Role defaults to a name-based
+        heuristic (FIX #212) when no explicit role has been saved.
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Calendar list, selection, and roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  calendars:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        summary: { type: string }
+                        primary: { type: boolean }
+                        backgroundColor: { type: string, nullable: true }
+                  selectedIds:
+                    type: array
+                    items: { type: string }
+                  roles:
+                    type: object
+                    additionalProperties: { type: string, enum: [work, school, activities, other] }
+                    description: Map of calendar ID to role
+        "401":
+          description: Not authenticated or Calendar requires re-authorization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_NEEDS_REAUTH }
+                  message: { type: string }
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "409":
+          description: Google Calendar not connected for this user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string, example: GCAL_NOT_CONNECTED }
+                  message: { type: string }
+        "502":
+          description: Google Calendar API error
+    patch:
+      tags: [gcal]
+      summary: Save the requesting user's calendar selection
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [selectedIds]
+              properties:
+                selectedIds:
+                  type: array
+                  minItems: 1
+                  items: { type: string }
+      responses:
+        "200":
+          description: Selection saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /gcal/calendar-roles:
+    patch:
+      tags: [gcal]
+      summary: Save per-calendar role (work/school/activities/other)
+      description: >
+        Lets the household mark a calendar as "school" so the family agent treats its
+        events as informational only (a school closure is not parent unavailability),
+        or as "activities" for kid activity calendars, rather than defaulting every
+        calendar to "work" via the name heuristic. (FIX #212)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                roles:
+                  type: object
+                  additionalProperties: { type: string, enum: [work, school, activities, other] }
+                  description: Map of calendar ID to role
+      responses:
+        "200":
+          description: Roles saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
   /gcal/events:
     get:
       tags: [gcal]

@@ -3724,6 +3724,9 @@ Same Google Cloud project as Drive (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`)
 | `POST /gcal/connect` | Yes | Yes | **403** |
 | `GET /gcal/status` | Yes | Yes | **403** |
 | `DELETE /gcal/disconnect` | Yes | Yes | **403** |
+| `GET /gcal/calendars` | Yes | Yes | **403** |
+| `PATCH /gcal/calendars` | Yes | Yes | **403** |
+| `PATCH /gcal/calendar-roles` | Yes | Yes | **403** |
 | `GET /gcal/events` | Yes | Yes | **403** |
 
 ### `GET /gcal/oauth/url`
@@ -3791,6 +3794,63 @@ Removes the requesting user's Calendar tokens. Does not affect other users in th
 ```json
 { "connected": false }
 ```
+
+---
+
+### `GET /gcal/calendars`
+
+Lists every calendar the connected Google account can read, the user's saved selection (which
+calendars feed the family agent), and a **role** per calendar: `work` | `school` | `activities` | `other`.
+Role defaults to a name-based heuristic (`heuristicCalendarRole`) when no explicit role has been
+saved — e.g. a calendar named "Example ISD" defaults to `school`. The family agent uses `school`
+to treat those events as informational only (a school closure is not parent unavailability),
+never as a parent commitment (FIX #212).
+
+**Response `200`:**
+```json
+{
+  "calendars": [
+    { "id": "primary", "summary": "Jane Doe", "primary": true, "backgroundColor": "#039BE5" },
+    { "id": "abc123@group.calendar.google.com", "summary": "Example ISD", "primary": false, "backgroundColor": null }
+  ],
+  "selectedIds": ["primary", "abc123@group.calendar.google.com"],
+  "roles": {
+    "primary": "work",
+    "abc123@group.calendar.google.com": "school"
+  }
+}
+```
+
+**Errors:** `409 GCAL_NOT_CONNECTED`, `401 GCAL_NEEDS_REAUTH`, `502` (Google API error).
+
+---
+
+### `PATCH /gcal/calendars`
+
+Saves the requesting user's calendar selection (which calendars feed events into the app).
+
+**Request body:**
+```json
+{ "selectedIds": ["primary", "abc123@group.calendar.google.com"] }
+```
+
+**Response `200`:** `{ "ok": true }`. **`400`** if `selectedIds` is missing or empty.
+
+---
+
+### `PATCH /gcal/calendar-roles`
+
+Saves a per-calendar role so the family agent can distinguish a school calendar's events from
+an actual parent commitment, or tag a calendar as kid activities (FIX #212).
+
+**Request body:**
+```json
+{ "roles": { "abc123@group.calendar.google.com": "school" } }
+```
+
+Each value must be one of `work` | `school` | `activities` | `other`.
+
+**Response `200`:** `{ "ok": true }`. **`400`** if `roles` is missing or contains an invalid role value.
 
 ---
 

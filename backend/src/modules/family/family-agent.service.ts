@@ -3,9 +3,16 @@ import { google } from "googleapis";
 import { getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
 import { SEARCH_WEB_TOOL, tavilySearch } from "../../llm/tools/tavily.js";
 import { log } from "../../logger.js";
+import { env } from "../../config/env.js";
 import { sendMail } from "../mailer/mailer.service.js";
 import { qAll, qExec, qGet } from "../../db/query.js";
-import { buildOAuth2Client, getDecryptedRefreshToken } from "../gcal/gcal.service.js";
+import {
+  buildOAuth2Client,
+  type CalendarRole,
+  getCalendarRoles,
+  getDecryptedRefreshToken,
+  heuristicCalendarRole
+} from "../gcal/gcal.service.js";
 import type { CaptureResult, FamilyEvent, FamilyEventRow, HelpAvailabilitySlot, HouseholdMember } from "./family.types.js";
 import { listAvailability, listHouseholdMembers } from "./family-profiles.service.js";
 
@@ -22,13 +29,15 @@ type ConnectedParent = {
   lastSyncedAt: string | null;
 };
 
-type CalendarEvent = {
+export type CalendarEvent = {
   summary: string;
   start: string | null;
   end: string | null;
   allDay: boolean;
   location: string | null;
   calendarId: string;
+  calendarName: string;
+  role: CalendarRole;
 };
 
 type AlertItem = {
@@ -65,7 +74,7 @@ type PipelineOutputs = {
   deadlines: DeadlineResult;
 };
 
-type FamilyContext = {
+export type FamilyContext = {
   location: string;
   today: string;
   todayIso: string;
@@ -122,17 +131,23 @@ async function updateLastSyncedAt(userId: string): Promise<void> {
   );
 }
 
-async function getFamilyEventsForWeek(householdId: string): Promise<FamilyEvent[]> {
+/**
+ * `days` must cover the widest window any caller needs (FIX #212: the deadline sweep's
+ * "next 30 days" prompt text was silently truncated to 14 days of actual data).
+ */
+async function getFamilyEventsForWeek(householdId: string, days = 14): Promise<FamilyEvent[]> {
   const rows = await qAll<FamilyEventRow>(
     `SELECT * FROM family_events
      WHERE household_id = ? AND is_active = TRUE
        AND (
-         (start_at IS NOT NULL AND start_at >= NOW() AND start_at < NOW() + INTERVAL '14 days')
+         (start_at IS NOT NULL AND start_at >= NOW() AND start_at < NOW() + make_interval(days => ?::int))
          OR
-         (due_date IS NOT NULL AND due_date::date >= CURRENT_DATE AND due_date::date < CURRENT_DATE + 14)
+         (due_date IS NOT NULL AND due_date::date >= CURRENT_DATE AND due_date::date < CURRENT_DATE + ?::int)
        )
      ORDER BY COALESCE(start_at, due_date::timestamptz) ASC NULLS LAST`,
-    householdId
+    householdId,
+    days,
+    days
   );
 
   return rows.map(r => ({
@@ -232,16 +247,23 @@ async function fetchCalendarEvents(
   const timeMin = new Date().toISOString();
   const timeMax = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
+  // Fetch calendar list unconditionally — needed for names (role heuristic + prompt provenance),
+  // not just to discover IDs when none were explicitly selected (FIX #212).
+  const listRes = await calendar.calendarList.list({ minAccessRole: "reader" });
+  const allCalendars = listRes.data.items ?? [];
+  const nameById = new Map(allCalendars.map(c => [c.id ?? "", c.summary ?? c.id ?? "Calendar"]));
+
   const calendarIds = parent.selectedCalendarIds?.length
     ? parent.selectedCalendarIds
-    : await (async () => {
-        const res = await calendar.calendarList.list({ minAccessRole: "reader" });
-        return (res.data.items ?? []).map(c => c.id).filter((id): id is string => !!id);
-      })();
+    : allCalendars.map(c => c.id).filter((id): id is string => !!id);
+
+  const savedRoles = await getCalendarRoles(parent.userId);
 
   const events: CalendarEvent[] = [];
 
   for (const calId of calendarIds) {
+    const calendarName = nameById.get(calId) ?? calId;
+    const role: CalendarRole = savedRoles[calId] ?? heuristicCalendarRole(calendarName);
     try {
       const res = await calendar.events.list({
         calendarId: calId,
@@ -260,6 +282,8 @@ async function fetchCalendarEvents(
           allDay: !ev.start?.dateTime,
           location: ev.location ?? null,
           calendarId: calId,
+          calendarName,
+          role,
         });
       }
     } catch (err) {
@@ -268,6 +292,114 @@ async function fetchCalendarEvents(
   }
 
   return events;
+}
+
+// ---------------------------------------------------------------------------
+// Day grid (FIX #209 / #212) — deterministic day-by-day merge of parent
+// commitments, school-calendar status, kid activities, and caregiver coverage.
+// Computed in code (never left to the LLM) so weekday/date arithmetic and
+// calendar-role exclusion are always correct, regardless of model behavior.
+// ---------------------------------------------------------------------------
+
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function localIsoDate(d: Date): string {
+  return d.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
+}
+
+/** `iso` is a plain YYYY-MM-DD date (no time component) — safe to treat as UTC midnight for arithmetic. */
+function addDaysIso(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function weekdayIndexOf(iso: string): number {
+  return new Date(`${iso}T00:00:00Z`).getUTCDay();
+}
+
+function formatDateLabel(iso: string): string {
+  const [, m, dd] = iso.split("-").map(Number);
+  return `${DAY_NAMES[weekdayIndexOf(iso)]} ${MONTH_NAMES[m - 1]} ${dd}`;
+}
+
+function formatEventTime(ev: CalendarEvent): string {
+  if (ev.allDay) return "all-day";
+  const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: env.TZ }) : "?";
+  return `${fmt(ev.start)}–${fmt(ev.end)}`;
+}
+
+function eventCoversDate(ev: CalendarEvent, iso: string): boolean {
+  if (!ev.start) return false;
+  if (ev.allDay) {
+    const startIso = ev.start.slice(0, 10);
+    const endIso = ev.end ? ev.end.slice(0, 10) : addDaysIso(startIso, 1);
+    return iso >= startIso && iso < endIso; // GCal all-day end date is exclusive
+  }
+  const startIso = localIsoDate(new Date(ev.start));
+  const endIso = ev.end ? localIsoDate(new Date(ev.end)) : startIso;
+  return iso >= startIso && iso <= endIso;
+}
+
+function dbEventCoversDate(ev: FamilyEvent, iso: string): boolean {
+  if (ev.recordType !== "event" || !ev.startAt) return false;
+  if (ev.allDay) {
+    const startIso = ev.startAt.slice(0, 10);
+    const endIso = ev.endAt ? ev.endAt.slice(0, 10) : addDaysIso(startIso, 1);
+    return iso >= startIso && iso < endIso;
+  }
+  const startIso = localIsoDate(new Date(ev.startAt));
+  const endIso = ev.endAt ? localIsoDate(new Date(ev.endAt)) : startIso;
+  return iso >= startIso && iso <= endIso;
+}
+
+function caregiverActiveOnDate(slot: HelpAvailabilitySlot, iso: string, weekday: number): boolean {
+  if (slot.slotType === "one_off") return slot.specificDate === iso;
+  return slot.daysOfWeek.includes(weekday);
+}
+
+/**
+ * Builds one text block per day covering `days` days starting today. Parent events tagged
+ * role "school" are informational only (a school closure is not parent unavailability) and
+ * are listed separately from actual parent commitments (FIX #212 calendar provenance).
+ */
+export function buildDayGrid(ctx: FamilyContext, days: number): string[] {
+  const lines: string[] = [];
+  for (let i = 0; i < days; i++) {
+    const iso = addDaysIso(ctx.todayIso, i);
+    const weekday = weekdayIndexOf(iso);
+    const parts: string[] = [`${formatDateLabel(iso)} (${iso}):`];
+
+    ctx.parentEvents.forEach((p, idx) => {
+      const dayEvents = p.events.filter(ev => ev.role !== "school" && eventCoversDate(ev, iso));
+      if (dayEvents.length > 0) {
+        parts.push(`  Parent ${String.fromCharCode(65 + idx)}: ` + dayEvents.map(ev => `${ev.summary} (${formatEventTime(ev)})`).join("; "));
+      }
+    });
+
+    const schoolEvents = ctx.parentEvents.flatMap(p => p.events).filter(ev => ev.role === "school" && eventCoversDate(ev, iso));
+    if (schoolEvents.length > 0) {
+      parts.push(`  School (informational, not a parent commitment): ` + schoolEvents.map(ev => ev.summary).join("; "));
+    }
+
+    const caregiverToday = ctx.caregiverSlots.filter(s => caregiverActiveOnDate(s, iso, weekday));
+    if (caregiverToday.length > 0) {
+      parts.push(`  Caregiver: ` + caregiverToday.map(s => {
+        const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
+        return `${s.personName}${time}`;
+      }).join("; "));
+    }
+
+    const activitiesToday = ctx.dbEvents.filter(ev => dbEventCoversDate(ev, iso));
+    if (activitiesToday.length > 0) {
+      parts.push(`  Activities: ` + activitiesToday.map(ev => ev.title).join("; "));
+    }
+
+    if (parts.length === 1) parts.push("  Nothing scheduled.");
+    lines.push(parts.join("\n"));
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,12 +486,7 @@ async function analyzeCoverageGaps(ctx: FamilyContext, runType: AgentRunType): P
   const children = ctx.members.filter(m => m.relationship === "child" || m.relationship === "dependent");
   if (children.length === 0) return { hasOutput: false, gaps: [] };
 
-  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const parentLines = ctx.parentEvents.map((p, i) =>
-    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
-    (p.events.length === 0 ? "  No events." :
-      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"}${ev.location ? ` | ${ev.location}` : ""}`).join("\n"))
-  ).join("\n\n");
+  const dayGrid = buildDayGrid(ctx, 14).join("\n\n");
 
   const caregiverLines = ctx.caregiverSlots.length === 0
     ? "No caregiver configured."
@@ -391,8 +518,9 @@ ${childLines}
 Caregiver schedule (CONFIRMED — these slots are already covered, do NOT ask to confirm them):
 ${caregiverLines}
 
-Parent calendars (next 14 days):
-${parentLines}
+Day-by-day schedule (next 14 days) — merges parent commitments (with start/end times), school-calendar
+status (informational only — never counts as parent unavailability), caregiver coverage, and kid activities:
+${dayGrid}
 
 ${openGapAlerts ? `Already flagged coverage gaps (DO NOT re-flag):\n${openGapAlerts}\n` : ""}
 Identify GENUINE childcare gaps only — windows where a child has no adult present because ALL of the following are true:
@@ -433,12 +561,7 @@ If no gaps, return { "gaps": [] }.`;
 async function assessNannyCoordination(ctx: FamilyContext, runType: AgentRunType): Promise<NannyCoordResult> {
   if (ctx.caregiverSlots.length === 0) return { hasOutput: false, items: [] };
 
-  const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const parentLines = ctx.parentEvents.map((p, i) =>
-    `Parent ${String.fromCharCode(65 + i)} (${p.email}):\n` +
-    (p.events.length === 0 ? "  No events." :
-      p.events.map(ev => `  - ${ev.summary} | ${ev.start ?? "no date"} | ${ev.allDay ? "all-day" : "timed"} | ${ev.location ?? ""}`).join("\n"))
-  ).join("\n\n");
+  const dayGrid = buildDayGrid(ctx, 14).join("\n\n");
 
   const caregiverLines = ctx.caregiverSlots.map(s => {
     const when = s.slotType === "one_off" && s.specificDate
@@ -459,8 +582,9 @@ ${memberProfile}
 Caregiver schedule (CONFIRMED regular hours — already arranged, no need to reconfirm):
 ${caregiverLines}
 
-Parent calendars (next 14 days):
-${parentLines}
+Day-by-day schedule (next 14 days) — merges parent commitments (with start/end times), school-calendar
+status (informational only), caregiver coverage, and kid activities:
+${dayGrid}
 
 Flag ONLY genuine caregiver coordination needs that require action BEYOND the regular schedule above.
 Flag these:
@@ -915,7 +1039,9 @@ export async function runFamilyAgent(
       }))
     );
 
-    const dbEvents = await getFamilyEventsForWeek(householdId);
+    // 30 days covers the widest window any domain needs (full-run deadline sweep); Domain 1/2's
+    // day grid and daily_delta's shorter cutoffs simply use a prefix of the same fetched set.
+    const dbEvents = await getFamilyEventsForWeek(householdId, 30);
 
     // For daily delta: fetch open alerts so the LLM can skip conflicts already surfaced.
     // For full digest runs: open alerts are irrelevant — the digest covers the whole week fresh.
@@ -931,8 +1057,11 @@ export async function runFamilyAgent(
       getHouseholdLocation(householdId),
     ]);
 
-    const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    // Household-local date (FIX #209) — env.TZ, never server/UTC time. A run kicked off at
+    // 11pm UTC must still resolve "today" to the household's own calendar day.
+    const today = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: env.TZ });
+    const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
     const ctx: FamilyContext = { location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
 
     // Run domains 1–4 in parallel; domain 5 synthesizes their outputs

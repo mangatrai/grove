@@ -423,6 +423,45 @@ export async function getCalendarSelection(
 }
 
 // ---------------------------------------------------------------------------
+// Per-calendar role (FIX #212) — distinguishes school calendars from parent
+// commitment calendars so the family agent doesn't treat a school closure as
+// a parent being unavailable.
+// ---------------------------------------------------------------------------
+
+export type CalendarRole = "work" | "school" | "activities" | "other";
+
+/** Default guess when no explicit role is saved — name-based, never authoritative. */
+export function heuristicCalendarRole(summary: string): CalendarRole {
+  const s = summary.toLowerCase();
+  if (s.includes("school") || s.includes("class") || /\bisd\b/.test(s)) return "school";
+  if (s.includes("activit") || s.includes("sport") || s.includes("camp")) return "activities";
+  return "work";
+}
+
+export async function saveCalendarRoles(userId: string, roles: Record<string, CalendarRole>): Promise<void> {
+  await qExec(
+    `UPDATE oauth_integrations SET calendar_roles = ? WHERE provider = 'google_calendar' AND user_id = ?`,
+    JSON.stringify(roles),
+    userId
+  );
+}
+
+export async function getCalendarRoles(userId: string): Promise<Record<string, CalendarRole>> {
+  const row = await qGet<{ calendar_roles: string | null }>(
+    `SELECT calendar_roles FROM oauth_integrations WHERE provider = 'google_calendar' AND user_id = ?`,
+    userId
+  );
+  if (!row?.calendar_roles) return {};
+  try {
+    const parsed = JSON.parse(row.calendar_roles) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, CalendarRole>;
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Authorization guard for Calendar (owner or admin)
 // ---------------------------------------------------------------------------
 

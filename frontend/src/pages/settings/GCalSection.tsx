@@ -10,6 +10,7 @@ import {
   Group,
   Loader,
   Paper,
+  Select,
   Skeleton,
   Stack,
   Text,
@@ -32,9 +33,19 @@ type CalendarItem = {
   backgroundColor: string | null;
 };
 
+type CalendarRole = "work" | "school" | "activities" | "other";
+
+const ROLE_OPTIONS: { value: CalendarRole; label: string }[] = [
+  { value: "work", label: "Work / personal" },
+  { value: "school", label: "School (informational only)" },
+  { value: "activities", label: "Kid activities" },
+  { value: "other", label: "Other" },
+];
+
 type GCalCalendarsResponse = {
   calendars: CalendarItem[];
   selectedIds: string[];
+  roles: Record<string, CalendarRole>;
 };
 
 type GCalSectionProps = {
@@ -51,6 +62,7 @@ export function GCalSection({ active }: GCalSectionProps) {
 
   const [calendars, setCalendars] = useState<CalendarItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [roles, setRoles] = useState<Record<string, CalendarRole>>({});
   const [calLoading, setCalLoading] = useState(false);
   const [calSaving, setCalSaving] = useState(false);
   const [calError, setCalError] = useState<string | null>(null);
@@ -79,6 +91,7 @@ export function GCalSection({ active }: GCalSectionProps) {
       const res = await apiJson<GCalCalendarsResponse>("/gcal/calendars");
       setCalendars(res.calendars);
       setSelectedIds(res.selectedIds);
+      setRoles(res.roles);
     } catch (e) {
       setCalError(e instanceof Error ? e.message : "Could not load calendar list.");
     } finally {
@@ -125,6 +138,7 @@ export function GCalSection({ active }: GCalSectionProps) {
       await apiFetch("/gcal/disconnect", { method: "DELETE" });
       setCalendars([]);
       setSelectedIds([]);
+      setRoles({});
       await loadStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not disconnect.");
@@ -144,6 +158,11 @@ export function GCalSection({ active }: GCalSectionProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ selectedIds }),
       });
+      await apiFetch("/gcal/calendar-roles", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roles }),
+      });
       setCalSaved(true);
       setTimeout(() => setCalSaved(false), 3000);
     } catch (e) {
@@ -157,6 +176,10 @@ export function GCalSection({ active }: GCalSectionProps) {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     );
+  }
+
+  function setRole(id: string, role: CalendarRole) {
+    setRoles(prev => ({ ...prev, [id]: role }));
   }
 
   function formatDate(iso: string | null): string {
@@ -259,7 +282,9 @@ export function GCalSection({ active }: GCalSectionProps) {
             </Group>
             <Text size="sm" c="dimmed">
               Choose which of your Google Calendars the family planner agent should read.
-              If you select none, the agent reads all accessible calendars.
+              If you select none, the agent reads all accessible calendars. Tag each calendar's
+              role so the agent knows a school calendar's events are informational — not an
+              actual parent commitment.
             </Text>
 
             {calError ? <Alert color="red">{calError}</Alert> : null}
@@ -274,27 +299,37 @@ export function GCalSection({ active }: GCalSectionProps) {
             ) : (
               <Stack gap="xs">
                 {calendars.map(cal => (
-                  <Group key={cal.id} gap="sm">
-                    {cal.backgroundColor ? (
-                      <div
-                        style={{
-                          width: 12,
-                          height: 12,
-                          borderRadius: "50%",
-                          backgroundColor: cal.backgroundColor,
-                          flexShrink: 0,
-                        }}
+                  <Group key={cal.id} gap="sm" justify="space-between" wrap="nowrap">
+                    <Group gap="sm" wrap="nowrap">
+                      {cal.backgroundColor ? (
+                        <div
+                          style={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: "50%",
+                            backgroundColor: cal.backgroundColor,
+                            flexShrink: 0,
+                          }}
+                        />
+                      ) : null}
+                      <Checkbox
+                        label={
+                          <Text size="sm">
+                            {cal.summary}
+                            {cal.primary ? <Text component="span" size="xs" c="dimmed"> (primary)</Text> : null}
+                          </Text>
+                        }
+                        checked={selectedIds.includes(cal.id)}
+                        onChange={() => toggleCalendar(cal.id)}
                       />
-                    ) : null}
-                    <Checkbox
-                      label={
-                        <Text size="sm">
-                          {cal.summary}
-                          {cal.primary ? <Text component="span" size="xs" c="dimmed"> (primary)</Text> : null}
-                        </Text>
-                      }
-                      checked={selectedIds.includes(cal.id)}
-                      onChange={() => toggleCalendar(cal.id)}
+                    </Group>
+                    <Select
+                      size="xs"
+                      w={200}
+                      data={ROLE_OPTIONS}
+                      value={roles[cal.id] ?? "work"}
+                      onChange={(value) => setRole(cal.id, (value as CalendarRole) ?? "work")}
+                      allowDeselect={false}
                     />
                   </Group>
                 ))}

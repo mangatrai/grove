@@ -770,7 +770,10 @@ Track regular and one-off care arrangements for any household member:
 
 **Google Calendar**
 
-Connect or disconnect your Google Calendar account. See § Google Calendar below for details.
+Connect or disconnect your Google Calendar account. Once connected:
+
+- **Select calendars** — check which of your Google Calendars the family planner agent should read. Leave none checked to include all accessible calendars.
+- **Calendar role** — tag each calendar as *Work / personal*, *School (informational only)*, *Kid activities*, or *Other*. The agent treats *School* events as informational — e.g. a school closure is never treated as a parent being unavailable, unlike a *Work / personal* event at the same time. Role defaults to a name-based guess (a calendar named "…ISD" or "…School" defaults to School) until you set it explicitly. Click **Save selection** to persist both the calendar selection and the roles.
 
 ### Data Tab
 
