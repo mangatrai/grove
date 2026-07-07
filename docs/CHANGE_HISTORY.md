@@ -14,6 +14,22 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — Idle logout + notification polling: fail-closed, browser-independent design (2026-07-07)
+
+**What changed:** Both idle-logout and notification polling previously relied on browser event delivery that Safari doesn't honor the same way as Chrome — `visibilitychange` doesn't fire when a macOS window is merely occluded/backgrounded, and `useIdleLogout`'s single 15-min `setTimeout` gets throttled and reset by the first `mousemove` on return. Net effect: a Safari window left open (occluded or on another Space) polled `/notifications/unread-count` every 60s forever and never idle-logged-out, each poll hitting Postgres via `verifyToken`.
+
+Redesigned so correctness never depends on any specific browser event firing or any timer being punctual:
+- **`frontend/src/utils/activity.ts` (new):** single `lastActivityAt` wall-clock timestamp in `localStorage` (cross-tab, survives reload), updated by `mousemove`/`keydown`/`click`/`touchstart`. Pure `evaluatePollGuard({ now, lastActivityAt, hasFocus })` decides `{ logout, poll }` from the wall clock at whatever moment it's called — a throttled/delayed tick still resolves correctly, so degradation is *later logout* or *less polling*, never more.
+- **`NotificationPanel.tsx`:** the 60s poll is now a single always-on interval; every tick re-evaluates the guard itself (idle-for-`IDLE_LOGOUT_MS` → skip; idle-for-`POLL_PAUSE_MS` (5 min) or `!document.hasFocus()` → skip; else fetch). `visibilitychange`/`focus`/`pageshow` still trigger an immediate tick as an optimization, but are no longer load-bearing. The poll now sends `x-background-poll: 1` so the server can tell it apart from real navigation.
+- **`useIdleLogout.ts`:** replaced the single `setTimeout` with a repeating 30s check against the same shared `lastActivityAt`, plus immediate checks on `focus`/`pageshow` (evaluated against the pre-return timestamp, before the return's own `mousemove` refreshes it).
+- **Layer 2 server backstop (`backend/src/modules/auth/activity-tracker.ts`, new):** in-memory per-user `lastActivityAt` (single-instance app, same pattern as #220's `hasPendingWork`), refreshed by `requireAuth` on every *non*-background-poll authenticated request and at login. A request carrying `x-background-poll` is rejected `401 { code: "token_stale" }` once that user has gone 15+ minutes without a real request — so even a non-cooperating/zombie client stops generating DB traffic within one idle window, independent of any client-side fix actually working.
+
+**Why:** Second half of the owner-confirmed two-part Neon compute-burn remediation (#220 then #221). Owner's explicit direction: no browser-specific code, ever — the fix had to be structurally fail-closed (Safari today, any other browser's throttling tomorrow), not a Safari patch.
+
+**Files:** `frontend/src/utils/activity.ts` (new), `frontend/src/utils/activity.test.ts` (new), `frontend/src/hooks/useIdleLogout.ts`, `frontend/src/components/NotificationPanel.tsx`, `backend/src/modules/auth/activity-tracker.ts` (new), `backend/src/modules/auth/auth.middleware.ts`, `backend/src/modules/auth/auth.service.ts`, `backend/tests/activity-tracker.test.ts` (new), `backend/tests/auth-idle-backstop.test.ts` (new)
+
+**GitHub:** closes [#221](https://github.com/mangatrai/grove/issues/221).
+
 ## FIX — Payslip async scheduler: gate DB polling on an in-memory hasPendingWork flag (2026-07-06)
 
 **What changed:** `payslip-async-scheduler.service.ts` ran its `qAll` pending-session query unconditionally on every tick (default 120s) and once on startup — the empty-result check happened *after* the query, so the DB was hit even when no async payslip import existed. Since Neon's serverless suspend timeout is 5 minutes and the tick interval was 120s, this kept Neon compute awake for the entire time the (Koyeb) app instance was awake, 1:1. Added a module-level `hasPendingWork` flag, `true` on boot (so the first tick still runs once for restart recovery), set by the new `armPayslipAsyncScheduler()` export — called from `import-parser.service.ts` when a file is queued for `openai_llm_payslip` extraction — and cleared back to `false` whenever a poll cycle finds zero pending sessions. While disarmed, `runPollCycle()` returns before issuing any query. Armed/drained transitions are logged.

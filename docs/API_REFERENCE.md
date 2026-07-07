@@ -3261,12 +3261,27 @@ Returns authenticated user's notification list: up to **40** unread (newest firs
 
 ### `GET /notifications/unread-count`
 
-Lightweight poll endpoint.
+Lightweight poll endpoint. The frontend calls this on a background interval (not direct user
+action), so it sends `x-background-poll: 1` — this lets the server distinguish it from a
+real/user-initiated request (see FIX #221).
+
+**Headers:** `x-background-poll: 1` (frontend background poll only; any authenticated caller
+without this header is treated as a real request and always allowed).
 
 **Response 200:**
 ```json
 { "count": 3 }
 ```
+
+**Response 401** (only when `x-background-poll: 1` is set and the session has had no
+non-background request in 15+ minutes):
+```json
+{ "message": "Session idle", "code": "token_stale" }
+```
+The JWT itself is still valid — this is a server-side idle backstop independent of the JWT's own
+expiry, so a background poll from an unattended/zombie tab stops generating DB traffic even if
+the client-side idle-logout guard never runs. A real request (no `x-background-poll` header)
+from the same token always succeeds and refreshes the activity window.
 
 ---
 

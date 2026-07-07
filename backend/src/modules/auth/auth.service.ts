@@ -4,6 +4,7 @@ import { createHash, randomUUID, webcrypto } from "node:crypto";
 
 import { qBegin, qExec, qGet, sqlBind } from "../../db/query.js";
 import { env } from "../../config/env.js";
+import { recordActivity } from "./activity-tracker.js";
 import { isEmailConfigured, sendMail } from "../mailer/mailer.service.js";
 import { renderPasswordChangedTemplate } from "../mailer/templates/password-changed.js";
 import { renderPasswordResetTemplate } from "../mailer/templates/password-reset.js";
@@ -85,6 +86,7 @@ export async function login(payload: LoginPayload): Promise<{ token: string; for
     env.JWT_SECRET,
     { expiresIn: "8h", algorithm: "HS256" }
   );
+  recordActivity(user.userId);
   return { token, forcePasswordChange: user.forcePasswordChange };
 }
 

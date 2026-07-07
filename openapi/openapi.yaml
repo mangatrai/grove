@@ -2517,8 +2517,18 @@ paths:
     get:
       tags: [notifications]
       summary: Get unread notification count
-      description: Lightweight endpoint polled every 60 seconds by the frontend bell icon.
+      description: >
+        Lightweight endpoint polled every 60 seconds by the frontend bell icon. The frontend
+        marks this call with `x-background-poll: 1` so the server can reject it once the session
+        has been idle 15+ minutes (FIX #221 Layer 2 backstop), independent of the JWT's own
+        expiry — this bounds how long an unattended/zombie tab can keep generating DB traffic.
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: x-background-poll
+          in: header
+          required: false
+          schema: { type: string, enum: ["1"] }
+          description: Marks this as a passive background poll rather than a user-initiated request.
       responses:
         "200":
           description: Unread count
@@ -2529,7 +2539,10 @@ paths:
                 properties:
                   count: { type: integer }
         "401":
-          description: Unauthorized
+          description: >
+            Unauthorized, or (when `x-background-poll: 1` is set) the session has been idle 15+
+            minutes with no non-background request — `{ "message": "Session idle", "code":
+            "token_stale" }`.
 
   /notifications/read-all:
     post:

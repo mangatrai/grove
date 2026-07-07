@@ -1,32 +1,44 @@
 import { useEffect, useRef } from "react";
 import { setToken, useAuthToken } from "../api";
+import { ensureActivityListeners, getLastActivityAt, IDLE_LOGOUT_MS } from "../utils/activity";
 
-const IDLE_EVENTS: (keyof WindowEventMap)[] = ["mousemove", "keydown", "click", "touchstart"];
+const CHECK_INTERVAL_MS = 30_000;
 
-export function useIdleLogout(idleMs = 15 * 60 * 1000) {
+/**
+ * Wall-clock idle check on a repeating interval (+ focus/pageshow), not a single setTimeout.
+ * Browsers that throttle background timers (Safari) just delay each check — the comparison
+ * against lastActivityAt is still correct whenever it runs, so logout lands late but never
+ * fails to land. See FIX #221.
+ */
+export function useIdleLogout(idleMs = IDLE_LOGOUT_MS) {
   const token = useAuthToken();
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loggedOutRef = useRef(false);
 
   useEffect(() => {
     if (!token) return;
+    ensureActivityListeners();
+    loggedOutRef.current = false;
 
-    function reset() {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      timerRef.current = setTimeout(() => {
-        void fetch("/auth/logout", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${localStorage.getItem("hf_jwt") ?? ""}` },
-        }).catch(() => {});
-        setToken(null);
-      }, idleMs);
+    function check() {
+      if (loggedOutRef.current) return;
+      if (Date.now() - getLastActivityAt() <= idleMs) return;
+      loggedOutRef.current = true;
+      void fetch("/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${localStorage.getItem("hf_jwt") ?? ""}` },
+      }).catch(() => {});
+      setToken(null);
     }
 
-    reset();
-    IDLE_EVENTS.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+    check();
+    const intervalId = setInterval(check, CHECK_INTERVAL_MS);
+    window.addEventListener("focus", check);
+    window.addEventListener("pageshow", check);
 
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-      IDLE_EVENTS.forEach((e) => window.removeEventListener(e, reset));
+      clearInterval(intervalId);
+      window.removeEventListener("focus", check);
+      window.removeEventListener("pageshow", check);
     };
   }, [token, idleMs]);
 }
