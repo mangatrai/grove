@@ -1,4 +1,5 @@
 import { google } from "googleapis";
+import { z } from "zod";
 
 import { getChatAdapter, getToolUseAdapter, isLlmConfigured, strongModel } from "../../llm/index.js";
 import { SEARCH_WEB_TOOL, tavilySearch } from "../../llm/tools/tavily.js";
@@ -40,18 +41,38 @@ export type CalendarEvent = {
   role: CalendarRole;
 };
 
-type AlertItem = {
-  alertType: "conflict" | "travel" | "coverage_gap" | "deadline_approaching" | "suggestion";
-  reason: string;
-  affectedDate: string | null;
-  copyPasteText: string;
-  recipientHint: string;
-  calendarEventPayload?: {
-    title: string;
-    date: string;
-    description: string;
-  } | null;
-};
+// FIX #217: validated against parsed LLM output before it reaches family_agent_alerts (writeAlerts)
+// — a malformed alertType/recipientHint or missing field would otherwise flow straight into the
+// INSERT (DB error mid-run) or into garbage rows the UI has to render.
+const alertItemSchema = z.object({
+  alertType: z.enum(["conflict", "travel", "coverage_gap", "deadline_approaching", "suggestion"]),
+  reason: z.string().min(1),
+  affectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  copyPasteText: z.string(),
+  recipientHint: z.enum(["Nanny", "Spouse", "Both", "Self"]),
+  calendarEventPayload: z
+    .object({
+      title: z.string(),
+      date: z.string(),
+      description: z.string(),
+      time: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+/** FIX #217: validate a domain's parsed alert-item array; on any invalid item, treat the whole
+ *  response as a parse failure (same as malformed JSON) so the caller's existing warn+empty path
+ *  runs and the pipeline continues with other domains. */
+export function parseAlertItems(items: unknown): AlertItem[] {
+  const result = z.array(alertItemSchema).safeParse(items);
+  if (!result.success) {
+    throw new Error(`alert item schema validation failed: ${result.error.issues.map(i => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  }
+  return result.data as AlertItem[];
+}
+
+type AlertItem = z.infer<typeof alertItemSchema>;
 
 type AgentAnalysis = {
   conflicts: AlertItem[];
@@ -75,6 +96,7 @@ type PipelineOutputs = {
 };
 
 export type FamilyContext = {
+  householdId: string;
   location: string;
   today: string;
   todayIso: string;
@@ -89,7 +111,7 @@ export type FamilyContext = {
 // DB helpers
 // ---------------------------------------------------------------------------
 
-async function getConnectedParents(householdId: string): Promise<ConnectedParent[]> {
+export async function getConnectedParents(householdId: string): Promise<ConnectedParent[]> {
   type Row = {
     user_id: string;
     app_email: string;
@@ -103,7 +125,8 @@ async function getConnectedParents(householdId: string): Promise<ConnectedParent
      WHERE oi.provider = 'google_calendar'
        AND oi.household_id = ?
        AND oi.needs_reauth = FALSE
-       AND oi.refresh_token IS NOT NULL`,
+       AND oi.refresh_token IS NOT NULL
+     ORDER BY oi.connected_at ASC`,
     householdId
   );
   return rows.map(r => {
@@ -592,10 +615,11 @@ If no gaps, return { "gaps": [] }.`;
   );
 
   try {
-    const parsed = parseJsonResponse<{ gaps: AlertItem[] }>(content);
-    return { hasOutput: parsed.gaps.length > 0, gaps: parsed.gaps };
-  } catch {
-    log.warn("family-agent: Domain 1 coverage gap parse failed", { raw: content.slice(0, 200) });
+    const parsed = parseJsonResponse<{ gaps: unknown[] }>(content);
+    const gaps = parseAlertItems(parsed.gaps);
+    return { hasOutput: gaps.length > 0, gaps };
+  } catch (err) {
+    log.warn("family-agent: Domain 1 coverage gap parse failed", { raw: content.slice(0, 200), err: String(err) });
     return { hasOutput: false, gaps: [] };
   }
 }
@@ -657,10 +681,11 @@ If nothing actionable, return { "items": [] }.`;
   );
 
   try {
-    const parsed = parseJsonResponse<{ items: AlertItem[] }>(content);
-    return { hasOutput: parsed.items.length > 0, items: parsed.items };
-  } catch {
-    log.warn("family-agent: Domain 2 nanny coord parse failed", { raw: content.slice(0, 200) });
+    const parsed = parseJsonResponse<{ items: unknown[] }>(content);
+    const items = parseAlertItems(parsed.items);
+    return { hasOutput: items.length > 0, items };
+  } catch (err) {
+    log.warn("family-agent: Domain 2 nanny coord parse failed", { raw: content.slice(0, 200), err: String(err) });
     return { hasOutput: false, items: [] };
   }
 }
@@ -742,13 +767,16 @@ Return ONLY valid JSON: { "queries": [ { "query": "...", "intent": "short phrase
     try {
       log.debug("family-agent: Domain 3 Tavily query", { query: q.query, intent: q.intent, freshness: q.freshness, startDate });
       const result = await tavilySearch(q.query, { startDate });
-      const resultStr = typeof result === "string" ? result : JSON.stringify(result);
-      if (resultStr.includes("TAVILY_API_KEY")) {
-        log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.location });
-        tavilyUnavailable = true;
-        break;
+      if (!result.ok) {
+        if (result.code === "not_configured") {
+          log.warn("family-agent: Tavily not configured — Domain 3 falling back to LLM-only suggestions", { householdId: ctx.householdId });
+          tavilyUnavailable = true;
+          break;
+        }
+        log.debug("family-agent: Domain 3 Tavily query returned no usable result", { query: q.query, code: result.code });
+        continue;
       }
-      searchResults.push({ query: q.query, intent: q.intent, result: resultStr });
+      searchResults.push({ query: q.query, intent: q.intent, result: result.text });
     } catch (err) {
       log.warn("family-agent: tavily search failed", { query: q.query, err: String(err) });
     }
@@ -910,7 +938,7 @@ Generate 3-4 targeted Tavily search queries to surface PUBLIC deadlines this hou
 
 Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       ],
-      { model: strongModel(), maxTokens: 200 }
+      { model: strongModel(), maxTokens: 400 }
     );
 
     let deadlineQueries: string[] = [];
@@ -930,9 +958,11 @@ Respond with ONLY valid JSON: { "queries": ["query 1", "query 2", ...] }` },
       try {
         log.debug("family-agent: Domain 4 Tavily query", { query: q, startDate: d4SeasonalStartDate });
         const r = await tavilySearch(q, { startDate: d4SeasonalStartDate });
-        const rStr = typeof r === "string" ? r : JSON.stringify(r);
-        if (rStr.includes("TAVILY_API_KEY")) break;
-        results.push(`"${q}": ${rStr}`);
+        if (!r.ok) {
+          if (r.code === "not_configured") break;
+          continue;
+        }
+        results.push(`"${q}": ${r.text}`);
       } catch { /* ignore individual search failures */ }
     }
     if (results.length > 0) tavilyContext = results.join("\n\n");
@@ -982,10 +1012,11 @@ If nothing new, return { "alerts": [] }.` },
 
   log.debug("family-agent: Domain 4 LLM synthesis response", { raw: content.slice(0, 1000) });
   try {
-    const parsed = parseJsonResponse<{ alerts: AlertItem[] }>(content);
-    return { hasOutput: parsed.alerts.length > 0, alerts: parsed.alerts };
-  } catch {
-    log.warn("family-agent: Domain 4 deadline parse failed", { raw: content.slice(0, 200) });
+    const parsed = parseJsonResponse<{ alerts: unknown[] }>(content);
+    const alerts = parseAlertItems(parsed.alerts);
+    return { hasOutput: alerts.length > 0, alerts };
+  } catch (err) {
+    log.warn("family-agent: Domain 4 deadline parse failed", { raw: content.slice(0, 200), err: String(err) });
     return { hasOutput: false, alerts: [] };
   }
 }
@@ -1045,7 +1076,7 @@ ${researchSection}
 Finance context:
 ${financeContext}
 
-Write digest emails per parent. Parent A = primary household manager. Parent B = co-parent/spouse. Each digest: items they're responsible for, coordination needs, proactive finds. Mobile-readable, bullet points, no filler.
+Write digest emails per parent. Parent A = primary household manager (FIX #217: the first Google Calendar account the household connected, deterministic — not an assumption about parenting roles). Parent B = co-parent/spouse. Each digest: items they're responsible for, coordination needs, proactive finds. Mobile-readable, bullet points, no filler.
 
 Respond with ONLY valid JSON:
 {
@@ -1087,16 +1118,22 @@ Respond with ONLY valid JSON:
 // Email HTML wrapper
 // ---------------------------------------------------------------------------
 
+// FIX #217: digest body/subject come from LLM output (and Tavily content flows into it via
+// Domain 3/4) — escape before interpolating into HTML so a stray "<" or "&" can't break layout.
+export function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function wrapDigestHtml(subject: string, body: string, parentEmail: string): string {
   const lines = body
     .split("\n")
-    .map(l => l.startsWith("- ") ? `<li>${l.slice(2)}</li>` : `<p>${l}</p>`)
+    .map(l => l.startsWith("- ") ? `<li>${escapeHtml(l.slice(2))}</li>` : `<p>${escapeHtml(l)}</p>`)
     .join("\n");
   return `<!DOCTYPE html><html><body style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:16px">
-<h2 style="color:#2d6a4f">${subject}</h2>
+<h2 style="color:#2d6a4f">${escapeHtml(subject)}</h2>
 ${lines}
 <hr style="margin-top:32px;border:none;border-top:1px solid #eee"/>
-<p style="font-size:11px;color:#999">Sent by Grove household assistant to ${parentEmail}</p>
+<p style="font-size:11px;color:#999">Sent by Grove household assistant to ${escapeHtml(parentEmail)}</p>
 </body></html>`;
 }
 
@@ -1153,7 +1190,7 @@ export async function runFamilyAgent(
     // 11pm UTC must still resolve "today" to the household's own calendar day.
     const today = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: env.TZ });
     const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
-    const ctx: FamilyContext = { location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
+    const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
 
     // Run domains 1–4 in parallel; domain 5 synthesizes their outputs
     const [coverageGaps, nannyCoord, research, deadlines] = await Promise.all([
@@ -1451,7 +1488,8 @@ export async function processCaptureNote(note: string): Promise<CaptureResult> {
     async (name, args) => {
       if (name === "search_web") {
         const query = typeof args.query === "string" ? args.query : "";
-        return tavilySearch(query);
+        const result = await tavilySearch(query);
+        return result.ok ? result.text : result.message;
       }
       return `Unknown tool: ${name}`;
     },

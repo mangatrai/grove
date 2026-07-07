@@ -14,6 +14,24 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FIX — Family agent: hardening grab-bag — deterministic parent order, zod validation, typed Tavily errors, digest HTML escaping (2026-07-07)
+
+**What changed:** Code-review grab-bag on `family-agent.service.ts` / `tavily.ts`, seven items shipped together as one PR of hardening per the issue:
+
+- **Deterministic Parent A/B (#217 item 1):** `getConnectedParents()` had no `ORDER BY`; Postgres row order isn't guaranteed, so Domain 5's "Parent A = primary household manager" digest could silently swap between the two parents across runs. Added `ORDER BY oi.connected_at ASC` — Parent A is now always the first Google Calendar account the household connected. Domain 5's prompt documents the rule explicitly instead of implying a parenting-role assumption.
+- **Schema validation on parsed LLM JSON (#217 item 2):** malformed LLM output (bad `alertType` enum, missing `copyPasteText`, etc.) previously flowed straight into `family_agent_alerts` INSERT unchecked. Added one shared `alertItemSchema` (zod) + `parseAlertItems()`, wired into Domain 1, Domain 2, and Domain 4's parse sites — invalid output now throws, caught by the existing warn+empty-result path, and the run continues instead of hitting a DB error or persisting garbage rows.
+- **`calendarEventPayload.time` type drift (#217 item 3):** Domain 4's prompt has always requested a `time: "HH:MM"` field but the type only declared `{title, date, description}`. Folded `time?: string` into `alertItemSchema`. Confirmed (by reading `family-events.routes.ts`) the GCal write-back already reads `rawPayload.time` correctly with a sensible fallback — this was a type-only gap, not a behavior bug.
+- **Typed Tavily errors (#217 item 4):** `tavilySearch()` used to signal "not configured" via `resultStr.includes("TAVILY_API_KEY")` — brittle string-matching on a human-readable message. Now returns a discriminated union `{ ok: true; text } | { ok: false; code: "not_configured" | "empty_query" | "http_error" | "no_results" | "network_error"; message }`. Domain 3, Domain 4, the quick-capture tool-loop callback, and the protest agent's `search_web` tool handler all updated to branch on `result.ok`/`result.code` instead of string-matching.
+- **Wrong log field (#217 item 5):** `log.warn("Tavily not configured...", { householdId: ctx.location })` logged the household's location string under the `householdId` key. Added `householdId` to `FamilyContext` (threaded from `runFamilyAgent`'s existing parameter) and fixed the call site.
+- **Query-gen `maxTokens` too tight (#217 item 6):** Domain 4's query-gen call was capped at `maxTokens: 200` for a JSON array of queries — a slightly chatty model could truncate mid-JSON and silently return an empty domain for that run. Bumped to 400 (Domain 3's was already raised to 500 during #210).
+- **Digest HTML injection (#217 item 7):** `wrapDigestHtml()` interpolated LLM-generated subject/body lines (which include Tavily-sourced text via Domain 3/4) directly into `<h2>/<li>/<p>` with no escaping. Added `escapeHtml()` and applied it to every interpolated value (subject, body lines, recipient email).
+
+**Why:** Owner-confirmed Sequence A order — #217 (hardening) alongside #211/#213, after #209/#212 (accuracy floor) and #210/#216 (Tavily quality + dedup).
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/src/llm/tools/tavily.ts`, `backend/src/modules/protest/protest.routes.ts`, `backend/tests/family-agent.test.ts`
+
+**GitHub:** closes [#217](https://github.com/mangatrai/grove/issues/217).
+
 ## FIX — Family agent: Tavily search quality (freshness classes, two-grade output) + alert dedup (2026-07-07)
 
 **What changed:** Two Sequence A items shipped together since they touch the same Domain 3 (proactive research) code path.

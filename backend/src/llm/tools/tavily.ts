@@ -7,9 +7,15 @@ export interface TavilySearchOpts {
   startDate?: string;
 }
 
-export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): Promise<string> {
-  if (!env.TAVILY_API_KEY) return "Web search is not configured (TAVILY_API_KEY missing).";
-  if (!query.trim()) return "No query provided.";
+// FIX #217: typed result instead of a plain string, so callers branch on `code` (e.g. "is Tavily
+// even configured?") rather than brittle string-matching a human-readable message.
+export type TavilySearchResult =
+  | { ok: true; text: string }
+  | { ok: false; code: "not_configured" | "empty_query" | "http_error" | "no_results" | "network_error"; message: string };
+
+export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): Promise<TavilySearchResult> {
+  if (!env.TAVILY_API_KEY) return { ok: false, code: "not_configured", message: "Web search is not configured (TAVILY_API_KEY missing)." };
+  if (!query.trim()) return { ok: false, code: "empty_query", message: "No query provided." };
   try {
     const body: Record<string, unknown> = {
       api_key: env.TAVILY_API_KEY,
@@ -28,14 +34,15 @@ export async function tavilySearch(query: string, opts: TavilySearchOpts = {}): 
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return `Tavily returned HTTP ${res.status}.`;
+    if (!res.ok) return { ok: false, code: "http_error", message: `Tavily returned HTTP ${res.status}.` };
     const data = (await res.json()) as { results?: TavilyResult[]; answer?: string };
     const results = (data.results ?? []).filter(r => (r.score ?? 1) >= 0.5);
-    if (results.length === 0) return "No results found.";
+    if (results.length === 0) return { ok: false, code: "no_results", message: "No results found." };
     const answerLine = data.answer ? `Summary: ${data.answer}\n\n` : "";
-    return answerLine + results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content.slice(0, 900)}`).join("\n\n");
+    const text = answerLine + results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.content.slice(0, 900)}`).join("\n\n");
+    return { ok: true, text };
   } catch (err) {
-    return `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.`;
+    return { ok: false, code: "network_error", message: `Web search failed: ${err instanceof Error ? err.message : "unknown error"}.` };
   }
 }
 

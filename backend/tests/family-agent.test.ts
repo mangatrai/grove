@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { qExec } from "../src/db/query.js";
 import {
   alertDedupKey,
   buildAlreadySuggestedText,
   buildDayGrid,
+  escapeHtml,
+  getConnectedParents,
+  parseAlertItems,
   startDateForFreshness,
   type AgentAlert,
   type CalendarEvent,
@@ -14,6 +18,7 @@ import type { FamilyEvent, HelpAvailabilitySlot } from "../src/modules/family/fa
 
 function baseCtx(overrides: Partial<FamilyContext> = {}): FamilyContext {
   return {
+    householdId: "hh-1",
     location: "Example City",
     today: "Monday, June 15",
     todayIso: "2026-06-15", // a Monday
@@ -281,5 +286,111 @@ describe("startDateForFreshness (FIX #210 per-class Tavily windows)", () => {
     const seasonalStart = startDateForFreshness("seasonal", "2026-07-15");
     expect(newStart).not.toBe(seasonalStart);
     expect(new Date(seasonalStart).getTime()).toBeLessThan(new Date(newStart).getTime());
+  });
+});
+
+function validAlertItem(overrides: Record<string, unknown> = {}) {
+  return {
+    alertType: "coverage_gap",
+    reason: "No caregiver coverage Friday afternoon",
+    affectedDate: "2026-07-10",
+    copyPasteText: "Can you cover Friday afternoon?",
+    recipientHint: "Nanny",
+    ...overrides
+  };
+}
+
+describe("parseAlertItems (FIX #217 zod validation before DB insert)", () => {
+  it("passes through a valid array unchanged", () => {
+    const items = parseAlertItems([validAlertItem()]);
+    expect(items).toHaveLength(1);
+    expect(items[0].reason).toBe("No caregiver coverage Friday afternoon");
+  });
+
+  it("accepts a null affectedDate", () => {
+    const items = parseAlertItems([validAlertItem({ affectedDate: null })]);
+    expect(items[0].affectedDate).toBeNull();
+  });
+
+  it("accepts an optional calendarEventPayload with time", () => {
+    const items = parseAlertItems([
+      validAlertItem({ calendarEventPayload: { title: "Enroll", date: "2026-08-01", description: "Deadline", time: "09:00" } })
+    ]);
+    expect(items[0].calendarEventPayload?.time).toBe("09:00");
+  });
+
+  it("throws on an invalid alertType enum value", () => {
+    expect(() => parseAlertItems([validAlertItem({ alertType: "warning" })])).toThrow();
+  });
+
+  it("throws on an invalid recipientHint enum value", () => {
+    expect(() => parseAlertItems([validAlertItem({ recipientHint: "Grandma" })])).toThrow();
+  });
+
+  it("throws on a malformed affectedDate", () => {
+    expect(() => parseAlertItems([validAlertItem({ affectedDate: "not-a-date" })])).toThrow();
+  });
+
+  it("throws when the whole array isn't an array", () => {
+    expect(() => parseAlertItems({ not: "an array" })).toThrow();
+  });
+});
+
+describe("escapeHtml (FIX #217 digest HTML injection guard)", () => {
+  it("escapes angle brackets and ampersands", () => {
+    expect(escapeHtml("<script>alert(1)</script> & more")).toBe("&lt;script&gt;alert(1)&lt;/script&gt; &amp; more");
+  });
+
+  it("escapes double quotes", () => {
+    expect(escapeHtml('say "hi"')).toBe("say &quot;hi&quot;");
+  });
+
+  it("leaves plain text untouched", () => {
+    expect(escapeHtml("Example Camp registration opens July 15")).toBe("Example Camp registration opens July 15");
+  });
+});
+
+describe("getConnectedParents ordering (FIX #217 deterministic Parent A/B)", () => {
+  const HOUSEHOLD_ID = "10000000-0000-0000-0000-000000000001";
+  const OWNER_USER_ID = "20000000-0000-0000-0000-000000000001";
+  const COPARENT_USER_ID = "99990000-test-0000-0000-coparent00001";
+  const OWNER_INTEGRATION_ID = "99990000-test-0000-0000-oauthint00001";
+  const COPARENT_INTEGRATION_ID = "99990000-test-0000-0000-oauthint00002";
+
+  beforeAll(async () => {
+    await qExec(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope, force_password_change)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO NOTHING`,
+      COPARENT_USER_ID, HOUSEHOLD_ID, "coparent-fix217@example.com", "member", "test-hash", "all", false
+    );
+    // Insert the later-connected row first, to prove result ordering comes from `connected_at`
+    // and not from insertion/row order.
+    await qExec(
+      `INSERT INTO oauth_integrations (id, provider, household_id, user_id, refresh_token, needs_reauth, connected_at)
+       VALUES (?, 'google_calendar', ?, ?, 'fake-refresh-token', FALSE, '2026-02-01T00:00:00Z')
+       ON CONFLICT (id) DO NOTHING`,
+      COPARENT_INTEGRATION_ID, HOUSEHOLD_ID, COPARENT_USER_ID
+    );
+    await qExec(
+      `INSERT INTO oauth_integrations (id, provider, household_id, user_id, refresh_token, needs_reauth, connected_at)
+       VALUES (?, 'google_calendar', ?, ?, 'fake-refresh-token', FALSE, '2026-01-01T00:00:00Z')
+       ON CONFLICT (id) DO NOTHING`,
+      OWNER_INTEGRATION_ID, HOUSEHOLD_ID, OWNER_USER_ID
+    );
+  });
+
+  afterAll(async () => {
+    await qExec(`DELETE FROM oauth_integrations WHERE id IN (?, ?)`, OWNER_INTEGRATION_ID, COPARENT_INTEGRATION_ID);
+    await qExec(`DELETE FROM app_user WHERE id = ?`, COPARENT_USER_ID);
+  });
+
+  it("returns the first-connected account first, stable across repeated calls", async () => {
+    for (let i = 0; i < 3; i++) {
+      const parents = await getConnectedParents(HOUSEHOLD_ID);
+      expect(parents).toHaveLength(2);
+      expect(parents[0].userId).toBe(OWNER_USER_ID);
+      expect(parents[1].userId).toBe(COPARENT_USER_ID);
+    }
   });
 });

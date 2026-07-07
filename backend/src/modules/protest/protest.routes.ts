@@ -975,7 +975,8 @@ protestRouter.post("/:propertyId/chat", async (req: AuthenticatedRequest, res) =
 
       if (toolName === "search_web") {
         const query = typeof args.query === "string" ? args.query : "";
-        return tavilySearch(query);
+        const result = await tavilySearch(query);
+        return result.ok ? result.text : result.message;
       }
 
       if (toolName === "fetch_dcad_comps") {
