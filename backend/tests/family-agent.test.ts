@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { qExec } from "../src/db/query.js";
+import { qExec, qGet } from "../src/db/query.js";
 
 // FIX #211: mock the LLM adapter layer so Domain 1-5 functions can be unit-tested for
 // (a) correctness of the merged D1+2 split and (b) which model tier each call actually uses,
@@ -50,12 +50,14 @@ import {
   alertDedupKey,
   analyzeCoverageAndCoordination,
   buildAlreadySuggestedText,
+  buildCalibrationBlock,
   buildCaptureContextHeader,
   buildDayGrid,
   escapeHtml,
   getConnectedParents,
   parseAlertItems,
   processCaptureNote,
+  resolveAlert,
   runProactiveResearch,
   startDateForFreshness,
   sweepDeadlines,
@@ -81,6 +83,7 @@ function baseCtx(overrides: Partial<FamilyContext> = {}): FamilyContext {
     parentEvents: [],
     dbEvents: [],
     openAlerts: [],
+    calibrationBlock: "",
     ...overrides
   };
 }
@@ -648,5 +651,138 @@ describe("FIX #213 — quick-capture context injection", () => {
     expect(userMessage.content).toContain("Test Nanny [nanny]");
     expect(userMessage.content).toContain("remind me tomorrow at 8am to pack swim gear");
     expect(options.model).toBe("TEST_STRONG_MODEL");
+  });
+});
+
+describe("FIX #208 — alert feedback loop (disposition capture + calibration)", () => {
+  const CAL_HOUSEHOLD_ID = "99990000-test-0000-0000-calhousehold1";
+  const CAL_USER_ID = "99990000-test-0000-0000-caluser000001";
+
+  beforeAll(async () => {
+    await qExec(
+      `INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`,
+      CAL_HOUSEHOLD_ID, "FIX-208 Test Household"
+    );
+    await qExec(
+      `INSERT INTO app_user (id, household_id, email, role, password_hash, visibility_scope)
+       VALUES (?, ?, ?, 'owner', 'x', 'own') ON CONFLICT (id) DO NOTHING`,
+      CAL_USER_ID, CAL_HOUSEHOLD_ID, "fix208@example.com"
+    );
+  });
+
+  afterAll(async () => {
+    await qExec(`DELETE FROM family_agent_alerts WHERE household_id = ?`, CAL_HOUSEHOLD_ID);
+    await qExec(`DELETE FROM app_user WHERE id = ?`, CAL_USER_ID);
+    await qExec(`DELETE FROM household WHERE id = ?`, CAL_HOUSEHOLD_ID);
+  });
+
+  beforeEach(() => {
+    mockComplete.mockReset();
+    mockTavilySearch.mockReset();
+  });
+
+  it("resolveAlert: persists the disposition and resolved_by_user_id", async () => {
+    const alertId = "99990000-test-0000-0000-calalert00001";
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason) VALUES (?, ?, 'suggestion', '[RESTAURANT] Example Bistro')`,
+      alertId, CAL_HOUSEHOLD_ID
+    );
+
+    const ok = await resolveAlert(alertId, CAL_HOUSEHOLD_ID, CAL_USER_ID, "not_relevant");
+
+    expect(ok).toBe(true);
+    const row = await qGet<{ resolution_kind: string | null; resolved_by_user_id: string | null; is_resolved: boolean }>(
+      `SELECT resolution_kind, resolved_by_user_id, is_resolved FROM family_agent_alerts WHERE id = ?`,
+      alertId
+    );
+    expect(row?.resolution_kind).toBe("not_relevant");
+    expect(row?.resolved_by_user_id).toBe(CAL_USER_ID);
+    expect(row?.is_resolved).toBe(true);
+  });
+
+  it("resolveAlert: defaults to a neutral (null) disposition when none is given", async () => {
+    const alertId = "99990000-test-0000-0000-calalert00002";
+    await qExec(
+      `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason) VALUES (?, ?, 'deadline_approaching', 'some deadline')`,
+      alertId, CAL_HOUSEHOLD_ID
+    );
+
+    await resolveAlert(alertId, CAL_HOUSEHOLD_ID, CAL_USER_ID);
+
+    const row = await qGet<{ resolution_kind: string | null }>(
+      `SELECT resolution_kind FROM family_agent_alerts WHERE id = ?`,
+      alertId
+    );
+    expect(row?.resolution_kind).toBeNull();
+  });
+
+  it("buildCalibrationBlock: aggregates by bracket-tag category for suggestions, instructs avoidance at the 3x not_relevant threshold", async () => {
+    const insertResolved = async (id: string, alertType: string, reason: string, kind: string) => {
+      await qExec(
+        `INSERT INTO family_agent_alerts (id, household_id, alert_type, reason, is_resolved, resolved_at, resolution_kind)
+         VALUES (?, ?, ?, ?, TRUE, NOW(), ?)`,
+        id, CAL_HOUSEHOLD_ID, alertType, reason, kind
+      );
+    };
+    await insertResolved("99990000-test-0000-0000-calblock00001", "suggestion", "[RESTAURANT] Place A", "not_relevant");
+    await insertResolved("99990000-test-0000-0000-calblock00002", "suggestion", "[RESTAURANT] Place B", "not_relevant");
+    await insertResolved("99990000-test-0000-0000-calblock00003", "suggestion", "[RESTAURANT] Place C", "not_relevant");
+    await insertResolved("99990000-test-0000-0000-calblock00004", "deadline_approaching", "school form due", "useful");
+    await insertResolved("99990000-test-0000-0000-calblock00005", "deadline_approaching", "permission slip due", "useful");
+
+    const block = await buildCalibrationBlock(CAL_HOUSEHOLD_ID);
+
+    expect(block).toContain("restaurant");
+    expect(block).toContain("Do NOT generate suggestions in these categories: restaurant");
+    expect(block).toContain("deadline_approaching");
+    expect(block).toMatch(/Keep prioritizing.*deadline_approaching \(2x useful\)/);
+  });
+
+  it("buildCalibrationBlock: returns empty string for a household with no dispositions", async () => {
+    const block = await buildCalibrationBlock("99990000-test-0000-0000-nohistoryhh1");
+    expect(block).toBe("");
+  });
+
+  it("runProactiveResearch: calibration block reaches the query-gen prompt", async () => {
+    mockComplete
+      .mockResolvedValueOnce({ content: JSON.stringify({ queries: [{ query: "q1", intent: "i1", freshness: "new" }] }), usage: {} })
+      .mockResolvedValueOnce({ content: JSON.stringify({ items: [] }), usage: {} });
+    mockTavilySearch.mockResolvedValue({ ok: false, code: "not_configured", message: "not configured" });
+
+    const ctx = baseCtx({ calibrationBlock: "Do NOT generate suggestions in these categories: restaurant." });
+
+    await runProactiveResearch(ctx, "manual");
+
+    const [messages] = mockComplete.mock.calls[0];
+    const userMessage = (messages as { role: string; content: string }[]).find(m => m.role === "user")!;
+    expect(userMessage.content).toContain("Do NOT generate suggestions in these categories: restaurant.");
+  });
+
+  it("synthesizeDigest: calibration block reaches the digest composition prompt", async () => {
+    mockComplete.mockResolvedValueOnce({
+      content: JSON.stringify({
+        summaryText: "summary",
+        parentADigest: { subject: "s", body: "b" },
+        parentBDigest: { subject: "s2", body: "b2" },
+      }),
+      usage: {},
+    });
+
+    const emptyDomain: PipelineOutputs = {
+      coverageGaps: { hasOutput: false, gaps: [] },
+      nannyCoord: { hasOutput: false, items: [] },
+      research: { hasOutput: false, items: [] },
+      deadlines: { hasOutput: false, alerts: [] },
+    };
+    const parents: ConnectedParent[] = [
+      { userId: "u1", email: "a@example.com", selectedCalendarIds: null, lastSyncedAt: null },
+    ];
+    const ctx = baseCtx({ calibrationBlock: "Deprioritize/avoid: restaurant (3x not relevant)." });
+
+    await synthesizeDigest(ctx, emptyDomain, "manual", parents, "no finance context");
+
+    const [messages] = mockComplete.mock.calls[0];
+    const userMessage = (messages as { role: string; content: string }[]).find(m => m.role === "user")!;
+    expect(userMessage.content).toContain("Deprioritize/avoid: restaurant (3x not relevant).");
   });
 });

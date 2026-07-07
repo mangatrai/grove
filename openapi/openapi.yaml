@@ -4606,6 +4606,61 @@ paths:
                   code: { type: string, example: GCAL_WRITE_ERROR }
                   message: { type: string }
 
+  /api/family/alerts/{id}/resolve:
+    patch:
+      tags: [family]
+      summary: Resolve a family agent alert, optionally with a feedback disposition (FIX #208)
+      description: |
+        Marks an alert resolved. The optional `kind` disposition feeds a rolling 60-day
+        calibration summary injected into the proactive-research (Domain 3) and digest-synthesis
+        (Domain 5) prompts on subsequent agent runs — categories repeatedly marked `not_relevant`
+        (3+ times) are instructed out of future suggestion generation. Observations-only: this
+        never produces lifestyle or spending-reduction advice, only shifts which alert categories
+        the agent surfaces.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  nullable: true
+                  enum: [useful, not_relevant, already_knew]
+      responses:
+        "200":
+          description: Alert resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+        "400":
+          description: Invalid kind value
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  errors: { type: array, items: { type: object } }
+        "401": { description: Unauthorized }
+        "404":
+          description: Alert not found or already resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
 components:
   securitySchemes:
     bearerAuth:

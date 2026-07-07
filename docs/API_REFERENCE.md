@@ -4066,3 +4066,21 @@ Execute the action associated with a family agent alert. Currently only supports
 ```
 
 > **Note:** `GET /api/family/alerts` responses include `actionType` and `actionPayload` fields on each alert. The UI shows an **Add to Calendar** button only when `actionType === 'create_gcal_event'` and `isResolved === false`.
+
+---
+
+### `PATCH /api/family/alerts/:id/resolve`
+
+Marks an alert resolved. Requires `owner | admin`.
+
+**Request body** (all optional):
+```json
+{ "kind": "useful" | "not_relevant" | "already_knew" | null }
+```
+`kind` (FIX #208) records why the household dismissed the alert. Omitting it or sending `null` resolves with a neutral (no-feedback) disposition. Dispositions accumulate over a rolling 60-day window into a compact calibration summary that is injected into the proactive-research (Domain 3) and digest-synthesis (Domain 5) prompts on subsequent runs — categories repeatedly marked `not_relevant` (3+ times) are instructed out of future suggestion generation. This is an observations-only mechanism: it changes which alert categories the agent produces, never a lifestyle or spending recommendation.
+
+**Response `200`:** `{ "ok": true }`
+**Response `400`:** `{ "errors": [...] }` — invalid `kind` value.
+**Response `404`:** `{ "message": "Alert not found or already resolved." }`
+
+> **Note:** `GET /api/family/alerts` responses also include `resolutionKind` (`"useful" | "not_relevant" | "already_knew" | null`) on each alert.

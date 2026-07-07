@@ -49,6 +49,7 @@ type AgentAlert = {
   recipientHint: string | null;
   isResolved: boolean;
   resolvedAt: string | null;
+  resolutionKind: "useful" | "not_relevant" | "already_knew" | null;
   actionType: string | null;
   actionPayload: { title: string; date: string; description: string } | null;
 };
@@ -138,10 +139,13 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
   const [calLink, setCalLink] = useState<string | null>(null);
   const textRef = useRef<HTMLPreElement>(null);
 
-  async function handleResolve() {
+  async function handleResolve(kind: "useful" | "not_relevant" | "already_knew" | null) {
     setResolving(true);
     try {
-      await apiFetch(`/api/family/alerts/${alert.id}/resolve`, { method: "PATCH" });
+      await apiFetch(`/api/family/alerts/${alert.id}/resolve`, {
+        method: "PATCH",
+        body: JSON.stringify({ kind }),
+      });
       onResolve(alert.id);
     } finally {
       setResolving(false);
@@ -257,16 +261,27 @@ function AlertCard({ alert, onResolve, onCompose }: AlertCardProps) {
               Add to Calendar
             </Button>
           ) : null}
-          <Button
-            size="xs"
-            variant="subtle"
-            color="green"
-            loading={resolving}
-            leftSection={<IconCheck size={13} />}
-            onClick={() => void handleResolve()}
-          >
-            Dismiss
-          </Button>
+          <Menu position="bottom-end" withinPortal disabled={resolving}>
+            <Menu.Target>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="green"
+                loading={resolving}
+                leftSection={<IconCheck size={13} />}
+                rightSection={<IconChevronDown size={13} />}
+              >
+                Resolve
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item onClick={() => void handleResolve("useful")}>Useful</Menu.Item>
+              <Menu.Item onClick={() => void handleResolve("not_relevant")}>Not relevant</Menu.Item>
+              <Menu.Item onClick={() => void handleResolve("already_knew")}>Already knew</Menu.Item>
+              <Menu.Divider />
+              <Menu.Item onClick={() => void handleResolve(null)}>Dismiss (no feedback)</Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
         </Group>
         {calError ? (
           <Text size="xs" c="red" mt={4}>{calError}</Text>

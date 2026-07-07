@@ -804,6 +804,17 @@ Operator details: see [ADMIN_GUIDE.md](ADMIN_GUIDE.md) §5.3; API: [API_REFERENC
 
 ---
 
+## Family Planner — Alerts
+
+The **Family** page's Alerts panel lists conflicts, coverage gaps, deadlines, and proactive suggestions detected by the household agent. Each alert card has a **Resolve** button — click the dropdown chevron to pick how you're resolving it:
+
+- **Useful** — the alert was worth surfacing; the agent keeps prioritizing this kind of alert.
+- **Not relevant** — the alert wasn't useful. After the same category is marked "Not relevant" 3 times within 60 days, the agent stops generating that category of suggestion going forward.
+- **Already knew** — accurate but not new information.
+- **Dismiss (no feedback)** — resolve without recording a disposition (same as the old single Dismiss button).
+
+This feedback only changes which *categories* of alert the agent produces (e.g. it may stop suggesting restaurants if you've dismissed several as not relevant) — it never turns into spending or lifestyle advice.
+
 ## Year-in-Review
 
 In **February and March**, a **Year in Review** button appears on the Dashboard. Clicking it generates a personalized summary of the prior year:

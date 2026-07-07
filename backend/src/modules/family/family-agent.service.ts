@@ -105,6 +105,8 @@ export type FamilyContext = {
   parentEvents: Array<{ email: string; events: CalendarEvent[] }>;
   dbEvents: FamilyEvent[];
   openAlerts: AgentAlert[];
+  // FIX #208: compact household-feedback block (categories to avoid/keep), "" when no history yet.
+  calibrationBlock: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -704,7 +706,7 @@ ${activityLocations || "None noted."}
 Already suggested in a prior run (FIX #216 — do NOT search for or resurface these; find something new instead):
 ${alreadySuggestedLines}
 
-HARD RULE (FIX #210, not a suggestion — a query violating this is invalid, rewrite it before including):
+${ctx.calibrationBlock ? `${ctx.calibrationBlock}\n\n` : ""}HARD RULE (FIX #210, not a suggestion — a query violating this is invalid, rewrite it before including):
 • Every query about a specific child's activity or age-typical opportunity MUST embed that child's age or grade band from the member profile above (e.g. "swim lessons for 6 year olds", "camps for 1st graders"). Never generate an age-agnostic query for a child-specific topic.
 • Every query MUST be anchored to ${ctx.location} (household city/metro) — never search nationwide or generically. Embed the target year/season too (e.g. "summer 2026 swim registration ${ctx.location}").
 
@@ -828,6 +830,7 @@ DISCARD GATE (FIX #210) — before an item becomes a suggestion, evaluate all of
 • Geo: if the item's venue is outside ${ctx.location}'s metro area — a different city, hundreds of miles away — discard (reason: "geo"). Ask: would a parent reasonably drive here for a weekly activity or day camp?
 • Duplicate: if the item substantially matches one of the already-suggested items below, discard (reason: "duplicate").
 • Date: keep the date rules above (reason: "date" if either fails).
+${ctx.calibrationBlock ? `• Feedback (FIX #208): ${ctx.calibrationBlock.replace(/\n/g, " ")} If the item's category is listed as "do not generate", discard it (reason: "feedback").\n` : ""}
 Do not use the "why relevant to THIS family" field to talk yourself into keeping a borderline item — if it fails a gate, it goes in "discarded", not "items".
 
 Already suggested in a prior run (FIX #216 — do not re-suggest these):
@@ -835,7 +838,7 @@ ${alreadySuggestedLines}
 
 Respond with ONLY valid JSON:
 { "items": [ { "title": "≤60 chars — include business name", "summary": "2-3 sentences: business name, website, pricing, registration steps, and why relevant to this specific child", "category": "event"|"deadline"|"restaurant"|"weather"|"activity"|"entertainment", "grade": "verified"|"lead" } ],
-  "discarded": [ { "title": "≤60 chars", "reason": "age"|"geo"|"duplicate"|"date" } ] }
+  "discarded": [ { "title": "≤60 chars", "reason": "age"|"geo"|"duplicate"|"date"|"feedback" } ] }
 If nothing specific enough found, return { "items": [], "discarded": [] }.` },
     ],
     { model: strongModel(), maxTokens: 900 }
@@ -1049,6 +1052,7 @@ ${researchSection}
 Finance context:
 ${financeContext}
 
+${ctx.calibrationBlock ? `${ctx.calibrationBlock}\n` : ""}
 Write digest emails per parent. Parent A = primary household manager (FIX #217: the first Google Calendar account the household connected, deterministic — not an assumption about parenting roles). Parent B = co-parent/spouse. Each digest: items they're responsible for, coordination needs, proactive finds. Mobile-readable, bullet points, no filler.
 
 Respond with ONLY valid JSON:
@@ -1152,11 +1156,12 @@ export async function runFamilyAgent(
     // full week regardless of what's in openAlerts.
     const openAlerts = await listAlerts(householdId, false);
 
-    const [members, caregiverSlots, financeContext, location] = await Promise.all([
+    const [members, caregiverSlots, financeContext, location, calibrationBlock] = await Promise.all([
       listHouseholdMembers(householdId),
       listAvailability(householdId),
       buildFinanceContext(householdId),
       getHouseholdLocation(householdId),
+      buildCalibrationBlock(householdId),
     ]);
 
     const now = new Date();
@@ -1164,7 +1169,7 @@ export async function runFamilyAgent(
     // 11pm UTC must still resolve "today" to the household's own calendar day.
     const today = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: env.TZ });
     const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
-    const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts };
+    const ctx: FamilyContext = { householdId, location, today, todayIso, members, caregiverSlots, parentEvents, dbEvents, openAlerts, calibrationBlock };
 
     // Run domains 1+2 (merged, FIX #211), 3, 4 in parallel; domain 5 synthesizes their outputs
     const [{ coverageGaps, nannyCoord }, research, deadlines] = await Promise.all([
@@ -1275,6 +1280,8 @@ export type AgentAlert = {
   recipientHint: string | null;
   isResolved: boolean;
   resolvedAt: string | null;
+  resolvedByUserId: string | null;
+  resolutionKind: "useful" | "not_relevant" | "already_knew" | null;
   sourceDigestId: string | null;
   actionType: string | null;
   actionPayload: { title: string; date: string; description: string } | null;
@@ -1291,6 +1298,8 @@ type AlertRow = {
   recipient_hint: string | null;
   is_resolved: boolean;
   resolved_at: string | null;
+  resolved_by_user_id: string | null;
+  resolution_kind: string | null;
   source_digest_id: string | null;
   action_type: string | null;
   action_payload: unknown;
@@ -1308,6 +1317,8 @@ function rowToAlert(r: AlertRow): AgentAlert {
     recipientHint: r.recipient_hint,
     isResolved: r.is_resolved,
     resolvedAt: r.resolved_at,
+    resolvedByUserId: r.resolved_by_user_id,
+    resolutionKind: r.resolution_kind as AgentAlert["resolutionKind"],
     sourceDigestId: r.source_digest_id,
     actionType: r.action_type,
     actionPayload: r.action_payload as AgentAlert["actionPayload"],
@@ -1327,17 +1338,69 @@ export async function listAlerts(householdId: string, includeResolved = false): 
   return rows.map(rowToAlert);
 }
 
-export async function resolveAlert(id: string, householdId: string, userId: string): Promise<boolean> {
+export async function resolveAlert(
+  id: string,
+  householdId: string,
+  userId: string,
+  resolutionKind: "useful" | "not_relevant" | "already_knew" | null = null
+): Promise<boolean> {
   const row = await qGet<{ id: string }>(
     `UPDATE family_agent_alerts
-     SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ?
+     SET is_resolved = TRUE, resolved_at = NOW(), resolved_by_user_id = ?, resolution_kind = ?
      WHERE id = ? AND household_id = ? AND is_resolved = FALSE
      RETURNING id`,
     userId,
+    resolutionKind,
     id,
     householdId
   );
   return row !== null;
+}
+
+// FIX #208: aggregate resolved-alert dispositions from the last 60 days into a compact,
+// category-level calibration block (never raw alert text) injected into Domain 3/5 prompts.
+// Suggestion-type alerts embed their category as a leading "[CATEGORY]" tag in `reason`
+// (see synthesizeDigest below); other alert types calibrate on alert_type itself.
+const NOT_RELEVANT_AVOID_THRESHOLD = 3;
+
+function extractCalibrationCategory(alertType: string, reason: string): string {
+  const tag = /^(?:\[LEAD\]\s*)?\[([A-Z_]+)\]/.exec(reason);
+  return tag ? tag[1].toLowerCase() : alertType;
+}
+
+export async function buildCalibrationBlock(householdId: string): Promise<string> {
+  const rows = await qAll<{ alert_type: string; reason: string; resolution_kind: string }>(
+    `SELECT alert_type, reason, resolution_kind
+       FROM family_agent_alerts
+      WHERE household_id = ? AND resolution_kind IS NOT NULL AND resolved_at >= NOW() - INTERVAL '60 days'`,
+    householdId
+  );
+  if (rows.length === 0) return "";
+
+  const counts = new Map<string, { useful: number; not_relevant: number; already_knew: number }>();
+  for (const r of rows) {
+    const category = extractCalibrationCategory(r.alert_type, r.reason);
+    const entry = counts.get(category) ?? { useful: 0, not_relevant: 0, already_knew: 0 };
+    if (r.resolution_kind === "useful" || r.resolution_kind === "not_relevant" || r.resolution_kind === "already_knew") {
+      entry[r.resolution_kind] += 1;
+    }
+    counts.set(category, entry);
+  }
+
+  const avoid: string[] = [];
+  const keep: string[] = [];
+  for (const [category, c] of counts) {
+    if (c.not_relevant >= NOT_RELEVANT_AVOID_THRESHOLD) avoid.push(`${category} (${c.not_relevant}x not relevant)`);
+    else if (c.not_relevant > 0) avoid.push(`${category} (${c.not_relevant}x not relevant, ${c.useful}x useful)`);
+    if (c.useful > 0 && c.not_relevant < NOT_RELEVANT_AVOID_THRESHOLD) keep.push(`${category} (${c.useful}x useful)`);
+  }
+
+  const lines: string[] = ["Household feedback (last 60 days) — observations only, no lifestyle advice:"];
+  if (avoid.length > 0) lines.push(`Deprioritize/avoid: ${avoid.join(", ")}.`);
+  if (keep.length > 0) lines.push(`Keep prioritizing: ${keep.join(", ")}.`);
+  const strongAvoid = [...counts.entries()].filter(([, c]) => c.not_relevant >= NOT_RELEVANT_AVOID_THRESHOLD).map(([category]) => category);
+  if (strongAvoid.length > 0) lines.push(`Do NOT generate suggestions in these categories: ${strongAvoid.join(", ")}.`);
+  return lines.join("\n");
 }
 
 export type DigestLogEntry = {

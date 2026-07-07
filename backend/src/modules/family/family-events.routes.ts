@@ -95,12 +95,24 @@ familyEventsRouter.get("/alerts", requireRole(["owner", "admin"]), async (req: A
   res.json({ alerts });
 });
 
+// FIX #208: optional disposition captured at resolve time, feeds the calibration block.
+const resolveAlertSchema = z.object({
+  kind: z.enum(["useful", "not_relevant", "already_knew"]).nullable().optional(),
+});
+
 /** PATCH /family/alerts/:id/resolve */
 familyEventsRouter.patch(
   "/alerts/:id/resolve",
   requireRole(["owner", "admin"]),
   async (req: AuthenticatedRequest, res) => {
-    const ok = await resolveAlert(req.params.id, req.authUser!.householdId, req.authUser!.userId);
+    const parsed = resolveAlertSchema.safeParse(req.body ?? {});
+    if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
+    const ok = await resolveAlert(
+      req.params.id,
+      req.authUser!.householdId,
+      req.authUser!.userId,
+      parsed.data.kind ?? null
+    );
     if (!ok) { res.status(404).json({ message: "Alert not found or already resolved." }); return; }
     res.json({ ok: true });
   }
