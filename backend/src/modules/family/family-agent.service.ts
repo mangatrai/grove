@@ -547,6 +547,19 @@ function buildMemberProfile(members: HouseholdMember[]): string {
   }).join("\n");
 }
 
+// FIX #213: shared with the quick-capture context header — extracted from Domain 1+2 so both
+// call sites render caregiver schedules identically instead of duplicating the mapping logic.
+function buildCaregiverLines(slots: HelpAvailabilitySlot[]): string {
+  if (slots.length === 0) return "No caregiver configured.";
+  return slots.map(s => {
+    const when = s.slotType === "one_off" && s.specificDate
+      ? `one-off ${s.specificDate}`
+      : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
+    const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
+    return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
+  }).join("\n");
+}
+
 // ---------------------------------------------------------------------------
 // Domain 1+2 — Coverage gap detection + nanny coordination (merged, FIX #211)
 // ---------------------------------------------------------------------------
@@ -567,15 +580,7 @@ export async function analyzeCoverageAndCoordination(
 
   const dayGrid = buildDayGrid(ctx, 14).join("\n\n");
 
-  const caregiverLines = ctx.caregiverSlots.length === 0
-    ? "No caregiver configured."
-    : ctx.caregiverSlots.map(s => {
-        const when = s.slotType === "one_off" && s.specificDate
-          ? `one-off ${s.specificDate}`
-          : s.daysOfWeek.length > 0 ? `every ${s.daysOfWeek.map(d => DAY_NAMES[d] ?? d).join("/")}` : "TBD";
-        const time = s.startTime && s.endTime ? ` ${s.startTime}–${s.endTime}` : "";
-        return `- ${s.personName} [${s.serviceType}]: ${when}${time}${s.notes ? ` — ${s.notes}` : ""}`;
-      }).join("\n");
+  const caregiverLines = buildCaregiverLines(ctx.caregiverSlots);
 
   const childLines = children.length > 0
     ? children.map(m => `- ${m.fullName}${m.age !== null ? ` (age ${m.age})` : ""}`).join("\n")
@@ -1412,10 +1417,13 @@ export async function runFamilyAgentForAllHouseholds(runType: AgentRunType): Pro
 
 const CAPTURE_SYSTEM = `You are a household executive assistant (PA). The user has sent you a quick-capture note — a research request, reminder, draft request, or scheduling task. Return a JSON object with a friendly acknowledgement and one or more suggested actions.
 
+A context header (today's date, location, household members, caregivers) precedes the note below. Resolve all relative dates ("tomorrow", "next Tuesday", "this weekend") against the "Today" line — never guess or hallucinate a date. Use the household member names/ages and caregiver names given for context — a note that names a family member should reflect their actual age/relationship; a draft_message to a caregiver should address them by their actual name, not a generic role. If a section (location/members/caregivers) is absent from the header, it was not configured — proceed without it, do not invent one.
+
 WHEN TO USE search_web (do this first, before generating the response):
 - Any question about external dates, deadlines, registration windows, program availability, locations, or business hours
 - "find camps near [area]", "when does X registration open", "what's the deadline for Y", "is Z still enrolling"
 - Always search before answering factual questions — do not guess at dates or availability
+- Include the household's location and the relevant year (from the context header) in search queries so results are geographically and temporally relevant (e.g. "swim camps Example City summer 2026", not just "swim camps")
 
 MULTI-STEP TASKS: If a task requires both research and an action (e.g. "find swim camps and add reminders"), return multiple actions — a "note" with research results plus a "set_reminder" or "create_event".
 
@@ -1446,11 +1454,37 @@ JSON response format (valid JSON only, no prose outside):
   ]
 }`;
 
-export async function processCaptureNote(note: string): Promise<CaptureResult> {
+// FIX #213: quick-capture previously sent the LLM zero household context, so it had no way to
+// resolve relative dates ("next Tuesday"), no location for search_web queries, and no member/
+// caregiver names — draft_message to the nanny would come out addressed "Dear Nanny" even
+// though her name is in household_help_availability. Build the same compact context header the
+// scheduled pipeline already has the data for, reusing its exact helpers (buildMemberProfile,
+// buildCaregiverLines, env.TZ-based today) rather than re-deriving any of it.
+export async function buildCaptureContextHeader(householdId: string): Promise<string> {
+  const [members, caregiverSlots, location] = await Promise.all([
+    listHouseholdMembers(householdId),
+    listAvailability(householdId),
+    getHouseholdLocation(householdId),
+  ]);
+
+  const now = new Date();
+  const todayFull = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: env.TZ });
+  const todayIso = now.toLocaleDateString("en-CA", { timeZone: env.TZ }); // en-CA => YYYY-MM-DD
+
+  const lines = [`Today: ${todayFull} (${todayIso}).`];
+  if (location) lines.push(`Location: ${location}.`);
+  if (members.length > 0) lines.push(`Household:\n${buildMemberProfile(members)}`);
+  if (caregiverSlots.length > 0) lines.push(`Caregivers:\n${buildCaregiverLines(caregiverSlots)}`);
+  return lines.join("\n");
+}
+
+export async function processCaptureNote(note: string, householdId: string): Promise<CaptureResult> {
+  const contextHeader = await buildCaptureContextHeader(householdId);
+
   const { finalResponse } = await getToolUseAdapter().runToolLoop(
     [
       { role: "system", content: CAPTURE_SYSTEM },
-      { role: "user", content: note },
+      { role: "user", content: `${contextHeader}\n\n${note}` },
     ],
     [SEARCH_WEB_TOOL],
     async (name, args) => {

@@ -17,10 +17,17 @@ type TavilySearchFn = (
   | { ok: true; text: string }
   | { ok: false; code: "not_configured" | "empty_query" | "http_error" | "no_results" | "network_error"; message: string }
 >;
+type RunToolLoopFn = (
+  messages: { role: string; content: string }[],
+  tools: unknown[],
+  executor: (name: string, args: Record<string, unknown>) => Promise<string>,
+  options: { model: string; maxTokens: number; maxIterations?: number }
+) => Promise<{ finalResponse: string }>;
 
-const { mockComplete, mockTavilySearch } = vi.hoisted(() => ({
+const { mockComplete, mockTavilySearch, mockRunToolLoop } = vi.hoisted(() => ({
   mockComplete: vi.fn<CompleteFn>(),
   mockTavilySearch: vi.fn<TavilySearchFn>(),
+  mockRunToolLoop: vi.fn<RunToolLoopFn>(),
 }));
 
 vi.mock("../src/llm/index.js", async (importOriginal) => {
@@ -30,6 +37,7 @@ vi.mock("../src/llm/index.js", async (importOriginal) => {
     chatModel: () => "TEST_CHEAP_MODEL",
     strongModel: () => "TEST_STRONG_MODEL",
     getChatAdapter: () => ({ complete: mockComplete }),
+    getToolUseAdapter: () => ({ runToolLoop: mockRunToolLoop }),
   };
 });
 
@@ -42,10 +50,12 @@ import {
   alertDedupKey,
   analyzeCoverageAndCoordination,
   buildAlreadySuggestedText,
+  buildCaptureContextHeader,
   buildDayGrid,
   escapeHtml,
   getConnectedParents,
   parseAlertItems,
+  processCaptureNote,
   runProactiveResearch,
   startDateForFreshness,
   sweepDeadlines,
@@ -551,5 +561,92 @@ describe("FIX #211 — merged Domain 1+2 correctness and model tiering", () => {
     expect(mockComplete).toHaveBeenCalledTimes(1);
     expect(mockComplete.mock.calls[0][1].model).toBe("TEST_CHEAP_MODEL");
     expect(result.hasOutput).toBe(true);
+  });
+});
+
+describe("FIX #213 — quick-capture context injection", () => {
+  const WITH_CONTEXT_HOUSEHOLD_ID = "99990000-test-0000-0000-capturehh0001";
+  const EMPTY_HOUSEHOLD_ID = "99990000-test-0000-0000-capturehh0002";
+  const CHILD_PROFILE_ID = "99990000-test-0000-0000-captureprof01";
+  const NANNY_PROFILE_ID = "99990000-test-0000-0000-captureprof02";
+  const MEMBERSHIP_ID = "99990000-test-0000-0000-capturemem001";
+  const AVAILABILITY_ID = "99990000-test-0000-0000-captureavl001";
+
+  beforeAll(async () => {
+    await qExec(
+      `INSERT INTO household (id, name, city, state) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      WITH_CONTEXT_HOUSEHOLD_ID, "FIX-213 Test Household", "Example City", "TX"
+    );
+    await qExec(
+      `INSERT INTO household (id, name) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`,
+      EMPTY_HOUSEHOLD_ID, "FIX-213 Empty Test Household"
+    );
+    await qExec(
+      `INSERT INTO person_profile (id, household_id, full_name, age) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      CHILD_PROFILE_ID, WITH_CONTEXT_HOUSEHOLD_ID, "Test Kid", 7
+    );
+    await qExec(
+      `INSERT INTO household_membership (id, household_id, person_profile_id, role, relationship) VALUES (?, ?, ?, 'member', 'child') ON CONFLICT (id) DO NOTHING`,
+      MEMBERSHIP_ID, WITH_CONTEXT_HOUSEHOLD_ID, CHILD_PROFILE_ID
+    );
+    await qExec(
+      `INSERT INTO person_profile (id, household_id, full_name) VALUES (?, ?, ?) ON CONFLICT (id) DO NOTHING`,
+      NANNY_PROFILE_ID, WITH_CONTEXT_HOUSEHOLD_ID, "Test Nanny"
+    );
+    await qExec(
+      `INSERT INTO household_help_availability
+         (id, household_id, person_profile_id, slot_type, service_type, days_of_week, start_time, end_time, is_active)
+       VALUES (?, ?, ?, 'regular', 'nanny', '1,3,5', '08:00', '16:00', TRUE)
+       ON CONFLICT (id) DO NOTHING`,
+      AVAILABILITY_ID, WITH_CONTEXT_HOUSEHOLD_ID, NANNY_PROFILE_ID
+    );
+  });
+
+  afterAll(async () => {
+    await qExec(`DELETE FROM household_help_availability WHERE id = ?`, AVAILABILITY_ID);
+    await qExec(`DELETE FROM household_membership WHERE id = ?`, MEMBERSHIP_ID);
+    await qExec(`DELETE FROM person_profile WHERE id IN (?, ?)`, CHILD_PROFILE_ID, NANNY_PROFILE_ID);
+    await qExec(`DELETE FROM household WHERE id IN (?, ?)`, WITH_CONTEXT_HOUSEHOLD_ID, EMPTY_HOUSEHOLD_ID);
+  });
+
+  beforeEach(() => {
+    mockRunToolLoop.mockReset();
+  });
+
+  it("buildCaptureContextHeader: includes today, location, members, and caregivers when configured", async () => {
+    const header = await buildCaptureContextHeader(WITH_CONTEXT_HOUSEHOLD_ID);
+
+    expect(header).toMatch(/^Today: \w+, \w+ \d{1,2}, \d{4} \(\d{4}-\d{2}-\d{2}\)\.$/m);
+    expect(header).toContain("Location: Example City, TX.");
+    expect(header).toContain("Test Kid (child, age 7)");
+    expect(header).toContain("Test Nanny [nanny]");
+    expect(header).toContain("every Mon/Wed/Fri");
+    expect(header).toContain("08:00–16:00");
+  });
+
+  it("buildCaptureContextHeader: omits location/household/caregiver sections cleanly when nothing is configured", async () => {
+    const header = await buildCaptureContextHeader(EMPTY_HOUSEHOLD_ID);
+
+    expect(header).toMatch(/^Today: /);
+    expect(header).not.toContain("Location:");
+    expect(header).not.toContain("Household:");
+    expect(header).not.toContain("Caregivers:");
+  });
+
+  it("processCaptureNote: the resolved concrete today's date reaches the LLM prompt content", async () => {
+    mockRunToolLoop.mockResolvedValueOnce({
+      finalResponse: JSON.stringify({ acknowledgement: "Got it", actions: [] }),
+    });
+
+    await processCaptureNote("remind me tomorrow at 8am to pack swim gear", WITH_CONTEXT_HOUSEHOLD_ID);
+
+    expect(mockRunToolLoop).toHaveBeenCalledTimes(1);
+    const [messages, , , options] = mockRunToolLoop.mock.calls[0];
+    const userMessage = messages.find(m => m.role === "user")!;
+    expect(userMessage.content).toMatch(/Today: \w+, \w+ \d{1,2}, \d{4} \(\d{4}-\d{2}-\d{2}\)\./);
+    expect(userMessage.content).toContain("Test Kid (child, age 7)");
+    expect(userMessage.content).toContain("Test Nanny [nanny]");
+    expect(userMessage.content).toContain("remind me tomorrow at 8am to pack swim gear");
+    expect(options.model).toBe("TEST_STRONG_MODEL");
   });
 });

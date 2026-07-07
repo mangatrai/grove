@@ -222,7 +222,7 @@ familyEventsRouter.post(
     const parsed = z.object({ note: z.string().min(1).max(2000) }).safeParse(req.body ?? {});
     if (!parsed.success) { res.status(400).json({ errors: parsed.error.issues }); return; }
     try {
-      const result = await processCaptureNote(parsed.data.note);
+      const result = await processCaptureNote(parsed.data.note, req.authUser!.householdId);
       res.json(result);
     } catch (err) {
       res.status(502).json({ error: "CAPTURE_FAILED", message: err instanceof Error ? err.message : "LLM processing failed" });

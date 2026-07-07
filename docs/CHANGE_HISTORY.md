@@ -14,6 +14,22 @@
 
 **GitHub issues:** For work also tracked on GitHub, add a **`GitHub:`** line on the entry with links to the issue(s). Repo: **`https://github.com/mangatrai/grove`**. When a fix ships, **close or update** the issue (and adjust this entry if the scope changed).
 
+## FEAT — Family agent: quick-capture context injection — date, location, members, caregivers (2026-07-07)
+
+**What changed:** `POST /family/agent/capture` (`processCaptureNote()`) previously sent the LLM the user's freeform note with **zero household context** — no current date, no location, no household members, no caregiver names. Concrete failures this caused: "remind me next Tuesday" had no "today" to resolve against, so the model could hallucinate a date even though the action schema requires a concrete `YYYY-MM-DD`; "find indoor activities for the kids this weekend" had no location for `search_web` queries and no ages to judge relevance; "draft a message to the nanny about Friday pickup" came out addressed "Dear Nanny" even though her actual name is in `household_help_availability`.
+
+- Added `buildCaptureContextHeader(householdId)`, a new exported function that assembles a compact (~300-token) header — `Today: <weekday>, <month> <day>, <year> (<ISO>).`, then `Location: <city, state>.`, `Household:\n<member profiles>`, `Caregivers:\n<schedule lines>` — each section omitted entirely (not left blank) when that data isn't configured for the household. Reuses the exact same helpers the scheduled 5-domain pipeline already has: `buildMemberProfile()`, `env.TZ`-based today/ISO date formatting (mirrors FIX #209's day-boundary fix), and a newly-extracted `buildCaregiverLines()` (pulled out of Domain 1+2's inline caregiver-rendering logic so both call sites format schedules identically instead of duplicating the mapping).
+- `processCaptureNote(note)` → `processCaptureNote(note, householdId)` — signature change; the route (`family-events.routes.ts`) already had `req.authUser.householdId` available, so this is a pure plumbing change, no new request field. The context header is now prepended to the user message sent to the tool-use loop.
+- `CAPTURE_SYSTEM` prompt updated: explicit instruction to resolve all relative dates ("tomorrow", "next Tuesday", "this weekend") against the "Today" line rather than guessing, to use the given member/caregiver names for context (address a caregiver draft_message by their actual name, not a generic role), and to proceed without inventing a section that's absent from the header. `search_web` usage guidance extended to include the household's location and year in queries (e.g. "swim camps Example City summer 2026") so results are geographically/temporally relevant.
+
+**Why:** Quick-capture is the PA agent's interactive front door and should have at least as much household context as the scheduled pipeline already builds for itself every run.
+
+**Tests:** `backend/tests/family-agent.test.ts` — new suite asserting: the header includes today/location/members/caregivers when configured (regex on the date line, exact-substring on rendered member/caregiver lines); the header cleanly omits the location/household/caregiver sections (no literal `"Location:"`/`"Household:"`/`"Caregivers:"` substrings) when nothing is configured for the household; and — via a mocked `getToolUseAdapter().runToolLoop` — that the concrete resolved today's-date string and the member/caregiver names actually reach the prompt content sent to the LLM for a note that uses a relative date ("remind me tomorrow at 8am...").
+
+**Files:** `backend/src/modules/family/family-agent.service.ts`, `backend/src/modules/family/family-events.routes.ts`, `backend/tests/family-agent.test.ts`
+
+**GitHub:** closes [#213](https://github.com/mangatrai/grove/issues/213). Contributes toward [#214](https://github.com/mangatrai/grove/issues/214)'s "Capture: today/location/members/caregivers present" coverage-checklist item — #214's broader test-coverage scope (prompt content for D1–D5, parsing robustness, behavioral/model-routing assertions) remains open.
+
 ## FEAT — Family agent: merge Domain 1+2, apply LLM cost-tier model selection (2026-07-07)
 
 **What changed:** Two related changes to the 5-domain PA agent pipeline in `family-agent.service.ts`:
